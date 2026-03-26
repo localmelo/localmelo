@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/melo.png" alt="Melo" width="280">
+</p>
+
 # localmelo
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
@@ -79,69 +83,6 @@ localmelo/
 ---
 
 **[Interactive Architecture Diagram](https://xthomaswang.github.io/localmelo/architecture.html)** — click components, highlight connections, detail panels
-
-### localmelo High-Level Architecture
-
-```mermaid
-%%{init: {'theme': 'neutral'}}%%
-flowchart LR
-    U["User / Client"]
-
-    subgraph gateway["support / gateway"]
-        G["Gateway\nSession Manager"]
-    end
-
-    subgraph core["melo — core agent runtime"]
-        A["Agent / Planner"]
-        M["Memory\nshort · long · history\npersonalized · tools"]
-        E["Executor\ntools · builtins · policy"]
-        C{{"Checker\nvalidation guard"}}
-        SL["Sleep\noffline personalization\npipeline"]
-    end
-
-    subgraph infra["support — infrastructure"]
-        P["Providers\nLLM · Embedding"]
-        SV["Serving"]
-        MD["Models"]
-        CF["Config / Onboard"]
-    end
-
-    U --> G
-    G --> A
-    A <-->|"plan ↔ recall"| M
-    A <-->|"plan ↔ act"| E
-
-    C -.->|guard| G
-    C -.->|guard| M
-    C -.->|guard| E
-    C -.->|"fail → replan"| A
-
-    P -.->|LLM| A
-    P -.->|embed| M
-
-    CF -.-> G
-    SV --> MD
-
-    SL -.->|consolidation| M
-    SL -.->|future training| P
-
-    classDef validationGuard fill:#f1f5f9,stroke:#94a3b8,stroke-dasharray:5 5
-    classDef offlinePipeline fill:#f8fafc,stroke:#cbd5e1,stroke-dasharray:5 5
-    class C validationGuard
-    class SL offlinePipeline
-```
-
-> **Checker** is not a processing stage — it is a validation guard that monitors
-> inter-component communication. When validation fails, control returns to the
-> Agent for replanning.
->
-> **Model / Provider** usage is restricted to the Agent (LLM chat) and Memory
-> (embedding). The Executor never calls the model layer directly.
->
-> **Sleep** is an offline pipeline that runs during idle time, not in the online
-> request path.
-
----
 
 <details>
 <summary><b>Agent / Planner</b> — main loop, chat planning, orchestration</summary>

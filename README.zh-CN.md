@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/assets/melo.png" alt="Melo" width="280">
+</p>
+
 # localmelo
 
 [English](./README.md) | [简体中文](./README.zh-CN.md)
