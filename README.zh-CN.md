@@ -79,7 +79,7 @@ localmelo/
 
 ---
 
-**[交互式架构图](https://localmelo.github.io/localmelo/architecture.html)** — 点击组件查看详情，高亮关联连接
+**[交互式架构图](https://localmelo.github.io/localmelo/architecture.zh-CN.html)** — 点击组件查看详情，高亮关联连接
 
 <details>
 <summary><b>Agent / Planner</b> — 主循环、chat planning、调度</summary>
