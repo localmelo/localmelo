@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>localmelo — Architecture</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #ffffff; --bg-alt: #f8fafc; --surface: #ffffff;
+  --text: #1e293b; --text-2: #475569; --text-3: #94a3b8;
+  --border: #e2e8f0; --border-2: #cbd5e1;
+  --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-200: #bfdbfe;
+  --blue-400: #60a5fa; --blue-500: #3b82f6; --blue-600: #2563eb;
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0;
+  --slate-300: #cbd5e1; --slate-400: #94a3b8;
+  --green-50: #f0fdf4; --green-200: #bbf7d0; --green-500: #22c55e;
+  --amber-50: #fffbeb; --amber-100: #fef3c7; --amber-200: #fde68a; --amber-500: #f59e0b;
+  --red-300: #fca5a5; --red-400: #f87171;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.06);
+  --shadow-lg: 0 12px 28px rgba(0,0,0,0.08);
+  --radius: 10px;
+  --t: 0.28s cubic-bezier(0.4,0,0.2,1);
+  --font: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --mono: 'JetBrains Mono', 'SF Mono', 'Menlo', monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a; --bg-alt: #1e293b; --surface: #1e293b;
+    --text: #e2e8f0; --text-2: #94a3b8; --text-3: #64748b;
+    --border: #334155; --border-2: #475569;
+    --blue-50: rgba(59,130,246,0.1); --blue-100: rgba(59,130,246,0.15);
+    --blue-200: rgba(59,130,246,0.25);
+    --slate-50: rgba(148,163,184,0.06); --slate-100: rgba(148,163,184,0.1);
+    --slate-200: #334155; --slate-300: #475569; --slate-400: #64748b;
+    --green-50: rgba(34,197,94,0.1); --green-200: rgba(34,197,94,0.2);
+    --amber-50: rgba(245,158,11,0.08); --amber-100: rgba(245,158,11,0.12);
+    --amber-200: rgba(245,158,11,0.2);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.2);
+    --shadow-md: 0 4px 12px rgba(0,0,0,0.3);
+    --shadow-lg: 0 12px 28px rgba(0,0,0,0.4);
+  }
+}
+
+body {
+  font-family: var(--font); background: var(--bg); color: var(--text);
+  line-height: 1.6; -webkit-font-smoothing: antialiased;
+  min-height: 100vh; transition: padding-bottom var(--t);
+}
+
+/* ── Header ── */
+.header { text-align: center; padding: 36px 24px 0; }
+.header h1 { font-family: var(--mono); font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+.header h1 span { color: var(--blue-500); }
+.header .subtitle { font-size: 14px; color: var(--text-3); margin-top: 4px; }
+
+/* ── Tabs ── */
+.tabs { display: flex; justify-content: center; gap: 4px; padding: 20px 24px 0; }
+.tab {
+  padding: 7px 18px; border: 1.5px solid var(--border); background: var(--surface);
+  border-radius: 8px; font-family: var(--font); font-size: 13px; font-weight: 500;
+  color: var(--text-2); cursor: pointer; transition: all var(--t);
+}
+.tab:hover { border-color: var(--border-2); color: var(--text); }
+.tab.active { color: var(--blue-500); border-color: var(--blue-500); background: var(--blue-50); }
+
+/* ── Views ── */
+.views { padding: 24px 24px 0; display: flex; justify-content: center; }
+.view { display: none; }
+.view.active { display: block; }
+
+/* ── Diagram ── */
+.diagram { position: relative; }
+.diagram svg.conns {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  pointer-events: none; z-index: 1;
+}
+.diagram svg.conns path { pointer-events: stroke; cursor: pointer; }
+.diagram-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* ── Groups ── */
+.group { position: absolute; border-radius: var(--radius); border: 1.5px solid; }
+.group-label {
+  position: absolute; top: -10px; left: 16px; background: var(--bg); padding: 0 8px;
+  font-family: var(--mono); font-size: 11px; font-weight: 500; letter-spacing: 0.4px;
+}
+.group.core { border-color: var(--blue-200); background: var(--blue-50); }
+.group.core .group-label { color: var(--blue-500); }
+.group.infra { border-color: var(--border); background: var(--slate-50); }
+.group.infra .group-label { color: var(--text-3); }
+
+/* ── Checker boundary ── */
+.checker-zone {
+  position: absolute; border: 2px dashed var(--amber-200); border-radius: 12px;
+  background: var(--amber-50); cursor: pointer; z-index: 1;
+  transition: all var(--t); opacity: 0.7;
+}
+.checker-zone:hover { border-color: var(--amber-500); opacity: 1; }
+.checker-zone.highlighted {
+  border-color: var(--amber-500); opacity: 1;
+  box-shadow: 0 0 0 3px rgba(245,158,11,0.12);
+}
+.checker-zone.dimmed { opacity: 0.15; }
+.checker-zone .cz-label {
+  position: absolute; top: -10px; left: 16px; background: var(--bg); padding: 0 8px;
+  font-family: var(--mono); font-size: 10px; font-weight: 500; color: var(--amber-500);
+}
+.checker-zone .cz-sub {
+  position: absolute; bottom: 8px; left: 0; right: 0; text-align: center;
+  font-family: var(--mono); font-size: 9px; color: var(--amber-500); opacity: 0.7;
+  letter-spacing: 0.3px;
+}
+
+/* ── Nodes ── */
+.node {
+  position: absolute; background: var(--surface); border: 1.5px solid var(--border);
+  border-radius: var(--radius); padding: 12px 16px; cursor: pointer;
+  transition: all var(--t); box-shadow: var(--shadow-sm); z-index: 2; user-select: none;
+}
+.node:hover { box-shadow: var(--shadow-lg); transform: translateY(-2px); border-color: var(--blue-400); }
+.node.highlighted { border-color: var(--blue-500); box-shadow: 0 0 0 3px var(--blue-100), var(--shadow-md); }
+.node.dimmed { opacity: 0.2; pointer-events: none; }
+.node-title { font-family: var(--mono); font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+.node-sub { font-size: 11px; color: var(--text-3); line-height: 1.45; }
+.badge {
+  display: inline-block; font-family: var(--mono); font-size: 9px; font-weight: 600;
+  padding: 1px 6px; border-radius: 4px; margin-bottom: 5px;
+  letter-spacing: 0.4px; text-transform: uppercase;
+}
+.badge.planner   { background: var(--blue-50); color: var(--blue-500); border: 1px solid var(--blue-200); }
+.badge.store     { background: var(--green-50); color: var(--green-500); border: 1px solid var(--green-200); }
+.badge.guard     { background: var(--amber-50); color: var(--amber-500); border: 1px solid var(--amber-200); }
+.badge.offline   { background: var(--slate-100); color: var(--text-3); border: 1px solid var(--border); }
+.badge.exec      { background: var(--blue-50); color: var(--blue-600); border: 1px solid var(--blue-200); }
+.badge.infra-tag { background: var(--slate-100); color: var(--text-3); border: 1px solid var(--border); }
+.badge.consumer  { background: var(--blue-50); color: var(--blue-500); border: 1px solid var(--blue-200); }
+.badge.result    { background: var(--green-50); color: var(--green-500); border: 1px solid var(--green-200); }
+.node.sleep-node { border-style: dashed; border-color: var(--border-2); background: var(--slate-50); }
+.node.user-node  { background: var(--bg-alt); border-color: var(--border-2); }
+
+/* ── SVG connections ── */
+.conn { fill: none; stroke: var(--slate-300); stroke-width: 1.5; transition: all var(--t); }
+.conn.dashed     { stroke-dasharray: 6 4; }
+.conn.guard-line { stroke: var(--amber-200); stroke-dasharray: 4 3; }
+.conn.fail-line  { stroke: var(--red-300); stroke-dasharray: 6 4; }
+.conn.offline-line { stroke: var(--slate-300); stroke-dasharray: 4 4; }
+.conn.feedback   { stroke: var(--slate-400); stroke-dasharray: 5 4; }
+.conn.highlighted { stroke: var(--blue-500); stroke-width: 2.5; }
+.conn.dimmed     { opacity: 0.08; }
+
+/* ── Connection labels ── */
+.conn-label {
+  position: absolute; font-family: var(--mono); font-size: 10px; font-weight: 500;
+  color: var(--text-3); background: var(--bg); padding: 1px 6px; border-radius: 3px;
+  pointer-events: none; z-index: 3; white-space: nowrap; transition: opacity var(--t);
+}
+.conn-label.dimmed { opacity: 0.08; }
+
+/* ── Detail panel (adaptive) ── */
+.detail-overlay {
+  position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+  background: rgba(0,0,0,0.06); z-index: 90; display: none;
+}
+.detail-overlay.open { display: block; }
+@media (prefers-color-scheme: dark) { .detail-overlay.open { background: rgba(0,0,0,0.35); } }
+
+.detail-panel {
+  position: fixed; bottom: -400px; left: 50%; transform: translateX(-50%);
+  width: 760px; max-width: calc(100vw - 32px);
+  background: var(--surface); border: 1px solid var(--border); border-bottom: none;
+  border-radius: 16px 16px 0 0; box-shadow: 0 -8px 32px rgba(0,0,0,0.1);
+  z-index: 100; transition: bottom var(--t); overflow-y: auto;
+  padding: 24px 28px 20px; max-height: 45vh;
+}
+.detail-panel.open { bottom: 0; }
+.detail-panel .close-btn {
+  position: absolute; top: 10px; right: 14px; width: 28px; height: 28px;
+  border: 1px solid var(--border); background: var(--surface); border-radius: 6px;
+  font-size: 16px; color: var(--text-3); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; transition: all var(--t);
+}
+.detail-panel .close-btn:hover { background: var(--bg-alt); color: var(--text); }
+.detail-panel h2 { font-family: var(--mono); font-size: 17px; font-weight: 700; margin-bottom: 2px; }
+.detail-panel .detail-role { font-size: 13px; color: var(--text-2); margin-bottom: 12px; }
+.detail-panel .detail-tags { display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap; }
+.detail-panel h3 {
+  font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.6px; margin: 14px 0 5px;
+}
+.detail-panel p, .detail-panel li { font-size: 13px; color: var(--text-2); line-height: 1.7; }
+.detail-panel ul { padding-left: 18px; }
+.detail-panel li { margin-bottom: 3px; }
+.detail-panel .file-list { display: flex; flex-wrap: wrap; gap: 5px; }
+.detail-panel .file-tag {
+  font-family: var(--mono); font-size: 11px; background: var(--bg-alt);
+  color: var(--text-2); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border);
+}
+/* ── Legend ── */
+.legend { display: flex; justify-content: center; gap: 20px; padding: 8px 24px 0; flex-wrap: wrap; }
+.legend-item { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3); }
+.legend-line { width: 24px; height: 2px; border-radius: 1px; }
+.legend-line.solid { background: var(--slate-300); }
+.legend-line.dashed { background: repeating-linear-gradient(90deg, var(--slate-400) 0, var(--slate-400) 5px, transparent 5px, transparent 9px); }
+.legend-line.guard-l { background: repeating-linear-gradient(90deg, var(--amber-500) 0, var(--amber-500) 4px, transparent 4px, transparent 7px); }
+.legend-line.fail-l { background: repeating-linear-gradient(90deg, var(--red-400) 0, var(--red-400) 5px, transparent 5px, transparent 9px); }
+.legend-box { width: 20px; height: 14px; border: 1.5px dashed var(--amber-200); border-radius: 3px; background: var(--amber-50); }
+
+.view-note { text-align: center; font-size: 12px; color: var(--text-3); padding: 4px 24px 0; font-style: italic; }
+.anno { position: absolute; font-size: 10px; font-style: italic; color: var(--text-3); z-index: 2; pointer-events: none; line-height: 1.4; }
+.footer { text-align: center; padding: 32px 24px; font-family: var(--mono); font-size: 11px; color: var(--text-3); }
+
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1><span>local</span>melo</h1>
+  <p class="subtitle">Architecture Overview</p>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-view="overview">High-Level Architecture</button>
+</div>
+
+<!-- ═══════════════════════ OVERVIEW ═══════════════════════ -->
+<div class="views">
+<section id="view-overview" class="view active">
+<div class="diagram-scroll">
+<div class="diagram" id="dia-overview" style="width:1200px;height:680px">
+
+  <!-- group: core -->
+  <div class="group core" style="left:350px;top:16px;width:470px;height:648px">
+    <span class="group-label">melo &mdash; core agent runtime</span>
+  </div>
+  <!-- group: infra -->
+  <div class="group infra" style="left:870px;top:16px;width:310px;height:648px">
+    <span class="group-label">support &mdash; infrastructure</span>
+  </div>
+
+  <!-- checker boundary (wraps Agent ↔ Memory/Executor communication paths) -->
+  <div class="checker-zone" id="n-checker" data-id="checker"
+       style="left:374px;top:155px;width:432px;height:270px">
+    <span class="cz-label">checker &mdash; validation boundary</span>
+    <span class="cz-sub">validates: ingress &middot; plan &middot; execute &middot; memory</span>
+  </div>
+
+  <!-- nodes: user + gateway -->
+  <div class="node user-node" id="n-user" data-id="user" style="left:20px;top:120px;width:130px">
+    <div class="node-title">User / Client</div>
+  </div>
+
+  <div class="node" id="n-gateway" data-id="gateway" style="left:190px;top:104px;width:125px">
+    <span class="badge infra-tag">infra</span>
+    <div class="node-title">Gateway</div>
+    <div class="node-sub">sessions &middot; HTTP</div>
+  </div>
+
+  <!-- nodes: core -->
+  <div class="node" id="n-agent" data-id="agent" style="left:490px;top:46px;width:195px">
+    <span class="badge planner">planner</span>
+    <span class="badge consumer">model consumer</span>
+    <div class="node-title">Agent / Planner</div>
+    <div class="node-sub">main loop &middot; orchestration</div>
+  </div>
+
+  <div class="node" id="n-memory" data-id="memory" style="left:388px;top:280px;width:185px">
+    <span class="badge store">store</span>
+    <span class="badge consumer">model consumer</span>
+    <div class="node-title">Memory</div>
+    <div class="node-sub">short &middot; long &middot; history<br>personalized &middot; tools</div>
+  </div>
+
+  <div class="node" id="n-executor" data-id="executor" style="left:612px;top:280px;width:185px">
+    <span class="badge exec">executor</span>
+    <div class="node-title">Executor</div>
+    <div class="node-sub">tools &middot; builtins &middot; policy</div>
+  </div>
+
+  <div class="node sleep-node" id="n-sleep" data-id="sleep" style="left:388px;top:530px;width:185px">
+    <span class="badge offline">offline</span>
+    <div class="node-title">Sleep</div>
+    <div class="node-sub">personalization pipeline</div>
+  </div>
+
+  <!-- sleep annotations -->
+  <div class="anno" style="left:600px;top:530px;width:170px">
+    offline personalization<br>
+    continuous embedding /<br>
+    personalization fine-tuning<br>
+    procedural memory
+  </div>
+
+  <!-- nodes: infra -->
+  <div class="node" id="n-providers" data-id="providers" style="left:900px;top:60px;width:230px">
+    <span class="badge infra-tag">infra</span>
+    <span class="badge consumer">model layer</span>
+    <div class="node-title">Providers</div>
+    <div class="node-sub">LLM &middot; Embedding</div>
+  </div>
+
+  <div class="node" id="n-serving" data-id="serving" style="left:900px;top:220px;width:230px">
+    <span class="badge infra-tag">infra</span>
+    <div class="node-title">Serving</div>
+    <div class="node-sub">local model serving</div>
+  </div>
+
+  <div class="node" id="n-models" data-id="models" style="left:900px;top:370px;width:230px">
+    <span class="badge infra-tag">infra</span>
+    <div class="node-title">Models</div>
+    <div class="node-sub">registry &middot; compile &middot; paths</div>
+  </div>
+
+  <div class="node" id="n-config" data-id="config" style="left:900px;top:510px;width:230px">
+    <span class="badge infra-tag">infra</span>
+    <div class="node-title">Config / Onboard</div>
+    <div class="node-sub">TOML config &middot; wizard</div>
+  </div>
+
+  <svg class="conns" id="svg-overview">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 3L0 6z" fill="var(--slate-400)"/></marker>
+      <marker id="arr-b" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 3L0 6z" fill="var(--blue-500)"/></marker>
+      <marker id="arr-a" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 3L0 6z" fill="var(--amber-500)"/></marker>
+      <marker id="arr-r" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 3L0 6z" fill="var(--red-400)"/></marker>
+    </defs>
+  </svg>
+</div>
+</div>
+</section>
+
+</div>
+
+<!-- legends -->
+<div class="legend" id="legend-overview">
+  <div class="legend-item"><div class="legend-line solid"></div>data flow</div>
+  <div class="legend-item"><div class="legend-line dashed"></div>model / provider</div>
+  <div class="legend-item"><div class="legend-box"></div>checker boundary</div>
+  <div class="legend-item"><div class="legend-line fail-l"></div>fail &rarr; replan</div>
+</div>
+<p class="view-note" id="note-overview">click any component to see details</p>
+
+<div class="detail-overlay" id="overlay"></div>
+<div class="detail-panel" id="panel">
+  <button class="close-btn" id="panel-close">&times;</button>
+  <h2 id="panel-title"></h2>
+  <p class="detail-role" id="panel-role"></p>
+  <div class="detail-tags" id="panel-tags"></div>
+  <div id="panel-body"></div>
+</div>
+
+<div class="footer">localmelo &middot; pre-alpha &middot; architecture docs</div>
+
+<script>
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/* ═══════════════════ DETAILS DATA ═══════════════════ */
+
+const DETAILS = {
+  user: {
+    title: 'User / Client',
+    role: 'End user or external client application',
+    tags: ['client'],
+    body: `<h3>Interfaces</h3><ul>
+      <li><code>melo "query"</code> &mdash; direct CLI mode</li>
+      <li><code>melo --serve</code> &mdash; gateway mode (HTTP + web UI)</li></ul>`
+  },
+  gateway: {
+    title: 'Gateway',
+    role: 'HTTP gateway with session management and request routing',
+    tags: ['infra'],
+    body: `<p>FastAPI-based HTTP gateway. Manages multi-user session isolation, idle cleanup, concurrent request safety.</p>
+      <h3>Key Files</h3><div class="file-list">
+        <span class="file-tag">support/gateway/webapp.py</span>
+        <span class="file-tag">support/gateway/session.py</span>
+        <span class="file-tag">support/gateway/channel.py</span></div>`
+  },
+  agent: {
+    title: 'Agent / Planner',
+    role: 'Main agent loop — plans, orchestrates, drives the multi-stage execution cycle',
+    tags: ['planner', 'model consumer'],
+    body: `<h3>Loop Stages</h3><ul>
+      <li><b>1. Retrieval</b> &mdash; embedding search + short-term window</li>
+      <li><b>2. Tool Resolution</b> &mdash; hints + BM25 lookup</li>
+      <li><b>3. Planning</b> &mdash; LLM generates thought + tool call</li>
+      <li><b>4. Execution</b> &mdash; executor runs tool with timeout</li>
+      <li><b>5. Memorization</b> &mdash; store to history + short/long memory</li></ul>
+      <p>All communication passes through the <b>checker validation boundary</b>.</p>
+      <h3>Key Files</h3><div class="file-list">
+        <span class="file-tag">melo/agent/agent.py</span>
+        <span class="file-tag">melo/agent/chat.py</span></div>`
+  },
+  memory: {
+    title: 'Memory',
+    role: 'Four-layer memory architecture coordinated by Hippo',
+    tags: ['store', 'model consumer'],
+    body: `<h3>Layers</h3><ul>
+      <li><b>Short-term</b> &mdash; rolling window (20), in-memory deque</li>
+      <li><b>Long-term</b> &mdash; embedding semantic search, SQLite</li>
+      <li><b>History</b> &mdash; append-only task/step records, SQLite</li>
+      <li><b>Tool Registry</b> &mdash; BM25 index + exact lookup</li></ul>
+      <h3>Key Files</h3><div class="file-list">
+        <span class="file-tag">melo/memory/coordinator.py</span>
+        <span class="file-tag">melo/memory/long/sqlite.py</span>
+        <span class="file-tag">melo/memory/history/sqlite.py</span></div>`
+  },
+  executor: {
+    title: 'Executor',
+    role: 'Structured tool execution with safety enforcement — no model access',
+    tags: ['executor'],
+    body: `<h3>Pipeline</h3><ul>
+      <li>Registry lookup (authoritative)</li>
+      <li>Pre-execute check (checker)</li>
+      <li>Callable resolution</li>
+      <li>Workspace policy (file path restrictions)</li>
+      <li>Timeout + exception handling (60s)</li>
+      <li>Artifact collection</li></ul>
+      <p><b>Note:</b> executor never calls the model/provider layer directly.</p>
+      <h3>Key Files</h3><div class="file-list">
+        <span class="file-tag">melo/executor/executor.py</span>
+        <span class="file-tag">melo/executor/builtins.py</span>
+        <span class="file-tag">melo/executor/policy.py</span></div>`
+  },
+  checker: {
+    title: 'Checker — Validation Boundary',
+    role: 'Guards all inter-component communication. Not a processing stage.',
+    tags: ['guard'],
+    body: `<h3>Validated Boundaries</h3><ul>
+      <li><b>Gateway &rarr; Agent</b> &mdash; request validation, ingress safety</li>
+      <li><b>Agent &rarr; Memory</b> &mdash; memory write size limits</li>
+      <li><b>Agent &rarr; Executor</b> &mdash; blocked commands (rm -rf, mkfs, fork bombs)</li>
+      <li><b>Executor &rarr; Agent</b> &mdash; output truncation (50 KB)</li>
+      <li><b>Agent planning</b> &mdash; prompt size, tool name validation</li></ul>
+      <p>On failure: <code>CheckResult(allowed=False)</code> &rarr; agent replans.</p>
+      <h3>Key Files</h3><div class="file-list">
+        <span class="file-tag">melo/checker/checker.py</span>
+        <span class="file-tag">melo/checker/validators.py</span>
+        <span class="file-tag">melo/checker/payloads.py</span></div>`
+  },
+  sleep: {
+    title: 'Sleep — Offline Personalization',
+    role: 'Runs during idle time. Continuous embedding/personalization fine-tuning.',
+    tags: ['offline'],
+    body: `<h3>Purpose</h3><ul>
+      <li>Continuous embedding / personalization fine-tuning</li>
+      <li>Improve personalization over time</li>
+      <li>Strengthen procedural memory</li></ul>
+      <h3>Pipeline</h3>
+      <p>preprocess &rarr; training &rarr; evaluation &rarr; state &rarr; promotion</p>
+      <p>On evaluation failure, the pipeline feeds back to preprocess or training for retry. Only approved updates are promoted.</p>
+      <h3>Key Files</h3><div class="file-list">
+        <span class="file-tag">melo/sleep/preprocess/</span>
+        <span class="file-tag">melo/sleep/training/</span>
+        <span class="file-tag">melo/sleep/evaluation/</span>
+        <span class="file-tag">melo/sleep/state/</span></div>`
+  },
+  providers: {
+    title: 'Providers',
+    role: 'LLM and embedding providers (OpenAI-compatible)',
+    tags: ['infra', 'model layer'],
+    body: `<p>Implements contracts from <code>melo/contracts/</code>. Supports any OpenAI-compatible API.</p>
+      <p><b>Only</b> Agent (LLM chat) and Memory (embedding) consume providers. Executor has no model connection.</p>
+      <h3>Key Files</h3><div class="file-list">
+        <span class="file-tag">support/providers/llm/openai_compat.py</span>
+        <span class="file-tag">support/providers/embedding/openai_compat.py</span></div>`
+  },
+  serving: {
+    title: 'Serving', role: 'Local model serving helpers', tags: ['infra'],
+    body: `<div class="file-list"><span class="file-tag">support/serving/server.py</span><span class="file-tag">support/serving/model_config.py</span></div>`
+  },
+  models: {
+    title: 'Models', role: 'Model registry, compile helpers, GPU auto-selection', tags: ['infra'],
+    body: `<p>ModelSpec catalog (Qwen, Llama, MistralNemo, etc.). Auto-selection by GPU memory.</p>
+      <div class="file-list"><span class="file-tag">support/models/__init__.py</span></div>`
+  },
+  config: {
+    title: 'Config / Onboard', role: 'Persistent runtime configuration and setup wizard', tags: ['infra'],
+    body: `<p>TOML at <code>~/.cache/localmelo/config.toml</code>. Backends: mlc-llm, ollama, online.</p>
+      <div class="file-list"><span class="file-tag">support/config.py</span><span class="file-tag">support/onboard.py</span></div>`
+  },
+};
+
+/* ═══════════════════ CONNECTION SPECS ═══════════════════ */
+
+const OVERVIEW_CONNS = [
+  // main flow
+  { from:'n-user',    to:'n-gateway',   fs:'right', ts:'left',   type:'',           mk:'arr',   relates:['user','gateway'] },
+  { from:'n-gateway', to:'n-agent',     fs:'right', ts:'left',   type:'',           mk:'arr',   label:'ingress', relates:['gateway','agent'] },
+  // agent ↔ memory / executor (direct, through checker zone)
+  { from:'n-agent',   to:'n-memory',    fs:'bottom',ts:'top',    type:'',           mk:'arr',   label:'plan ↔ recall', bidi:true, relates:['agent','memory'] },
+  { from:'n-agent',   to:'n-executor',  fs:'bottom',ts:'top',    type:'',           mk:'arr',   label:'plan ↔ act',    bidi:true, relates:['agent','executor'] },
+  // checker fail → replan (curves from checker right to agent right)
+  { from:'n-checker', to:'n-agent',     fs:'right',  ts:'right', type:'fail-line',  mk:'arr-r', label:'fail → replan', relates:['checker','agent'] },
+  // providers → agent & memory (model layer)
+  { from:'n-providers',to:'n-agent',    fs:'left',  ts:'right',  type:'dashed',     mk:'arr',   label:'LLM',   relates:['providers','agent'] },
+  { from:'n-providers',to:'n-memory',   fs:'left',  ts:'right',  type:'dashed',     mk:'arr',   label:'embed', relates:['providers','memory'] },
+  // infra connections
+  { from:'n-config',  to:'n-gateway',   fs:'left',  ts:'right',  type:'dashed',     mk:'arr',   relates:['config','gateway'] },
+  { from:'n-serving', to:'n-models',    fs:'bottom',ts:'top',    type:'',           mk:'arr',   relates:['serving','models'] },
+  // sleep (offline)
+  { from:'n-sleep',   to:'n-memory',    fs:'top',   ts:'bottom', type:'offline-line',mk:'arr',  label:'consolidation', relates:['sleep','memory'] },
+  { from:'n-sleep',   to:'n-providers', fs:'right', ts:'left',   type:'offline-line',mk:'arr',  label:'future training', relates:['sleep','providers'] },
+];
+
+
+/* ═══════════════════ DRAWING ENGINE ═══════════════════ */
+
+function edge(el, side) {
+  const c = el.closest('.diagram').getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const x = r.left - c.left, y = r.top - c.top, w = r.width, h = r.height;
+  switch (side) {
+    case 'left':   return { x, y: y+h/2 };
+    case 'right':  return { x: x+w, y: y+h/2 };
+    case 'top':    return { x: x+w/2, y };
+    case 'bottom': return { x: x+w/2, y: y+h };
+  }
+}
+
+function bz(p1, p2, fs, ts) {
+  // same-side arcs (feedback loops)
+  if (fs === 'top' && ts === 'top') {
+    const my = Math.min(p1.y, p2.y) - 55;
+    return `M${p1.x} ${p1.y} C${p1.x} ${my},${p2.x} ${my},${p2.x} ${p2.y}`;
+  }
+  if (fs === 'right' && ts === 'right') {
+    const mx = Math.max(p1.x, p2.x) + 55;
+    return `M${p1.x} ${p1.y} C${mx} ${p1.y},${mx} ${p2.y},${p2.x} ${p2.y}`;
+  }
+  if (fs === 'left' && ts === 'left') {
+    const mx = Math.min(p1.x, p2.x) - 55;
+    return `M${p1.x} ${p1.y} C${mx} ${p1.y},${mx} ${p2.y},${p2.x} ${p2.y}`;
+  }
+  const h = (fs==='left'||fs==='right');
+  const cp = h ? Math.max(Math.abs(p2.x-p1.x)*0.4, 30) : Math.max(Math.abs(p2.y-p1.y)*0.4, 30);
+  let c1x,c1y,c2x,c2y;
+  if (h) {
+    const s = fs==='right'?1:-1;
+    c1x=p1.x+s*cp; c1y=p1.y; c2x=p2.x-s*cp; c2y=p2.y;
+  } else {
+    const s = fs==='bottom'?1:-1;
+    c1x=p1.x; c1y=p1.y+s*cp; c2x=p2.x; c2y=p2.y-s*cp;
+  }
+  return `M${p1.x} ${p1.y} C${c1x} ${c1y},${c2x} ${c2y},${p2.x} ${p2.y}`;
+}
+
+function drawConns(svgId, conns) {
+  const svg = document.getElementById(svgId);
+  const dia = svg.closest('.diagram');
+  conns.forEach(c => {
+    const fe = document.getElementById(c.from);
+    const te = document.getElementById(c.to);
+    if (!fe||!te) return;
+    const p1 = edge(fe, c.fs), p2 = edge(te, c.ts);
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', bz(p1,p2,c.fs,c.ts));
+    path.setAttribute('class', 'conn '+(c.type||''));
+    path.setAttribute('marker-end', 'url(#'+c.mk+')');
+    if (c.bidi) path.setAttribute('marker-start', 'url(#'+c.mk+')');
+    path.dataset.relates = c.relates.join(',');
+    svg.appendChild(path);
+    if (c.label) {
+      const l = document.createElement('div');
+      l.className = 'conn-label';
+      l.textContent = c.label;
+      let lx, ly;
+      if (c.fs === 'right' && c.ts === 'right') {
+        // right-side arc: label to the right of midpoint
+        lx = Math.max(p1.x, p2.x) + 60;
+        ly = (p1.y + p2.y) / 2 - 8;
+        l.style.left = lx+'px'; l.style.top = ly+'px';
+      } else if (c.fs === 'top' && c.ts === 'top') {
+        lx = (p1.x + p2.x) / 2;
+        ly = Math.min(p1.y, p2.y) - 48;
+        l.style.left = lx+'px'; l.style.top = ly+'px'; l.style.transform = 'translateX(-50%)';
+      } else {
+        lx = (p1.x + p2.x) / 2;
+        ly = (p1.y + p2.y) / 2 - 10;
+        l.style.left = lx+'px'; l.style.top = ly+'px'; l.style.transform = 'translateX(-50%)';
+      }
+      l.dataset.relates = c.relates.join(',');
+      dia.appendChild(l);
+    }
+  });
+}
+
+/* ═══════════════════ INTERACTIVITY ═══════════════════ */
+
+let activeNode = null;
+
+function highlightFor(nodeId) {
+  const dia = document.querySelector('.view.active .diagram');
+  if (!dia) return;
+  // nodes
+  dia.querySelectorAll('.node').forEach(n => {
+    n.classList.toggle('dimmed', n.dataset.id !== nodeId);
+    n.classList.toggle('highlighted', n.dataset.id === nodeId);
+  });
+  // checker zone
+  dia.querySelectorAll('.checker-zone').forEach(z => {
+    z.classList.toggle('dimmed', z.dataset.id !== nodeId);
+    z.classList.toggle('highlighted', z.dataset.id === nodeId);
+  });
+  // connections
+  dia.querySelectorAll('.conn').forEach(p => {
+    const rels = (p.dataset.relates||'').split(',');
+    const hit = rels.includes(nodeId);
+    p.classList.toggle('highlighted', hit);
+    p.classList.toggle('dimmed', !hit);
+    if (hit) rels.forEach(rid => {
+      const rn = dia.querySelector('[data-id="'+rid+'"]');
+      if (rn) rn.classList.remove('dimmed');
+    });
+  });
+  // labels
+  dia.querySelectorAll('.conn-label').forEach(l => {
+    l.classList.toggle('dimmed', !(l.dataset.relates||'').split(',').includes(nodeId));
+  });
+}
+
+function clearHighlight() {
+  document.querySelectorAll('.node,.checker-zone').forEach(n => n.classList.remove('dimmed','highlighted'));
+  document.querySelectorAll('.conn').forEach(p => p.classList.remove('dimmed','highlighted'));
+  document.querySelectorAll('.conn-label').forEach(l => l.classList.remove('dimmed'));
+}
+
+function openPanel(nodeId) {
+  const info = DETAILS[nodeId];
+  if (!info) return;
+  activeNode = nodeId;
+  highlightFor(nodeId);
+
+  document.getElementById('panel-title').textContent = info.title;
+  document.getElementById('panel-role').textContent = info.role;
+
+  const tags = document.getElementById('panel-tags');
+  tags.innerHTML = '';
+  (info.tags||[]).forEach(t => {
+    const s = document.createElement('span');
+    s.className = 'badge '+tagCls(t); s.textContent = t; tags.appendChild(s);
+  });
+
+  document.getElementById('panel-body').innerHTML = info.body||'';
+
+  // bind zoom links inside panel
+  document.querySelectorAll('.zoom-link[data-zoom]').forEach(z => {
+    z.onclick = () => { closePanel(); switchTab(z.dataset.zoom); };
+  });
+
+  const panel = document.getElementById('panel');
+  const overlay = document.getElementById('overlay');
+  panel.classList.add('open');
+  overlay.classList.add('open');
+
+  // adaptive: add body padding and scroll to keep node visible
+  const ph = panel.offsetHeight || 320;
+  document.body.style.paddingBottom = ph + 'px';
+  requestAnimationFrame(() => {
+    const el = document.querySelector('[data-id="'+nodeId+'"]');
+    if (el) {
+      const r = el.getBoundingClientRect();
+      const limit = window.innerHeight - ph - 20;
+      if (r.bottom > limit) {
+        window.scrollBy({ top: r.bottom - limit + 10, behavior: 'smooth' });
+      }
+    }
+  });
+}
+
+function closePanel() {
+  activeNode = null;
+  document.getElementById('panel').classList.remove('open');
+  document.getElementById('overlay').classList.remove('open');
+  document.body.style.paddingBottom = '';
+  clearHighlight();
+}
+
+function tagCls(t) {
+  const m = { planner:'planner', 'model consumer':'consumer', 'model layer':'consumer',
+    guard:'guard', offline:'offline', executor:'exec', infra:'infra-tag', store:'store',
+    client:'infra-tag', source:'store', pipeline:'planner', promoted:'result', outcome:'result' };
+  return m[t]||'infra-tag';
+}
+
+/* ═══════════════════ INIT ═══════════════════ */
+
+document.addEventListener('DOMContentLoaded', () => {
+  drawConns('svg-overview', OVERVIEW_CONNS);
+
+  // node clicks
+  document.querySelectorAll('.node').forEach(n => {
+    n.addEventListener('click', () => openPanel(n.dataset.id));
+  });
+
+  // checker zone click
+  document.querySelectorAll('.checker-zone').forEach(z => {
+    z.addEventListener('click', () => openPanel(z.dataset.id));
+  });
+
+  // close panel
+  document.getElementById('panel-close').addEventListener('click', closePanel);
+  document.getElementById('overlay').addEventListener('click', closePanel);
+  document.addEventListener('keydown', e => { if (e.key==='Escape') closePanel(); });
+});
+</script>
+</body>
+</html>

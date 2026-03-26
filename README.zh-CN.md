@@ -63,7 +63,8 @@
 
 ## 架构
 
-仓库目前围绕“runtime / infrastructure 分离”来组织：
+> **核心设计原则：** `melo/` 是主要的 agent 层。`support/` 是支撑 agent 运行的
+> 基础设施层。`melo/` 不应直接依赖 `support/` 的具体实现。
 
 ```text
 localmelo/
@@ -72,93 +73,253 @@ localmelo/
   tests/      # 回归测试与集成测试
 ```
 
-核心设计原则：
+---
 
-- `melo/` 是主要的 agent 层
-- `support/` 是支撑 agent 运行的基础设施层
-- `melo/` 不应直接依赖 `support/` 的具体实现
+**[交互式架构图 (HTML)](./docs/architecture.html)** — 点击组件查看详情，高亮关联连接
 
-### 高层架构图
+### localmelo 高层架构图
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 flowchart LR
-    U["User / Client"] --> G["support/gateway"]
+    U["用户 / 客户端"]
 
-    subgraph Core["melo/（核心 agent runtime）"]
-        A["agent/"]
-        M["memory/"]
-        C["checker/"]
-        E["executor/"]
-        SL["sleep/"]
-        CT["contracts/ + schema"]
+    subgraph gateway["support / gateway"]
+        G["Gateway\n会话管理"]
     end
 
-    subgraph Infra["support/（基础设施）"]
-        P["providers/"]
-        SV["serving/"]
-        MD["models/"]
-        CF["config.py + onboard.py"]
+    subgraph core["melo — 核心 agent runtime"]
+        A["Agent / Planner"]
+        M["Memory\nshort · long · history\npersonalized · tools"]
+        E["Executor\ntools · builtins · policy"]
+        C{{"Checker\n校验守卫"}}
+        SL["Sleep\n离线 personalization\npipeline"]
     end
 
+    subgraph infra["support — 基础设施"]
+        P["Providers\nLLM · Embedding"]
+        SV["Serving"]
+        MD["Models"]
+        CF["Config / Onboard"]
+    end
+
+    U --> G
     G --> A
-    A --> M
-    A --> C
-    A --> E
-    A -. 通过接口依赖 .-> CT
-    P -. 实现这些接口 .-> CT
+    A <-->|"规划 ↔ 检索"| M
+    A <-->|"规划 ↔ 执行"| E
 
-    G --> P
-    G --> CF
-    P --> SV
+    C -.->|校验| G
+    C -.->|校验| M
+    C -.->|校验| E
+    C -.->|"失败 → 重新规划"| A
+
+    P -.->|LLM| A
+    P -.->|embedding| M
+
+    CF -.-> G
     SV --> MD
 
-    SL -. 离线 personalization pipeline .-> M
-    SL -. 规划中的个性化更新 .-> P
+    SL -.->|整合| M
+    SL -.->|未来训练| P
+
+    classDef validationGuard fill:#f1f5f9,stroke:#94a3b8,stroke-dasharray:5 5
+    classDef offlinePipeline fill:#f8fafc,stroke:#cbd5e1,stroke-dasharray:5 5
+    class C validationGuard
+    class SL offlinePipeline
 ```
 
-### 结构说明
+> **Checker** 不是处理阶段 — 它是一个校验守卫层，监控组件之间的通信。
+> 当校验失败时，控制权交还给 Agent 进行重新规划。
+>
+> **Model / Provider** 层仅被 Agent（LLM chat）和 Memory（embedding）使用。
+> Executor 不会直接调用 model 层。
+>
+> **Sleep** 是离线 pipeline，在用户空闲时运行，不在在线请求路径中。
 
-#### `melo/`
+---
 
-`melo/` 是项目里最核心的 agent runtime。
+<details>
+<summary><b>Agent / Planner</b> — 主循环、chat planning、调度</summary>
 
-目前其中各部分职责大致如下：
+<br>
 
-- `agent/`：主 agent loop、chat planning，以及高层调度逻辑
-- `memory/`：负责 working memory、long memory、history、tool memory，以及未来 personalized memory 的协调
-- `checker/`：负责 planning、execution、gateway ingress、memory write 等边界上的校验与约束
-- `executor/`：负责 tool execution、内置工具、执行结果模型以及 workspace policy
-- `sleep/`：负责用户空闲时的离线 personalization pipeline，包括 preprocess、training、evaluation 和 state tracking
-- `contracts/`：放共享接口定义，例如 provider contracts
-- `schema.py`：放共享的数据结构和核心类型
+Agent 对每个 task 执行多阶段循环：
 
-#### `support/`
+1. **Retrieval** — 通过 embedding 搜索获取长期上下文 + 短期窗口
+2. **Tool Resolution** — 从消息中提取 tool hints，通过 BM25 + 精确查找解析
+3. **Planning** — LLM 生成 thought 和可选的 tool call
+4. **Execution** — executor 执行 tool，带超时和 workspace policy
+5. **Memorization** — 在 history 中记录步骤，向 short + long memory 写入
 
-`support/` 不是 agent 本身，而是支撑 agent 运行的外围基础设施。
+Checker 在第 2–5 阶段验证边界。任何检查失败都会触发 agent 重新规划。
 
-目前主要包括：
+核心文件：`melo/agent/agent.py` · `melo/agent/chat.py`
 
-- `providers/`：具体的 LLM / embedding provider 实现
-- `gateway/`：session 管理、HTTP gateway 和 webapp 接线
-- `serving/`：本地模型 serving 辅助能力和 serving 配置
-- `models/`：本地模型注册、编译辅助和编译产物路径管理
-- `config.py`：持久化运行配置
-- `onboard.py`：初始化和 onboarding 流程
-- `3rdparty/`：support 层依赖的第三方组件
+</details>
 
-### Sleep Module 流程图
+<details>
+<summary><b>Memory</b> — short · long · history · personalized · tools</summary>
+
+<br>
+
+由 **Hippo** 协调的四层 memory 架构：
+
+| 层 | 职责 | 后端 |
+|---|---|---|
+| **Short-term** | 固定大小的滚动窗口（默认 20） | 内存 deque |
+| **Long-term** | 基于 embedding 的语义搜索 | SQLite（可选） |
+| **History** | Append-only 的 task / step 记录 | SQLite（可选） |
+| **Tool Registry** | BM25 语义索引 + 精确名称查找 | 内存 |
+
+协调器提供：`retrieve_context()`、`resolve_tools()`、`memorize()`、`store_step()`。
+
+核心文件：`melo/memory/coordinator.py` · `melo/memory/long/sqlite.py` · `melo/memory/history/sqlite.py`
+
+</details>
+
+<details>
+<summary><b>Executor</b> — tools、builtins、workspace policy</summary>
+
+<br>
+
+结构化执行流程：
+
+1. 注册表查找（权威 tool 定义）
+2. 执行前检查（checker 边界）
+3. Callable 解析
+4. Workspace policy 强制执行（文件路径限制）
+5. 超时 + 异常处理（默认 60s）
+6. Artifact 收集（创建 / 读取文件的元数据）
+
+返回 `ExecutionOutcome`，包含：status、error category、duration、artifacts。
+
+核心文件：`melo/executor/executor.py` · `melo/executor/builtins.py` · `melo/executor/policy.py`
+
+</details>
+
+<details>
+<summary><b>Checker</b> — 跨越所有边界的校验守卫</summary>
+
+<br>
+
+在每个阶段进行多边界校验：
+
+| 边界 | 检查内容 |
+|---|---|
+| **Gateway → Agent** | 请求校验、ingress 安全 |
+| **Agent → Memory** | Memory 写入大小限制 |
+| **Agent → Executor** | 禁止危险命令（`rm -rf`、`mkfs`、fork bomb） |
+| **Executor → Agent** | 输出截断（50 KB 限制） |
+| **Agent planning** | Prompt 大小、tool 名称校验 |
+
+当任何检查失败时，返回 `CheckResult(allowed=False, reason=...)`，agent 重新规划。
+
+核心文件：`melo/checker/checker.py` · `melo/checker/validators.py` · `melo/checker/payloads.py`
+
+</details>
+
+<details>
+<summary><b>Sleep</b> — 离线 personalization pipeline</summary>
+
+<br>
+
+设计用于在用户空闲时持续微调 agent 的 embedding 和 personalization stack。
+
+**目的：**
+- 逐步改善个性化能力
+- 强化程序性记忆
+- 不在在线请求路径中
+
+**阶段：** preprocess → training → evaluation → state → promotion
+
+完整的工作流请参见下方 [Sleep Module 流程图](#localmelo-sleep-module)。
+
+核心文件：`melo/sleep/preprocess/` · `melo/sleep/training/` · `melo/sleep/evaluation/` · `melo/sleep/state/`
+
+</details>
+
+<details>
+<summary><b>Support / 基础设施</b> — providers、gateway、serving、config</summary>
+
+<br>
+
+| 模块 | 职责 |
+|---|---|
+| `providers/` | 具体的 LLM / embedding provider 实现（OpenAI-compatible） |
+| `gateway/` | HTTP gateway、session 管理、webapp |
+| `serving/` | 本地模型 serving 辅助能力 |
+| `models/` | 模型注册、编译辅助、编译产物路径管理 |
+| `config.py` | 持久化 TOML 配置，位于 `~/.cache/localmelo/config.toml` |
+| `onboard.py` | 初始化和 onboarding 流程 |
+
+支持三种 backend：`mlc-llm` · `ollama` · `online`（OpenAI / Gemini / Anthropic）
+
+</details>
+
+---
+
+### localmelo Sleep Module
+
+> *离线 / 用户空闲时运行 — 不在在线请求路径中*
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 flowchart LR
-    H["history / personalized memory"] --> PP["sleep/preprocess"]
-    PP --> TR["sleep/training"]
-    TR --> EV["sleep/evaluation"]
-    EV --> ST["sleep/state"]
+    subgraph sources["数据来源"]
+        H["History"]
+        PM["Personalized\nMemory"]
+    end
 
-    EV -->|通过后| UP["规划中的 embedding / personalization update"]
-    UP -. 增强 .-> PR["personalization behavior"]
-    UP -. 强化 .-> PM["procedural memory"]
+    subgraph pipeline["sleep pipeline — 在用户空闲时运行"]
+        PP["Preprocess\n清洗 · 过滤 · 筛选\n合成数据 · 划分"]
+        TR["Training\nembedding 微调\n轻量级适配"]
+        EV["Evaluation\n个性化增益\n程序性记忆\n安全性检查"]
+        ST["State\n阶段追踪\n产物版本\n审批状态"]
+    end
+
+    subgraph output["已批准的更新"]
+        UP["Embedding /\nPersonalization\n更新"]
+    end
+
+    H --> PP
+    PM --> PP
+    PP --> TR
+    TR --> EV
+    EV --> ST
+
+    ST -->|批准| UP
+    EV -.->|失败| PP
+    EV -.->|重试| TR
+
+    UP -.-> IMP["改善的\n个性化能力"]
+    UP -.-> PROC["强化的\n程序性记忆"]
+
+    classDef result fill:#f0fdf4,stroke:#86efac
+    class IMP,PROC result
 ```
+
+> Sleep 模块用于在用户空闲时进行 **持续性 embedding 和 personalization 微调**。
+> 目的是逐步改善个性化能力、强化程序性记忆，同时不影响在线 agent loop。
+
+<details>
+<summary><b>Sleep 各阶段说明</b></summary>
+
+<br>
+
+| 阶段 | 内容 |
+|---|---|
+| **Preprocess** | 数据清洗、过滤、样本筛选、合成数据生成、train/eval 划分 |
+| **Training** | 持续性 embedding 微调、轻量级适配、个性化更新 |
+| **Evaluation** | 衡量个性化增益、程序性记忆改善、检查安全/质量回归 |
+| **State** | 追踪当前 sleep 阶段、产物版本、evaluation 状态、approved/rejected 记录 |
+| **Promotion** | 只有通过审批的更新才会被推送回系统 |
+
+评估失败时，pipeline 会回退到 preprocess 或 training 进行重试。
+被拒绝的更新永远不会被推送。
+
+</details>
+
+---
 
 ## 快速开始
 
@@ -203,7 +364,7 @@ pytest
 - 搭建 memory 与 sleep-mode 的基础能力
 - 在继续扩展功能之前先补齐测试覆盖
 
-所以你现在看到的仓库，可能会表现为“结构已经很清晰，但功能还没有完全长出来”。这是有意为之。
+所以你现在看到的仓库，可能会表现为"结构已经很清晰，但功能还没有完全长出来"。这是有意为之。
 
 ## Roadmap
 

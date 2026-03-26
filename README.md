@@ -66,7 +66,8 @@ What is intentionally still incomplete:
 
 ## Architecture
 
-The repository is organized around a strict separation of concerns:
+> **Design rule:** `melo/` is the core agent layer. `support/` is the infrastructure
+> layer. `melo/` never depends on `support/` implementations directly.
 
 ```text
 localmelo/
@@ -75,98 +76,258 @@ localmelo/
   tests/      # regression and integration tests
 ```
 
-Design rule:
+---
 
-- `melo/` is the main agent layer
-- `support/` is the infrastructure layer that supports the agent
-- `melo/` should not depend on `support/` implementations directly
+**[Interactive Architecture Diagram (HTML)](./docs/architecture.html)** — click components, highlight connections, detail panels
 
-### High-Level Architecture
+### localmelo High-Level Architecture
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 flowchart LR
-    U["User / Client"] --> G["support/gateway"]
+    U["User / Client"]
 
-    subgraph Core["melo/ (core agent runtime)"]
-        A["agent/"]
-        M["memory/"]
-        C["checker/"]
-        E["executor/"]
-        SL["sleep/"]
-        CT["contracts/ + schema"]
+    subgraph gateway["support / gateway"]
+        G["Gateway\nSession Manager"]
     end
 
-    subgraph Infra["support/ (infrastructure)"]
-        P["providers/"]
-        SV["serving/"]
-        MD["models/"]
-        CF["config.py + onboard.py"]
+    subgraph core["melo — core agent runtime"]
+        A["Agent / Planner"]
+        M["Memory\nshort · long · history\npersonalized · tools"]
+        E["Executor\ntools · builtins · policy"]
+        C{{"Checker\nvalidation guard"}}
+        SL["Sleep\noffline personalization\npipeline"]
     end
 
+    subgraph infra["support — infrastructure"]
+        P["Providers\nLLM · Embedding"]
+        SV["Serving"]
+        MD["Models"]
+        CF["Config / Onboard"]
+    end
+
+    U --> G
     G --> A
-    A --> M
-    A --> C
-    A --> E
-    A -. uses interfaces from .-> CT
-    P -. implements .-> CT
+    A <-->|"plan ↔ recall"| M
+    A <-->|"plan ↔ act"| E
 
-    G --> P
-    G --> CF
-    P --> SV
+    C -.->|guard| G
+    C -.->|guard| M
+    C -.->|guard| E
+    C -.->|"fail → replan"| A
+
+    P -.->|LLM| A
+    P -.->|embed| M
+
+    CF -.-> G
     SV --> MD
 
-    SL -. offline personalization pipeline .-> M
-    SL -. planned personalization updates .-> P
+    SL -.->|consolidation| M
+    SL -.->|future training| P
+
+    classDef validationGuard fill:#f1f5f9,stroke:#94a3b8,stroke-dasharray:5 5
+    classDef offlinePipeline fill:#f8fafc,stroke:#cbd5e1,stroke-dasharray:5 5
+    class C validationGuard
+    class SL offlinePipeline
 ```
 
-### Structure Overview
+> **Checker** is not a processing stage — it is a validation guard that monitors
+> inter-component communication. When validation fails, control returns to the
+> Agent for replanning.
+>
+> **Model / Provider** usage is restricted to the Agent (LLM chat) and Memory
+> (embedding). The Executor never calls the model layer directly.
+>
+> **Sleep** is an offline pipeline that runs during idle time, not in the online
+> request path.
 
-#### `melo/`
+---
 
-`melo/` contains the core agent runtime itself.
+<details>
+<summary><b>Agent / Planner</b> — main loop, chat planning, orchestration</summary>
 
-Its main submodules are:
+<br>
 
-- `agent/`: the main agent loop, chat planning, and high-level orchestration
-- `memory/`: memory coordination across working memory, long memory, history,
-  tool-related memory, and future personalized memory flows
-- `checker/`: validation and safety boundaries between planning, execution,
-  gateway ingress, and memory writes
-- `executor/`: tool execution, built-in tools, execution models, and workspace
-  policy
-- `sleep/`: the offline personalization pipeline, intended for preprocessing,
-  training, evaluation, and state tracking during user idle periods
-- `contracts/`: shared runtime interfaces such as provider contracts
-- `schema.py`: shared runtime data structures and core types
+The agent runs a multi-stage loop per task:
 
-#### `support/`
+1. **Retrieval** — fetch long-term context via embedding search + short-term window
+2. **Tool Resolution** — extract tool hints from messages, resolve via BM25 + exact lookup
+3. **Planning** — LLM generates a thought and optional tool call
+4. **Execution** — executor runs the tool with timeout and workspace policy
+5. **Memorization** — store step in history, memorize to short + long memory
 
-`support/` contains the infrastructure needed to run the agent, but is not the
-agent runtime itself.
+The checker validates boundaries at stages 2–5. If any check fails, the agent replans.
 
-It currently includes:
+Key files: `melo/agent/agent.py` · `melo/agent/chat.py`
 
-- `providers/`: concrete LLM and embedding provider implementations
-- `gateway/`: session management, HTTP gateway, and webapp wiring
-- `serving/`: local model serving helpers and serving configuration
-- `models/`: local model registry, compile helpers, and compiled model paths
-- `config.py`: persistent runtime configuration
-- `onboard.py`: setup and onboarding flow
-- `3rdparty/`: vendored third-party dependencies needed by the support layer
+</details>
 
-### Sleep Module Flow
+<details>
+<summary><b>Memory</b> — short · long · history · personalized · tools</summary>
+
+<br>
+
+Four-layer memory architecture coordinated by **Hippo**:
+
+| Layer | Purpose | Backend |
+|---|---|---|
+| **Short-term** | Fixed-size rolling window (default 20) | In-memory deque |
+| **Long-term** | Embedding-based semantic search | SQLite (optional) |
+| **History** | Append-only task / step records | SQLite (optional) |
+| **Tool Registry** | BM25 semantic index + exact name lookup | In-memory |
+
+The coordinator provides: `retrieve_context()`, `resolve_tools()`, `memorize()`, `store_step()`.
+
+Key files: `melo/memory/coordinator.py` · `melo/memory/long/sqlite.py` · `melo/memory/history/sqlite.py`
+
+</details>
+
+<details>
+<summary><b>Executor</b> — tools, builtins, workspace policy</summary>
+
+<br>
+
+Structured execution pipeline:
+
+1. Registry lookup (authoritative tool definition)
+2. Pre-execute check (checker boundary)
+3. Callable resolution
+4. Workspace policy enforcement (file path restrictions)
+5. Timeout + exception handling (60s default)
+6. Artifact collection (metadata about created / read files)
+
+Returns `ExecutionOutcome` with: status, error category, duration, artifacts.
+
+Key files: `melo/executor/executor.py` · `melo/executor/builtins.py` · `melo/executor/policy.py`
+
+</details>
+
+<details>
+<summary><b>Checker</b> — validation guard across all boundaries</summary>
+
+<br>
+
+Multi-boundary validation at every stage:
+
+| Boundary | What it checks |
+|---|---|
+| **Gateway → Agent** | Request validation, ingress safety |
+| **Agent → Memory** | Memory write size limits |
+| **Agent → Executor** | Blocked commands (`rm -rf`, `mkfs`, fork bombs) |
+| **Executor → Agent** | Output truncation (50 KB limit) |
+| **Agent planning** | Prompt size, tool name validation |
+
+When any check fails, a `CheckResult(allowed=False, reason=...)` is returned and the agent replans.
+
+Key files: `melo/checker/checker.py` · `melo/checker/validators.py` · `melo/checker/payloads.py`
+
+</details>
+
+<details>
+<summary><b>Sleep</b> — offline personalization pipeline</summary>
+
+<br>
+
+Designed for continuous fine-tuning of the agent's embedding and personalization
+stack during idle time.
+
+**Purpose:**
+- Improve personalization over time
+- Strengthen procedural memory
+- Not part of the online request path
+
+**Stages:** preprocess → training → evaluation → state → promotion
+
+See the [Sleep Module diagram](#localmelo-sleep-module) below for the full workflow.
+
+Key files: `melo/sleep/preprocess/` · `melo/sleep/training/` · `melo/sleep/evaluation/` · `melo/sleep/state/`
+
+</details>
+
+<details>
+<summary><b>Support / Infrastructure</b> — providers, gateway, serving, config</summary>
+
+<br>
+
+| Module | Role |
+|---|---|
+| `providers/` | Concrete LLM and embedding implementations (OpenAI-compatible) |
+| `gateway/` | HTTP gateway, session management, webapp |
+| `serving/` | Local model serving helpers |
+| `models/` | Model registry, compile helpers, compiled model paths |
+| `config.py` | Persistent TOML config at `~/.cache/localmelo/config.toml` |
+| `onboard.py` | Setup wizard and onboarding flow |
+
+Supports three backends: `mlc-llm` · `ollama` · `online` (OpenAI / Gemini / Anthropic)
+
+</details>
+
+---
+
+### localmelo Sleep Module
+
+> *offline / idle time — not in the online request path*
 
 ```mermaid
+%%{init: {'theme': 'neutral'}}%%
 flowchart LR
-    H["history / personalized memory"] --> PP["sleep/preprocess"]
-    PP --> TR["sleep/training"]
-    TR --> EV["sleep/evaluation"]
-    EV --> ST["sleep/state"]
+    subgraph sources["data sources"]
+        H["History"]
+        PM["Personalized\nMemory"]
+    end
 
-    EV -->|approved| UP["planned embedding / personalization update"]
-    UP -. improves .-> PR["personalization behavior"]
-    UP -. strengthens .-> PM["procedural memory"]
+    subgraph pipeline["sleep pipeline — runs during idle time"]
+        PP["Preprocess\nclean · filter · select\nsynthetic data · split"]
+        TR["Training\nembedding fine-tuning\nlightweight adaptation"]
+        EV["Evaluation\npersonalization gain\nprocedural memory\nsafety check"]
+        ST["State\nstage tracking\nartifact versions\napproval status"]
+    end
+
+    subgraph output["promoted updates"]
+        UP["Embedding /\nPersonalization\nUpdate"]
+    end
+
+    H --> PP
+    PM --> PP
+    PP --> TR
+    TR --> EV
+    EV --> ST
+
+    ST -->|approved| UP
+    EV -.->|failed| PP
+    EV -.->|retry| TR
+
+    UP -.-> IMP["Improved\nPersonalization"]
+    UP -.-> PROC["Stronger\nProcedural\nMemory"]
+
+    classDef result fill:#f0fdf4,stroke:#86efac
+    class IMP,PROC result
 ```
+
+> The sleep module is intended for **continuous embedding and personalization
+> fine-tuning** during user idle periods. Its purpose is to improve
+> personalization and strengthen procedural memory over time, without affecting
+> the online agent loop.
+
+<details>
+<summary><b>Sleep stages explained</b></summary>
+
+<br>
+
+| Stage | What happens |
+|---|---|
+| **Preprocess** | Data cleaning, filtering, sample selection, synthetic data generation, train/eval split |
+| **Training** | Continuous embedding fine-tuning, lightweight adaptation, personalization updates |
+| **Evaluation** | Measure personalization gain, procedural memory improvement, check for safety/quality regression |
+| **State** | Track current sleep stage, artifact versions, evaluation status, approved/rejected decisions |
+| **Promotion** | Only approved updates are promoted back into the agent system |
+
+On evaluation failure, the pipeline feeds back to preprocess or training for retry.
+Rejected updates are never promoted.
+
+</details>
+
+---
 
 ## Getting Started
 
