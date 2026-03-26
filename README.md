@@ -78,7 +78,7 @@ localmelo/
 
 ---
 
-**[Interactive Architecture Diagram (HTML)](./docs/architecture.html)** — click components, highlight connections, detail panels
+**[Interactive Architecture Diagram](https://xthomaswang.github.io/localmelo/architecture.html)** — click components, highlight connections, detail panels
 
 ### localmelo High-Level Architecture
 

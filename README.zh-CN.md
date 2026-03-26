@@ -75,7 +75,7 @@ localmelo/
 
 ---
 
-**[交互式架构图 (HTML)](./docs/architecture.html)** — 点击组件查看详情，高亮关联连接
+**[交互式架构图](https://xthomaswang.github.io/localmelo/architecture.html)** — 点击组件查看详情，高亮关联连接
 
 ### localmelo 高层架构图
 
