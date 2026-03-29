@@ -16,6 +16,7 @@ from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
+    MIN_AGENT_STEPS,
     Message,
     StepRecord,
     TaskRecord,
@@ -280,6 +281,19 @@ class Agent:
         if tool_mem_check.allowed:
             self.hippo.short.append(Message(role="tool", content=tool_msg))
 
+    # ── Step estimation ──
+
+    async def _estimate_max_steps(self, query: str) -> int:
+        """Ask the LLM for a conservative step-count estimate.
+
+        The result is clamped to [MIN_AGENT_STEPS, MAX_AGENT_STEPS].
+        On parse failure the hard ceiling is used as a safe fallback.
+        """
+        estimate = await self.chat.estimate_steps(query)
+        if estimate < 0:
+            return MAX_AGENT_STEPS
+        return max(MIN_AGENT_STEPS, min(estimate, MAX_AGENT_STEPS))
+
     # ── Main loop ──
 
     async def run(self, query: str) -> str:
@@ -288,7 +302,9 @@ class Agent:
 
         self.hippo.short.append(Message(role="user", content=query))
 
-        for _ in range(MAX_AGENT_STEPS):
+        max_steps = await self._estimate_max_steps(query)
+
+        for _ in range(max_steps):
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(query)
             if fail is not None:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import unittest.mock
 from collections import deque
 from typing import Any
 
@@ -11,7 +10,13 @@ import pytest
 from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
-from localmelo.melo.schema import MAX_AGENT_STEPS, Message, ToolCall, ToolDef
+from localmelo.melo.schema import (
+    MAX_AGENT_STEPS,
+    MIN_AGENT_STEPS,
+    Message,
+    ToolCall,
+    ToolDef,
+)
 
 # ── Fake providers ──────────────────────────────────────────────────────────
 
@@ -64,6 +69,22 @@ def _make_agent(
     """Build an Agent wired to fake providers."""
     llm = FakeLLM(responses)
     return Agent(llm=llm, embedding=embedding)
+
+
+# ── Estimation fixture ─────────────────────────────────────────────────────
+
+# Save the real method before any patching so estimation tests can restore it.
+_orig_estimate_max_steps = Agent._estimate_max_steps
+
+
+@pytest.fixture(autouse=True)
+def _skip_estimation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip LLM step estimation in tests — always use MAX_AGENT_STEPS."""
+
+    async def _use_max(self: Agent, query: str) -> int:
+        return MAX_AGENT_STEPS
+
+    monkeypatch.setattr(Agent, "_estimate_max_steps", _use_max)
 
 
 # ── Tests ───────────────────────────────────────────────────────────────────
@@ -350,15 +371,20 @@ class TestRetrievalSeparation:
 
 
 class TestMaxStepsTermination:
-    """Loop terminates cleanly when MAX_AGENT_STEPS is exhausted."""
+    """Loop terminates cleanly when estimated step budget is exhausted."""
 
     @pytest.mark.asyncio
-    async def test_max_steps_sets_failed(self) -> None:
+    async def test_max_steps_sets_failed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Agent that always requests tool calls must hit the step limit."""
+
+        async def _return_3(self: Agent, query: str) -> int:
+            return 3
+
+        monkeypatch.setattr(Agent, "_estimate_max_steps", _return_3)
+
         llm = FakeLLM()
-        # Queue enough tool-call responses to exhaust the step limit.
-        # We use a small limit via monkeypatching for speed.
-        for _ in range(MAX_AGENT_STEPS):
+        # Queue more tool-call responses than the estimated budget.
+        for _ in range(5):
             llm.enqueue(
                 Message(
                     role="assistant",
@@ -366,7 +392,6 @@ class TestMaxStepsTermination:
                     tool_call=ToolCall(tool_name="echo", arguments={"text": "x"}),
                 )
             )
-        # No final-answer enqueued -- loop must exhaust.
 
         agent = Agent(llm=llm, embedding=FakeEmbedding())
         agent.hippo.register_tool(
@@ -382,10 +407,7 @@ class TestMaxStepsTermination:
         )
         agent.executor.register("echo", _echo_tool)
 
-        # Patch MAX_AGENT_STEPS to 3 for fast test
-        with unittest.mock.patch("localmelo.melo.agent.agent.MAX_AGENT_STEPS", 3):
-            result = await agent.run("loop forever")
-
+        result = await agent.run("loop forever")
         assert result == "Max steps reached"
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
@@ -687,6 +709,90 @@ class TestPostPlanCheckFailure:
         assert "Response check failed" in result
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
+
+
+class TestStepEstimation:
+    """Dynamic step-budget estimation before the agent loop."""
+
+    @pytest.fixture(autouse=True)
+    def _restore_estimation(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Use real estimation for tests in this class."""
+        monkeypatch.setattr(Agent, "_estimate_max_steps", _orig_estimate_max_steps)
+
+    @pytest.mark.asyncio
+    async def test_parse_step_estimate(self) -> None:
+        """_parse_step_estimate extracts integers correctly."""
+        from localmelo.melo.agent.chat import _parse_step_estimate
+
+        assert _parse_step_estimate("5") == 5
+        assert _parse_step_estimate("I think 12 steps") == 12
+        assert _parse_step_estimate("no number") == -1
+        assert _parse_step_estimate("") == -1
+
+    @pytest.mark.asyncio
+    async def test_clamps_to_min(self) -> None:
+        """Estimate below MIN_AGENT_STEPS is clamped up."""
+        llm = FakeLLM([Message(role="assistant", content="1")])
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        result = await agent._estimate_max_steps("tiny")
+        assert result == MIN_AGENT_STEPS
+
+    @pytest.mark.asyncio
+    async def test_clamps_to_max(self) -> None:
+        """Estimate above MAX_AGENT_STEPS is clamped down."""
+        llm = FakeLLM([Message(role="assistant", content="100")])
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        result = await agent._estimate_max_steps("huge")
+        assert result == MAX_AGENT_STEPS
+
+    @pytest.mark.asyncio
+    async def test_within_bounds(self) -> None:
+        """Estimate within bounds is used as-is."""
+        llm = FakeLLM([Message(role="assistant", content="10")])
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        result = await agent._estimate_max_steps("medium")
+        assert result == 10
+
+    @pytest.mark.asyncio
+    async def test_unparseable_falls_back(self) -> None:
+        """Non-numeric LLM response falls back to MAX_AGENT_STEPS."""
+        llm = FakeLLM([Message(role="assistant", content="I don't know")])
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        result = await agent._estimate_max_steps("query")
+        assert result == MAX_AGENT_STEPS
+
+    @pytest.mark.asyncio
+    async def test_estimated_budget_limits_loop(self) -> None:
+        """Estimation of 3 steps limits the agent to 3 loop iterations."""
+        llm = FakeLLM()
+        # Estimation response
+        llm.enqueue(Message(role="assistant", content="3"))
+        # More tool calls than the estimate
+        for _ in range(5):
+            llm.enqueue(
+                Message(
+                    role="assistant",
+                    content="again",
+                    tool_call=ToolCall(tool_name="echo", arguments={"text": "x"}),
+                )
+            )
+
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        agent.hippo.register_tool(
+            ToolDef(
+                name="echo",
+                description="echo",
+                parameters={
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                },
+            )
+        )
+        agent.executor.register("echo", _echo_tool)
+
+        result = await agent.run("loop task")
+        assert result == "Max steps reached"
 
 
 # ── Test helper ─────────────────────────────────────────────────────────────

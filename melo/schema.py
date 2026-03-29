@@ -12,6 +12,7 @@ LONG_TERM_TOP_K = 5
 TOOL_SEARCH_TOP_K = 3
 
 MAX_AGENT_STEPS = 30
+MIN_AGENT_STEPS = 3
 
 
 # ── Data types ──

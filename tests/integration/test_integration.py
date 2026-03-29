@@ -20,7 +20,7 @@ from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMPro
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
-from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.melo.schema import MAX_AGENT_STEPS, Message, ToolCall, ToolDef
 from localmelo.support.config import Config, ConfigError, GatewayConfig, MlcConfig
 from localmelo.support.gateway.session import SessionManager
 
@@ -71,6 +71,19 @@ class FakeAgent:
 class FakeSessionManager(SessionManager):
     def _create_agent(self) -> FakeAgent:  # type: ignore[override]
         return FakeAgent()
+
+
+# ── Estimation fixture ─────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _skip_estimation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Skip LLM step estimation in integration tests."""
+
+    async def _use_max(self: Agent, query: str) -> int:
+        return MAX_AGENT_STEPS
+
+    monkeypatch.setattr(Agent, "_estimate_max_steps", _use_max)
 
 
 # ── 1. Gateway startup validation failure ───────────────────────────────────
