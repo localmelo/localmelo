@@ -53,6 +53,12 @@ body {
   min-height: 100vh; transition: padding-bottom var(--t);
 }
 
+/* ── Site Nav ── */
+.site-nav { display: flex; gap: 6px; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.site-nav a { font-family: var(--font); font-size: 13px; font-weight: 500; color: var(--text-3); text-decoration: none; padding: 4px 12px; border-radius: 6px; transition: all 0.15s; }
+.site-nav a:hover { color: var(--text); background: var(--bg-alt); }
+.site-nav a.site-nav-active { color: var(--blue-500); background: var(--blue-50); }
+
 /* ── Header ── */
 .header { text-align: center; padding: 36px 24px 0; }
 .header h1 { font-family: var(--mono); font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
@@ -217,6 +223,12 @@ body {
 </style>
 </head>
 <body>
+
+<nav class="site-nav">
+  <a href="./architecture.zh-CN.html" class="site-nav-active">架构</a>
+  <a href="./updates.html">更新日志</a>
+  <a href="https://github.com/localmelo/localmelo">GitHub</a>
+</nav>
 
 <div class="header">
   <h1><span>local</span>melo</h1>

@@ -15,6 +15,8 @@ The project is being built in public. The architecture is in place, the codebase
 is being organized, and core interfaces are being stabilized, but the full
 product vision is not implemented yet.
 
+**[Updates & Changelog](https://localmelo.github.io/localmelo/updates.html)** | **[Architecture Diagram](https://localmelo.github.io/localmelo/architecture.html)**
+
 ## Status
 
 **Pre-alpha / work in progress**
@@ -363,30 +365,10 @@ Long-term:
 
 ## Updates
 
-This section is meant to make progress easy to track while the project is still
-forming.
+See the full **[Updates & Changelog](https://localmelo.github.io/localmelo/updates.html)** for detailed progress on each development track, with English/Chinese toggle.
 
-### Latest update
-
-- runtime and infrastructure were split into `melo/` and `support/`
-- provider contracts were introduced to reduce coupling
-- memory and sleep-mode package boundaries were established
-- the `sleep` module was added as the foundation for continuous personalization
-  work, with the long-term goal of incrementally fine-tuning the agent's
-  embedding/personalization stack during offline periods to strengthen
-  personalization and procedural memory
-- backend adapters were reorganized into `support/backends/` with local and cloud sub-packages
-- CLI and gateway wiring were improved
-- regression coverage was expanded
-
-### Update policy
-
-Until the project reaches a more stable phase, updates will likely be:
-
-- incremental
-- architecture-heavy
-- sometimes breaking
-- documented in this README before the docs are split into separate pages
+Until the project reaches a more stable phase, updates will be incremental,
+architecture-heavy, and sometimes breaking.
 
 ## Contributing
 

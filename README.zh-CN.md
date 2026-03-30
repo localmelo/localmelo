@@ -10,6 +10,8 @@
 
 这个项目正在公开迭代中。当前已经完成了整体架构搭建、代码分层和核心接口整理，但完整的产品能力还没有实现。
 
+**[更新日志](https://localmelo.github.io/localmelo/updates.html)** | **[架构图](https://localmelo.github.io/localmelo/architecture.zh-CN.html)**
+
 ## 当前状态
 
 **Pre-alpha / 持续开发中**
@@ -354,26 +356,9 @@ pytest
 
 ## 更新记录
 
-这个区块的作用是：在项目仍处于快速演进阶段时，让仓库首页就能清楚反映进展。
+查看完整的 **[更新日志](https://localmelo.github.io/localmelo/updates.html)**（支持中英文切换）了解每个开发阶段的详细进展。
 
-### 最新更新
-
-- runtime 与 infrastructure 已拆分为 `melo/` 和 `support/`
-- 引入了 provider contracts 以降低模块耦合
-- 明确了 memory 和 sleep-mode 的包边界
-- 新增了 `sleep` module，作为持续性 personalization 的基础模块；它的长期目标是在用户空闲时逐步微调 agent 的 embedding / personalization stack，从而增强个性化能力和程序性记忆
-- backend adapter 重新组织到 `support/backends/`，包含 local 和 cloud 子包
-- 改善了 CLI 与 gateway 的接线方式
-- 扩展了回归测试覆盖
-
-### 更新策略
-
-在项目进入更稳定阶段之前，更新会更偏向：
-
-- 增量式推进
-- 架构整理优先
-- 可能包含 breaking changes
-- 先记录在 README，再逐步拆分到更正式的文档中
+在项目进入更稳定阶段之前，更新以增量式推进为主，偶尔包含 breaking changes。
 
 ## 贡献
 
