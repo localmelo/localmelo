@@ -16,7 +16,6 @@
   --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-500: #3b82f6; --blue-600: #2563eb;
   --green-50: #f0fdf4; --green-500: #22c55e; --green-700: #15803d;
   --amber-50: #fffbeb; --amber-500: #f59e0b; --amber-700: #b45309;
-  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0;
   --radius: 10px;
 }
 @media (prefers-color-scheme: dark) {
@@ -38,15 +37,22 @@ p, li { color: var(--text-2); }
 a { color: var(--blue-500); text-decoration: none; }
 a:hover { text-decoration: underline; }
 code { font-family: 'JetBrains Mono', monospace; font-size: 0.85em; background: var(--bg-alt); padding: 2px 6px; border-radius: 4px; }
-pre { background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; overflow-x: auto; margin: 12px 0; }
-pre code { background: none; padding: 0; }
 ul { padding-left: 24px; margin: 8px 0; }
 li { margin: 4px 0; }
 .subtitle { color: var(--text-3); font-size: 0.95rem; margin-bottom: 32px; }
-.lang-toggle { display: inline-flex; gap: 8px; margin-bottom: 24px; }
-.lang-toggle button { font-family: inherit; font-size: 0.85rem; padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; background: var(--surface); color: var(--text-2); transition: all 0.15s; }
+
+/* ── Site Nav ── */
+.site-nav { display: flex; align-items: center; gap: 6px; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--bg); margin: -40px -24px 32px; }
+.site-nav a { font-size: 13px; font-weight: 500; color: var(--text-3); text-decoration: none; padding: 4px 12px; border-radius: 6px; transition: all 0.15s; }
+.site-nav a:hover { color: var(--text); background: var(--bg-alt); }
+.site-nav a.site-nav-active { color: var(--blue-500); background: var(--blue-50); }
+.nav-spacer { flex: 1; }
+.lang-toggle { display: flex; gap: 4px; }
+.lang-toggle button { font-family: inherit; font-size: 12px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 5px; cursor: pointer; background: var(--surface); color: var(--text-3); transition: all 0.15s; }
 .lang-toggle button.active { background: var(--blue-500); color: #fff; border-color: var(--blue-500); }
 .lang-toggle button:hover:not(.active) { border-color: var(--blue-500); color: var(--blue-500); }
+
+/* ── Update entries ── */
 .update-entry { margin-top: 36px; padding: 24px; background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius); }
 .update-entry h2 { margin-top: 0; border: none; padding-bottom: 0; }
 .update-date { font-size: 0.85rem; color: var(--text-3); margin-bottom: 12px; }
@@ -59,30 +65,29 @@ li { margin: 4px 0; }
 .status-table th { background: var(--bg-alt); font-weight: 600; }
 .done { color: var(--green-500); }
 .pending { color: var(--amber-500); }
-.site-nav { display: flex; gap: 6px; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--bg); margin: -40px -24px 32px; }
-.site-nav a { font-size: 13px; font-weight: 500; color: var(--text-3); text-decoration: none; padding: 4px 12px; border-radius: 6px; transition: all 0.15s; }
-.site-nav a:hover { color: var(--text); background: var(--bg-alt); }
-.site-nav a.site-nav-active { color: var(--blue-500); background: var(--blue-50); }
-[lang="zh"] { display: none; }
+
+/* ── Language visibility (class-based) ── */
+body.lang-en [data-lang="zh"] { display: none; }
+body.lang-zh [data-lang="en"] { display: none; }
 </style>
 </head>
-<body>
+<body class="lang-en">
 <div class="container">
 
 <nav class="site-nav">
   <a href="./architecture.html">Architecture</a>
   <a href="./updates.html" class="site-nav-active">Updates</a>
   <a href="https://github.com/localmelo/localmelo">GitHub</a>
+  <span class="nav-spacer"></span>
+  <div class="lang-toggle">
+    <button id="btn-en" class="active" onclick="setLang('en')">EN</button>
+    <button id="btn-zh" onclick="setLang('zh')">中文</button>
+  </div>
 </nav>
 
 <h1>localmelo updates</h1>
-<p class="subtitle" lang="en">Development changelog and progress tracker</p>
-<p class="subtitle" lang="zh">开发日志与进度追踪</p>
-
-<div class="lang-toggle">
-  <button id="btn-en" class="active" onclick="setLang('en')">English</button>
-  <button id="btn-zh" onclick="setLang('zh')">中文</button>
-</div>
+<p class="subtitle" data-lang="en">Development changelog and progress tracker</p>
+<p class="subtitle" data-lang="zh">开发日志与进度追踪</p>
 
 <!-- ================================================================ -->
 <!-- Update 2: Task 1 Online Core Loop                                -->
@@ -97,7 +102,7 @@ li { margin: 4px 0; }
   </h2>
   <div class="update-date">2026-03-29 &mdash; <a href="https://github.com/localmelo/localmelo/issues/3">localmelo/localmelo#3</a></div>
 
-  <div lang="en">
+  <div data-lang="en">
     <h3>A. Backend registry and infrastructure refactor</h3>
     <ul>
       <li>Pluggable backend registry with local (Ollama, MLC-LLM, vLLM, SGLang) and cloud (OpenAI, Anthropic, Gemini, Nvidia) adapters</li>
@@ -148,7 +153,7 @@ li { margin: 4px 0; }
     </table>
   </div>
 
-  <div lang="zh">
+  <div data-lang="zh">
     <h3>A. 后端注册表与基础设施重构</h3>
     <ul>
       <li>可插拔后端注册表，支持本地 (Ollama, MLC-LLM, vLLM, SGLang) 和云端 (OpenAI, Anthropic, Gemini, Nvidia) 适配器</li>
@@ -211,7 +216,7 @@ li { margin: 4px 0; }
   </h2>
   <div class="update-date">2026-03-25</div>
 
-  <div lang="en">
+  <div data-lang="en">
     <ul>
       <li>Split runtime and infrastructure into <code>melo/</code> and <code>support/</code></li>
       <li>Introduced provider contracts to reduce coupling</li>
@@ -222,7 +227,7 @@ li { margin: 4px 0; }
     </ul>
   </div>
 
-  <div lang="zh">
+  <div data-lang="zh">
     <ul>
       <li>运行时和基础设施拆分为 <code>melo/</code> 和 <code>support/</code></li>
       <li>引入 provider 契约以降低耦合</li>
@@ -238,13 +243,10 @@ li { margin: 4px 0; }
 
 <script>
 function setLang(lang) {
-  document.querySelectorAll('[lang="en"], [lang="zh"]').forEach(el => {
-    el.style.display = el.getAttribute('lang') === lang ? '' : 'none';
-  });
+  document.body.className = 'lang-' + lang;
   document.getElementById('btn-en').classList.toggle('active', lang === 'en');
   document.getElementById('btn-zh').classList.toggle('active', lang === 'zh');
 }
-setLang('en');
 </script>
 </body>
 </html>
