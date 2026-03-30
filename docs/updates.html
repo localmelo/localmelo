@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>localmelo — Updates</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg: #ffffff; --bg-alt: #f8fafc; --surface: #ffffff;
+  --text: #1e293b; --text-2: #475569; --text-3: #94a3b8;
+  --border: #e2e8f0; --border-2: #cbd5e1;
+  --blue-50: #eff6ff; --blue-100: #dbeafe; --blue-500: #3b82f6; --blue-600: #2563eb;
+  --green-50: #f0fdf4; --green-500: #22c55e; --green-700: #15803d;
+  --amber-50: #fffbeb; --amber-500: #f59e0b; --amber-700: #b45309;
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a; --bg-alt: #1e293b; --surface: #1e293b;
+    --text: #f1f5f9; --text-2: #94a3b8; --text-3: #64748b;
+    --border: #334155; --border-2: #475569;
+    --blue-50: #1e293b; --blue-100: #1e3a5f; --blue-500: #60a5fa;
+    --green-50: #1a2e1a; --green-500: #4ade80; --green-700: #86efac;
+    --amber-50: #2e2a1a; --amber-500: #fbbf24; --amber-700: #fcd34d;
+  }
+}
+body { font-family: 'DM Sans', system-ui, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+.container { max-width: 860px; margin: 0 auto; padding: 40px 24px 80px; }
+h1 { font-size: 2rem; font-weight: 700; margin-bottom: 8px; }
+h2 { font-size: 1.35rem; font-weight: 600; margin-top: 48px; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+h3 { font-size: 1.1rem; font-weight: 600; margin-top: 24px; margin-bottom: 8px; }
+p, li { color: var(--text-2); }
+a { color: var(--blue-500); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { font-family: 'JetBrains Mono', monospace; font-size: 0.85em; background: var(--bg-alt); padding: 2px 6px; border-radius: 4px; }
+pre { background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; overflow-x: auto; margin: 12px 0; }
+pre code { background: none; padding: 0; }
+ul { padding-left: 24px; margin: 8px 0; }
+li { margin: 4px 0; }
+.subtitle { color: var(--text-3); font-size: 0.95rem; margin-bottom: 32px; }
+.lang-toggle { display: inline-flex; gap: 8px; margin-bottom: 24px; }
+.lang-toggle button { font-family: inherit; font-size: 0.85rem; padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; background: var(--surface); color: var(--text-2); transition: all 0.15s; }
+.lang-toggle button.active { background: var(--blue-500); color: #fff; border-color: var(--blue-500); }
+.lang-toggle button:hover:not(.active) { border-color: var(--blue-500); color: var(--blue-500); }
+.update-entry { margin-top: 36px; padding: 24px; background: var(--bg-alt); border: 1px solid var(--border); border-radius: var(--radius); }
+.update-entry h2 { margin-top: 0; border: none; padding-bottom: 0; }
+.update-date { font-size: 0.85rem; color: var(--text-3); margin-bottom: 12px; }
+.tag { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-right: 6px; }
+.tag-feat { background: var(--green-50); color: var(--green-700); }
+.tag-refactor { background: var(--blue-50); color: var(--blue-500); }
+.tag-bench { background: var(--amber-50); color: var(--amber-700); }
+.status-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.9rem; }
+.status-table th, .status-table td { padding: 8px 12px; border: 1px solid var(--border); text-align: left; }
+.status-table th { background: var(--bg-alt); font-weight: 600; }
+.done { color: var(--green-500); }
+.pending { color: var(--amber-500); }
+.site-nav { display: flex; gap: 6px; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--bg); margin: -40px -24px 32px; }
+.site-nav a { font-size: 13px; font-weight: 500; color: var(--text-3); text-decoration: none; padding: 4px 12px; border-radius: 6px; transition: all 0.15s; }
+.site-nav a:hover { color: var(--text); background: var(--bg-alt); }
+.site-nav a.site-nav-active { color: var(--blue-500); background: var(--blue-50); }
+[lang="zh"] { display: none; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<nav class="site-nav">
+  <a href="./architecture.html">Architecture</a>
+  <a href="./updates.html" class="site-nav-active">Updates</a>
+  <a href="https://github.com/localmelo/localmelo">GitHub</a>
+</nav>
+
+<h1>localmelo updates</h1>
+<p class="subtitle" lang="en">Development changelog and progress tracker</p>
+<p class="subtitle" lang="zh">开发日志与进度追踪</p>
+
+<div class="lang-toggle">
+  <button id="btn-en" class="active" onclick="setLang('en')">English</button>
+  <button id="btn-zh" onclick="setLang('zh')">中文</button>
+</div>
+
+<!-- ================================================================ -->
+<!-- Update 2: Task 1 Online Core Loop                                -->
+<!-- ================================================================ -->
+
+<div class="update-entry">
+  <h2>
+    <span class="tag tag-feat">feat</span>
+    <span class="tag tag-refactor">refactor</span>
+    <span class="tag tag-bench">bench</span>
+    Task 1: Online Core Loop
+  </h2>
+  <div class="update-date">2026-03-29 &mdash; <a href="https://github.com/localmelo/localmelo/issues/3">localmelo/localmelo#3</a></div>
+
+  <div lang="en">
+    <h3>A. Backend registry and infrastructure refactor</h3>
+    <ul>
+      <li>Pluggable backend registry with local (Ollama, MLC-LLM, vLLM, SGLang) and cloud (OpenAI, Anthropic, Gemini, Nvidia) adapters</li>
+      <li>Config supports split <code>chat_backend</code> / <code>embedding_backend</code> (e.g. cloud chat + local embedding)</li>
+      <li>Removed legacy <code>support/serving/</code> and <code>support/models/</code> modules</li>
+      <li>Tests reorganized from flat layout to domain-grouped subdirectories</li>
+      <li>Removed legacy raw-string Agent constructor</li>
+    </ul>
+
+    <h3>B. Attempt-based agent loop with structured reflection</h3>
+    <ul>
+      <li>Replaced flat step loop with attempt-based outer loop (<code>MAX_ATTEMPTS=5</code>, <code>STEPS_PER_ATTEMPT=10</code>, capped by <code>MAX_AGENT_STEPS=30</code>)</li>
+      <li>Extracted <code>_run_attempt()</code> for clean single-responsibility separation</li>
+      <li>Renamed <code>ShortTerm</code> &rarr; <code>WorkingMemory</code> with reflection entries that persist across attempts</li>
+      <li>Structured <code>ReflectionEntry</code> and <code>ReflectionDecision</code> with active-learning fields</li>
+      <li>Utility-based continuation gate: <code>utility = info_gain * feasibility * novelty - cost - repeat_risk</code></li>
+      <li>Stuck detection: repeated tool calls or errors trigger early attempt termination</li>
+      <li>Reflection context injected into retrieval, planning, and reflect calls</li>
+      <li>Reflections promoted to long-term memory only at terminal task state</li>
+      <li>Hardened reflection parsing with strict type coercion and <code>[0,1]</code> float clamping</li>
+    </ul>
+
+    <h3>C. Ollama native provider, usage normalization, and smoke benchmark</h3>
+    <ul>
+      <li>Ollama native <code>/api/chat</code> provider with <code>think: true</code></li>
+      <li>Thinking/answer split for both Ollama native and MLC <code>&lt;think&gt;</code> tags</li>
+      <li>Provider-boundary usage normalization with <code>total_tokens</code> backfill</li>
+      <li>Data-driven smoke benchmark with per-scenario metrics, normalized tokenizer comparison, multi-backend reports</li>
+      <li><code>--report-only</code> mode for regenerating reports from existing JSON</li>
+    </ul>
+
+    <h3>Status</h3>
+    <table class="status-table">
+      <tr><th>Component</th><th>Status</th></tr>
+      <tr><td>Backend registry (local + cloud)</td><td class="done">Done</td></tr>
+      <tr><td>Split chat/embedding config</td><td class="done">Done</td></tr>
+      <tr><td>Attempt-based agent loop</td><td class="done">Done</td></tr>
+      <tr><td>Structured reflection + utility gate</td><td class="done">Done</td></tr>
+      <tr><td>Working memory with reflection entries</td><td class="done">Done</td></tr>
+      <tr><td>Stuck detection</td><td class="done">Done</td></tr>
+      <tr><td>Ollama native chat provider</td><td class="done">Done</td></tr>
+      <tr><td>Smoke benchmark framework</td><td class="done">Done</td></tr>
+      <tr><td>637 tests passing (ruff, black, mypy, pytest)</td><td class="done">Done</td></tr>
+      <tr><td>Task decomposition (<code>decompose</code> action)</td><td class="pending">Not yet</td></tr>
+      <tr><td>Sleep-mode pipeline</td><td class="pending">Not yet</td></tr>
+      <tr><td>Long-memory promotion policies</td><td class="pending">Not yet</td></tr>
+      <tr><td>Utility threshold empirical tuning</td><td class="pending">Not yet</td></tr>
+    </table>
+  </div>
+
+  <div lang="zh">
+    <h3>A. 后端注册表与基础设施重构</h3>
+    <ul>
+      <li>可插拔后端注册表，支持本地 (Ollama, MLC-LLM, vLLM, SGLang) 和云端 (OpenAI, Anthropic, Gemini, Nvidia) 适配器</li>
+      <li>Config 支持 <code>chat_backend</code> / <code>embedding_backend</code> 分离配置（如云端 chat + 本地 embedding）</li>
+      <li>移除遗留的 <code>support/serving/</code> 和 <code>support/models/</code> 模块</li>
+      <li>测试从扁平结构重组为按子系统分目录</li>
+      <li>移除遗留的 Agent 原始字符串构造路径</li>
+    </ul>
+
+    <h3>B. 基于 Attempt 的 Agent 循环与结构化反思</h3>
+    <ul>
+      <li>用 attempt-based 双层循环替代原来的单层 for 循环（<code>MAX_ATTEMPTS=5</code>，<code>STEPS_PER_ATTEMPT=10</code>，总上限 <code>MAX_AGENT_STEPS=30</code>）</li>
+      <li>提取 <code>_run_attempt()</code> 方法，职责清晰</li>
+      <li><code>ShortTerm</code> 更名为 <code>WorkingMemory</code>，反思条目跨 attempt 保留</li>
+      <li>结构化 <code>ReflectionEntry</code> 和 <code>ReflectionDecision</code>，包含主动学习字段</li>
+      <li>基于效用值的续行门控：<code>utility = info_gain * feasibility * novelty - cost - repeat_risk</code></li>
+      <li>卡住检测：相同工具调用或错误重复 3 次触发提前终止</li>
+      <li>反思上下文注入到检索、规划和反思调用中</li>
+      <li>反思条目仅在任务终态时推送到长期记忆</li>
+      <li>严格类型强制转换和 <code>[0,1]</code> 浮点数钳位</li>
+    </ul>
+
+    <h3>C. Ollama 原生 Provider、Usage 规范化与 Smoke 基准框架</h3>
+    <ul>
+      <li>Ollama 原生 <code>/api/chat</code> provider，启用 <code>think: true</code></li>
+      <li>支持 Ollama 和 MLC <code>&lt;think&gt;</code> 标签的 thinking/answer 拆分</li>
+      <li>Provider 边界的 usage 规范化，支持 <code>total_tokens</code> 回填</li>
+      <li>数据驱动的 smoke 基准框架：场景指标、统一 tokenizer 对比、多后端报告</li>
+      <li><code>--report-only</code> 模式从已有 JSON 重新生成报告</li>
+    </ul>
+
+    <h3>状态</h3>
+    <table class="status-table">
+      <tr><th>组件</th><th>状态</th></tr>
+      <tr><td>后端注册表（本地 + 云端）</td><td class="done">完成</td></tr>
+      <tr><td>Chat/Embedding 分离配置</td><td class="done">完成</td></tr>
+      <tr><td>Attempt-based Agent 循环</td><td class="done">完成</td></tr>
+      <tr><td>结构化反思 + 效用门控</td><td class="done">完成</td></tr>
+      <tr><td>Working Memory + 反思条目</td><td class="done">完成</td></tr>
+      <tr><td>卡住检测</td><td class="done">完成</td></tr>
+      <tr><td>Ollama 原生 Chat Provider</td><td class="done">完成</td></tr>
+      <tr><td>Smoke 基准框架</td><td class="done">完成</td></tr>
+      <tr><td>637 测试通过（ruff, black, mypy, pytest）</td><td class="done">完成</td></tr>
+      <tr><td>任务分解（<code>decompose</code> 动作）</td><td class="pending">待完成</td></tr>
+      <tr><td>Sleep 模式管线</td><td class="pending">待完成</td></tr>
+      <tr><td>长期记忆推送策略</td><td class="pending">待完成</td></tr>
+      <tr><td>效用阈值经验校准</td><td class="pending">待完成</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ================================================================ -->
+<!-- Update 1: Initial Commit                                         -->
+<!-- ================================================================ -->
+
+<div class="update-entry">
+  <h2>
+    <span class="tag tag-refactor">refactor</span>
+    Initial Architecture
+  </h2>
+  <div class="update-date">2026-03-25</div>
+
+  <div lang="en">
+    <ul>
+      <li>Split runtime and infrastructure into <code>melo/</code> and <code>support/</code></li>
+      <li>Introduced provider contracts to reduce coupling</li>
+      <li>Established memory and sleep-mode package boundaries</li>
+      <li>Added <code>sleep</code> module as foundation for continuous personalization</li>
+      <li>Cleaned up local serving paths</li>
+      <li>Expanded regression coverage</li>
+    </ul>
+  </div>
+
+  <div lang="zh">
+    <ul>
+      <li>运行时和基础设施拆分为 <code>melo/</code> 和 <code>support/</code></li>
+      <li>引入 provider 契约以降低耦合</li>
+      <li>建立 memory 和 sleep-mode 包边界</li>
+      <li>添加 <code>sleep</code> 模块作为持续个性化的基础</li>
+      <li>清理本地 serving 路径</li>
+      <li>扩展回归测试覆盖</li>
+    </ul>
+  </div>
+</div>
+
+</div>
+
+<script>
+function setLang(lang) {
+  document.querySelectorAll('[lang="en"], [lang="zh"]').forEach(el => {
+    el.style.display = el.getAttribute('lang') === lang ? '' : 'none';
+  });
+  document.getElementById('btn-en').classList.toggle('active', lang === 'en');
+  document.getElementById('btn-zh').classList.toggle('active', lang === 'zh');
+}
+setLang('en');
+</script>
+</body>
+</html>
