@@ -1,7 +1,7 @@
-"""Executor v0.2 tests.
+"""Executor tests.
 
 Covers: builtin execution, unknown tool, blocked command, timeout,
-file path policy, structured result/artifacts, backward compat.
+file path policy, structured result/artifacts.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ from localmelo.melo.executor.models import (
 )
 from localmelo.melo.executor.policy import WorkspacePolicy
 from localmelo.melo.memory.coordinator import Hippo
-from localmelo.melo.schema import ToolCall, ToolDef, ToolResult
+from localmelo.melo.schema import ToolDef, ToolResult
 
 # ── helpers ──
 
@@ -48,38 +48,40 @@ class TestBuiltinExecution(unittest.IsolatedAsyncioTestCase):
         self.executor, self.hippo, _ = _make_executor()
 
     async def test_python_exec(self) -> None:
-        result = await self.executor.execute(
-            ToolCall(tool_name="python_exec", arguments={"code": "print(1+1)"})
+        outcome = await self.executor.execute_structured(
+            ExecutionRequest(tool_name="python_exec", arguments={"code": "print(1+1)"})
         )
-        self.assertIsInstance(result, ToolResult)
-        self.assertEqual(result.output, "2")
-        self.assertEqual(result.error, "")
-        self.assertGreater(result.duration_ms, 0)
+        self.assertEqual(outcome.status, ExecutionStatus.SUCCESS)
+        self.assertEqual(outcome.output, "2")
+        self.assertEqual(outcome.error, "")
+        self.assertGreater(outcome.duration_ms, 0)
 
     async def test_shell_exec(self) -> None:
-        result = await self.executor.execute(
-            ToolCall(tool_name="shell_exec", arguments={"command": "echo hello"})
+        outcome = await self.executor.execute_structured(
+            ExecutionRequest(
+                tool_name="shell_exec", arguments={"command": "echo hello"}
+            )
         )
-        self.assertEqual(result.output, "hello")
-        self.assertEqual(result.error, "")
+        self.assertEqual(outcome.status, ExecutionStatus.SUCCESS)
+        self.assertEqual(outcome.output, "hello")
 
     async def test_file_read_write_roundtrip(self) -> None:
         with tempfile.NamedTemporaryFile(suffix=".txt", delete=False) as f:
             path = f.name
         try:
             # write
-            wr = await self.executor.execute(
-                ToolCall(
+            wr = await self.executor.execute_structured(
+                ExecutionRequest(
                     tool_name="file_write",
                     arguments={"path": path, "content": "round trip"},
                 )
             )
+            self.assertEqual(wr.status, ExecutionStatus.SUCCESS)
             self.assertIn("Written", wr.output)
-            self.assertEqual(wr.error, "")
 
             # read back
-            rd = await self.executor.execute(
-                ToolCall(tool_name="file_read", arguments={"path": path})
+            rd = await self.executor.execute_structured(
+                ExecutionRequest(tool_name="file_read", arguments={"path": path})
             )
             self.assertEqual(rd.output, "round trip")
         finally:
@@ -93,12 +95,6 @@ class TestUnknownTool(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.executor, self.hippo, _ = _make_executor()
 
-    async def test_execute_returns_error(self) -> None:
-        result = await self.executor.execute(ToolCall(tool_name="no_such_tool"))
-        self.assertIsInstance(result, ToolResult)
-        self.assertNotEqual(result.error, "")
-        self.assertEqual(result.output, "")
-
     async def test_structured_error_category(self) -> None:
         outcome = await self.executor.execute_structured(
             ExecutionRequest(tool_name="no_such_tool")
@@ -107,7 +103,7 @@ class TestUnknownTool(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.error_category, ErrorCategory.TOOL_NOT_FOUND)
 
     async def test_callable_without_registry_entry(self) -> None:
-        """A callable registered but no ToolDef → still not found."""
+        """A callable registered but no ToolDef -> still not found."""
 
         async def _ghost() -> str:
             return "boo"
@@ -127,12 +123,6 @@ class TestUnknownTool(unittest.IsolatedAsyncioTestCase):
 class TestBlockedCommand(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.executor, self.hippo, _ = _make_executor()
-
-    async def test_blocked_via_execute(self) -> None:
-        result = await self.executor.execute(
-            ToolCall(tool_name="shell_exec", arguments={"command": "rm -rf /"})
-        )
-        self.assertIn("Blocked", result.error)
 
     async def test_blocked_structured(self) -> None:
         outcome = await self.executor.execute_structured(
@@ -180,11 +170,6 @@ class TestTimeout(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(outcome.duration_ms, 0)
         self.assertIn("timed out", outcome.error.lower())
 
-    async def test_timeout_backward_compat(self) -> None:
-        result = await self.executor.execute(ToolCall(tool_name="slow_tool"))
-        self.assertNotEqual(result.error, "")
-        self.assertIn("timed out", result.error.lower())
-
     async def test_per_request_timeout_override(self) -> None:
         """A generous per-request timeout lets a fast tool succeed."""
         outcome = await self.executor.execute_structured(
@@ -211,31 +196,31 @@ class TestFilePathPolicy(unittest.IsolatedAsyncioTestCase):
 
     async def test_allowed_path_write(self) -> None:
         path = os.path.join(self.tmpdir, "ok.txt")
-        result = await self.executor.execute(
-            ToolCall(
+        outcome = await self.executor.execute_structured(
+            ExecutionRequest(
                 tool_name="file_write",
                 arguments={"path": path, "content": "ok"},
             )
         )
-        self.assertEqual(result.error, "")
-        self.assertIn("Written", result.output)
+        self.assertEqual(outcome.status, ExecutionStatus.SUCCESS)
+        self.assertIn("Written", outcome.output)
 
     async def test_allowed_path_read(self) -> None:
         path = os.path.join(self.tmpdir, "readable.txt")
         with open(path, "w") as f:
             f.write("data")
-        result = await self.executor.execute(
-            ToolCall(tool_name="file_read", arguments={"path": path})
+        outcome = await self.executor.execute_structured(
+            ExecutionRequest(tool_name="file_read", arguments={"path": path})
         )
-        self.assertEqual(result.output, "data")
-        self.assertEqual(result.error, "")
+        self.assertEqual(outcome.status, ExecutionStatus.SUCCESS)
+        self.assertEqual(outcome.output, "data")
 
     async def test_blocked_path_escape(self) -> None:
-        result = await self.executor.execute(
-            ToolCall(tool_name="file_read", arguments={"path": "/etc/hosts"})
+        outcome = await self.executor.execute_structured(
+            ExecutionRequest(tool_name="file_read", arguments={"path": "/etc/hosts"})
         )
-        self.assertNotEqual(result.error, "")
-        self.assertIn("outside", result.error.lower())
+        self.assertEqual(outcome.status, ExecutionStatus.ERROR)
+        self.assertEqual(outcome.error_category, ErrorCategory.PATH_POLICY_VIOLATION)
 
     async def test_blocked_path_structured(self) -> None:
         outcome = await self.executor.execute_structured(
@@ -278,10 +263,11 @@ class TestFilePathPolicy(unittest.IsolatedAsyncioTestCase):
             f.write("free")
             path = f.name
         try:
-            result = await executor.execute(
-                ToolCall(tool_name="file_read", arguments={"path": path})
+            outcome = await executor.execute_structured(
+                ExecutionRequest(tool_name="file_read", arguments={"path": path})
             )
-            self.assertEqual(result.output, "free")
+            self.assertEqual(outcome.status, ExecutionStatus.SUCCESS)
+            self.assertEqual(outcome.output, "free")
         finally:
             os.unlink(path)
 
@@ -360,69 +346,29 @@ class TestStructuredResult(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.output, "hello")
         self.assertEqual(result.duration_ms, 42.0)
 
-
-# ── 7. Backward-compatible execute(tool_call) ──
-
-
-class TestBackwardCompat(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
-        self.executor, self.hippo, _ = _make_executor()
-
-    async def test_returns_tool_result_type(self) -> None:
-        result = await self.executor.execute(
-            ToolCall(tool_name="python_exec", arguments={"code": "print(42)"})
-        )
-        self.assertIsInstance(result, ToolResult)
-        self.assertEqual(result.tool_name, "python_exec")
-        self.assertEqual(result.output, "42")
-
-    async def test_error_for_unknown_tool(self) -> None:
-        result = await self.executor.execute(ToolCall(tool_name="nope"))
-        self.assertIsInstance(result, ToolResult)
-        self.assertNotEqual(result.error, "")
-        self.assertEqual(result.output, "")
-
-    async def test_exception_preserves_duration(self) -> None:
+    async def test_error_outcome_preserves_duration(self) -> None:
         err_def = ToolDef(
             name="err_tool",
             description="raises",
             parameters={"type": "object", "properties": {}},
         )
-        self.hippo.register_tool(err_def)
+        hippo = Hippo()
+        checker = Checker()
+        executor = Executor(hippo, checker)
+        register_builtins(executor, hippo)
+        hippo.register_tool(err_def)
 
         async def _err() -> str:
             raise ValueError("boom")
 
-        self.executor.register("err_tool", _err)
+        executor.register("err_tool", _err)
 
-        result = await self.executor.execute(ToolCall(tool_name="err_tool"))
-        self.assertEqual(result.error, "boom")
-        self.assertGreater(result.duration_ms, 0)
-
-    async def test_post_check_truncation(self) -> None:
-        big_def = ToolDef(
-            name="big_tool",
-            description="huge output",
-            parameters={"type": "object", "properties": {}},
+        outcome = await executor.execute_structured(
+            ExecutionRequest(tool_name="err_tool")
         )
-        self.hippo.register_tool(big_def)
-
-        async def _big() -> str:
-            return "x" * 100_000
-
-        self.executor.register("big_tool", _big)
-
-        result = await self.executor.execute(ToolCall(tool_name="big_tool"))
-        self.assertLess(len(result.output), 100_000)
-        self.assertIn("[truncated]", result.output)
-
-    async def test_execute_signature_unchanged(self) -> None:
-        """execute() takes ToolCall, returns ToolResult — no new required args."""
-        import inspect
-
-        sig = inspect.signature(self.executor.execute)
-        params = list(sig.parameters.keys())
-        self.assertEqual(params, ["tool_call"])
+        self.assertEqual(outcome.status, ExecutionStatus.ERROR)
+        self.assertEqual(outcome.error, "boom")
+        self.assertGreater(outcome.duration_ms, 0)
 
 
 # ── WorkspacePolicy unit tests ──
@@ -454,7 +400,7 @@ class TestWorkspacePolicy(unittest.TestCase):
             self.assertTrue(policy.check_path(td))
 
 
-# ── 8. All builtins via execute_structured() ──
+# ── 7. All builtins via execute_structured() ──
 
 
 class TestAllBuiltinsStructured(unittest.IsolatedAsyncioTestCase):
@@ -516,11 +462,11 @@ class TestAllBuiltinsStructured(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.output, "21")
 
 
-# ── 9. All blocked commands via both execute() and execute_structured() ──
+# ── 8. All blocked commands ──
 
 
 class TestAllBlockedCommands(unittest.IsolatedAsyncioTestCase):
-    """Every pattern in BLOCKED_COMMANDS must be caught by both paths."""
+    """Every pattern in BLOCKED_COMMANDS must be caught."""
 
     def setUp(self) -> None:
         self.executor, self.hippo, _ = _make_executor()
@@ -535,21 +481,6 @@ class TestAllBlockedCommands(unittest.IsolatedAsyncioTestCase):
         ("shutdown -h now", "shutdown"),
         ("reboot", "reboot"),
     ]
-
-    async def test_blocked_via_execute(self) -> None:
-        for cmd, label in self.DANGEROUS_COMMANDS:
-            with self.subTest(label=label):
-                result = await self.executor.execute(
-                    ToolCall(
-                        tool_name="shell_exec",
-                        arguments={"command": cmd},
-                    )
-                )
-                self.assertIn(
-                    "Blocked",
-                    result.error,
-                    f"{label!r} should be blocked via execute()",
-                )
 
     async def test_blocked_via_execute_structured(self) -> None:
         for cmd, label in self.DANGEROUS_COMMANDS:
@@ -571,7 +502,7 @@ class TestAllBlockedCommands(unittest.IsolatedAsyncioTestCase):
                 )
 
 
-# ── 10. Unknown tool error categories and messages ──
+# ── 9. Unknown tool error categories and messages ──
 
 
 class TestUnknownToolErrorMessages(unittest.IsolatedAsyncioTestCase):
@@ -625,7 +556,7 @@ class TestUnknownToolErrorMessages(unittest.IsolatedAsyncioTestCase):
         self.assertNotEqual(o1.error, o2.error)
 
 
-# ── 11. Per-request timeout override (shorter) ──
+# ── 10. Per-request timeout override (shorter) ──
 
 
 class TestPerRequestTimeoutShort(unittest.IsolatedAsyncioTestCase):

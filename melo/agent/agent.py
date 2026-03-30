@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 import os
 from typing import TYPE_CHECKING
 
@@ -16,8 +19,12 @@ from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
+    MAX_ATTEMPTS,
     MIN_AGENT_STEPS,
+    STEPS_PER_ATTEMPT,
     Message,
+    ReflectionDecision,
+    ReflectionEntry,
     StepRecord,
     TaskRecord,
     ToolDef,
@@ -27,64 +34,115 @@ from localmelo.melo.schema import (
 if TYPE_CHECKING:
     from localmelo.support.config import Config
 
+# ── Reflection coercion helpers ──
+
+
+def _coerce_str(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value)
+
+
+def _coerce_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "1", "yes")
+    try:
+        return bool(value)
+    except (TypeError, ValueError):
+        return False
+
+
+def _coerce_float(value: object, default: float = 0.0) -> float:
+    if value is None:
+        return default
+    try:
+        result = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return result if math.isfinite(result) else default
+
+
+def _coerce_unit_float(value: object, default: float = 0.0) -> float:
+    """Coerce to a float clamped to [0.0, 1.0]. Non-finite values use *default*."""
+    return max(0.0, min(1.0, _coerce_float(value, default)))
+
+
+def _coerce_str_list(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(v) for v in value]
+    if isinstance(value, str):
+        return [value] if value else []
+    if value is None:
+        return []
+    return [str(value)]
+
+
+def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
+    """Convert reflection entries into compact system Messages for retrieval context."""
+    if not entries:
+        return []
+    parts: list[str] = []
+    for r in entries:
+        lines = [f"[reflection] Attempt {r.attempt_id}: {r.summary}"]
+        if r.recommended_avoids:
+            lines.append(f"  Avoid: {'; '.join(r.recommended_avoids)}")
+        if r.next_promising_directions:
+            lines.append(f"  Try: {'; '.join(r.next_promising_directions)}")
+        if r.useful_evidence:
+            lines.append(f"  Evidence: {'; '.join(r.useful_evidence)}")
+        if r.failed_hypotheses:
+            lines.append(f"  Failed: {'; '.join(r.failed_hypotheses)}")
+        parts.append("\n".join(lines))
+    return [Message(role="system", content="\n".join(parts))]
+
+
+CONTINUATION_UTILITY_THRESHOLD = 0.1
+
+
+def _should_continue(decision: ReflectionDecision) -> bool:
+    """Active-learning style continuation gate.
+
+    Computes a lightweight utility score and checks structured signals.
+    Returns True only if all conditions suggest another attempt is worthwhile.
+    """
+    if decision.recommended_action != "continue":
+        return False
+    if not decision.task_still_feasible:
+        return False
+    if not decision.next_step_is_concrete:
+        return False
+    if not decision.next_step_is_novel:
+        return False
+
+    utility = (
+        decision.estimated_info_gain * decision.feasibility * decision.novelty
+        - decision.estimated_cost
+        - decision.repeat_risk
+    )
+    return utility >= CONTINUATION_UTILITY_THRESHOLD
+
 
 def _providers_from_config(
     cfg: Config,
 ) -> tuple[BaseLLMProvider, BaseEmbeddingProvider | None]:
-    """Build LLM and embedding providers from a Config object."""
-    from localmelo.support.providers.embedding.openai_compat import (
-        OpenAICompatEmbedding,
-    )
-    from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+    """Build LLM and embedding providers from a Config object.
 
-    llm: BaseLLMProvider
-    embedding: BaseEmbeddingProvider | None
+    Uses the split backend model: ``cfg.chat_backend`` selects the chat
+    provider and ``cfg.embedding_backend`` selects the embedding provider.
+    The two may refer to different backend adapters.
+    """
+    from localmelo.support.backends import get_backend
 
-    if cfg.backend == "mlc-llm":
-        base_url = f"http://127.0.0.1:{cfg.mlc.chat_port}/v1"
-        llm = OpenAICompatLLM(base_url=base_url, model=cfg.mlc.chat_model)
-        embedding = OpenAICompatEmbedding(
-            base_url=base_url, model=cfg.mlc.embedding_model
-        )
+    chat_backend = get_backend(cfg.chat_backend)
+    llm = chat_backend.build_chat_provider(cfg)
 
-    elif cfg.backend == "ollama":
-        chat_url = cfg.ollama.chat_url.rstrip("/") + "/v1"
-        llm = OpenAICompatLLM(base_url=chat_url, model=cfg.ollama.chat_model)
-
-        if cfg.ollama.embedding_model:
-            emb_base = cfg.ollama.embedding_url or cfg.ollama.chat_url
-            emb_url = emb_base.rstrip("/") + "/v1"
-            embedding = OpenAICompatEmbedding(
-                base_url=emb_url, model=cfg.ollama.embedding_model
-            )
-        else:
-            emb_url = f"http://127.0.0.1:{cfg.mlc.chat_port}/v1"
-            embedding = OpenAICompatEmbedding(
-                base_url=emb_url, model="qwen3-embedding-0.6b"
-            )
-
-    elif cfg.backend == "online":
-        api_base = {
-            "openai": "https://api.openai.com/v1",
-            "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
-            "anthropic": "https://api.anthropic.com/v1",
-        }
-        base_url = api_base.get(cfg.online.provider, "")
-        api_key = os.environ.get(cfg.online.api_key_env, "")
-        llm = OpenAICompatLLM(
-            base_url=base_url, model=cfg.online.chat_model, api_key=api_key
-        )
-
-        if cfg.online.local_embedding:
-            emb_url = f"http://127.0.0.1:{cfg.mlc.chat_port}/v1"
-            embedding = OpenAICompatEmbedding(
-                base_url=emb_url, model="qwen3-embedding-0.6b"
-            )
-        else:
-            embedding = None
-
-    else:
-        raise ValueError(f"Unknown backend: {cfg.backend!r}")
+    embedding = None
+    if cfg.has_embedding:
+        emb_key = cfg.embedding_backend  # direct key, no mapping needed
+        emb_backend = get_backend(emb_key)
+        embedding = emb_backend.build_embedding_provider(cfg)
 
     return llm, embedding
 
@@ -162,9 +220,12 @@ class Agent:
         *fail_reason* is non-None when a check fails and the loop must break.
         """
         long_context = await self.hippo.retrieve_context(query)
-        short_window = self.hippo.short.get_window()
+        short_window = self.hippo.working.get_window()
 
-        tool_hints = self.hippo.extract_tool_hints(long_context + short_window)
+        # Include reflection context in tool hint extraction
+        reflection_msgs = _serialize_reflections(self.hippo.working.get_reflections())
+        hint_sources = long_context + short_window + reflection_msgs
+        tool_hints = self.hippo.extract_tool_hints(hint_sources)
         tools = self.hippo.resolve_tools(query, hints=tool_hints)
 
         resolution_check = self.checker.check_tool_resolution(
@@ -182,7 +243,7 @@ class Agent:
                 (f"Tool resolution failed: {resolution_check.reason}"),
             )
 
-        all_msgs = long_context + short_window
+        all_msgs = long_context + short_window + reflection_msgs
         check = await self.checker.pre_plan(all_msgs)
         if not check.allowed:
             return (
@@ -200,6 +261,7 @@ class Agent:
         short_window: list[Message],
         tools: list[ToolDef],
         query: str,
+        reflections: list[ReflectionEntry] | None = None,
     ) -> tuple[Message, str | None]:
         """Stage 3: LLM planning step with post-plan check.
 
@@ -210,6 +272,7 @@ class Agent:
             short=short_window,
             tools=tools,
             query=query,
+            reflections=reflections,
         )
 
         check = await self.checker.post_plan(response)
@@ -279,9 +342,9 @@ class Agent:
             MemoryWritePayload(text=tool_msg, role="tool")
         )
         if tool_mem_check.allowed:
-            self.hippo.short.append(Message(role="tool", content=tool_msg))
+            self.hippo.working.append(Message(role="tool", content=tool_msg))
 
-    # ── Step estimation ──
+    # ── Step estimation (kept for backward compat, no longer called by run) ──
 
     async def _estimate_max_steps(self, query: str) -> int:
         """Ask the LLM for a conservative step-count estimate.
@@ -294,49 +357,229 @@ class Agent:
             return MAX_AGENT_STEPS
         return max(MIN_AGENT_STEPS, min(estimate, MAX_AGENT_STEPS))
 
-    # ── Main loop ──
+    # ── Stuck detection ──
 
-    async def run(self, query: str) -> str:
-        task = TaskRecord(query=query)
-        await self.hippo.save_task(task)
+    @staticmethod
+    def _make_fingerprint(
+        response: Message, result: ToolResult
+    ) -> tuple[str, str, str]:
+        """Return (tool_name, args_hash, error) for stuck detection."""
+        tc = response.tool_call
+        args_json = json.dumps(tc.arguments if tc else {}, sort_keys=True)
+        return (
+            tc.tool_name if tc else "",
+            hashlib.sha256(args_json.encode()).hexdigest()[:16],
+            result.error,
+        )
 
-        self.hippo.short.append(Message(role="user", content=query))
+    @staticmethod
+    def _detect_stuck(
+        fingerprints: list[tuple[str, str, str]],
+    ) -> str:
+        """Return a failure_type string if stuck heuristics fire, else ''."""
+        if len(fingerprints) < 3:
+            return ""
+        last3 = fingerprints[-3:]
+        # Same tool+args repeated 3 times
+        keys = {(name, args_h) for name, args_h, _ in last3}
+        if len(keys) == 1 and last3[0][0]:
+            return "stuck"
+        # Same error repeated 3 times
+        errors = [err for _, _, err in last3 if err]
+        if len(errors) == 3 and len(set(errors)) == 1:
+            return "stuck"
+        return ""
 
-        max_steps = await self._estimate_max_steps(query)
+    # ── Reflection ──
 
-        for _ in range(max_steps):
+    async def _do_reflect(
+        self,
+        task: TaskRecord,
+        attempt_id: int,
+        failure_type: str,
+    ) -> tuple[ReflectionEntry, ReflectionDecision]:
+        """Structured reflection at attempt boundary."""
+        short_window = self.hippo.working.get_window()
+        prior_reflections = self.hippo.working.get_reflections()
+        response = await self.chat.reflect(
+            short=short_window,
+            query=task.query,
+            attempt_id=attempt_id,
+            failure_type=failure_type,
+            prior_reflections=prior_reflections or None,
+        )
+        return self._parse_reflection(response.content, attempt_id, failure_type)
+
+    @staticmethod
+    def _parse_reflection(
+        text: str,
+        attempt_id: int,
+        failure_type: str,
+    ) -> tuple[ReflectionEntry, ReflectionDecision]:
+        """Parse LLM reflection JSON with strict coercion and conservative fallback."""
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            entry = ReflectionEntry(
+                attempt_id=attempt_id,
+                summary=_coerce_str(text)[:200],
+                failure_type=failure_type,
+            )
+            return entry, ReflectionDecision(
+                recommended_action="stop",
+                rationale="Could not parse reflection response",
+                best_effort_result=_coerce_str(text)[:500],
+                tried_memory=entry,
+            )
+
+        if not isinstance(data, dict):
+            entry = ReflectionEntry(
+                attempt_id=attempt_id,
+                summary=str(data)[:200],
+                failure_type=failure_type,
+            )
+            return entry, ReflectionDecision(
+                recommended_action="stop",
+                rationale="Reflection response was not a JSON object",
+                best_effort_result="",
+                tried_memory=entry,
+            )
+
+        entry = ReflectionEntry(
+            attempt_id=attempt_id,
+            summary=_coerce_str(data.get("summary")),
+            failed_hypotheses=_coerce_str_list(data.get("failed_hypotheses")),
+            disproven_actions=_coerce_str_list(data.get("disproven_actions")),
+            useful_evidence=_coerce_str_list(data.get("useful_evidence")),
+            unresolved_questions=_coerce_str_list(data.get("unresolved_questions")),
+            recommended_avoids=_coerce_str_list(data.get("recommended_avoids")),
+            next_promising_directions=_coerce_str_list(
+                data.get("next_promising_directions")
+            ),
+            failure_type=failure_type or _coerce_str(data.get("failure_type")),
+            confidence=_coerce_float(data.get("confidence")),
+        )
+
+        action = _coerce_str(data.get("recommended_action")) or "stop"
+        if action not in ("continue", "stop", "decompose"):
+            action = "stop"
+
+        decision = ReflectionDecision(
+            progress_made=_coerce_bool(data.get("progress_made")),
+            task_still_feasible=_coerce_bool(data.get("task_still_feasible", True)),
+            new_information_gained=_coerce_bool(data.get("new_information_gained")),
+            next_step_is_concrete=_coerce_bool(data.get("next_step_is_concrete")),
+            next_step_is_novel=_coerce_bool(data.get("next_step_is_novel")),
+            recommended_action=action,
+            rationale=_coerce_str(data.get("rationale")),
+            best_effort_result=_coerce_str(data.get("best_effort_result")),
+            tried_memory=entry,
+            # Active-learning fields (clamped to [0, 1])
+            estimated_info_gain=_coerce_unit_float(data.get("estimated_info_gain")),
+            estimated_cost=_coerce_unit_float(data.get("estimated_cost")),
+            repeat_risk=_coerce_unit_float(data.get("repeat_risk")),
+            novelty=_coerce_unit_float(data.get("novelty")),
+            feasibility=_coerce_unit_float(data.get("feasibility")),
+        )
+        return entry, decision
+
+    # ── Attempt ──
+
+    async def _run_attempt(
+        self, task: TaskRecord, query: str, budget: int
+    ) -> tuple[int, str]:
+        """Run one attempt of the agent loop.
+
+        Returns ``(steps_used, failure_type)``.
+        *failure_type* is ``""`` when the task reached a terminal state
+        (completed or failed via checker), ``"budget"`` when the step
+        budget was exhausted, or ``"stuck"`` when stuck detection fired.
+        The method mutates *task.status* / *task.result* on terminal
+        conditions (direct answer or checker failure).
+        """
+        fingerprints: list[tuple[str, str, str]] = []
+        reflections = self.hippo.working.get_reflections() or None
+
+        for step in range(budget):
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(query)
             if fail is not None:
                 task.status = "failed"
                 task.result = fail
-                break
+                return step + 1, ""
 
-            # LLM planning step
+            # LLM planning step (with reflection context)
             response, fail = await self._do_plan(
-                long_context, short_window, tools, query
+                long_context,
+                short_window,
+                tools,
+                query,
+                reflections=reflections,
             )
             if fail is not None:
                 task.status = "failed"
                 task.result = fail
-                break
+                return step + 1, ""
 
-            # No tool call -> direct answer; loop terminates
+            # No tool call → direct answer
             if response.tool_call is None:
                 task.status = "completed"
                 task.result = response.content
+                return step + 1, ""
+
+            # Execute + memorize
+            result = await self._do_execute(response)
+            await self._do_memorize(task.task_id, response, result)
+
+            # Stuck detection
+            fp = self._make_fingerprint(response, result)
+            fingerprints.append(fp)
+            stuck = self._detect_stuck(fingerprints)
+            if stuck:
+                return step + 1, stuck
+
+        return budget, "budget"
+
+    # ── Main loop ──
+
+    async def run(self, query: str) -> str:
+        task = TaskRecord(query=query)
+        await self.hippo.save_task(task)
+        self.hippo.working.append(Message(role="user", content=query))
+
+        total_steps = 0
+
+        for attempt_id in range(MAX_ATTEMPTS):
+            budget = min(STEPS_PER_ATTEMPT, MAX_AGENT_STEPS - total_steps)
+            if budget <= 0:
+                task.status = "failed"
+                task.result = "Max steps reached"
                 break
 
-            # Execute tool call and validate result
-            result = await self._do_execute(response)
+            steps_used, failure_type = await self._run_attempt(task, query, budget)
+            total_steps += steps_used
 
-            # Record step and write checked results to memory
-            await self._do_memorize(task.task_id, response, result)
+            if task.status in ("completed", "failed"):
+                break
+
+            # Reflect at attempt boundary
+            task.attempts_completed = attempt_id + 1
+            entry, decision = await self._do_reflect(task, attempt_id, failure_type)
+            self.hippo.working.add_reflection(entry)
+
+            if not _should_continue(decision):
+                task.status = "failed"
+                task.result = (
+                    decision.best_effort_result
+                    or f"Stopped after attempt {attempt_id}: {decision.rationale}"
+                )
+                break
         else:
-            # for-else: loop exhausted without break
-            task.status = "failed"
-            task.result = "Max steps reached"
+            if task.status == "running":
+                task.status = "failed"
+                task.result = "Max attempts reached"
 
+        await self.hippo.promote_reflections(task.task_id)
         await self.hippo.save_task(task)
         return task.result
 

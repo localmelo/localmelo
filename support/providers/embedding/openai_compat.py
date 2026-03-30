@@ -14,7 +14,7 @@ class OpenAICompatEmbedding(BaseEmbeddingProvider):
     in the OpenAI format:
 
     - **Local**: MLC LLM, Ollama, vLLM, LMStudio
-    - **Online**: OpenAI, Together AI, Voyage AI, etc.
+    - **Cloud**: OpenAI, Together AI, Voyage AI, etc.
 
     Parameters
     ----------

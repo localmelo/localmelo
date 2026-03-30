@@ -21,6 +21,44 @@ def _tool_def_to_openai(td: ToolDef) -> dict[str, Any]:
     }
 
 
+def _coerce_token_count(value: Any) -> int:
+    """Safely coerce a token count to a non-negative int.
+
+    Handles None, missing, string-encoded ints, floats, and negatives.
+    Returns 0 for anything unparseable or negative.
+    """
+    if value is None:
+        return 0
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(n, 0)
+
+
+def _normalize_usage(raw_usage: Any) -> dict[str, int] | None:
+    """Normalize a raw OpenAI-style usage dict into a clean ``dict[str, int]``.
+
+    Rules:
+    - If *raw_usage* is not a dict, returns ``None``.
+    - Each token field is coerced via :func:`_coerce_token_count`.
+    - If ``total_tokens`` is missing or zero but prompt/completion are
+      present, it is back-filled as their sum.
+    """
+    if not isinstance(raw_usage, dict):
+        return None
+    prompt = _coerce_token_count(raw_usage.get("prompt_tokens"))
+    completion = _coerce_token_count(raw_usage.get("completion_tokens"))
+    total = _coerce_token_count(raw_usage.get("total_tokens"))
+    if total == 0 and (prompt or completion):
+        total = prompt + completion
+    return {
+        "prompt_tokens": prompt,
+        "completion_tokens": completion,
+        "total_tokens": total,
+    }
+
+
 class OpenAICompatLLM(BaseLLMProvider):
     """OpenAI-compatible chat/completion provider.
 
@@ -28,7 +66,7 @@ class OpenAICompatLLM(BaseLLMProvider):
     in the OpenAI format:
 
     - **Local**: MLC LLM, Ollama, vLLM, LMStudio, llama.cpp server
-    - **Online**: OpenAI, Groq, Together AI, Fireworks, DeepSeek, Mistral
+    - **Cloud**: OpenAI, Groq, Together AI, Fireworks, DeepSeek, Mistral
 
     Parameters
     ----------
@@ -94,6 +132,7 @@ class OpenAICompatLLM(BaseLLMProvider):
             role="assistant",
             content=msg.get("content") or "",
             tool_call=tool_call,
+            usage=_normalize_usage(data.get("usage")),
         )
 
     async def close(self) -> None:

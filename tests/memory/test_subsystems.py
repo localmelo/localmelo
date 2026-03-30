@@ -2,9 +2,15 @@ import pytest
 
 from localmelo.melo.memory.history import History
 from localmelo.melo.memory.long import LongTerm
-from localmelo.melo.memory.short import ShortTerm
+from localmelo.melo.memory.short import ShortTerm, WorkingMemory
 from localmelo.melo.memory.tools import ToolRegistry
-from localmelo.melo.schema import Message, StepRecord, TaskRecord, ToolDef
+from localmelo.melo.schema import (
+    Message,
+    ReflectionEntry,
+    StepRecord,
+    TaskRecord,
+    ToolDef,
+)
 
 
 class TestShortTerm:
@@ -29,6 +35,35 @@ class TestShortTerm:
         st.append(Message(role="user", content="a"))
         st.clear()
         assert len(st.get_window()) == 0
+
+
+class TestWorkingMemory:
+    def test_add_and_get_reflections(self) -> None:
+        wm = WorkingMemory(max_len=5)
+        entry = ReflectionEntry(attempt_id=0, summary="tried X")
+        wm.add_reflection(entry)
+        assert len(wm.get_reflections()) == 1
+        assert wm.get_reflections()[0].summary == "tried X"
+
+    def test_clear_preserves_reflections(self) -> None:
+        wm = WorkingMemory(max_len=5)
+        wm.append(Message(role="user", content="hello"))
+        wm.add_reflection(ReflectionEntry(attempt_id=0, summary="r1"))
+        wm.clear()
+        assert len(wm.get_window()) == 0
+        assert len(wm.get_reflections()) == 1
+
+    def test_clear_all(self) -> None:
+        wm = WorkingMemory(max_len=5)
+        wm.append(Message(role="user", content="hello"))
+        wm.add_reflection(ReflectionEntry(attempt_id=0, summary="r1"))
+        wm.clear_all()
+        assert len(wm.get_window()) == 0
+        assert len(wm.get_reflections()) == 0
+
+    def test_backward_compat_alias(self) -> None:
+        st = ShortTerm(max_len=3)
+        assert isinstance(st, WorkingMemory)
 
 
 class TestLongTerm:

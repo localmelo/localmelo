@@ -1,1 +1,1 @@
-"""Support utilities: providers, gateway, and serving infrastructure."""
+"""Support utilities: providers, gateway, backends, and optional serving scaffold."""

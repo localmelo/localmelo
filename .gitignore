@@ -1,6 +1,9 @@
 # OS
 .DS_Store
 
+# editor / AI tooling
+.claude/
+
 # caches (all tools write to .cache/)
 .cache/
 __pycache__/
@@ -10,9 +13,5 @@ __pycache__/
 dist/
 build/
 
-# 3rdparty (symlinked, not vendored)
-support/3rdparty/
-
-# compiled models (large binaries, compiled on-device)
-support/models/chat/
-support/models/embedding/
+# smoke-test artifacts (generated reports)
+tests/artifacts/

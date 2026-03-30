@@ -1,4 +1,4 @@
-"""Tests for the support layer: config, providers, serving paths."""
+"""Tests for the support layer: config roundtrip, validation, embedding."""
 
 from __future__ import annotations
 
@@ -8,18 +8,21 @@ from unittest import mock
 
 import pytest
 
+from localmelo.support.backends.registry import ensure_defaults_registered
 from localmelo.support.config import (
+    CloudVendorConfig,
     Config,
     ConfigError,
     GatewayConfig,
-    MlcConfig,
-    OllamaConfig,
-    OnlineConfig,
+    LocalBackendConfig,
     load,
     save,
 )
 
-# ── Config roundtrip ──
+# Ensure default backends are registered so that has_embedding delegation works.
+ensure_defaults_registered()
+
+# -- Config roundtrip --
 
 
 class TestConfigRoundtrip:
@@ -27,12 +30,13 @@ class TestConfigRoundtrip:
 
     def test_mlc_roundtrip(self, tmp_path: Path) -> None:
         cfg = Config(
-            backend="mlc-llm",
-            mlc=MlcConfig(
-                gpu_memory_gb=24.0,
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:9000",
                 chat_model="Qwen3-8B",
+                embedding_url="http://127.0.0.1:9000",
                 embedding_model="Qwen3-Embedding-0.6B",
-                chat_port=9000,
             ),
             gateway=GatewayConfig(port=9999, host="0.0.0.0"),
         )
@@ -44,22 +48,24 @@ class TestConfigRoundtrip:
             save(cfg)
             loaded = load()
 
-        assert loaded.backend == "mlc-llm"
-        assert loaded.mlc.gpu_memory_gb == 24.0
+        assert loaded.chat_backend == "mlc"
+        assert loaded.embedding_backend == "mlc"
+        assert loaded.mlc.chat_url == "http://127.0.0.1:9000"
         assert loaded.mlc.chat_model == "Qwen3-8B"
+        assert loaded.mlc.embedding_url == "http://127.0.0.1:9000"
         assert loaded.mlc.embedding_model == "Qwen3-Embedding-0.6B"
-        assert loaded.mlc.chat_port == 9000
         assert loaded.gateway.port == 9999
         assert loaded.gateway.host == "0.0.0.0"
 
     def test_ollama_roundtrip(self, tmp_path: Path) -> None:
         cfg = Config(
-            backend="ollama",
-            ollama=OllamaConfig(
+            chat_backend="ollama",
+            embedding_backend="ollama",
+            ollama=LocalBackendConfig(
                 chat_url="http://myhost:11434",
                 chat_model="llama3.2",
-                embedding_model="nomic-embed",
                 embedding_url="http://myhost:11434",
+                embedding_model="nomic-embed",
             ),
         )
         config_path = str(tmp_path / "config.toml")
@@ -70,19 +76,20 @@ class TestConfigRoundtrip:
             save(cfg)
             loaded = load()
 
-        assert loaded.backend == "ollama"
+        assert loaded.chat_backend == "ollama"
+        assert loaded.embedding_backend == "ollama"
         assert loaded.ollama.chat_url == "http://myhost:11434"
         assert loaded.ollama.chat_model == "llama3.2"
+        assert loaded.ollama.embedding_url == "http://myhost:11434"
         assert loaded.ollama.embedding_model == "nomic-embed"
 
-    def test_online_roundtrip(self, tmp_path: Path) -> None:
+    def test_openai_roundtrip(self, tmp_path: Path) -> None:
         cfg = Config(
-            backend="online",
-            online=OnlineConfig(
-                provider="openai",
+            chat_backend="openai",
+            embedding_backend="none",
+            openai=CloudVendorConfig(
                 api_key_env="OPENAI_API_KEY",
                 chat_model="gpt-4o",
-                local_embedding=True,
             ),
         )
         config_path = str(tmp_path / "config.toml")
@@ -93,420 +100,676 @@ class TestConfigRoundtrip:
             save(cfg)
             loaded = load()
 
-        assert loaded.backend == "online"
-        assert loaded.online.provider == "openai"
-        assert loaded.online.api_key_env == "OPENAI_API_KEY"
-        assert loaded.online.chat_model == "gpt-4o"
-        assert loaded.online.local_embedding is True
+        assert loaded.chat_backend == "openai"
+        assert loaded.embedding_backend == "none"
+        assert loaded.openai.api_key_env == "OPENAI_API_KEY"
+        assert loaded.openai.chat_model == "gpt-4o"
+
+    def test_vllm_roundtrip(self, tmp_path: Path) -> None:
+        cfg = Config(
+            chat_backend="vllm",
+            embedding_backend="vllm",
+            vllm=LocalBackendConfig(
+                chat_url="http://localhost:8000",
+                chat_model="meta-llama/Llama-3-8B",
+                embedding_url="http://localhost:8000",
+                embedding_model="BAAI/bge-small-en",
+            ),
+        )
+        config_path = str(tmp_path / "config.toml")
+        with (
+            mock.patch("localmelo.support.config.CONFIG_PATH", config_path),
+            mock.patch("localmelo.support.config.CONFIG_DIR", str(tmp_path)),
+        ):
+            save(cfg)
+            loaded = load()
+
+        assert loaded.chat_backend == "vllm"
+        assert loaded.embedding_backend == "vllm"
+        assert loaded.vllm.chat_url == "http://localhost:8000"
+        assert loaded.vllm.chat_model == "meta-llama/Llama-3-8B"
 
     def test_load_missing_file_returns_default(self, tmp_path: Path) -> None:
         config_path = str(tmp_path / "nonexistent.toml")
         with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
             loaded = load()
-        assert loaded.backend == ""
+        assert loaded.chat_backend == ""
+        assert loaded.embedding_backend == ""
         assert not loaded.is_configured
 
 
-# ── Config validation ──
+# -- Config validation --
 
 
 class TestConfigValidation:
     """Config.validate() should catch misconfigurations."""
 
-    def test_empty_backend(self) -> None:
-        cfg = Config(backend="")
+    def test_empty_chat_backend(self) -> None:
+        cfg = Config(chat_backend="", embedding_backend="none")
         errors = cfg.validate()
         assert len(errors) == 1
-        assert "backend is not set" in errors[0]
+        assert "chat_backend is not set" in errors[0]
 
-    def test_invalid_backend(self) -> None:
-        cfg = Config(backend="not-a-backend")
+    def test_invalid_chat_backend(self) -> None:
+        cfg = Config(chat_backend="not-a-backend", embedding_backend="none")
         errors = cfg.validate()
-        assert any("invalid" in e for e in errors)
+        assert any("not recognised" in e for e in errors)
+
+    def test_empty_embedding_backend(self) -> None:
+        cfg = Config(chat_backend="mlc", embedding_backend="")
+        errors = cfg.validate()
+        assert any("embedding_backend is not set" in e for e in errors)
+
+    def test_invalid_embedding_backend(self) -> None:
+        cfg = Config(chat_backend="mlc", embedding_backend="bad")
+        errors = cfg.validate()
+        assert any("not recognised" in e for e in errors)
+
+    def test_none_not_valid_as_chat_backend(self) -> None:
+        """'none' is not a valid chat_backend."""
+        cfg = Config(chat_backend="none", embedding_backend="none")
+        errors = cfg.validate()
+        assert any("not recognised" in e for e in errors)
+
+    def test_cloud_vendor_not_valid_as_embedding_backend(self) -> None:
+        """Cloud vendors are not valid embedding backends."""
+        cfg = Config(chat_backend="openai", embedding_backend="openai")
+        errors = cfg.validate()
+        assert any("not recognised" in e for e in errors)
+
+    def test_mlc_missing_url(self) -> None:
+        cfg = Config(
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(chat_url="", chat_model="Qwen3-1.7B"),
+        )
+        errors = cfg.validate()
+        assert any("chat_url" in e for e in errors)
 
     def test_mlc_missing_model(self) -> None:
-        cfg = Config(backend="mlc-llm", mlc=MlcConfig(chat_model=""))
+        cfg = Config(
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(chat_url="http://127.0.0.1:8400", chat_model=""),
+        )
         errors = cfg.validate()
         assert any("chat_model" in e for e in errors)
 
-    def test_mlc_bad_port(self) -> None:
-        cfg = Config(
-            backend="mlc-llm", mlc=MlcConfig(chat_model="Qwen3-1.7B", chat_port=0)
-        )
-        errors = cfg.validate()
-        assert any("chat_port" in e for e in errors)
-
     def test_mlc_valid(self) -> None:
         cfg = Config(
-            backend="mlc-llm", mlc=MlcConfig(chat_model="Qwen3-1.7B", chat_port=8400)
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400",
+                embedding_model="Qwen3-Embedding-0.6B",
+            ),
         )
         assert cfg.validate() == []
 
     def test_ollama_missing_url(self) -> None:
         cfg = Config(
-            backend="ollama", ollama=OllamaConfig(chat_url="", chat_model="llama3")
+            chat_backend="ollama",
+            embedding_backend="none",
+            ollama=LocalBackendConfig(chat_url="", chat_model="llama3"),
         )
         errors = cfg.validate()
         assert any("chat_url" in e for e in errors)
 
     def test_ollama_missing_model(self) -> None:
         cfg = Config(
-            backend="ollama",
-            ollama=OllamaConfig(chat_url="http://localhost:11434", chat_model=""),
+            chat_backend="ollama",
+            embedding_backend="none",
+            ollama=LocalBackendConfig(chat_url="http://localhost:11434", chat_model=""),
         )
         errors = cfg.validate()
         assert any("chat_model" in e for e in errors)
 
     def test_ollama_valid(self) -> None:
         cfg = Config(
-            backend="ollama",
-            ollama=OllamaConfig(
+            chat_backend="ollama",
+            embedding_backend="none",
+            ollama=LocalBackendConfig(
                 chat_url="http://localhost:11434", chat_model="qwen3:8b"
             ),
         )
         assert cfg.validate() == []
 
-    def test_online_missing_provider(self) -> None:
+    def test_openai_missing_api_key_env(self) -> None:
         cfg = Config(
-            backend="online",
-            online=OnlineConfig(provider="", api_key_env="KEY", chat_model="gpt-4o"),
-        )
-        errors = cfg.validate()
-        assert any("provider" in e for e in errors)
-
-    def test_online_invalid_provider(self) -> None:
-        cfg = Config(
-            backend="online",
-            online=OnlineConfig(provider="deepseek", api_key_env="KEY", chat_model="m"),
-        )
-        errors = cfg.validate()
-        assert any("invalid" in e for e in errors)
-
-    def test_online_missing_api_key_env(self) -> None:
-        cfg = Config(
-            backend="online",
-            online=OnlineConfig(provider="openai", api_key_env="", chat_model="gpt-4o"),
+            chat_backend="openai",
+            embedding_backend="none",
+            openai=CloudVendorConfig(api_key_env="", chat_model="gpt-4o"),
         )
         errors = cfg.validate()
         assert any("api_key_env" in e for e in errors)
 
-    def test_online_env_var_not_set(self) -> None:
+    def test_openai_env_var_not_set(self) -> None:
         env_var = "_LOCALMELO_TEST_KEY_NONEXISTENT"
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop(env_var, None)
             cfg = Config(
-                backend="online",
-                online=OnlineConfig(
-                    provider="openai", api_key_env=env_var, chat_model="gpt-4o"
-                ),
+                chat_backend="openai",
+                embedding_backend="none",
+                openai=CloudVendorConfig(api_key_env=env_var, chat_model="gpt-4o"),
             )
             errors = cfg.validate()
             assert any(env_var in e for e in errors)
 
-    def test_online_env_var_set(self) -> None:
+    def test_openai_env_var_set(self) -> None:
         env_var = "_LOCALMELO_TEST_KEY"
         with mock.patch.dict(os.environ, {env_var: "sk-test123"}):
             cfg = Config(
-                backend="online",
-                online=OnlineConfig(
-                    provider="openai", api_key_env=env_var, chat_model="gpt-4o"
-                ),
+                chat_backend="openai",
+                embedding_backend="none",
+                openai=CloudVendorConfig(api_key_env=env_var, chat_model="gpt-4o"),
             )
             assert cfg.validate() == []
 
-    def test_online_missing_model(self) -> None:
+    def test_openai_missing_model(self) -> None:
         env_var = "_LOCALMELO_TEST_KEY"
         with mock.patch.dict(os.environ, {env_var: "sk-test123"}):
             cfg = Config(
-                backend="online",
-                online=OnlineConfig(
-                    provider="openai", api_key_env=env_var, chat_model=""
-                ),
+                chat_backend="openai",
+                embedding_backend="none",
+                openai=CloudVendorConfig(api_key_env=env_var, chat_model=""),
             )
             errors = cfg.validate()
             assert any("chat_model" in e for e in errors)
 
+    def test_ollama_embedding_empty_model_validation_error(self) -> None:
+        cfg = Config(
+            chat_backend="ollama",
+            embedding_backend="ollama",
+            ollama=LocalBackendConfig(
+                chat_url="http://localhost:11434",
+                chat_model="qwen3:8b",
+                embedding_url="http://localhost:11434",
+                embedding_model="",
+            ),
+        )
+        errors = cfg.validate()
+        assert any("embedding_model" in e for e in errors)
+
+    def test_split_ollama_embedding_no_url_validation_error(self) -> None:
+        env_var = "_LOCALMELO_TEST_KEY"
+        with mock.patch.dict(os.environ, {env_var: "sk-test123"}):
+            cfg = Config(
+                chat_backend="openai",
+                embedding_backend="ollama",
+                openai=CloudVendorConfig(
+                    api_key_env=env_var,
+                    chat_model="gpt-4o",
+                ),
+                ollama=LocalBackendConfig(
+                    chat_url="",
+                    chat_model="",
+                    embedding_url="",
+                    embedding_model="nomic-embed-text",
+                ),
+            )
+            errors = cfg.validate()
+            assert any("embedding_url" in e for e in errors)
+
     def test_bad_gateway_port(self) -> None:
         cfg = Config(
-            backend="mlc-llm",
-            mlc=MlcConfig(chat_model="Qwen3-1.7B"),
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400",
+                embedding_model="Qwen3-Embedding-0.6B",
+            ),
             gateway=GatewayConfig(port=99999),
         )
         errors = cfg.validate()
         assert any("gateway" in e and "port" in e for e in errors)
 
     def test_validate_or_raise(self) -> None:
-        cfg = Config(backend="")
+        cfg = Config(chat_backend="", embedding_backend="")
         with pytest.raises(ConfigError, match="Configuration errors"):
             cfg.validate_or_raise()
 
     def test_validate_or_raise_passes(self) -> None:
-        cfg = Config(backend="mlc-llm", mlc=MlcConfig(chat_model="Qwen3-1.7B"))
+        cfg = Config(
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400",
+                embedding_model="Qwen3-Embedding-0.6B",
+            ),
+        )
         cfg.validate_or_raise()  # should not raise
 
 
-# ── has_embedding property ──
+# -- has_embedding property --
 
 
 class TestHasEmbedding:
-    """has_embedding should reflect embedding availability per backend."""
-
-    def test_mlc_always_has_embedding(self) -> None:
-        """mlc-llm backend always includes a local embedding model."""
-        cfg = Config(backend="mlc-llm", mlc=MlcConfig(chat_model="Qwen3-1.7B"))
+    def test_mlc_embedding(self) -> None:
+        cfg = Config(
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400",
+                chat_model="Qwen3-4B",
+                embedding_url="http://127.0.0.1:8400",
+                embedding_model="Qwen3-Embedding-0.6B",
+            ),
+        )
         assert cfg.has_embedding is True
 
-    def test_ollama_with_embedding_model(self) -> None:
-        """ollama has embedding when embedding_model is set."""
+    def test_ollama_embedding(self) -> None:
         cfg = Config(
-            backend="ollama",
-            ollama=OllamaConfig(
+            chat_backend="ollama",
+            embedding_backend="ollama",
+            ollama=LocalBackendConfig(
                 chat_url="http://localhost:11434",
                 chat_model="qwen3:8b",
+                embedding_url="http://localhost:11434",
                 embedding_model="nomic-embed",
             ),
         )
         assert cfg.has_embedding is True
 
-    def test_ollama_without_embedding_model(self) -> None:
-        """ollama without embedding_model -> no embedding."""
+    def test_ollama_embedding_empty_model(self) -> None:
         cfg = Config(
-            backend="ollama",
-            ollama=OllamaConfig(
+            chat_backend="ollama",
+            embedding_backend="ollama",
+            ollama=LocalBackendConfig(
                 chat_url="http://localhost:11434",
                 chat_model="qwen3:8b",
+                embedding_url="http://localhost:11434",
                 embedding_model="",
             ),
         )
         assert cfg.has_embedding is False
 
-    def test_online_with_local_embedding(self) -> None:
-        """online backend with local_embedding=True has embedding."""
+    def test_none_embedding(self) -> None:
+        cfg = Config(chat_backend="openai", embedding_backend="none")
+        assert cfg.has_embedding is False
+
+    def test_empty_embedding(self) -> None:
+        cfg = Config(chat_backend="mlc", embedding_backend="")
+        assert cfg.has_embedding is False
+
+    def test_openai_chat_with_mlc_embedding(self) -> None:
         cfg = Config(
-            backend="online",
-            online=OnlineConfig(
-                provider="openai",
-                api_key_env="OPENAI_API_KEY",
-                chat_model="gpt-4o",
-                local_embedding=True,
+            chat_backend="openai",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                embedding_url="http://127.0.0.1:8400",
+                embedding_model="Qwen3-Embedding-0.6B",
             ),
         )
         assert cfg.has_embedding is True
 
-    def test_online_without_local_embedding(self) -> None:
-        """online backend with local_embedding=False has no embedding."""
+    def test_openai_chat_with_ollama_embedding(self) -> None:
         cfg = Config(
-            backend="online",
-            online=OnlineConfig(
-                provider="openai",
-                api_key_env="OPENAI_API_KEY",
-                chat_model="gpt-4o",
-                local_embedding=False,
+            chat_backend="openai",
+            embedding_backend="ollama",
+            ollama=LocalBackendConfig(
+                chat_url="http://localhost:11434",
+                chat_model="",
+                embedding_url="http://localhost:11434",
+                embedding_model="nomic-embed",
+            ),
+        )
+        assert cfg.has_embedding is True
+
+    def test_split_ollama_embedding_empty_urls_no_embedding(self) -> None:
+        cfg = Config(
+            chat_backend="openai",
+            embedding_backend="ollama",
+            ollama=LocalBackendConfig(
+                chat_url="",
+                chat_model="",
+                embedding_url="",
+                embedding_model="nomic-embed-text",
             ),
         )
         assert cfg.has_embedding is False
 
-    def test_unknown_backend_no_embedding(self) -> None:
-        """Unknown/empty backend -> no embedding."""
-        cfg = Config(backend="")
-        assert cfg.has_embedding is False
 
-        cfg2 = Config(backend="some-unknown")
-        assert cfg2.has_embedding is False
+# -- Migration tests --
 
 
-# ── Fail-fast config validation ──
+class TestMigration:
+    """load() should migrate old configs to the new format."""
+
+    def test_migrate_online_without_local_embedding(self, tmp_path: Path) -> None:
+        """Old backend='online' without local_embedding -> openai + none."""
+        config_path = str(tmp_path / "config.toml")
+        content = (
+            'backend = "online"\n\n'
+            "[online]\n"
+            'provider = "openai"\n'
+            'api_key_env = "OPENAI_API_KEY"\n'
+            'chat_model = "gpt-4o"\n'
+            "local_embedding = false\n"
+        )
+        (tmp_path / "config.toml").write_text(content)
+        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
+            loaded = load()
+        assert loaded.chat_backend == "openai"
+        assert loaded.embedding_backend == "none"
+        assert loaded.openai.api_key_env == "OPENAI_API_KEY"
+        assert loaded.openai.chat_model == "gpt-4o"
+
+    def test_migrate_online_with_local_embedding(self, tmp_path: Path) -> None:
+        """Old backend='online' with local_embedding=true -> openai + mlc."""
+        config_path = str(tmp_path / "config.toml")
+        content = (
+            'backend = "online"\n\n'
+            "[online]\n"
+            'provider = "openai"\n'
+            'api_key_env = "OPENAI_API_KEY"\n'
+            'chat_model = "gpt-4o"\n'
+            "local_embedding = true\n"
+        )
+        (tmp_path / "config.toml").write_text(content)
+        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
+            loaded = load()
+        assert loaded.chat_backend == "openai"
+        assert loaded.embedding_backend == "mlc"
+
+    def test_migrate_online_gemini(self, tmp_path: Path) -> None:
+        """Old backend='online' with provider='gemini' -> gemini vendor key."""
+        config_path = str(tmp_path / "config.toml")
+        content = (
+            'backend = "online"\n\n'
+            "[online]\n"
+            'provider = "gemini"\n'
+            'api_key_env = "GEMINI_API_KEY"\n'
+            'chat_model = "gemini-2.0-flash"\n'
+            "local_embedding = false\n"
+        )
+        (tmp_path / "config.toml").write_text(content)
+        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
+            loaded = load()
+        assert loaded.chat_backend == "gemini"
+        assert loaded.embedding_backend == "none"
+        assert loaded.gemini.api_key_env == "GEMINI_API_KEY"
+        assert loaded.gemini.chat_model == "gemini-2.0-flash"
+
+    def test_migrate_mlc_llm_legacy(self, tmp_path: Path) -> None:
+        """Old backend='mlc-llm' -> mlc + mlc."""
+        config_path = str(tmp_path / "config.toml")
+        content = (
+            'backend = "mlc-llm"\n\n'
+            "[mlc]\n"
+            'chat_model = "Qwen3-1.7B"\n'
+            "chat_port = 8400\n"
+        )
+        (tmp_path / "config.toml").write_text(content)
+        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
+            loaded = load()
+        assert loaded.chat_backend == "mlc"
+        assert loaded.embedding_backend == "mlc"
+        assert loaded.mlc.chat_model == "Qwen3-1.7B"
+        assert loaded.mlc.chat_url == "http://127.0.0.1:8400/v1"
+
+    def test_migrate_ollama_without_embedding(self, tmp_path: Path) -> None:
+        """Old backend='ollama' without embedding_model -> ollama + none."""
+        config_path = str(tmp_path / "config.toml")
+        content = (
+            'backend = "ollama"\n\n'
+            "[ollama]\n"
+            'chat_url = "http://localhost:11434"\n'
+            'chat_model = "qwen3:8b"\n'
+        )
+        (tmp_path / "config.toml").write_text(content)
+        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
+            loaded = load()
+        assert loaded.chat_backend == "ollama"
+        assert loaded.embedding_backend == "none"
+
+    def test_migrate_ollama_with_embedding(self, tmp_path: Path) -> None:
+        """Old backend='ollama' with embedding_model -> ollama + ollama."""
+        config_path = str(tmp_path / "config.toml")
+        content = (
+            'backend = "ollama"\n\n'
+            "[ollama]\n"
+            'chat_url = "http://localhost:11434"\n'
+            'chat_model = "qwen3:8b"\n'
+            'embedding_model = "nomic-embed-text"\n'
+        )
+        (tmp_path / "config.toml").write_text(content)
+        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
+            loaded = load()
+        assert loaded.chat_backend == "ollama"
+        assert loaded.embedding_backend == "ollama"
+        assert loaded.ollama.embedding_model == "nomic-embed-text"
+
+    def test_migrate_chat_backend_mlc_llm(self, tmp_path: Path) -> None:
+        """New-ish format with chat_backend='mlc-llm' -> migrated to 'mlc'."""
+        config_path = str(tmp_path / "config.toml")
+        content = (
+            'chat_backend = "mlc-llm"\n'
+            'embedding_backend = "mlc-llm"\n\n'
+            "[mlc]\n"
+            'chat_model = "Qwen3-4B"\n'
+            "chat_port = 8400\n"
+        )
+        (tmp_path / "config.toml").write_text(content)
+        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
+            loaded = load()
+        assert loaded.chat_backend == "mlc"
+        assert loaded.embedding_backend == "mlc"
+        assert loaded.mlc.chat_url == "http://127.0.0.1:8400/v1"
+
+    def test_migrate_chat_backend_cloud_api(self, tmp_path: Path) -> None:
+        """New-ish format with chat_backend='cloud_api' -> migrated to vendor key."""
+        config_path = str(tmp_path / "config.toml")
+        content = (
+            'chat_backend = "cloud_api"\n'
+            'embedding_backend = "none"\n\n'
+            "[cloud_api]\n"
+            'provider = "openai"\n'
+            'api_key_env = "OPENAI_API_KEY"\n'
+            'chat_model = "gpt-4o"\n'
+        )
+        (tmp_path / "config.toml").write_text(content)
+        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
+            loaded = load()
+        assert loaded.chat_backend == "openai"
+        assert loaded.embedding_backend == "none"
+        assert loaded.openai.api_key_env == "OPENAI_API_KEY"
+        assert loaded.openai.chat_model == "gpt-4o"
+
+    def test_new_format_not_migrated(self, tmp_path: Path) -> None:
+        """New format with vendor-specific keys should NOT trigger migration."""
+        config_path = str(tmp_path / "config.toml")
+        content = 'chat_backend = "openai"\n' 'embedding_backend = "ollama"\n'
+        (tmp_path / "config.toml").write_text(content)
+        with mock.patch("localmelo.support.config.CONFIG_PATH", config_path):
+            loaded = load()
+        assert loaded.chat_backend == "openai"
+        assert loaded.embedding_backend == "ollama"
+
+
+# -- Fail-fast config validation --
 
 
 class TestFailFastValidation:
-    """validate() should catch all errors eagerly and validate_or_raise()
-    should raise ConfigError with all collected issues."""
-
     def test_multiple_errors_collected(self) -> None:
-        """A backend with multiple issues should report all of them."""
         cfg = Config(
-            backend="online",
-            online=OnlineConfig(provider="", api_key_env="", chat_model=""),
+            chat_backend="openai",
+            embedding_backend="none",
+            openai=CloudVendorConfig(api_key_env="", chat_model=""),
         )
         errors = cfg.validate()
-        # Should catch: missing provider, missing api_key_env, missing chat_model
-        assert len(errors) >= 3
+        # Should catch: missing api_key_env, missing chat_model
+        assert len(errors) >= 2
 
     def test_validate_or_raise_includes_all_errors(self) -> None:
-        """ConfigError message should contain all validation errors."""
         cfg = Config(
-            backend="online",
-            online=OnlineConfig(provider="", api_key_env="", chat_model=""),
+            chat_backend="openai",
+            embedding_backend="none",
+            openai=CloudVendorConfig(api_key_env="", chat_model=""),
         )
         with pytest.raises(ConfigError) as exc_info:
             cfg.validate_or_raise()
         msg = str(exc_info.value)
-        assert "provider" in msg
         assert "api_key_env" in msg
         assert "chat_model" in msg
 
-    def test_empty_backend_returns_early(self) -> None:
-        """Empty backend should report just that one error and stop."""
-        cfg = Config(backend="")
+    def test_empty_chat_backend_returns_early(self) -> None:
+        cfg = Config(chat_backend="", embedding_backend="none")
         errors = cfg.validate()
         assert len(errors) == 1
-        assert "backend is not set" in errors[0]
+        assert "chat_backend is not set" in errors[0]
 
-    def test_invalid_backend_returns_early(self) -> None:
-        """Invalid backend should report just that one error and stop."""
-        cfg = Config(backend="nope")
+    def test_invalid_chat_backend_returns_early(self) -> None:
+        cfg = Config(chat_backend="nope", embedding_backend="none")
         errors = cfg.validate()
         assert len(errors) == 1
-        assert "invalid" in errors[0]
+        assert "not recognised" in errors[0]
 
     def test_valid_config_returns_no_errors(self) -> None:
-        """A fully valid config should produce zero errors."""
         cfg = Config(
-            backend="mlc-llm",
-            mlc=MlcConfig(chat_model="Qwen3-1.7B", chat_port=8400),
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400",
+                embedding_model="Qwen3-Embedding-0.6B",
+            ),
             gateway=GatewayConfig(port=8401, host="127.0.0.1"),
         )
         assert cfg.validate() == []
-        # validate_or_raise should not raise
         cfg.validate_or_raise()
 
 
-# ── Provider factory ──
+# -- Deployment matrix validation --
 
 
-class TestProviderFactory:
-    """Provider creation should fail clearly for unknown providers."""
+class TestDeploymentMatrix:
+    """Validate the target deployment combinations."""
 
-    def test_unknown_llm_provider_raises(self) -> None:
-        from localmelo.support.providers import create_llm
-
-        with pytest.raises(ValueError, match="Unknown LLM provider"):
-            create_llm("nonexistent_provider", base_url="http://x", model="m")
-
-    def test_unknown_embedding_provider_raises(self) -> None:
-        from localmelo.support.providers import create_embedding
-
-        with pytest.raises(ValueError, match="Unknown embedding provider"):
-            create_embedding("nonexistent_provider", base_url="http://x", model="m")
-
-    def test_openai_compat_llm_creates(self) -> None:
-        from localmelo.support.providers import create_llm
-        from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
-
-        provider = create_llm(
-            "openai_compat", base_url="http://localhost:8400/v1", model="test"
+    def test_ollama_chat_ollama_embedding(self) -> None:
+        cfg = Config(
+            chat_backend="ollama",
+            embedding_backend="ollama",
+            ollama=LocalBackendConfig(
+                chat_url="http://localhost:11434",
+                chat_model="qwen3:8b",
+                embedding_url="http://localhost:11434",
+                embedding_model="nomic-embed",
+            ),
         )
-        assert isinstance(provider, OpenAICompatLLM)
+        assert cfg.is_configured
+        assert cfg.has_embedding
 
-    def test_openai_compat_embedding_creates(self) -> None:
-        from localmelo.support.providers import create_embedding
-        from localmelo.support.providers.embedding.openai_compat import (
-            OpenAICompatEmbedding,
+    def test_openai_chat_ollama_embedding(self) -> None:
+        env_var = "_LOCALMELO_TEST_KEY"
+        with mock.patch.dict(os.environ, {env_var: "sk-test123"}):
+            cfg = Config(
+                chat_backend="openai",
+                embedding_backend="ollama",
+                openai=CloudVendorConfig(
+                    api_key_env=env_var,
+                    chat_model="gpt-4o",
+                ),
+                ollama=LocalBackendConfig(
+                    chat_url="http://localhost:11434",
+                    chat_model="",
+                    embedding_url="http://localhost:11434",
+                    embedding_model="nomic-embed",
+                ),
+            )
+            assert cfg.is_configured
+            assert cfg.has_embedding
+
+    def test_mlc_chat_mlc_embedding(self) -> None:
+        cfg = Config(
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400",
+                chat_model="Qwen3-8B",
+                embedding_url="http://127.0.0.1:8400",
+                embedding_model="Qwen3-Embedding-0.6B",
+            ),
         )
+        assert cfg.is_configured
+        assert cfg.has_embedding
 
-        provider = create_embedding(
-            "openai_compat", base_url="http://localhost:8400/v1", model="test"
+    def test_openai_chat_mlc_embedding(self) -> None:
+        env_var = "_LOCALMELO_TEST_KEY"
+        with mock.patch.dict(os.environ, {env_var: "sk-test123"}):
+            cfg = Config(
+                chat_backend="openai",
+                embedding_backend="mlc",
+                openai=CloudVendorConfig(
+                    api_key_env=env_var,
+                    chat_model="gpt-4o",
+                ),
+                mlc=LocalBackendConfig(
+                    embedding_url="http://127.0.0.1:8400",
+                    embedding_model="Qwen3-Embedding-0.6B",
+                ),
+            )
+            assert cfg.is_configured
+            assert cfg.has_embedding
+
+    def test_openai_chat_no_embedding(self) -> None:
+        env_var = "_LOCALMELO_TEST_KEY"
+        with mock.patch.dict(os.environ, {env_var: "sk-test123"}):
+            cfg = Config(
+                chat_backend="openai",
+                embedding_backend="none",
+                openai=CloudVendorConfig(
+                    api_key_env=env_var,
+                    chat_model="gpt-4o",
+                ),
+            )
+            assert cfg.is_configured
+            assert cfg.has_embedding is False
+
+    def test_vllm_chat_vllm_embedding(self) -> None:
+        cfg = Config(
+            chat_backend="vllm",
+            embedding_backend="vllm",
+            vllm=LocalBackendConfig(
+                chat_url="http://localhost:8000",
+                chat_model="meta-llama/Llama-3-8B",
+                embedding_url="http://localhost:8001",
+                embedding_model="BAAI/bge-small-en",
+            ),
         )
-        assert isinstance(provider, OpenAICompatEmbedding)
+        assert cfg.is_configured
+        assert cfg.has_embedding
 
-    def test_list_providers(self) -> None:
-        from localmelo.support.providers import (
-            list_embedding_providers,
-            list_llm_providers,
+    def test_sglang_chat_sglang_embedding(self) -> None:
+        cfg = Config(
+            chat_backend="sglang",
+            embedding_backend="sglang",
+            sglang=LocalBackendConfig(
+                chat_url="http://localhost:30000",
+                chat_model="meta-llama/Llama-3-8B",
+                embedding_url="http://localhost:30001",
+                embedding_model="BAAI/bge-small-en",
+            ),
         )
+        assert cfg.is_configured
+        assert cfg.has_embedding
 
-        assert "openai_compat" in list_llm_providers()
-        assert "openai_compat" in list_embedding_providers()
-
-
-# ── Serving path resolution ──
-
-
-class TestServingPaths:
-    """Serving paths must use support.models as the single source of truth."""
-
-    def test_no_hardcoded_paths_in_source(self) -> None:
-        """The model_config source must not contain hardcoded user paths."""
-        import localmelo.support.serving.model_config as mc
-
-        source_path = Path(mc.__file__)
-        source = source_path.read_text()
-        assert "/Users/tuomasier/Desktop/mlsys/models" not in source
-
-    def test_models_base_matches_support_models(self) -> None:
-        """models_base() must point to localmelo/support/models/."""
-        from localmelo.support import models as sm
-        from localmelo.support.serving.model_config import models_base
-
-        base = models_base()
-        # Must be the same directory that MODELS_DIR / EMBED_DIR live in
-        assert str(base) == os.path.dirname(sm.__file__)
-        assert base.name == "models"
-
-    def test_default_config_paths_match_compiled_dir(self) -> None:
-        """default_config() paths must agree with support.models.compiled_dir()."""
-        from localmelo.support.models import (
-            CHAT_MODELS,
-            DEFAULT_EMBEDDING,
-            compiled_dir,
-            dylib_path,
-        )
-        from localmelo.support.serving.model_config import default_config
-
-        cfg = default_config()
-
-        # Find the embedding entry
-        emb_entries = [e for e in cfg.models if e.model_type == "embedding"]
-        assert len(emb_entries) >= 1
-        emb = emb_entries[0]
-        assert emb.model_dir == compiled_dir(DEFAULT_EMBEDDING)
-        assert emb.model_lib == dylib_path(DEFAULT_EMBEDDING)
-
-        # Find the chat entry
-        chat_entries = [e for e in cfg.models if e.model_type == "chat"]
-        assert len(chat_entries) >= 1
-        chat = chat_entries[0]
-        assert chat.model_dir == compiled_dir(CHAT_MODELS[0])
-        assert chat.model_lib == dylib_path(CHAT_MODELS[0])
-
-    def test_default_config_paths_start_with_models_base(self) -> None:
-        from localmelo.support.serving.model_config import default_config, models_base
-
-        cfg = default_config()
-        base_str = str(models_base())
-        for entry in cfg.models:
-            assert entry.model_dir.startswith(
-                base_str
-            ), f"model_dir not under models_base: {entry.model_dir}"
-            assert entry.model_lib.startswith(
-                base_str
-            ), f"model_lib not under models_base: {entry.model_lib}"
-
-    def test_default_config_entries_are_valid(self) -> None:
-        from localmelo.support.serving.model_config import default_config
-
-        cfg = default_config()
-        assert len(cfg.models) > 0
-        for entry in cfg.models:
-            assert entry.name
-            assert entry.model_dir
-            assert entry.model_lib
-            assert entry.device in ("metal", "cuda", "vulkan", "cpu")
-            assert entry.model_type in ("chat", "embedding")
-            assert 0 < entry.port < 65536
-
-    def test_default_config_device_matches_platform(self) -> None:
-        import sys
-
-        from localmelo.support.serving.model_config import default_config
-
-        cfg = default_config()
-        expected = "metal" if sys.platform == "darwin" else "cuda"
-        for entry in cfg.models:
-            assert entry.device == expected
-
-    def test_models_base_resolves_to_existing_parent(self) -> None:
-        """The parent of models_base() should exist (support/ dir)."""
-        from localmelo.support.serving.model_config import models_base
-
-        assert models_base().parent.exists()
+    def test_gemini_chat_no_embedding(self) -> None:
+        env_var = "_LOCALMELO_TEST_KEY"
+        with mock.patch.dict(os.environ, {env_var: "gem-test"}):
+            cfg = Config(
+                chat_backend="gemini",
+                embedding_backend="none",
+                gemini=CloudVendorConfig(
+                    api_key_env=env_var,
+                    chat_model="gemini-2.0-flash",
+                ),
+            )
+            assert cfg.is_configured
+            assert cfg.has_embedding is False

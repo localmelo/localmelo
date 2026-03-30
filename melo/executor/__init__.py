@@ -2,15 +2,12 @@
 
 from localmelo.melo.executor.builtins import BUILTINS
 from localmelo.melo.executor.executor import Executor
-
-# Re-export for backward compatibility
 from localmelo.melo.executor.models import (
     ArtifactMeta,
     ErrorCategory,
     ExecutionOutcome,
     ExecutionRequest,
     ExecutionStatus,
-    LogMeta,
 )
 from localmelo.melo.executor.policy import WorkspacePolicy
 
@@ -30,7 +27,6 @@ __all__ = [
     "ExecutionRequest",
     "ExecutionStatus",
     "Executor",
-    "LogMeta",
     "WorkspacePolicy",
     "register_builtins",
 ]

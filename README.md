@@ -7,7 +7,9 @@
 [English](./README.md) | [简体中文](./README.zh-CN.md)
 
 `localmelo` is a local-first agent runtime focused on explicit memory layers,
-tool use, and a future sleep-time personalization workflow.
+tool use, and a future sleep-time personalization workflow. The core connects to
+configured local backends and cloud backends via their endpoints — it does not
+host or manage local runtimes itself.
 
 The project is being built in public. The architecture is in place, the codebase
 is being organized, and core interfaces are being stabilized, but the full
@@ -55,8 +57,9 @@ What exists today:
 - a split architecture between `melo/` and `support/`
 - agent, memory, checker, and executor modules
 - provider contracts and OpenAI-compatible provider implementations
-- gateway and serving infrastructure
-- persistent config and local serving helpers
+- backend adapter registry with local and cloud vendor backends
+- gateway infrastructure
+- persistent config and onboarding helpers
 - scaffolding for sleep-time preprocessing, training, evaluation, and state
 - test coverage around the current architecture and integration points
 
@@ -76,7 +79,7 @@ What is intentionally still incomplete:
 ```text
 localmelo/
   melo/       # core runtime: agent, memory, checker, executor, sleep
-  support/    # infrastructure: providers, gateway, serving, config, models
+  support/    # infrastructure: backends, providers, gateway, config
   tests/      # regression and integration tests
 ```
 
@@ -186,20 +189,39 @@ Key files: `melo/sleep/preprocess/` · `melo/sleep/training/` · `melo/sleep/eva
 </details>
 
 <details>
-<summary><b>Support / Infrastructure</b> — providers, gateway, serving, config</summary>
+<summary><b>Support / Infrastructure</b> — backends, providers, gateway, config</summary>
 
 <br>
 
 | Module | Role |
 |---|---|
+| `backends/` | Backend adapter registry and implementations (local + cloud) |
 | `providers/` | Concrete LLM and embedding implementations (OpenAI-compatible) |
 | `gateway/` | HTTP gateway, session management, webapp |
-| `serving/` | Local model serving helpers |
-| `models/` | Model registry, compile helpers, compiled model paths |
 | `config.py` | Persistent TOML config at `~/.cache/localmelo/config.toml` |
 | `onboard.py` | Setup wizard and onboarding flow |
 
-Supports three backends: `mlc-llm` · `ollama` · `online` (OpenAI / Gemini / Anthropic)
+**Supported backends:**
+
+| Backend | Type | Description |
+|---|---|---|
+| `ollama` | local | Ollama-compatible server |
+| `mlc` | local | MLC-LLM server |
+| `vllm` | local | vLLM server |
+| `sglang` | local | SGLang server |
+| `openai` | cloud | OpenAI API |
+| `gemini` | cloud | Google Gemini API |
+| `anthropic` | cloud | Anthropic API |
+| `nvidia` | cloud | NVIDIA API |
+
+Local backends run as external processes managed by the user; localmelo connects
+to them via a configured URL. Cloud backends connect to vendor APIs directly.
+
+Backend-specific logic (validation, provider construction) lives in
+`support/backends/`. The app layer dispatches via a registry -- no hardcoded backend branching.
+
+> **Future:** a separate repository for local backend deployment and runtime
+> management is being considered, but it is not part of localmelo core yet.
 
 </details>
 
@@ -323,20 +345,21 @@ Near-term:
 - finish the first usable local agent loop
 - expand memory-layer behavior beyond scaffolding
 - wire sleep-mode preprocessing into actual runtime flows
-- improve local serving and backend configuration UX
+- improve backend configuration UX
 
 Mid-term:
 
 - add real sleep-time dataset preparation
 - add adapter-based personalization experiments
 - define a clearer long-memory retrieval and promotion policy
-- add examples and documentation for local deployment
+- add examples and documentation for backend configuration
 
 Long-term:
 
 - support stable local-first agent workflows
 - support explicit memory consolidation
 - support optional user-specific personalization during offline periods
+- explore a separate local backend deployment / runtime management layer
 
 ## Updates
 
@@ -352,7 +375,7 @@ forming.
   work, with the long-term goal of incrementally fine-tuning the agent's
   embedding/personalization stack during offline periods to strengthen
   personalization and procedural memory
-- local serving paths were cleaned up and made more consistent
+- backend adapters were reorganized into `support/backends/` with local and cloud sub-packages
 - CLI and gateway wiring were improved
 - regression coverage was expanded
 

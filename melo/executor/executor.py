@@ -14,7 +14,7 @@ from localmelo.melo.executor.models import (
     ExecutionStatus,
 )
 from localmelo.melo.executor.policy import WorkspacePolicy
-from localmelo.melo.schema import ToolCall, ToolResult
+from localmelo.melo.schema import ToolCall
 
 if TYPE_CHECKING:
     from localmelo.melo.memory.coordinator import Hippo
@@ -41,23 +41,6 @@ class Executor:
         self._callables[name] = fn
 
     # ── Public API ──
-
-    async def execute(self, tool_call: ToolCall) -> ToolResult:
-        """Backward-compatible execution entry point."""
-        request = ExecutionRequest(
-            tool_name=tool_call.tool_name,
-            arguments=dict(tool_call.arguments),
-        )
-        outcome = await self.execute_structured(request)
-        result = outcome.to_tool_result()
-
-        # post-check only on success (matches v0.1 behaviour)
-        if outcome.status == ExecutionStatus.SUCCESS:
-            check = await self.checker.post_execute(tool_call, result)
-            if check.modified_payload:
-                result = check.modified_payload
-
-        return result
 
     async def execute_structured(self, request: ExecutionRequest) -> ExecutionOutcome:
         """Structured execution path with rich outcome metadata."""

@@ -1,4 +1,4 @@
-"""Boundary validators for Checker v0.2."""
+"""Boundary validators for the Checker."""
 
 from __future__ import annotations
 

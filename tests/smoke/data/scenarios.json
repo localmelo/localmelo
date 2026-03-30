@@ -1,0 +1,191 @@
+[
+  {
+    "id": "personal_preference",
+    "name": "个人偏好类",
+    "description": "测试系统对 localmelo 开发者偏好信息的记忆与精确召回能力。种入多条涵盖开发习惯、后端选择、架构偏好及个人背景的记忆后，通过语义检索验证召回精度。此场景考察嵌入模型对近义/相关概念的语义区分度，以及检索器在多条候选记忆中的排序质量。包含无关干扰记忆以检验排序鲁棒性。",
+    "seed_memories": [
+      "开发 localmelo 时偏好使用 MLC-LLM 作为本地推理后端，默认模型是 Qwen3，因为 TVM 编译优化后推理速度比 Ollama 快很多。",
+      "localmelo 的 melo/ 和 support/ 必须严格分层，melo/ 核心运行时绝不能直接 import support/ 的实现。",
+      "写 localmelo 测试时习惯用 FakeLLM 和 FakeEmbedding 做假 provider，避免依赖真实模型服务。",
+      "Checker 的校验边界设计遵循四层原则：gateway→agent、agent→memory、agent→executor、executor→agent。",
+      "Melo 是我的狗，一只秋田犬，每天至少出门三次——早晚出去尿尿，下午再溜一次。项目取名 localmelo 就是以他命名的，因为他总是陪在我身边写代码。",
+      "日常开发主要用 Python，配合 Codex 和 Claude Code 做 AI 辅助编程，也懂 C++。",
+      "习惯晚上写代码，晚上效率特别高，是最佳编码时段。",
+      "喜欢喝 Blue Bottle 的咖啡，自己也会拉花。",
+      "上周看了一部韩剧叫《权欲之巅》，但第三集之后觉得很难看就弃了。",
+      "开发环境是 MacBook Pro M1 Pro 16GB + Neovim + tmux，所有操作都在终端里完成，不用 VS Code。",
+      "周末偶尔去超市买菜，最近在做一个 hexapod 机器人的项目。",
+      "巴黎的天气在三月份通常比较冷，平均气温大约 5 到 12 摄氏度。",
+      "2024 年诺贝尔物理学奖授予了 John Hopfield 和 Geoffrey Hinton，表彰他们在机器学习领域的贡献。",
+      "全球咖啡产量最大的国家是巴西，其次是越南和哥伦比亚。"
+    ],
+    "queries": [
+      {
+        "text": "localmelo 开发时用什么本地推理后端？",
+        "expected_keywords": ["MLC", "Qwen3", "TVM"]
+      },
+      {
+        "text": "melo 和 support 之间的依赖规则是什么？",
+        "expected_keywords": ["分层", "melo", "support", "import"]
+      },
+      {
+        "text": "为什么选择 MLC-LLM 而不是 Ollama？",
+        "expected_keywords": ["TVM", "推理速度", "Ollama"]
+      },
+      {
+        "text": "Melo 是谁？为什么项目叫 localmelo？",
+        "expected_keywords": ["狗", "秋田犬", "命名", "陪伴"]
+      },
+      {
+        "text": "开发者平时用什么语言和工具写代码？",
+        "expected_keywords": ["Python", "Codex", "Claude Code", "C++"]
+      },
+      {
+        "text": "开发者喜欢喝什么咖啡？",
+        "expected_keywords": ["Blue Bottle", "拉花"]
+      }
+    ]
+  },
+  {
+    "id": "cross_session",
+    "name": "跨会话续接类",
+    "description": "模拟 localmelo 开发过程中的跨会话续接能力。第一阶段种入与项目进度、技术决策相关的记忆（模拟上一次开发会话中的讨论），第二阶段用全新查询验证系统能否检索到前次上下文并生成连贯回答。重点验证长期记忆的持久化写入以及跨查询的语义关联召回能力。包含无关干扰记忆以测试检索精度。",
+    "seed_memories": [
+      "localmelo 的 sleep 模块目前还是脚手架状态，SleepTrainer 和 SleepEvaluator 都只是 stub 实现，尚未接入真正的 LoRA 微调。",
+      "上次讨论决定将向量存储从纯 numpy 内存方案扩展到 SQLite 持久化，已启用 WAL 模式支持并发读写。",
+      "Agent 循环新增了动态步数估计功能，通过 LLM 预估所需 tool-call 步数，避免无意义的循环消耗。",
+      "下一步需要实现 memory coordinator 的 promote 策略，把高频短期记忆自动提升为长期记忆。",
+      "上次会话中发现 executor 的超时逻辑在 Windows 上有 bug：asyncio.wait_for 在 ProactorEventLoop 下行为不一致，需要加平台判断。",
+      "讨论了 gateway 的并发模型，决定每个 session 加一把 asyncio.Lock，防止同一 session 被并发请求竞争。",
+      "上次 code review 中提到 checker validators 应该支持自定义规则注入，方便用户扩展安全策略，目前只有硬编码的 BLOCKED_COMMANDS。",
+      "短期记忆的滑动窗口大小从 10 调整到 20，因为测试发现 10 条上下文不足以维持复杂多步工具调用的连贯性。",
+      "上次调试时发现 embedding 模型在处理超过 512 token 的文本时会截断，需要在入库前做分块处理。",
+      "最近的研究表明深度睡眠对记忆巩固至关重要，成年人每晚需要 7-9 小时的睡眠。",
+      "Python 3.12 引入了更好的错误消息和性能改进，包括 comprehension 内联和更快的 asyncio。",
+      "木星是太阳系中最大的行星，质量约为地球的 318 倍。"
+    ],
+    "queries": [
+      {
+        "text": "localmelo 的 sleep 模块目前是什么状态？",
+        "expected_keywords": ["脚手架", "SleepTrainer", "stub"]
+      },
+      {
+        "text": "向量存储做了什么改动？用了什么持久化方案？",
+        "expected_keywords": ["numpy", "SQLite", "WAL"]
+      },
+      {
+        "text": "executor 在 Windows 上有什么已知问题？",
+        "expected_keywords": ["超时", "asyncio", "ProactorEventLoop", "Windows"]
+      },
+      {
+        "text": "gateway 是怎么处理并发请求的？",
+        "expected_keywords": ["session", "asyncio", "Lock", "并发"]
+      },
+      {
+        "text": "短期记忆的滑动窗口改了多少？为什么改？",
+        "expected_keywords": ["10", "20", "多步", "工具调用", "连贯"]
+      }
+    ]
+  },
+  {
+    "id": "project_development",
+    "name": "项目开发追踪类",
+    "description": "测试系统对 localmelo 项目开发主线（Track 1 在线核心循环）的记忆召回。种入涵盖项目命名由来、Track 1 目标、核心循环各阶段（直答路径、工具调用循环、阻断命令、超时行为、网关/会话连接、无嵌入模式）的具体记忆，验证检索器能否针对开发优先级和技术细节问题精准召回。包含无关干扰记忆以测试排序质量。",
+    "seed_memories": [
+      "localmelo 是一个 local-first 的 agent runtime，核心理念是所有数据和推理都优先在本地运行，不依赖云端服务。",
+      "项目叫 localmelo 是因为 Melo 是开发者的秋田犬——local 代表本地优先的设计理念，melo 取自狗的名字，寓意是陪伴式的本地 AI 助手。",
+      "Track 1 是 Issue #3 定义的在线核心循环（Online Core Loop），目标是让 agent 能完成一次完整的 query→think→act→answer 流程。",
+      "直答路径（direct-answer path）是核心循环最简单的分支：LLM 返回内容但没有 tool_call 时，agent 直接将 response.content 设为 task result 并终止循环。",
+      "工具调用循环（tool-call/tool-result/final-answer loop）是核心循环的主路径：LLM 请求 tool_call → executor 执行 → 结果作为 tool role message 回传 → LLM 再次决策，直到给出 final answer 或达到 max_steps。",
+      "阻断命令（blocked commands）由 checker 的 pre_execute 校验拦截，硬编码了 rm -rf /、mkfs、dd if=、fork bomb、shutdown、reboot 六个危险模式，匹配时返回 CheckResult(allowed=False) 迫使 agent 重新规划。",
+      "超时行为：executor 默认 60 秒超时，通过 asyncio.wait_for 实现；超时后返回 ExecutionStatus.TIMEOUT 并记录耗时，agent 可据此决定是否重试。",
+      "gateway/session 连接：gateway 通过 /v1/agent/run 接收请求，SessionManager 管理最多 50 个 session，空闲 TTL 3600 秒，每个 session 持有 asyncio.Lock 防止并发竞争。",
+      "无嵌入模式（no-embedding mode）：当 embedding_backend 设为 none 时跳过所有长期记忆操作，仅使用短期滑动窗口上下文，但工具调用和历史记录不受影响。",
+      "Track 1 的当前开发优先级：先确保 direct-answer path 和 tool-call loop 端到端通过，然后完善 blocked commands 覆盖率，最后打通 gateway 到 session 的完整链路。",
+      "日本的新干线最高运营速度可达 320 公里每小时，连接东京和大阪仅需约 2 小时 15 分钟。",
+      "意大利面的种类超过 350 种，其中最常见的包括 spaghetti、penne 和 fusilli。",
+      "南极洲是地球上最冷的大陆，最低气温纪录为零下 89.2 摄氏度。"
+    ],
+    "queries": [
+      {
+        "text": "为什么项目叫 localmelo？名字的由来是什么？",
+        "expected_keywords": ["Melo", "秋田犬", "狗", "本地", "命名"]
+      },
+      {
+        "text": "Track 1 的目标是什么？它要解决什么问题？",
+        "expected_keywords": ["核心循环", "Online Core Loop", "query", "think", "act", "answer"]
+      },
+      {
+        "text": "agent 的直答路径是怎么工作的？",
+        "expected_keywords": ["direct-answer", "tool_call", "response.content", "终止"]
+      },
+      {
+        "text": "哪些危险命令会被 checker 拦截？",
+        "expected_keywords": ["rm -rf", "mkfs", "dd", "fork bomb", "shutdown", "reboot"]
+      },
+      {
+        "text": "executor 超时后会发生什么？",
+        "expected_keywords": ["60", "asyncio", "TIMEOUT", "重试"]
+      },
+      {
+        "text": "不配置 embedding 后端时 localmelo 还能正常运行吗？",
+        "expected_keywords": ["no-embedding", "none", "长期记忆", "滑动窗口", "工具调用"]
+      },
+      {
+        "text": "Track 1 当前最优先要完成的开发任务是什么？",
+        "expected_keywords": ["direct-answer", "tool-call", "blocked commands", "gateway", "session"]
+      }
+    ]
+  },
+  {
+    "id": "github_project_tracking",
+    "name": "GitHub 项目管理类",
+    "description": "测试系统对 localmelo GitHub 仓库中 issue、PR、roadmap 规划信息的记忆与召回。种入涵盖 roadmap 总览、各 track 定义与排期、PR 记录、milestone 目标的记忆，验证检索器在项目管理语境下的精准度。包含无关干扰记忆以测试排序鲁棒性。",
+    "seed_memories": [
+      "localmelo 的 GitHub 仓库地址是 localmelo/localmelo，唯一贡献者是 xthomaswang（Xijing Wang）。",
+      "Issue #2 是 localmelo 的顶层 Roadmap，标签为 type/plan，目标是在 2026 年 4 月 30 日前完成 v1，覆盖 5 个 track。",
+      "Roadmap v1 的完成标准：Track 1-3 达到稳定的 local-first MVP，Track 4 实现端到端离线工作流，Track 5 达到发布基线（测试、文档、CI）。",
+      "5 个 track 的推荐执行顺序：先做 Track 1-3 达到可用本地 MVP，Track 4 作为第二阶段差异化功能，Track 5 贯穿始终并在公测前做发布质量审查。",
+      "Track 1（Online Core Loop）是 Issue #3，标签 type/track 和 area/core，排期 4 月 1-7 日，是最高优先级的实现 track。",
+      "Track 1 的目标是让用户能启动 localmelo → 发送 query → agent 直答或安全调用工具 → 可靠返回最终答案 → 跨 mlc-llm、ollama、online 三种后端模式验证。",
+      "Track 1 需要验证的后端：mlc-llm（Qwen3-1.7B/4B + Qwen3-Embedding-0.6B）、ollama（qwen3:8b）、online（claude-sonnet-4-20250514、codex、gemini-2.0-flash、kimi-k2.5、minimax-m2.5）。",
+      "Track 1 的验收标准包括：直答和工具调用端到端通过、blocked commands 被安全拒绝、超时处理稳定、session 生命周期正确、有/无 embedding 都能工作、每个后端至少一个 smoke test。",
+      "Track 1 的自动化验证命令：pytest tests/test_agent_loop.py、pytest tests/test_executor.py、pytest tests/test_checker_v02.py、pytest tests/test_gateway.py、pytest tests/test_integration.py。",
+      "Track 2（Memory System）是 Issue #4，排期 4 月 8-14 日，目前只有标题没有正文内容。",
+      "Track 3（Deployment / Product Shell）排期 4 月 15-21 日，track issue 尚未创建（#TBD）。",
+      "Track 4（Personalization / Sleep Pipeline）排期 4 月 22-26 日，track issue 尚未创建（#TBD），目前大部分是脚手架状态。",
+      "Track 5（Quality / Release）排期 4 月 27-30 日，track issue 尚未创建（#TBD），已有部分基础。",
+      "PR #1 是唯一已合并的 PR，标题 [docs] update README links to localmelo org，由 xthomaswang 于 2026-03-26 合并，纯文档改动。",
+      "localmelo 项目当前处于 pre-alpha 阶段，Track 1-3 开发最多，Track 5 有部分基础，Track 4 还是脚手架。",
+      "Roadmap 的工作原则：keep only one issue in In Progress at a time，用 task issue 做具体交付物，PR 关闭 task issue 而不是直接关闭 track/roadmap issue。",
+      "太阳系中距离太阳最远的行星是海王星，距离太阳约 45 亿公里。",
+      "世界上最长的河流是尼罗河，全长约 6650 公里，流经 11 个非洲国家。"
+    ],
+    "queries": [
+      {
+        "text": "localmelo 的整体开发计划是什么？v1 的目标日期是什么时候？",
+        "expected_keywords": ["Roadmap", "2026", "4 月 30", "5", "track"]
+      },
+      {
+        "text": "Track 1 是什么？它的排期和目标是什么？",
+        "expected_keywords": ["Online Core Loop", "#3", "4 月 1-7", "核心循环"]
+      },
+      {
+        "text": "Track 1 需要支持哪些后端？",
+        "expected_keywords": ["mlc-llm", "ollama", "online", "Qwen3", "claude"]
+      },
+      {
+        "text": "目前有哪些 PR 被合并了？",
+        "expected_keywords": ["PR #1", "README", "docs", "xthomaswang"]
+      },
+      {
+        "text": "Track 2 到 Track 5 分别是什么？排期如何？",
+        "expected_keywords": ["Memory", "Deployment", "Personalization", "Sleep", "Quality", "Release"]
+      },
+      {
+        "text": "localmelo 项目目前处于什么阶段？哪些 track 最成熟？",
+        "expected_keywords": ["pre-alpha", "Track 1", "Track 2", "Track 3", "脚手架"]
+      }
+    ]
+  }
+]

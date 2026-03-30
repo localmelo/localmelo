@@ -303,16 +303,10 @@ body {
     <div class="node-sub">LLM · Embedding</div>
   </div>
 
-  <div class="node" id="n-serving" data-id="serving" style="left:900px;top:220px;width:230px">
+  <div class="node" id="n-backends" data-id="backends" style="left:900px;top:220px;width:230px">
     <span class="badge infra-tag">infra</span>
-    <div class="node-title">Serving</div>
-    <div class="node-sub">本地模型 serving</div>
-  </div>
-
-  <div class="node" id="n-models" data-id="models" style="left:900px;top:370px;width:230px">
-    <span class="badge infra-tag">infra</span>
-    <div class="node-title">Models</div>
-    <div class="node-sub">注册 · 编译 · 路径</div>
+    <div class="node-title">Backends</div>
+    <div class="node-sub">本地 · 云端 · 注册表</div>
   </div>
 
   <div class="node" id="n-config" data-id="config" style="left:900px;top:510px;width:230px">
@@ -468,18 +462,21 @@ const DETAILS = {
         <span class="file-tag">support/providers/llm/openai_compat.py</span>
         <span class="file-tag">support/providers/embedding/openai_compat.py</span></div>`
   },
-  serving: {
-    title: 'Serving', role: '本地模型 serving 辅助', tags: ['infra'],
-    body: `<div class="file-list"><span class="file-tag">support/serving/server.py</span><span class="file-tag">support/serving/model_config.py</span></div>`
-  },
-  models: {
-    title: 'Models', role: '模型注册、编译辅助、GPU 自动选择', tags: ['infra'],
-    body: `<p>ModelSpec 目录（Qwen 等）。按 GPU 显存自动选择。</p>
-      <div class="file-list"><span class="file-tag">support/models/__init__.py</span></div>`
+  backends: {
+    title: 'Backends', role: 'Backend adapter 注册表，包含本地和云端实现', tags: ['infra'],
+    body: `<p>每个 backend 实现 <code>BaseBackend</code>。registry 按 key 分发——无硬编码分支。</p>
+      <h3>本地</h3><p>Ollama、MLC-LLM、vLLM、SGLang——由用户自行管理的外部进程；localmelo 通过配置的 URL 连接。</p>
+      <h3>云端</h3><p>OpenAI、Gemini、Anthropic、NVIDIA——厂商 API backend。</p>
+      <h3>核心文件</h3><div class="file-list">
+        <span class="file-tag">support/backends/base.py</span>
+        <span class="file-tag">support/backends/registry.py</span>
+        <span class="file-tag">support/backends/openai_compat.py</span>
+        <span class="file-tag">support/backends/local/</span>
+        <span class="file-tag">support/backends/cloud/</span></div>`
   },
   config: {
     title: 'Config / Onboard', role: '持久化运行时配置和初始化向导', tags: ['infra'],
-    body: `<p>TOML 配置位于 <code>~/.cache/localmelo/config.toml</code>。后端：mlc-llm、ollama、online。</p>
+    body: `<p>TOML 配置位于 <code>~/.cache/localmelo/config.toml</code>。后端：ollama、mlc、vllm、sglang、openai、gemini、anthropic、nvidia。</p>
       <div class="file-list"><span class="file-tag">support/config.py</span><span class="file-tag">support/onboard.py</span></div>`
   },
 };
@@ -500,7 +497,7 @@ const OVERVIEW_CONNS = [
   { from:'n-providers',to:'n-memory',   fs:'left',  ts:'right',  type:'dashed',     mk:'arr',   label:'embed', relates:['providers','memory'] },
   // infra connections
   { from:'n-config',  to:'n-gateway',   fs:'left',  ts:'right',  type:'dashed',     mk:'arr',   relates:['config','gateway'] },
-  { from:'n-serving', to:'n-models',    fs:'bottom',ts:'top',    type:'',           mk:'arr',   relates:['serving','models'] },
+  { from:'n-backends',to:'n-providers',  fs:'top',   ts:'bottom', type:'',           mk:'arr',   relates:['backends','providers'] },
   // sleep (offline)
   { from:'n-sleep',   to:'n-memory',    fs:'top',   ts:'bottom', type:'offline-line',mk:'arr',  label:'整合', relates:['sleep','memory'] },
   { from:'n-sleep',   to:'n-providers', fs:'right', ts:'left',   type:'offline-line',mk:'arr',  label:'未来训练', relates:['sleep','providers'] },

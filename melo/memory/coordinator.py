@@ -6,13 +6,14 @@ from typing import Any
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
 from localmelo.melo.memory.history import History
 from localmelo.melo.memory.long import LongTerm
-from localmelo.melo.memory.short import ShortTerm
+from localmelo.melo.memory.short import WorkingMemory
 from localmelo.melo.memory.tools import ToolRegistry
 from localmelo.melo.schema import (
     LONG_TERM_TOP_K,
     SHORT_TERM_MAX,
     TOOL_SEARCH_TOP_K,
     Message,
+    ReflectionEntry,
     StepRecord,
     TaskRecord,
     ToolDef,
@@ -20,11 +21,10 @@ from localmelo.melo.schema import (
 
 
 class Hippo:
-    """Memory coordinator: short-term, long-term, history, and tool registry.
+    """Memory coordinator: working memory, long-term, history, and tool registry.
 
-    When ``embedding`` is None (e.g. online mode without local embedding),
-    long-term memory operations are silently skipped and the agent runs
-    with short-term context only.
+    When ``embedding`` is None, long-term memory operations are silently
+    skipped and the agent runs with working-memory context only.
 
     Optional ``history`` and ``long`` parameters allow injecting persistent
     backends (e.g. :class:`SqliteHistory`, :class:`SqliteLongTerm`).
@@ -45,9 +45,14 @@ class Hippo:
         self._long_term_top_k = long_term_top_k
         self._tool_search_top_k = tool_search_top_k
         self.history = history if history is not None else History()
-        self.short = ShortTerm(max_len=short_term_max)
+        self.working = WorkingMemory(max_len=short_term_max)
         self.long = long if long is not None else LongTerm()
         self.tools = ToolRegistry()
+
+    @property
+    def short(self) -> WorkingMemory:
+        """Backward-compat alias for ``self.working``."""
+        return self.working
 
     def close(self) -> None:
         """Close persistent backends if they support it."""
@@ -81,7 +86,7 @@ class Hippo:
         """Record step in history and return a summary string.
 
         Does NOT write to short/long memory.  The caller is responsible
-        for routing the summary through ``Checker.pre_memory_write``
+        for routing the summary through ``Checker.check_memory_write``
         and then calling ``memorize()`` if allowed.
         """
         await self.history.add_step(task_id, step)
@@ -101,12 +106,50 @@ class Hippo:
         role: str = "assistant",
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Write text to short-term and (if embedding available) long-term memory."""
-        self.short.append(Message(role=role, content=text))
+        """Write text to working memory and (if embedding available) long-term memory."""
+        self.working.append(Message(role=role, content=text))
 
         if self.embedding:
             emb = await self.embedding.embed([text])
             await self.long.add(text=text, embedding=emb[0], metadata=metadata or {})
+
+    # ── Reflection promotion ──
+
+    async def promote_reflections(self, task_id: str) -> None:
+        """Promote reflection entries to long-term memory and clear them.
+
+        Called at terminal task state (completed or failed).
+        """
+        reflections = self.working.get_reflections()
+        if not reflections or not self.embedding:
+            self.working.clear_reflections()
+            return
+
+        for entry in reflections:
+            text = self._format_reflection_for_long(entry)
+            if text.strip():
+                emb = await self.embedding.embed([text])
+                await self.long.add(
+                    text=text,
+                    embedding=emb[0],
+                    metadata={
+                        "task_id": task_id,
+                        "attempt_id": entry.attempt_id,
+                        "type": "reflection",
+                    },
+                )
+        self.working.clear_reflections()
+
+    @staticmethod
+    def _format_reflection_for_long(entry: ReflectionEntry) -> str:
+        parts = [f"Attempt {entry.attempt_id}: {entry.summary}"]
+        if entry.failed_hypotheses:
+            parts.append(f"Failed: {'; '.join(entry.failed_hypotheses)}")
+        if entry.useful_evidence:
+            parts.append(f"Evidence: {'; '.join(entry.useful_evidence)}")
+        if entry.recommended_avoids:
+            parts.append(f"Avoid: {'; '.join(entry.recommended_avoids)}")
+        return " | ".join(parts)
 
     # ── Level 1: Context Retrieval (embedding search only) ──
 

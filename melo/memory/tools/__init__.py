@@ -62,8 +62,7 @@ class ToolRegistry:
     """Authoritative executable tool registry with integrated search index.
 
     Maintains both an exact-name lookup (the registry) and a BM25 semantic
-    index for query-based discovery.  The public surface is backward-
-    compatible with the original single-class design.
+    index for query-based discovery.
     """
 
     def __init__(self) -> None:

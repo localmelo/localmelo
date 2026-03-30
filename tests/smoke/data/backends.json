@@ -1,0 +1,18 @@
+{
+  "ollama": {
+    "name": "Ollama",
+    "chat_url": "http://127.0.0.1:11434/v1",
+    "chat_model": "qwen3:0.6b",
+    "embed_url": "http://127.0.0.1:11434/v1",
+    "embed_model": "qwen3-embedding:0.6b",
+    "health_url": "http://127.0.0.1:11434/api/tags"
+  },
+  "mlc": {
+    "name": "MLC-LLM",
+    "chat_url": "http://127.0.0.1:8400/v1",
+    "chat_model": "qwen3-0.6b",
+    "embed_url": "http://127.0.0.1:8400/v1",
+    "embed_model": "qwen3-embedding",
+    "health_url": "http://127.0.0.1:8400/v1/models"
+  }
+}

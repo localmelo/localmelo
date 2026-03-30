@@ -5,8 +5,9 @@ Covers:
 - Direct mode: `melo "hello"` calls Agent().run(), prints result
 - Gateway mode: `melo --serve` loads config, validates, calls start_gateway
 - Config validation failure: bad config -> error on stderr, exit 1
-- Reconfigure: `melo --reconfigure` -> runs wizard
-- Direct mode semantics: no config.load() call
+- Reconfigure: `melo --reconfigure` -> runs backend setup
+- Direct mode semantics: no config.load() call when --base-url given
+- Direct mode without --base-url uses config
 
 CRITICAL: These tests must run without fastapi/uvicorn installed.
 We never import localmelo.support.gateway at module level.
@@ -21,7 +22,7 @@ from unittest import mock
 
 import pytest
 
-from localmelo.support.config import Config, GatewayConfig, MlcConfig
+from localmelo.support.config import Config, GatewayConfig, LocalBackendConfig
 
 # ---------------------------------------------------------------------------
 # Helper: build an args namespace that mimics argparse output
@@ -45,11 +46,17 @@ def _make_args(**overrides: Any) -> argparse.Namespace:
 
 
 def _valid_cfg(**gw_overrides: Any) -> Config:
-    """Return a minimal valid Config (mlc-llm backend) with custom gateway."""
+    """Return a minimal valid Config (mlc backend) with custom gateway."""
     gw = GatewayConfig(**gw_overrides) if gw_overrides else GatewayConfig()
     return Config(
-        backend="mlc-llm",
-        mlc=MlcConfig(chat_model="Qwen3-1.7B"),
+        chat_backend="mlc",
+        embedding_backend="mlc",
+        mlc=LocalBackendConfig(
+            chat_url="http://127.0.0.1:8400/v1",
+            chat_model="Qwen3-1.7B",
+            embedding_url="http://127.0.0.1:8400/v1",
+            embedding_model="nomic-embed",
+        ),
         gateway=gw,
     )
 
@@ -270,6 +277,7 @@ class TestDirectMode:
         agent = _mock_agent("Hello back!")
 
         with (
+            mock.patch("localmelo.__main__._register_backends"),
             mock.patch(
                 "localmelo.__main__._build_direct_mode_agent", return_value=agent
             ),
@@ -288,6 +296,7 @@ class TestDirectMode:
         agent = _mock_agent("done")
 
         with (
+            mock.patch("localmelo.__main__._register_backends"),
             mock.patch(
                 "localmelo.__main__._build_direct_mode_agent", return_value=agent
             ),
@@ -302,47 +311,31 @@ class TestDirectMode:
 
 
 class TestBuildDirectModeAgent:
-    """Verify _build_direct_mode_agent preserves URLs correctly."""
+    """Verify _build_direct_mode_agent behaviour."""
 
-    def test_no_base_url_uses_mlc_config(self) -> None:
-        """No --base-url: default mlc-llm config path."""
-        agent = _mock_agent()
-        with mock.patch("localmelo.__main__.Agent", return_value=agent) as cls:
-            from localmelo.__main__ import _build_direct_mode_agent
-
-            ns = argparse.Namespace(base_url=None, chat_model=None)
-            _build_direct_mode_agent(ns)
-
-        _, kwargs = cls.call_args
-        cfg = kwargs.get("config") or cls.call_args[0][0]
-        assert cfg.backend == "mlc-llm"
-
-    def test_ollama_url_uses_ollama_config(self) -> None:
-        """--base-url with port 11434: Ollama config path."""
+    def test_base_url_uses_direct_injection_no_embedding(self) -> None:
+        """--base-url uses generic OpenAI-compatible injection, no embedding."""
         agent = _mock_agent()
         with mock.patch("localmelo.__main__.Agent", return_value=agent) as cls:
             from localmelo.__main__ import _build_direct_mode_agent
 
             ns = argparse.Namespace(
-                base_url="http://myhost:11434/v1", chat_model="qwen3:8b"
+                base_url="http://myhost:8000/v1", chat_model="my-model"
             )
             _build_direct_mode_agent(ns)
 
         _, kwargs = cls.call_args
-        cfg = kwargs.get("config") or cls.call_args[0][0]
-        assert cfg.backend == "ollama"
-        assert cfg.ollama.chat_url == "http://myhost:11434"
-        assert cfg.ollama.chat_model == "qwen3:8b"
+        assert "llm" in kwargs
+        assert kwargs.get("embedding") is None
 
     def test_arbitrary_url_preserved_exactly(self) -> None:
-        """--base-url http://10.1.2.3:9000/v1 must NOT become 127.0.0.1."""
+        """--base-url http://10.1.2.3:9000/v1 must NOT be modified."""
         from localmelo.__main__ import _build_direct_mode_agent
 
         ns = argparse.Namespace(
             base_url="http://10.1.2.3:9000/v1", chat_model="my-model"
         )
 
-        # Don't mock Agent — let it construct with llm= provider injection
         with mock.patch(
             "localmelo.support.providers.llm.openai_compat.OpenAICompatLLM"
         ) as mock_llm_cls:
@@ -353,22 +346,55 @@ class TestBuildDirectModeAgent:
         mock_llm_cls.assert_called_once_with(
             base_url="http://10.1.2.3:9000/v1", model="my-model"
         )
-        # Agent was constructed with direct provider injection, no embedding
         assert agent is not None
 
-    def test_arbitrary_url_no_embedding(self) -> None:
-        """Arbitrary URL uses no-embedding mode."""
+    def test_no_base_url_uses_config(self) -> None:
+        """No --base-url: loads config and builds Agent from config."""
+        cfg = _valid_cfg()
         agent = _mock_agent()
-        with mock.patch("localmelo.__main__.Agent", return_value=agent) as cls:
+        with (
+            mock.patch("localmelo.support.config.load", return_value=cfg),
+            mock.patch("localmelo.__main__.Agent", return_value=agent) as cls,
+        ):
             from localmelo.__main__ import _build_direct_mode_agent
 
-            ns = argparse.Namespace(base_url="http://remote:8000/v1", chat_model="test")
+            ns = argparse.Namespace(base_url=None, chat_model=None)
             _build_direct_mode_agent(ns)
 
         _, kwargs = cls.call_args
-        # Should use llm= and embedding=None (direct injection)
-        assert "llm" in kwargs
-        assert kwargs.get("embedding") is None
+        assert kwargs.get("config") is cfg
+
+    def test_no_base_url_unconfigured_exits(self) -> None:
+        """No --base-url and no configured backend -> SystemExit(1)."""
+        unconfigured = Config()  # chat_backend=""
+
+        with (
+            mock.patch("localmelo.support.config.load", return_value=unconfigured),
+            mock.patch("builtins.print"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            from localmelo.__main__ import _build_direct_mode_agent
+
+            ns = argparse.Namespace(base_url=None, chat_model=None)
+            _build_direct_mode_agent(ns)
+
+        assert exc_info.value.code == 1
+
+    def test_default_model_when_base_url_no_model(self) -> None:
+        """--base-url without --chat-model uses 'default' as model name."""
+        from localmelo.__main__ import _build_direct_mode_agent
+
+        ns = argparse.Namespace(base_url="http://localhost:8000/v1", chat_model=None)
+
+        with mock.patch(
+            "localmelo.support.providers.llm.openai_compat.OpenAICompatLLM"
+        ) as mock_llm_cls:
+            mock_llm_cls.return_value = mock.MagicMock()
+            _build_direct_mode_agent(ns)
+
+        mock_llm_cls.assert_called_once_with(
+            base_url="http://localhost:8000/v1", model="default"
+        )
 
 
 class TestGatewayMode:
@@ -383,9 +409,10 @@ class TestGatewayMode:
         mock_start = mock.MagicMock()
 
         with (
+            mock.patch("localmelo.__main__._register_backends"),
             mock.patch("sys.argv", ["melo", "--serve"]),
             mock.patch("localmelo.support.config.load", return_value=cfg),
-            mock.patch("localmelo.support.onboard.run_wizard"),
+            mock.patch("localmelo.support.onboard.run_backend_setup"),
             mock.patch(
                 "localmelo.__main__._start_gateway",
                 mock_start,
@@ -404,11 +431,12 @@ class TestGatewayMode:
         mock_start = mock.MagicMock()
 
         with (
+            mock.patch("localmelo.__main__._register_backends"),
             mock.patch(
                 "sys.argv", ["melo", "--serve", "--host", "0.0.0.0", "--port", "5000"]
             ),
             mock.patch("localmelo.support.config.load", return_value=cfg),
-            mock.patch("localmelo.support.onboard.run_wizard"),
+            mock.patch("localmelo.support.onboard.run_backend_setup"),
             mock.patch(
                 "localmelo.__main__._start_gateway",
                 mock_start,
@@ -430,12 +458,17 @@ class TestConfigValidationFailure:
 
     def test_bad_config_exits_with_error(self) -> None:
         """Invalid config should print to stderr and raise SystemExit(1)."""
-        bad_cfg = Config(backend="mlc-llm", mlc=MlcConfig(chat_model=""))
+        bad_cfg = Config(
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(chat_model=""),
+        )
 
         with (
+            mock.patch("localmelo.__main__._register_backends"),
             mock.patch("sys.argv", ["melo", "--serve"]),
             mock.patch("localmelo.support.config.load", return_value=bad_cfg),
-            mock.patch("localmelo.support.onboard.run_wizard"),
+            mock.patch("localmelo.support.onboard.run_backend_setup"),
             mock.patch("builtins.print") as mock_print,
             pytest.raises(SystemExit) as exc_info,
         ):
@@ -453,17 +486,18 @@ class TestConfigValidationFailure:
         assert len(stderr_calls) >= 1
 
     def test_empty_backend_fails_fast(self) -> None:
-        """Empty backend should fail validation immediately."""
-        empty_cfg = Config(backend="")
+        """Empty chat_backend should fail validation immediately."""
+        empty_cfg = Config(chat_backend="")
 
         with (
+            mock.patch("localmelo.__main__._register_backends"),
             mock.patch("sys.argv", ["melo", "--serve"]),
             mock.patch("localmelo.support.config.load", return_value=empty_cfg),
-            # An unconfigured config triggers the wizard; wizard returns None -> early return
-            # So we need the wizard to return a still-bad config
+            # An unconfigured config triggers backend setup; if setup returns
+            # None, main() exits early. So we need setup to return a still-bad config.
             mock.patch(
-                "localmelo.support.onboard.run_wizard",
-                return_value=Config(backend="not-a-backend"),
+                "localmelo.support.onboard.run_backend_setup",
+                return_value=Config(chat_backend="not-a-backend"),
             ),
             mock.patch("builtins.print"),
             pytest.raises(SystemExit) as exc_info,
@@ -474,37 +508,41 @@ class TestConfigValidationFailure:
 
         assert exc_info.value.code == 1
 
-    def test_wizard_returns_none_exits_cleanly(self) -> None:
-        """If the wizard is cancelled (returns None), main() returns cleanly."""
-        empty_cfg = Config(backend="")
+    def test_backend_setup_returns_none_exits_cleanly(self) -> None:
+        """If backend setup is cancelled (returns None), main() returns cleanly."""
+        empty_cfg = Config(chat_backend="")
 
         with (
+            mock.patch("localmelo.__main__._register_backends"),
             mock.patch("sys.argv", ["melo", "--serve"]),
             mock.patch("localmelo.support.config.load", return_value=empty_cfg),
-            mock.patch("localmelo.support.onboard.run_wizard", return_value=None),
+            mock.patch(
+                "localmelo.support.onboard.run_backend_setup", return_value=None
+            ),
             mock.patch("builtins.print"),
         ):
             from localmelo.__main__ import main
 
-            # Should return without error (wizard cancelled)
+            # Should return without error (setup cancelled)
             main()
 
 
 class TestReconfigure:
-    """melo --reconfigure -> runs wizard regardless of config state."""
+    """melo --reconfigure -> runs backend setup regardless of config state."""
 
-    def test_reconfigure_runs_wizard(self) -> None:
-        """--reconfigure flag should trigger run_wizard even if configured."""
+    def test_reconfigure_runs_backend_setup(self) -> None:
+        """--reconfigure flag should trigger run_backend_setup even if configured."""
         valid_cfg = _valid_cfg()
         new_cfg = _valid_cfg(port=7777)
         mock_start = mock.MagicMock()
 
         with (
+            mock.patch("localmelo.__main__._register_backends"),
             mock.patch("sys.argv", ["melo", "--serve", "--reconfigure"]),
             mock.patch("localmelo.support.config.load", return_value=valid_cfg),
             mock.patch(
-                "localmelo.support.onboard.run_wizard", return_value=new_cfg
-            ) as mock_wizard,
+                "localmelo.support.onboard.run_backend_setup", return_value=new_cfg
+            ) as mock_setup,
             mock.patch(
                 "localmelo.__main__._start_gateway",
                 mock_start,
@@ -515,27 +553,291 @@ class TestReconfigure:
 
             main()
 
-        mock_wizard.assert_called_once()
-        # The NEW config from wizard is what gets passed to start_gateway
+        mock_setup.assert_called_once()
+        # The NEW config from backend setup is what gets passed to start_gateway
         mock_start.assert_called_once_with(new_cfg)
 
-    def test_reconfigure_wizard_cancel_exits_cleanly(self) -> None:
-        """--reconfigure but wizard cancelled -> clean exit."""
+    def test_reconfigure_backend_setup_cancel_exits_cleanly(self) -> None:
+        """--reconfigure but backend setup cancelled -> clean exit."""
         valid_cfg = _valid_cfg()
 
         with (
+            mock.patch("localmelo.__main__._register_backends"),
             mock.patch("sys.argv", ["melo", "--serve", "--reconfigure"]),
             mock.patch("localmelo.support.config.load", return_value=valid_cfg),
             mock.patch(
-                "localmelo.support.onboard.run_wizard", return_value=None
-            ) as mock_wizard,
+                "localmelo.support.onboard.run_backend_setup", return_value=None
+            ) as mock_setup,
             mock.patch("builtins.print"),
         ):
             from localmelo.__main__ import main
 
             main()
 
-        mock_wizard.assert_called_once()
+        mock_setup.assert_called_once()
+
+
+class TestRegisterBackends:
+    """_register_backends() registers all three backend adapters."""
+
+    def test_registers_all_eight_backends(self) -> None:
+        """After _register_backends(), the registry contains all 8 backends."""
+        from localmelo.support.backends.registry import _clear, list_backends
+
+        _clear()  # start clean (resets flag too)
+
+        from localmelo.__main__ import _register_backends
+
+        _register_backends()
+
+        backends = list_backends()
+        keys = [b.key for b in backends]
+        assert "mlc" in keys
+        assert "ollama" in keys
+        assert "vllm" in keys
+        assert "sglang" in keys
+        assert "openai" in keys
+        assert "gemini" in keys
+        assert "anthropic" in keys
+        assert "nvidia" in keys
+
+        _clear()  # clean up
+
+    def test_repeated_registration_is_safe(self) -> None:
+        """_register_backends() is idempotent — calling twice does not error."""
+        from localmelo.support.backends.registry import _clear, list_backends
+
+        _clear()
+
+        from localmelo.__main__ import _register_backends
+
+        _register_backends()
+        _register_backends()  # must not raise
+
+        assert len(list_backends()) == 8
+        _clear()
+
+    def test_main_calls_register_backends_first(self) -> None:
+        """main() calls _register_backends() before parsing args."""
+        call_order: list[str] = []
+
+        def fake_register() -> None:
+            call_order.append("register")
+
+        def fake_parse(*a: object, **kw: object) -> None:
+            call_order.append("parse")
+            raise SystemExit(0)  # stop early
+
+        with (
+            mock.patch(
+                "localmelo.__main__._register_backends", side_effect=fake_register
+            ),
+            mock.patch("argparse.ArgumentParser.parse_args", side_effect=fake_parse),
+            pytest.raises(SystemExit),
+        ):
+            from localmelo.__main__ import main
+
+            main()
+
+        assert call_order[0] == "register"
+
+
+# ---------------------------------------------------------------------------
+# Onboarding: new backend keys, config-prompts-only flow
+# ---------------------------------------------------------------------------
+
+
+class TestOnboardingDispatch:
+    """Verify onboarding dispatches by backend key from hardcoded choice list."""
+
+    def test_local_backend_routes_to_onboard_local(self) -> None:
+        """Selecting 'ollama' calls the local backend handler."""
+        mock_handler = mock.MagicMock(return_value=True)
+
+        import localmelo.support.onboard as _onboard
+
+        patched_setup = {**_onboard._CHAT_SETUP, "ollama": mock_handler}
+
+        with (
+            # choice 2 = ollama in CHAT_BACKENDS, choice 5 = none in EMBEDDING_BACKENDS
+            mock.patch("localmelo.support.onboard._ask_choice", side_effect=[2, 5]),
+            mock.patch.dict(
+                "localmelo.support.onboard._CHAT_SETUP", patched_setup, clear=True
+            ),
+            mock.patch("localmelo.support.onboard.config.load", return_value=Config()),
+            mock.patch("localmelo.support.onboard.config.save"),
+            mock.patch("builtins.print"),
+        ):
+            from localmelo.support.onboard import run_backend_setup
+
+            result = run_backend_setup()
+
+        mock_handler.assert_called_once()
+        assert result is not None
+        assert result.chat_backend == "ollama"
+        assert result.embedding_backend == "none"
+
+    def test_cloud_backend_routes_to_onboard_cloud(self) -> None:
+        """Selecting 'openai' calls the cloud backend handler."""
+        mock_handler = mock.MagicMock(return_value=True)
+
+        import localmelo.support.onboard as _onboard
+
+        patched_setup = {**_onboard._CHAT_SETUP, "openai": mock_handler}
+
+        with (
+            # choice 5 = openai in CHAT_BACKENDS, choice 5 = none in EMBEDDING_BACKENDS
+            mock.patch("localmelo.support.onboard._ask_choice", side_effect=[5, 5]),
+            mock.patch.dict(
+                "localmelo.support.onboard._CHAT_SETUP", patched_setup, clear=True
+            ),
+            mock.patch("localmelo.support.onboard.config.load", return_value=Config()),
+            mock.patch("localmelo.support.onboard.config.save"),
+            mock.patch("builtins.print"),
+        ):
+            from localmelo.support.onboard import run_backend_setup
+
+            result = run_backend_setup()
+
+        mock_handler.assert_called_once()
+        assert result is not None
+        assert result.chat_backend == "openai"
+
+    def test_chat_setup_has_all_backend_keys(self) -> None:
+        """_CHAT_SETUP must cover all 8 backend keys."""
+        from localmelo.support.onboard import _CHAT_SETUP
+
+        expected = {
+            "mlc",
+            "ollama",
+            "vllm",
+            "sglang",
+            "openai",
+            "gemini",
+            "anthropic",
+            "nvidia",
+        }
+        assert set(_CHAT_SETUP.keys()) == expected
+        assert all(callable(fn) for fn in _CHAT_SETUP.values())
+
+    def test_chat_backends_list_has_8_entries(self) -> None:
+        """CHAT_BACKENDS list must have 8 entries."""
+        from localmelo.support.onboard import CHAT_BACKENDS
+
+        assert len(CHAT_BACKENDS) == 8
+
+    def test_embedding_backends_list_includes_local_and_none(self) -> None:
+        """EMBEDDING_BACKENDS must include local backends + none only."""
+        from localmelo.support.onboard import EMBEDDING_BACKENDS
+
+        keys = [k for k, _ in EMBEDDING_BACKENDS]
+        assert keys == ["mlc", "ollama", "vllm", "sglang", "none"]
+
+    def test_setup_cancelled_returns_none(self) -> None:
+        """If user cancels during chat setup, returns None."""
+        mock_handler = mock.MagicMock(return_value=False)
+
+        import localmelo.support.onboard as _onboard
+
+        patched_setup = {**_onboard._CHAT_SETUP, "mlc": mock_handler}
+
+        with (
+            mock.patch("localmelo.support.onboard._ask_choice", return_value=1),
+            mock.patch.dict(
+                "localmelo.support.onboard._CHAT_SETUP", patched_setup, clear=True
+            ),
+            mock.patch("localmelo.support.onboard.config.load", return_value=Config()),
+            mock.patch("builtins.print"),
+        ):
+            from localmelo.support.onboard import run_backend_setup
+
+            result = run_backend_setup()
+
+        assert result is None
+
+    def test_embedding_selection_with_local_backend(self) -> None:
+        """Selecting a local embedding backend calls _onboard_embedding_local."""
+        mock_handler = mock.MagicMock(return_value=True)
+
+        import localmelo.support.onboard as _onboard
+
+        patched_setup = {**_onboard._CHAT_SETUP, "mlc": mock_handler}
+
+        with (
+            # choice 1 = mlc chat, choice 2 = ollama embedding
+            mock.patch("localmelo.support.onboard._ask_choice", side_effect=[1, 2]),
+            mock.patch.dict(
+                "localmelo.support.onboard._CHAT_SETUP", patched_setup, clear=True
+            ),
+            mock.patch("localmelo.support.onboard.config.load", return_value=Config()),
+            mock.patch("localmelo.support.onboard.config.save"),
+            mock.patch(
+                "localmelo.support.onboard._onboard_embedding_local"
+            ) as mock_emb,
+            mock.patch("builtins.print"),
+        ):
+            from localmelo.support.onboard import run_backend_setup
+
+            result = run_backend_setup()
+
+        assert result is not None
+        assert result.embedding_backend == "ollama"
+        mock_emb.assert_called_once()
+
+    def test_nvidia_cloud_backend_onboarding(self) -> None:
+        """Cloud API onboarding for NVIDIA sets correct config fields."""
+        with (
+            mock.patch(
+                "localmelo.support.onboard._ask",
+                side_effect=[
+                    "NVIDIA_API_KEY",
+                    "nvidia/llama-3.1-nemotron-70b-instruct",
+                ],
+            ),
+            mock.patch("localmelo.support.onboard._confirm", return_value=True),
+            mock.patch("builtins.print"),
+        ):
+            from localmelo.support.onboard import _onboard_cloud
+
+            cfg = Config()
+            result = _onboard_cloud(cfg, "nvidia")
+
+        assert result is True
+        assert cfg.nvidia.api_key_env == "NVIDIA_API_KEY"
+        assert cfg.nvidia.chat_model == "nvidia/llama-3.1-nemotron-70b-instruct"
+
+    def test_local_backend_onboarding_sets_ollama_config(self) -> None:
+        """Local backend onboarding for ollama sets URL and model."""
+        with (
+            mock.patch(
+                "localmelo.support.onboard._ask",
+                side_effect=["http://myhost:11434", "llama3:8b"],
+            ),
+            mock.patch("localmelo.support.onboard._confirm", return_value=True),
+            mock.patch("builtins.print"),
+        ):
+            from localmelo.support.onboard import _onboard_local
+
+            cfg = Config()
+            result = _onboard_local(cfg, "ollama")
+
+        assert result is True
+        assert cfg.ollama.chat_url == "http://myhost:11434"
+        assert cfg.ollama.chat_model == "llama3:8b"
+
+    def test_no_compilation_imports(self) -> None:
+        """onboard.py must NOT import compile_model, is_compiled, pick_chat_model."""
+        from pathlib import Path
+
+        onboard_src = (
+            Path(__file__).resolve().parent.parent.parent / "support" / "onboard.py"
+        )
+        text = onboard_src.read_text()
+
+        assert "compile_model" not in text
+        assert "is_compiled" not in text
+        assert "pick_chat_model" not in text
+        assert "DEFAULT_EMBEDDING" not in text
 
 
 class TestEntrypointThinness:

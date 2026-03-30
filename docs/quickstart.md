@@ -18,8 +18,8 @@ pip install -e ".[dev,gateway]"
 ### Direct CLI mode
 
 Run a one-shot query without starting a server. No configuration file is
-needed -- localmelo defaults to a local MLC-LLM backend at
-`http://127.0.0.1:8400/v1`.
+needed -- localmelo defaults to a local Ollama backend at
+`http://127.0.0.1:11434/v1`.
 
 ```bash
 melo "what is 2+2"
@@ -79,37 +79,86 @@ curl -X DELETE http://localhost:8401/v1/sessions/my-session
 
 ## Backend options
 
-localmelo supports three backends, configured via `melo --reconfigure`:
+localmelo uses a **split backend model**: `chat_backend` and
+`embedding_backend` are configured independently via `melo --reconfigure`.
 
-| Backend    | Description                          | Embedding support         |
-|------------|--------------------------------------|---------------------------|
-| `mlc-llm`  | Local MLC-LLM server                | Always (bundled model)    |
-| `ollama`   | Ollama-compatible server             | Optional (`embedding_model` field) |
-| `online`   | Cloud APIs (OpenAI, Gemini, Anthropic) | Optional (`local_embedding` flag) |
+### Supported backends
 
-### mlc-llm (default)
+| Backend | Type | Description |
+|---------|------|-------------|
+| `ollama` | local | Ollama-compatible server |
+| `mlc` | local | MLC-LLM server |
+| `vllm` | local | vLLM server |
+| `sglang` | local | SGLang server |
+| `openai` | cloud | OpenAI API |
+| `gemini` | cloud | Google Gemini API |
+| `anthropic` | cloud | Anthropic API |
+| `nvidia` | cloud | NVIDIA API |
+| `none` | — | No backend (embedding only: disables long-term memory) |
 
-Uses a local MLC-LLM server for both chat and embedding. The server must
-be running before starting the gateway.
+**Local backends** run as external processes managed by the user.
+localmelo connects to them via a configured URL — it does not
+host, compile, or serve models itself.
 
-### ollama
+**Cloud backends** connect to vendor APIs directly. Set the API key
+via the environment variable named in `api_key_env`
+(e.g. `OPENAI_API_KEY`).
 
-Connects to an Ollama-compatible server. If `embedding_model` is left
-empty, localmelo falls back to the MLC-LLM embedding server.
+### Deployment matrix
 
-### online
+Any local or cloud backend can be used for chat. Embedding can use
+any local backend or `none`. Example combinations:
 
-Connects to a cloud API provider. Set the API key via the environment
-variable named in `api_key_env` (e.g. `OPENAI_API_KEY`).
+| Chat         | Embedding   | Notes                              |
+|--------------|-------------|------------------------------------|
+| `ollama`     | `ollama`    | Fully Ollama-based stack           |
+| `openai`     | `ollama`    | Cloud LLM + local Ollama embedding |
+| `mlc`        | `mlc`       | Fully local MLC-LLM stack          |
+| `vllm`       | `vllm`      | Fully local vLLM stack             |
+| `anthropic`  | `ollama`    | Cloud LLM + local embedding        |
+| `gemini`     | `none`      | Cloud LLM, no long-term memory     |
 
-When `local_embedding` is `false`, the agent runs without long-term
-memory -- only short-term (session) context is used. This is the
-**no-embedding mode**.
+> **Future:** a separate repository for local backend deployment and
+> runtime management is being considered, but it is not part of
+> localmelo core yet.
+
+## Backend architecture
+
+Backend-specific logic lives under `support/backends/`. Each backend
+implements the `BaseBackend` contract:
+
+```text
+support/backends/
+  base.py            # BaseBackend ABC
+  registry.py        # register(), get_backend(), list_backends()
+  openai_compat.py   # Shared OpenAI-compatible provider helpers
+  local/             # Local backends (user-managed external processes)
+    mlc.py           # MLC-LLM
+    ollama.py        # Ollama
+    vllm.py          # vLLM
+    sglang.py        # SGLang
+  cloud/             # Cloud vendor backends
+    openai_api.py    # OpenAI
+    gemini_api.py    # Google Gemini
+    anthropic_api.py # Anthropic
+    nvidia_api.py    # NVIDIA
+```
+
+The app layer (`agent.py`, `gateway/__init__.py`, `onboard.py`) uses the
+registry to dispatch to the correct backend -- no hardcoded if/elif chains.
+
+### Adding a new backend
+
+1. Create `support/backends/local/mybackend.py` or `support/backends/cloud/mybackend.py` implementing `BaseBackend`
+2. Register it in `support/backends/registry.py`'s `ensure_defaults_registered()`
+3. Add the backend key to `VALID_CHAT_BACKENDS` and/or `VALID_EMBEDDING_BACKENDS` in `support/config.py`
+4. Add a config dataclass in `support/config.py` if needed
+5. Add tests in `tests/backends/test_mybackend.py`
 
 ## No-embedding mode
 
-When no embedding provider is available (online backend with
-`local_embedding = false`, or `embedding=None` in code), localmelo:
+When `embedding_backend` is set to `"none"` (or `embedding=None` in
+code), localmelo:
 
 - Skips all long-term memory operations (store and retrieve)
 - Uses only short-term (sliding window) context for conversations
@@ -154,7 +203,8 @@ python -m pytest tests/ -q
 | Directory              | Install target    | Notes                                |
 |------------------------|-------------------|--------------------------------------|
 | `tests/agent/`         | `.[dev]`          | Agent loop with fake providers       |
-| `tests/executor/`      | `.[dev]`          | Executor v0.2 + builtins             |
+| `tests/backends/`      | `.[dev]`          | Backend adapter contract + implementations |
+| `tests/executor/`      | `.[dev]`          | Executor + builtins                  |
 | `tests/checker/`       | `.[dev]`          | Checker boundary validators          |
 | `tests/cli/`           | `.[dev]`          | CLI entrypoint, config, direct + gateway mode |
 | `tests/memory/`        | `.[dev]`          | Memory subsystems + SQLite persistence |

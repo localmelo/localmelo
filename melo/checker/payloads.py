@@ -1,4 +1,4 @@
-"""Typed payload dataclasses for Checker v0.2 boundary validation."""
+"""Typed payload dataclasses for Checker boundary validation."""
 
 from __future__ import annotations
 

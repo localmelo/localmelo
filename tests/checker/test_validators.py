@@ -1,4 +1,4 @@
-"""Tests for Checker v0.2 boundary validators."""
+"""Tests for Checker boundary validators."""
 
 import pytest
 
@@ -24,7 +24,7 @@ from localmelo.melo.checker.validators import (
     validate_session_transition,
     validate_tool_resolution,
 )
-from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
+from localmelo.melo.schema import Message, ToolCall, ToolDef
 
 
 @pytest.fixture
@@ -398,11 +398,11 @@ class TestMemoryWrite:
         assert result.allowed
 
 
-# ── Backward compatibility ──
+# ── Async boundary checks ──
 
 
-class TestBackwardCompatibility:
-    """Ensure v0.1 Checker API still works identically."""
+class TestAsyncBoundaryChecks:
+    """Checker async boundary methods (pre_plan, post_plan, pre_execute)."""
 
     @pytest.mark.asyncio
     async def test_pre_plan_ok(self, checker: Checker) -> None:
@@ -450,25 +450,6 @@ class TestBackwardCompatibility:
     async def test_pre_execute_unknown_tool(self, checker: Checker) -> None:
         tc = ToolCall(tool_name="fake_tool", arguments={})
         result = await checker.pre_execute(tc, None)
-        assert not result.allowed
-
-    @pytest.mark.asyncio
-    async def test_post_execute_truncates(self, checker: Checker) -> None:
-        tc = ToolCall(tool_name="shell_exec", arguments={})
-        tr = ToolResult(tool_name="shell_exec", output="x" * 100_000)
-        result = await checker.post_execute(tc, tr)
-        assert result.allowed
-        assert result.modified_payload is not None
-        assert len(result.modified_payload.output) < 100_000
-
-    @pytest.mark.asyncio
-    async def test_pre_memory_write_ok(self, checker: Checker) -> None:
-        result = await checker.pre_memory_write("some text")
-        assert result.allowed
-
-    @pytest.mark.asyncio
-    async def test_pre_memory_write_too_large(self, checker: Checker) -> None:
-        result = await checker.pre_memory_write("x" * 100_000)
         assert not result.allowed
 
     def test_check_result_dataclass(self) -> None:
@@ -527,10 +508,10 @@ class TestConstantDeduplication:
         assert len(BLOCKED_COMMANDS) == 6
 
 
-# ── All blocked commands via v0.2 validate_executor_request ──
+# ── All blocked commands via validate_executor_request ──
 
 
-class TestAllBlockedCommandsV02:
+class TestAllBlockedCommandsStructured:
     """Every blocked pattern must be caught by validate_executor_request."""
 
     DANGEROUS = [
@@ -549,7 +530,7 @@ class TestAllBlockedCommandsV02:
         DANGEROUS,
         ids=[d[1] for d in DANGEROUS],
     )
-    def test_v02_blocks(self, cmd: str, label: str) -> None:
+    def test_structured_blocks(self, cmd: str, label: str) -> None:
         req = ExecutorRequest(
             tool_name="shell_exec",
             arguments={"command": cmd},
@@ -560,10 +541,10 @@ class TestAllBlockedCommandsV02:
         assert "Blocked" in result.reason
 
 
-# ── All blocked commands via v0.1 pre_execute ──
+# ── All blocked commands via pre_execute ──
 
 
-class TestAllBlockedCommandsV01:
+class TestAllBlockedCommandsPreExecute:
     """Every blocked pattern must be caught by checker.pre_execute."""
 
     DANGEROUS = [
@@ -583,7 +564,9 @@ class TestAllBlockedCommandsV01:
         DANGEROUS,
         ids=[d[1] for d in DANGEROUS],
     )
-    async def test_v01_blocks(self, checker: Checker, cmd: str, label: str) -> None:
+    async def test_pre_execute_blocks(
+        self, checker: Checker, cmd: str, label: str
+    ) -> None:
         td = ToolDef(name="shell_exec", description="", parameters={})
         tc = ToolCall(tool_name="shell_exec", arguments={"command": cmd})
         result = await checker.pre_execute(tc, td)

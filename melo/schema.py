@@ -13,6 +13,8 @@ TOOL_SEARCH_TOP_K = 3
 
 MAX_AGENT_STEPS = 30
 MIN_AGENT_STEPS = 3
+STEPS_PER_ATTEMPT = 10
+MAX_ATTEMPTS = 5
 
 
 # ── Data types ──
@@ -25,6 +27,8 @@ class Message:
     tool_call: ToolCall | None = None
     tool_result: ToolResult | None = None
     timestamp: float = field(default_factory=time.time)
+    usage: dict[str, int] | None = None
+    thinking: str = ""
 
 
 @dataclass
@@ -65,6 +69,7 @@ class TaskRecord:
     steps: list[StepRecord] = field(default_factory=list)
     status: str = "running"  # running, completed, failed
     result: str = ""
+    attempts_completed: int = 0
 
 
 @dataclass
@@ -72,3 +77,45 @@ class CheckResult:
     allowed: bool = True
     reason: str = ""
     modified_payload: Any = None
+
+
+# ── Reflection ──
+
+
+@dataclass
+class ReflectionEntry:
+    """Structured reflection from one attempt."""
+
+    attempt_id: int = 0
+    summary: str = ""
+    failed_hypotheses: list[str] = field(default_factory=list)
+    disproven_actions: list[str] = field(default_factory=list)
+    useful_evidence: list[str] = field(default_factory=list)
+    unresolved_questions: list[str] = field(default_factory=list)
+    recommended_avoids: list[str] = field(default_factory=list)
+    next_promising_directions: list[str] = field(default_factory=list)
+    failure_type: str = ""  # "stuck", "budget", "error", ""
+    confidence: float = 0.0
+    timestamp: float = field(default_factory=time.time)
+
+
+@dataclass
+class ReflectionDecision:
+    """Structured decision from the reflection step."""
+
+    progress_made: bool = False
+    task_still_feasible: bool = True
+    new_information_gained: bool = False
+    next_step_is_concrete: bool = False
+    next_step_is_novel: bool = False
+    recommended_action: str = "stop"  # "continue" | "stop" | "decompose"
+    rationale: str = ""
+    handoff_summary: str = ""
+    tried_memory: ReflectionEntry | None = None
+    best_effort_result: str = ""
+    # Active-learning acquisition signals
+    estimated_info_gain: float = 0.0
+    estimated_cost: float = 0.0
+    repeat_risk: float = 0.0
+    novelty: float = 0.0
+    feasibility: float = 0.0

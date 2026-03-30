@@ -16,26 +16,51 @@ from unittest import mock
 import pytest
 
 from localmelo.melo.agent import Agent
+from localmelo.melo.agent.chat import STEP_ESTIMATE_PROMPT
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
-from localmelo.melo.schema import MAX_AGENT_STEPS, Message, ToolCall, ToolDef
-from localmelo.support.config import Config, ConfigError, GatewayConfig, MlcConfig
+from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.support.config import (
+    CloudVendorConfig,
+    Config,
+    ConfigError,
+    GatewayConfig,
+    LocalBackendConfig,
+)
 from localmelo.support.gateway.session import SessionManager
 
 # ── Fake providers ──────────────────────────────────────────────────────────
 
 
 class FakeLLM(BaseLLMProvider):
-    def __init__(self, responses: list[Message] | None = None) -> None:
+    """Programmable fake LLM that pops planning responses from a queue.
+
+    Step-estimation requests (identified by ``STEP_ESTIMATE_PROMPT`` in the
+    system message) are answered with ``estimate_response`` without consuming
+    the normal response queue.
+    """
+
+    def __init__(
+        self,
+        responses: list[Message] | None = None,
+        *,
+        estimate_response: str = "30",
+    ) -> None:
         self.responses: deque[Message] = deque(responses or [])
         self.calls: list[dict[str, Any]] = []
+        self.estimate_response = estimate_response
 
     async def chat(
         self, messages: list[Message], tools: list[ToolDef] | None = None
     ) -> Message:
         self.calls.append({"messages": list(messages), "tools": tools})
+        # Intercept step-estimation requests.
+        if any(
+            STEP_ESTIMATE_PROMPT in m.content for m in messages if m.role == "system"
+        ):
+            return Message(role="assistant", content=self.estimate_response)
         if not self.responses:
             return Message(role="assistant", content="(empty)")
         return self.responses.popleft()
@@ -73,17 +98,24 @@ class FakeSessionManager(SessionManager):
         return FakeAgent()
 
 
-# ── Estimation fixture ─────────────────────────────────────────────────────
+# ── Helpers ────────────────────────────────────────────────────────────────
 
 
-@pytest.fixture(autouse=True)
-def _skip_estimation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Skip LLM step estimation in integration tests."""
+def _planning_calls(llm: FakeLLM) -> list[dict[str, Any]]:
+    """Return only the non-estimation LLM calls (i.e. planning calls).
 
-    async def _use_max(self: Agent, query: str) -> int:
-        return MAX_AGENT_STEPS
-
-    monkeypatch.setattr(Agent, "_estimate_max_steps", _use_max)
+    Filters out the step-estimation call that ``Agent._estimate_max_steps``
+    makes at the start of each ``run()``.
+    """
+    return [
+        c
+        for c in llm.calls
+        if not any(
+            STEP_ESTIMATE_PROMPT in m.content
+            for m in c["messages"]
+            if m.role == "system"
+        )
+    ]
 
 
 # ── 1. Gateway startup validation failure ───────────────────────────────────
@@ -91,24 +123,34 @@ def _skip_estimation(monkeypatch: pytest.MonkeyPatch) -> None:
 
 class TestGatewayStartupValidation:
     def test_validate_or_raise_blocks_empty_backend(self) -> None:
-        cfg = Config(backend="")
-        with pytest.raises(ConfigError, match="backend is not set"):
+        cfg = Config(chat_backend="")
+        with pytest.raises(ConfigError, match="chat_backend is not set"):
             cfg.validate_or_raise()
 
     def test_validate_or_raise_blocks_bad_backend(self) -> None:
-        cfg = Config(backend="imaginary")
-        with pytest.raises(ConfigError, match="invalid"):
+        cfg = Config(chat_backend="imaginary", embedding_backend="none")
+        with pytest.raises(ConfigError, match="not recognised"):
             cfg.validate_or_raise()
 
     def test_validate_or_raise_blocks_missing_mlc_model(self) -> None:
-        cfg = Config(backend="mlc-llm", mlc=MlcConfig(chat_model=""))
+        cfg = Config(
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(chat_url="http://127.0.0.1:8400/v1", chat_model=""),
+        )
         with pytest.raises(ConfigError, match="chat_model"):
             cfg.validate_or_raise()
 
     def test_validate_or_raise_blocks_bad_gateway_port(self) -> None:
         cfg = Config(
-            backend="mlc-llm",
-            mlc=MlcConfig(chat_model="Qwen3-1.7B"),
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400/v1",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400/v1",
+                embedding_model="nomic-embed",
+            ),
             gateway=GatewayConfig(port=0),
         )
         with pytest.raises(ConfigError, match="port"):
@@ -117,14 +159,20 @@ class TestGatewayStartupValidation:
     def test_start_gateway_validates_config(self) -> None:
         from localmelo.support.gateway import start_gateway
 
-        cfg = Config(backend="")
-        with pytest.raises(ConfigError, match="backend is not set"):
+        cfg = Config(chat_backend="")
+        with pytest.raises(ConfigError, match="chat_backend is not set"):
             start_gateway(cfg)
 
     def test_valid_config_passes(self) -> None:
         cfg = Config(
-            backend="mlc-llm",
-            mlc=MlcConfig(chat_model="Qwen3-1.7B", chat_port=8400),
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400/v1",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400/v1",
+                embedding_model="nomic-embed",
+            ),
         )
         cfg.validate_or_raise()  # should not raise
 
@@ -179,7 +227,8 @@ class TestAgentLoopAfterMerge:
         agent = Agent(llm=llm, embedding=FakeEmbedding())
         await agent.run("unique_marker_xyz")
 
-        sent = llm.calls[0]["messages"]
+        planning = _planning_calls(llm)
+        sent = planning[0]["messages"]
         user_msgs = [m for m in sent if m.role == "user"]
         matches = [m for m in user_msgs if "unique_marker_xyz" in m.content]
         assert len(matches) == 1
@@ -208,6 +257,93 @@ class TestAgentLoopAfterMerge:
         )
         tools = hippo.resolve_tools("run a shell command")
         assert any(t.name == "shell_exec" for t in tools)
+
+
+# ── 2b. Single system message with recalled memory ────────────────────────────
+
+
+class TestSingleSystemMessageWithMemory:
+    """MLC-compat: planning calls must contain exactly one system message."""
+
+    @pytest.mark.asyncio
+    async def test_single_system_msg_with_long_term_memory(self) -> None:
+        """When long-term memory returns [memory] items, plan_step merges
+        them into the first system prompt under a [RECALL] section."""
+        llm = FakeLLM([Message(role="assistant", content="ok")])
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
+
+        # Seed long-term memory so retrieve_context returns system messages.
+        await agent.hippo.long.add("fact alpha", [1.0, 0.0, 0.0, 0.0])
+        await agent.hippo.long.add("fact beta", [0.0, 1.0, 0.0, 0.0])
+
+        await agent.run("recall test")
+
+        planning = _planning_calls(llm)
+        assert len(planning) >= 1
+        sent = planning[0]["messages"]
+
+        sys_msgs = [m for m in sent if m.role == "system"]
+        assert (
+            len(sys_msgs) == 1
+        ), f"Expected exactly 1 system message, got {len(sys_msgs)}"
+        assert "[RECALL]" in sys_msgs[0].content
+        assert "fact alpha" in sys_msgs[0].content
+        assert "fact beta" in sys_msgs[0].content
+        # Memory prefix must be stripped.
+        assert "[memory]" not in sys_msgs[0].content
+        await agent.close()
+
+    @pytest.mark.asyncio
+    async def test_single_system_msg_without_memory(self) -> None:
+        """Without long-term memory, still exactly one system message."""
+        llm = FakeLLM([Message(role="assistant", content="ok")])
+        agent = Agent(llm=llm, embedding=None)
+        await agent.run("no memory test")
+
+        planning = _planning_calls(llm)
+        sent = planning[0]["messages"]
+        sys_msgs = [m for m in sent if m.role == "system"]
+        assert len(sys_msgs) == 1
+        assert "[RECALL]" not in sys_msgs[0].content
+        await agent.close()
+
+    @pytest.mark.asyncio
+    async def test_multi_turn_stays_single_system(self) -> None:
+        """Across a tool-call turn, each planning call has one system msg."""
+        llm = FakeLLM()
+        llm.responses.append(
+            Message(
+                role="assistant",
+                content="calling echo",
+                tool_call=ToolCall(tool_name="echo", arguments={"text": "hi"}),
+            )
+        )
+        llm.responses.append(Message(role="assistant", content="done"))
+
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        await agent.hippo.long.add("remembered fact", [1.0, 0.0, 0.0, 0.0])
+        agent.hippo.register_tool(
+            ToolDef(
+                name="echo",
+                description="echo text",
+                parameters={
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                },
+            )
+        )
+        agent.executor.register("echo", _echo_tool)
+
+        await agent.run("multi turn recall")
+
+        planning = _planning_calls(llm)
+        for i, call in enumerate(planning):
+            sys_msgs = [m for m in call["messages"] if m.role == "system"]
+            assert (
+                len(sys_msgs) == 1
+            ), f"Planning call {i} had {len(sys_msgs)} system messages"
+        await agent.close()
 
 
 # ── 3. Same-session serialization ───────────────────────────────────────────
@@ -382,11 +518,11 @@ class TestPersistentMemoryWiring:
         h2.close()
 
 
-# ── 5. Checker v0.2 gateway ingress validation ─────────────────────────────
+# ── 5. Checker gateway ingress validation ─────────────────────────────
 
 
-class TestCheckerV02GatewayIngress:
-    """Gateway ingress validated through Checker v0.2."""
+class TestCheckerGatewayIngress:
+    """Gateway ingress validated through Checker."""
 
     def test_empty_query_rejected(self) -> None:
         from localmelo.melo.checker import Checker, GatewayIngressPayload
@@ -427,11 +563,11 @@ class TestCheckerV02GatewayIngress:
         assert "too large" in result.reason.lower()
 
 
-# ── 6. Checker v0.2 session transition validation ──────────────────────────
+# ── 6. Checker session transition validation ──────────────────────────
 
 
-class TestCheckerV02SessionTransition:
-    """Illegal session transitions rejected by Checker v0.2."""
+class TestCheckerSessionTransition:
+    """Illegal session transitions rejected by Checker."""
 
     def test_closed_to_running_rejected(self) -> None:
         from localmelo.melo.checker import Checker, SessionTransition
@@ -463,10 +599,10 @@ class TestCheckerV02SessionTransition:
         assert not result.allowed
 
 
-# ── 7. Checker v0.2 tool resolution validation ─────────────────────────────
+# ── 7. Checker tool resolution validation ─────────────────────────────
 
 
-class TestCheckerV02ToolResolution:
+class TestCheckerToolResolution:
     """Invalid tool resolution blocked before planning/execution."""
 
     @pytest.mark.asyncio
@@ -541,8 +677,9 @@ class TestStructuredExecutorInAgentLoop:
         result = await agent.run("echo hi")
         assert result == "done"
 
-        # Verify tool result fed back in second LLM call
-        sent = llm.calls[1]["messages"]
+        # Verify tool result fed back in second planning call
+        planning = _planning_calls(llm)
+        sent = planning[1]["messages"]
         tool_msgs = [m for m in sent if m.role == "tool"]
         assert len(tool_msgs) >= 1
         assert "hi" in tool_msgs[0].content
@@ -629,7 +766,7 @@ class TestStructuredExecutorInAgentLoop:
 
 
 class TestArtifactMetadata:
-    """Artifact/log metadata from Executor v0.2 in agent context."""
+    """Artifact/log metadata from Executor in agent context."""
 
     @pytest.mark.asyncio
     async def test_agent_executor_produces_artifacts(self) -> None:
@@ -703,6 +840,17 @@ class TestArtifactMetadata:
 class TestProvidersFromConfig:
     """Verify _providers_from_config returns correct provider types for each backend."""
 
+    @pytest.fixture(autouse=True)
+    def _register_backends(self) -> None:
+        """Register backends so _providers_from_config can look them up."""
+        from localmelo.support.backends.registry import (
+            _clear,
+            ensure_defaults_registered,
+        )
+
+        _clear()
+        ensure_defaults_registered()
+
     def test_mlc_backend_creates_llm_and_embedding(self) -> None:
         from localmelo.melo.agent.agent import _providers_from_config
         from localmelo.support.providers.embedding.openai_compat import (
@@ -711,8 +859,14 @@ class TestProvidersFromConfig:
         from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
         cfg = Config(
-            backend="mlc-llm",
-            mlc=MlcConfig(chat_model="Qwen3-1.7B", chat_port=8400),
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400/v1",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400/v1",
+                embedding_model="nomic-embed",
+            ),
         )
         llm, embedding = _providers_from_config(cfg)
         assert isinstance(llm, OpenAICompatLLM)
@@ -721,52 +875,51 @@ class TestProvidersFromConfig:
 
     def test_ollama_backend_creates_providers(self) -> None:
         from localmelo.melo.agent.agent import _providers_from_config
-        from localmelo.support.config import OllamaConfig
-        from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+        from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 
         cfg = Config(
-            backend="ollama",
-            ollama=OllamaConfig(
+            chat_backend="ollama",
+            embedding_backend="ollama",
+            ollama=LocalBackendConfig(
                 chat_url="http://localhost:11434",
                 chat_model="qwen3:8b",
+                embedding_url="http://localhost:11434",
                 embedding_model="nomic-embed",
             ),
         )
         llm, embedding = _providers_from_config(cfg)
-        assert isinstance(llm, OpenAICompatLLM)
+        assert isinstance(llm, OllamaNativeChat)
         assert embedding is not None
         assert llm.model == "qwen3:8b"
 
-    def test_ollama_without_embedding_model_falls_back_to_mlc(self) -> None:
+    def test_ollama_without_embedding_model_returns_none(self) -> None:
+        """Ollama with no embedding_model and embedding_backend='none'
+        returns None from _providers_from_config."""
         from localmelo.melo.agent.agent import _providers_from_config
-        from localmelo.support.config import OllamaConfig
-        from localmelo.support.providers.embedding.openai_compat import (
-            OpenAICompatEmbedding,
-        )
 
         cfg = Config(
-            backend="ollama",
-            ollama=OllamaConfig(
+            chat_backend="ollama",
+            embedding_backend="none",
+            ollama=LocalBackendConfig(
                 chat_url="http://localhost:11434",
                 chat_model="qwen3:8b",
-                embedding_model="",  # empty = fallback
+                embedding_model="",
             ),
         )
         llm, embedding = _providers_from_config(cfg)
-        assert isinstance(embedding, OpenAICompatEmbedding)
+        assert embedding is None
 
-    def test_online_backend_no_local_embedding(self) -> None:
+    def test_openai_cloud_backend_no_embedding(self) -> None:
+        """OpenAI cloud backend is chat-only; embedding is None."""
         from localmelo.melo.agent.agent import _providers_from_config
-        from localmelo.support.config import OnlineConfig
         from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
         cfg = Config(
-            backend="online",
-            online=OnlineConfig(
-                provider="openai",
+            chat_backend="openai",
+            embedding_backend="none",
+            openai=CloudVendorConfig(
                 api_key_env="OPENAI_API_KEY",
                 chat_model="gpt-4o",
-                local_embedding=False,
             ),
         )
         with mock.patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
@@ -774,20 +927,25 @@ class TestProvidersFromConfig:
         assert isinstance(llm, OpenAICompatLLM)
         assert embedding is None
 
-    def test_online_backend_with_local_embedding(self) -> None:
+    def test_gemini_chat_with_mlc_embedding(self) -> None:
+        """Gemini cloud chat + mlc local embedding (split backend model)."""
         from localmelo.melo.agent.agent import _providers_from_config
-        from localmelo.support.config import OnlineConfig
         from localmelo.support.providers.embedding.openai_compat import (
             OpenAICompatEmbedding,
         )
 
         cfg = Config(
-            backend="online",
-            online=OnlineConfig(
-                provider="gemini",
+            chat_backend="gemini",
+            embedding_backend="mlc",
+            gemini=CloudVendorConfig(
                 api_key_env="GEMINI_API_KEY",
                 chat_model="gemini-2.0-flash",
-                local_embedding=True,
+            ),
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400/v1",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400/v1",
+                embedding_model="nomic-embed",
             ),
         )
         with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "key-test"}):
@@ -797,8 +955,8 @@ class TestProvidersFromConfig:
     def test_unknown_backend_raises(self) -> None:
         from localmelo.melo.agent.agent import _providers_from_config
 
-        cfg = Config(backend="something-else")
-        with pytest.raises(ValueError, match="Unknown backend"):
+        cfg = Config(chat_backend="something-else", embedding_backend="none")
+        with pytest.raises(KeyError, match="Unknown backend"):
             _providers_from_config(cfg)
 
 
@@ -985,8 +1143,9 @@ class TestThreeWayBoundary:
         # ── Boundary 3: planning prompt has no tool message ──
         # Because memory-write correctly blocked the oversized message,
         # the follow-up planning call must not contain a tool role message.
-        assert len(llm.calls) >= 2
-        second_plan_msgs = llm.calls[1]["messages"]
+        planning = _planning_calls(llm)
+        assert len(planning) >= 2
+        second_plan_msgs = planning[1]["messages"]
         tool_msgs = [m for m in second_plan_msgs if m.role == "tool"]
         assert tool_msgs == [], (
             f"Expected no tool messages in planning prompt (memory-write "
@@ -1048,16 +1207,23 @@ class TestLLMErrorPropagation:
 
     @pytest.mark.asyncio
     async def test_llm_exception_after_tool_call(self) -> None:
-        """LLM works for the first call (tool request) but fails on second."""
+        """LLM works for estimation + first planning call but fails on second."""
 
-        class FailOnSecondLLM(FakeLLM):
+        class FailOnSecondPlanLLM(FakeLLM):
             def __init__(self) -> None:
                 super().__init__()
-                self._call_count = 0
+                self._plan_count = 0
 
             async def chat(self, messages: Any, tools: Any = None) -> Message:
-                self._call_count += 1
-                if self._call_count == 1:
+                # Let estimation pass through the parent handler.
+                if any(
+                    STEP_ESTIMATE_PROMPT in m.content
+                    for m in messages
+                    if hasattr(m, "role") and m.role == "system"
+                ):
+                    return await super().chat(messages, tools)
+                self._plan_count += 1
+                if self._plan_count == 1:
                     return Message(
                         role="assistant",
                         content="calling echo",
@@ -1065,7 +1231,7 @@ class TestLLMErrorPropagation:
                     )
                 raise ConnectionError("LLM crashed mid-conversation")
 
-        agent = Agent(llm=FailOnSecondLLM(), embedding=FakeEmbedding())
+        agent = Agent(llm=FailOnSecondPlanLLM(), embedding=FakeEmbedding())
         agent.hippo.register_tool(
             ToolDef(
                 name="echo",
@@ -1173,8 +1339,14 @@ class TestConfigToAgentEndToEnd:
     async def test_config_based_agent_runs_query(self) -> None:
         """Build Agent from Config, mock the HTTP layer, verify full run."""
         cfg = Config(
-            backend="mlc-llm",
-            mlc=MlcConfig(chat_model="Qwen3-1.7B", chat_port=8400),
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400/v1",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400/v1",
+                embedding_model="nomic-embed",
+            ),
         )
         # We mock _providers_from_config to inject fake providers
         fake_llm = FakeLLM([Message(role="assistant", content="42")])
@@ -1189,17 +1361,14 @@ class TestConfigToAgentEndToEnd:
             await agent.close()
 
     @pytest.mark.asyncio
-    async def test_config_online_no_embedding_agent(self) -> None:
-        """Online config with no embedding -> Agent works without long-term memory."""
-        from localmelo.support.config import OnlineConfig
-
+    async def test_config_openai_no_embedding_agent(self) -> None:
+        """OpenAI cloud config with no embedding -> Agent works without long-term memory."""
         cfg = Config(
-            backend="online",
-            online=OnlineConfig(
-                provider="openai",
+            chat_backend="openai",
+            embedding_backend="none",
+            openai=CloudVendorConfig(
                 api_key_env="OPENAI_API_KEY",
                 chat_model="gpt-4o",
-                local_embedding=False,
             ),
         )
         fake_llm = FakeLLM([Message(role="assistant", content="answer")])
@@ -1223,7 +1392,16 @@ class TestHasEmbeddingConsistency:
     """Config.has_embedding must predict whether Agent gets an embedding provider."""
 
     def test_mlc_has_embedding_matches_provider(self) -> None:
-        cfg = Config(backend="mlc-llm", mlc=MlcConfig(chat_model="Qwen3-1.7B"))
+        cfg = Config(
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400/v1",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400/v1",
+                embedding_model="nomic-embed",
+            ),
+        )
         assert cfg.has_embedding is True
 
         fake_llm = FakeLLM()
@@ -1235,16 +1413,13 @@ class TestHasEmbeddingConsistency:
             agent = Agent(config=cfg)
             assert agent._embedding is not None
 
-    def test_online_no_embedding_matches_provider(self) -> None:
-        from localmelo.support.config import OnlineConfig
-
+    def test_openai_no_embedding_matches_provider(self) -> None:
         cfg = Config(
-            backend="online",
-            online=OnlineConfig(
-                provider="openai",
+            chat_backend="openai",
+            embedding_backend="none",
+            openai=CloudVendorConfig(
                 api_key_env="OPENAI_API_KEY",
                 chat_model="gpt-4o",
-                local_embedding=False,
             ),
         )
         assert cfg.has_embedding is False
@@ -1256,6 +1431,220 @@ class TestHasEmbeddingConsistency:
         ):
             agent = Agent(config=cfg)
             assert agent._embedding is None
+
+
+# ── 17. Backend adapter architecture integration ────────────────────────────
+
+
+class TestBackendAdapterArchitecture:
+    """Verify the backend adapter architecture wires correctly end-to-end."""
+
+    @pytest.fixture(autouse=True)
+    def _register_backends(self) -> None:
+        from localmelo.support.backends.registry import (
+            _clear,
+            ensure_defaults_registered,
+        )
+
+        _clear()
+        ensure_defaults_registered()
+
+    def test_registry_has_all_eight_backends(self) -> None:
+        from localmelo.support.backends import get_backend, list_backends
+
+        backends = list_backends()
+        keys = {b.key for b in backends}
+        assert keys == {
+            "mlc",
+            "ollama",
+            "vllm",
+            "sglang",
+            "openai",
+            "gemini",
+            "anthropic",
+            "nvidia",
+        }
+
+        # Each is retrievable by key
+        for key in keys:
+            assert get_backend(key).key == key
+
+    def test_backend_validate_matches_config_validate(self) -> None:
+        """Backend.validate() and Config.validate() should agree on errors."""
+        from localmelo.support.backends import get_backend
+
+        # Valid mlc config
+        cfg = Config(
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400/v1",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400/v1",
+                embedding_model="nomic-embed",
+            ),
+        )
+        assert get_backend("mlc").validate(cfg) == []
+        assert cfg.validate() == []
+
+        # Invalid mlc config (missing chat_model)
+        bad_cfg = Config(
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400/v1",
+                chat_model="",
+            ),
+        )
+        backend_errors = get_backend("mlc").validate(bad_cfg)
+        config_errors = bad_cfg.validate()
+        assert len(backend_errors) > 0
+        assert len(config_errors) > 0
+
+    def test_backend_has_embedding_matches_config(self) -> None:
+        """Backend.has_embedding() and Config.has_embedding should agree."""
+        from localmelo.support.backends import get_backend
+
+        # mlc with embedding fields set: True
+        cfg_mlc = Config(
+            chat_backend="mlc",
+            embedding_backend="mlc",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400/v1",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400/v1",
+                embedding_model="nomic-embed",
+            ),
+        )
+        assert get_backend("mlc").has_embedding(cfg_mlc) is True
+        assert cfg_mlc.has_embedding is True
+
+        # ollama without embedding_model: has_embedding False
+        cfg_ollama = Config(
+            chat_backend="ollama",
+            embedding_backend="none",
+            ollama=LocalBackendConfig(
+                chat_url="http://localhost:11434",
+                chat_model="qwen3:8b",
+            ),
+        )
+        assert get_backend("ollama").has_embedding(cfg_ollama) is False
+        assert cfg_ollama.has_embedding is False
+
+        # openai cloud: never has embedding (chat-only)
+        cfg_openai = Config(
+            chat_backend="openai",
+            embedding_backend="none",
+            openai=CloudVendorConfig(
+                api_key_env="OPENAI_API_KEY",
+                chat_model="gpt-4o",
+            ),
+        )
+        assert get_backend("openai").has_embedding(cfg_openai) is False
+        assert cfg_openai.has_embedding is False
+
+        # openai chat + mlc embedding: Config says True
+        cfg_cloud_emb = Config(
+            chat_backend="openai",
+            embedding_backend="mlc",
+            openai=CloudVendorConfig(
+                api_key_env="OPENAI_API_KEY",
+                chat_model="gpt-4o",
+            ),
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:8400/v1",
+                chat_model="Qwen3-1.7B",
+                embedding_url="http://127.0.0.1:8400/v1",
+                embedding_model="nomic-embed",
+            ),
+        )
+        assert cfg_cloud_emb.has_embedding is True
+
+    def test_all_backends_implement_full_contract(self) -> None:
+        """Every registered backend must satisfy the BaseBackend ABC."""
+        from localmelo.support.backends import list_backends
+        from localmelo.support.backends.base import BaseBackend
+
+        for backend in list_backends():
+            assert isinstance(backend, BaseBackend)
+            assert isinstance(backend.key, str)
+            assert isinstance(backend.display_name, str)
+            # Backends are pure connectors -- no runtime_mode or start_runtime
+            assert not hasattr(backend, "runtime_mode")
+            assert not hasattr(backend, "start_runtime")
+
+    def test_deployment_matrix(self) -> None:
+        """Verify the supported deployment combinations.
+
+        Covers all four local backends, all four cloud vendors, and
+        the split-backend model (cloud chat + local embedding).
+        """
+        mlc_full = LocalBackendConfig(
+            chat_url="http://127.0.0.1:8400/v1",
+            chat_model="Qwen3-1.7B",
+            embedding_url="http://127.0.0.1:8400/v1",
+            embedding_model="nomic-embed",
+        )
+        ollama_with_emb = LocalBackendConfig(
+            chat_url="http://localhost:11434",
+            chat_model="qwen3:8b",
+            embedding_url="http://localhost:11434",
+            embedding_model="nomic-embed",
+        )
+
+        combos: list[tuple[str, str, str, bool, dict[str, Any]]] = [
+            # (chat_backend, embedding_backend, description, expected_has_embedding, extra_kwargs)
+            ("mlc", "mlc", "mlc chat + mlc embedding", True, {"mlc": mlc_full}),
+            (
+                "ollama",
+                "ollama",
+                "ollama chat + ollama embedding",
+                True,
+                {"ollama": ollama_with_emb},
+            ),
+            ("vllm", "none", "vllm chat only", False, {}),
+            ("sglang", "none", "sglang chat only", False, {}),
+            ("openai", "none", "openai chat only", False, {}),
+            ("gemini", "none", "gemini chat only", False, {}),
+            ("anthropic", "none", "anthropic chat only", False, {}),
+            ("nvidia", "none", "nvidia chat only", False, {}),
+            (
+                "openai",
+                "ollama",
+                "openai chat + ollama embedding",
+                True,
+                {"ollama": ollama_with_emb},
+            ),
+            ("gemini", "mlc", "gemini chat + mlc embedding", True, {"mlc": mlc_full}),
+        ]
+        for chat_b, emb_b, desc, expected_emb, extra in combos:
+            cfg = Config(chat_backend=chat_b, embedding_backend=emb_b, **extra)
+            assert cfg.chat_backend == chat_b, desc
+            assert cfg.embedding_backend == emb_b, desc
+            assert cfg.has_embedding is expected_emb, desc
+
+
+# ── 18. Step-estimation path exercised during Agent.run() ────────────────────
+
+
+class TestAttemptBasedLoop:
+    """Prove that Agent.run() uses the attempt-based loop."""
+
+    @pytest.mark.asyncio
+    async def test_direct_answer_completes_in_one_attempt(self) -> None:
+        """A direct answer should complete without reflection."""
+        llm = FakeLLM(
+            [Message(role="assistant", content="42")],
+        )
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        result = await agent.run("What is 6*7?")
+
+        assert result == "42"
+        tasks = list(agent.hippo.history._tasks.values())
+        assert tasks[0].status == "completed"
+        assert tasks[0].attempts_completed == 0
+
+        await agent.close()
 
 
 # ── Helper ──────────────────────────────────────────────────────────────────

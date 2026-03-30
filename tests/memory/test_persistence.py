@@ -71,8 +71,8 @@ class TestRegistryIndexSplit:
         assert isinstance(reg.index, ToolIndex)
         assert len(reg.index.search("x tool")) == 1
 
-    def test_registry_backward_compat(self) -> None:
-        """Existing callers using register/get/list_all/search still work."""
+    def test_registry_public_api(self) -> None:
+        """register/get/list_all/search work as expected."""
         reg = ToolRegistry()
         reg.register(
             ToolDef(

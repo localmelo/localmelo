@@ -13,7 +13,11 @@ from unittest.mock import patch  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from localmelo.support.config import Config, GatewayConfig, MlcConfig  # noqa: E402
+from localmelo.support.config import (  # noqa: E402
+    Config,
+    GatewayConfig,
+    LocalBackendConfig,
+)
 from localmelo.support.gateway import GatewayServer  # noqa: E402
 from localmelo.support.gateway.session import SessionManager  # noqa: E402
 
@@ -58,37 +62,36 @@ class FakeSessionManager(SessionManager):
 
 
 # ---------------------------------------------------------------------------
-# Test GatewayServer subclass — uses real routes, no LLM subprocess
+# Helpers
 # ---------------------------------------------------------------------------
 
 
 def _test_cfg() -> Config:
     """Minimal valid Config for constructing a GatewayServer."""
     return Config(
-        backend="mlc-llm",
-        mlc=MlcConfig(chat_model="Qwen3-1.7B"),
+        chat_backend="mlc",
+        embedding_backend="mlc",
+        mlc=LocalBackendConfig(
+            chat_url="http://127.0.0.1:8400/v1",
+            chat_model="Qwen3-1.7B",
+            embedding_url="http://127.0.0.1:8400/v1",
+            embedding_model="nomic-embed",
+        ),
         gateway=GatewayConfig(port=8401, host="127.0.0.1"),
     )
 
 
-class _TestableGatewayServer(GatewayServer):
-    """GatewayServer subclass that skips LLM startup and webapp mount."""
-
-    def _start_llm_server(self) -> None:
-        pass  # no-op: no real model subprocess in tests
-
-
 def _build_server(
     sessions: FakeSessionManager | None = None,
-) -> _TestableGatewayServer:
-    """Build a GatewayServer with real routes but no LLM or webapp."""
+) -> GatewayServer:
+    """Build a GatewayServer with real routes but no webapp."""
     if sessions is None:
         sessions = FakeSessionManager()
 
     cfg = _test_cfg()
 
     with patch("localmelo.support.gateway.webapp.mount", lambda app: None):
-        server = _TestableGatewayServer(cfg)
+        server = GatewayServer(cfg)
 
     # Replace the real SessionManager with our fake
     server.sessions = sessions
@@ -106,12 +109,12 @@ def sessions() -> FakeSessionManager:
 
 
 @pytest.fixture()
-def server(sessions: FakeSessionManager) -> _TestableGatewayServer:
+def server(sessions: FakeSessionManager) -> GatewayServer:
     return _build_server(sessions)
 
 
 @pytest.fixture()
-def client(server: _TestableGatewayServer) -> TestClient:
+def client(server: GatewayServer) -> TestClient:
     # raise_server_exceptions=False so we can assert on 500 responses
     return TestClient(server.app, raise_server_exceptions=False)
 
@@ -184,9 +187,11 @@ class TestHealth:
         assert data["status"] == "ok"
         assert "uptime" in data
         assert "sessions" in data
-        assert "llm" in data
-        assert "backend" in data
-        assert data["backend"] == "mlc-llm"
+        assert "llm" not in data
+        assert "chat_backend" in data
+        assert data["chat_backend"] == "mlc"
+        assert "embedding_backend" in data
+        assert data["embedding_backend"] == "mlc"
 
     def test_health_session_counts(self, client: TestClient) -> None:
         client.post("/v1/agent/run", json={"query": "seed"})
@@ -331,3 +336,21 @@ class TestSessionLifecycle:
         )
         assert r2.status_code == 200
         assert r2.json()["result"] == "echo: ok now"
+
+
+# ---------------------------------------------------------------------------
+# GatewayServer delegates inference to external backends
+# ---------------------------------------------------------------------------
+
+
+class TestNoEmbeddedInference:
+    """GatewayServer must not embed inference processes."""
+
+    def test_no_llm_attribute(self) -> None:
+        """GatewayServer must not have an llm attribute."""
+        server = _build_server()
+        assert not hasattr(server, "llm")
+
+    def test_no_start_llm_server_method(self) -> None:
+        """GatewayServer must not have _start_llm_server."""
+        assert not hasattr(GatewayServer, "_start_llm_server")

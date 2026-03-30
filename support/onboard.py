@@ -1,14 +1,10 @@
-"""Interactive onboarding wizard for first-time setup."""
+"""Interactive backend setup flow for first-time configuration."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from localmelo.support import config
-from localmelo.support.models import (
-    DEFAULT_EMBEDDING,
-    compile_model,
-    is_compiled,
-    pick_chat_model,
-)
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -40,159 +36,167 @@ def _confirm(prompt: str = "Start?") -> bool:
     return val in ("y", "yes", "")
 
 
-# ── Path 1: MLC-LLM ──
+# ── Backend choice lists ──
+
+CHAT_BACKENDS: list[tuple[str, str]] = [
+    ("mlc", "MLC (local endpoint)"),
+    ("ollama", "Ollama (local endpoint)"),
+    ("vllm", "vLLM (local endpoint)"),
+    ("sglang", "SGLang (local endpoint)"),
+    ("openai", "OpenAI"),
+    ("gemini", "Google Gemini"),
+    ("anthropic", "Anthropic"),
+    ("nvidia", "NVIDIA"),
+]
+
+EMBEDDING_BACKENDS: list[tuple[str, str]] = [
+    ("mlc", "MLC (local endpoint)"),
+    ("ollama", "Ollama (local endpoint)"),
+    ("vllm", "vLLM (local endpoint)"),
+    ("sglang", "SGLang (local endpoint)"),
+    ("none", "None (no long-term memory)"),
+]
 
 
-def _onboard_mlc(cfg: config.Config) -> bool:
-    print("\n  -- MLC-LLM (local) --\n")
+# ── Chat backend handlers ──
 
-    gb = _ask_int("GPU memory to allocate (GB, min 8)", 16, lo=8, hi=1024)
-    cfg.mlc.gpu_memory_gb = gb
+_LOCAL_DEFAULTS: dict[str, tuple[str, str]] = {
+    "mlc": ("http://localhost:8400/v1", "qwen3-1.7b"),
+    "ollama": ("http://localhost:11434", "qwen3:8b"),
+    "vllm": ("http://localhost:8000/v1", ""),
+    "sglang": ("http://localhost:30000/v1", ""),
+}
 
-    chat = pick_chat_model(gb)
-    if chat is None:
-        print("    Not enough memory for any chat model (need at least 8 GB)")
-        return False
+_CLOUD_DEFAULTS: dict[str, tuple[str, str]] = {
+    "openai": ("OPENAI_API_KEY", "gpt-4o"),
+    "gemini": ("GEMINI_API_KEY", "gemini-2.0-flash"),
+    "anthropic": ("ANTHROPIC_API_KEY", "claude-sonnet-4-20250514"),
+    "nvidia": ("NVIDIA_API_KEY", "nvidia/llama-3.1-nemotron-70b-instruct"),
+}
 
-    embed = DEFAULT_EMBEDDING
-    total = chat.estimated_gb + embed.estimated_gb
 
-    cfg.mlc.chat_model = chat.name
-    cfg.mlc.embedding_model = embed.name
-
-    print("\n  Auto-selected:")
-    print(f"    Chat:      {chat.name} ({chat.quantization})  ~{chat.estimated_gb} GB")
-    print(
-        f"    Embedding: {embed.name} ({embed.quantization})  ~{embed.estimated_gb} GB"
+def _onboard_local(cfg: config.Config, key: str) -> bool:
+    """Local (OpenAI-compatible) chat backend setup: URL and model name."""
+    default_url, default_model = _LOCAL_DEFAULTS.get(
+        key, ("http://localhost:8000/v1", "")
     )
-    print(f"    Total:     ~{total:.1f} GB / {gb} GB")
-    print()
 
-    if not _confirm():
-        return False
+    print(f"\n  -- {key} (local endpoint) --\n")
 
-    # compile if needed
-    for spec in [chat, embed]:
-        if is_compiled(spec):
-            print(f"  {spec.name}: already compiled")
-        else:
-            print(f"\n  Compiling {spec.name} ...")
-            compile_model(spec)
+    url = _ask("Base URL", default_url)
+    model = _ask("Chat model name", default_model)
 
-    cfg.backend = "mlc-llm"
-    return True
-
-
-# ── Path 2: Ollama ──
-
-
-def _onboard_ollama(cfg: config.Config) -> bool:
-    print("\n  -- Ollama --\n")
-
-    cfg.ollama.chat_url = _ask("Ollama API URL", "http://localhost:11434")
-    cfg.ollama.chat_model = _ask("Chat model name", "qwen3:8b")
-
-    print("\n  Embedding model (leave empty to use mlc-llm local embedding):")
-    emb = _ask("Ollama embedding model", "")
-
-    if emb:
-        cfg.ollama.embedding_model = emb
-        cfg.ollama.embedding_url = _ask("Embedding API URL", cfg.ollama.chat_url)
-    else:
-        # fallback to mlc-llm embedding
-        cfg.ollama.embedding_model = ""
-        embed = DEFAULT_EMBEDDING
-        print(
-            f"\n  Will use mlc-llm for embedding: {embed.name} (~{embed.estimated_gb} GB)"
-        )
-        if not is_compiled(embed):
-            print(f"  Compiling {embed.name} ...")
-            compile_model(embed)
-        else:
-            print(f"  {embed.name}: already compiled")
+    # Store in the matching config section
+    section = getattr(cfg, key, None)
+    if section is not None:
+        section.chat_url = url
+        section.chat_model = model
 
     print()
-    if not _confirm():
-        return False
-
-    cfg.backend = "ollama"
-    return True
+    return _confirm()
 
 
-# ── Path 3: Online API ──
+def _onboard_cloud(cfg: config.Config, key: str) -> bool:
+    """Cloud vendor chat backend setup: API key env var and model name."""
+    default_env, default_model = _CLOUD_DEFAULTS.get(key, ("", ""))
 
+    print(f"\n  -- {key} (cloud API) --\n")
 
-def _onboard_online(cfg: config.Config) -> bool:
-    print("\n  -- Cloud API --\n")
-
-    providers = ["OpenAI", "Gemini", "Anthropic"]
-    idx = _ask_choice("Provider", providers, default=1)
-    provider = providers[idx - 1].lower()
-    cfg.online.provider = provider
-
-    default_env = {
-        "openai": "OPENAI_API_KEY",
-        "gemini": "GEMINI_API_KEY",
-        "anthropic": "ANTHROPIC_API_KEY",
-    }
-    cfg.online.api_key_env = _ask("API key env var", default_env.get(provider, ""))
-
-    default_model = {
-        "openai": "gpt-4o",
-        "gemini": "gemini-2.0-flash",
-        "anthropic": "claude-sonnet-4-20250514",
-    }
-    cfg.online.chat_model = _ask("Chat model", default_model.get(provider, ""))
-
-    print("\n  Local embedding model for memory system?")
-    print("    If no: agent runs without long-term memory")
-    use_local = _ask("Use local embedding? (y/n)", "n").lower() in ("y", "yes")
-    cfg.online.local_embedding = use_local
-
-    if use_local:
-        embed = DEFAULT_EMBEDDING
-        print(
-            f"\n  Will use mlc-llm for embedding: {embed.name} (~{embed.estimated_gb} GB)"
-        )
-        if not is_compiled(embed):
-            print(f"  Compiling {embed.name} ...")
-            compile_model(embed)
-        else:
-            print(f"  {embed.name}: already compiled")
-    else:
-        print("\n  No memory mode: agent will not have long-term memory.")
+    section = getattr(cfg, key, None)
+    if section is not None:
+        section.api_key_env = _ask("API key env var", default_env)
+        section.chat_model = _ask("Chat model", default_model)
 
     print()
-    if not _confirm():
-        return False
-
-    cfg.backend = "online"
-    return True
+    return _confirm()
 
 
-# ── Main wizard ──
+# ── Chat backend setup dispatch ──
+
+_CHAT_SETUP: dict[str, Callable[[config.Config], bool]] = {
+    "mlc": lambda cfg: _onboard_local(cfg, "mlc"),
+    "ollama": lambda cfg: _onboard_local(cfg, "ollama"),
+    "vllm": lambda cfg: _onboard_local(cfg, "vllm"),
+    "sglang": lambda cfg: _onboard_local(cfg, "sglang"),
+    "openai": lambda cfg: _onboard_cloud(cfg, "openai"),
+    "gemini": lambda cfg: _onboard_cloud(cfg, "gemini"),
+    "anthropic": lambda cfg: _onboard_cloud(cfg, "anthropic"),
+    "nvidia": lambda cfg: _onboard_cloud(cfg, "nvidia"),
+}
 
 
-def run_wizard() -> config.Config | None:
-    """Run the onboarding wizard. Returns Config if successful, None if cancelled."""
+# ── Embedding backend handlers ──
+
+_EMBEDDING_DEFAULTS: dict[str, tuple[str, str]] = {
+    "mlc": ("http://localhost:8400/v1", "nomic-embed"),
+    "ollama": ("http://localhost:11434", "nomic-embed-text"),
+    "vllm": ("http://localhost:8000/v1", ""),
+    "sglang": ("http://localhost:30000/v1", ""),
+}
+
+
+def _onboard_embedding_local(cfg: config.Config, key: str) -> None:
+    """Set up a local embedding endpoint: URL and model name."""
+    default_url, default_model = _EMBEDDING_DEFAULTS.get(
+        key, ("http://localhost:8000/v1", "")
+    )
+
+    url = _ask("Embedding endpoint URL", default_url)
+    model = _ask("Embedding model name", default_model)
+
+    section = getattr(cfg, key, None)
+    if section is not None:
+        section.embedding_url = url
+        section.embedding_model = model
+
+
+# ── Main setup flow ──
+
+
+def run_backend_setup() -> config.Config | None:
+    """Run the split backend setup flow.
+
+    1. Choose and configure the chat backend.
+    2. Choose and configure the embedding backend.
+    3. Save and return the Config.
+
+    Returns Config if successful, None if cancelled.
+    """
 
     print("\n  Welcome to localmelo.\n")
 
-    backends = [
-        "Local - mlc-llm (default, fully local)",
-        "Local - ollama",
-        "Cloud API (OpenAI / Gemini / Anthropic)",
-    ]
-    choice = _ask_choice("LLM backend", backends, default=1)
+    # ── 1. Chat backend ──
+    chat_display = [name for _, name in CHAT_BACKENDS]
+    choice = _ask_choice("Chat backend", chat_display, default=1)
+    selected_chat_key = CHAT_BACKENDS[choice - 1][0]
+
+    handler = _CHAT_SETUP.get(selected_chat_key)
+    if handler is None:
+        print(
+            f"  Backend '{selected_chat_key}' has no onboarding handler yet. "
+            f"Cannot continue."
+        )
+        return None
 
     cfg = config.load()
-
-    handlers = {1: _onboard_mlc, 2: _onboard_ollama, 3: _onboard_online}
-    ok = handlers[choice](cfg)
+    ok = handler(cfg)
 
     if not ok:
         print("  Setup cancelled.")
         return None
+
+    # ── 2. Embedding backend ──
+    emb_display = [name for _, name in EMBEDDING_BACKENDS]
+    emb_choice = _ask_choice("Embedding backend", emb_display, default=1)
+    selected_emb_key = EMBEDDING_BACKENDS[emb_choice - 1][0]
+
+    if selected_emb_key != "none":
+        _onboard_embedding_local(cfg, selected_emb_key)
+    else:
+        print("\n  No embedding: agent will not have long-term memory.")
+
+    cfg.chat_backend = selected_chat_key
+    cfg.embedding_backend = selected_emb_key
 
     config.save(cfg)
     print(f"\n  Config saved to {config.CONFIG_PATH}")

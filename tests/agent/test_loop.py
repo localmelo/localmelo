@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent
+from localmelo.melo.agent.chat import Chat
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
@@ -290,7 +291,7 @@ class TestPromptAssembly:
 
 
 class TestCheckedMemoryWrite:
-    """Memory writes must be routed through Checker.pre_memory_write."""
+    """Memory writes must be routed through Checker.check_memory_write."""
 
     @pytest.mark.asyncio
     async def test_huge_summary_blocked(self) -> None:
@@ -323,7 +324,7 @@ class TestCheckedMemoryWrite:
         result = await agent.run("test")
         assert result == "done"
 
-        # The huge summary should have been blocked by pre_memory_write,
+        # The huge summary should have been blocked by check_memory_write,
         # so long-term memory should be empty.
         assert len(agent.hippo.long._entries) == 0
 
@@ -371,19 +372,19 @@ class TestRetrievalSeparation:
 
 
 class TestMaxStepsTermination:
-    """Loop terminates cleanly when estimated step budget is exhausted."""
+    """Loop terminates cleanly when step/attempt budget is exhausted."""
 
     @pytest.mark.asyncio
     async def test_max_steps_sets_failed(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Agent that always requests tool calls must hit the step limit."""
+        import localmelo.melo.agent.agent as _agent_mod
 
-        async def _return_3(self: Agent, query: str) -> int:
-            return 3
-
-        monkeypatch.setattr(Agent, "_estimate_max_steps", _return_3)
+        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 3)
+        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 1)
+        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 3)
 
         llm = FakeLLM()
-        # Queue more tool-call responses than the estimated budget.
+        # 5 tool-call responses (more than 3-step budget)
         for _ in range(5):
             llm.enqueue(
                 Message(
@@ -392,6 +393,13 @@ class TestMaxStepsTermination:
                     tool_call=ToolCall(tool_name="echo", arguments={"text": "x"}),
                 )
             )
+        # Reflection response (will be consumed after attempt exhausts)
+        llm.enqueue(
+            Message(
+                role="assistant",
+                content='{"recommended_action":"stop","rationale":"stuck","best_effort_result":""}',
+            )
+        )
 
         agent = Agent(llm=llm, embedding=FakeEmbedding())
         agent.hippo.register_tool(
@@ -407,8 +415,7 @@ class TestMaxStepsTermination:
         )
         agent.executor.register("echo", _echo_tool)
 
-        result = await agent.run("loop forever")
-        assert result == "Max steps reached"
+        await agent.run("loop forever")
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
 
@@ -762,12 +769,17 @@ class TestStepEstimation:
         assert result == MAX_AGENT_STEPS
 
     @pytest.mark.asyncio
-    async def test_estimated_budget_limits_loop(self) -> None:
-        """Estimation of 3 steps limits the agent to 3 loop iterations."""
+    async def test_estimated_budget_limits_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Attempt budget limits the agent loop iterations."""
+        import localmelo.melo.agent.agent as _agent_mod
+
+        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 3)
+        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 1)
+        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 3)
+
         llm = FakeLLM()
-        # Estimation response
-        llm.enqueue(Message(role="assistant", content="3"))
-        # More tool calls than the estimate
         for _ in range(5):
             llm.enqueue(
                 Message(
@@ -776,6 +788,13 @@ class TestStepEstimation:
                     tool_call=ToolCall(tool_name="echo", arguments={"text": "x"}),
                 )
             )
+        # Reflection response
+        llm.enqueue(
+            Message(
+                role="assistant",
+                content='{"recommended_action":"stop","rationale":"budget","best_effort_result":""}',
+            )
+        )
 
         agent = Agent(llm=llm, embedding=FakeEmbedding())
         agent.hippo.register_tool(
@@ -791,8 +810,180 @@ class TestStepEstimation:
         )
         agent.executor.register("echo", _echo_tool)
 
-        result = await agent.run("loop task")
-        assert result == "Max steps reached"
+        await agent.run("loop task")
+        tasks = list(agent.hippo.history._tasks.values())
+        assert tasks[0].status == "failed"
+
+
+class TestBuildSystemPrompt:
+    """Unit tests for _build_system_prompt merging logic."""
+
+    def test_no_context_no_short(self) -> None:
+        from localmelo.melo.agent.chat import SYSTEM_PROMPT, _build_system_prompt
+
+        prompt, others = _build_system_prompt([], [])
+        assert prompt == SYSTEM_PROMPT
+        assert others == []
+
+    def test_memory_items_merged_under_recall(self) -> None:
+        from localmelo.melo.agent.chat import SYSTEM_PROMPT, _build_system_prompt
+
+        context = [
+            Message(role="system", content="[memory] used shell_exec before"),
+            Message(role="system", content="[memory] prefers concise answers"),
+        ]
+        prompt, others = _build_system_prompt(context, [])
+        assert prompt.startswith(SYSTEM_PROMPT)
+        assert prompt.count("[RECALL]") == 1
+        assert "used shell_exec before" in prompt
+        assert "prefers concise answers" in prompt
+        # [memory] prefix must be stripped
+        assert "[memory]" not in prompt
+        assert others == []
+
+    def test_non_memory_system_messages_merged(self) -> None:
+        from localmelo.melo.agent.chat import SYSTEM_PROMPT, _build_system_prompt
+
+        short = [Message(role="system", content="extra context info")]
+        prompt, others = _build_system_prompt([], short)
+        assert "extra context info" in prompt
+        assert prompt.startswith(SYSTEM_PROMPT)
+        assert "[RECALL]" not in prompt
+        assert others == []
+
+    def test_mixed_roles_separated(self) -> None:
+        from localmelo.melo.agent.chat import SYSTEM_PROMPT, _build_system_prompt
+
+        context = [
+            Message(role="system", content="[memory] fact A"),
+        ]
+        short = [
+            Message(role="system", content="extra sys"),
+            Message(role="user", content="hello"),
+            Message(role="assistant", content="hi"),
+        ]
+        prompt, others = _build_system_prompt(context, short)
+        assert prompt.startswith(SYSTEM_PROMPT)
+        assert "extra sys" in prompt
+        assert "[RECALL]" in prompt
+        assert "fact A" in prompt
+        assert len(others) == 2
+        assert others[0].role == "user"
+        assert others[1].role == "assistant"
+
+    def test_no_recall_section_without_memory(self) -> None:
+        from localmelo.melo.agent.chat import _build_system_prompt
+
+        context: list[Message] = []
+        short = [Message(role="user", content="query")]
+        prompt, others = _build_system_prompt(context, short)
+        assert "[RECALL]" not in prompt
+        assert len(others) == 1
+
+    @pytest.mark.asyncio
+    async def test_plan_step_single_system_message(self) -> None:
+        """plan_step must produce exactly one system message even with memory."""
+        llm = FakeLLM([Message(role="assistant", content="ok")])
+        chat = Chat(llm)
+        context = [
+            Message(role="system", content="[memory] mem0"),
+            Message(role="system", content="[memory] mem1"),
+        ]
+        short = [Message(role="user", content="query")]
+        await chat.plan_step(context=context, short=short, tools=[], query="query")
+
+        sent = llm.calls[0]["messages"]
+        sys_msgs = [m for m in sent if m.role == "system"]
+        assert len(sys_msgs) == 1, f"Expected 1 system message, got {len(sys_msgs)}"
+        assert "[RECALL]" in sys_msgs[0].content
+        assert "mem0" in sys_msgs[0].content
+        assert "mem1" in sys_msgs[0].content
+
+
+class TestProvidersFromConfig:
+    """_providers_from_config delegates to the backend registry."""
+
+    def test_delegates_to_backend_registry(self) -> None:
+        """build_chat_provider and build_embedding_provider are called
+        on potentially different backends for chat vs embedding."""
+        from unittest import mock
+
+        fake_llm = mock.MagicMock()
+        fake_emb = mock.MagicMock()
+
+        fake_chat_backend = mock.MagicMock()
+        fake_chat_backend.build_chat_provider.return_value = fake_llm
+
+        fake_emb_backend = mock.MagicMock()
+        fake_emb_backend.build_embedding_provider.return_value = fake_emb
+
+        def _get_backend(key: str) -> mock.MagicMock:
+            if key == "openai":
+                return fake_chat_backend
+            if key == "ollama":
+                return fake_emb_backend
+            raise KeyError(key)
+
+        with mock.patch(
+            "localmelo.support.backends.get_backend", side_effect=_get_backend
+        ):
+            from localmelo.melo.agent.agent import _providers_from_config
+            from localmelo.support.config import Config, LocalBackendConfig
+
+            cfg = Config(
+                chat_backend="openai",
+                embedding_backend="ollama",
+                ollama=LocalBackendConfig(
+                    embedding_url="http://localhost:11434",
+                    embedding_model="nomic-embed",
+                ),
+            )
+            llm, embedding = _providers_from_config(cfg)
+
+        fake_chat_backend.build_chat_provider.assert_called_once_with(cfg)
+        fake_emb_backend.build_embedding_provider.assert_called_once_with(cfg)
+        assert llm is fake_llm
+        assert embedding is fake_emb
+
+    def test_no_embedding_when_backend_is_none(self) -> None:
+        """When embedding_backend is 'none', embedding provider is None."""
+        from unittest import mock
+
+        fake_llm = mock.MagicMock()
+        fake_backend = mock.MagicMock()
+        fake_backend.build_chat_provider.return_value = fake_llm
+
+        with mock.patch(
+            "localmelo.support.backends.get_backend", return_value=fake_backend
+        ):
+            from localmelo.melo.agent.agent import _providers_from_config
+            from localmelo.support.config import Config
+
+            cfg = Config(
+                chat_backend="openai",
+                embedding_backend="none",
+            )
+            llm, embedding = _providers_from_config(cfg)
+
+        fake_backend.build_chat_provider.assert_called_once_with(cfg)
+        fake_backend.build_embedding_provider.assert_not_called()
+        assert llm is fake_llm
+        assert embedding is None
+
+    def test_unknown_backend_raises_key_error(self) -> None:
+        """Requesting an unregistered backend raises KeyError."""
+        from unittest import mock
+
+        with mock.patch(
+            "localmelo.support.backends.get_backend",
+            side_effect=KeyError("Unknown backend 'nope'"),
+        ):
+            from localmelo.melo.agent.agent import _providers_from_config
+            from localmelo.support.config import Config
+
+            cfg = Config(chat_backend="nope", embedding_backend="none")
+            with pytest.raises(KeyError, match="nope"):
+                _providers_from_config(cfg)
 
 
 # ── Test helper ─────────────────────────────────────────────────────────────
