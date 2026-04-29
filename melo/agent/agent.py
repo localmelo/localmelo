@@ -6,7 +6,7 @@ import math
 import os
 from typing import TYPE_CHECKING
 
-from localmelo.melo.agent.chat import Chat
+from localmelo.melo.agent._chat import Chat
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
     ExecutorResultPayload,

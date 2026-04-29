@@ -8,7 +8,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent
-from localmelo.melo.agent.chat import Chat
+from localmelo.melo.agent._chat import Chat
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
@@ -729,7 +729,7 @@ class TestStepEstimation:
     @pytest.mark.asyncio
     async def test_parse_step_estimate(self) -> None:
         """_parse_step_estimate extracts integers correctly."""
-        from localmelo.melo.agent.chat import _parse_step_estimate
+        from localmelo.melo.agent._chat import _parse_step_estimate
 
         assert _parse_step_estimate("5") == 5
         assert _parse_step_estimate("I think 12 steps") == 12
@@ -819,14 +819,14 @@ class TestBuildSystemPrompt:
     """Unit tests for _build_system_prompt merging logic."""
 
     def test_no_context_no_short(self) -> None:
-        from localmelo.melo.agent.chat import SYSTEM_PROMPT, _build_system_prompt
+        from localmelo.melo.agent._chat import SYSTEM_PROMPT, _build_system_prompt
 
         prompt, others = _build_system_prompt([], [])
         assert prompt == SYSTEM_PROMPT
         assert others == []
 
     def test_memory_items_merged_under_recall(self) -> None:
-        from localmelo.melo.agent.chat import SYSTEM_PROMPT, _build_system_prompt
+        from localmelo.melo.agent._chat import SYSTEM_PROMPT, _build_system_prompt
 
         context = [
             Message(role="system", content="[memory] used shell_exec before"),
@@ -842,7 +842,7 @@ class TestBuildSystemPrompt:
         assert others == []
 
     def test_non_memory_system_messages_merged(self) -> None:
-        from localmelo.melo.agent.chat import SYSTEM_PROMPT, _build_system_prompt
+        from localmelo.melo.agent._chat import SYSTEM_PROMPT, _build_system_prompt
 
         short = [Message(role="system", content="extra context info")]
         prompt, others = _build_system_prompt([], short)
@@ -852,7 +852,7 @@ class TestBuildSystemPrompt:
         assert others == []
 
     def test_mixed_roles_separated(self) -> None:
-        from localmelo.melo.agent.chat import SYSTEM_PROMPT, _build_system_prompt
+        from localmelo.melo.agent._chat import SYSTEM_PROMPT, _build_system_prompt
 
         context = [
             Message(role="system", content="[memory] fact A"),
@@ -872,7 +872,7 @@ class TestBuildSystemPrompt:
         assert others[1].role == "assistant"
 
     def test_no_recall_section_without_memory(self) -> None:
-        from localmelo.melo.agent.chat import _build_system_prompt
+        from localmelo.melo.agent._chat import _build_system_prompt
 
         context: list[Message] = []
         short = [Message(role="user", content="query")]

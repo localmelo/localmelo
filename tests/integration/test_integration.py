@@ -16,7 +16,7 @@ from unittest import mock
 import pytest
 
 from localmelo.melo.agent import Agent
-from localmelo.melo.agent.chat import STEP_ESTIMATE_PROMPT
+from localmelo.melo.agent._chat import STEP_ESTIMATE_PROMPT
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.history.sqlite import SqliteHistory
