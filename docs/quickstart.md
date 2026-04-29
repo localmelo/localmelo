@@ -3,6 +3,15 @@
 This guide covers the minimum needed to run localmelo, verify the
 installation, and run the test suite.
 
+Sections:
+
+- [Installation](#installation)
+- [Usage modes](#usage-modes)
+- [Minimum smoke](#minimum-smoke) — verify each mode end-to-end after install
+- [Backend options](#backend-options)
+- [No-embedding mode](#no-embedding-mode)
+- [Running tests](#running-tests)
+
 ## Installation
 
 ```bash
@@ -76,6 +85,162 @@ curl http://localhost:8401/v1/sessions
 # Delete a session
 curl -X DELETE http://localhost:8401/v1/sessions/my-session
 ```
+
+## Minimum smoke
+
+After installing and configuring localmelo, run the commands below to
+verify each path works end-to-end. These are the canonical smoke commands
+referenced from issue [#3](https://github.com/localmelo/localmelo/issues/3)
+and [#13](https://github.com/localmelo/localmelo/issues/13).
+
+The smoke is split into four parts:
+
+1. [Direct CLI smoke](#1-direct-cli-smoke)
+2. [Gateway smoke](#2-gateway-smoke)
+3. [Session reuse smoke](#3-session-reuse-smoke)
+4. [Per-backend minimum config + chat verify](#4-per-backend-minimum-config--chat-verify)
+
+A passing run for parts 1-3 plus at least one backend in part 4 is the
+minimum localmelo "works on this machine" signal.
+
+### 1. Direct CLI smoke
+
+```bash
+melo "What is 6*7?"
+```
+
+Pass criteria:
+
+- the process exits cleanly with status `0`
+- the final answer mentions `42`
+- no traceback is printed
+
+### 2. Gateway smoke
+
+```bash
+# Start the gateway in a separate shell (or background it)
+melo --serve
+
+# Health check — confirms the configured backend is reachable
+curl http://127.0.0.1:8401/v1/health
+
+# Run a query through the gateway
+curl -X POST http://127.0.0.1:8401/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Say hello briefly"}'
+```
+
+Pass criteria:
+
+- `/v1/health` returns JSON with `"status": "ok"` and shows the active
+  backend / model
+- `/v1/agent/run` returns JSON with both `result` and `session_id`
+- the gateway log line on startup names the backend, model, embedding
+  status, and bound URL
+
+### 3. Session reuse smoke
+
+```bash
+# First call — creates a named session
+curl -X POST http://127.0.0.1:8401/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"query":"remember this is session test","session_id":"demo123"}'
+
+# Second call — reuses the same session
+curl -X POST http://127.0.0.1:8401/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"query":"continue","session_id":"demo123"}'
+
+# Confirm the session is listed, then delete it
+curl http://127.0.0.1:8401/v1/sessions
+curl -X DELETE http://127.0.0.1:8401/v1/sessions/demo123
+```
+
+Pass criteria:
+
+- both `POST` calls return the same `session_id` (`demo123`)
+- `GET /v1/sessions` lists the session before delete and not after
+- no session-transition errors appear in the gateway log
+
+### 4. Per-backend minimum config + chat verify
+
+For each backend you want to support, run `melo --reconfigure`, supply
+the minimum config below, then re-run the [Direct CLI smoke](#1-direct-cli-smoke)
+to confirm chat works.
+
+#### `mlc` (local MLC-LLM server)
+
+Minimum config:
+
+| Field | Value |
+|---|---|
+| `chat_backend` | `mlc` |
+| `chat_url` | `http://127.0.0.1:8000/v1` |
+| `chat_model` | a served model id, e.g. `Qwen3-1.7B` or `Qwen3-4B` |
+| `embedding_backend` | `mlc` (or `none` to skip long-term memory) |
+| `embedding_model` | e.g. `Qwen3-Embedding-0.6B` (only if `embedding_backend != "none"`) |
+
+Verify:
+
+```bash
+melo "What is 6*7?"
+```
+
+#### `ollama` (local Ollama server)
+
+Minimum config:
+
+| Field | Value |
+|---|---|
+| `chat_backend` | `ollama` |
+| `chat_url` | `http://127.0.0.1:11434/v1` |
+| `chat_model` | e.g. `qwen3:8b` |
+| `embedding_backend` | `ollama` (or `none`) |
+| `embedding_model` | the embedding model name your Ollama instance has pulled (only if not `none`) |
+
+Verify:
+
+```bash
+melo "What is 6*7?"
+```
+
+#### `online` (cloud chat — `openai`, `anthropic`, `gemini`, `nvidia`)
+
+Minimum config:
+
+| Field | Value |
+|---|---|
+| `chat_backend` | one of `openai`, `anthropic`, `gemini`, `nvidia` |
+| `chat_model` | a vendor model id, e.g. `gpt-4o-mini`, `claude-sonnet-4-20250514`, `gemini-2.0-flash` |
+| API key env | the env var named in `api_key_env` for the chosen backend, e.g. `OPENAI_API_KEY` |
+| `embedding_backend` | a local backend (e.g. `ollama`) for long-term memory, or `none` |
+
+Verify:
+
+```bash
+export OPENAI_API_KEY=sk-...   # or the key env var for your chosen vendor
+melo "What is 6*7?"
+```
+
+### No-embedding smoke
+
+When you do not have a local embedding server, set
+`embedding_backend = "none"`. The agent loop still runs end-to-end —
+only long-term memory is disabled. Verify with the same direct-CLI
+command:
+
+```bash
+melo "What is 6*7?"
+```
+
+Pass criteria:
+
+- the answer is returned without errors
+- the gateway `/v1/health` (if running) reports embedding as disabled, not
+  failed
+
+See [No-embedding mode](#no-embedding-mode) below for the full behavior
+contract.
 
 ## Backend options
 

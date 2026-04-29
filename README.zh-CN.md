@@ -318,6 +318,11 @@ melo --serve
 pytest
 ```
 
+### 验证
+
+完成安装并执行 `melo --reconfigure` 之后，按照 quickstart 中的
+**[最小冒烟测试](docs/quickstart.md#minimum-smoke)** 部分依次验证 direct CLI 模式、gateway 模式、session 复用、以及所选 backend 是否端到端正常。
+
 ## 开发说明
 
 这个项目当前是一个 **architecture-first** 的仓库。

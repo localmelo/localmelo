@@ -326,6 +326,13 @@ melo --serve
 pytest
 ```
 
+### Verify
+
+After install + `melo --reconfigure`, run the
+**[Minimum smoke](docs/quickstart.md#minimum-smoke)** section in the
+quickstart to confirm direct CLI mode, gateway mode, session reuse, and
+your chosen backend each work end-to-end.
+
 ## Development Notes
 
 The project is currently architecture-first.
