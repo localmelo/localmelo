@@ -33,6 +33,7 @@
     <aside class="sidebar" aria-label="架构章节">
       <h2>架构</h2>
       <a class="active" href="#overview">概览</a>
+      <a href="#diagram">架构图</a>
       <a href="#runtime">运行时</a>
       <a href="#boundaries">边界</a>
       <a href="#status">状态</a>
@@ -48,10 +49,123 @@
           这样 agent loop、memory、checker、executor 可以独立于具体模型服务演进。
         </p>
         <div class="masthead-actions">
-          <a class="button primary" href="#runtime">查看运行时路径</a>
+          <a class="button primary" href="#diagram">查看架构图</a>
           <a class="button" href="./quickstart.zh-CN.html">查看快速开始</a>
         </div>
       </header>
+
+      <section class="section" id="diagram">
+        <div class="diagram-intro">
+          <div>
+            <h2>运行时架构图</h2>
+            <p>
+              这张图展示 online path 从用户入口到最终回答的主要流向，也标出
+              checker 边界、provider/backend seam，以及后续 sleep pipeline 的离线路径。
+            </p>
+          </div>
+          <div class="callout">
+            <strong>读图方式：</strong>实线表示 runtime 数据流，虚线表示 model/provider
+            或离线路径，橙色虚线区域表示 checker validation boundary。
+          </div>
+        </div>
+
+        <div class="diagram-scroll">
+          <svg class="arch-map" viewBox="0 0 1180 660" role="img" aria-labelledby="zh-arch-title zh-arch-desc">
+            <title id="zh-arch-title">localmelo 运行时架构图</title>
+            <desc id="zh-arch-desc">localmelo 的用户入口、gateway、agent、checker、memory、executor、providers、backends、config 和 sleep pipeline 关系图。</desc>
+            <defs>
+              <marker id="zh-arr" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto-start-reverse">
+                <path d="M0 0L10 3L0 6z" fill="#8a95a6"></path>
+              </marker>
+              <marker id="zh-arr-red" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto-start-reverse">
+                <path d="M0 0L10 3L0 6z" fill="#b42318"></path>
+              </marker>
+            </defs>
+
+            <rect class="map-group" x="350" y="26" width="470" height="610" rx="8"></rect>
+            <text class="map-label" x="374" y="48">melo - core agent runtime</text>
+            <rect class="map-group infra" x="870" y="26" width="290" height="610" rx="8"></rect>
+            <text class="map-label" x="894" y="48">support - infrastructure</text>
+
+            <rect class="map-checker" x="374" y="150" width="426" height="266" rx="8"></rect>
+            <text class="map-label" x="396" y="174">checker - validation boundary</text>
+            <text class="map-muted" x="468" y="396">validates: ingress · plan · execute · memory</text>
+
+            <rect class="map-node" x="20" y="118" width="130" height="88" rx="8"></rect>
+            <text x="42" y="154">用户 / Client</text>
+            <text class="map-muted" x="42" y="180">CLI or HTTP</text>
+
+            <rect class="map-node" x="190" y="104" width="130" height="96" rx="8"></rect>
+            <rect class="map-badge" x="212" y="122" width="42" height="18" rx="4"></rect>
+            <text class="map-badge-text" x="221" y="135">INFRA</text>
+            <text x="212" y="164">Gateway</text>
+            <text class="map-muted" x="212" y="188">sessions · HTTP</text>
+
+            <rect class="map-node" x="490" y="52" width="196" height="102" rx="8"></rect>
+            <rect class="map-badge" x="512" y="72" width="56" height="18" rx="4"></rect>
+            <text class="map-badge-text" x="521" y="85">PLANNER</text>
+            <rect class="map-badge" x="576" y="72" width="92" height="18" rx="4"></rect>
+            <text class="map-badge-text" x="586" y="85">MODEL USE</text>
+            <text x="512" y="116">Agent / Planner</text>
+            <text class="map-muted" x="512" y="140">main loop · orchestration</text>
+
+            <rect class="map-node" x="388" y="280" width="186" height="104" rx="8"></rect>
+            <rect class="map-badge" x="410" y="300" width="44" height="18" rx="4"></rect>
+            <text class="map-badge-text" x="421" y="313">STORE</text>
+            <text x="410" y="342">Memory</text>
+            <text class="map-muted" x="410" y="366">working · long · history</text>
+
+            <rect class="map-node" x="612" y="280" width="186" height="104" rx="8"></rect>
+            <rect class="map-badge" x="634" y="300" width="62" height="18" rx="4"></rect>
+            <text class="map-badge-text" x="643" y="313">EXECUTOR</text>
+            <text x="634" y="342">Executor</text>
+            <text class="map-muted" x="634" y="366">tools · policy · artifacts</text>
+
+            <rect class="map-node sleep" x="388" y="526" width="186" height="86" rx="8"></rect>
+            <text x="410" y="564">Sleep</text>
+            <text class="map-muted" x="410" y="588">future personalization</text>
+            <text class="map-muted" x="604" y="548">planned offline workflow</text>
+            <text class="map-muted" x="604" y="570">preprocess / training / eval</text>
+
+            <rect class="map-node" x="900" y="66" width="220" height="100" rx="8"></rect>
+            <text x="922" y="108">Providers</text>
+            <text class="map-muted" x="922" y="132">LLM · Embedding contracts</text>
+
+            <rect class="map-node" x="900" y="224" width="220" height="94" rx="8"></rect>
+            <text x="922" y="264">Backends</text>
+            <text class="map-muted" x="922" y="288">local · cloud · registry</text>
+
+            <rect class="map-node" x="900" y="514" width="220" height="94" rx="8"></rect>
+            <text x="922" y="554">Config / Onboard</text>
+            <text class="map-muted" x="922" y="578">TOML config · probes</text>
+
+            <path class="map-arrow" d="M150 162 C168 162,172 152,190 152" marker-end="url(#zh-arr)"></path>
+            <path class="map-arrow" d="M320 152 C374 152,420 102,490 102" marker-end="url(#zh-arr)"></path>
+            <text class="map-muted" x="364" y="128">ingress</text>
+            <path class="map-arrow" d="M550 154 C530 206,504 232,482 280" marker-start="url(#zh-arr)" marker-end="url(#zh-arr)"></path>
+            <text class="map-muted" x="484" y="238">plan + recall</text>
+            <path class="map-arrow" d="M638 154 C660 206,682 232,704 280" marker-start="url(#zh-arr)" marker-end="url(#zh-arr)"></path>
+            <text class="map-muted" x="668" y="238">plan + act</text>
+            <path class="map-arrow fail" d="M800 284 C858 284,858 104,686 104" marker-end="url(#zh-arr-red)"></path>
+            <text class="map-muted" x="840" y="196">fail to replan</text>
+            <path class="map-arrow dashed" d="M900 116 C820 116,760 104,686 104" marker-end="url(#zh-arr)"></path>
+            <text class="map-muted" x="792" y="92">LLM</text>
+            <path class="map-arrow dashed" d="M900 132 C800 176,710 284,574 332" marker-end="url(#zh-arr)"></path>
+            <text class="map-muted" x="764" y="230">embed</text>
+            <path class="map-arrow" d="M1010 224 C1010 198,1010 184,1010 166" marker-end="url(#zh-arr)"></path>
+            <path class="map-arrow dashed" d="M900 560 C700 560,520 508,480 384" marker-end="url(#zh-arr)"></path>
+            <path class="map-arrow offline" d="M574 568 C692 520,808 398,900 142" marker-end="url(#zh-arr)"></path>
+            <path class="map-arrow dashed" d="M900 560 C680 500,450 250,320 152" marker-end="url(#zh-arr)"></path>
+          </svg>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item"><div class="legend-line"></div>runtime 数据流</div>
+          <div class="legend-item"><div class="legend-line dashed"></div>model / provider 路径</div>
+          <div class="legend-item"><div class="legend-box"></div>checker 边界</div>
+          <div class="legend-item"><div class="legend-line fail-l"></div>失败后重新规划</div>
+        </div>
+      </section>
 
       <section class="section" id="runtime">
         <h2>运行时路径</h2>
@@ -111,6 +225,7 @@
     <aside class="toc" aria-label="本页内容">
       <h2>本页内容</h2>
       <a href="#overview">概览</a>
+      <a href="#diagram">架构图</a>
       <a href="#runtime">运行时路径</a>
       <a href="#boundaries">边界</a>
       <a href="#status">实现状态</a>

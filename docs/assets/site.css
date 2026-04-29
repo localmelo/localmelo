@@ -687,6 +687,87 @@ body.lang-zh [data-lang="en"] {
   background: var(--surface);
 }
 
+.arch-map {
+  display: block;
+  width: 100%;
+  min-width: 1080px;
+  height: auto;
+  color: var(--ink);
+}
+
+.arch-map text {
+  fill: var(--ink);
+  font-family: var(--mono);
+  font-size: 13px;
+}
+
+.arch-map .map-muted {
+  fill: var(--muted-2);
+  font-size: 11px;
+}
+
+.arch-map .map-label {
+  fill: var(--muted-2);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+.arch-map .map-group {
+  fill: var(--accent-soft);
+  stroke: color-mix(in srgb, var(--accent) 34%, var(--line));
+}
+
+.arch-map .map-group.infra {
+  fill: var(--surface-2);
+  stroke: var(--line-2);
+}
+
+.arch-map .map-node {
+  fill: var(--surface);
+  stroke: var(--line-2);
+  stroke-width: 1.5;
+}
+
+.arch-map .map-node.sleep {
+  fill: var(--surface-2);
+  stroke-dasharray: 7 5;
+}
+
+.arch-map .map-checker {
+  fill: var(--amber-soft);
+  stroke: color-mix(in srgb, var(--amber) 58%, var(--line));
+  stroke-dasharray: 8 6;
+  stroke-width: 2;
+}
+
+.arch-map .map-arrow {
+  fill: none;
+  stroke: var(--line-2);
+  stroke-width: 1.8;
+}
+
+.arch-map .map-arrow.dashed,
+.arch-map .map-arrow.offline,
+.arch-map .map-arrow.fail {
+  stroke-dasharray: 7 5;
+}
+
+.arch-map .map-arrow.fail {
+  stroke: var(--red);
+}
+
+.arch-map .map-badge {
+  fill: var(--accent-soft);
+  stroke: color-mix(in srgb, var(--accent) 28%, var(--line));
+}
+
+.arch-map .map-badge-text {
+  fill: var(--accent);
+  font-size: 9px;
+  font-weight: 760;
+  text-transform: uppercase;
+}
+
 .diagram {
   position: relative;
 }
