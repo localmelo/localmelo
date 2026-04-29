@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>更新 - localmelo 中文文档</title>
+  <meta name="description" content="localmelo 开发日志与路线图进度。">
+  <link rel="icon" href="./assets/icon_small.png">
+  <link rel="stylesheet" href="./assets/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="topbar">
+      <a class="brand" href="./index.zh-CN.html" aria-label="localmelo 中文文档首页">
+        <img src="./assets/icon_small.png" alt="">
+        <strong><span>local</span>melo</strong>
+      </a>
+      <nav class="site-nav" aria-label="主导航">
+        <a href="./index.zh-CN.html">文档</a>
+        <a href="./quickstart.zh-CN.html">快速开始</a>
+        <a href="./architecture.zh-CN.html">架构</a>
+        <a class="active" href="./updates.zh-CN.html">更新</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
+      <div class="lang-toggle" aria-label="语言">
+        <a href="./updates.html">EN</a>
+        <a class="active" href="./updates.zh-CN.html">中文</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="page layout">
+    <aside class="sidebar" aria-label="更新章节">
+      <h2>更新</h2>
+      <a class="active" href="#latest">最新</a>
+      <a href="#track-one">Track 1</a>
+      <a href="#foundation">基础</a>
+      <a href="#status">状态</a>
+    </aside>
+
+    <article class="content">
+      <header class="doc-hero">
+        <p class="eyebrow">Project updates</p>
+        <h1>开发日志与路线图进度。</h1>
+        <p class="lead">这里记录对 review 真正有用的变化：运行时行为、公开边界、验证覆盖与路线图状态。</p>
+      </header>
+
+      <section class="section" id="latest">
+        <article class="update-entry">
+          <div class="update-tags">
+            <span class="tag experimental">maintenance</span>
+            <span class="tag stable">memory</span>
+            <span class="tag stable">smoke</span>
+          </div>
+          <h2>运行时存储、反思边界与 smoke 验证</h2>
+          <p class="update-date">2026-04-29 - PRs <a href="https://github.com/localmelo/localmelo/pull/8">#8</a> to <a href="https://github.com/localmelo/localmelo/pull/20">#20</a></p>
+          <p>当前 runtime baseline 已经从「能跑」推进到「能验证」。这轮主要收紧了持久化、reflection prompt、onboarding 校验，并补齐了最小 smoke 路径文档。</p>
+          <ul>
+            <li>SQLite history 和长期记忆改为 async <code>aiosqlite</code> 持久化，支持懒连接和写入串行化。</li>
+            <li>Working memory 只保留最新一条压缩 reflection；超预算时强制 <code>decompose</code>。</li>
+            <li>Onboarding 在保存配置前会 probe chat 和 embedding provider。</li>
+            <li>Executor 边界测试覆盖工作区外绝对路径和 symlink 越界。</li>
+            <li><code>Chat</code> 移入 agent 内部命名空间。</li>
+            <li>Quickstart 补齐 direct CLI、gateway、session 复用、no-embedding 和 backend smoke 命令。</li>
+            <li><code>tests/smoke/</code> 新增可被 pytest 发现的本地 backend smoke。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="section" id="track-one">
+        <article class="update-entry">
+          <div class="update-tags">
+            <span class="tag stable">track 1</span>
+            <span class="tag experimental">agent</span>
+            <span class="tag planned">backend</span>
+          </div>
+          <h2>Online core loop 基础完成</h2>
+          <p class="update-date">2026-03-29 - issue <a href="https://github.com/localmelo/localmelo/issues/3">#3</a></p>
+          <p>Track 1 建立了第一条可用 online agent loop：检索、工具解析、规划、执行、记忆写回，以及 direct CLI / gateway 两个入口的响应路径。</p>
+          <ul>
+            <li>后端注册表支持 Ollama、MLC、vLLM、SGLang 本地适配器，以及 OpenAI、Anthropic、Gemini、NVIDIA 云端适配器。</li>
+            <li><code>chat_backend</code> 与 <code>embedding_backend</code> 分离配置。</li>
+            <li>Attempt-based agent loop，包含结构化 reflection 与 utility gate。</li>
+            <li>Ollama native chat provider，支持 thinking/answer 拆分。</li>
+            <li>数据驱动 smoke benchmark，用于 backend 对比。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="section" id="foundation">
+        <article class="update-entry">
+          <div class="update-tags">
+            <span class="tag planned">foundation</span>
+            <span class="tag experimental">architecture</span>
+          </div>
+          <h2>初始架构拆分</h2>
+          <p class="update-date">2026-03-25</p>
+          <ul>
+            <li>运行时拆分到 <code>melo/</code>，基础设施拆分到 <code>support/</code>。</li>
+            <li>引入 provider contracts，降低 core runtime 与 backend implementation 的耦合。</li>
+            <li>建立 memory 和 sleep 包边界，为后续个性化工作留出位置。</li>
+            <li>围绕初始架构扩展早期回归测试。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="section" id="status">
+        <h2>当前路线图状态</h2>
+        <table>
+          <tr><th>区域</th><th>状态</th><th>下一步</th></tr>
+          <tr><td>Online core loop</td><td><span class="tag stable">verified baseline</span></td><td>记录真实 backend smoke 结果，并继续补 gateway lifecycle 覆盖。</td></tr>
+          <tr><td>Memory system</td><td><span class="tag experimental">active</span></td><td>用真实数据验证 persistent retrieval，并 stress 多 session memory access。</td></tr>
+          <tr><td>Deployment shell</td><td><span class="tag planned">planned</span></td><td>定义 core runtime 之外的产品外壳职责。</td></tr>
+          <tr><td>Sleep pipeline</td><td><span class="tag planned">planned</span></td><td>先写 design issue，再实现 training/evaluation。</td></tr>
+          <tr><td>Quality / release</td><td><span class="tag experimental">ongoing</span></td><td>保持 docs、tests、smoke 和 issue hygiene 与各 track 对齐。</td></tr>
+        </table>
+      </section>
+    </article>
+
+    <aside class="toc" aria-label="本页内容">
+      <h2>本页内容</h2>
+      <a href="#latest">最新</a>
+      <a href="#track-one">Track 1</a>
+      <a href="#foundation">基础</a>
+      <a href="#status">路线图状态</a>
+    </aside>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>localmelo 更新</span>
+      <span><a href="https://github.com/localmelo/localmelo/issues">Issues</a> and <a href="https://github.com/localmelo/localmelo/pulls">pull requests</a></span>
+    </div>
+  </footer>
+  <script src="./assets/site.js"></script>
+</body>
+</html>

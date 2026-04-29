@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>架构概览 - localmelo docs</title>
+  <title>架构概览 - localmelo 中文文档</title>
   <meta name="description" content="localmelo 架构概览：agent runtime、memory、checker、executor 与 backend support 层。">
   <link rel="icon" href="./assets/icon_small.png">
   <link rel="stylesheet" href="./assets/site.css">
@@ -11,24 +11,28 @@
 <body>
   <header class="site-header">
     <div class="topbar">
-      <a class="brand" href="./index.html" aria-label="localmelo docs home">
+      <a class="brand" href="./index.zh-CN.html" aria-label="localmelo 中文文档首页">
         <img src="./assets/icon_small.png" alt="">
         <strong><span>local</span>melo</strong>
       </a>
       <nav class="site-nav" aria-label="主导航">
-        <a href="./index.html">Docs</a>
-        <a href="./quickstart.html">Quickstart</a>
+        <a href="./index.zh-CN.html">文档</a>
+        <a href="./quickstart.zh-CN.html">快速开始</a>
         <a class="active" href="./architecture.zh-CN.html">架构</a>
-        <a href="./updates.html">Updates</a>
+        <a href="./updates.zh-CN.html">更新</a>
         <a href="https://github.com/localmelo/localmelo">GitHub</a>
       </nav>
+      <div class="lang-toggle" aria-label="语言">
+        <a href="./architecture.html">EN</a>
+        <a class="active" href="./architecture.zh-CN.html">中文</a>
+      </div>
     </div>
   </header>
 
   <main class="page layout">
     <aside class="sidebar" aria-label="架构章节">
       <h2>架构</h2>
-      <a href="#overview">概览</a>
+      <a class="active" href="#overview">概览</a>
       <a href="#runtime">运行时</a>
       <a href="#boundaries">边界</a>
       <a href="#status">状态</a>
@@ -44,8 +48,8 @@
           这样 agent loop、memory、checker、executor 可以独立于具体模型服务演进。
         </p>
         <div class="masthead-actions">
-          <a class="button primary" href="./architecture.html">打开交互架构图</a>
-          <a class="button" href="./quickstart.html">查看 Quickstart</a>
+          <a class="button primary" href="#runtime">查看运行时路径</a>
+          <a class="button" href="./quickstart.zh-CN.html">查看快速开始</a>
         </div>
       </header>
 
@@ -103,12 +107,20 @@
         </div>
       </section>
     </article>
+
+    <aside class="toc" aria-label="本页内容">
+      <h2>本页内容</h2>
+      <a href="#overview">概览</a>
+      <a href="#runtime">运行时路径</a>
+      <a href="#boundaries">边界</a>
+      <a href="#status">实现状态</a>
+    </aside>
   </main>
 
   <footer class="site-footer">
     <div class="footer-inner">
       <span>localmelo 架构概览</span>
-      <span><a href="./architecture.html">Interactive architecture diagram</a></span>
+      <span>核心边界与运行时路径</span>
     </div>
   </footer>
   <script src="./assets/site.js"></script>

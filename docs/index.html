@@ -22,108 +22,123 @@
         <a href="./updates.html">Updates</a>
         <a href="https://github.com/localmelo/localmelo">GitHub</a>
       </nav>
+      <div class="lang-toggle" aria-label="Language">
+        <a class="active" href="./index.html">EN</a>
+        <a href="./index.zh-CN.html">中文</a>
+      </div>
     </div>
   </header>
 
-  <main class="page">
-    <section class="masthead">
-      <div>
-        <p class="eyebrow">Pre-alpha local-first agent runtime</p>
-        <h1>Run an agent loop with explicit memory, tool use, and local backend control.</h1>
-        <p class="lead">
-          localmelo separates the core agent runtime from infrastructure. It connects to
-          user-managed local or cloud model endpoints, records task history, and keeps
-          memory boundaries visible instead of hiding them behind a single context blob.
-        </p>
-        <div class="masthead-actions">
-          <a class="button primary" href="./quickstart.html">Start with Quickstart</a>
-          <a class="button" href="./architecture.html">View Architecture</a>
-        </div>
-      </div>
+  <main class="page layout">
+    <aside class="sidebar" aria-label="Documentation sections">
+      <h2>Get started</h2>
+      <a class="active" href="#overview">Overview</a>
+      <a href="#setup">Set up</a>
+      <a href="./quickstart.html">Quickstart</a>
+      <a href="./updates.html">Updates</a>
+      <h2>Runtime</h2>
+      <a href="#runtime">Runtime model</a>
+      <a href="./architecture.html">Architecture</a>
+      <a href="./quickstart.html#backends">Backends</a>
+      <a href="./quickstart.html#tests">Validation</a>
+    </aside>
 
-      <div class="terminal" aria-label="First run commands">
-        <div class="terminal-title">minimum local run</div>
-        <pre><code>pip install -e ".[dev,gateway]"
+    <article class="content">
+      <header class="doc-hero" id="overview">
+        <p class="eyebrow">Get started</p>
+        <h1>localmelo documentation</h1>
+        <p class="lead">
+          localmelo is a pre-alpha local-first agent runtime with explicit memory
+          layers, checked tool execution, and connectors for user-managed local or
+          cloud model endpoints.
+        </p>
+        <div class="doc-meta">
+          <span class="tag stable">online loop verified</span>
+          <span class="tag experimental">memory active</span>
+          <span class="tag planned">sleep planned</span>
+        </div>
+        <div class="masthead-visual doc-illustration">
+          <img src="./assets/melo.png" alt="Melo mascot">
+        </div>
+      </header>
+
+      <section class="section" id="setup">
+        <h2>Set up</h2>
+        <p>
+          Install the package, configure a chat backend, then run a single direct
+          query. This is the smallest useful path through the runtime.
+        </p>
+        <div class="terminal" aria-label="First run commands">
+          <div class="terminal-title">minimum local run</div>
+          <pre><code>pip install -e ".[dev,gateway]"
 melo --reconfigure
 melo "What is 6*7?"</code></pre>
-      </div>
-    </section>
+        </div>
+        <div class="masthead-actions">
+          <a class="button primary" href="./quickstart.html">Open Quickstart</a>
+          <a class="button" href="./architecture.html">View Architecture</a>
+        </div>
+      </section>
 
-    <section class="section" id="start">
-      <p class="eyebrow">Start here</p>
-      <h2>Choose the path that matches what you are trying to verify.</h2>
-      <div class="link-grid">
-        <a class="link-card" href="./quickstart.html#direct-cli">
-          <strong>Run the CLI</strong>
-          <span>Install localmelo and complete a one-shot direct agent query.</span>
-        </a>
-        <a class="link-card" href="./quickstart.html#gateway">
-          <strong>Run the gateway</strong>
-          <span>Start the HTTP API, call health, and reuse a session.</span>
-        </a>
-        <a class="link-card" href="./quickstart.html#backends">
-          <strong>Configure backends</strong>
-          <span>Use Ollama, MLC, vLLM, SGLang, or cloud chat with optional embedding.</span>
-        </a>
-        <a class="link-card" href="./architecture.html">
-          <strong>Understand the runtime</strong>
-          <span>See how agent, memory, checker, executor, and support layers connect.</span>
-        </a>
-        <a class="link-card" href="./quickstart.html#tests">
-          <strong>Run validation</strong>
-          <span>Use the focused pytest suites and smoke checks used by maintainers.</span>
-        </a>
-        <a class="link-card" href="./updates.html">
-          <strong>Track progress</strong>
-          <span>Review recent runtime, memory, backend, and roadmap changes.</span>
-        </a>
-      </div>
-    </section>
+      <section class="section" id="runtime">
+        <h2>What localmelo provides</h2>
+        <div class="link-grid">
+          <a class="link-card" href="./quickstart.html#direct-cli">
+            <strong>Direct CLI</strong>
+            <span>Run one agent query from the command line and exit.</span>
+          </a>
+          <a class="link-card" href="./quickstart.html#gateway">
+            <strong>Gateway API</strong>
+            <span>Serve the same runtime over HTTP with session reuse.</span>
+          </a>
+          <a class="link-card" href="./architecture.html#boundaries">
+            <strong>Checked tool use</strong>
+            <span>Validate ingress, planning, execution, output, and memory writes.</span>
+          </a>
+          <a class="link-card" href="./architecture.html#status">
+            <strong>Layered memory</strong>
+            <span>Keep working memory, history, long-term retrieval, and tools separate.</span>
+          </a>
+          <a class="link-card" href="./quickstart.html#backends">
+            <strong>Backend connectors</strong>
+            <span>Connect to Ollama, MLC, vLLM, SGLang, or supported cloud providers.</span>
+          </a>
+          <a class="link-card" href="./updates.html">
+            <strong>Roadmap tracking</strong>
+            <span>Follow runtime, memory, backend, and release-quality progress.</span>
+          </a>
+        </div>
+      </section>
 
-    <section class="section" id="status">
-      <p class="eyebrow">Project state</p>
-      <h2>What is stable today versus still experimental.</h2>
-      <div class="status-grid">
-        <article class="status-card">
-          <span class="tag stable">Stable enough to verify</span>
-          <h3>Online core loop</h3>
-          <p>Direct CLI mode, gateway entry points, provider registry, tool execution, and checker boundaries have automated coverage.</p>
-        </article>
-        <article class="status-card">
-          <span class="tag experimental">Experimental</span>
-          <h3>Memory persistence</h3>
-          <p>SQLite-backed history and long-term memory are async and persistent, but retrieval and promotion policies are still being shaped.</p>
-        </article>
-        <article class="status-card">
-          <span class="tag planned">Planned</span>
-          <h3>Sleep pipeline</h3>
-          <p>Sleep-time training and evaluation are scaffolded. The real personalization workflow is a later track, not part of the current runtime baseline.</p>
-        </article>
-      </div>
-    </section>
+      <section class="section" id="state">
+        <h2>Current project state</h2>
+        <div class="status-grid">
+          <article class="status-card">
+            <span class="tag stable">Ready to verify</span>
+            <h3>Online core loop</h3>
+            <p>Direct CLI, gateway entry points, provider registry, tool execution, and checker boundaries have automated coverage.</p>
+          </article>
+          <article class="status-card">
+            <span class="tag experimental">Active</span>
+            <h3>Memory persistence</h3>
+            <p>SQLite-backed history and long-term memory are async and persistent. Retrieval policy is still evolving.</p>
+          </article>
+          <article class="status-card">
+            <span class="tag planned">Later track</span>
+            <h3>Sleep pipeline</h3>
+            <p>Sleep-time training and evaluation are scaffolded. The personalization workflow is not part of the current baseline.</p>
+          </article>
+        </div>
+      </section>
+    </article>
 
-    <section class="section" id="model">
-      <p class="eyebrow">Runtime model</p>
-      <h2>The core split is simple: `melo/` owns behavior, `support/` owns infrastructure.</h2>
-      <div class="steps">
-        <article class="step">
-          <h3>Agent plans and decides</h3>
-          <p>The agent retrieves context, resolves tools, asks the model for the next step, and either returns a final answer or executes a tool call.</p>
-        </article>
-        <article class="step">
-          <h3>Checker validates boundaries</h3>
-          <p>Gateway ingress, planning payloads, executor calls, output size, and memory writes flow through explicit checks.</p>
-        </article>
-        <article class="step">
-          <h3>Memory stays layered</h3>
-          <p>Working memory, history, long-term retrieval, and tool registry are separate surfaces with separate responsibilities.</p>
-        </article>
-        <article class="step">
-          <h3>Backends stay external</h3>
-          <p>localmelo connects to configured endpoints. It does not start or manage Ollama, MLC, vLLM, SGLang, or cloud runtime infrastructure.</p>
-        </article>
-      </div>
-    </section>
+    <aside class="toc" aria-label="On this page">
+      <h2>On this page</h2>
+      <a href="#overview">Overview</a>
+      <a href="#setup">Set up</a>
+      <a href="#runtime">Runtime model</a>
+      <a href="#state">Project state</a>
+    </aside>
   </main>
 
   <footer class="site-footer">

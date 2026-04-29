@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>localmelo 文档</title>
+  <meta name="description" content="localmelo 文档：本地优先 agent runtime、显式 memory 分层和安全 tool use。">
+  <link rel="icon" href="./assets/icon_small.png">
+  <link rel="stylesheet" href="./assets/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="topbar">
+      <a class="brand" href="./index.zh-CN.html" aria-label="localmelo 中文文档首页">
+        <img src="./assets/icon_small.png" alt="">
+        <strong><span>local</span>melo</strong>
+      </a>
+      <nav class="site-nav" aria-label="主导航">
+        <a class="active" href="./index.zh-CN.html">文档</a>
+        <a href="./quickstart.zh-CN.html">快速开始</a>
+        <a href="./architecture.zh-CN.html">架构</a>
+        <a href="./updates.zh-CN.html">更新</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
+      <div class="lang-toggle" aria-label="语言">
+        <a href="./index.html">EN</a>
+        <a class="active" href="./index.zh-CN.html">中文</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="page layout">
+    <aside class="sidebar" aria-label="文档章节">
+      <h2>开始</h2>
+      <a class="active" href="#overview">概览</a>
+      <a href="#setup">安装配置</a>
+      <a href="./quickstart.zh-CN.html">快速开始</a>
+      <a href="./updates.zh-CN.html">更新</a>
+      <h2>运行时</h2>
+      <a href="#runtime">运行模型</a>
+      <a href="./architecture.zh-CN.html">架构</a>
+      <a href="./quickstart.zh-CN.html#backends">后端</a>
+      <a href="./quickstart.zh-CN.html#tests">验证</a>
+    </aside>
+
+    <article class="content">
+      <header class="doc-hero" id="overview">
+        <p class="eyebrow">Get started</p>
+        <h1>localmelo 文档</h1>
+        <p class="lead">
+          localmelo 是一个 pre-alpha、本地优先的 agent runtime，核心能力是显式
+          memory 分层、受检查的 tool execution，以及连接用户自己管理的本地或云端模型 endpoint。
+        </p>
+        <div class="doc-meta">
+          <span class="tag stable">online loop 可验证</span>
+          <span class="tag experimental">memory 进行中</span>
+          <span class="tag planned">sleep 后续计划</span>
+        </div>
+        <div class="masthead-visual doc-illustration">
+          <img src="./assets/melo.png" alt="Melo mascot">
+        </div>
+      </header>
+
+      <section class="section" id="setup">
+        <h2>安装配置</h2>
+        <p>
+          先安装 package，配置 chat backend，然后运行一次 direct query。这是穿过当前
+          runtime 的最小可用路径。
+        </p>
+        <div class="terminal" aria-label="最小本地运行命令">
+          <div class="terminal-title">minimum local run</div>
+          <pre><code>pip install -e ".[dev,gateway]"
+melo --reconfigure
+melo "What is 6*7?"</code></pre>
+        </div>
+        <div class="masthead-actions">
+          <a class="button primary" href="./quickstart.zh-CN.html">打开快速开始</a>
+          <a class="button" href="./architecture.zh-CN.html">查看架构</a>
+        </div>
+      </section>
+
+      <section class="section" id="runtime">
+        <h2>localmelo 提供什么</h2>
+        <div class="link-grid">
+          <a class="link-card" href="./quickstart.zh-CN.html#direct-cli">
+            <strong>Direct CLI</strong>
+            <span>从命令行执行一次 agent query，然后退出。</span>
+          </a>
+          <a class="link-card" href="./quickstart.zh-CN.html#gateway">
+            <strong>Gateway API</strong>
+            <span>用 HTTP 暴露同一个 runtime，并支持 session 复用。</span>
+          </a>
+          <a class="link-card" href="./architecture.zh-CN.html#boundaries">
+            <strong>受检查的工具执行</strong>
+            <span>校验 ingress、planning、execution、output 和 memory write。</span>
+          </a>
+          <a class="link-card" href="./architecture.zh-CN.html#status">
+            <strong>分层 Memory</strong>
+            <span>把 working memory、history、long-term retrieval 和 tools 拆开维护。</span>
+          </a>
+          <a class="link-card" href="./quickstart.zh-CN.html#backends">
+            <strong>后端连接器</strong>
+            <span>连接 Ollama、MLC、vLLM、SGLang 或支持的云端 provider。</span>
+          </a>
+          <a class="link-card" href="./updates.zh-CN.html">
+            <strong>路线图跟踪</strong>
+            <span>跟踪 runtime、memory、backend 和 release quality 的进展。</span>
+          </a>
+        </div>
+      </section>
+
+      <section class="section" id="state">
+        <h2>当前项目状态</h2>
+        <div class="status-grid">
+          <article class="status-card">
+            <span class="tag stable">可以验证</span>
+            <h3>Online core loop</h3>
+            <p>Direct CLI、gateway、provider registry、tool execution 和 checker boundary 已经有自动化覆盖。</p>
+          </article>
+          <article class="status-card">
+            <span class="tag experimental">进行中</span>
+            <h3>Memory persistence</h3>
+            <p>SQLite history 和 long-term memory 已经异步持久化；retrieval policy 仍在演进。</p>
+          </article>
+          <article class="status-card">
+            <span class="tag planned">后续 track</span>
+            <h3>Sleep pipeline</h3>
+            <p>Sleep-time training 和 evaluation 仍是 scaffold，personalization workflow 不属于当前 baseline。</p>
+          </article>
+        </div>
+      </section>
+    </article>
+
+    <aside class="toc" aria-label="本页内容">
+      <h2>本页内容</h2>
+      <a href="#overview">概览</a>
+      <a href="#setup">安装配置</a>
+      <a href="#runtime">运行模型</a>
+      <a href="#state">项目状态</a>
+    </aside>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>localmelo 中文文档</span>
+      <span>Pre-alpha. API 和 workflow 仍可能变化。</span>
+    </div>
+  </footer>
+  <script src="./assets/site.js"></script>
+</body>
+</html>

@@ -10,7 +10,7 @@
 
 这个项目正在公开迭代中。当前已经完成了整体架构搭建、代码分层和核心接口整理，但完整的产品能力还没有实现。
 
-**[Docs](https://localmelo.github.io/localmelo/)** | **[Quickstart](https://localmelo.github.io/localmelo/quickstart.html)** | **[架构](https://localmelo.github.io/localmelo/architecture.zh-CN.html)** | **[更新](https://localmelo.github.io/localmelo/updates.html)**
+**[文档](https://localmelo.github.io/localmelo/index.zh-CN.html)** | **[快速开始](https://localmelo.github.io/localmelo/quickstart.zh-CN.html)** | **[架构](https://localmelo.github.io/localmelo/architecture.zh-CN.html)** | **[更新](https://localmelo.github.io/localmelo/updates.zh-CN.html)**
 
 ## 当前状态
 
@@ -321,7 +321,7 @@ pytest
 ### 验证
 
 完成安装并执行 `melo --reconfigure` 之后，按照
-**[Quickstart smoke checks](https://localmelo.github.io/localmelo/quickstart.html)**
+**[快速开始 smoke checks](https://localmelo.github.io/localmelo/quickstart.zh-CN.html)**
 依次验证 direct CLI 模式、gateway 模式、session 复用、以及所选 backend 是否端到端正常。
 
 ## 开发说明
@@ -362,7 +362,7 @@ pytest
 
 ## 更新记录
 
-查看完整的 **[更新日志](https://localmelo.github.io/localmelo/updates.html)**（支持中英文切换）了解每个开发阶段的详细进展。
+查看完整的 **[更新日志](https://localmelo.github.io/localmelo/updates.zh-CN.html)** 了解每个开发阶段的详细进展。
 
 在项目进入更稳定阶段之前，更新以增量式推进为主，偶尔包含 breaking changes。
 

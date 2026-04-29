@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>快速开始 - localmelo 中文文档</title>
+  <meta name="description" content="安装 localmelo，运行 direct CLI，验证 gateway，配置 backend，并运行测试。">
+  <link rel="icon" href="./assets/icon_small.png">
+  <link rel="stylesheet" href="./assets/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="topbar">
+      <a class="brand" href="./index.zh-CN.html" aria-label="localmelo 中文文档首页">
+        <img src="./assets/icon_small.png" alt="">
+        <strong><span>local</span>melo</strong>
+      </a>
+      <nav class="site-nav" aria-label="主导航">
+        <a href="./index.zh-CN.html">文档</a>
+        <a class="active" href="./quickstart.zh-CN.html">快速开始</a>
+        <a href="./architecture.zh-CN.html">架构</a>
+        <a href="./updates.zh-CN.html">更新</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
+      <div class="lang-toggle" aria-label="语言">
+        <a href="./quickstart.html">EN</a>
+        <a class="active" href="./quickstart.zh-CN.html">中文</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="page layout">
+    <aside class="sidebar" aria-label="Quickstart 章节">
+      <h2>快速开始</h2>
+      <a class="active" href="#install">安装</a>
+      <a href="#direct-cli">Direct CLI</a>
+      <a href="#gateway">Gateway</a>
+      <a href="#sessions">Sessions</a>
+      <a href="#backends">后端</a>
+      <a href="#no-embedding">No embedding</a>
+      <a href="#tests">Tests</a>
+    </aside>
+
+    <article class="content">
+      <header class="doc-hero">
+        <p class="eyebrow">快速开始</p>
+        <h1>安装、配置并 smoke-test localmelo。</h1>
+        <p class="lead">
+          这页是从 checkout 到验证本地 agent loop 的最短路径，覆盖 direct CLI、gateway、
+          session 复用、backend setup 和 focused test suites。
+        </p>
+      </header>
+
+      <section class="section" id="install">
+        <h2>安装</h2>
+        <p>从仓库根目录以 editable mode 安装。</p>
+        <pre><code># Core + dev dependencies
+pip install -e ".[dev]"
+
+# Core + dev + gateway dependencies
+pip install -e ".[dev,gateway]"</code></pre>
+      </section>
+
+      <section class="section" id="direct-cli">
+        <h2>Direct CLI smoke</h2>
+        <p>Direct mode 执行一次 query 后退出，是确认 chat backend 可用的最快路径。</p>
+        <pre><code>melo "What is 6*7?"</code></pre>
+        <div class="callout">
+          <strong>通过标准：</strong>命令以 status 0 退出，答案提到 42，并且没有 traceback。
+        </div>
+        <p>也可以临时覆盖 endpoint 和 model：</p>
+        <pre><code>melo --base-url http://localhost:11434/v1 \
+     --chat-model qwen3:8b \
+     "What is 6*7?"</code></pre>
+      </section>
+
+      <section class="section" id="gateway">
+        <h2>Gateway smoke</h2>
+        <p>Gateway mode 在同一个 agent runtime 外面启动 HTTP API。一个 shell 启动服务，另一个 shell 调用。</p>
+        <pre><code>melo --serve</code></pre>
+        <pre><code>curl http://127.0.0.1:8401/v1/health
+
+curl -X POST http://127.0.0.1:8401/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Say hello briefly"}'</code></pre>
+      </section>
+
+      <section class="section" id="sessions">
+        <h2>Session 复用</h2>
+        <p>传入稳定的 <code>session_id</code> 可以在多次 gateway 调用之间复用同一个 session。</p>
+        <pre><code>curl -X POST http://127.0.0.1:8401/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"query":"remember this is session test","session_id":"demo123"}'
+
+curl -X POST http://127.0.0.1:8401/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"query":"continue","session_id":"demo123"}'
+
+curl http://127.0.0.1:8401/v1/sessions
+curl -X DELETE http://127.0.0.1:8401/v1/sessions/demo123</code></pre>
+      </section>
+
+      <section class="section" id="backends">
+        <h2>Backend setup</h2>
+        <p>
+          localmelo 使用 split backend model：<code>chat_backend</code> 和
+          <code>embedding_backend</code> 通过 <code>melo --reconfigure</code> 独立配置。
+        </p>
+        <table>
+          <tr><th>模式</th><th>Chat backend</th><th>Embedding backend</th><th>说明</th></tr>
+          <tr><td>Ollama local</td><td><code>ollama</code></td><td><code>ollama</code> 或 <code>none</code></td><td>连接用户自己管理的 Ollama server。</td></tr>
+          <tr><td>MLC local</td><td><code>mlc</code></td><td><code>mlc</code> 或 <code>none</code></td><td>连接用户自己管理的 OpenAI-compatible MLC endpoint。</td></tr>
+          <tr><td>Other local</td><td><code>vllm</code> 或 <code>sglang</code></td><td>同一个 local backend 或 <code>none</code></td><td>runtime lifecycle 仍在 localmelo 外部。</td></tr>
+          <tr><td>Cloud chat</td><td><code>openai</code>、<code>anthropic</code>、<code>gemini</code> 或 <code>nvidia</code></td><td>local backend 或 <code>none</code></td><td>运行前设置对应 API key env var。</td></tr>
+        </table>
+      </section>
+
+      <section class="section" id="no-embedding">
+        <h2>No-embedding mode</h2>
+        <p>
+          当不想运行 embedding server 时，把 <code>embedding_backend</code> 设为
+          <code>"none"</code>。Agent 仍支持 direct answer、tool use 和 history recording；
+          只有 long-term embedding retrieval 会被关闭。
+        </p>
+        <pre><code>melo --reconfigure
+melo "What is 6*7?"</code></pre>
+      </section>
+
+      <section class="section" id="tests">
+        <h2>Tests</h2>
+        <pre><code># Dev-safe core suites
+python -m pytest tests/agent tests/checker tests/executor \
+                 tests/cli tests/memory tests/integration -q
+
+# Gateway suite
+python -m pytest tests/gateway -q
+
+# Full suite
+python -m pytest tests/ -q
+
+# Lint
+python -m ruff check .</code></pre>
+      </section>
+    </article>
+
+    <aside class="toc" aria-label="本页内容">
+      <h2>本页内容</h2>
+      <a href="#install">安装</a>
+      <a href="#direct-cli">Direct CLI</a>
+      <a href="#gateway">Gateway</a>
+      <a href="#sessions">Sessions</a>
+      <a href="#backends">后端</a>
+      <a href="#no-embedding">No embedding</a>
+      <a href="#tests">Tests</a>
+    </aside>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>localmelo 中文文档</span>
+      <span><a href="./quickstart.md">Markdown quickstart</a></span>
+    </div>
+  </footer>
+  <script src="./assets/site.js"></script>
+</body>
+</html>
