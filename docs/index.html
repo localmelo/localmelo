@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>localmelo docs</title>
+  <meta name="description" content="Documentation for localmelo, a local-first agent runtime with explicit memory layers and safe tool use.">
+  <link rel="icon" href="./assets/icon_small.png">
+  <link rel="stylesheet" href="./assets/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="topbar">
+      <a class="brand" href="./index.html" aria-label="localmelo docs home">
+        <img src="./assets/icon_small.png" alt="">
+        <strong><span>local</span>melo</strong>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a class="active" href="./index.html">Docs</a>
+        <a href="./quickstart.html">Quickstart</a>
+        <a href="./architecture.html">Architecture</a>
+        <a href="./updates.html">Updates</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="masthead">
+      <div>
+        <p class="eyebrow">Pre-alpha local-first agent runtime</p>
+        <h1>Run an agent loop with explicit memory, tool use, and local backend control.</h1>
+        <p class="lead">
+          localmelo separates the core agent runtime from infrastructure. It connects to
+          user-managed local or cloud model endpoints, records task history, and keeps
+          memory boundaries visible instead of hiding them behind a single context blob.
+        </p>
+        <div class="masthead-actions">
+          <a class="button primary" href="./quickstart.html">Start with Quickstart</a>
+          <a class="button" href="./architecture.html">View Architecture</a>
+        </div>
+      </div>
+
+      <div class="terminal" aria-label="First run commands">
+        <div class="terminal-title">minimum local run</div>
+        <pre><code>pip install -e ".[dev,gateway]"
+melo --reconfigure
+melo "What is 6*7?"</code></pre>
+      </div>
+    </section>
+
+    <section class="section" id="start">
+      <p class="eyebrow">Start here</p>
+      <h2>Choose the path that matches what you are trying to verify.</h2>
+      <div class="link-grid">
+        <a class="link-card" href="./quickstart.html#direct-cli">
+          <strong>Run the CLI</strong>
+          <span>Install localmelo and complete a one-shot direct agent query.</span>
+        </a>
+        <a class="link-card" href="./quickstart.html#gateway">
+          <strong>Run the gateway</strong>
+          <span>Start the HTTP API, call health, and reuse a session.</span>
+        </a>
+        <a class="link-card" href="./quickstart.html#backends">
+          <strong>Configure backends</strong>
+          <span>Use Ollama, MLC, vLLM, SGLang, or cloud chat with optional embedding.</span>
+        </a>
+        <a class="link-card" href="./architecture.html">
+          <strong>Understand the runtime</strong>
+          <span>See how agent, memory, checker, executor, and support layers connect.</span>
+        </a>
+        <a class="link-card" href="./quickstart.html#tests">
+          <strong>Run validation</strong>
+          <span>Use the focused pytest suites and smoke checks used by maintainers.</span>
+        </a>
+        <a class="link-card" href="./updates.html">
+          <strong>Track progress</strong>
+          <span>Review recent runtime, memory, backend, and roadmap changes.</span>
+        </a>
+      </div>
+    </section>
+
+    <section class="section" id="status">
+      <p class="eyebrow">Project state</p>
+      <h2>What is stable today versus still experimental.</h2>
+      <div class="status-grid">
+        <article class="status-card">
+          <span class="tag stable">Stable enough to verify</span>
+          <h3>Online core loop</h3>
+          <p>Direct CLI mode, gateway entry points, provider registry, tool execution, and checker boundaries have automated coverage.</p>
+        </article>
+        <article class="status-card">
+          <span class="tag experimental">Experimental</span>
+          <h3>Memory persistence</h3>
+          <p>SQLite-backed history and long-term memory are async and persistent, but retrieval and promotion policies are still being shaped.</p>
+        </article>
+        <article class="status-card">
+          <span class="tag planned">Planned</span>
+          <h3>Sleep pipeline</h3>
+          <p>Sleep-time training and evaluation are scaffolded. The real personalization workflow is a later track, not part of the current runtime baseline.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section" id="model">
+      <p class="eyebrow">Runtime model</p>
+      <h2>The core split is simple: `melo/` owns behavior, `support/` owns infrastructure.</h2>
+      <div class="steps">
+        <article class="step">
+          <h3>Agent plans and decides</h3>
+          <p>The agent retrieves context, resolves tools, asks the model for the next step, and either returns a final answer or executes a tool call.</p>
+        </article>
+        <article class="step">
+          <h3>Checker validates boundaries</h3>
+          <p>Gateway ingress, planning payloads, executor calls, output size, and memory writes flow through explicit checks.</p>
+        </article>
+        <article class="step">
+          <h3>Memory stays layered</h3>
+          <p>Working memory, history, long-term retrieval, and tool registry are separate surfaces with separate responsibilities.</p>
+        </article>
+        <article class="step">
+          <h3>Backends stay external</h3>
+          <p>localmelo connects to configured endpoints. It does not start or manage Ollama, MLC, vLLM, SGLang, or cloud runtime infrastructure.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>localmelo documentation</span>
+      <span>Pre-alpha. APIs and workflows may change.</span>
+    </div>
+  </footer>
+  <script src="./assets/site.js"></script>
+</body>
+</html>

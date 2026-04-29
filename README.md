@@ -15,7 +15,7 @@ The project is being built in public. The architecture is in place, the codebase
 is being organized, and core interfaces are being stabilized, but the full
 product vision is not implemented yet.
 
-**[Updates & Changelog](https://localmelo.github.io/localmelo/updates.html)** | **[Architecture Diagram](https://localmelo.github.io/localmelo/architecture.html)**
+**[Docs](https://localmelo.github.io/localmelo/)** | **[Quickstart](https://localmelo.github.io/localmelo/quickstart.html)** | **[Architecture](https://localmelo.github.io/localmelo/architecture.html)** | **[Updates](https://localmelo.github.io/localmelo/updates.html)**
 
 ## Status
 
@@ -87,7 +87,7 @@ localmelo/
 
 ---
 
-**[Interactive Architecture Diagram](https://localmelo.github.io/localmelo/architecture.html)** — click components, highlight connections, detail panels
+**[Architecture docs](https://localmelo.github.io/localmelo/architecture.html)** — runtime split, checker boundaries, component details, and interactive diagram
 
 <details>
 <summary><b>Agent / Planner</b> — main loop, chat planning, orchestration</summary>
@@ -104,7 +104,7 @@ The agent runs a multi-stage loop per task:
 
 The checker validates boundaries at stages 2–5. If any check fails, the agent replans.
 
-Key files: `melo/agent/agent.py` · `melo/agent/chat.py`
+Key files: `melo/agent/agent.py` · `melo/agent/_chat.py`
 
 </details>
 
@@ -329,9 +329,9 @@ pytest
 ### Verify
 
 After install + `melo --reconfigure`, run the
-**[Minimum smoke](docs/quickstart.md#minimum-smoke)** section in the
-quickstart to confirm direct CLI mode, gateway mode, session reuse, and
-your chosen backend each work end-to-end.
+**[Quickstart smoke checks](https://localmelo.github.io/localmelo/quickstart.html)**
+to confirm direct CLI mode, gateway mode, session reuse, and your chosen
+backend each work end-to-end.
 
 ## Development Notes
 
@@ -372,7 +372,9 @@ Long-term:
 
 ## Updates
 
-See the full **[Updates & Changelog](https://localmelo.github.io/localmelo/updates.html)** for detailed progress on each development track, with English/Chinese toggle.
+See the full **[Updates](https://localmelo.github.io/localmelo/updates.html)**
+page for detailed progress on each development track, with English/Chinese
+toggle.
 
 Until the project reaches a more stable phase, updates will be incremental,
 architecture-heavy, and sometimes breaking.

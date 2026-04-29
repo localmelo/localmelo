@@ -10,7 +10,7 @@
 
 这个项目正在公开迭代中。当前已经完成了整体架构搭建、代码分层和核心接口整理，但完整的产品能力还没有实现。
 
-**[更新日志](https://localmelo.github.io/localmelo/updates.html)** | **[架构图](https://localmelo.github.io/localmelo/architecture.zh-CN.html)**
+**[Docs](https://localmelo.github.io/localmelo/)** | **[Quickstart](https://localmelo.github.io/localmelo/quickstart.html)** | **[架构](https://localmelo.github.io/localmelo/architecture.zh-CN.html)** | **[更新](https://localmelo.github.io/localmelo/updates.html)**
 
 ## 当前状态
 
@@ -82,7 +82,7 @@ localmelo/
 
 ---
 
-**[交互式架构图](https://localmelo.github.io/localmelo/architecture.zh-CN.html)** — 点击组件查看详情，高亮关联连接
+**[架构文档](https://localmelo.github.io/localmelo/architecture.zh-CN.html)** — runtime 分层、checker 边界、组件职责与交互式架构图入口
 
 <details>
 <summary><b>Agent / Planner</b> — 主循环、chat planning、调度</summary>
@@ -99,7 +99,7 @@ Agent 对每个 task 执行多阶段循环：
 
 Checker 在第 2–5 阶段验证边界。任何检查失败都会触发 agent 重新规划。
 
-核心文件：`melo/agent/agent.py` · `melo/agent/chat.py`
+核心文件：`melo/agent/agent.py` · `melo/agent/_chat.py`
 
 </details>
 
@@ -320,8 +320,9 @@ pytest
 
 ### 验证
 
-完成安装并执行 `melo --reconfigure` 之后，按照 quickstart 中的
-**[最小冒烟测试](docs/quickstart.md#minimum-smoke)** 部分依次验证 direct CLI 模式、gateway 模式、session 复用、以及所选 backend 是否端到端正常。
+完成安装并执行 `melo --reconfigure` 之后，按照
+**[Quickstart smoke checks](https://localmelo.github.io/localmelo/quickstart.html)**
+依次验证 direct CLI 模式、gateway 模式、session 复用、以及所选 backend 是否端到端正常。
 
 ## 开发说明
 

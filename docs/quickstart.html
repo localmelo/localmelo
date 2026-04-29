@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quickstart - localmelo docs</title>
+  <meta name="description" content="Install localmelo, run the direct CLI, verify gateway mode, configure backends, and run tests.">
+  <link rel="icon" href="./assets/icon_small.png">
+  <link rel="stylesheet" href="./assets/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="topbar">
+      <a class="brand" href="./index.html" aria-label="localmelo docs home">
+        <img src="./assets/icon_small.png" alt="">
+        <strong><span>local</span>melo</strong>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="./index.html">Docs</a>
+        <a class="active" href="./quickstart.html">Quickstart</a>
+        <a href="./architecture.html">Architecture</a>
+        <a href="./updates.html">Updates</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page layout">
+    <aside class="sidebar" aria-label="Quickstart sections">
+      <h2>Quickstart</h2>
+      <a href="#install">Install</a>
+      <a href="#direct-cli">Direct CLI</a>
+      <a href="#gateway">Gateway</a>
+      <a href="#sessions">Sessions</a>
+      <a href="#backends">Backends</a>
+      <a href="#no-embedding">No embedding</a>
+      <a href="#tests">Tests</a>
+    </aside>
+
+    <article class="content">
+      <header class="doc-hero">
+        <p class="eyebrow">Quickstart</p>
+        <h1>Install, configure, and smoke-test localmelo.</h1>
+        <p class="lead">
+          This page is the minimum path from checkout to a verified local agent loop.
+          It covers direct CLI mode, gateway mode, session reuse, backend setup, and
+          the focused test suites.
+        </p>
+      </header>
+
+      <section class="section" id="install">
+        <h2>Install</h2>
+        <p>Install the package in editable mode from the repository root.</p>
+        <pre><code># Core + dev dependencies
+pip install -e ".[dev]"
+
+# Core + dev + gateway dependencies
+pip install -e ".[dev,gateway]"</code></pre>
+      </section>
+
+      <section class="section" id="direct-cli">
+        <h2>Direct CLI smoke</h2>
+        <p>
+          Direct mode runs one query and exits. It is the fastest way to confirm the
+          configured chat backend can complete a normal request.
+        </p>
+        <pre><code>melo "What is 6*7?"</code></pre>
+        <div class="callout">
+          <strong>Pass criteria:</strong> the command exits with status 0, returns an
+          answer that mentions 42, and prints no traceback.
+        </div>
+        <p>You can override the endpoint and model for an ad-hoc run:</p>
+        <pre><code>melo --base-url http://localhost:11434/v1 \
+     --chat-model qwen3:8b \
+     "What is 6*7?"</code></pre>
+      </section>
+
+      <section class="section" id="gateway">
+        <h2>Gateway smoke</h2>
+        <p>
+          Gateway mode starts an HTTP API around the same agent runtime. Run the
+          server in one shell and call it from another.
+        </p>
+        <pre><code>melo --serve</code></pre>
+        <pre><code>curl http://127.0.0.1:8401/v1/health
+
+curl -X POST http://127.0.0.1:8401/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"query":"Say hello briefly"}'</code></pre>
+        <div class="callout">
+          <strong>Pass criteria:</strong> health returns JSON with <code>status: ok</code>,
+          and <code>/v1/agent/run</code> returns both <code>result</code> and
+          <code>session_id</code>.
+        </div>
+      </section>
+
+      <section class="section" id="sessions">
+        <h2>Session reuse</h2>
+        <p>Pass a stable <code>session_id</code> to reuse one gateway session across calls.</p>
+        <pre><code>curl -X POST http://127.0.0.1:8401/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"query":"remember this is session test","session_id":"demo123"}'
+
+curl -X POST http://127.0.0.1:8401/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"query":"continue","session_id":"demo123"}'
+
+curl http://127.0.0.1:8401/v1/sessions
+curl -X DELETE http://127.0.0.1:8401/v1/sessions/demo123</code></pre>
+      </section>
+
+      <section class="section" id="backends">
+        <h2>Backend setup</h2>
+        <p>
+          localmelo uses a split backend model: <code>chat_backend</code> and
+          <code>embedding_backend</code> are configured independently through
+          <code>melo --reconfigure</code>.
+        </p>
+        <table>
+          <tr><th>Mode</th><th>Chat backend</th><th>Embedding backend</th><th>Notes</th></tr>
+          <tr><td>Ollama local</td><td><code>ollama</code></td><td><code>ollama</code> or <code>none</code></td><td>Connects to a user-managed Ollama server.</td></tr>
+          <tr><td>MLC local</td><td><code>mlc</code></td><td><code>mlc</code> or <code>none</code></td><td>Connects to a user-managed OpenAI-compatible MLC endpoint.</td></tr>
+          <tr><td>Other local</td><td><code>vllm</code> or <code>sglang</code></td><td>same local backend or <code>none</code></td><td>Runtime lifecycle remains outside localmelo.</td></tr>
+          <tr><td>Cloud chat</td><td><code>openai</code>, <code>anthropic</code>, <code>gemini</code>, or <code>nvidia</code></td><td>local backend or <code>none</code></td><td>Set the configured API key environment variable before running.</td></tr>
+        </table>
+        <div class="callout warning">
+          <strong>Local backend rule:</strong> localmelo does not host, compile, or
+          start model runtimes. Start your local server separately, then point
+          localmelo at its URL.
+        </div>
+      </section>
+
+      <section class="section" id="no-embedding">
+        <h2>No-embedding mode</h2>
+        <p>
+          Set <code>embedding_backend = "none"</code> when you do not want to run an
+          embedding server. The agent still supports direct answers, tool use, and
+          history recording; only long-term embedding retrieval is disabled.
+        </p>
+        <pre><code>melo --reconfigure
+melo "What is 6*7?"</code></pre>
+      </section>
+
+      <section class="section" id="tests">
+        <h2>Tests</h2>
+        <p>Use the focused suites while developing, then run the full suite before merging.</p>
+        <pre><code># Dev-safe core suites
+python -m pytest tests/agent tests/checker tests/executor \
+                 tests/cli tests/memory tests/integration -q
+
+# Gateway suite
+python -m pytest tests/gateway -q
+
+# Full suite
+python -m pytest tests/ -q
+
+# Lint
+python -m ruff check .</code></pre>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>localmelo documentation</span>
+      <span><a href="./quickstart.md">Markdown quickstart</a></span>
+    </div>
+  </footer>
+  <script src="./assets/site.js"></script>
+</body>
+</html>
