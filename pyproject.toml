@@ -89,3 +89,6 @@ ignore_errors = true
 testpaths = ["tests"]
 asyncio_mode = "auto"
 cache_dir = ".cache/pytest"
+markers = [
+    "smoke_backend: real-backend smoke tests; skipped automatically when the backend is not reachable",
+]
