@@ -666,6 +666,7 @@ class TestOnboardingDispatch:
             ),
             mock.patch("localmelo.support.onboard.config.load", return_value=Config()),
             mock.patch("localmelo.support.onboard.config.save"),
+            mock.patch("localmelo.support.onboard._run_probes", return_value=True),
             mock.patch("builtins.print"),
         ):
             from localmelo.support.onboard import run_backend_setup
@@ -693,6 +694,7 @@ class TestOnboardingDispatch:
             ),
             mock.patch("localmelo.support.onboard.config.load", return_value=Config()),
             mock.patch("localmelo.support.onboard.config.save"),
+            mock.patch("localmelo.support.onboard._run_probes", return_value=True),
             mock.patch("builtins.print"),
         ):
             from localmelo.support.onboard import run_backend_setup
@@ -771,6 +773,7 @@ class TestOnboardingDispatch:
             ),
             mock.patch("localmelo.support.onboard.config.load", return_value=Config()),
             mock.patch("localmelo.support.onboard.config.save"),
+            mock.patch("localmelo.support.onboard._run_probes", return_value=True),
             mock.patch(
                 "localmelo.support.onboard._onboard_embedding_local"
             ) as mock_emb,

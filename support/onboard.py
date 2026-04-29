@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 
 from localmelo.support import config
+from localmelo.support.onboard_probe import ProbeError, probe_all
 
 
 def _ask(prompt: str, default: str = "") -> str:
@@ -198,6 +200,30 @@ def run_backend_setup() -> config.Config | None:
     cfg.chat_backend = selected_chat_key
     cfg.embedding_backend = selected_emb_key
 
+    if not _run_probes(cfg):
+        return None
+
     config.save(cfg)
     print(f"\n  Config saved to {config.CONFIG_PATH}")
     return cfg
+
+
+def _run_probes(cfg: config.Config) -> bool:
+    """Run chat + embedding connectivity probes before saving.
+
+    Returns True if config should be saved. On probe failure, the user
+    is asked whether to save anyway; the default is No.
+    """
+    print("\n  Probing backends ...")
+    try:
+        asyncio.run(probe_all(cfg))
+    except ProbeError as exc:
+        print(f"\n  Probe failed: {exc}")
+        save_anyway = _ask("Save config anyway?", "N").lower()
+        if save_anyway not in ("y", "yes"):
+            print("  Setup cancelled — config not saved.")
+            return False
+        print("  Saving despite failed probe.")
+        return True
+    print("  Backends OK.")
+    return True
