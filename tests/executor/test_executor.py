@@ -236,6 +236,54 @@ class TestFilePathPolicy(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(outcome.error_category, ErrorCategory.PATH_POLICY_VIOLATION)
 
+    async def test_absolute_path_outside_root_blocked(self) -> None:
+        """An absolute path that doesn't share the workspace prefix is rejected.
+
+        Forge a sibling dir to *self.tmpdir* — same parent, different name —
+        so the candidate path is fully outside the policy root even though
+        it never traverses through ``..``.
+        """
+        sibling = tempfile.mkdtemp(dir=os.path.dirname(self.tmpdir))
+        try:
+            outside = os.path.join(sibling, "secret.txt")
+            with open(outside, "w") as f:
+                f.write("classified")
+            outcome = await self.executor.execute_structured(
+                ExecutionRequest(tool_name="file_read", arguments={"path": outside})
+            )
+            self.assertEqual(outcome.status, ExecutionStatus.ERROR)
+            self.assertEqual(
+                outcome.error_category, ErrorCategory.PATH_POLICY_VIOLATION
+            )
+        finally:
+            shutil.rmtree(sibling, ignore_errors=True)
+
+    async def test_symlink_pointing_outside_root_blocked(self) -> None:
+        """A symlink inside the workspace that resolves outside is rejected.
+
+        ``WorkspacePolicy.check_path`` uses ``os.path.realpath`` so the
+        link target — not the link path — is what's evaluated. The link
+        sits inside the workspace but points at a sibling tree.
+        """
+        sibling = tempfile.mkdtemp(dir=os.path.dirname(self.tmpdir))
+        try:
+            target = os.path.join(sibling, "real.txt")
+            with open(target, "w") as f:
+                f.write("outside data")
+
+            link = os.path.join(self.tmpdir, "link.txt")
+            os.symlink(target, link)
+
+            outcome = await self.executor.execute_structured(
+                ExecutionRequest(tool_name="file_read", arguments={"path": link})
+            )
+            self.assertEqual(outcome.status, ExecutionStatus.ERROR)
+            self.assertEqual(
+                outcome.error_category, ErrorCategory.PATH_POLICY_VIOLATION
+            )
+        finally:
+            shutil.rmtree(sibling, ignore_errors=True)
+
     async def test_per_request_workspace_override(self) -> None:
         """Per-request workspace_root narrows the allowed root."""
         subdir = os.path.join(self.tmpdir, "sub")
