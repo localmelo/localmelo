@@ -584,7 +584,7 @@ class Agent:
         return task.result
 
     async def close(self) -> None:
-        self.hippo.close()
+        await self.hippo.aclose()
         await self._llm.close()
         if self._embedding:
             await self._embedding.close()

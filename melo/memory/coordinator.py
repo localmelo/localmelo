@@ -55,8 +55,28 @@ class Hippo:
         return self.working
 
     def close(self) -> None:
-        """Close persistent backends if they support it."""
+        """Close persistent backends if they support it.
+
+        Prefer :meth:`aclose` for SQLite-backed memory: the sync shim only
+        drops references and lets GC release file descriptors. This stays
+        for callers that don't have an event loop available.
+        """
         for backend in (self.history, self.long):
+            close_fn = getattr(backend, "close", None)
+            if callable(close_fn):
+                close_fn()
+
+    async def aclose(self) -> None:
+        """Async close path for backends that hold open async resources.
+
+        Falls back to sync :meth:`close` semantics for backends that only
+        expose ``close()``.
+        """
+        for backend in (self.history, self.long):
+            aclose_fn = getattr(backend, "aclose", None)
+            if callable(aclose_fn):
+                await aclose_fn()
+                continue
             close_fn = getattr(backend, "close", None)
             if callable(close_fn):
                 close_fn()

@@ -1,64 +1,83 @@
 from __future__ import annotations
 
+import asyncio
 import json
-import sqlite3
 from pathlib import Path
 
+import aiosqlite
+
+from localmelo.melo.memory._sqlite import apply_pragmas
 from localmelo.melo.memory.history import History
 from localmelo.melo.schema import StepRecord, TaskRecord, ToolCall, ToolResult
 
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS tasks (
+    task_id TEXT PRIMARY KEY,
+    query   TEXT NOT NULL,
+    status  TEXT NOT NULL DEFAULT 'running',
+    result  TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS steps (
+    step_id          TEXT PRIMARY KEY,
+    task_id          TEXT NOT NULL,
+    thought          TEXT NOT NULL DEFAULT '',
+    tool_call_json   TEXT,
+    tool_result_json TEXT,
+    timestamp        REAL NOT NULL,
+    seq              INTEGER NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id)
+);
+"""
+
 
 class SqliteHistory(History):
-    """Persistent history backed by SQLite.
+    """Persistent history backed by SQLite via aiosqlite.
 
-    Drop-in replacement for the in-memory :class:`History` — same async
-    interface, data survives process restarts.
+    The connection is opened lazily on first awaited call so the
+    constructor stays synchronous (compatible with ``Agent.__init__``).
+    All write paths run under ``_write_lock`` so the
+    ``SELECT MAX(seq) → INSERT`` sequence in :meth:`add_step` is atomic
+    across concurrent callers on the same event loop.
     """
 
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = str(db_path)
-        self._conn = sqlite3.connect(self._db_path)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._create_tables()
+        self._conn: aiosqlite.Connection | None = None
+        self._init_lock = asyncio.Lock()
+        self._write_lock = asyncio.Lock()
 
-    def _create_tables(self) -> None:
-        self._conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS tasks (
-                task_id TEXT PRIMARY KEY,
-                query   TEXT NOT NULL,
-                status  TEXT NOT NULL DEFAULT 'running',
-                result  TEXT NOT NULL DEFAULT ''
-            );
-            CREATE TABLE IF NOT EXISTS steps (
-                step_id          TEXT PRIMARY KEY,
-                task_id          TEXT NOT NULL,
-                thought          TEXT NOT NULL DEFAULT '',
-                tool_call_json   TEXT,
-                tool_result_json TEXT,
-                timestamp        REAL NOT NULL,
-                seq              INTEGER NOT NULL,
-                FOREIGN KEY (task_id) REFERENCES tasks(task_id)
-            );
-        """
-        )
-        self._conn.commit()
+    async def _ensure_ready(self) -> aiosqlite.Connection:
+        if self._conn is not None:
+            return self._conn
+        async with self._init_lock:
+            if self._conn is not None:
+                return self._conn
+            conn = await aiosqlite.connect(self._db_path)
+            await apply_pragmas(conn)
+            await conn.executescript(_SCHEMA)
+            await conn.commit()
+            self._conn = conn
+            return conn
 
     # ── public interface (mirrors History) ──
 
     async def save_task(self, task: TaskRecord) -> None:
-        self._conn.execute(
-            """INSERT OR REPLACE INTO tasks (task_id, query, status, result)
-               VALUES (?, ?, ?, ?)""",
-            (task.task_id, task.query, task.status, task.result),
-        )
-        self._conn.commit()
+        conn = await self._ensure_ready()
+        async with self._write_lock:
+            await conn.execute(
+                """INSERT OR REPLACE INTO tasks (task_id, query, status, result)
+                   VALUES (?, ?, ?, ?)""",
+                (task.task_id, task.query, task.status, task.result),
+            )
+            await conn.commit()
 
     async def get_task(self, task_id: str) -> TaskRecord | None:
-        row = self._conn.execute(
+        conn = await self._ensure_ready()
+        async with conn.execute(
             "SELECT task_id, query, status, result FROM tasks WHERE task_id = ?",
             (task_id,),
-        ).fetchone()
+        ) as cur:
+            row = await cur.fetchone()
         if row is None:
             return None
         task = TaskRecord(query=row[1], task_id=row[0], status=row[2], result=row[3])
@@ -66,11 +85,7 @@ class SqliteHistory(History):
         return task
 
     async def add_step(self, task_id: str, step: StepRecord) -> None:
-        row = self._conn.execute(
-            "SELECT COALESCE(MAX(seq), -1) FROM steps WHERE task_id = ?",
-            (task_id,),
-        ).fetchone()
-        seq = (row[0] if row else -1) + 1
+        conn = await self._ensure_ready()
 
         tc_json = None
         if step.tool_call:
@@ -92,29 +107,43 @@ class SqliteHistory(History):
                 }
             )
 
-        self._conn.execute(
-            """INSERT INTO steps
-               (step_id, task_id, thought, tool_call_json, tool_result_json,
-                timestamp, seq)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                step.step_id,
-                task_id,
-                step.thought,
-                tc_json,
-                tr_json,
-                step.timestamp,
-                seq,
-            ),
-        )
-        self._conn.commit()
+        async with self._write_lock:
+            await conn.execute("BEGIN IMMEDIATE")
+            try:
+                async with conn.execute(
+                    "SELECT COALESCE(MAX(seq), -1) FROM steps WHERE task_id = ?",
+                    (task_id,),
+                ) as cur:
+                    row = await cur.fetchone()
+                seq = (row[0] if row else -1) + 1
+                await conn.execute(
+                    """INSERT INTO steps
+                       (step_id, task_id, thought, tool_call_json, tool_result_json,
+                        timestamp, seq)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        step.step_id,
+                        task_id,
+                        step.thought,
+                        tc_json,
+                        tr_json,
+                        step.timestamp,
+                        seq,
+                    ),
+                )
+                await conn.commit()
+            except BaseException:
+                await conn.rollback()
+                raise
 
     async def get_steps(self, task_id: str) -> list[StepRecord]:
-        rows = self._conn.execute(
+        conn = await self._ensure_ready()
+        async with conn.execute(
             """SELECT step_id, thought, tool_call_json, tool_result_json, timestamp
                FROM steps WHERE task_id = ? ORDER BY seq""",
             (task_id,),
-        ).fetchall()
+        ) as cur:
+            rows = await cur.fetchall()
 
         steps: list[StepRecord] = []
         for row in rows:
@@ -147,5 +176,30 @@ class SqliteHistory(History):
             )
         return steps
 
+    async def count_tasks(self) -> int:
+        """Diagnostic helper: total tasks persisted."""
+        conn = await self._ensure_ready()
+        async with conn.execute("SELECT COUNT(*) FROM tasks") as cur:
+            row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+    async def count_steps(self) -> int:
+        """Diagnostic helper: total steps across all tasks."""
+        conn = await self._ensure_ready()
+        async with conn.execute("SELECT COUNT(*) FROM steps") as cur:
+            row = await cur.fetchone()
+        return int(row[0]) if row else 0
+
+    async def aclose(self) -> None:
+        """Close the underlying aiosqlite connection."""
+        if self._conn is not None:
+            await self._conn.close()
+            self._conn = None
+
     def close(self) -> None:
-        self._conn.close()
+        """Sync compatibility shim. Prefer :meth:`aclose` in new code.
+
+        Drops the connection reference so GC eventually releases the FD.
+        Awaitable cleanup must go through :meth:`aclose`.
+        """
+        self._conn = None

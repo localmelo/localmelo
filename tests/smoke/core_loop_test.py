@@ -42,7 +42,6 @@ import json
 import logging
 import os
 import re as _re
-import sqlite3
 import sys
 import tempfile
 import time
@@ -294,20 +293,40 @@ def check_backend_health(
         return False, str(exc)
 
 
-# ── SQLite helpers ──────────────────────────────────────────
+# ── Persistence inspection helpers ─────────────────────────
 
 
-def _count_rows(db_path: str, table: str) -> int:
-    if not os.path.exists(db_path):
-        return -1
-    conn = sqlite3.connect(db_path)
-    try:
-        cur = conn.execute(f"SELECT count(*) FROM {table}")  # noqa: S608
-        return cur.fetchone()[0]  # type: ignore[no-any-return]
-    except sqlite3.OperationalError:
-        return -1
-    finally:
-        conn.close()
+async def _persisted_counts(mem_dir: str) -> dict[str, int]:
+    """Count rows in the persisted memory stores via the public async API.
+
+    Returns ``-1`` for any store whose DB file does not exist yet
+    (the smoke run was skipped before persistence was created).
+    """
+    history_db = os.path.join(mem_dir, "history.db")
+    long_db = os.path.join(mem_dir, "long_term.db")
+
+    counts = {"tasks_rows": -1, "steps_rows": -1, "long_term_rows": -1}
+
+    if os.path.exists(history_db):
+        from localmelo.melo.memory.history.sqlite import SqliteHistory
+
+        h = SqliteHistory(history_db)
+        try:
+            counts["tasks_rows"] = await h.count_tasks()
+            counts["steps_rows"] = await h.count_steps()
+        finally:
+            await h.aclose()
+
+    if os.path.exists(long_db):
+        from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+
+        lt = SqliteLongTerm(long_db)
+        try:
+            counts["long_term_rows"] = await lt.count_entries()
+        finally:
+            await lt.aclose()
+
+    return counts
 
 
 # ── Core scenario runner ───────────────────────────────────
@@ -512,13 +531,13 @@ async def run_scenario(
         "sqlite": {
             "history_db": history_db,
             "long_term_db": long_db,
-            "tasks_rows": _count_rows(history_db, "tasks"),
-            "steps_rows": _count_rows(history_db, "steps"),
-            "long_term_rows": _count_rows(long_db, "long_term"),
         },
     }
 
     await agent.close()
+
+    persisted = await _persisted_counts(mem_dir)
+    record["sqlite"].update(persisted)
     return record
 
 

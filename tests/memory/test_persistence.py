@@ -1,5 +1,6 @@
 """Tests for memory persistence (SQLite) and registry/index split."""
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -114,7 +115,7 @@ class TestSqliteHistory:
         got = await h.get_task("t1")
         assert got is not None
         assert got.query == "hello"
-        h.close()
+        await h.aclose()
 
     @pytest.mark.asyncio
     async def test_add_step_with_tool_call(self, tmp_path: Path) -> None:
@@ -139,7 +140,7 @@ class TestSqliteHistory:
         assert steps[0].tool_call.arguments == {"cmd": "ls"}
         assert steps[0].tool_result is not None
         assert steps[0].tool_result.output == "file.txt"
-        h.close()
+        await h.aclose()
 
     @pytest.mark.asyncio
     async def test_persistence_across_reopen(self, tmp_path: Path) -> None:
@@ -152,7 +153,7 @@ class TestSqliteHistory:
         await h1.save_task(task)
         await h1.add_step("tp", StepRecord(thought="step-one"))
         await h1.add_step("tp", StepRecord(thought="step-two"))
-        h1.close()
+        await h1.aclose()
 
         # Session 2: read data back
         h2 = SqliteHistory(db)
@@ -162,7 +163,7 @@ class TestSqliteHistory:
         assert len(got.steps) == 2
         assert got.steps[0].thought == "step-one"
         assert got.steps[1].thought == "step-two"
-        h2.close()
+        await h2.aclose()
 
     @pytest.mark.asyncio
     async def test_save_task_updates_status(self, tmp_path: Path) -> None:
@@ -179,14 +180,14 @@ class TestSqliteHistory:
         assert got is not None
         assert got.status == "completed"
         assert got.result == "done"
-        h.close()
+        await h.aclose()
 
     @pytest.mark.asyncio
     async def test_get_nonexistent_task(self, tmp_path: Path) -> None:
         db = tmp_path / "history.db"
         h = SqliteHistory(db)
         assert await h.get_task("nope") is None
-        h.close()
+        await h.aclose()
 
     @pytest.mark.asyncio
     async def test_step_ordering(self, tmp_path: Path) -> None:
@@ -196,12 +197,38 @@ class TestSqliteHistory:
         await h.save_task(TaskRecord(query="q", task_id="so"))
         for i in range(5):
             await h.add_step("so", StepRecord(thought=f"s{i}"))
-        h.close()
+        await h.aclose()
 
         h2 = SqliteHistory(db)
         steps = await h2.get_steps("so")
         assert [s.thought for s in steps] == [f"s{i}" for i in range(5)]
-        h2.close()
+        await h2.aclose()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_add_step_preserves_order(self, tmp_path: Path) -> None:
+        """Concurrent add_step calls produce dense, unique seq values.
+
+        The SELECT MAX(seq) → INSERT pair must be atomic. Without the
+        write lock, racing tasks would collide on the same ``seq`` and
+        the resulting steps would either duplicate or be reordered on
+        reload.
+        """
+        db = tmp_path / "history.db"
+        h = SqliteHistory(db)
+        await h.save_task(TaskRecord(query="q", task_id="cc"))
+
+        n = 20
+        await asyncio.gather(
+            *(h.add_step("cc", StepRecord(thought=f"s{i}")) for i in range(n))
+        )
+
+        # Steps are returned ordered by seq. Each thought must appear
+        # exactly once and the count must equal n.
+        steps = await h.get_steps("cc")
+        thoughts = sorted(s.thought for s in steps)
+        assert thoughts == sorted(f"s{i}" for i in range(n))
+        assert len(steps) == n
+        await h.aclose()
 
 
 # ── SqliteLongTerm persistence ──
@@ -217,7 +244,7 @@ class TestSqliteLongTerm:
         results = await lt.search([1.0, 0.0, 0.0], top_k=1)
         assert len(results) == 1
         assert results[0][0] == "hello world"
-        lt.close()
+        await lt.aclose()
 
     @pytest.mark.asyncio
     async def test_empty_search(self, tmp_path: Path) -> None:
@@ -225,7 +252,7 @@ class TestSqliteLongTerm:
         lt = SqliteLongTerm(db)
         results = await lt.search([1.0, 0.0], top_k=5)
         assert results == []
-        lt.close()
+        await lt.aclose()
 
     @pytest.mark.asyncio
     async def test_persistence_across_reopen(self, tmp_path: Path) -> None:
@@ -236,7 +263,7 @@ class TestSqliteLongTerm:
         lt1 = SqliteLongTerm(db)
         await lt1.add("alpha", [1.0, 0.0, 0.0], metadata={"src": "test"})
         await lt1.add("beta", [0.0, 1.0, 0.0])
-        lt1.close()
+        await lt1.aclose()
 
         # Session 2: search
         lt2 = SqliteLongTerm(db)
@@ -244,7 +271,7 @@ class TestSqliteLongTerm:
         assert len(results) == 1
         assert results[0][0] == "alpha"
         assert results[0][2] == {"src": "test"}
-        lt2.close()
+        await lt2.aclose()
 
     @pytest.mark.asyncio
     async def test_search_after_reload(self, tmp_path: Path) -> None:
@@ -255,14 +282,14 @@ class TestSqliteLongTerm:
         await lt.add("doc about cats", [0.9, 0.1, 0.0])
         await lt.add("doc about dogs", [0.1, 0.9, 0.0])
         await lt.add("doc about fish", [0.0, 0.1, 0.9])
-        lt.close()
+        await lt.aclose()
 
         lt2 = SqliteLongTerm(db)
         results = await lt2.search([0.9, 0.1, 0.0], top_k=2)
         assert len(results) == 2
         # "cats" should rank first (closest vector)
         assert results[0][0] == "doc about cats"
-        lt2.close()
+        await lt2.aclose()
 
     @pytest.mark.asyncio
     async def test_metadata_preserved(self, tmp_path: Path) -> None:
@@ -271,4 +298,4 @@ class TestSqliteLongTerm:
         await lt.add("x", [1.0, 0.0], metadata={"step_id": "abc", "num": 42})
         results = await lt.search([1.0, 0.0], top_k=1)
         assert results[0][2] == {"step_id": "abc", "num": 42}
-        lt.close()
+        await lt.aclose()
