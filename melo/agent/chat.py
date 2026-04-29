@@ -33,6 +33,13 @@ def _parse_step_estimate(text: str) -> int:
 REFLECTION_PROMPT = (
     "The current attempt has ended without a final answer. "
     "Reflect on what happened and decide how to proceed.\n\n"
+    "IMPORTANT: this reflection is the *only* state carried into the next "
+    "attempt. It is compressed working state, not a log. Treat any prior "
+    "reflection the same way: keep only constraints, failed paths, and "
+    "evidence that are still relevant to the next concrete step. Drop the "
+    "rest. The total reflection should stay under ~1500 characters when "
+    "serialized — if you cannot fit it, choose 'stop' or 'decompose' "
+    "instead of 'continue'.\n\n"
     "Respond with a JSON object (no markdown fences):\n"
     "{\n"
     '  "summary": "one-sentence summary of what was attempted",\n'

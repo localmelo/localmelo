@@ -14,7 +14,6 @@ from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMPro
 from localmelo.melo.schema import (
     Message,
     ReflectionDecision,
-    ReflectionEntry,
     ToolCall,
     ToolDef,
 )
@@ -774,11 +773,18 @@ class TestPrePlanIncludesReflections:
     """Pre-plan size check must account for reflection content."""
 
     @pytest.mark.asyncio
-    async def test_large_reflection_triggers_pre_plan_failure(
+    async def test_oversized_reflection_forces_decompose(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Reflection content that pushes total size over the limit
-        should cause pre_plan to reject the prompt."""
+        """A parsed reflection whose serialized form exceeds
+        :data:`MAX_REFLECTION_CHARS` must override the model's choice
+        and force ``recommended_action='decompose'`` so the next attempt
+        does not start.
+
+        Single-latest semantics mean a pre-injected huge reflection is
+        replaced by every subsequent ``add_reflection`` call, so the
+        budget cap has to fire on the *parsed* reflection itself.
+        """
         import localmelo.melo.agent.agent as _agent_mod
 
         monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 1)
@@ -786,7 +792,7 @@ class TestPrePlanIncludesReflections:
         monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 10)
 
         llm = FakeLLM()
-        # Attempt 0: tool call → budget
+        # Attempt 0: a tool call so the attempt exhausts its 1-step budget.
         llm.enqueue(
             Message(
                 role="assistant",
@@ -794,30 +800,31 @@ class TestPrePlanIncludesReflections:
                 tool_call=ToolCall(tool_name="echo", arguments={"text": "a"}),
             )
         )
-        # Reflection: continue
+        # Reflection: model says "continue" but its summary is huge —
+        # serializing the entry pushes it past MAX_REFLECTION_CHARS so
+        # the agent must override to decompose.
+        bloat = "x" * 4000
         llm.enqueue(
             Message(
                 role="assistant",
-                content=_reflection_json("continue", summary="ok"),
+                content=_reflection_json(
+                    "continue",
+                    summary=bloat,
+                    rationale="model wants to continue",
+                ),
             )
         )
-        # Attempt 1 should fail pre_plan due to huge reflection content
 
         agent = _make_echo_agent(llm)
-
-        # Inject a huge reflection entry that will push total content over limit
-        huge_reflection = ReflectionEntry(
-            attempt_id=99,
-            summary="x" * 110_000,  # exceeds the 100k pre_plan limit
-        )
-        agent.hippo.working.add_reflection(huge_reflection)
-
-        # Attempt 0: tool call succeeds, budget exhausts, reflection fires
-        # Then attempt 1: retrieval includes huge reflection → pre_plan blocks
         result = await agent.run("test")
-        assert "Plan check failed" in result
+
+        # Decompose is not "continue", so _should_continue returns False
+        # and the task is marked failed. The result string carries the
+        # rationale, which must mention the budget overflow.
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
+        assert "reflection budget exceeded" in result
+        assert tasks[0].attempts_completed == 1  # second attempt did not start
 
 
 class TestReflectionFailureTypeInPrompt:

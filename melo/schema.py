@@ -16,6 +16,12 @@ MIN_AGENT_STEPS = 3
 STEPS_PER_ATTEMPT = 10
 MAX_ATTEMPTS = 5
 
+# Reflection budget. Only one reflection is carried into the next attempt's
+# prompt. If its serialized form exceeds the char cap the agent forces a
+# decompose action instead of continuing.
+MAX_REFLECTIONS_IN_PROMPT = 1
+MAX_REFLECTION_CHARS = 2000
+
 
 # ── Data types ──
 

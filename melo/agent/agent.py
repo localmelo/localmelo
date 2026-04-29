@@ -20,6 +20,7 @@ from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
     MAX_ATTEMPTS,
+    MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
     STEPS_PER_ATTEMPT,
     Message,
@@ -398,7 +399,15 @@ class Agent:
         attempt_id: int,
         failure_type: str,
     ) -> tuple[ReflectionEntry, ReflectionDecision]:
-        """Structured reflection at attempt boundary."""
+        """Structured reflection at attempt boundary.
+
+        After parsing, enforce :data:`MAX_REFLECTION_CHARS`: if the
+        serialized form of the new reflection exceeds the budget, force
+        ``decision.recommended_action = "decompose"`` so the next attempt
+        does not start. The model is meant to keep the reflection compact
+        — when it cannot, the agent stops chasing instead of carrying an
+        ever-growing scratchpad.
+        """
         short_window = self.hippo.working.get_window()
         prior_reflections = self.hippo.working.get_reflections()
         response = await self.chat.reflect(
@@ -408,7 +417,16 @@ class Agent:
             failure_type=failure_type,
             prior_reflections=prior_reflections or None,
         )
-        return self._parse_reflection(response.content, attempt_id, failure_type)
+        entry, decision = self._parse_reflection(
+            response.content, attempt_id, failure_type
+        )
+        serialized = _serialize_reflections([entry])
+        size = serialized[0].content.__len__() if serialized else 0
+        if size > MAX_REFLECTION_CHARS:
+            decision.recommended_action = "decompose"
+            note = f" (reflection budget exceeded: {size} > {MAX_REFLECTION_CHARS})"
+            decision.rationale = (decision.rationale or "") + note
+        return entry, decision
 
     @staticmethod
     def _parse_reflection(
