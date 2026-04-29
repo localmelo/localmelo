@@ -90,6 +90,85 @@ body.lang-zh [data-lang="en"] { display: none; }
 <p class="subtitle" data-lang="zh">开发日志与进度追踪</p>
 
 <!-- ================================================================ -->
+<!-- Update 3: Hardening Pass + Track 1 Close                         -->
+<!-- ================================================================ -->
+
+<div class="update-entry">
+  <h2>
+    <span class="tag tag-refactor">refactor</span>
+    <span class="tag tag-feat">feat</span>
+    Hardening Pass &amp; Track 1 Close
+  </h2>
+  <div class="update-date">2026-04-29 &mdash; closes <a href="https://github.com/localmelo/localmelo/issues/3">#3</a>, <a href="https://github.com/localmelo/localmelo/issues/7">#7</a>, <a href="https://github.com/localmelo/localmelo/issues/16">#16</a></div>
+
+  <div data-lang="en">
+    <h3>A. Async-safe persistence and runtime hardening</h3>
+    <ul>
+      <li>SQLite history and long-term memory rewritten on top of <code>aiosqlite</code> with lazy connection setup, WAL + busy-timeout PRAGMAs, and a write lock that serializes <code>SELECT MAX(seq)</code> + <code>INSERT</code> so concurrent writes can no longer interleave (<a href="https://github.com/localmelo/localmelo/pull/8">#8</a>)</li>
+      <li><code>WorkingMemory</code> keeps only the latest reflection entry; oversized reflections force <code>recommended_action = "decompose"</code> via a <code>MAX_REFLECTION_CHARS</code> budget so the loop stops cleanly instead of blowing the prompt (<a href="https://github.com/localmelo/localmelo/pull/9">#9</a>)</li>
+      <li>Onboarding now probes the configured chat and embedding backends before <code>config.save()</code>, so a wrong API key or unreachable URL can no longer be silently persisted (<a href="https://github.com/localmelo/localmelo/pull/10">#10</a>)</li>
+      <li>Executor workspace boundary tests expanded to cover absolute paths outside the workspace and symlink-escape attempts (<a href="https://github.com/localmelo/localmelo/pull/11">#11</a>)</li>
+      <li><code>Chat</code> moved out of the public agent surface into <code>localmelo.melo.agent._chat</code>; it is now an internal implementation detail (<a href="https://github.com/localmelo/localmelo/pull/12">#12</a>)</li>
+    </ul>
+
+    <h3>B. Smoke documentation and pytest-discoverable smoke</h3>
+    <ul>
+      <li>Quickstart documents the canonical minimum-smoke commands for direct CLI, gateway, session reuse, and per-backend chat verification (<a href="https://github.com/localmelo/localmelo/pull/19">#19</a>)</li>
+      <li>New pytest-discoverable smoke under <code>tests/smoke/</code> for local backends, runnable without external services and gated to skip when the backend is unreachable (<a href="https://github.com/localmelo/localmelo/pull/20">#20</a>)</li>
+    </ul>
+
+    <h3>Status</h3>
+    <table class="status-table">
+      <tr><th>Component</th><th>Status</th></tr>
+      <tr><td>Async SQLite history + long-term memory (aiosqlite)</td><td class="done">Done</td></tr>
+      <tr><td>Single-latest reflection + budget overflow → decompose</td><td class="done">Done</td></tr>
+      <tr><td>Onboarding probes before <code>config.save()</code></td><td class="done">Done</td></tr>
+      <tr><td>Executor boundary tests (abs path, symlink escape)</td><td class="done">Done</td></tr>
+      <tr><td><code>Chat</code> moved to internal <code>_chat</code></td><td class="done">Done</td></tr>
+      <tr><td>Minimum smoke documented in quickstart</td><td class="done">Done</td></tr>
+      <tr><td>Pytest-discoverable local-backend smoke</td><td class="done">Done</td></tr>
+      <tr><td>Track 1 (Online Core Loop) closed</td><td class="done">Done</td></tr>
+      <tr><td>Manual real-backend smoke results recorded</td><td class="pending">Tracked in <a href="https://github.com/localmelo/localmelo/issues/18">#18</a></td></tr>
+      <tr><td>Online cloud-backend pytest smoke</td><td class="pending">Tracked in <a href="https://github.com/localmelo/localmelo/issues/21">#21</a></td></tr>
+      <tr><td>Gateway session lifecycle end-to-end test</td><td class="pending">Tracked in <a href="https://github.com/localmelo/localmelo/issues/17">#17</a></td></tr>
+    </table>
+  </div>
+
+  <div data-lang="zh">
+    <h3>A. 异步安全的持久化与运行时加固</h3>
+    <ul>
+      <li>SQLite history 与长期记忆改写为 <code>aiosqlite</code> 实现：懒连接、WAL + busy-timeout PRAGMA、用 write lock 把 <code>SELECT MAX(seq)</code> + <code>INSERT</code> 串行化，杜绝并发写入交错（<a href="https://github.com/localmelo/localmelo/pull/8">#8</a>）</li>
+      <li><code>WorkingMemory</code> 只保留最新一条 reflection；超过 <code>MAX_REFLECTION_CHARS</code> 预算时强制 <code>recommended_action = "decompose"</code>，让循环干净停止而不是把 prompt 撑爆（<a href="https://github.com/localmelo/localmelo/pull/9">#9</a>)</li>
+      <li>Onboarding 在 <code>config.save()</code> 之前会先 probe 配置的 chat 和 embedding 后端，错误的 API key 或不可达的 URL 不再会被静默落盘（<a href="https://github.com/localmelo/localmelo/pull/10">#10</a>)</li>
+      <li>Executor 工作目录边界测试扩展，覆盖了工作目录之外的绝对路径与 symlink 越界场景（<a href="https://github.com/localmelo/localmelo/pull/11">#11</a>)</li>
+      <li><code>Chat</code> 从 agent 公开接口移到 <code>localmelo.melo.agent._chat</code>，正式作为内部实现细节（<a href="https://github.com/localmelo/localmelo/pull/12">#12</a>)</li>
+    </ul>
+
+    <h3>B. Smoke 文档与可被 pytest 发现的 smoke</h3>
+    <ul>
+      <li>Quickstart 收录了 direct CLI / gateway / session 复用 / per-backend chat 校验的标准 minimum-smoke 命令（<a href="https://github.com/localmelo/localmelo/pull/19">#19</a>)</li>
+      <li>新增 <code>tests/smoke/</code> 下可被 pytest 自动发现的本地后端 smoke，无需外部服务即可收集，后端不可达时自动 skip（<a href="https://github.com/localmelo/localmelo/pull/20">#20</a>)</li>
+    </ul>
+
+    <h3>状态</h3>
+    <table class="status-table">
+      <tr><th>组件</th><th>状态</th></tr>
+      <tr><td>异步 SQLite history + 长期记忆 (aiosqlite)</td><td class="done">完成</td></tr>
+      <tr><td>单条最新 reflection + 超额自动 decompose</td><td class="done">完成</td></tr>
+      <tr><td>Onboarding 在 <code>config.save()</code> 前 probe 后端</td><td class="done">完成</td></tr>
+      <tr><td>Executor 边界测试（绝对路径、symlink 越界）</td><td class="done">完成</td></tr>
+      <tr><td><code>Chat</code> 内化为 <code>_chat</code></td><td class="done">完成</td></tr>
+      <tr><td>Quickstart 收录 minimum smoke</td><td class="done">完成</td></tr>
+      <tr><td>本地后端 pytest smoke</td><td class="done">完成</td></tr>
+      <tr><td>Track 1（Online Core Loop）关闭</td><td class="done">完成</td></tr>
+      <tr><td>真机后端手工 smoke 结果记录</td><td class="pending">由 <a href="https://github.com/localmelo/localmelo/issues/18">#18</a> 跟踪</td></tr>
+      <tr><td>云端后端 pytest smoke</td><td class="pending">由 <a href="https://github.com/localmelo/localmelo/issues/21">#21</a> 跟踪</td></tr>
+      <tr><td>Gateway session 生命周期端到端测试</td><td class="pending">由 <a href="https://github.com/localmelo/localmelo/issues/17">#17</a> 跟踪</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ================================================================ -->
 <!-- Update 2: Task 1 Online Core Loop                                -->
 <!-- ================================================================ -->
 
