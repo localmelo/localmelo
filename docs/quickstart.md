@@ -10,6 +10,7 @@ Sections:
 - [Minimum smoke](#minimum-smoke) — verify each mode end-to-end after install
 - [Backend options](#backend-options)
 - [No-embedding mode](#no-embedding-mode)
+- [Memory persistence](#memory-persistence)
 - [Running tests](#running-tests)
 
 ## Installation
@@ -332,6 +333,25 @@ code), localmelo:
 
 This is useful when you want to use a cloud LLM without running a local
 embedding server.
+
+## Memory persistence
+
+By default, working, history, and long-term memory live only in RAM and are
+lost on process exit. To persist memory across runs, set
+`LOCALMELO_PERSIST_MEMORY=1`. SQLite files are written to
+`~/.cache/localmelo/memory` by default (`history.db` always,
+`long_term.db` only when an embedding provider is configured), and
+`LOCALMELO_MEMORY_DIR` overrides the directory.
+
+```bash
+export LOCALMELO_PERSIST_MEMORY=1
+# optional: export LOCALMELO_MEMORY_DIR=/var/lib/localmelo/memory
+melo --serve
+```
+
+See [memory.md](memory.md) for the full operational guide: env vars, file
+layout, retention semantics, reset and inspection workflows, real-backend
+smoke commands, and the frozen `PersonalizedSample` v1 schema.
 
 ## Running tests
 
