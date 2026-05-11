@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>更新 - localmelo 中文文档</title>
+  <meta name="description" content="localmelo 开发日志与路线图进度。">
+  <link rel="icon" href="../assets/icon_small.png">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="topbar">
+      <a class="brand" href="./index.html" aria-label="localmelo 中文文档首页">
+        <img src="../assets/icon_small.png" alt="">
+        <strong><span>local</span>melo</strong>
+      </a>
+      <nav class="site-nav" aria-label="主导航">
+        <a href="./index.html">文档</a>
+        <a href="./quickstart.html">快速开始</a>
+        <a href="./architecture.html">架构</a>
+        <a class="active" href="./updates.html">更新</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
+      <div class="lang-toggle" aria-label="语言">
+        <a href="../en/updates.html">EN</a>
+        <a class="active" href="./updates.html">中文</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="page layout">
+    <aside class="sidebar" aria-label="更新章节">
+      <h2>更新</h2>
+      <a class="active" href="#track-two">Track 2</a>
+      <a href="#backend-evidence">后端证据</a>
+      <a href="#latest">Runtime hardening</a>
+      <a href="#track-one">Track 1</a>
+      <a href="#foundation">基础</a>
+      <a href="#status">状态</a>
+      <a href="#deliverables">交付物</a>
+    </aside>
+
+    <article class="content">
+      <header class="doc-hero">
+        <p class="eyebrow">Project updates</p>
+        <h1>开发日志与路线图进度。</h1>
+        <p class="lead">这里记录对 review 真正有用的变化：运行时行为、公开边界、验证覆盖与路线图状态。</p>
+      </header>
+
+      <section class="section" id="track-two">
+        <article class="update-entry">
+          <div class="update-tags">
+            <span class="tag experimental">track 2</span>
+            <span class="tag stable">memory design</span>
+            <span class="tag planned">sleep-ready</span>
+          </div>
+          <h2>Track 2 记忆系统设计演化</h2>
+          <p class="update-date">2026-05-03 - design notes <code>.melo/track2_plan_cn.md</code></p>
+          <p>
+            Track 2 现在有了更清晰的 memory-session 结构：online path 会把值得记忆的
+            candidate 拆到两条并行分支，一条进入快速的 working memory，另一条进入
+            负责 durable 或 specialized placement 的 Hippo。
+          </p>
+          <ul>
+            <li>agent 在 v1 中只做轻量 write proposal：判断 candidate 是否值得记忆，保持 bool 决策。</li>
+            <li><code>working</code> 存短期 active task/session context，使用 LRU-style refresh；设计方向区分 <code>fresh</code> 和 <code>rehearsed</code> memories。</li>
+            <li>long-term persistence 需要等待相关 working memory 进入 <code>rehearsed</code>，或出现其他 strong write signal。</li>
+            <li><code>Hippo</code> 用五类明确 action 路由 durable writes：<code>NEW</code>、<code>UPDATE</code>、<code>RELATED</code>、<code>CONFLICT</code> 和 <code>IGNORE</code>。</li>
+            <li><code>long</code> 和 <code>profile</code> 在 v1 中共享一个 physical long-term store，通过 semantic、episodic、profile、reflection 等 metadata kinds 区分。</li>
+            <li><code>tools</code> 仍是 authoritative registry，同时扩展 procedural skill/template memory，但不能绕过 checker 或 executor policy。</li>
+            <li><code>PersonalizedMemory</code> 是 Track 4 的 filtered sleep-sample staging area，不是 raw history dump。</li>
+            <li><code>history</code> 保持 append-only 或 near-append-only，只用于 debugging、replay、auditability 和 provenance lookup，不参与 normal recall。</li>
+          </ul>
+          <p>
+            v1 foundation 已经补齐 persistent-memory 文档、multi-session SQLite
+            stress coverage、真实 backend long-term retrieval evidence，以及
+            <code>PersonalizedMemory</code> selected-sample schema freeze。后续 Track 2
+            会进入 working-memory stages、Hippo write routing、long/profile semantics、
+            procedural memory 和 evaluation。
+          </p>
+        </article>
+      </section>
+
+      <section class="section" id="backend-evidence">
+        <article class="update-entry">
+          <div class="update-tags">
+            <span class="tag stable">track 2 v1</span>
+            <span class="tag stable">backend smoke</span>
+            <span class="tag stable">qwen3 embedding</span>
+          </div>
+          <h2>真实后端 memory smoke 已归档</h2>
+          <p class="update-date">2026-05-10 - issue <a href="https://github.com/localmelo/localmelo/issues/4">#4</a></p>
+          <p>
+            OMLX、Ollama 和 MLC-LLM 已经使用同一个 Qwen3 0.6B embedding family
+            完成 persistent long-term retrieval smoke。长期归档位置是
+            <code>tests_result/backend-smoke/2026-05-10-qwen3-embedding-0.6b/</code>；
+            临时 runner output 保持分离。
+          </p>
+          <table>
+            <tr><th>后端</th><th>Embedding</th><th>个人偏好</th><th>跨会话</th><th>项目开发</th><th>GitHub</th></tr>
+            <tr><td>OMLX</td><td><code>Qwen3-Embedding-0.6B</code></td><td>92% / 193s</td><td>100% / 164s</td><td>65% / 298s</td><td>73% / 385s</td></tr>
+            <tr><td>Ollama</td><td><code>qwen3-embedding:0.6b</code></td><td>96% / 180s</td><td>100% / 120s</td><td>94% / 208s</td><td>97% / 298s</td></tr>
+            <tr><td>MLC-LLM</td><td><code>Qwen3-Embedding-0.6B-q0f16-MLC</code></td><td>100% / 94s</td><td>100% / 76s</td><td>94% / 138s</td><td>88% / 156s</td></tr>
+          </table>
+          <p>
+            MLC 使用真实编译产物，没有 symlink 或临时 alias。OMLX 目前通过本地
+            OpenAI-compatible wrapper 记录，后续再接入共享 smoke backend registry。
+          </p>
+        </article>
+      </section>
+
+      <section class="section" id="latest">
+        <article class="update-entry">
+          <div class="update-tags">
+            <span class="tag experimental">maintenance</span>
+            <span class="tag stable">memory</span>
+            <span class="tag stable">smoke</span>
+          </div>
+          <h2>运行时存储、反思边界与 smoke 验证</h2>
+          <p class="update-date">2026-04-29 - PRs <a href="https://github.com/localmelo/localmelo/pull/8">#8</a> to <a href="https://github.com/localmelo/localmelo/pull/20">#20</a></p>
+          <p>当前 runtime baseline 已经从「能跑」推进到「能验证」。这轮主要收紧了持久化、reflection prompt、onboarding 校验，并补齐了最小 smoke 路径文档。</p>
+          <ul>
+            <li>SQLite history 和长期记忆改为 async <code>aiosqlite</code> 持久化，支持懒连接和写入串行化。</li>
+            <li>Working memory 只保留最新一条压缩 reflection；超预算时强制 <code>decompose</code>。</li>
+            <li>Onboarding 在保存配置前会 probe chat 和 embedding provider。</li>
+            <li>Executor 边界测试覆盖工作区外绝对路径和 symlink 越界。</li>
+            <li><code>Chat</code> 移入 agent 内部命名空间。</li>
+            <li>Quickstart 补齐 direct CLI、gateway、session 复用、no-embedding 和 backend smoke 命令。</li>
+            <li><code>tests/smoke/</code> 新增可被 pytest 发现的本地 backend smoke。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="section" id="track-one">
+        <article class="update-entry">
+          <div class="update-tags">
+            <span class="tag stable">track 1</span>
+            <span class="tag experimental">agent</span>
+            <span class="tag planned">backend</span>
+          </div>
+          <h2>Online core loop 基础完成</h2>
+          <p class="update-date">2026-03-29 - issue <a href="https://github.com/localmelo/localmelo/issues/3">#3</a></p>
+          <p>Track 1 建立了第一条可用 online agent loop：检索、工具解析、规划、执行、记忆写回，以及 direct CLI / gateway 两个入口的响应路径。</p>
+          <ul>
+            <li>后端注册表支持 Ollama、MLC、vLLM、SGLang 本地适配器，以及 OpenAI、Anthropic、Gemini、NVIDIA 云端适配器。</li>
+            <li><code>chat_backend</code> 与 <code>embedding_backend</code> 分离配置。</li>
+            <li>Attempt-based agent loop，包含结构化 reflection 与 utility gate。</li>
+            <li>Ollama native chat provider，支持 thinking/answer 拆分。</li>
+            <li>数据驱动 smoke benchmark，用于 backend 对比。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="section" id="foundation">
+        <article class="update-entry">
+          <div class="update-tags">
+            <span class="tag planned">foundation</span>
+            <span class="tag experimental">architecture</span>
+          </div>
+          <h2>初始架构拆分</h2>
+          <p class="update-date">2026-03-25</p>
+          <ul>
+            <li>运行时拆分到 <code>melo/</code>，基础设施拆分到 <code>support/</code>。</li>
+            <li>引入 provider contracts，降低 core runtime 与 backend implementation 的耦合。</li>
+            <li>建立 memory 和 sleep 包边界，为后续个性化工作留出位置。</li>
+            <li>围绕初始架构扩展早期回归测试。</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="section" id="status">
+        <h2>当前路线图状态</h2>
+        <table>
+          <tr><th>区域</th><th>状态</th><th>下一步</th></tr>
+          <tr><td>Online core loop</td><td><span class="tag stable">verified baseline</span></td><td>继续补 gateway lifecycle 覆盖，并保持 backend smoke evidence 可追踪。</td></tr>
+          <tr><td>Memory system</td><td><span class="tag experimental">active design</span></td><td>实现 working-memory stages、Hippo 五类 action controller，以及 metadata-typed long/profile memory。</td></tr>
+          <tr><td>Deployment shell</td><td><span class="tag planned">planned</span></td><td>定义 core runtime 之外的产品外壳职责。</td></tr>
+          <tr><td>Sleep pipeline</td><td><span class="tag planned">planned</span></td><td>先写 design issue，再实现 training/evaluation。</td></tr>
+          <tr><td>Quality / release</td><td><span class="tag experimental">ongoing</span></td><td>保持 docs、tests、smoke 和 issue hygiene 与各 track 对齐。</td></tr>
+        </table>
+      </section>
+
+      <section class="section" id="deliverables">
+        <h2>Track 2 交付物</h2>
+        <table>
+          <tr><th>交付物</th><th>状态</th></tr>
+          <tr><td>文档化 memory env vars、file layout、retention semantics 和 reset workflow。</td><td><span class="tag stable">v1 done</span></td></tr>
+          <tr><td>添加 multi-session SQLite stress coverage。</td><td><span class="tag stable">v1 done</span></td></tr>
+          <tr><td>针对 OMLX、Ollama 和 MLC-LLM 运行并记录 real-backend long-term retrieval smoke。</td><td><span class="tag stable">archived</span></td></tr>
+          <tr><td>冻结并文档化 <code>PersonalizedMemory</code> selected-sample schema for v1。</td><td><span class="tag stable">v1 done</span></td></tr>
+          <tr><td>实现 working-memory <code>fresh</code> / <code>rehearsed</code> stages。</td><td><span class="tag planned">next</span></td></tr>
+          <tr><td>实现 Hippo five-action routing 和 metadata-typed long/profile memory。</td><td><span class="tag planned">next</span></td></tr>
+        </table>
+      </section>
+    </article>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>localmelo 更新</span>
+      <span><a href="https://github.com/localmelo/localmelo/issues">Issues</a> and <a href="https://github.com/localmelo/localmelo/pulls">pull requests</a></span>
+    </div>
+  </footer>
+  <script src="../assets/site.js"></script>
+</body>
+</html>

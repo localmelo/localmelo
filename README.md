@@ -15,10 +15,10 @@ without changing runtime behavior.
 testing, but public APIs, memory policy, and personalization workflows are still
 evolving.
 
-**[Docs](https://localmelo.github.io/localmelo/index.html)** |
-**[Quickstart](https://localmelo.github.io/localmelo/quickstart.html)** |
-**[Architecture](https://localmelo.github.io/localmelo/architecture.html)** |
-**[Updates](https://localmelo.github.io/localmelo/updates.html)**
+**[Docs](https://localmelo.github.io/localmelo/en/index.html)** |
+**[Quickstart](https://localmelo.github.io/localmelo/en/quickstart.html)** |
+**[Architecture](https://localmelo.github.io/localmelo/en/architecture.html)** |
+**[Updates](https://localmelo.github.io/localmelo/en/updates.html)**
 
 ## What It Does
 
@@ -93,7 +93,7 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
   -d '{"query":"Say hello briefly"}'
 ```
 
-See the [Quickstart](https://localmelo.github.io/localmelo/quickstart.html) for
+See the [Quickstart](https://localmelo.github.io/localmelo/en/quickstart.html) for
 gateway smoke checks, session reuse, no-embedding mode, and backend-specific
 verification.
 
@@ -123,7 +123,7 @@ Core modules:
 | Support | Backend registry, provider implementations, config, gateway |
 
 For the full runtime map, see the
-[Architecture docs](https://localmelo.github.io/localmelo/architecture.html).
+[Architecture docs](https://localmelo.github.io/localmelo/en/architecture.html).
 
 ## Safety Boundaries
 
@@ -184,7 +184,7 @@ python -m pytest tests/ -q
 ```
 
 Development priorities are tracked in
-[Updates](https://localmelo.github.io/localmelo/updates.html) and GitHub issues.
+[Updates](https://localmelo.github.io/localmelo/en/updates.html) and GitHub issues.
 
 ## Contributing
 

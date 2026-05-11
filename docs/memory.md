@@ -219,17 +219,15 @@ explicitly:
 # From localmelo/
 python tests/smoke/core_loop_test.py --backends ollama
 python tests/smoke/core_loop_test.py --backends mlc
-SMOKE_ONLINE_API_KEY=sk-... python tests/smoke/core_loop_test.py --backends online
-python tests/smoke/core_loop_test.py --backends all
 ```
 
-The `online` backend is skipped (before any network probe) unless
-`SMOKE_ONLINE_API_KEY` is exported, so `--backends all` stays
-offline-safe by default. Per-backend evidence lands in
-`tests/smoke/output/{ollama,mlc,online}_test.json`; cross-backend
-comparison in `tests/smoke/output/compare_test.md`. See
-[`tests/smoke/README.md`](../tests/smoke/README.md) for scenario
-selection, env-var overrides, and online safety notes.
+Per-backend scratch output lands in `tests/smoke/output/` and is ignored
+by git. Curated long-term evidence should be promoted into `tests_result/`
+with a summary, manifest, and raw artifacts. The 2026-05-10 Track 2 v1 run
+is archived in
+[`tests_result/backend-smoke/2026-05-10-qwen3-embedding-0.6b/`](../tests_result/backend-smoke/2026-05-10-qwen3-embedding-0.6b/).
+See [`tests/smoke/README.md`](../tests/smoke/README.md) for scenario
+selection and env-var overrides.
 
 ## PersonalizedSample v1 schema
 

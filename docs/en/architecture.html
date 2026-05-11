@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Architecture - localmelo docs</title>
+  <meta name="description" content="Architecture overview for localmelo's agent runtime, memory layers, checker boundaries, executor, and backend support layer.">
+  <link rel="icon" href="../assets/icon_small.png">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="topbar">
+      <a class="brand" href="./index.html" aria-label="localmelo docs home">
+        <img src="../assets/icon_small.png" alt="">
+        <strong><span>local</span>melo</strong>
+      </a>
+      <nav class="site-nav" aria-label="Primary navigation">
+        <a href="./index.html">Docs</a>
+        <a href="./quickstart.html">Quickstart</a>
+        <a class="active" href="./architecture.html">Architecture</a>
+        <a href="./updates.html">Updates</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
+      <div class="lang-toggle" aria-label="Language">
+        <a class="active" href="./architecture.html">EN</a>
+        <a href="../zh-CN/architecture.html">中文</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="page layout">
+    <aside class="sidebar" aria-label="Architecture sections">
+      <h2>Architecture</h2>
+      <a class="active" href="#overview">Overview</a>
+      <a href="#diagram">Overall diagram</a>
+      <a href="#memory-subgraph">Memory subgraph</a>
+      <a href="#boundaries">Boundaries</a>
+      <a href="#status">Status</a>
+    </aside>
+
+    <article class="content">
+      <header class="doc-hero" id="overview">
+        <p class="eyebrow">Concepts / Architecture</p>
+        <h1>Core runtime stays separate from infrastructure.</h1>
+        <p class="lead">
+          localmelo is organized around one rule: <code>melo/</code> contains the
+          agent runtime and contracts; <code>support/</code> contains config,
+          backends, providers, onboarding, and gateway infrastructure. Track 2
+          keeps online working context separate from Hippo's durable memory routing.
+        </p>
+        <div class="doc-meta">
+          <span class="tag stable">online loop verified</span>
+          <span class="tag experimental">memory policies evolving</span>
+          <span class="tag planned">sleep pipeline planned</span>
+        </div>
+      </header>
+
+      <section class="section" id="diagram">
+        <div class="diagram-intro">
+          <div>
+            <h2>Overall diagram</h2>
+            <p>
+              The diagram shows the online path from user ingress to final answer,
+              plus the offline sleep pipeline that is intentionally still a future
+              personalization track. Memory is shown as a Track 2 session boundary:
+              the agent-facing cache stays fast while Hippo routes durable writes.
+              Click a component to inspect responsibilities and important files.
+            </p>
+          </div>
+          <div class="callout">
+            <strong>Reading guide:</strong> solid lines are runtime data flow,
+            dashed lines are model/provider or offline paths, and the amber dashed
+            region marks checker validation boundaries.
+          </div>
+        </div>
+
+        <div class="diagram-scroll">
+          <div class="diagram" id="dia-overview" style="width:1200px;height:680px">
+            <div class="group core" style="left:350px;top:16px;width:470px;height:648px">
+              <span class="group-label">melo - core agent runtime</span>
+            </div>
+            <div class="group infra" style="left:870px;top:16px;width:310px;height:648px">
+              <span class="group-label">support - infrastructure</span>
+            </div>
+
+            <div class="checker-zone" id="n-checker" data-id="checker" style="left:374px;top:155px;width:432px;height:270px">
+              <span class="cz-label">checker - validation boundary</span>
+              <span class="cz-sub">validates: ingress · plan · execute · memory</span>
+            </div>
+
+            <div class="node" id="n-user" data-id="user" style="left:20px;top:120px;width:130px">
+              <div class="node-title">User / Client</div>
+              <div class="node-sub">CLI or HTTP</div>
+            </div>
+
+            <div class="node" id="n-gateway" data-id="gateway" style="left:190px;top:104px;width:125px">
+              <span class="badge infra-tag">infra</span>
+              <div class="node-title">Gateway</div>
+              <div class="node-sub">sessions · HTTP</div>
+            </div>
+
+            <div class="node" id="n-agent" data-id="agent" style="left:490px;top:46px;width:195px">
+              <span class="badge planner">planner</span>
+              <span class="badge consumer">model consumer</span>
+              <div class="node-title">Agent / Planner</div>
+              <div class="node-sub">main loop · orchestration</div>
+            </div>
+
+            <div class="node" id="n-memory" data-id="memory" style="left:388px;top:280px;width:185px">
+              <span class="badge store">store</span>
+              <span class="badge consumer">model consumer</span>
+              <div class="node-title">Memory</div>
+              <div class="node-sub">working + Hippo branches<br>history stays raw</div>
+            </div>
+
+            <div class="node" id="n-executor" data-id="executor" style="left:612px;top:280px;width:185px">
+              <span class="badge exec">executor</span>
+              <div class="node-title">Executor</div>
+              <div class="node-sub">tools · builtins · policy</div>
+            </div>
+
+            <div class="node sleep-node" id="n-sleep" data-id="sleep" style="left:388px;top:530px;width:185px">
+              <span class="badge offline">offline</span>
+              <div class="node-title">Sleep</div>
+              <div class="node-sub">future personalization</div>
+            </div>
+
+            <div class="anno" style="left:600px;top:530px;width:180px">
+              planned offline workflow<br>
+              preprocessing / training /<br>
+              evaluation / promotion
+            </div>
+
+            <div class="node" id="n-providers" data-id="providers" style="left:900px;top:60px;width:230px">
+              <span class="badge infra-tag">infra</span>
+              <span class="badge consumer">model layer</span>
+              <div class="node-title">Providers</div>
+              <div class="node-sub">LLM · Embedding contracts</div>
+            </div>
+
+            <div class="node" id="n-backends" data-id="backends" style="left:900px;top:220px;width:230px">
+              <span class="badge infra-tag">infra</span>
+              <div class="node-title">Backends</div>
+              <div class="node-sub">local · cloud · registry</div>
+            </div>
+
+            <div class="node" id="n-config" data-id="config" style="left:900px;top:510px;width:230px">
+              <span class="badge infra-tag">infra</span>
+              <div class="node-title">Config / Onboard</div>
+              <div class="node-sub">TOML config · probes</div>
+            </div>
+
+            <svg class="conns" id="svg-overview">
+              <defs>
+                <marker id="arr" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 3L0 6z" fill="#8a95a6"/></marker>
+                <marker id="arr-b" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 3L0 6z" fill="#255edb"/></marker>
+                <marker id="arr-r" viewBox="0 0 10 6" refX="9" refY="3" markerWidth="8" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 3L0 6z" fill="#b42318"/></marker>
+              </defs>
+            </svg>
+          </div>
+        </div>
+
+        <div class="legend">
+          <div class="legend-item"><div class="legend-line"></div>data flow</div>
+          <div class="legend-item"><div class="legend-line dashed"></div>model / provider</div>
+          <div class="legend-item"><div class="legend-box"></div>checker boundary</div>
+          <div class="legend-item"><div class="legend-line fail-l"></div>fail to replan</div>
+        </div>
+
+        <div class="subdiagram" id="memory-subgraph">
+          <div class="subdiagram-heading">
+            <div>
+              <p class="eyebrow">Track 2 / Memory Session</p>
+              <h3>Memory subgraph</h3>
+            </div>
+            <p>
+              When the agent decides a candidate is worth remembering, v1 keeps the
+              agent-side decision as a bool and sends the same candidate to two
+              branches: <code>working</code> for active context and <code>Hippo</code>
+              for durable or specialized placement. Long-term writes wait for a
+              rehearsed working-memory signal or another strong write signal.
+            </p>
+          </div>
+
+          <div class="memory-flow" role="img" aria-label="Track 2 memory session subgraph">
+            <div class="memory-lane online">
+              <span class="lane-label">online session</span>
+              <div class="flow-node source">
+                <span class="badge planner">agent</span>
+                <strong>Remembered candidate</strong>
+                <span>bool=true proposal, not a storage decision</span>
+              </div>
+              <div class="flow-split">
+                <div class="flow-node active">
+                  <span class="badge store">working</span>
+                  <strong>Working memory</strong>
+                  <span>short-lived active cache with LRU-style refresh; only rehearsed memories can become long-term candidates</span>
+                </div>
+                <div class="flow-node router">
+                  <span class="badge store">hippo</span>
+                  <strong>Hippo router</strong>
+                  <span>chooses NEW, UPDATE, RELATED, CONFLICT, or IGNORE; long-term writes await rehearsal</span>
+                </div>
+              </div>
+              <div class="promotion-gate">promotion gate: fresh -> rehearsed before long-term persistence</div>
+            </div>
+
+            <div class="memory-lane durable">
+              <span class="lane-label">durable and specialized memory</span>
+              <div class="store-grid">
+                <div class="store-node">
+                  <strong>Long / Profile</strong>
+                  <span>one physical long store in v1; semantic, episodic, profile, and reflection metadata kinds</span>
+                </div>
+                <div class="store-node">
+                  <strong>Tools</strong>
+                  <span>authoritative registry plus procedural skill/template memory; no checker bypass</span>
+                </div>
+                <div class="store-node">
+                  <strong>Personalized</strong>
+                  <span>filtered sleep samples for Track 4, not raw runtime history</span>
+                </div>
+                <div class="store-node history-node">
+                  <strong>History</strong>
+                  <span>append-only task and step records for debugging, audit, replay, and provenance only</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="detail-grid">
+            <article>
+              <h4>Working branch</h4>
+              <p>Reused active memories are touched or compacted so the current task context stays bounded and fresh. Only rehearsed memories can become long-term candidates.</p>
+            </article>
+            <article>
+              <h4>Hippo branch</h4>
+              <p>Hippo owns classification, metadata, provenance, relation links, conflict handling, and whether a write is immediate or deferred to sleep.</p>
+            </article>
+            <article>
+              <h4>Extensible shape</h4>
+              <p>The same subgraph pattern leaves room for later agent, executor, and sleep diagrams without forcing those concerns into the memory session view.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="boundaries">
+        <h2>Boundaries to preserve</h2>
+        <table>
+          <tr><th>Boundary</th><th>Rule</th><th>Why it matters</th></tr>
+          <tr><td><code>melo/</code> to <code>support/</code></td><td><code>melo/</code> must not import infrastructure implementations.</td><td>The runtime stays portable and testable.</td></tr>
+          <tr><td>Agent to executor</td><td>Tool calls go through checker and workspace policy.</td><td>Unsafe shell/file operations are rejected before execution.</td></tr>
+          <tr><td>Agent to memory</td><td>The agent proposes a remembered candidate; working memory and Hippo receive it in parallel after checker limits apply.</td><td>The agent stays independent of SQLite, vector search, profile tables, tool memory internals, and sleep samples.</td></tr>
+          <tr><td>History to PersonalizedMemory</td><td><code>PersonalizedMemory</code> only receives selected sleep samples; it must not ingest raw history directly.</td><td>Track 4 receives curated training inputs without turning the audit log into online recall or training data by default.</td></tr>
+          <tr><td>Backends</td><td>Local backends are connectors only.</td><td>Runtime management belongs outside localmelo core.</td></tr>
+        </table>
+      </section>
+
+      <section class="section" id="status">
+        <h2>Implementation status</h2>
+        <div class="status-grid">
+          <article class="status-card">
+            <span class="tag stable">Implemented</span>
+            <h3>Online runtime</h3>
+            <p>Direct CLI, gateway routing, built-in tools, checker boundaries, backend registry, and provider contracts are in place.</p>
+          </article>
+          <article class="status-card">
+            <span class="tag experimental">Active</span>
+            <h3>Memory system</h3>
+            <p>Track 2 now treats working memory and Hippo as parallel branches. The five-action Hippo controller, metadata-typed profile memory, procedural tool memory, and selected sleep samples are the active design direction.</p>
+          </article>
+          <article class="status-card">
+            <span class="tag planned">Planned</span>
+            <h3>Sleep pipeline</h3>
+            <p>Training and evaluation modules are scaffolds. The next step is a design issue, not immediate implementation.</p>
+          </article>
+        </div>
+      </section>
+    </article>
+
+  </main>
+
+  <div class="detail-overlay" id="overlay"></div>
+  <div class="detail-panel" id="panel" aria-live="polite">
+    <button class="close-btn" id="panel-close" aria-label="Close details">&times;</button>
+    <h2 id="panel-title"></h2>
+    <p class="detail-role" id="panel-role"></p>
+    <div class="detail-tags" id="panel-tags"></div>
+    <div id="panel-body"></div>
+  </div>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <span>localmelo architecture</span>
+      <span>Click components in the diagram for file-level orientation.</span>
+    </div>
+  </footer>
+
+  <script src="../assets/site.js"></script>
+  <script>
+    const SVG_NS = "http://www.w3.org/2000/svg";
+
+    const DETAILS = {
+      user: {
+        title: "User / Client",
+        role: "End user or external client application",
+        tags: ["client"],
+        body: `<h3>Interfaces</h3><ul>
+          <li><code>melo "query"</code> - direct CLI mode</li>
+          <li><code>melo --serve</code> - gateway mode with HTTP API</li>
+          <li><code>POST /v1/agent/run</code> - API request path</li>
+        </ul>`
+      },
+      gateway: {
+        title: "Gateway",
+        role: "HTTP gateway with session management and request routing",
+        tags: ["infra"],
+        body: `<p>FastAPI gateway for agent-as-a-service mode. Sessions are lazy-created, serialized per session, and idle-evicted.</p>
+          <h3>Key files</h3><div class="file-list">
+            <span class="file-tag">support/gateway/webapp.py</span>
+            <span class="file-tag">support/gateway/session.py</span>
+            <span class="file-tag">support/gateway/__init__.py</span>
+          </div>`
+      },
+      agent: {
+        title: "Agent / Planner",
+        role: "Main agent loop for retrieval, planning, execution, reflection, and memorization",
+        tags: ["planner", "model consumer"],
+        body: `<h3>Loop stages</h3><ul>
+          <li>Retrieve long-term context and working-memory window.</li>
+          <li>Resolve tools from hints and registry search.</li>
+          <li>Plan with the chat provider.</li>
+          <li>Execute tool calls through executor and checker boundaries.</li>
+          <li>Make only a lightweight bool decision that a candidate is worth remembering.</li>
+        </ul>
+        <h3>Key files</h3><div class="file-list">
+          <span class="file-tag">melo/agent/agent.py</span>
+          <span class="file-tag">melo/agent/_chat.py</span>
+          <span class="file-tag">melo/schema.py</span>
+        </div>`
+      },
+      memory: {
+        title: "Memory",
+        role: "Track 2 memory session with parallel working and Hippo branches",
+        tags: ["store", "model consumer"],
+        body: `<h3>Session split</h3><ul>
+          <li><code>working</code> is the agent-facing active cache with two-stage LRU-style refresh: <code>fresh</code> memories are promoted to <code>rehearsed</code> only after reuse.</li>
+          <li>Only <code>rehearsed</code> working memories are eligible for long-term promotion; <code>fresh</code> memories should not persist directly.</li>
+          <li><code>Hippo</code> routes durable and specialized writes to long/profile, tools, and personalized samples.</li>
+          <li><code>history</code> is a raw append-only record/debug layer outside normal recall.</li>
+          <li>Hippo v1 uses <code>NEW</code>, <code>UPDATE</code>, <code>RELATED</code>, <code>CONFLICT</code>, and <code>IGNORE</code> instead of one vector threshold.</li>
+        </ul>
+        <h3>Key files</h3><div class="file-list">
+          <span class="file-tag">melo/memory/coordinator.py</span>
+          <span class="file-tag">melo/memory/hippo/hippo.py</span>
+          <span class="file-tag">melo/memory/hippo/hippo_policy.py</span>
+          <span class="file-tag">melo/memory/short/</span>
+          <span class="file-tag">melo/memory/history/sqlite.py</span>
+          <span class="file-tag">melo/memory/long/sqlite.py</span>
+          <span class="file-tag">melo/memory/personalized/</span>
+          <span class="file-tag">melo/memory/tools/</span>
+        </div>`
+      },
+      executor: {
+        title: "Executor",
+        role: "Structured tool execution with registry lookup, workspace policy, timeout, and artifacts",
+        tags: ["executor"],
+        body: `<p>The executor does not call the model layer. It receives structured tool calls and returns structured outcomes.</p>
+        <h3>Pipeline</h3><ul>
+          <li>Registry lookup</li>
+          <li>Pre-execute checker validation</li>
+          <li>Workspace policy enforcement</li>
+          <li>Timeout and exception handling</li>
+          <li>Artifact metadata collection</li>
+        </ul>
+        <h3>Key files</h3><div class="file-list">
+          <span class="file-tag">melo/executor/executor.py</span>
+          <span class="file-tag">melo/executor/builtins.py</span>
+          <span class="file-tag">melo/executor/policy.py</span>
+        </div>`
+      },
+      checker: {
+        title: "Checker",
+        role: "Validation boundary across ingress, planning, execution, and memory writes",
+        tags: ["guard"],
+        body: `<p>Checks are control flow, not incidental exceptions. A failed check returns <code>CheckResult(allowed=False)</code> and the agent replans or reflects.</p>
+        <h3>Validated boundaries</h3><ul>
+          <li>Gateway ingress and session transitions.</li>
+          <li>Tool resolution and post-plan tool call shape.</li>
+          <li>Shell command deny patterns and executor result size.</li>
+          <li>Prompt and memory write size limits.</li>
+        </ul>
+        <h3>Key files</h3><div class="file-list">
+          <span class="file-tag">melo/checker/checker.py</span>
+          <span class="file-tag">melo/checker/validators.py</span>
+          <span class="file-tag">melo/checker/payloads.py</span>
+        </div>`
+      },
+      sleep: {
+        title: "Sleep",
+        role: "Planned offline personalization pipeline",
+        tags: ["offline"],
+        body: `<p>Sleep mode remains offline. Track 2 defines the boundary it will consume later: <code>PersonalizedMemory</code> receives filtered samples, not raw history dumps.</p>
+        <h3>Key files</h3><div class="file-list">
+          <span class="file-tag">melo/sleep/preprocess/</span>
+          <span class="file-tag">melo/sleep/training/</span>
+          <span class="file-tag">melo/sleep/evaluation/</span>
+          <span class="file-tag">melo/sleep/state/</span>
+        </div>`
+      },
+      providers: {
+        title: "Providers",
+        role: "LLM and embedding provider implementations behind core contracts",
+        tags: ["infra", "model layer"],
+        body: `<p>Providers implement contracts consumed by the agent and memory layers. This is the allowed seam between core runtime and infrastructure.</p>
+        <h3>Key files</h3><div class="file-list">
+          <span class="file-tag">melo/contracts/providers.py</span>
+          <span class="file-tag">support/providers/llm/</span>
+          <span class="file-tag">support/providers/embedding/</span>
+        </div>`
+      },
+      backends: {
+        title: "Backends",
+        role: "Registry of local and cloud backend adapters",
+        tags: ["infra"],
+        body: `<p>Backends build chat and embedding providers from config. Local backends are connectors only; users manage model runtime processes separately.</p>
+        <h3>Key files</h3><div class="file-list">
+          <span class="file-tag">support/backends/base.py</span>
+          <span class="file-tag">support/backends/registry.py</span>
+          <span class="file-tag">support/backends/local/</span>
+          <span class="file-tag">support/backends/cloud/</span>
+        </div>`
+      },
+      config: {
+        title: "Config / Onboard",
+        role: "Persistent runtime config and interactive setup flow",
+        tags: ["infra"],
+        body: `<p>Configuration is stored as TOML under <code>~/.cache/localmelo/config.toml</code>. Onboarding collects backend fields and probes providers before saving.</p>
+        <h3>Key files</h3><div class="file-list">
+          <span class="file-tag">support/config.py</span>
+          <span class="file-tag">support/onboard.py</span>
+          <span class="file-tag">support/onboard_probe.py</span>
+        </div>`
+      }
+    };
+
+    const OVERVIEW_CONNS = [
+      { from:"n-user", to:"n-gateway", fs:"right", ts:"left", type:"", mk:"arr", relates:["user","gateway"] },
+      { from:"n-gateway", to:"n-agent", fs:"right", ts:"left", type:"", mk:"arr", label:"ingress", relates:["gateway","agent"] },
+      { from:"n-agent", to:"n-memory", fs:"bottom", ts:"top", type:"", mk:"arr", label:"plan + recall", bidi:true, relates:["agent","memory"] },
+      { from:"n-agent", to:"n-executor", fs:"bottom", ts:"top", type:"", mk:"arr", label:"plan + act", bidi:true, relates:["agent","executor"] },
+      { from:"n-checker", to:"n-agent", fs:"right", ts:"right", type:"fail-line", mk:"arr-r", label:"fail to replan", relates:["checker","agent"] },
+      { from:"n-providers", to:"n-agent", fs:"left", ts:"right", type:"dashed", mk:"arr", label:"LLM", relates:["providers","agent"] },
+      { from:"n-providers", to:"n-memory", fs:"left", ts:"right", type:"dashed", mk:"arr", label:"embed", relates:["providers","memory"] },
+      { from:"n-config", to:"n-gateway", fs:"left", ts:"right", type:"dashed", mk:"arr", relates:["config","gateway"] },
+      { from:"n-backends", to:"n-providers", fs:"top", ts:"bottom", type:"", mk:"arr", relates:["backends","providers"] },
+      { from:"n-sleep", to:"n-memory", fs:"top", ts:"bottom", type:"offline-line", mk:"arr", label:"consolidation", relates:["sleep","memory"] },
+      { from:"n-sleep", to:"n-providers", fs:"right", ts:"left", type:"offline-line", mk:"arr", label:"future training", relates:["sleep","providers"] }
+    ];
+
+    function edge(el, side) {
+      const c = el.closest(".diagram").getBoundingClientRect();
+      const r = el.getBoundingClientRect();
+      const x = r.left - c.left;
+      const y = r.top - c.top;
+      const w = r.width;
+      const h = r.height;
+      switch (side) {
+        case "left": return { x, y: y + h / 2 };
+        case "right": return { x: x + w, y: y + h / 2 };
+        case "top": return { x: x + w / 2, y };
+        case "bottom": return { x: x + w / 2, y: y + h };
+        default: return { x, y };
+      }
+    }
+
+    function bz(p1, p2, fs, ts) {
+      if (fs === "right" && ts === "right") {
+        const mx = Math.max(p1.x, p2.x) + 55;
+        return `M${p1.x} ${p1.y} C${mx} ${p1.y},${mx} ${p2.y},${p2.x} ${p2.y}`;
+      }
+      const horizontal = fs === "left" || fs === "right";
+      const cp = horizontal ? Math.max(Math.abs(p2.x - p1.x) * 0.4, 30) : Math.max(Math.abs(p2.y - p1.y) * 0.4, 30);
+      let c1x;
+      let c1y;
+      let c2x;
+      let c2y;
+      if (horizontal) {
+        const s = fs === "right" ? 1 : -1;
+        c1x = p1.x + s * cp;
+        c1y = p1.y;
+        c2x = p2.x - s * cp;
+        c2y = p2.y;
+      } else {
+        const s = fs === "bottom" ? 1 : -1;
+        c1x = p1.x;
+        c1y = p1.y + s * cp;
+        c2x = p2.x;
+        c2y = p2.y - s * cp;
+      }
+      return `M${p1.x} ${p1.y} C${c1x} ${c1y},${c2x} ${c2y},${p2.x} ${p2.y}`;
+    }
+
+    function drawConns(svgId, conns) {
+      const svg = document.getElementById(svgId);
+      const dia = svg.closest(".diagram");
+      conns.forEach((c) => {
+        const fe = document.getElementById(c.from);
+        const te = document.getElementById(c.to);
+        if (!fe || !te) return;
+        const p1 = edge(fe, c.fs);
+        const p2 = edge(te, c.ts);
+        const path = document.createElementNS(SVG_NS, "path");
+        path.setAttribute("d", bz(p1, p2, c.fs, c.ts));
+        path.setAttribute("class", `conn ${c.type || ""}`);
+        path.setAttribute("marker-end", `url(#${c.mk})`);
+        if (c.bidi) path.setAttribute("marker-start", `url(#${c.mk})`);
+        path.dataset.relates = c.relates.join(",");
+        svg.appendChild(path);
+        if (c.label) {
+          const label = document.createElement("div");
+          label.className = "conn-label";
+          label.textContent = c.label;
+          let lx;
+          let ly;
+          if (c.fs === "right" && c.ts === "right") {
+            lx = Math.max(p1.x, p2.x) + 60;
+            ly = (p1.y + p2.y) / 2 - 8;
+            label.style.left = `${lx}px`;
+            label.style.top = `${ly}px`;
+          } else {
+            lx = (p1.x + p2.x) / 2;
+            ly = (p1.y + p2.y) / 2 - 10;
+            label.style.left = `${lx}px`;
+            label.style.top = `${ly}px`;
+            label.style.transform = "translateX(-50%)";
+          }
+          label.dataset.relates = c.relates.join(",");
+          dia.appendChild(label);
+        }
+      });
+    }
+
+    function tagCls(t) {
+      const map = {
+        planner: "planner",
+        "model consumer": "consumer",
+        "model layer": "consumer",
+        guard: "guard",
+        offline: "offline",
+        executor: "exec",
+        infra: "infra-tag",
+        store: "store",
+        client: "infra-tag"
+      };
+      return map[t] || "infra-tag";
+    }
+
+    function highlightFor(nodeId) {
+      const dia = document.querySelector(".diagram");
+      dia.querySelectorAll(".node").forEach((n) => {
+        n.classList.toggle("dimmed", n.dataset.id !== nodeId);
+        n.classList.toggle("highlighted", n.dataset.id === nodeId);
+      });
+      dia.querySelectorAll(".checker-zone").forEach((z) => {
+        z.classList.toggle("dimmed", z.dataset.id !== nodeId);
+        z.classList.toggle("highlighted", z.dataset.id === nodeId);
+      });
+      dia.querySelectorAll(".conn").forEach((p) => {
+        const rels = (p.dataset.relates || "").split(",");
+        const hit = rels.includes(nodeId);
+        p.classList.toggle("highlighted", hit);
+        p.classList.toggle("dimmed", !hit);
+        if (hit) {
+          rels.forEach((rid) => {
+            const related = dia.querySelector(`[data-id="${rid}"]`);
+            if (related) related.classList.remove("dimmed");
+          });
+        }
+      });
+      dia.querySelectorAll(".conn-label").forEach((label) => {
+        label.classList.toggle("dimmed", !(label.dataset.relates || "").split(",").includes(nodeId));
+      });
+    }
+
+    function clearHighlight() {
+      document.querySelectorAll(".node,.checker-zone").forEach((n) => n.classList.remove("dimmed", "highlighted"));
+      document.querySelectorAll(".conn").forEach((p) => p.classList.remove("dimmed", "highlighted"));
+      document.querySelectorAll(".conn-label").forEach((label) => label.classList.remove("dimmed"));
+    }
+
+    function openPanel(nodeId) {
+      const info = DETAILS[nodeId];
+      if (!info) return;
+      highlightFor(nodeId);
+      document.getElementById("panel-title").textContent = info.title;
+      document.getElementById("panel-role").textContent = info.role;
+      const tags = document.getElementById("panel-tags");
+      tags.innerHTML = "";
+      (info.tags || []).forEach((t) => {
+        const span = document.createElement("span");
+        span.className = `badge ${tagCls(t)}`;
+        span.textContent = t;
+        tags.appendChild(span);
+      });
+      document.getElementById("panel-body").innerHTML = info.body || "";
+      document.getElementById("panel").classList.add("open");
+      document.getElementById("overlay").classList.add("open");
+    }
+
+    function closePanel() {
+      document.getElementById("panel").classList.remove("open");
+      document.getElementById("overlay").classList.remove("open");
+      clearHighlight();
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      drawConns("svg-overview", OVERVIEW_CONNS);
+      document.querySelectorAll(".node,.checker-zone").forEach((node) => {
+        node.addEventListener("click", () => openPanel(node.dataset.id));
+      });
+      document.getElementById("panel-close").addEventListener("click", closePanel);
+      document.getElementById("overlay").addEventListener("click", closePanel);
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closePanel();
+      });
+    });
+  </script>
+</body>
+</html>

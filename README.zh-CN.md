@@ -13,10 +13,10 @@ tool use，以及由用户自行管理的模型 backend。它把核心 agent loo
 **状态：** pre-alpha。当前 online core loop 已经可以用于开发和 smoke test，
 但公共 API、memory policy 和 personalization workflow 仍在演进。
 
-**[文档](https://localmelo.github.io/localmelo/index.zh-CN.html)** |
-**[快速开始](https://localmelo.github.io/localmelo/quickstart.zh-CN.html)** |
-**[架构](https://localmelo.github.io/localmelo/architecture.zh-CN.html)** |
-**[更新](https://localmelo.github.io/localmelo/updates.zh-CN.html)**
+**[文档](https://localmelo.github.io/localmelo/zh-CN/index.html)** |
+**[快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html)** |
+**[架构](https://localmelo.github.io/localmelo/zh-CN/architecture.html)** |
+**[更新](https://localmelo.github.io/localmelo/zh-CN/updates.html)**
 
 ## 项目能力
 
@@ -92,7 +92,7 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 ```
 
 Gateway smoke checks、session 复用、no-embedding mode 和 backend-specific 验证
-见 [快速开始](https://localmelo.github.io/localmelo/quickstart.zh-CN.html)。
+见 [快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html)。
 
 ## 架构
 
@@ -120,7 +120,7 @@ localmelo/
 | Support | Backend registry、provider implementations、config、gateway |
 
 完整 runtime map 见
-[架构文档](https://localmelo.github.io/localmelo/architecture.zh-CN.html)。
+[架构文档](https://localmelo.github.io/localmelo/zh-CN/architecture.html)。
 
 ## 安全边界
 
@@ -179,7 +179,7 @@ python -m ruff check .
 python -m pytest tests/ -q
 ```
 
-开发进度见 [更新](https://localmelo.github.io/localmelo/updates.zh-CN.html)
+开发进度见 [更新](https://localmelo.github.io/localmelo/zh-CN/updates.html)
 和 GitHub issues。
 
 ## 贡献

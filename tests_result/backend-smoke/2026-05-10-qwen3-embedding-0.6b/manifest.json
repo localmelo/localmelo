@@ -1,0 +1,83 @@
+{
+  "schema_version": "tests-result.v1",
+  "run_id": "2026-05-10-qwen3-embedding-0.6b",
+  "kind": "backend-smoke",
+  "issue": "https://github.com/localmelo/localmelo/issues/4",
+  "captured_at": "2026-05-10",
+  "embedding_model_family": "Qwen3-Embedding-0.6B",
+  "online_backend_in_scope": false,
+  "environment": {
+    "conda_env": "mlsys",
+    "requires_real_local_servers": true,
+    "sandbox_safe": false
+  },
+  "backends": [
+    {
+      "id": "omlx",
+      "name": "OMLX",
+      "chat_model": "Qwen3-4B",
+      "embedding_model": "Qwen3-Embedding-0.6B",
+      "runner": "experiments/localmelo-smoke/run_backend.py",
+      "scenarios": [
+        {"id": "personal_preference", "score_percent": 92, "wall_time_seconds": 193, "status": "completed"},
+        {"id": "cross_session", "score_percent": 100, "wall_time_seconds": 164, "status": "completed"},
+        {"id": "project_development", "score_percent": 65, "wall_time_seconds": 298, "status": "completed"},
+        {"id": "github_project_tracking", "score_percent": 73, "wall_time_seconds": 385, "status": "completed"}
+      ]
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama",
+      "chat_model": "qwen3:4b",
+      "embedding_model": "qwen3-embedding:0.6b",
+      "runner": "tests/smoke/core_loop_test.py --backends ollama",
+      "scenarios": [
+        {"id": "personal_preference", "score_percent": 96, "wall_time_seconds": 180, "status": "completed"},
+        {"id": "cross_session", "score_percent": 100, "wall_time_seconds": 120, "status": "completed"},
+        {"id": "project_development", "score_percent": 94, "wall_time_seconds": 208, "status": "completed"},
+        {"id": "github_project_tracking", "score_percent": 97, "wall_time_seconds": 298, "status": "completed"}
+      ]
+    },
+    {
+      "id": "mlc",
+      "name": "MLC-LLM",
+      "chat_model": "qwen3-4b",
+      "embedding_model": "qwen3-embedding",
+      "embedding_artifact": "Qwen3-Embedding-0.6B-q0f16-MLC",
+      "runner": "tests/smoke/core_loop_test.py --backends mlc",
+      "scenarios": [
+        {"id": "personal_preference", "score_percent": 100, "wall_time_seconds": 94, "status": "completed"},
+        {"id": "cross_session", "score_percent": 100, "wall_time_seconds": 76, "status": "completed"},
+        {"id": "project_development", "score_percent": 94, "wall_time_seconds": 138, "status": "completed"},
+        {"id": "github_project_tracking", "score_percent": 88, "wall_time_seconds": 156, "status": "completed"}
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "raw/omlx_test.json",
+      "sha256": "2d841f2fe0d2f96bc3bed25bcb50b372af3375966875dc1cdfaf05bf2ddf2861",
+      "bytes": 237013
+    },
+    {
+      "path": "raw/ollama_test.json",
+      "sha256": "5e13c28e3f336529123233fa552f30c4493b1b6ae96f7ff0be2112730143f4eb",
+      "bytes": 385956
+    },
+    {
+      "path": "raw/mlc_test.json",
+      "sha256": "9fb4aabfadfb36925786bd0a593e794ddee371174c1b2a3bcb18d72e5bc1cb2a",
+      "bytes": 303835
+    },
+    {
+      "path": "raw/compare.md",
+      "sha256": "181a3708115b825a55fd3ea8f524979237e8bdfa30f2b676de4f8af3d62f748d",
+      "bytes": 126585
+    }
+  ],
+  "notes": [
+    "All local backends completed all four retrieval scenarios.",
+    "MLC-LLM used a real compiled Qwen3-Embedding-0.6B artifact, not a symlink or temporary alias.",
+    "OMLX is captured through the local OpenAI-compatible experiment wrapper until it is added to tests/smoke/data/backends.json."
+  ]
+}

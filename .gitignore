@@ -15,3 +15,5 @@ build/
 
 # smoke-test artifacts (generated reports)
 tests/artifacts/
+tests/smoke/output/*
+!tests/smoke/output/.gitkeep

@@ -11,7 +11,7 @@ This directory holds two kinds of smoke checks:
    markdown comparison report.
 
 The CLI smoke is the real-backend long-term retrieval evidence path for issue
-\#4 item 1. It is **not** pytest-collected (filename doesn't match
+\#4 v1 local backends. It is **not** pytest-collected (filename doesn't match
 `test_*.py`) and is invoked manually.
 
 > Memory architecture, retention semantics, and reset workflow are documented
@@ -122,7 +122,15 @@ tests/smoke/output/
   compare_test.md         # cross-backend markdown report
 ```
 
-Output lives under `tests/smoke/output/`. These files are per-run evidence,
-not source of truth — `.gitignore` does not exclude them, so avoid
-committing routine reruns. Commit only when the JSON / markdown represents
-a meaningful baseline change.
+Output under `tests/smoke/output/` is transient and ignored by git. When a run
+becomes a meaningful baseline, promote it into `tests_result/` using the
+archive layout documented in `tests_result/README.md`.
+
+For example, the 2026-05-10 Track 2 v1 local-backend capture is stored at:
+
+```
+tests_result/backend-smoke/2026-05-10-qwen3-embedding-0.6b/
+  summary.md
+  manifest.json
+  raw/
+```
