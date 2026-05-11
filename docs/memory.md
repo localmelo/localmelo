@@ -4,7 +4,7 @@ LocalMelo keeps four conceptual memory layers behind the `Hippo` coordinator:
 working memory (short-lived LRU), long-term memory (retrieved at planning
 time), history (raw record/debug layer), and `PersonalizedMemory` (selected
 sleep-input samples). This page documents the persistence options users can
-configure and inspect on disk. See [architecture.html](architecture.html) for
+configure and inspect on disk. See [architecture.html](en/architecture.html) for
 the conceptual diagram.
 
 Sections:
