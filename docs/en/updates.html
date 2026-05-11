@@ -102,11 +102,16 @@
             <code>tests_result/backend-smoke/2026-05-10-qwen3-embedding-0.6b/</code>;
             transient runner output remains separate.
           </p>
+          <p>
+            The times below are end-to-end scenario wall-clock times. They
+            include chat generation, embedding calls, persistence/retrieval,
+            and agent-loop overhead; they are not embedding-only latency.
+          </p>
           <table>
-            <tr><th>Backend</th><th>Embedding</th><th>Personal</th><th>Cross-session</th><th>Project</th><th>GitHub</th></tr>
-            <tr><td>OMLX</td><td><code>Qwen3-Embedding-0.6B</code></td><td>92% / 193s</td><td>100% / 164s</td><td>65% / 298s</td><td>73% / 385s</td></tr>
-            <tr><td>Ollama</td><td><code>qwen3-embedding:0.6b</code></td><td>96% / 180s</td><td>100% / 120s</td><td>94% / 208s</td><td>97% / 298s</td></tr>
-            <tr><td>MLC-LLM</td><td><code>Qwen3-Embedding-0.6B-q0f16-MLC</code></td><td>100% / 94s</td><td>100% / 76s</td><td>94% / 138s</td><td>88% / 156s</td></tr>
+            <tr><th>Backend</th><th>Chat model</th><th>Embedding</th><th>Personal</th><th>Cross-session</th><th>Project</th><th>GitHub</th></tr>
+            <tr><td>OMLX</td><td><code>Qwen3-4B</code></td><td><code>Qwen3-Embedding-0.6B</code></td><td>92% / 193s</td><td>100% / 164s</td><td>65% / 298s</td><td>73% / 385s</td></tr>
+            <tr><td>Ollama</td><td><code>qwen3:4b</code></td><td><code>qwen3-embedding:0.6b</code></td><td>96% / 180s</td><td>100% / 120s</td><td>94% / 208s</td><td>97% / 298s</td></tr>
+            <tr><td>MLC-LLM</td><td><code>qwen3-4b</code></td><td><code>Qwen3-Embedding-0.6B-q0f16-MLC</code></td><td>100% / 94s</td><td>100% / 76s</td><td>94% / 138s</td><td>88% / 156s</td></tr>
           </table>
           <p>
             MLC used a real compiled model artifact with no symlink or temporary

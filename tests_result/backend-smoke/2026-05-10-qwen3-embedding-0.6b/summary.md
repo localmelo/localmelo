@@ -9,6 +9,10 @@ Purpose: verify persistent long-term retrieval against real local backends.
 All tested backends used the Qwen3 0.6B embedding family. The `online` backend
 was intentionally out of scope for this capture.
 
+The timing columns are end-to-end scenario wall-clock times. They include chat
+generation, embedding calls, memory persistence/retrieval, and agent-loop
+overhead; they should not be read as embedding-only latency.
+
 ## Results
 
 | Backend | Chat model | Embedding model | Personal | Cross-session | Project dev | GitHub tracking | Result |
@@ -20,7 +24,9 @@ was intentionally out of scope for this capture.
 ## Interpretation
 
 - All three local backends completed all four long-term retrieval scenarios.
-- MLC-LLM had the fastest wall-clock time in this capture.
+- MLC-LLM had the fastest wall-clock time in this capture, primarily reflecting
+  the served chat stack and end-to-end loop behavior rather than the shared
+  Qwen3 0.6B embedding family alone.
 - OMLX completed the run with the same embedding model but lower project/GitHub
   scenario scores, so it should be kept as supported evidence rather than the
   current performance baseline.

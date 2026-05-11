@@ -15,4 +15,4 @@ Current runs:
 
 | Run | Scope | Summary |
 | --- | --- | --- |
-| `2026-05-10-qwen3-embedding-0.6b` | OMLX, Ollama, MLC-LLM using the Qwen3 0.6B embedding family | [summary](2026-05-10-qwen3-embedding-0.6b/summary.md) |
+| `2026-05-10-qwen3-embedding-0.6b` | OMLX, Ollama, MLC-LLM using the Qwen3 0.6B embedding family; timings are end-to-end and include chat | [summary](2026-05-10-qwen3-embedding-0.6b/summary.md) |

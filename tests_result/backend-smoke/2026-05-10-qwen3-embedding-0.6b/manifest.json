@@ -5,6 +5,7 @@
   "issue": "https://github.com/localmelo/localmelo/issues/4",
   "captured_at": "2026-05-10",
   "embedding_model_family": "Qwen3-Embedding-0.6B",
+  "timing_scope": "end-to-end scenario wall-clock time, including chat generation, embedding calls, memory persistence/retrieval, and agent-loop overhead",
   "online_backend_in_scope": false,
   "environment": {
     "conda_env": "mlsys",
@@ -77,6 +78,7 @@
   ],
   "notes": [
     "All local backends completed all four retrieval scenarios.",
+    "Timing values are end-to-end scenario times and should not be interpreted as embedding-only latency.",
     "MLC-LLM used a real compiled Qwen3-Embedding-0.6B artifact, not a symlink or temporary alias.",
     "OMLX is captured through the local OpenAI-compatible experiment wrapper until it is added to tests/smoke/data/backends.json."
   ]

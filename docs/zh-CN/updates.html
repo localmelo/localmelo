@@ -97,11 +97,16 @@
             <code>tests_result/backend-smoke/2026-05-10-qwen3-embedding-0.6b/</code>；
             临时 runner output 保持分离。
           </p>
+          <p>
+            下面的时间是端到端场景 wall-clock time，包含 chat generation、embedding
+            calls、persistence/retrieval 和 agent-loop overhead；不能当作 embedding-only
+            latency 解读。
+          </p>
           <table>
-            <tr><th>后端</th><th>Embedding</th><th>个人偏好</th><th>跨会话</th><th>项目开发</th><th>GitHub</th></tr>
-            <tr><td>OMLX</td><td><code>Qwen3-Embedding-0.6B</code></td><td>92% / 193s</td><td>100% / 164s</td><td>65% / 298s</td><td>73% / 385s</td></tr>
-            <tr><td>Ollama</td><td><code>qwen3-embedding:0.6b</code></td><td>96% / 180s</td><td>100% / 120s</td><td>94% / 208s</td><td>97% / 298s</td></tr>
-            <tr><td>MLC-LLM</td><td><code>Qwen3-Embedding-0.6B-q0f16-MLC</code></td><td>100% / 94s</td><td>100% / 76s</td><td>94% / 138s</td><td>88% / 156s</td></tr>
+            <tr><th>后端</th><th>Chat model</th><th>Embedding</th><th>个人偏好</th><th>跨会话</th><th>项目开发</th><th>GitHub</th></tr>
+            <tr><td>OMLX</td><td><code>Qwen3-4B</code></td><td><code>Qwen3-Embedding-0.6B</code></td><td>92% / 193s</td><td>100% / 164s</td><td>65% / 298s</td><td>73% / 385s</td></tr>
+            <tr><td>Ollama</td><td><code>qwen3:4b</code></td><td><code>qwen3-embedding:0.6b</code></td><td>96% / 180s</td><td>100% / 120s</td><td>94% / 208s</td><td>97% / 298s</td></tr>
+            <tr><td>MLC-LLM</td><td><code>qwen3-4b</code></td><td><code>Qwen3-Embedding-0.6B-q0f16-MLC</code></td><td>100% / 94s</td><td>100% / 76s</td><td>94% / 138s</td><td>88% / 156s</td></tr>
           </table>
           <p>
             MLC 使用真实编译产物，没有 symlink 或临时 alias。OMLX 目前通过本地
