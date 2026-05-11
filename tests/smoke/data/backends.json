@@ -14,5 +14,14 @@
     "embed_url": "http://127.0.0.1:8400/v1",
     "embed_model": "qwen3-embedding",
     "health_url": "http://127.0.0.1:8400/v1/models"
+  },
+  "online": {
+    "name": "Online (OpenAI-compatible)",
+    "chat_url": "https://api.openai.com/v1",
+    "chat_model": "gpt-4o-mini",
+    "embed_url": "https://api.openai.com/v1",
+    "embed_model": "text-embedding-3-small",
+    "health_url": "https://api.openai.com/v1/models",
+    "requires_api_key_env": "SMOKE_ONLINE_API_KEY"
   }
 }

@@ -25,6 +25,10 @@ Usage
     # 全部后端:
     python tests/smoke/core_loop_test.py --backends all
 
+    # 在线后端 (默认 OpenAI; 未设置 API key 时自动跳过):
+    SMOKE_ONLINE_API_KEY=sk-... \
+        python tests/smoke/core_loop_test.py --backends online
+
     # 自定义输出目录:
     python tests/smoke/core_loop_test.py --out-dir ./my_reports
 
@@ -276,19 +280,29 @@ def check_backend_health(
     backend: dict[str, Any],
     timeout: float = 5.0,
 ) -> tuple[bool, str]:
-    """Probe the backend with a quick HTTP GET; return (ok, message)."""
+    """Probe the backend with a quick HTTP GET; return (ok, message).
+
+    Sends ``Authorization: Bearer <key>`` when the backend declares a
+    ``requires_api_key_env`` field and that env var is set, so probes
+    against auth-required endpoints (e.g. OpenAI ``/v1/models``) succeed.
+    """
     from urllib.error import URLError
-    from urllib.request import urlopen
+    from urllib.request import Request, urlopen
 
     url = backend.get(
         "health_url",
         backend["chat_url"].rstrip("/") + "/models",
     )
+    api_key_env = backend.get("requires_api_key_env")
+    api_key = os.environ.get(api_key_env) if api_key_env else None
+    req = Request(url)
+    if api_key:
+        req.add_header("Authorization", f"Bearer {api_key}")
     try:
-        with urlopen(url, timeout=timeout) as resp:  # noqa: S310
+        with urlopen(req, timeout=timeout) as resp:  # noqa: S310
             return True, f"OK ({resp.status})"
     except URLError as exc:
-        return False, str(exc.reason)
+        return False, str(getattr(exc, "reason", exc))
     except OSError as exc:
         return False, str(exc)
 
@@ -340,6 +354,8 @@ async def run_scenario(
     """Run one scenario against one backend. Return the full record."""
     # Select the appropriate chat provider based on backend type.
     backend_id = backend_cfg.get("id", "")
+    api_key_env = backend_cfg.get("requires_api_key_env")
+    api_key = os.environ.get(api_key_env) if api_key_env else None
     if backend_id == "ollama":
         # Use native Ollama /api/chat with think:true support.
         # Strip /v1 suffix if present (backends.json stores the OpenAI-compat URL).
@@ -355,12 +371,14 @@ async def run_scenario(
         inner_llm = OpenAICompatLLM(
             base_url=backend_cfg["chat_url"],
             model=backend_cfg["chat_model"],
+            api_key=api_key,
             timeout=300.0,
         )
     llm = LoggingLLM(inner=inner_llm)
     embedding = LoggingEmbedding(
         base_url=backend_cfg["embed_url"],
         model=backend_cfg["embed_model"],
+        api_key=api_key,
         timeout=60.0,
     )
 
@@ -941,6 +959,14 @@ async def run_all(
         print(f"[smoke] 对话: {bcfg['chat_model']}" f" @ {bcfg['chat_url']}")
         print(f"[smoke] 嵌入: {bcfg['embed_model']}" f" @ {bcfg['embed_url']}")
 
+        api_key_env = bcfg.get("requires_api_key_env")
+        if api_key_env and not os.environ.get(api_key_env):
+            reason = f"{api_key_env} not set"
+            print(f"[smoke] 跳过 {bcfg.get('name', bid)}: {reason}")
+            for sc in scenarios:
+                all_records.append(_make_skipped_record(bcfg, sc, reason))
+            continue
+
         ok, msg = check_backend_health(bcfg)
         if not ok:
             print(f"[smoke] 后端不可用: {msg}")
@@ -1009,7 +1035,7 @@ async def run_all(
 
     # Reload all backend summary JSONs from disk so sequential runs
     # (e.g. ollama first, mlc later) produce one combined compare report.
-    known_backends = ["ollama", "mlc"]
+    known_backends = ["ollama", "mlc", "online"]
     disk_summaries: list[dict[str, Any]] = []
     for bid in known_backends:
         json_path = out_dir / f"{bid}_test.json"
@@ -1058,7 +1084,7 @@ def _parse_args() -> argparse.Namespace:
 
 def _report_only(out_dir: Path, backend_ids: list[str]) -> None:
     """Regenerate compare_test.md from existing JSON files without re-running."""
-    known_backends = ["ollama", "mlc"]
+    known_backends = ["ollama", "mlc", "online"]
     disk_summaries: list[dict[str, Any]] = []
     for bid in known_backends:
         json_path = out_dir / f"{bid}_test.json"
