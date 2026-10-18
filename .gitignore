@@ -8,6 +8,9 @@
 .cache/
 __pycache__/
 
+# virtualenv (uv sync)
+.venv/
+
 # build
 *.egg-info/
 dist/
