@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from localmelo.melo.agent._chat import Chat
@@ -28,6 +29,7 @@ from localmelo.melo.schema import (
     ReflectionEntry,
     StepRecord,
     TaskRecord,
+    ToolCall,
     ToolDef,
     ToolResult,
 )
@@ -97,6 +99,35 @@ def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
             lines.append(f"  Failed: {'; '.join(r.failed_hypotheses)}")
         parts.append("\n".join(lines))
     return [Message(role="system", content="\n".join(parts))]
+
+
+# Characters of a withheld tool result that stay visible to the model.
+WITHHELD_PREVIEW_CHARS = 200
+
+
+def _render_tool_calls(calls: Sequence[ToolCall]) -> str:
+    """Text form of tool calls, used for memory-write checks."""
+    return "\n".join(
+        f"{tc.tool_name}("
+        f"{json.dumps(tc.arguments, ensure_ascii=False, sort_keys=True, default=str)})"
+        for tc in calls
+    )
+
+
+def _tool_result_text(result: ToolResult) -> str:
+    """Content of the ``role="tool"`` message that answers a call."""
+    if result.error:
+        return f"Error: {result.error}"
+    return result.output or "(no output)"
+
+
+def _withheld_notice(text: str, reason: str) -> str:
+    """Stand-in for a tool result the memory-write check rejected."""
+    preview = text[:WITHHELD_PREVIEW_CHARS]
+    return (
+        f"[Tool result withheld from working memory: {reason}. "
+        f"First {len(preview)} characters follow.]\n{preview}"
+    )
 
 
 CONTINUATION_UTILITY_THRESHOLD = 0.1
@@ -282,17 +313,16 @@ class Agent:
 
         return response, None
 
-    async def _do_execute(self, response: Message) -> ToolResult:
-        """Stage 4: execute tool call and validate the result.
+    async def _do_execute(self, call: ToolCall) -> ToolResult:
+        """Stage 4: execute one tool call and validate the result.
 
         Uses the sanitized payload from the executor-result checker
         when truncation or modification was applied; falls back to
         the raw outcome otherwise.
         """
-        assert response.tool_call is not None
         exec_request = ExecutionRequest(
-            tool_name=response.tool_call.tool_name,
-            arguments=dict(response.tool_call.arguments),
+            tool_name=call.tool_name,
+            arguments=dict(call.arguments),
         )
         outcome = await self.executor.execute_structured(exec_request)
 
@@ -315,35 +345,96 @@ class Agent:
         return outcome.to_tool_result()
 
     async def _do_memorize(
-        self, task_id: str, response: Message, result: ToolResult
+        self, task_id: str, response: Message, results: Sequence[ToolResult]
     ) -> None:
-        """Stage 5: record step and write checked results to memory."""
-        step = StepRecord(
-            thought=response.content,
-            tool_call=response.tool_call,
-            tool_result=result,
-        )
-        summary = await self.hippo.store_step(task_id, step)
+        """Stage 5: record the step and write checked results to memory.
 
-        # Checked write: step summary -> short + long memory
-        mem_check = self.checker.check_memory_write(
-            MemoryWritePayload(
-                text=summary,
-                role="assistant",
-                metadata={"step_id": step.step_id},
+        - History gets one StepRecord per executed call (the assistant
+          text is attached to the first), unconditionally.
+        - Long-term memory gets each record's text summary, if the checker
+          allows the write.
+        - Working memory gets the real protocol turn: the assistant message
+          with its tool calls, then one ``role="tool"`` message per call
+          paired by ``tool_call_id``, appended as one unit (see
+          :meth:`_checked_tool_turn`).
+        """
+        calls = response.tool_calls
+        for index, (call, result) in enumerate(zip(calls, results, strict=True)):
+            step = StepRecord(
+                thought=response.content if index == 0 else "",
+                tool_call=call,
+                tool_result=result,
             )
-        )
-        if mem_check.allowed:
-            await self.hippo.memorize(summary, metadata={"step_id": step.step_id})
+            summary = await self.hippo.store_step(task_id, step)
 
-        # Checked write: tool result -> short memory
-        output = result.error if result.error else result.output
-        tool_msg = f"[{result.tool_name}] {output}"
-        tool_mem_check = self.checker.check_memory_write(
-            MemoryWritePayload(text=tool_msg, role="tool")
+            # Checked write: step summary -> long-term memory only
+            mem_check = self.checker.check_memory_write(
+                MemoryWritePayload(
+                    text=summary,
+                    role="assistant",
+                    metadata={"step_id": step.step_id},
+                )
+            )
+            if mem_check.allowed:
+                await self.hippo.memorize(
+                    summary, metadata={"step_id": step.step_id}, to_working=False
+                )
+
+        turn = self._checked_tool_turn(response, results)
+        if turn is not None:
+            assistant_msg, tool_msgs = turn
+            self.hippo.working.append_turn(assistant_msg, tool_msgs)
+
+    def _memory_write_allowed(self, text: str, role: str) -> bool:
+        check = self.checker.check_memory_write(
+            MemoryWritePayload(text=text, role=role)
         )
-        if tool_mem_check.allowed:
-            self.hippo.working.append(Message(role="tool", content=tool_msg))
+        return check.allowed
+
+    def _checked_tool_turn(
+        self, response: Message, results: Sequence[ToolResult]
+    ) -> tuple[Message, list[Message]] | None:
+        """Build the working-memory copy of one tool-call turn.
+
+        Every message goes through ``Checker.check_memory_write``. A
+        rejected tool result is replaced by a short notice bound to the
+        same ``tool_call_id``; rejected assistant text is dropped while its
+        tool calls are kept. The turn therefore stays protocol-valid. When
+        even the tool calls are rejected (oversized arguments), the whole
+        turn is left out of working memory — history and long-term memory
+        still record it.
+        """
+        calls = list(response.tool_calls)
+        calls_text = _render_tool_calls(calls)
+        content, thinking = response.content, response.thinking
+        full_text = "\n".join(part for part in (content, calls_text) if part)
+        if not self._memory_write_allowed(full_text, "assistant"):
+            if not self._memory_write_allowed(calls_text, "assistant"):
+                return None
+            content, thinking = "", ""
+        assistant_msg = Message(
+            role="assistant", content=content, tool_calls=calls, thinking=thinking
+        )
+
+        tool_msgs: list[Message] = []
+        for call, result in zip(calls, results, strict=True):
+            text = _tool_result_text(result)
+            check = self.checker.check_memory_write(
+                MemoryWritePayload(text=text, role="tool")
+            )
+            if not check.allowed:
+                text = _withheld_notice(text, check.reason)
+                if not self._memory_write_allowed(text, "tool"):
+                    return None
+            tool_msgs.append(
+                Message(
+                    role="tool",
+                    content=text,
+                    tool_call_id=call.id,
+                    tool_result=result,
+                )
+            )
+        return assistant_msg, tool_msgs
 
     # ── Step estimation (kept for backward compat, no longer called by run) ──
 
@@ -362,15 +453,24 @@ class Agent:
 
     @staticmethod
     def _make_fingerprint(
-        response: Message, result: ToolResult
+        calls: Sequence[ToolCall], results: Sequence[ToolResult]
     ) -> tuple[str, str, str]:
-        """Return (tool_name, args_hash, error) for stuck detection."""
-        tc = response.tool_call
-        args_json = json.dumps(tc.arguments if tc else {}, sort_keys=True)
+        """Return one ``(tool_names, args_hash, errors)`` fingerprint per step.
+
+        A step with several calls is fingerprinted as a whole: calls are
+        sorted (the same batch in another order matches) and their errors
+        joined. ``_detect_stuck`` therefore fires when the same batch, or
+        the same errors, repeat across steps — not merely because one step
+        contains several calls.
+        """
+        pairs = sorted(
+            (tc.tool_name, json.dumps(tc.arguments, sort_keys=True, default=str))
+            for tc in calls
+        )
         return (
-            tc.tool_name if tc else "",
-            hashlib.sha256(args_json.encode()).hexdigest()[:16],
-            result.error,
+            ",".join(name for name, _ in pairs),
+            hashlib.sha256(json.dumps(pairs).encode()).hexdigest()[:16],
+            "\n".join(sorted(r.error for r in results if r.error)),
         )
 
     @staticmethod
@@ -540,18 +640,20 @@ class Agent:
                 return step + 1, ""
 
             # No tool call → direct answer
-            if response.tool_call is None:
+            if not response.tool_calls:
                 task.status = "completed"
                 task.result = response.content
                 return step + 1, ""
 
-            # Execute + memorize
-            result = await self._do_execute(response)
-            await self._do_memorize(task.task_id, response, result)
+            # Execute every call in order, each through the executor boundary
+            calls = list(response.tool_calls)
+            results: list[ToolResult] = []
+            for call in calls:
+                results.append(await self._do_execute(call))
+            await self._do_memorize(task.task_id, response, results)
 
-            # Stuck detection
-            fp = self._make_fingerprint(response, result)
-            fingerprints.append(fp)
+            # Stuck detection (one fingerprint per step)
+            fingerprints.append(self._make_fingerprint(calls, results))
             stuck = self._detect_stuck(fingerprints)
             if stuck:
                 return step + 1, stuck

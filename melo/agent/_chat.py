@@ -4,6 +4,7 @@ import re
 from typing import TYPE_CHECKING
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.memory.short import tail_turns
 from localmelo.melo.schema import Message, ToolDef
 
 if TYPE_CHECKING:
@@ -64,6 +65,10 @@ REFLECTION_PROMPT = (
 )
 
 _MEMORY_PREFIX = "[memory] "
+
+# Most recent working-memory messages shown to the reflection call. The
+# window is cut on turn boundaries, so a tool call keeps its results.
+REFLECTION_WINDOW = 10
 
 
 def _build_system_prompt(
@@ -141,9 +146,12 @@ class Chat:
     ) -> Message:
         system_prompt, other_msgs = _build_system_prompt(context, short, reflections)
         messages = [Message(role="system", content=system_prompt)]
-        messages.extend(other_msgs)
         if not any(m.role == "user" for m in short):
+            # The task query is no longer in the window (evicted). Put it
+            # back ahead of the remaining turns so the conversation still
+            # opens with the request instead of ending with it.
             messages.append(Message(role="user", content=query))
+        messages.extend(other_msgs)
 
         return await self.llm.chat(messages, tools=tools or None)
 
@@ -181,7 +189,7 @@ class Chat:
         )
 
         messages = [Message(role="system", content="\n\n".join(system_parts))]
-        messages.extend(short[-10:])
+        messages.extend(tail_turns(short, REFLECTION_WINDOW))
         messages.append(
             Message(
                 role="user",
