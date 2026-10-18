@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.melo.schema import Message, ToolCall, ToolDef, describe_images
 from localmelo.support.providers.llm._protocol import (
     parse_tool_calls,
     prepare_extra_body,
@@ -111,12 +111,32 @@ def _message_to_ollama(msg: Message, tool_names: dict[str, str]) -> dict[str, An
 
 
 def _messages_to_ollama(messages: list[Message]) -> list[dict[str, Any]]:
+    """Serialize a conversation for ``/api/chat``.
+
+    Images use the native ``images`` field (raw base64). Like the OpenAI
+    provider, images of a tool result go into a user message after the
+    run of tool results.
+    """
     tool_names: dict[str, str] = {}
     out: list[dict[str, Any]] = []
+    trailing: list[dict[str, Any]] = []
     for msg in messages:
+        if msg.role != "tool" and trailing:
+            out.extend(trailing)
+            trailing = []
         for tc in msg.tool_calls:
             tool_names[tc.id] = tc.tool_name
-        out.append(_message_to_ollama(msg, tool_names))
+        entry = _message_to_ollama(msg, tool_names)
+        images = [img.data for img in msg.images if img.data]
+        if images and msg.role == "tool":
+            label = (
+                f"Output of tool call {msg.tool_call_id}: {describe_images(msg.images)}"
+            )
+            trailing.append({"role": "user", "content": label, "images": images})
+        elif images:
+            entry["images"] = images
+        out.append(entry)
+    out.extend(trailing)
     return out
 
 

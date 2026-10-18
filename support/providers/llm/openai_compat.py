@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import httpx
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, describe_images
 from localmelo.support.providers.llm._protocol import (
     parse_tool_calls,
     prepare_extra_body,
@@ -47,14 +47,31 @@ def _tool_call_to_openai(tc: ToolCall) -> dict[str, Any]:
     }
 
 
+def _image_parts(images: Sequence[ImagePart]) -> list[dict[str, Any]]:
+    """``image_url`` content parts (base64 data URLs) for images with data."""
+    return [
+        {"type": "image_url", "image_url": {"url": img.data_url}}
+        for img in images
+        if img.data
+    ]
+
+
 def _message_to_openai(msg: Message) -> dict[str, Any]:
     """Serialize a Message as an OpenAI chat message.
 
     Only spec fields are sent: ``thinking``, ``usage``, ``timestamp`` and
     ``tool_result`` stay local. An assistant message with tool calls keeps
     its (possibly empty) text and lists every call; a tool result names
-    the call it answers through ``tool_call_id``.
+    the call it answers through ``tool_call_id``. A user message with
+    images becomes a content array of ``text`` and ``image_url`` parts.
+    Images on other roles are not sent here (see :func:`_messages_to_openai`
+    for tool results; the spec allows images only in user content).
     """
+    if msg.role == "user" and msg.images:
+        parts = _image_parts(msg.images)
+        if parts:
+            text = [{"type": "text", "text": msg.content}] if msg.content else []
+            return {"role": "user", "content": text + parts}
     if msg.role == "assistant" and msg.tool_calls:
         return {
             "role": "assistant",
@@ -68,6 +85,47 @@ def _message_to_openai(msg: Message) -> dict[str, Any]:
         out["content"] = msg.content
         return out
     return {"role": msg.role, "content": msg.content}
+
+
+def _tool_images_message(msg: Message, tool_names: dict[str, str]) -> dict[str, Any]:
+    """The user message that carries the images of one tool result."""
+    name = tool_names.get(msg.tool_call_id, "")
+    if not name and msg.tool_result is not None:
+        name = msg.tool_result.tool_name
+    label = f"Output of tool call {msg.tool_call_id}"
+    if name:
+        label += f" ({name})"
+    label += f": {describe_images(msg.images)}"
+    return {
+        "role": "user",
+        "content": [{"type": "text", "text": label}, *_image_parts(msg.images)],
+    }
+
+
+def _messages_to_openai(messages: Sequence[Message]) -> list[dict[str, Any]]:
+    """Serialize a conversation, moving tool-result images into user turns.
+
+    OpenAI tool messages are text-only, and oMLX 0.3.9 drops image parts
+    from ``role="tool"`` messages (it places image tokens on user turns
+    only, the same way it converts images inside Anthropic tool_result
+    blocks). So the images of each tool result travel in their own
+    ``role="user"`` message, placed right after the run of tool results
+    and labelled with the tool call they belong to.
+    """
+    out: list[dict[str, Any]] = []
+    trailing: list[dict[str, Any]] = []
+    tool_names: dict[str, str] = {}
+    for msg in messages:
+        if msg.role != "tool" and trailing:
+            out.extend(trailing)
+            trailing = []
+        for tc in msg.tool_calls:
+            tool_names[tc.id] = tc.tool_name
+        out.append(_message_to_openai(msg))
+        if msg.role == "tool" and _image_parts(msg.images):
+            trailing.append(_tool_images_message(msg, tool_names))
+    out.extend(trailing)
+    return out
 
 
 def _reasoning_text(msg: dict[str, Any]) -> str:
@@ -181,7 +239,7 @@ class OpenAICompatLLM(BaseLLMProvider):
         payload: dict[str, Any] = {
             **self.extra_body,
             "model": self.model,
-            "messages": [_message_to_openai(m) for m in messages],
+            "messages": _messages_to_openai(messages),
         }
         if tools:
             payload["tools"] = [_tool_def_to_openai(t) for t in tools]
