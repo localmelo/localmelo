@@ -8,6 +8,7 @@ from localmelo.support.mcp.config import (
     parse_mcp_config,
     sanitize_name,
 )
+from localmelo.support.mcp.provider import McpToolProvider, exposed_tool_name
 from localmelo.support.mcp.results import tool_result_to_output
 
 __all__ = [
@@ -15,7 +16,9 @@ __all__ = [
     "McpError",
     "McpServerConfig",
     "McpTool",
+    "McpToolProvider",
     "StdioMcpClient",
+    "exposed_tool_name",
     "load_mcp_config",
     "parse_mcp_config",
     "sanitize_name",
