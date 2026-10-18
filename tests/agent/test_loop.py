@@ -456,9 +456,13 @@ class TestNoEmbeddingToolLoop:
         # Long-term memory must stay empty (no embedding).
         assert len(agent.hippo.long._entries) == 0
 
-        # Short-term should contain the tool message.
-        short_contents = [m.content for m in agent.hippo.short.get_window()]
-        assert any("echo" in c and "hi" in c for c in short_contents)
+        # Short-term holds the real turn: the echo call and its result,
+        # paired by tool_call_id.
+        window = agent.hippo.short.get_window()
+        calls = [tc for m in window for tc in m.tool_calls]
+        results = [m for m in window if m.role == "tool"]
+        assert [tc.tool_name for tc in calls] == ["echo"]
+        assert [(m.tool_call_id, m.content) for m in results] == [(calls[0].id, "hi")]
 
 
 class TestPrePlanCheckFailure:
@@ -532,7 +536,7 @@ class TestSanitizedOutputInMemory:
     @pytest.mark.asyncio
     async def test_truncated_tool_msg_blocked_from_short_memory(self) -> None:
         """When both executor truncation and memory-write check apply,
-        the oversized tool message is correctly blocked from short-term."""
+        nothing oversized reaches short-term memory."""
         llm = FakeLLM()
         llm.enqueue(
             Message(
@@ -560,10 +564,12 @@ class TestSanitizedOutputInMemory:
         result = await agent.run("huge output test")
         assert result == "ok"
 
-        # The truncated output (~50k) plus the "[echo] " prefix exceeds
-        # the memory-write limit, so no tool message in short-term.
-        tool_msgs = [m for m in agent.hippo.short.get_window() if m.role == "tool"]
-        assert len(tool_msgs) == 0
+        # The call's own arguments (60k chars) exceed the memory-write
+        # limit, so the whole turn (call + result) stays out of short-term;
+        # a lone result without its call would be invalid on the wire.
+        window = agent.hippo.short.get_window()
+        assert [m for m in window if m.role == "tool"] == []
+        assert [m for m in window if m.tool_calls] == []
 
 
 class TestToolResultMemoryWriteBlocked:
@@ -600,14 +606,16 @@ class TestToolResultMemoryWriteBlocked:
         result = await agent.run("do fail")
         assert result == "handled"
 
-        # The huge error should be blocked from short-term memory by the
-        # memory-write checker (text > 50k chars).
-        tool_msgs = [
-            m
-            for m in agent.hippo.short.get_window()
-            if m.role == "tool" and "fail_tool" in m.content
-        ]
-        assert len(tool_msgs) == 0
+        # The huge error is blocked from short-term memory by the
+        # memory-write checker (text > 50k chars). The call still gets an
+        # answer: a short notice bound to the same tool_call_id.
+        window = agent.hippo.short.get_window()
+        calls = [tc for m in window for tc in m.tool_calls]
+        tool_msgs = [m for m in window if m.role == "tool"]
+        assert len(calls) == 1 and len(tool_msgs) == 1
+        assert tool_msgs[0].tool_call_id == calls[0].id
+        assert tool_msgs[0].content.startswith("[Tool result withheld")
+        assert len(tool_msgs[0].content) < 1_000
 
 
 class TestDirectAnswerEdgeCases:

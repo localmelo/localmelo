@@ -1004,9 +1004,14 @@ class TestNoEmbeddingFullPath:
         # Long-term memory must be empty (no embedding)
         assert len(agent.hippo.long._entries) == 0
 
-        # Short-term memory should have the tool message
-        short_contents = [m.content for m in agent.hippo.short.get_window()]
-        assert any("echo" in c and "hello" in c for c in short_contents)
+        # Short-term memory holds the echo call and its paired result
+        window = agent.hippo.short.get_window()
+        calls = [tc for m in window for tc in m.tool_calls]
+        results = [m for m in window if m.role == "tool"]
+        assert [tc.tool_name for tc in calls] == ["echo"]
+        assert [(m.tool_call_id, m.content) for m in results] == [
+            (calls[0].id, "hello")
+        ]
 
         # History should have the task and step
         tasks = list(agent.hippo.history._tasks.values())
@@ -1078,14 +1083,14 @@ class TestThreeWayBoundary:
     async def test_truncated_output_flows_through_all_layers(self) -> None:
         """Large tool output -> Checker truncates -> step record truncated
         -> memory-write blocks oversized tool message -> planning prompt
-        has no tool message.
+        carries a short notice bound to the call instead of the output.
 
         This exercises three boundaries in sequence:
         1. Executor result checker truncates output > MAX_OUTPUT_LEN
         2. Agent memory-write checker rejects the tool message because
            truncation tail + tool-name prefix push it over MAX_MEMORY_TEXT_LEN
            (both limits are currently 50,000 — any truncated message exceeds)
-        3. The follow-up planning prompt correctly reflects the absence
+        3. The follow-up planning prompt answers the call with a notice
         """
         from localmelo.melo.checker.validators import (
             MAX_MEMORY_TEXT_LEN,
