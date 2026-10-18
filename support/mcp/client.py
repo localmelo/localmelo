@@ -96,10 +96,12 @@ class StdioMcpClient:
         self._write_lock = asyncio.Lock()
         self._tasks: set[asyncio.Task[None]] = set()
         self._exit_error: McpError | None = None
-        # close() has begun: requests are refused from then on.
+        # close() has begun: requests are refused, and start() refuses to
+        # run, from then on.
         self._closing = False
-        # close() has finished (process gone, readers stopped): later calls
-        # do nothing.
+        # close() has shut a process down (process gone, readers stopped):
+        # later calls do nothing. A close() before there is a process only
+        # sets _closing.
         self._closed = False
         self.stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
         self.protocol_version = ""
@@ -117,7 +119,17 @@ class StdioMcpClient:
     # ── Lifecycle ──
 
     async def start(self) -> None:
-        """Spawn the server and complete the ``initialize`` handshake."""
+        """Spawn the server and complete the ``initialize`` handshake.
+
+        Once close() has begun, start() raises McpError instead. A close()
+        that comes while the process is being spawned finds no process to
+        stop, so start() stops the new process itself, without the
+        handshake, and raises McpError.
+        """
+        if self._closing:
+            raise McpError(
+                f"Cannot start MCP server {self.name!r}: the client is closed"
+            )
         if self._proc is not None:
             return
         env = {k: os.environ[k] for k in DEFAULT_ENV_VARS if k in os.environ}
@@ -141,6 +153,15 @@ class StdioMcpClient:
                 f"Cannot start MCP server {self.name!r} "
                 f"({self.config.command}): {exc}"
             ) from exc
+        if self._closing:
+            # close() ran during the spawn and had no process to stop. If
+            # this shutdown is cancelled, _proc is set and _closed is not,
+            # so the next close() finishes it.
+            await self.close()
+            raise McpError(
+                f"Cannot start MCP server {self.name!r}: the client was closed "
+                "during start-up"
+            )
         self._spawn(self._read_stdout())
         self._spawn(self._read_stderr())
 
@@ -188,12 +209,18 @@ class StdioMcpClient:
         stopped. A close() cancelled part-way therefore leaves the shutdown
         to the next call, which finishes it; after that, close() does
         nothing.
+
+        Before there is a process, close() only marks the client as closing
+        and returns: start() then refuses to run, and a start() that is
+        spawning the server stops the new process itself.
         """
         if self._closed:
             return
         self._closing = True
         proc = self._proc
-        if proc is not None and proc.returncode is None:
+        if proc is None:
+            return
+        if proc.returncode is None:
             if proc.stdin is not None:
                 with contextlib.suppress(Exception):
                     proc.stdin.close()

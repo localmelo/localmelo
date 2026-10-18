@@ -13,7 +13,12 @@ from typing import Any
 import pytest
 
 from localmelo.support.mcp import McpError, StdioMcpClient, tool_result_to_output
-from localmelo.tests.mcp.conftest import fake_server_config, read_log
+from localmelo.tests.mcp.conftest import (
+    SpawnGate,
+    fake_server_config,
+    read_log,
+    wait_held,
+)
 from localmelo.tests.mcp.fake_mcp_server import PNG_1X1, TOOLS
 
 
@@ -293,3 +298,48 @@ class TestShutdown:
         await asyncio.wait_for(mcp.close(), 5)
         assert mcp.returncode is not None
         assert readers and all(task.done() for task in readers)
+
+
+class TestCloseDuringStart:
+    async def test_close_during_the_spawn_stops_the_new_process(
+        self, log_path: Path, spawn_gate: SpawnGate
+    ) -> None:
+        spawn_gate.hold_from = 0
+        mcp = StdioMcpClient(fake_server_config(log_path), shutdown_grace_s=0.5)
+        starting = asyncio.create_task(mcp.start())
+        await wait_held(spawn_gate, starting)
+        # start() is still spawning, so close() has no process to stop and
+        # returns at once, however often it is called ...
+        await mcp.close()
+        await mcp.close()
+        spawn_gate.release()
+        # ... and start() stops the process it then gets, without the
+        # handshake.
+        with pytest.raises(
+            McpError,
+            match="Cannot start MCP server 'fake': the client was closed",
+        ):
+            await starting
+        (proc,) = spawn_gate.processes
+        assert proc.returncode is not None
+        assert mcp.returncode is not None
+        assert not mcp._tasks  # private: no reader task is running
+        assert read_log(log_path) == []  # the server never got initialize
+        # The client stays closed.
+        await mcp.close()
+        with pytest.raises(McpError, match="the client is closed"):
+            await mcp.start()
+        assert len(spawn_gate.processes) == 1
+
+    async def test_start_after_close_is_refused(
+        self, log_path: Path, spawn_gate: SpawnGate
+    ) -> None:
+        mcp = StdioMcpClient(fake_server_config(log_path))
+        await mcp.close()
+        await mcp.close()
+        with pytest.raises(
+            McpError, match="Cannot start MCP server 'fake': the client is closed"
+        ):
+            await mcp.start()
+        assert spawn_gate.processes == []
+        assert mcp.returncode is None
