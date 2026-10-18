@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import copy
 import json
+from collections.abc import Mapping
 from typing import Any
 
 from localmelo.melo.schema import ToolCall, new_tool_call_id
+
+# Request fields the providers own. ``extra_body`` may add any other
+# top-level field (``chat_template_kwargs``, ``temperature``,
+# ``reasoning_effort``, ...) but cannot replace these.
+RESERVED_BODY_KEYS = frozenset({"model", "messages", "tools", "tool_choice", "stream"})
 
 # Key used to keep tool-call arguments that are not a JSON object. The
 # call is still executed through the normal executor path, which reports
@@ -69,3 +76,36 @@ def parse_tool_calls(raw: Any) -> list[ToolCall]:
             )
         )
     return calls
+
+
+def extra_body_errors(extra_body: object) -> list[str]:
+    """Return problems with an ``extra_body`` value (empty list = valid)."""
+    if not isinstance(extra_body, Mapping):
+        return [f"extra_body must be a table, got {type(extra_body).__name__}"]
+    errors: list[str] = []
+    for key in extra_body:
+        if not isinstance(key, str):
+            errors.append(f"extra_body keys must be strings, got {key!r}")
+        elif key in RESERVED_BODY_KEYS:
+            errors.append(
+                f"extra_body must not set {key!r}; localmelo manages that field"
+            )
+    try:
+        json.dumps(extra_body, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        errors.append(f"extra_body is not JSON-serializable: {exc}")
+    return errors
+
+
+def prepare_extra_body(extra_body: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Validate *extra_body* and return a private deep copy of it.
+
+    Raises :class:`ValueError` when the value cannot be merged into a
+    request body.
+    """
+    if extra_body is None:
+        return {}
+    errors = extra_body_errors(extra_body)
+    if errors:
+        raise ValueError("; ".join(errors))
+    return copy.deepcopy(dict(extra_body))

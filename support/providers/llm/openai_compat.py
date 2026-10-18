@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef
-from localmelo.support.providers.llm._protocol import parse_tool_calls
+from localmelo.support.providers.llm._protocol import (
+    parse_tool_calls,
+    prepare_extra_body,
+)
 
 
 def _tool_def_to_openai(td: ToolDef) -> dict[str, Any]:
@@ -129,6 +133,11 @@ class OpenAICompatLLM(BaseLLMProvider):
         Bearer token for authenticated endpoints.
     timeout : float
         HTTP timeout in seconds (default 120).
+    extra_body : Mapping[str, Any] | None
+        Extra top-level fields merged into every request body, e.g.
+        ``{"chat_template_kwargs": {"enable_thinking": False}}``. Fields
+        the provider owns (``model``, ``messages``, ``tools``,
+        ``tool_choice``, ``stream``) are rejected with ``ValueError``.
     transport : httpx.AsyncBaseTransport | None
         Optional HTTP transport, e.g. ``httpx.MockTransport`` in tests.
     """
@@ -140,10 +149,12 @@ class OpenAICompatLLM(BaseLLMProvider):
         api_key: str | None = None,
         timeout: float = 120.0,
         *,
+        extra_body: Mapping[str, Any] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         **kwargs: Any,
     ) -> None:
         self.model = model
+        self.extra_body = prepare_extra_body(extra_body)
         headers: dict[str, str] = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -160,6 +171,7 @@ class OpenAICompatLLM(BaseLLMProvider):
         tools: list[ToolDef] | None = None,
     ) -> Message:
         payload: dict[str, Any] = {
+            **self.extra_body,
             "model": self.model,
             "messages": [_message_to_openai(m) for m in messages],
         }

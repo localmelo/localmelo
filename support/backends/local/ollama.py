@@ -71,6 +71,7 @@ class OllamaBackend(BaseBackend):
         return OllamaNativeChat(
             base_url=url,
             model=cfg.ollama.chat_model,
+            extra_body=cfg.ollama.extra_body,
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

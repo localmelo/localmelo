@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
-from localmelo.support.providers.llm._protocol import parse_tool_calls
+from localmelo.support.providers.llm._protocol import (
+    parse_tool_calls,
+    prepare_extra_body,
+)
 
 
 def _tool_def_to_openai(td: ToolDef) -> dict[str, Any]:
@@ -122,6 +126,10 @@ class OllamaNativeChat(BaseLLMProvider):
         Model identifier, e.g. ``"qwen3:8b"``.
     timeout : float
         HTTP timeout in seconds (default 300).
+    extra_body : Mapping[str, Any] | None
+        Extra top-level fields merged into every ``/api/chat`` body, e.g.
+        ``{"think": False}`` or ``{"options": {"temperature": 0}}``.
+        ``model``, ``messages``, ``tools`` and ``stream`` cannot be set.
     transport : httpx.AsyncBaseTransport | None
         Optional HTTP transport, e.g. ``httpx.MockTransport`` in tests.
     """
@@ -132,9 +140,11 @@ class OllamaNativeChat(BaseLLMProvider):
         model: str,
         timeout: float = 300.0,
         *,
+        extra_body: Mapping[str, Any] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.model = model
+        self.extra_body = prepare_extra_body(extra_body)
         self._http = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=timeout,
@@ -147,10 +157,11 @@ class OllamaNativeChat(BaseLLMProvider):
         tools: list[ToolDef] | None = None,
     ) -> Message:
         payload: dict[str, Any] = {
+            "think": True,  # extra_body may turn this off
+            **self.extra_body,
             "model": self.model,
             "messages": _messages_to_ollama(messages),
             "stream": False,
-            "think": True,
         }
         if tools:
             payload["tools"] = [_tool_def_to_openai(t) for t in tools]

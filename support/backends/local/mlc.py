@@ -65,6 +65,7 @@ class MlcBackend(BaseBackend):
         return build_openai_chat(
             base_url=normalize_url(cfg.mlc.chat_url),
             model=cfg.mlc.chat_model,
+            extra_body=cfg.mlc.extra_body,
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

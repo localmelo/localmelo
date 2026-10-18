@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import math
 import os
+import re
 import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 
 class ConfigError(Exception):
@@ -35,6 +40,9 @@ class LocalBackendConfig:
     chat_model: str = ""
     embedding_url: str = ""
     embedding_model: str = ""
+    # Extra top-level fields merged into every chat request body, e.g.
+    # {"chat_template_kwargs": {"enable_thinking": False}}.
+    extra_body: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -44,6 +52,8 @@ class CloudVendorConfig:
     api_key_env: str = ""  # env var name, e.g. OPENAI_API_KEY
     chat_model: str = ""
     base_url: str = ""  # optional override; each vendor has a built-in default
+    # Extra top-level fields merged into every chat request body.
+    extra_body: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -120,6 +130,7 @@ class Config:
         # -- Delegate chat backend validation --
         chat_errors = self._validate_chat_backend()
         errors.extend(chat_errors)
+        errors.extend(self._validate_extra_body())
 
         # -- Delegate embedding backend validation (skip if "none") --
         if self.embedding_backend != "none":
@@ -142,6 +153,17 @@ class Config:
             return backend.validate(self)
         except KeyError:
             return [f"chat_backend {self.chat_backend!r}: no registered adapter found."]
+
+    def _validate_extra_body(self) -> list[str]:
+        from localmelo.support.providers.llm._protocol import extra_body_errors
+
+        section = getattr(self, self.chat_backend, None)
+        if section is None:
+            return []
+        return [
+            f"[{self.chat_backend}] {err}"
+            for err in extra_body_errors(getattr(section, "extra_body", {}))
+        ]
 
     def _validate_embedding_backend(self) -> list[str]:
         from localmelo.support.backends.registry import get_backend
@@ -211,6 +233,8 @@ def load() -> Config:
             for k, v in data[section].items():
                 if hasattr(target, k):
                     setattr(target, k, v)
+            # Migration: flat chat_template_kwargs -> extra_body
+            _migrate_extra_body(target, data[section])
         # Migration: old [mlc] section with chat_port -> chat_url
         if section == "mlc" and "mlc" in data:
             _migrate_mlc_section(cfg.mlc, data["mlc"])
@@ -222,6 +246,8 @@ def load() -> Config:
             for k, v in data[section].items():
                 if hasattr(target, k):
                     setattr(target, k, v)
+            # Migration: flat chat_template_kwargs -> extra_body
+            _migrate_extra_body(target, data[section])
 
     # Migration: old [cloud_api] section -> vendor-specific section
     if "cloud_api" in data and cfg.chat_backend in _CLOUD_SECTIONS:
@@ -263,6 +289,24 @@ def _migrate_mlc_section(mlc: LocalBackendConfig, section: dict) -> None:
             mlc.embedding_url = mlc.chat_url
 
 
+def _migrate_extra_body(
+    target: LocalBackendConfig | CloudVendorConfig, section: Mapping[str, Any]
+) -> None:
+    """Fold a flat ``chat_template_kwargs`` table into ``extra_body``.
+
+    ``extra_body`` is the canonical form; a section-level
+    ``chat_template_kwargs = {...}`` is accepted as shorthand and is
+    written back in canonical form by :func:`save`. An explicit
+    ``extra_body.chat_template_kwargs`` wins over the flat key. A bad
+    ``extra_body`` value is left for :meth:`Config.validate` to report.
+    """
+    flat = section.get("chat_template_kwargs")
+    if not isinstance(flat, dict) or not isinstance(target.extra_body, dict):
+        return
+    if "chat_template_kwargs" not in target.extra_body:
+        target.extra_body = {**target.extra_body, "chat_template_kwargs": flat}
+
+
 def _migrate_cloud_api_section(cfg: Config, section: dict) -> None:
     """Migrate old [cloud_api] or [online] section to vendor-specific config."""
     vendor = cfg.chat_backend
@@ -274,6 +318,7 @@ def _migrate_cloud_api_section(cfg: Config, section: dict) -> None:
             continue
         if hasattr(target, k):
             setattr(target, k, v)
+    _migrate_extra_body(target, section)
 
 
 def _migrate_legacy(data: dict) -> Config:
@@ -289,6 +334,7 @@ def _migrate_legacy(data: dict) -> Config:
                 if hasattr(cfg.mlc, k):
                     setattr(cfg.mlc, k, v)
             _migrate_mlc_section(cfg.mlc, data["mlc"])
+            _migrate_extra_body(cfg.mlc, data["mlc"])
     elif old == "online":
         online_sec = data.get("online", {})
         provider = online_sec.get("provider", "")
@@ -309,6 +355,7 @@ def _migrate_legacy(data: dict) -> Config:
             for k, v in data["ollama"].items():
                 if hasattr(cfg.ollama, k):
                     setattr(cfg.ollama, k, v)
+            _migrate_extra_body(cfg.ollama, data["ollama"])
 
     if "gateway" in data:
         for k, v in data["gateway"].items():
@@ -316,6 +363,41 @@ def _migrate_legacy(data: dict) -> Config:
                 setattr(cfg.gateway, k, v)
 
     return cfg
+
+
+_BARE_TOML_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _toml_string(text: str) -> str:
+    # A JSON string literal (ASCII-only) is also a valid TOML basic
+    # string, except that TOML additionally requires DEL to be escaped.
+    return json.dumps(text).replace("\x7f", "\\u007f")
+
+
+def _toml_value(value: Any) -> str:
+    """Render *value* as a single-line TOML value (inline tables for dicts)."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if math.isnan(value):
+            return "nan"
+        if math.isinf(value):
+            return "inf" if value > 0 else "-inf"
+        return repr(value)
+    if isinstance(value, str):
+        return _toml_string(value)
+    if isinstance(value, Mapping):
+        items = []
+        for key, item in value.items():
+            k = str(key)
+            k = k if _BARE_TOML_KEY.match(k) else _toml_string(k)
+            items.append(f"{k} = {_toml_value(item)}")
+        return "{" + ", ".join(items) + "}"
+    if isinstance(value, list | tuple):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    raise ConfigError(f"Cannot write {type(value).__name__} value {value!r} to TOML")
 
 
 def save(cfg: Config) -> None:
@@ -334,6 +416,8 @@ def save(cfg: Config) -> None:
         lines.append(f'chat_model = "{sec.chat_model}"')
         lines.append(f'embedding_url = "{sec.embedding_url}"')
         lines.append(f'embedding_model = "{sec.embedding_model}"')
+        if sec.extra_body:
+            lines.append(f"extra_body = {_toml_value(sec.extra_body)}")
         lines.append("")
 
     # Cloud vendor sections
@@ -343,6 +427,8 @@ def save(cfg: Config) -> None:
         lines.append(f'api_key_env = "{sec.api_key_env}"')
         lines.append(f'chat_model = "{sec.chat_model}"')
         lines.append(f'base_url = "{sec.base_url}"')
+        if sec.extra_body:
+            lines.append(f"extra_body = {_toml_value(sec.extra_body)}")
         lines.append("")
 
     lines.append("[gateway]")

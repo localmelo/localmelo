@@ -270,6 +270,32 @@ host, compile, or serve models itself.
 via the environment variable named in `api_key_env`
 (e.g. `OPENAI_API_KEY`).
 
+### Extra request fields (`extra_body`)
+
+Every chat backend section in `~/.cache/localmelo/config.toml` accepts an
+optional `extra_body` table. Its keys are merged into the top level of
+every chat request, which is how server-specific options such as
+`chat_template_kwargs` reach an OpenAI-compatible server:
+
+```toml
+[vllm]
+chat_url = "http://127.0.0.1:8000/v1"
+chat_model = "Qwen3-8B"
+
+[vllm.extra_body.chat_template_kwargs]
+enable_thinking = false
+```
+
+- Inline form: `extra_body = { chat_template_kwargs = { reasoning_effort = "low" } }`.
+- A flat `chat_template_kwargs = { ... }` key in the section is accepted as
+  shorthand and is rewritten as `extra_body` the next time the config is saved.
+- `model`, `messages`, `tools`, `tool_choice` and `stream` are managed by
+  localmelo and cannot be set through `extra_body`.
+- For the `ollama` backend the table is merged into the native `/api/chat`
+  body, e.g. `extra_body = { think = false }`.
+- Direct `--base-url` mode does not read the config file, so `extra_body`
+  does not apply there.
+
 ### Deployment matrix
 
 Any local or cloud backend can be used for chat. Embedding can use

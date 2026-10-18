@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
@@ -25,9 +28,16 @@ def build_openai_chat(
     base_url: str,
     model: str,
     api_key: str | None = None,
+    extra_body: Mapping[str, Any] | None = None,
 ) -> BaseLLMProvider:
-    """Build an :class:`OpenAICompatLLM` with consistent URL handling."""
-    return OpenAICompatLLM(base_url=base_url, model=model, api_key=api_key)
+    """Build an :class:`OpenAICompatLLM` with consistent URL handling.
+
+    *extra_body* is merged into every chat request (see
+    :class:`OpenAICompatLLM`).
+    """
+    return OpenAICompatLLM(
+        base_url=base_url, model=model, api_key=api_key, extra_body=extra_body
+    )
 
 
 def build_openai_embedding(
