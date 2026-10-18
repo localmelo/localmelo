@@ -30,7 +30,13 @@ from localmelo.support.mcp import (
     StdioMcpClient,
     exposed_tool_name,
 )
-from localmelo.tests.mcp.conftest import fake_server_config, read_log
+from localmelo.tests.mcp.conftest import (
+    Gate,
+    SpawnGate,
+    fake_server_config,
+    read_log,
+    wait_held,
+)
 from localmelo.tests.mcp.fake_mcp_server import PNG_1X1, TOOLS
 
 
@@ -47,6 +53,21 @@ def recording_factory(
     return make
 
 
+def gated_factory(
+    cls: Callable[[McpServerConfig, Gate], StdioMcpClient],
+    gate: Gate,
+    created: list[StdioMcpClient],
+) -> Callable[[McpServerConfig], StdioMcpClient]:
+    """Clients of *cls* that share *gate*, kept for later assertions."""
+
+    def make(server: McpServerConfig) -> StdioMcpClient:
+        client = cls(server, gate)
+        created.append(client)
+        return client
+
+    return make
+
+
 class BlankDescriptionClient(StdioMcpClient):
     """Lists the fake server's tools with their descriptions removed."""
 
@@ -55,6 +76,31 @@ class BlankDescriptionClient(StdioMcpClient):
             dataclasses.replace(tool, description="")
             for tool in await super().list_tools()
         ]
+
+
+class HeldListingClient(StdioMcpClient):
+    """Lists the server's tools, then holds at the gate before returning them."""
+
+    def __init__(self, server: McpServerConfig, gate: Gate) -> None:
+        super().__init__(server, shutdown_grace_s=0.5)
+        self._gate = gate
+
+    async def list_tools(self) -> list[McpTool]:
+        tools = await super().list_tools()
+        await self._gate.hold()
+        return tools
+
+
+class HeldShutdownClient(StdioMcpClient):
+    """Holds close() at the gate before each wait for the process to exit."""
+
+    def __init__(self, server: McpServerConfig, gate: Gate) -> None:
+        super().__init__(server, shutdown_grace_s=0.2)
+        self._gate = gate
+
+    async def _wait_exit(self, proc: asyncio.subprocess.Process) -> bool:
+        await self._gate.hold()
+        return await super()._wait_exit(proc)
 
 
 async def invoke(tool: ProvidedTool, **arguments: Any) -> ToolOutput:
@@ -251,6 +297,107 @@ class TestClose:
         assert client.returncode is not None
         assert provider.clients == []
         assert readers and all(task.done() for task in readers)
+
+
+class TestCloseDuringStart:
+    async def test_close_during_a_spawn(
+        self, tmp_path: Path, spawn_gate: SpawnGate, created: list[StdioMcpClient]
+    ) -> None:
+        spawn_gate.hold_from = 1  # server a starts; b is held in its spawn
+        provider = McpToolProvider(
+            [
+                fake_server_config(tmp_path / f"{name}.log", name=name)
+                for name in ("a", "b", "c")
+            ],
+            client_factory=recording_factory(created),
+        )
+        starting = asyncio.create_task(provider.start())
+        await wait_held(spawn_gate, starting)
+        readers = set(created[0]._tasks)  # private: server a's readers
+        # close() stops a. b has no process yet, so close() only marks it
+        # closing and drops it ...
+        await provider.close()
+        assert provider.clients == []
+        spawn_gate.release()
+        # ... and b's start() stops the process it then gets.
+        with pytest.raises(McpError, match="Cannot start MCP server 'b'"):
+            await starting
+        assert [client.name for client in created] == ["a", "b"]  # c never ran
+        assert len(spawn_gate.processes) == 2
+        assert all(proc.returncode is not None for proc in spawn_gate.processes)
+        assert readers and all(task.done() for task in readers)
+        assert not created[1]._tasks
+        assert provider.clients == []
+        assert read_log(tmp_path / "b.log") == []  # b got no handshake
+
+    @pytest.mark.parametrize(
+        "names", [("a",), ("a", "b")], ids=["last_server", "more_servers"]
+    )
+    async def test_close_during_a_listing(
+        self, tmp_path: Path, names: tuple[str, ...], created: list[StdioMcpClient]
+    ) -> None:
+        gate = Gate()
+        provider = McpToolProvider(
+            [fake_server_config(tmp_path / f"{name}.log", name=name) for name in names],
+            client_factory=gated_factory(HeldListingClient, gate, created),
+        )
+        starting = asyncio.create_task(provider.start())
+        try:
+            # Server a has listed its tools; close() stops it while start()
+            # is held before it uses the listing.
+            await wait_held(gate, starting)
+            readers = set(created[0]._tasks)  # private: server a's readers
+            await provider.close()
+            gate.release()
+            with pytest.raises(McpError, match="the tool provider is closed"):
+                await starting
+        finally:
+            await provider.close()
+        # start() neither started another server nor returned a's tools.
+        assert [client.name for client in created] == ["a"]
+        assert created[0].returncode is not None
+        assert readers and all(task.done() for task in readers)
+        assert provider.clients == []
+
+    async def test_start_after_close_is_refused(
+        self, log_path: Path, spawn_gate: SpawnGate, created: list[StdioMcpClient]
+    ) -> None:
+        provider = McpToolProvider(
+            [fake_server_config(log_path)], client_factory=recording_factory(created)
+        )
+        await provider.close()
+        with pytest.raises(McpError, match="the tool provider is closed"):
+            await provider.start()
+        assert created == []
+        assert spawn_gate.processes == []
+
+    async def test_cancelled_start_still_stops_a_late_process(
+        self, log_path: Path, spawn_gate: SpawnGate, created: list[StdioMcpClient]
+    ) -> None:
+        # close() drops a client that has no process yet, and the client's
+        # start() stops the process it then gets. If the provider's start()
+        # is cancelled during that shutdown, no later close() can reach the
+        # client, so start() has to finish the shutdown in its clean-up.
+        spawn_gate.hold_from = 0
+        exit_gate = Gate()
+        provider = McpToolProvider(
+            # The stubborn server outlives its closed stdin and SIGTERM.
+            [fake_server_config(log_path, env={"FAKE_MCP_MODE": "stubborn"})],
+            client_factory=gated_factory(HeldShutdownClient, exit_gate, created),
+        )
+        starting = asyncio.create_task(provider.start())
+        await wait_held(spawn_gate, starting)
+        await provider.close()
+        assert provider.clients == []
+        spawn_gate.release()
+        await wait_held(exit_gate, starting)  # stopping the new process
+        starting.cancel()
+        exit_gate.release()
+        with pytest.raises(asyncio.CancelledError):
+            await starting
+        (proc,) = spawn_gate.processes
+        assert proc.returncode is not None
+        assert not created[0]._tasks
 
 
 class TestThroughExecutor:

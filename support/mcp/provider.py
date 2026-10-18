@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import hashlib
 import logging
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any
 
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
@@ -56,18 +56,29 @@ class McpToolProvider(BaseToolProvider):
         self._servers = list(servers)
         self._client_factory = client_factory
         self._clients: list[StdioMcpClient] = []
+        # close() has begun: start() starts no further server from then on.
+        self._closing = False
 
     @property
     def clients(self) -> list[StdioMcpClient]:
         return list(self._clients)
 
     async def start(self) -> list[ProvidedTool]:
+        """Start every server and return the tools to register.
+
+        Once close() has begun, start() starts no further server, closes
+        the clients it started and raises McpError, also when close() came
+        while the last server was starting or listing its tools.
+        """
         tools: list[ProvidedTool] = []
         owners: dict[str, str] = {}
+        started: list[StdioMcpClient] = []
         try:
             for server in self._servers:
+                self._check_open()
                 client = self._client_factory(server)
                 self._clients.append(client)
+                started.append(client)
                 await client.start()
                 listed = await client.list_tools()
                 wanted = set(server.include_tools or [])
@@ -101,21 +112,36 @@ class McpToolProvider(BaseToolProvider):
                             timeout_ms=server.timeout_s * 1000,
                         )
                     )
+            self._check_open()
         except BaseException:
-            await self.close()
+            # The clients still listed, as before, and every client this
+            # start() created. close() drops a client that has no process
+            # yet; that client's start() stops the process it then gets,
+            # and if that is cancelled, only this call still reaches it.
+            await self._close_clients([*self._clients, *started])
             raise
         return tools
 
     async def close(self) -> None:
         """Close every server's client; errors are ignored.
 
+        From the moment close() begins, start() starts no further server.
         A client is dropped only once its close() has finished, so if this
         close() is cancelled part-way, the next call finishes the shutdown.
         """
-        # return_exceptions=True: when cancelled, gather waits for every
-        # client's close() to unwind before re-raising the cancellation.
+        self._closing = True
+        await self._close_clients(self._clients)
+
+    def _check_open(self) -> None:
+        if self._closing:
+            raise McpError("Cannot start MCP servers: the tool provider is closed")
+
+    async def _close_clients(self, clients: Iterable[StdioMcpClient]) -> None:
+        # dict.fromkeys: a copy, each client once. return_exceptions=True:
+        # when cancelled, gather waits for every client's close() to unwind
+        # before re-raising the cancellation.
         await asyncio.gather(
-            *(self._close_client(client) for client in list(self._clients)),
+            *(self._close_client(client) for client in dict.fromkeys(clients)),
             return_exceptions=True,
         )
 
