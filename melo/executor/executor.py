@@ -15,7 +15,7 @@ from localmelo.melo.executor.models import (
     ToolOutput,
 )
 from localmelo.melo.executor.policy import WorkspacePolicy
-from localmelo.melo.schema import ToolCall
+from localmelo.melo.schema import RAW_ARGUMENTS_KEY, ToolCall
 
 if TYPE_CHECKING:
     from localmelo.melo.memory.coordinator import Hippo
@@ -72,7 +72,21 @@ class Executor:
                 error_category=ErrorCategory.TOOL_NOT_FOUND,
             )
 
-        # 2. Pre-execution safety check
+        # 2. Arguments the provider could not parse into a JSON object:
+        #    report them to the model and run nothing.
+        if RAW_ARGUMENTS_KEY in request.arguments:
+            raw = str(request.arguments[RAW_ARGUMENTS_KEY])
+            return ExecutionOutcome(
+                tool_name=request.tool_name,
+                status=ExecutionStatus.ERROR,
+                error=(
+                    f"Arguments for {request.tool_name} are not a JSON object: "
+                    f"{raw[:200]}"
+                ),
+                error_category=ErrorCategory.INVALID_ARGUMENTS,
+            )
+
+        # 3. Pre-execution safety check
         check = await self.checker.pre_execute(tool_call, tool_def)
         if not check.allowed:
             return ExecutionOutcome(
@@ -82,7 +96,7 @@ class Executor:
                 error_category=ErrorCategory.BLOCKED_BY_CHECKER,
             )
 
-        # 3. Resolve callable
+        # 4. Resolve callable
         fn = self._callables.get(request.tool_name)
         if fn is None:
             return ExecutionOutcome(
@@ -92,7 +106,7 @@ class Executor:
                 error_category=ErrorCategory.TOOL_NOT_FOUND,
             )
 
-        # 4. Workspace path policy for file tools
+        # 5. Workspace path policy for file tools
         if request.tool_name in ("file_read", "file_write"):
             effective_root = request.workspace_root or self._policy.root
             if effective_root:
@@ -106,7 +120,7 @@ class Executor:
                         error_category=ErrorCategory.PATH_POLICY_VIOLATION,
                     )
 
-        # 5. Execute with timeout
+        # 6. Execute with timeout
         timeout_ms = (
             request.timeout_ms
             or self._timeouts_ms.get(request.tool_name)
@@ -137,7 +151,7 @@ class Executor:
 
         duration = (time.perf_counter() - start) * 1000
 
-        # 6. Normalize rich output (text + images)
+        # 7. Normalize rich output (text + images)
         if isinstance(output, ToolOutput):
             if output.is_error:
                 return ExecutionOutcome(
@@ -152,7 +166,7 @@ class Executor:
         else:
             text, images = (output if isinstance(output, str) else str(output)), []
 
-        # 7. Build outcome with artifact metadata
+        # 8. Build outcome with artifact metadata
         artifacts = self._collect_artifacts(request, text)
 
         return ExecutionOutcome(

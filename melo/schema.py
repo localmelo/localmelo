@@ -176,6 +176,14 @@ def new_tool_call_id() -> str:
     return f"call_{uuid.uuid4().hex[:24]}"
 
 
+# Providers keep tool-call arguments that are not a JSON object as
+# ``{RAW_ARGUMENTS_KEY: <text>}`` instead of failing the run. The executor
+# rejects such a call before running anything and reports it to the model.
+# When the call is replayed to the model, the providers send an empty
+# object in place of this form.
+RAW_ARGUMENTS_KEY = "_raw_arguments"
+
+
 @dataclass
 class ToolCall:
     tool_name: str

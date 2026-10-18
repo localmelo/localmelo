@@ -7,20 +7,12 @@ import json
 from collections.abc import Mapping
 from typing import Any
 
-from localmelo.melo.schema import ToolCall, new_tool_call_id
+from localmelo.melo.schema import RAW_ARGUMENTS_KEY, ToolCall, new_tool_call_id
 
 # Request fields the providers own. ``extra_body`` may add any other
 # top-level field (``chat_template_kwargs``, ``temperature``,
 # ``reasoning_effort``, ...) but cannot replace these.
 RESERVED_BODY_KEYS = frozenset({"model", "messages", "tools", "tool_choice", "stream"})
-
-# Key used to keep tool-call arguments that are not a JSON object, as
-# text. The call is still executed through the normal executor path,
-# which reports the unexpected argument back to the model instead of the
-# whole run crashing on a parse error. When the call is replayed to the
-# model, the providers send an empty object in place of this form; see
-# :func:`raw_tool_arguments`.
-RAW_ARGUMENTS_KEY = "_raw_arguments"
 
 
 def parse_tool_arguments(raw: Any) -> dict[str, Any]:
@@ -29,9 +21,10 @@ def parse_tool_arguments(raw: Any) -> dict[str, Any]:
     The OpenAI spec sends a JSON-encoded string; Ollama's native API
     sends an object. ``None`` and empty strings mean "no arguments".
     Anything else that is not a JSON object is kept under
-    :data:`RAW_ARGUMENTS_KEY`: a string as sent, and any other value a
-    server sends in place of the string (a list, a number) as its JSON
-    text.
+    ``RAW_ARGUMENTS_KEY`` as text: a string as sent, and any other value
+    a server sends in place of the string (a list, a number) as its JSON
+    text. A parse error therefore does not crash the run; the executor
+    reports the error to the model without running the tool.
     """
     if raw is None:
         return {}

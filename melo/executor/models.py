@@ -22,6 +22,7 @@ class ErrorCategory(StrEnum):
     RUNTIME_ERROR = "runtime_error"
     PATH_POLICY_VIOLATION = "path_policy_violation"
     TOOL_ERROR = "tool_error"  # the tool itself reported failure (MCP isError)
+    INVALID_ARGUMENTS = "invalid_arguments"  # arguments were not a JSON object
 
 
 @dataclass

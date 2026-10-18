@@ -10,8 +10,17 @@ from typing import Any
 
 import pytest
 
+from localmelo.melo.checker import Checker
 from localmelo.melo.contracts.tools import ProvidedTool
-from localmelo.melo.executor.models import ToolOutput
+from localmelo.melo.executor import Executor
+from localmelo.melo.executor.models import (
+    ErrorCategory,
+    ExecutionRequest,
+    ExecutionStatus,
+    ToolOutput,
+)
+from localmelo.melo.memory.coordinator import Hippo
+from localmelo.melo.schema import RAW_ARGUMENTS_KEY
 from localmelo.support.mcp import (
     McpError,
     McpServerConfig,
@@ -218,6 +227,41 @@ class TestClose:
         provider = McpToolProvider([])
         await provider.close()
         assert provider.clients == []
+
+
+class TestThroughExecutor:
+    async def test_unparsed_arguments_never_reach_the_server(
+        self, tools: dict[str, ProvidedTool], log_path: Path
+    ) -> None:
+        hippo = Hippo()
+        executor = Executor(hippo, Checker())
+        for tool in tools.values():
+            hippo.register_tool(tool.definition)
+            executor.register(
+                tool.definition.name, tool.function, timeout_ms=tool.timeout_ms
+            )
+
+        raw = '{"text": "hello"'  # cut off before the closing brace
+        rejected = await executor.execute_structured(
+            ExecutionRequest(
+                tool_name="mcp__fake__echo", arguments={RAW_ARGUMENTS_KEY: raw}
+            )
+        )
+        accepted = await executor.execute_structured(
+            ExecutionRequest(tool_name="mcp__fake__echo", arguments={"text": "hello"})
+        )
+
+        assert rejected.status == ExecutionStatus.ERROR
+        assert rejected.error_category == ErrorCategory.INVALID_ARGUMENTS
+        assert rejected.error == (
+            f"Arguments for mcp__fake__echo are not a JSON object: {raw}"
+        )
+        assert accepted.output == "hello"
+        # Only the parsed call reached the server.
+        calls = [
+            m["params"] for m in read_log(log_path) if m.get("method") == "tools/call"
+        ]
+        assert calls == [{"name": "echo", "arguments": {"text": "hello"}}]
 
 
 def test_long_names_are_capped_with_a_digest() -> None:
