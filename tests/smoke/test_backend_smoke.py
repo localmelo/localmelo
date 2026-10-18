@@ -37,7 +37,7 @@ pytestmark = pytest.mark.smoke_backend
 
 
 def _load_backends() -> dict[str, dict[str, Any]]:
-    return json.loads(_BACKENDS_JSON.read_text("utf-8"))
+    return json.loads(_BACKENDS_JSON.read_text("utf-8"))  # type: ignore[no-any-return]
 
 
 def _can_reach(url: str, timeout: float = 0.5) -> bool:

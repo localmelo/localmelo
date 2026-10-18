@@ -18,8 +18,7 @@ def _plist_xml(
     args_xml = "\n".join(
         f"        <string>{a}</string>" for a in [python, "-m"] + module_args
     )
-    return textwrap.dedent(
-        f"""\
+    template = f"""\
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
           "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -44,7 +43,7 @@ def _plist_xml(
         </dict>
         </plist>
     """
-    )
+    return textwrap.dedent(template)
 
 
 def install(port: int = 8401) -> str:
