@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from localmelo.melo.checker import Checker
 from localmelo.melo.contracts.tools import ProvidedTool
 from localmelo.melo.executor import BUILTINS, Executor, ToolOutput, register_builtins
@@ -115,12 +117,23 @@ async def test_rejected_before_the_checker() -> None:
     assert outcome.error_category == ErrorCategory.INVALID_ARGUMENTS
 
 
-async def test_non_string_raw_value_is_quoted_as_text() -> None:
+@pytest.mark.parametrize(
+    ("raw", "quoted"),
+    [
+        ([1, 2], "[1, 2]"),
+        # A number cannot be sliced, so it must be turned into text first.
+        (7, "7"),
+        # A long list is cut after 200 characters of its text, not 200 items.
+        (list(range(100)), str(list(range(100)))[:200]),
+    ],
+    ids=["list", "number", "long_list"],
+)
+async def test_non_string_raw_value_is_quoted_as_text(raw: Any, quoted: str) -> None:
     outcome = await _with_builtins().execute_structured(
-        ExecutionRequest(tool_name="python_exec", arguments=_raw([1, 2]))
+        ExecutionRequest(tool_name="python_exec", arguments=_raw(raw))
     )
     assert outcome.error_category == ErrorCategory.INVALID_ARGUMENTS
-    assert outcome.error == "Arguments for python_exec are not a JSON object: [1, 2]"
+    assert outcome.error == f"Arguments for python_exec are not a JSON object: {quoted}"
 
 
 async def test_unknown_tool_is_still_not_found() -> None:
