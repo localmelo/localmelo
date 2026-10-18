@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import httpx
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.melo.schema import Message, ToolDef
+from localmelo.support.providers.llm._protocol import parse_tool_calls
 
 
 def _tool_def_to_openai(td: ToolDef) -> dict[str, Any]:
@@ -55,6 +55,58 @@ def _normalize_usage(data: dict[str, Any]) -> dict[str, int] | None:
     }
 
 
+def _inline_thinking_prefix(thinking: str) -> str:
+    """The ``<think>`` block :class:`OllamaNativeChat` prepends to content."""
+    return f"<think>\n{thinking}\n</think>\n\n"
+
+
+def _message_to_ollama(msg: Message, tool_names: dict[str, str]) -> dict[str, Any]:
+    """Serialize a Message for Ollama's native ``/api/chat``.
+
+    Assistant turns are sent back the way Ollama returned them: thinking
+    in its own field (the inline ``<think>`` copy this provider adds to
+    ``content`` is removed again) and tool calls with object arguments.
+    Tool results carry ``tool_name``, which is how the native API ties a
+    result to its call. *tool_names* maps tool call ids seen earlier in
+    the conversation to their tool names.
+    """
+    if msg.role == "assistant":
+        content = msg.content
+        if msg.thinking:
+            prefix = _inline_thinking_prefix(msg.thinking)
+            if content.startswith(prefix):
+                content = content[len(prefix) :]
+        out: dict[str, Any] = {"role": "assistant", "content": content}
+        if msg.thinking:
+            out["thinking"] = msg.thinking
+        if msg.tool_calls:
+            out["tool_calls"] = [
+                {"function": {"name": tc.tool_name, "arguments": tc.arguments}}
+                for tc in msg.tool_calls
+            ]
+        return out
+    if msg.role == "tool":
+        out = {"role": "tool", "content": msg.content}
+        if msg.tool_result is not None and msg.tool_result.tool_name:
+            name = msg.tool_result.tool_name
+        else:
+            name = tool_names.get(msg.tool_call_id, "")
+        if name:
+            out["tool_name"] = name
+        return out
+    return {"role": msg.role, "content": msg.content}
+
+
+def _messages_to_ollama(messages: list[Message]) -> list[dict[str, Any]]:
+    tool_names: dict[str, str] = {}
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        for tc in msg.tool_calls:
+            tool_names[tc.id] = tc.tool_name
+        out.append(_message_to_ollama(msg, tool_names))
+    return out
+
+
 class OllamaNativeChat(BaseLLMProvider):
     """Ollama native ``/api/chat`` provider.
 
@@ -70,6 +122,8 @@ class OllamaNativeChat(BaseLLMProvider):
         Model identifier, e.g. ``"qwen3:8b"``.
     timeout : float
         HTTP timeout in seconds (default 300).
+    transport : httpx.AsyncBaseTransport | None
+        Optional HTTP transport, e.g. ``httpx.MockTransport`` in tests.
     """
 
     def __init__(
@@ -77,11 +131,14 @@ class OllamaNativeChat(BaseLLMProvider):
         base_url: str,
         model: str,
         timeout: float = 300.0,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self.model = model
         self._http = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=timeout,
+            transport=transport,
         )
 
     async def chat(
@@ -91,7 +148,7 @@ class OllamaNativeChat(BaseLLMProvider):
     ) -> Message:
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": _messages_to_ollama(messages),
             "stream": False,
             "think": True,
         }
@@ -109,24 +166,15 @@ class OllamaNativeChat(BaseLLMProvider):
         # Prepend <think> block into content for compatibility with
         # consumers that expect inline thinking tags.
         if thinking:
-            combined_content = f"<think>\n{thinking}\n</think>\n\n{content}"
+            combined_content = _inline_thinking_prefix(thinking) + content
         else:
             combined_content = content
-
-        # Parse tool calls (Ollama uses the same format as OpenAI).
-        tool_call = None
-        if msg.get("tool_calls"):
-            tc = msg["tool_calls"][0]
-            fn = tc.get("function", {})
-            args = fn.get("arguments", "{}")
-            if isinstance(args, str):
-                args = json.loads(args)
-            tool_call = ToolCall(tool_name=fn["name"], arguments=args)
 
         return Message(
             role="assistant",
             content=combined_content,
-            tool_call=tool_call,
+            # Every call is kept; ids are generated when Ollama sends none.
+            tool_calls=parse_tool_calls(msg.get("tool_calls")),
             usage=_normalize_usage(data),
             thinking=thinking,
         )
