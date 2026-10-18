@@ -133,7 +133,10 @@ class StdioMcpClient:
                 cwd=self.config.cwd,
                 limit=STREAM_LIMIT,
             )
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
+            # ValueError: a string the OS cannot take (a NUL, "=" in an env
+            # name, text that cannot be encoded) in a config built in code,
+            # which parse_mcp_config did not check.
             raise McpError(
                 f"Cannot start MCP server {self.name!r} "
                 f"({self.config.command}): {exc}"

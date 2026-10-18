@@ -101,6 +101,39 @@ class TestParse:
         with pytest.raises(McpConfigError, match=message):
             _one(server)
 
+    @pytest.mark.parametrize(
+        ("server", "field"),
+        [
+            ({"command": "x\0y"}, "command"),
+            ({"command": "x", "args": ["--a", "b\0c"]}, "args"),
+            ({"command": "x", "env": {"": "1"}}, "env"),
+            ({"command": "x", "env": {"A=B": "1"}}, "env"),
+            ({"command": "x", "env": {"A\0B": "1"}}, "env"),
+            ({"command": "x", "env": {"A": "1\0"}}, "env"),
+            ({"command": "x", "cwd": "/tmp\0"}, "cwd"),
+        ],
+        ids=[
+            "nul_in_command",
+            "nul_in_args",
+            "empty_env_name",
+            "equals_in_env_name",
+            "nul_in_env_name",
+            "nul_in_env_value",
+            "nul_in_cwd",
+        ],
+    )
+    def test_strings_a_process_cannot_take(
+        self, server: dict[str, Any], field: str
+    ) -> None:
+        # Refused when the config is read, naming the server and the field,
+        # not later by the spawn (a bare ValueError, or for an empty env
+        # name, a nameless variable in the server's environment).
+        with pytest.raises(McpConfigError, match=f"server 'srv': '{field}'"):
+            _one(server)
+
+    def test_env_value_may_contain_equals(self) -> None:
+        assert _one({"command": "x", "env": {"A": "b=c"}}).env == {"A": "b=c"}
+
     def test_top_level_shape(self) -> None:
         with pytest.raises(McpConfigError, match="mcpServers"):
             parse_mcp_config({"tools": []})

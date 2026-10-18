@@ -126,18 +126,32 @@ def _parse_server(name: Any, raw: Any, source: str) -> McpServerConfig | None:
     if not isinstance(command, str) or not command:
         hint = " (HTTP/SSE servers are not supported)" if "url" in raw else ""
         raise McpConfigError(f"{where}: 'command' must be a non-empty string{hint}")
+    _reject_nul(where, "command", command)
 
     args = raw.get("args", [])
     if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
         raise McpConfigError(f"{where}: 'args' must be a list of strings")
+    _reject_nul(where, "args", *args)
     env = raw.get("env", {})
     if not isinstance(env, dict) or not all(
         isinstance(k, str) and isinstance(v, str) for k, v in env.items()
     ):
         raise McpConfigError(f"{where}: 'env' must map strings to strings")
+    for key, value in env.items():
+        if not key or "=" in key or "\0" in key:
+            raise McpConfigError(
+                f"{where}: 'env' names must be non-empty and contain no '=' or "
+                f"NUL (got {key!r})"
+            )
+        if "\0" in value:
+            raise McpConfigError(
+                f"{where}: 'env' value of {key!r} must not contain NUL characters"
+            )
     cwd = raw.get("cwd")
-    if cwd is not None and not isinstance(cwd, str):
-        raise McpConfigError(f"{where}: 'cwd' must be a string")
+    if cwd is not None:
+        if not isinstance(cwd, str):
+            raise McpConfigError(f"{where}: 'cwd' must be a string")
+        _reject_nul(where, "cwd", cwd)
     include = raw.get("include_tools")
     if include is not None and (
         not isinstance(include, list) or not all(isinstance(t, str) for t in include)
@@ -156,6 +170,13 @@ def _parse_server(name: Any, raw: Any, source: str) -> McpServerConfig | None:
         ),
         include_tools=list(include) if include is not None else None,
     )
+
+
+def _reject_nul(where: str, key: str, *values: str) -> None:
+    # The command, its arguments, environment entries and the working
+    # directory reach the OS as NUL-terminated strings.
+    if any("\0" in value for value in values):
+        raise McpConfigError(f"{where}: {key!r} must not contain NUL characters")
 
 
 def _seconds(raw: dict[str, Any], key: str, default: float, where: str) -> float:

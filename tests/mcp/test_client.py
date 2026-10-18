@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import dataclasses
 import hashlib
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -178,6 +180,32 @@ class TestFailures:
         cfg.command = str(tmp_path / "does-not-exist")
         mcp = StdioMcpClient(cfg)
         with pytest.raises(McpError, match="Cannot start"):
+            await mcp.start()
+        await mcp.close()
+
+    @pytest.mark.parametrize(
+        "change",
+        [
+            {"env": {"A=B": "1"}},
+            {"args": ["-I", "a\0b"]},
+            {"cwd": "/tmp\0"},
+            {"env": {"TEXT": "\ud800"}},  # a lone surrogate cannot be encoded
+        ],
+        ids=[
+            "equals_in_env_name",
+            "nul_in_args",
+            "nul_in_cwd",
+            "unencodable_env_value",
+        ],
+    )
+    async def test_spawn_value_error(
+        self, tmp_path: Path, change: dict[str, Any]
+    ) -> None:
+        # A config built in code skips parse_mcp_config's checks, and the
+        # spawn raises ValueError for strings the OS cannot take.
+        cfg = dataclasses.replace(fake_server_config(tmp_path / "log"), **change)
+        mcp = StdioMcpClient(cfg)
+        with pytest.raises(McpError, match="Cannot start MCP server 'fake'"):
             await mcp.start()
         await mcp.close()
 
