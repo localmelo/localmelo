@@ -391,6 +391,7 @@ class Agent:
                 output=outcome.output,
                 error=outcome.error,
                 duration_ms=outcome.duration_ms,
+                images=list(outcome.images),
             )
         )
         if exec_result_check.sanitized_payload is not None:
@@ -400,6 +401,7 @@ class Agent:
                 output=sp.output,
                 error=sp.error,
                 duration_ms=sp.duration_ms,
+                images=list(sp.images),
             )
         return outcome.to_tool_result()
 

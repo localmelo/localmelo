@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-from localmelo.melo.schema import ToolResult
+from localmelo.melo.schema import ImagePart, ToolResult
 
 
 class ExecutionStatus(StrEnum):
@@ -21,6 +21,7 @@ class ErrorCategory(StrEnum):
     TIMEOUT = "timeout"
     RUNTIME_ERROR = "runtime_error"
     PATH_POLICY_VIOLATION = "path_policy_violation"
+    TOOL_ERROR = "tool_error"  # the tool itself reported failure (MCP isError)
 
 
 @dataclass
@@ -36,6 +37,20 @@ class LogMeta:
     level: str = "info"  # "info", "warning", "error"
     message: str = ""
     detail: str = ""
+
+
+@dataclass
+class ToolOutput:
+    """Rich return value of a tool callable: text plus optional images.
+
+    Callables may still return a plain ``str``. ``is_error=True`` marks a
+    failure the tool itself reported (an MCP result with ``isError``); the
+    text then becomes the outcome's error.
+    """
+
+    text: str = ""
+    images: list[ImagePart] = field(default_factory=list)
+    is_error: bool = False
 
 
 @dataclass
@@ -56,6 +71,7 @@ class ExecutionOutcome:
     duration_ms: float = 0.0
     artifacts: list[ArtifactMeta] = field(default_factory=list)
     logs: list[LogMeta] = field(default_factory=list)
+    images: list[ImagePart] = field(default_factory=list)
 
     def to_tool_result(self) -> ToolResult:
         return ToolResult(
@@ -63,4 +79,5 @@ class ExecutionOutcome:
             output=self.output,
             error=self.error,
             duration_ms=self.duration_ms,
+            images=list(self.images),
         )

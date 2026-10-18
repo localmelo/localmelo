@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 
 from localmelo.melo.checker.payloads import (
     ExecutorRequest,
@@ -13,6 +14,7 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
     ValidationResult,
 )
+from localmelo.melo.schema import ImagePart
 
 # ── Constants ──
 
@@ -31,6 +33,14 @@ LEGAL_SESSION_TRANSITIONS: set[tuple[str, str]] = {
 }
 
 VALID_MEMORY_ROLES = {"user", "assistant", "system", "tool"}
+
+# Images a tool may hand back to the model.
+ALLOWED_IMAGE_MIME_TYPES = frozenset(
+    {"image/png", "image/jpeg", "image/webp", "image/gif"}
+)
+MAX_IMAGE_BYTES = 20 * 1024 * 1024  # decoded size per image
+MAX_IMAGES_PER_RESULT = 8
+MAX_IMAGES_PER_MEMORY_WRITE = MAX_IMAGES_PER_RESULT
 
 BLOCKED_COMMANDS = [
     r"\brm\s+-rf\s+/",
@@ -162,6 +172,37 @@ def validate_executor_request(request: ExecutorRequest) -> ValidationResult:
     return ValidationResult(allowed=True)
 
 
+# ── Images ──
+
+
+def image_problem(image: ImagePart) -> str:
+    """Return why *image* cannot be passed to the model, or ``""``."""
+    if image.mime_type not in ALLOWED_IMAGE_MIME_TYPES:
+        return f"unsupported image type {image.mime_type!r}"
+    if not image.data or image.size_bytes <= 0:
+        return "image data is empty or not valid base64"
+    if image.size_bytes > MAX_IMAGE_BYTES:
+        return f"image too large: {image.size_bytes} bytes (max {MAX_IMAGE_BYTES})"
+    return ""
+
+
+def _sanitize_images(images: list[ImagePart]) -> tuple[list[ImagePart], list[str]]:
+    """Split *images* into the ones to keep and notes about dropped ones."""
+    kept: list[ImagePart] = []
+    notes: list[str] = []
+    for image in images:
+        problem = image_problem(image)
+        if problem:
+            notes.append(f"[image dropped: {problem}]")
+        elif len(kept) >= MAX_IMAGES_PER_RESULT:
+            notes.append(
+                f"[image dropped: more than {MAX_IMAGES_PER_RESULT} images in one result]"
+            )
+        else:
+            kept.append(image)
+    return kept, notes
+
+
 # ── Executor result ──
 
 
@@ -177,21 +218,33 @@ def validate_executor_result(result: ExecutorResultPayload) -> ValidationResult:
             allowed=False, reason="Executor result must have a tool_name"
         )
 
+    reasons: list[str] = []
+    sanitized = result
+
     # Truncate oversized output
     if len(result.output) > MAX_OUTPUT_LEN:
         truncated = result.output[:MAX_OUTPUT_LEN] + "\n... [truncated]"
-        sanitized = ExecutorResultPayload(
-            tool_name=result.tool_name,
-            output=truncated,
-            error=result.error,
-            duration_ms=result.duration_ms,
-        )
+        sanitized = replace(sanitized, output=truncated)
+        reasons.append("Output truncated")
+
+    # Drop images the model cannot (or should not) receive. The notes go
+    # where the model will read them: the error text for failed calls.
+    kept, notes = _sanitize_images(result.images)
+    if notes:
+        if sanitized.error:
+            error = "\n".join((sanitized.error, *notes))
+            sanitized = replace(sanitized, error=error, images=kept)
+        else:
+            output = "\n".join(part for part in (sanitized.output, *notes) if part)
+            sanitized = replace(sanitized, output=output, images=kept)
+        reasons.append("Images dropped")
+
+    if sanitized is not result:
         return ValidationResult(
             allowed=True,
-            reason="Output truncated",
+            reason="; ".join(reasons),
             sanitized_payload=sanitized,
         )
-
     return ValidationResult(allowed=True)
 
 
@@ -215,5 +268,19 @@ def validate_memory_write(payload: MemoryWritePayload) -> ValidationResult:
             allowed=False,
             reason=f"Invalid memory role: {payload.role!r}",
         )
+
+    if len(payload.images) > MAX_IMAGES_PER_MEMORY_WRITE:
+        return ValidationResult(
+            allowed=False,
+            reason=(
+                f"Too many images in one memory write: {len(payload.images)} "
+                f"(max {MAX_IMAGES_PER_MEMORY_WRITE})"
+            ),
+        )
+    for image in payload.images:
+        if not image.sha256:
+            return ValidationResult(
+                allowed=False, reason="Image in memory write has no sha256"
+            )
 
     return ValidationResult(allowed=True)
