@@ -7,6 +7,7 @@ ping. Every message received is appended (one JSON per line) to the file
 named by FAKE_MCP_LOG. FAKE_MCP_MODE selects misbehaviour:
 
 - ``hang_initialize``: never answer ``initialize``
+- ``hang_tools_list``: never answer ``tools/list``
 - ``garbage_stdout``: write a non-JSON line before every response
 - ``stubborn``: ignore SIGTERM and keep running after stdin closes
 """
@@ -197,6 +198,8 @@ def handle(message: dict[str, Any]) -> None:
     elif method == "notifications/cancelled":
         _cancelled.add(params.get("requestId"))
     elif method == "tools/list":
+        if MODE == "hang_tools_list":
+            return
         start = int(params.get("cursor") or 0)
         page: dict[str, Any] = {"tools": TOOLS[start : start + PAGE_SIZE]}
         if start + PAGE_SIZE < len(TOOLS):

@@ -194,6 +194,25 @@ class TestFailures:
             await mcp.start()
         assert mcp.returncode is not None  # the process was shut down
 
+    async def test_tools_list_timeout(self, log_path: Path) -> None:
+        mcp = StdioMcpClient(
+            fake_server_config(log_path, env={"FAKE_MCP_MODE": "hang_tools_list"}),
+            shutdown_grace_s=0.5,
+        )
+        await mcp.start()
+        # Only the listing gets a short bound: start() ran with the default,
+        # and list_tools() reads the config when it is called.
+        mcp.config.startup_timeout_s = 0.3
+        try:
+            with pytest.raises(McpError) as info:
+                await mcp.list_tools()
+        finally:
+            await mcp.close()
+        # The server, the request, the bound and the stderr tail are named.
+        assert str(info.value).startswith(
+            "MCP server 'fake' did not answer tools/list within 0.3s; stderr: "
+        )
+
     async def test_non_json_stdout_is_ignored(self, log_path: Path) -> None:
         mcp = StdioMcpClient(
             fake_server_config(log_path, env={"FAKE_MCP_MODE": "garbage_stdout"}),

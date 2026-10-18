@@ -222,10 +222,16 @@ class StdioMcpClient:
         cursor: str | None = None
         for _ in range(MAX_TOOL_PAGES):
             params = {"cursor": cursor} if cursor else {}
-            result = await asyncio.wait_for(
-                self._request("tools/list", params),
-                timeout=self.config.startup_timeout_s,
-            )
+            try:
+                result = await asyncio.wait_for(
+                    self._request("tools/list", params),
+                    timeout=self.config.startup_timeout_s,
+                )
+            except TimeoutError:
+                raise McpError(
+                    f"MCP server {self.name!r} did not answer tools/list within "
+                    f"{self.config.startup_timeout_s:g}s{self._stderr_hint()}"
+                ) from None
             if not isinstance(result, dict):
                 raise McpError(f"MCP server {self.name!r}: invalid tools/list result")
             for item in result.get("tools") or []:
