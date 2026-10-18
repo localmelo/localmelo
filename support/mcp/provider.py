@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import logging
 from collections.abc import Callable, Sequence
@@ -106,5 +107,21 @@ class McpToolProvider(BaseToolProvider):
         return tools
 
     async def close(self) -> None:
-        clients, self._clients = self._clients, []
-        await asyncio.gather(*(c.close() for c in clients), return_exceptions=True)
+        """Close every server's client; errors are ignored.
+
+        A client is dropped only once its close() has finished, so if this
+        close() is cancelled part-way, the next call finishes the shutdown.
+        """
+        # return_exceptions=True: when cancelled, gather waits for every
+        # client's close() to unwind before re-raising the cancellation.
+        await asyncio.gather(
+            *(self._close_client(client) for client in list(self._clients)),
+            return_exceptions=True,
+        )
+
+    async def _close_client(self, client: StdioMcpClient) -> None:
+        with contextlib.suppress(Exception):
+            await client.close()
+        # Not reached when close() is cancelled: the client stays listed.
+        if client in self._clients:
+            self._clients.remove(client)

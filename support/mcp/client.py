@@ -96,6 +96,10 @@ class StdioMcpClient:
         self._write_lock = asyncio.Lock()
         self._tasks: set[asyncio.Task[None]] = set()
         self._exit_error: McpError | None = None
+        # close() has begun: requests are refused from then on.
+        self._closing = False
+        # close() has finished (process gone, readers stopped): later calls
+        # do nothing.
         self._closed = False
         self.stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
         self.protocol_version = ""
@@ -174,10 +178,17 @@ class StdioMcpClient:
             raise
 
     async def close(self) -> None:
-        """Shut the server down: close stdin, then terminate, then kill."""
+        """Shut the server down: close stdin, then terminate, then kill.
+
+        Requests are refused as soon as close() begins, but the client only
+        counts as closed once the process has exited and the readers have
+        stopped. A close() cancelled part-way therefore leaves the shutdown
+        to the next call, which finishes it; after that, close() does
+        nothing.
+        """
         if self._closed:
             return
-        self._closed = True
+        self._closing = True
         proc = self._proc
         if proc is not None and proc.returncode is None:
             if proc.stdin is not None:
@@ -194,6 +205,7 @@ class StdioMcpClient:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._fail_pending(McpError(f"MCP client for {self.name!r} is closed"))
+        self._closed = True
 
     async def _wait_exit(self, proc: asyncio.subprocess.Process) -> bool:
         try:
@@ -276,7 +288,7 @@ class StdioMcpClient:
     def _check_usable(self) -> None:
         if self._exit_error is not None:
             raise McpError(str(self._exit_error))
-        if self._closed or self._proc is None:
+        if self._closing or self._proc is None:
             raise McpError(f"MCP server {self.name!r} is not running")
 
     # ── Wire ──

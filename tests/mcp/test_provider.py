@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import hashlib
 from collections.abc import AsyncIterator, Callable
@@ -227,6 +228,29 @@ class TestClose:
         provider = McpToolProvider([])
         await provider.close()
         assert provider.clients == []
+
+    async def test_cancelled_close_is_finished_by_the_next_one(
+        self, log_path: Path, created: list[StdioMcpClient]
+    ) -> None:
+        provider = McpToolProvider(
+            [fake_server_config(log_path, env={"FAKE_MCP_MODE": "stubborn"})],
+            client_factory=recording_factory(created),
+        )
+        await provider.start()
+        (client,) = created
+        readers = set(client._tasks)  # private: the stdout and stderr readers
+        # The stubborn server ignores its closed stdin and SIGTERM. A close()
+        # cancelled within the first grace period (0.5 s) re-raises the
+        # cancellation and leaves the server running and its client listed ...
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(provider.close(), 0.2)
+        assert client.returncode is None
+        assert provider.clients == [client]
+        # ... so the next close() finishes the shutdown.
+        await asyncio.wait_for(provider.close(), 5)
+        assert client.returncode is not None
+        assert provider.clients == []
+        assert readers and all(task.done() for task in readers)
 
 
 class TestThroughExecutor:

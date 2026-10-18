@@ -223,3 +223,26 @@ class TestShutdown:
         await mcp.start()
         await asyncio.wait_for(mcp.close(), 5)
         assert mcp.returncode is not None
+
+    @pytest.mark.parametrize(
+        "cancel_after_s", [0.1, 0.3], ids=["during_grace", "after_terminate"]
+    )
+    async def test_cancelled_close_is_finished_by_the_next_one(
+        self, log_path: Path, cancel_after_s: float
+    ) -> None:
+        mcp = StdioMcpClient(
+            fake_server_config(log_path, env={"FAKE_MCP_MODE": "stubborn"}),
+            shutdown_grace_s=0.2,
+        )
+        await mcp.start()
+        readers = set(mcp._tasks)  # private: the stdout and stderr readers
+        # The stubborn server outlives its closed stdin and SIGTERM; it is
+        # only killed after two grace periods (0.4 s), so a close() cancelled
+        # before that leaves it running ...
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(mcp.close(), cancel_after_s)
+        assert mcp.returncode is None
+        # ... and the next close() finishes the shutdown.
+        await asyncio.wait_for(mcp.close(), 5)
+        assert mcp.returncode is not None
+        assert readers and all(task.done() for task in readers)
