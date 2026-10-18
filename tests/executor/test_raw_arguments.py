@@ -125,8 +125,12 @@ async def test_rejected_before_the_checker() -> None:
         (7, "7"),
         # A long list is cut after 200 characters of its text, not 200 items.
         (list(range(100)), str(list(range(100)))[:200]),
+        # Falsy values: the executor must test for the key, not for a
+        # truthy value under it.
+        (0, "0"),
+        (False, "False"),
     ],
-    ids=["list", "number", "long_list"],
+    ids=["list", "number", "long_list", "zero", "false"],
 )
 async def test_non_string_raw_value_is_quoted_as_text(raw: Any, quoted: str) -> None:
     outcome = await _with_builtins().execute_structured(
