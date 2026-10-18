@@ -18,6 +18,12 @@ per-server keys:
 - ``disabled``: ``true`` skips the server
 
 Other keys are ignored so files written for other clients still load.
+
+A server does not inherit localmelo's environment. It gets only the
+variables named in ``DEFAULT_ENV_VARS`` (in
+:mod:`localmelo.support.mcp.client`: ``PATH``, ``HOME``, the locale and
+a few more), with its ``env`` on top. ``env`` values are used literally;
+``${VAR}`` references are not expanded.
 """
 
 from __future__ import annotations

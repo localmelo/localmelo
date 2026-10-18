@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import os
 from pathlib import Path
 
 import pytest
@@ -99,7 +100,50 @@ class TestCancellation:
         assert [c["params"]["requestId"] for c in cancels] == [slow_id]
 
 
+async def env_var(mcp: StdioMcpClient, name: str) -> str:
+    """The value of *name* in the server's environment, or ``<unset>``."""
+    return tool_result_to_output(await mcp.call_tool("env", {"name": name})).text
+
+
 class TestEnvironment:
+    async def test_only_default_vars_and_config_env_are_passed(
+        self, log_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LOCALMELO_TEST_SECRET", "hunter2")
+        monkeypatch.delenv("LC_ALL", raising=False)
+        mcp = StdioMcpClient(
+            fake_server_config(log_path, env={"FAKE_FLAG": "42"}),
+            shutdown_grace_s=0.5,
+        )
+        await mcp.start()
+        try:
+            seen = {
+                name: await env_var(mcp, name)
+                for name in ("LOCALMELO_TEST_SECRET", "FAKE_FLAG", "PATH", "LC_ALL")
+            }
+        finally:
+            await mcp.close()
+        assert seen == {
+            "LOCALMELO_TEST_SECRET": "<unset>",  # not inherited
+            "FAKE_FLAG": "42",  # config env, literal
+            "PATH": os.environ["PATH"],  # a default variable
+            "LC_ALL": "<unset>",  # a default variable unset here stays unset
+        }
+
+    async def test_config_env_overrides_a_default_var(
+        self, log_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("LANG", "en_US.UTF-8")
+        mcp = StdioMcpClient(
+            fake_server_config(log_path, env={"LANG": "C"}), shutdown_grace_s=0.5
+        )
+        await mcp.start()
+        try:
+            lang = await env_var(mcp, "LANG")
+        finally:
+            await mcp.close()
+        assert lang == "C"
+
     async def test_env_and_cwd(self, log_path: Path, tmp_path: Path) -> None:
         workdir = tmp_path / "work"
         workdir.mkdir()

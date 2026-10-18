@@ -7,10 +7,13 @@ other server-to-client requests (sampling, roots, elicitation). A
 cancelled request (for example by the executor's timeout) is announced
 with ``notifications/cancelled``.
 
-The server runs as a child process. It inherits this process's
-environment plus the configured ``env``, so wrappers such as the
-benchmark's stdio tap see the same PATH and variables as the harness
-(the official MCP SDK passes only a minimal default environment instead).
+The server runs as a child process with a minimal environment: the
+variables named in ``DEFAULT_ENV_VARS`` that are set in this process
+(``PATH``, ``HOME``, user, shell, terminal, locale and ``TMPDIR``), then
+the server's configured ``env`` on top, as literal values. Nothing else
+is inherited, so API keys and other secrets in the agent's environment
+do not reach MCP servers; a server that needs another variable must
+list it in its ``env``.
 """
 
 from __future__ import annotations
@@ -38,6 +41,22 @@ STDERR_TAIL_LINES = 200
 MAX_TOOL_PAGES = 100
 
 METHOD_NOT_FOUND = -32601
+
+# Variables a server inherits from this process: the official MCP SDK's
+# POSIX defaults plus the locale and TMPDIR. Anything else must be set in
+# the server's ``env``.
+DEFAULT_ENV_VARS = (
+    "HOME",
+    "LOGNAME",
+    "PATH",
+    "SHELL",
+    "TERM",
+    "USER",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TMPDIR",
+)
 
 
 class McpError(Exception):
@@ -97,7 +116,8 @@ class StdioMcpClient:
         """Spawn the server and complete the ``initialize`` handshake."""
         if self._proc is not None:
             return
-        env = {**os.environ, **self.config.env}
+        env = {k: os.environ[k] for k in DEFAULT_ENV_VARS if k in os.environ}
+        env.update(self.config.env)
         try:
             self._proc = await asyncio.create_subprocess_exec(
                 self.config.command,
