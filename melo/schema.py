@@ -26,15 +26,63 @@ MAX_REFLECTION_CHARS = 2000
 # ── Data types ──
 
 
-@dataclass
+@dataclass(init=False)
 class Message:
+    """One chat message.
+
+    An assistant message may carry several tool calls (``tool_calls``).
+    A ``role="tool"`` message answers exactly one of them and names it in
+    ``tool_call_id``. ``tool_call`` is kept as a compatibility accessor
+    for single-call callers: it reads and writes the first entry of
+    ``tool_calls``.
+    """
+
     role: str  # "system", "user", "assistant", "tool"
     content: str = ""
-    tool_call: ToolCall | None = None
+    tool_calls: list[ToolCall] = field(default_factory=list)
     tool_result: ToolResult | None = None
+    tool_call_id: str = ""
     timestamp: float = field(default_factory=time.time)
     usage: dict[str, int] | None = None
     thinking: str = ""
+
+    def __init__(
+        self,
+        role: str,
+        content: str = "",
+        tool_call: ToolCall | None = None,
+        tool_result: ToolResult | None = None,
+        timestamp: float | None = None,
+        usage: dict[str, int] | None = None,
+        thinking: str = "",
+        *,
+        tool_calls: list[ToolCall] | None = None,
+        tool_call_id: str = "",
+    ) -> None:
+        # The positional order matches the previous dataclass signature so
+        # existing ``Message(...)`` calls keep working unchanged.
+        if tool_call is not None and tool_calls:
+            raise TypeError("Message() takes tool_call or tool_calls, not both")
+        self.role = role
+        self.content = content
+        if tool_calls:
+            self.tool_calls = list(tool_calls)
+        else:
+            self.tool_calls = [tool_call] if tool_call is not None else []
+        self.tool_result = tool_result
+        self.tool_call_id = tool_call_id
+        self.timestamp = time.time() if timestamp is None else timestamp
+        self.usage = usage
+        self.thinking = thinking
+
+    @property
+    def tool_call(self) -> ToolCall | None:
+        """The first tool call, or ``None`` (compatibility accessor)."""
+        return self.tool_calls[0] if self.tool_calls else None
+
+    @tool_call.setter
+    def tool_call(self, value: ToolCall | None) -> None:
+        self.tool_calls = [value] if value is not None else []
 
 
 @dataclass
@@ -45,10 +93,23 @@ class ToolDef:
     semantic_tags: list[str] = field(default_factory=list)
 
 
+def new_tool_call_id() -> str:
+    """Return a fresh OpenAI-style tool call id (``call_`` + 24 hex chars)."""
+    return f"call_{uuid.uuid4().hex[:24]}"
+
+
 @dataclass
 class ToolCall:
     tool_name: str
     arguments: dict[str, Any] = field(default_factory=dict)
+    # Pairs the call with its ``role="tool"`` result message. Providers keep
+    # the id the backend assigned; when there is none (or it is empty) one
+    # is generated. Equality ignores it so calls compare by name and args.
+    id: str = field(default="", compare=False)
+
+    def __post_init__(self) -> None:
+        if not self.id:
+            self.id = new_tool_call_id()
 
 
 @dataclass

@@ -143,6 +143,52 @@ class TestSqliteHistory:
         await h.aclose()
 
     @pytest.mark.asyncio
+    async def test_tool_call_id_roundtrip(self, tmp_path: Path) -> None:
+        """The provider-assigned tool call id survives persistence."""
+        db = tmp_path / "history.db"
+        h = SqliteHistory(db)
+        await h.save_task(TaskRecord(query="test", task_id="t3"))
+        step = StepRecord(
+            tool_call=ToolCall(tool_name="echo", arguments={}, id="call_abc123"),
+            tool_result=ToolResult(tool_name="echo", output="ok"),
+        )
+        await h.add_step("t3", step)
+        steps = await h.get_steps("t3")
+        assert steps[0].tool_call is not None
+        assert steps[0].tool_call.id == "call_abc123"
+        await h.aclose()
+
+    @pytest.mark.asyncio
+    async def test_rows_without_tool_call_id_still_load(self, tmp_path: Path) -> None:
+        """Rows written before ids were stored load with a generated id."""
+        db = tmp_path / "history.db"
+        h = SqliteHistory(db)
+        await h.save_task(TaskRecord(query="old", task_id="t4"))
+        conn = await h._ensure_ready()
+        await conn.execute(
+            """INSERT INTO steps
+               (step_id, task_id, thought, tool_call_json, tool_result_json,
+                timestamp, seq)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "s-old",
+                "t4",
+                "legacy",
+                '{"tool_name": "echo", "arguments": {"text": "hi"}}',
+                None,
+                0.0,
+                0,
+            ),
+        )
+        await conn.commit()
+        steps = await h.get_steps("t4")
+        assert steps[0].tool_call is not None
+        assert steps[0].tool_call.tool_name == "echo"
+        assert steps[0].tool_call.arguments == {"text": "hi"}
+        assert steps[0].tool_call.id.startswith("call_")
+        await h.aclose()
+
+    @pytest.mark.asyncio
     async def test_persistence_across_reopen(self, tmp_path: Path) -> None:
         """Data survives closing and reopening the database."""
         db = tmp_path / "history.db"
