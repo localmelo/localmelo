@@ -193,3 +193,7 @@ python -m pytest tests/ -q
 - backend、gateway、config、onboarding implementation 放在 `support/`
 - 安全边界保持 checker-based control flow
 - 修改 public command、storage、tool execution 或 provider contracts 时补测试
+
+## 许可证
+
+localmelo 以 [MIT License](LICENSE) 发布。

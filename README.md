@@ -197,3 +197,7 @@ Please keep changes aligned with the runtime/infrastructure boundary:
 - put backend, gateway, config, and onboarding implementation in `support/`
 - preserve checker-based control flow for safety boundaries
 - add tests for behavior that changes public commands, storage, tool execution, or provider contracts
+
+## License
+
+localmelo is released under the [MIT License](LICENSE).
