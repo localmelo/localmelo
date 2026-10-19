@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Collection, Coroutine
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.checker.checker import Checker
@@ -58,8 +58,16 @@ class Executor:
 
     # ── Public API ──
 
-    async def execute_structured(self, request: ExecutionRequest) -> ExecutionOutcome:
-        """Structured execution path with rich outcome metadata."""
+    async def execute_structured(
+        self, request: ExecutionRequest, *, allowed: Collection[str] | None = None
+    ) -> ExecutionOutcome:
+        """Structured execution path with rich outcome metadata.
+
+        *allowed* names the tools the caller offered the model in this
+        step. A registered tool outside it is refused with
+        ``TOOL_NOT_OFFERED`` before its arguments are looked at. ``None``
+        skips that check.
+        """
         tool_call = ToolCall(tool_name=request.tool_name, arguments=request.arguments)
 
         # 1. Authoritative registry resolution
@@ -72,7 +80,16 @@ class Executor:
                 error_category=ErrorCategory.TOOL_NOT_FOUND,
             )
 
-        # 2. Arguments the provider could not parse into a JSON object:
+        # 2. Allowlist: only the tools the caller offered may run.
+        if allowed is not None and request.tool_name not in allowed:
+            return ExecutionOutcome(
+                tool_name=request.tool_name,
+                status=ExecutionStatus.ERROR,
+                error=f"Tool '{request.tool_name}' was not offered in this step.",
+                error_category=ErrorCategory.TOOL_NOT_OFFERED,
+            )
+
+        # 3. Arguments the provider could not parse into a JSON object:
         #    report them to the model and run nothing.
         if RAW_ARGUMENTS_KEY in request.arguments:
             raw = str(request.arguments[RAW_ARGUMENTS_KEY])
@@ -86,7 +103,7 @@ class Executor:
                 error_category=ErrorCategory.INVALID_ARGUMENTS,
             )
 
-        # 3. Pre-execution safety check
+        # 4. Pre-execution safety check
         check = await self.checker.pre_execute(tool_call, tool_def)
         if not check.allowed:
             return ExecutionOutcome(
@@ -96,7 +113,7 @@ class Executor:
                 error_category=ErrorCategory.BLOCKED_BY_CHECKER,
             )
 
-        # 4. Resolve callable
+        # 5. Resolve callable
         fn = self._callables.get(request.tool_name)
         if fn is None:
             return ExecutionOutcome(
@@ -106,7 +123,7 @@ class Executor:
                 error_category=ErrorCategory.TOOL_NOT_FOUND,
             )
 
-        # 5. Workspace path policy for file tools
+        # 6. Workspace path policy for file tools
         if request.tool_name in ("file_read", "file_write"):
             effective_root = request.workspace_root or self._policy.root
             if effective_root:
@@ -120,7 +137,7 @@ class Executor:
                         error_category=ErrorCategory.PATH_POLICY_VIOLATION,
                     )
 
-        # 6. Execute with timeout
+        # 7. Execute with timeout
         timeout_ms = (
             request.timeout_ms
             or self._timeouts_ms.get(request.tool_name)
@@ -151,7 +168,7 @@ class Executor:
 
         duration = (time.perf_counter() - start) * 1000
 
-        # 7. Normalize rich output (text + images)
+        # 8. Normalize rich output (text + images)
         if isinstance(output, ToolOutput):
             if output.is_error:
                 return ExecutionOutcome(
@@ -166,7 +183,7 @@ class Executor:
         else:
             text, images = (output if isinstance(output, str) else str(output)), []
 
-        # 8. Build outcome with artifact metadata
+        # 9. Build outcome with artifact metadata
         artifacts = self._collect_artifacts(request, text)
 
         return ExecutionOutcome(
