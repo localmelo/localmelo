@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import sys
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 from typing import Any
@@ -223,6 +224,35 @@ class TestStart:
         assert provider.clients == []
         with pytest.raises(McpError):
             await first.call_tool("echo", {"text": "x"})
+
+    async def test_failed_start_can_be_retried(
+        self, log_path: Path, tmp_path: Path
+    ) -> None:
+        # A failed start() closes the clients it started but leaves the
+        # provider open, so once the cause is fixed start() can run again.
+        broken = fake_server_config(tmp_path / "broken.log", name="broken")
+        broken.command = str(tmp_path / "does-not-exist")
+        created: list[StdioMcpClient] = []
+        provider = McpToolProvider(
+            [fake_server_config(log_path), broken],
+            client_factory=recording_factory(created),
+        )
+        try:
+            with pytest.raises(McpError, match="Cannot start"):
+                await provider.start()
+            assert provider.clients == []
+            assert created[0].returncode is not None
+            broken.command = sys.executable
+            tools = await provider.start()
+            assert [tool.definition.name for tool in tools] == [
+                f"mcp__{server}__" + t["name"].replace(".", "_")
+                for server in ("fake", "broken")
+                for t in TOOLS
+            ]
+            # Only the second attempt's clients are listed.
+            assert provider.clients == created[2:]
+        finally:
+            await provider.close()
 
 
 class TestCalls:
