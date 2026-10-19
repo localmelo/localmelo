@@ -26,6 +26,15 @@ def _builtin(
     return decorator
 
 
+def builtin_names() -> frozenset[str]:
+    """Names of all built-in tools.
+
+    The one source of known names: every selection of built-ins is
+    checked against it.
+    """
+    return frozenset(tool_def.name for tool_def, _ in BUILTINS)
+
+
 @_builtin(
     ToolDef(
         name="shell_exec",
