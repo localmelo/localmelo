@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.agent import Agent
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent.agent import _providers_from_config  # noqa: F401
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.schema import (
@@ -95,8 +95,8 @@ def _reflection_json(
     return json.dumps(data)
 
 
-def _make_echo_agent(llm: FakeLLM) -> Agent:
-    agent = Agent(llm=llm, embedding=FakeEmbedding())
+def _make_echo_agent(llm: FakeLLM, options: AgentOptions | None = None) -> Agent:
+    agent = Agent(llm=llm, embedding=FakeEmbedding(), options=options)
     agent.hippo.register_tool(
         ToolDef(
             name="echo",
@@ -135,14 +135,8 @@ class TestAttemptBudgetTriggersReflection:
     """Exhausting attempt budget triggers reflection."""
 
     @pytest.mark.asyncio
-    async def test_reflection_fires_after_budget(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 2)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 10)
+    async def test_reflection_fires_after_budget(self) -> None:
+        options = AgentOptions(steps_per_attempt=2, max_attempts=1, max_steps=10)
 
         llm = FakeLLM()
         # 2 tool calls (exactly the budget — for-else fires)
@@ -162,7 +156,7 @@ class TestAttemptBudgetTriggersReflection:
             )
         )
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         result = await agent.run("test")
         assert result == "partial answer"
         tasks = list(agent.hippo.history._tasks.values())
@@ -173,12 +167,8 @@ class TestReflectionContinue:
     """Reflection returning 'continue' causes a second attempt."""
 
     @pytest.mark.asyncio
-    async def test_continue_then_answer(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 2)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 3)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 20)
+    async def test_continue_then_answer(self) -> None:
+        options = AgentOptions(steps_per_attempt=2, max_attempts=3, max_steps=20)
 
         llm = FakeLLM()
         # Attempt 0: 2 tool calls → budget exhausted
@@ -205,7 +195,7 @@ class TestReflectionContinue:
         # Attempt 1: direct answer
         llm.enqueue(Message(role="assistant", content="final answer"))
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         result = await agent.run("test")
         assert result == "final answer"
         tasks = list(agent.hippo.history._tasks.values())
@@ -217,11 +207,8 @@ class TestReflectionStop:
     """Reflection returning 'stop' terminates gracefully."""
 
     @pytest.mark.asyncio
-    async def test_stop_with_best_effort(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 2)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 3)
+    async def test_stop_with_best_effort(self) -> None:
+        options = AgentOptions(steps_per_attempt=2, max_attempts=3)
 
         llm = FakeLLM()
         for _ in range(2):
@@ -239,7 +226,7 @@ class TestReflectionStop:
             )
         )
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         result = await agent.run("hard task")
         assert result == "best I can do"
         tasks = list(agent.hippo.history._tasks.values())
@@ -250,12 +237,8 @@ class TestMaxAttemptsExhausted:
     """All MAX_ATTEMPTS exhausted triggers failure."""
 
     @pytest.mark.asyncio
-    async def test_all_attempts_used(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 2)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 10)
+    async def test_all_attempts_used(self) -> None:
+        options = AgentOptions(steps_per_attempt=1, max_attempts=2, max_steps=10)
 
         llm = FakeLLM()
         # Attempt 0: 1 tool call → budget exhausted
@@ -289,7 +272,7 @@ class TestMaxAttemptsExhausted:
             )
         )
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         result = await agent.run("endless")
         assert "Max attempts reached" in result
         tasks = list(agent.hippo.history._tasks.values())
@@ -300,13 +283,8 @@ class TestStuckDetection:
     """Stuck detection catches repeated patterns."""
 
     @pytest.mark.asyncio
-    async def test_repeated_tool_calls_detected(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 5)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 1)
+    async def test_repeated_tool_calls_detected(self) -> None:
+        options = AgentOptions(steps_per_attempt=5, max_attempts=1)
 
         llm = FakeLLM()
         # Same tool+args 3 times → stuck
@@ -326,7 +304,7 @@ class TestStuckDetection:
             )
         )
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         await agent.run("stuck task")
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
@@ -342,14 +320,8 @@ class TestReflectionInPrompt:
     """Reflection context appears in the system prompt after reflection."""
 
     @pytest.mark.asyncio
-    async def test_reflection_section_in_prompt(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 3)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 10)
+    async def test_reflection_section_in_prompt(self) -> None:
+        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         # Attempt 0: tool call → budget
@@ -375,7 +347,7 @@ class TestReflectionInPrompt:
         # Attempt 1: direct answer
         llm.enqueue(Message(role="assistant", content="done"))
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         await agent.run("test")
 
         # The last LLM call (attempt 1 planning) should have [REFLECTION]
@@ -389,14 +361,8 @@ class TestReflectionPromotion:
     """Reflections are promoted to long-term memory at terminal state."""
 
     @pytest.mark.asyncio
-    async def test_promoted_on_completion(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 3)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 10)
+    async def test_promoted_on_completion(self) -> None:
+        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         llm.enqueue(
@@ -414,7 +380,7 @@ class TestReflectionPromotion:
         )
         llm.enqueue(Message(role="assistant", content="answer"))
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         result = await agent.run("test")
         assert result == "answer"
 
@@ -425,13 +391,8 @@ class TestReflectionPromotion:
         assert len(agent.hippo.long._entries) > 0
 
     @pytest.mark.asyncio
-    async def test_no_promotion_without_embedding(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 2)
+    async def test_no_promotion_without_embedding(self) -> None:
+        options = AgentOptions(steps_per_attempt=1, max_attempts=2)
 
         llm = FakeLLM()
         llm.enqueue(
@@ -448,7 +409,7 @@ class TestReflectionPromotion:
             )
         )
 
-        agent = Agent(llm=llm, embedding=None)
+        agent = Agent(llm=llm, embedding=None, options=options)
         agent.hippo.register_tool(
             ToolDef(
                 name="echo",
@@ -612,15 +573,9 @@ class TestUtilityContinuationGate:
         assert _should_continue(decision) is False
 
     @pytest.mark.asyncio
-    async def test_utility_blocks_continuation_in_loop(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_utility_blocks_continuation_in_loop(self) -> None:
         """Even with recommended_action=continue, low utility stops the loop."""
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 3)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 10)
+        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         llm.enqueue(
@@ -646,7 +601,7 @@ class TestUtilityContinuationGate:
             )
         )
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         result = await agent.run("test")
         assert result == "low utility answer"
         tasks = list(agent.hippo.history._tasks.values())
@@ -657,14 +612,8 @@ class TestReflectionReceivesPriorReflections:
     """The reflect call should see prior reflection entries."""
 
     @pytest.mark.asyncio
-    async def test_prior_reflections_in_reflect_call(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 3)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 10)
+    async def test_prior_reflections_in_reflect_call(self) -> None:
+        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         # Attempt 0: tool call
@@ -702,7 +651,7 @@ class TestReflectionReceivesPriorReflections:
             )
         )
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         await agent.run("test")
 
         # The second reflection call (4th LLM call) should contain
@@ -717,14 +666,8 @@ class TestReflectionInfluencesRetrieval:
     """Reflection context should be included in tool hint extraction."""
 
     @pytest.mark.asyncio
-    async def test_reflection_messages_in_hint_sources(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 3)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 10)
+    async def test_reflection_messages_in_hint_sources(self) -> None:
+        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         # Attempt 0: tool call
@@ -749,7 +692,7 @@ class TestReflectionInfluencesRetrieval:
         # Attempt 1: direct answer
         llm.enqueue(Message(role="assistant", content="done"))
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         # Also register shell_exec so it can be found
         agent.hippo.register_tool(
             ToolDef(
@@ -773,9 +716,7 @@ class TestPrePlanIncludesReflections:
     """Pre-plan size check must account for reflection content."""
 
     @pytest.mark.asyncio
-    async def test_oversized_reflection_forces_decompose(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_oversized_reflection_forces_decompose(self) -> None:
         """A parsed reflection whose serialized form exceeds
         :data:`MAX_REFLECTION_CHARS` must override the model's choice
         and force ``recommended_action='decompose'`` so the next attempt
@@ -785,11 +726,7 @@ class TestPrePlanIncludesReflections:
         replaced by every subsequent ``add_reflection`` call, so the
         budget cap has to fire on the *parsed* reflection itself.
         """
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 3)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 10)
+        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
         # Attempt 0: a tool call so the attempt exhausts its 1-step budget.
@@ -815,7 +752,7 @@ class TestPrePlanIncludesReflections:
             )
         )
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         result = await agent.run("test")
 
         # Decompose is not "continue", so _should_continue returns False
@@ -831,13 +768,8 @@ class TestReflectionFailureTypeInPrompt:
     """Reflection prompt must describe the real failure mode."""
 
     @pytest.mark.asyncio
-    async def test_stuck_failure_type_in_reflection(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 5)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 1)
+    async def test_stuck_failure_type_in_reflection(self) -> None:
+        options = AgentOptions(steps_per_attempt=5, max_attempts=1)
 
         llm = FakeLLM()
         # Same tool+args 3 times → stuck detection
@@ -857,7 +789,7 @@ class TestReflectionFailureTypeInPrompt:
             )
         )
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         await agent.run("stuck task")
 
         # The reflection call should mention "repeated" not "budget"
@@ -881,14 +813,8 @@ class TestReflectionFailureTypeInPrompt:
         assert "budget" not in reflect_user_msgs[0].content.lower()
 
     @pytest.mark.asyncio
-    async def test_budget_failure_type_in_reflection(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 2)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 10)
+    async def test_budget_failure_type_in_reflection(self) -> None:
+        options = AgentOptions(steps_per_attempt=2, max_attempts=1, max_steps=10)
 
         llm = FakeLLM()
         # Different tool calls → no stuck, just budget exhaustion
@@ -913,7 +839,7 @@ class TestReflectionFailureTypeInPrompt:
             )
         )
 
-        agent = _make_echo_agent(llm)
+        agent = _make_echo_agent(llm, options=options)
         await agent.run("budget test")
 
         reflect_call = [

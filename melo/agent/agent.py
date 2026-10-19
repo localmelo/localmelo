@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.agent._chat import Chat
+from localmelo.melo.agent.options import AgentOptions
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
     ExecutorResultPayload,
@@ -17,15 +18,14 @@ from localmelo.melo.checker.payloads import (
 )
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.executor import Executor, register_builtins
 from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
-    MAX_ATTEMPTS,
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
-    STEPS_PER_ATTEMPT,
     ImagePart,
     Message,
     ReflectionDecision,
@@ -268,6 +268,27 @@ def _providers_from_config(
     return llm, embedding
 
 
+# SQLite directory when LOCALMELO_PERSIST_MEMORY is set without
+# LOCALMELO_MEMORY_DIR. Expanded when used, not at import.
+DEFAULT_MEMORY_DIR = "~/.cache/localmelo/memory"
+
+
+def _resolve_memory_dir(options: AgentOptions) -> str | None:
+    """Directory for SQLite-backed memory, or ``None`` for in-memory backends.
+
+    ``options.memory_dir`` comes first, with ``~`` expanded. Otherwise any
+    non-empty ``LOCALMELO_PERSIST_MEMORY`` turns persistence on, in
+    ``LOCALMELO_MEMORY_DIR`` (used as given) or :data:`DEFAULT_MEMORY_DIR`.
+    """
+    if options.memory_dir is not None:
+        return os.path.expanduser(options.memory_dir)
+    if os.environ.get("LOCALMELO_PERSIST_MEMORY"):
+        return os.environ.get(
+            "LOCALMELO_MEMORY_DIR", os.path.expanduser(DEFAULT_MEMORY_DIR)
+        )
+    return None
+
+
 class Agent:
     """Task-solving agent with tool use and memory.
 
@@ -281,6 +302,11 @@ class Agent:
     2. **Direct provider injection** (testing / custom setups)::
 
         agent = Agent(llm=my_llm_provider, embedding=my_emb_provider)
+
+    Either mode takes ``options=AgentOptions(...)`` to set step budgets,
+    the attempt policy, the built-in tools and memory; the defaults keep
+    the behavior from before options existed. ``tool_providers`` are only
+    stored so far: nothing starts them or registers their tools.
     """
 
     def __init__(
@@ -289,6 +315,8 @@ class Agent:
         *,
         llm: BaseLLMProvider | None = None,
         embedding: BaseEmbeddingProvider | None = None,
+        options: AgentOptions | None = None,
+        tool_providers: Sequence[BaseToolProvider] = (),
     ) -> None:
         if llm is not None:
             self._llm = llm
@@ -298,26 +326,35 @@ class Agent:
         else:
             raise TypeError("Agent requires either config= or llm= to be provided")
 
-        # Optional persistent memory backends (env-based opt-in).
-        # LOCALMELO_PERSIST_MEMORY=1 enables SQLite-backed history and long-term.
-        # LOCALMELO_MEMORY_DIR overrides the default storage directory.
+        self.options = options if options is not None else AgentOptions()
+        self._tool_providers: tuple[BaseToolProvider, ...] = tuple(tool_providers)
+
+        # Optional persistent memory backends: options.memory_dir, or the
+        # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History is
+        # SQLite whenever persistence is on; long-term only when memory is
+        # on and an embedding provider exists.
+        self._memory_dir = _resolve_memory_dir(self.options)
         history_backend = None
         long_backend = None
-        if os.environ.get("LOCALMELO_PERSIST_MEMORY"):
+        if self._memory_dir is not None:
             from localmelo.melo.memory.history.sqlite import SqliteHistory
             from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 
-            mem_dir = os.environ.get(
-                "LOCALMELO_MEMORY_DIR",
-                os.path.expanduser("~/.cache/localmelo/memory"),
+            os.makedirs(self._memory_dir, exist_ok=True)
+            history_backend = SqliteHistory(
+                os.path.join(self._memory_dir, "history.db")
             )
-            os.makedirs(mem_dir, exist_ok=True)
-            history_backend = SqliteHistory(os.path.join(mem_dir, "history.db"))
-            if self._embedding:
-                long_backend = SqliteLongTerm(os.path.join(mem_dir, "long_term.db"))
+            if self._embedding and self.options.memory:
+                long_backend = SqliteLongTerm(
+                    os.path.join(self._memory_dir, "long_term.db")
+                )
 
+        # memory=False runs Hippo in its no-embedding mode, which is exactly
+        # the documented behavior of that option: no long-term recall, no
+        # long-term writes, no reflection promotion, and reflections are
+        # still cleared. self._embedding stays set so close() closes it.
         self.hippo = Hippo(
-            embedding=self._embedding,
+            embedding=self._embedding if self.options.memory else None,
             history=history_backend,
             long=long_backend,
         )
@@ -325,7 +362,7 @@ class Agent:
         self.executor = Executor(self.hippo, self.checker)
         self.chat = Chat(self._llm)
 
-        register_builtins(self.executor, self.hippo)
+        register_builtins(self.executor, self.hippo, names=self.options.builtins)
 
     # ── Stage helpers ──
     # Each helper owns one phase of the agent loop.  They return a
@@ -821,10 +858,28 @@ class Agent:
         await self.hippo.save_task(task)
         self.hippo.working.append(Message(role="user", content=query))
 
+        if self.options.attempt_policy == "none":
+            await self._run_single_attempt(task, query)
+        else:
+            await self._run_reflective_attempts(task, query)
+
+        await self.hippo.promote_reflections(task.task_id)
+        await self.hippo.save_task(task)
+        return task.result
+
+    async def _run_reflective_attempts(self, task: TaskRecord, query: str) -> None:
+        """``attempt_policy="reflect"``: attempts with reflection between them.
+
+        Each attempt gets at most ``steps_per_attempt`` steps, and all
+        attempts together at most ``max_steps``. An attempt that runs out
+        of steps or gets stuck is followed by a reflection, whose decision
+        gates the next attempt.
+        """
+        opts = self.options
         total_steps = 0
 
-        for attempt_id in range(MAX_ATTEMPTS):
-            budget = min(STEPS_PER_ATTEMPT, MAX_AGENT_STEPS - total_steps)
+        for attempt_id in range(opts.max_attempts):
+            budget = min(opts.steps_per_attempt, opts.max_steps - total_steps)
             if budget <= 0:
                 task.status = "failed"
                 task.result = "Max steps reached"
@@ -853,9 +908,21 @@ class Agent:
                 task.status = "failed"
                 task.result = "Max attempts reached"
 
-        await self.hippo.promote_reflections(task.task_id)
-        await self.hippo.save_task(task)
-        return task.result
+    async def _run_single_attempt(self, task: TaskRecord, query: str) -> None:
+        """``attempt_policy="none"``: one attempt with budget ``max_steps``.
+
+        No reflection call is made. An attempt that runs out of steps or
+        gets stuck fails the task.
+        """
+        _, failure_type = await self._run_attempt(task, query, self.options.max_steps)
+        if task.status != "running":
+            return
+        task.attempts_completed = 1
+        task.status = "failed"
+        if failure_type == "stuck":
+            task.result = "Stuck: the same tool calls or errors repeated"
+        else:
+            task.result = "Max steps reached"
 
     async def close(self) -> None:
         await self.hippo.aclose()

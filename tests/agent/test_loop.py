@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.agent import Agent
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import Chat
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
@@ -375,13 +375,9 @@ class TestMaxStepsTermination:
     """Loop terminates cleanly when step/attempt budget is exhausted."""
 
     @pytest.mark.asyncio
-    async def test_max_steps_sets_failed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_max_steps_sets_failed(self) -> None:
         """Agent that always requests tool calls must hit the step limit."""
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 3)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 3)
+        options = AgentOptions(steps_per_attempt=3, max_attempts=1, max_steps=3)
 
         llm = FakeLLM()
         # 5 tool-call responses (more than 3-step budget)
@@ -401,7 +397,7 @@ class TestMaxStepsTermination:
             )
         )
 
-        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        agent = Agent(llm=llm, embedding=FakeEmbedding(), options=options)
         agent.hippo.register_tool(
             ToolDef(
                 name="echo",
@@ -836,15 +832,9 @@ class TestStepEstimation:
         assert result == MAX_AGENT_STEPS
 
     @pytest.mark.asyncio
-    async def test_estimated_budget_limits_loop(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_estimated_budget_limits_loop(self) -> None:
         """Attempt budget limits the agent loop iterations."""
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 3)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 3)
+        options = AgentOptions(steps_per_attempt=3, max_attempts=1, max_steps=3)
 
         llm = FakeLLM()
         for _ in range(5):
@@ -863,7 +853,7 @@ class TestStepEstimation:
             )
         )
 
-        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        agent = Agent(llm=llm, embedding=FakeEmbedding(), options=options)
         agent.hippo.register_tool(
             ToolDef(
                 name="echo",

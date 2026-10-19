@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import pytest
 
-from localmelo.melo.agent import Agent
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import REFLECTION_PROMPT
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
@@ -154,8 +154,13 @@ def _echo_def(name: str = "echo") -> ToolDef:
     )
 
 
-def _agent(llm: BaseLLMProvider, executed: list[str] | None = None) -> Agent:
-    agent = Agent(llm=llm, embedding=None)
+def _agent(
+    llm: BaseLLMProvider,
+    executed: list[str] | None = None,
+    *,
+    options: AgentOptions | None = None,
+) -> Agent:
+    agent = Agent(llm=llm, embedding=None, options=options)
     agent.hippo.register_tool(_echo_def())
 
     async def _echo(text: str) -> str:
@@ -932,13 +937,8 @@ class TestWorkingMemoryTurns:
 
 class TestAgentWindowTruncation:
     @pytest.mark.asyncio
-    async def test_every_planning_prompt_is_protocol_valid(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as agent_mod
-
-        monkeypatch.setattr(agent_mod, "STEPS_PER_ATTEMPT", 8)
-        monkeypatch.setattr(agent_mod, "MAX_ATTEMPTS", 1)
+    async def test_every_planning_prompt_is_protocol_valid(self) -> None:
+        options = AgentOptions(steps_per_attempt=8, max_attempts=1)
         responses = [
             Message(
                 role="assistant",
@@ -948,7 +948,7 @@ class TestAgentWindowTruncation:
         ]
         responses.append(Message(role="assistant", content="done"))
         llm = FakeLLM(responses)
-        agent = _agent(llm)
+        agent = _agent(llm, options=options)
         agent.hippo.working = WorkingMemory(max_len=4)
         assert await agent.run("long task") == "done"
 
@@ -962,13 +962,8 @@ class TestAgentWindowTruncation:
             assert sent[1].content == "long task"
 
     @pytest.mark.asyncio
-    async def test_reflection_window_is_protocol_valid(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as agent_mod
-
-        monkeypatch.setattr(agent_mod, "STEPS_PER_ATTEMPT", 3)
-        monkeypatch.setattr(agent_mod, "MAX_ATTEMPTS", 1)
+    async def test_reflection_window_is_protocol_valid(self) -> None:
+        options = AgentOptions(steps_per_attempt=3, max_attempts=1)
         llm = FakeLLM(
             [
                 Message(
@@ -981,7 +976,7 @@ class TestAgentWindowTruncation:
         llm.responses.append(
             Message(role="assistant", content='{"recommended_action": "stop"}')
         )
-        agent = _agent(llm)
+        agent = _agent(llm, options=options)
         await agent.run("needs reflection")
         reflection = _reflection_calls(llm)
         assert len(reflection) == 1
@@ -1021,13 +1016,8 @@ class TestStuckDetectionMultiCall:
         assert Agent._detect_stuck(fps) == "stuck"
 
     @pytest.mark.asyncio
-    async def test_loop_stops_on_repeated_batches(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        import localmelo.melo.agent.agent as agent_mod
-
-        monkeypatch.setattr(agent_mod, "STEPS_PER_ATTEMPT", 6)
-        monkeypatch.setattr(agent_mod, "MAX_ATTEMPTS", 1)
+    async def test_loop_stops_on_repeated_batches(self) -> None:
+        options = AgentOptions(steps_per_attempt=6, max_attempts=1)
         llm = FakeLLM(
             [
                 Message(
@@ -1040,7 +1030,7 @@ class TestStuckDetectionMultiCall:
         llm.responses.append(
             Message(role="assistant", content='{"recommended_action": "stop"}')
         )
-        agent = _agent(llm)
+        agent = _agent(llm, options=options)
         await agent.run("repeat")
         # 3 planning steps, then stuck -> one reflection call.
         assert len(_planning_calls(llm)) == 3
