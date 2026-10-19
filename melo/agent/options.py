@@ -55,9 +55,8 @@ class AgentOptions:
       ``LOCALMELO_MEMORY_DIR`` environment variables decide.
     - ``timeout_s``: wall-clock bound for one run; ``None`` means no bound.
 
-    ``tool_exposure`` and ``timeout_s`` are stored but not acted on yet:
-    the agent always resolves tools as in ``"retrieve"`` mode and does not
-    bound a run's duration.
+    ``timeout_s`` is stored but not acted on yet: the agent does not bound
+    a run's duration.
     """
 
     max_steps: int = MAX_AGENT_STEPS

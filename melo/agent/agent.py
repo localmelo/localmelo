@@ -304,9 +304,10 @@ class Agent:
         agent = Agent(llm=my_llm_provider, embedding=my_emb_provider)
 
     Either mode takes ``options=AgentOptions(...)`` to set step budgets,
-    the attempt policy, the built-in tools and memory; the defaults keep
-    the behavior from before options existed. ``tool_providers`` are only
-    stored so far: nothing starts them or registers their tools.
+    the attempt policy, tool exposure, the built-in tools and memory; the
+    defaults keep the behavior from before options existed.
+    ``tool_providers`` are only stored so far: nothing starts them or
+    registers their tools.
     """
 
     def __init__(
@@ -374,17 +375,27 @@ class Agent:
     ) -> tuple[list[Message], list[Message], list[ToolDef], str | None]:
         """Stage 1+2: retrieve context, resolve tools, run boundary checks.
 
+        With ``tool_exposure="retrieve"`` the tools come from hint
+        extraction plus BM25; with ``"all"`` they are every registered
+        tool, sorted by name.
+
         Returns (long_context, short_window, tools, fail_reason).
         *fail_reason* is non-None when a check fails and the loop must break.
         """
         long_context = await self.hippo.retrieve_context(query)
         short_window = self.hippo.working.get_window()
-
-        # Include reflection context in tool hint extraction
         reflection_msgs = _serialize_reflections(self.hippo.working.get_reflections())
-        hint_sources = long_context + short_window + reflection_msgs
-        tool_hints = self.hippo.extract_tool_hints(hint_sources)
-        tools = self.hippo.resolve_tools(query, hints=tool_hints)
+
+        tool_hints: list[str] = []
+        if self.options.tool_exposure == "all":
+            # The same list on every step, so the tools part of the request
+            # stays byte-stable for prefix caching.
+            tools = sorted(self.hippo.list_tools(), key=lambda t: t.name)
+        else:
+            # Include reflection context in tool hint extraction
+            hint_sources = long_context + short_window + reflection_msgs
+            tool_hints = self.hippo.extract_tool_hints(hint_sources)
+            tools = self.hippo.resolve_tools(query, hints=tool_hints)
 
         resolution_check = self.checker.check_tool_resolution(
             ToolResolutionResult(
