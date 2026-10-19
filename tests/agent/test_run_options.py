@@ -228,7 +228,7 @@ class TestMemoryOption:
         emb = FakeEmbedding()
         options = AgentOptions(steps_per_attempt=1, max_attempts=2)
         agent = _echo_agent(_continue_then_answer(), options, embedding=emb)
-        assert await agent.run("q") == "answer"
+        assert await agent.run("echo q") == "answer"
         assert emb.calls > 0
         assert agent.hippo.long._entries
 
@@ -240,7 +240,7 @@ class TestMemoryOption:
         assert agent.hippo.embedding is None
         assert agent._embedding is emb
 
-        assert await agent.run("q") == "answer"
+        assert await agent.run("echo q") == "answer"
         # No recall, no long-term writes, no reflection promotion.
         assert emb.calls == 0
         assert agent.hippo.long._entries == []
@@ -370,7 +370,7 @@ class TestNoReflectionPolicy:
             attempt_policy="none", max_steps=4, steps_per_attempt=1, max_attempts=1
         )
         agent = _echo_agent(llm, options)
-        assert await agent.run("q") == "Max steps reached"
+        assert await agent.run("echo q") == "Max steps reached"
         assert len(llm.calls) == 4
         assert _reflection_calls(llm) == []
         task = _only_task(agent)
@@ -381,7 +381,7 @@ class TestNoReflectionPolicy:
     async def test_stuck_fails_without_reflection(self) -> None:
         llm = FakeLLM([_echo_call("same") for _ in range(6)])
         agent = _echo_agent(llm, AgentOptions(attempt_policy="none", max_steps=10))
-        result = await agent.run("q")
+        result = await agent.run("echo q")
         assert result == "Stuck: the same tool calls or errors repeated"
         assert len(llm.calls) == 3
         assert _reflection_calls(llm) == []
@@ -407,7 +407,7 @@ class TestReflectPolicyBudgets:
         )
         options = AgentOptions(max_steps=3, steps_per_attempt=2, max_attempts=5)
         agent = _echo_agent(llm, options)
-        assert await agent.run("q") == "Max steps reached"
+        assert await agent.run("echo q") == "Max steps reached"
         # Attempt 0 uses 2 steps, attempt 1 the 1 step left; no attempt 2.
         assert len(_planning_calls(llm)) == 3
         assert len(_reflection_calls(llm)) == 2

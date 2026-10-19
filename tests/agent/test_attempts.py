@@ -157,7 +157,7 @@ class TestAttemptBudgetTriggersReflection:
         )
 
         agent = _make_echo_agent(llm, options=options)
-        result = await agent.run("test")
+        result = await agent.run("echo test")
         assert result == "partial answer"
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
@@ -196,7 +196,7 @@ class TestReflectionContinue:
         llm.enqueue(Message(role="assistant", content="final answer"))
 
         agent = _make_echo_agent(llm, options=options)
-        result = await agent.run("test")
+        result = await agent.run("echo test")
         assert result == "final answer"
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "completed"
@@ -227,7 +227,7 @@ class TestReflectionStop:
         )
 
         agent = _make_echo_agent(llm, options=options)
-        result = await agent.run("hard task")
+        result = await agent.run("echo hard task")
         assert result == "best I can do"
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
@@ -273,7 +273,7 @@ class TestMaxAttemptsExhausted:
         )
 
         agent = _make_echo_agent(llm, options=options)
-        result = await agent.run("endless")
+        result = await agent.run("echo endless")
         assert "Max attempts reached" in result
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
@@ -305,7 +305,7 @@ class TestStuckDetection:
         )
 
         agent = _make_echo_agent(llm, options=options)
-        await agent.run("stuck task")
+        await agent.run("echo stuck task")
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
 
@@ -348,7 +348,7 @@ class TestReflectionInPrompt:
         llm.enqueue(Message(role="assistant", content="done"))
 
         agent = _make_echo_agent(llm, options=options)
-        await agent.run("test")
+        await agent.run("echo test")
 
         # The last LLM call (attempt 1 planning) should have [REFLECTION]
         last_plan_call = llm.calls[-1]
@@ -381,7 +381,7 @@ class TestReflectionPromotion:
         llm.enqueue(Message(role="assistant", content="answer"))
 
         agent = _make_echo_agent(llm, options=options)
-        result = await agent.run("test")
+        result = await agent.run("echo test")
         assert result == "answer"
 
         # Reflections cleared from working memory after promotion
@@ -423,7 +423,7 @@ class TestReflectionPromotion:
         )
         agent.executor.register("echo", _echo_tool)
 
-        await agent.run("test")
+        await agent.run("echo test")
         # No crash, reflections cleared even without embedding
         assert len(agent.hippo.working.get_reflections()) == 0
 
@@ -602,7 +602,7 @@ class TestUtilityContinuationGate:
         )
 
         agent = _make_echo_agent(llm, options=options)
-        result = await agent.run("test")
+        result = await agent.run("echo test")
         assert result == "low utility answer"
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
@@ -652,7 +652,7 @@ class TestReflectionReceivesPriorReflections:
         )
 
         agent = _make_echo_agent(llm, options=options)
-        await agent.run("test")
+        await agent.run("echo test")
 
         # The second reflection call (4th LLM call) should contain
         # prior reflection info ("tried approach A") in the system prompt
@@ -701,7 +701,7 @@ class TestReflectionInfluencesRetrieval:
                 parameters={"type": "object", "properties": {}},
             )
         )
-        await agent.run("test")
+        await agent.run("echo test")
 
         # The planning call for attempt 1 should have tools that include
         # shell_exec (found via reflection hint) — verify it was offered
@@ -753,7 +753,7 @@ class TestPrePlanIncludesReflections:
         )
 
         agent = _make_echo_agent(llm, options=options)
-        result = await agent.run("test")
+        result = await agent.run("echo test")
 
         # Decompose is not "continue", so _should_continue returns False
         # and the task is marked failed. The result string carries the
@@ -790,7 +790,7 @@ class TestReflectionFailureTypeInPrompt:
         )
 
         agent = _make_echo_agent(llm, options=options)
-        await agent.run("stuck task")
+        await agent.run("echo stuck task")
 
         # The reflection call should mention "repeated" not "budget"
         reflect_call = [
@@ -840,7 +840,7 @@ class TestReflectionFailureTypeInPrompt:
         )
 
         agent = _make_echo_agent(llm, options=options)
-        await agent.run("budget test")
+        await agent.run("echo budget test")
 
         reflect_call = [
             c

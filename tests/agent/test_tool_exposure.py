@@ -1,4 +1,4 @@
-"""Agent: tool exposure modes — no real network or model."""
+"""Agent: tool exposure modes and the execution allowlist — no real network or model."""
 
 from __future__ import annotations
 
@@ -102,6 +102,15 @@ def _call(name: str, text: str) -> Message:
     )
 
 
+def _batch(*calls: tuple[str, str]) -> Message:
+    """One assistant message with a call per ``(name, text)``, in order."""
+    return Message(
+        role="assistant",
+        content="",
+        tool_calls=[ToolCall(tool_name=n, arguments={"text": t}) for n, t in calls],
+    )
+
+
 def _answer(text: str) -> Message:
     return Message(role="assistant", content=text)
 
@@ -109,6 +118,16 @@ def _answer(text: str) -> Message:
 def _offered(call: dict[str, Any]) -> list[str]:
     """Names of the tools one request offered, in order."""
     return [t.name for t in call["tools"] or []]
+
+
+def _results(call: dict[str, Any]) -> list[str]:
+    """Contents of the tool-result messages one request carried, in order."""
+    return [m.content for m in call["messages"] if m.role == "tool"]
+
+
+def _refused(name: str) -> str:
+    """The tool-result text for a call to a tool its step did not offer."""
+    return f"Error: Tool '{name}' was not offered in this step."
 
 
 def _wire(call: dict[str, Any]) -> str:
@@ -200,3 +219,57 @@ class TestAllExposure:
 
         assert "Plan check failed" in await agent.run("hello")
         assert llm.calls == []
+
+
+# ── tool_exposure="retrieve": the execution allowlist ───────────────────────
+
+# "echo" matches the query "echo one" by name (hint and BM25); "zeta" shares
+# no word with either query below, so retrieval never offers it on its own.
+ECHO_AND_ZETA = {"echo": "echo text back", "zeta": "last letter"}
+
+
+class TestRetrieveAllowlist:
+    @pytest.mark.asyncio
+    async def test_tool_not_offered_is_refused_while_offered_call_runs(self) -> None:
+        llm = FakeLLM([_batch(("zeta", "1"), ("echo", "2")), _answer("done")])
+        agent, ran = _agent(llm, AgentOptions(builtins=frozenset()), ECHO_AND_ZETA)
+
+        assert await agent.run("echo one") == "done"
+        # zeta is registered, but this step offered only echo.
+        assert _offered(llm.calls[0]) == ["echo"]
+        assert ran == [("echo", "2")]
+        assert _results(llm.calls[1]) == [_refused("zeta"), "2"]
+
+    @pytest.mark.asyncio
+    async def test_nothing_offered_refuses_every_call(self) -> None:
+        llm = FakeLLM([_call("zeta", "1"), _answer("done")])
+        options = AgentOptions(builtins=frozenset())
+        agent, ran = _agent(llm, options, {"zeta": "last letter"})
+
+        assert await agent.run("hello") == "done"
+        # No tool matched, so the request carried none; the call made anyway
+        # meets an empty allowlist.
+        assert llm.calls[0]["tools"] is None
+        assert ran == []
+        assert _results(llm.calls[1]) == [_refused("zeta")]
+
+    @pytest.mark.asyncio
+    async def test_refused_tool_is_offered_on_the_next_step(self) -> None:
+        """Known limit: the allowlist holds within one step only.
+
+        The refused call and its error put the tool's name into working
+        memory, so hint extraction offers it on the next step and the same
+        call then runs. Revisit this test with the hints rework (review
+        finding C1).
+        """
+        llm = FakeLLM([_call("zeta", "1"), _call("zeta", "2"), _answer("done")])
+        agent, ran = _agent(llm, AgentOptions(builtins=frozenset()), ECHO_AND_ZETA)
+
+        assert await agent.run("echo one") == "done"
+        assert [_offered(call) for call in llm.calls] == [
+            ["echo"],
+            ["echo", "zeta"],
+            ["echo", "zeta"],
+        ]
+        assert _results(llm.calls[1]) == [_refused("zeta")]
+        assert ran == [("zeta", "2")]

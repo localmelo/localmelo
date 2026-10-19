@@ -222,7 +222,7 @@ class TestBlockedToolCall:
         llm.enqueue(Message(role="assistant", content="aborted"))
 
         agent = Agent(llm=llm, embedding=FakeEmbedding())
-        result = await agent.run("delete everything")
+        result = await agent.run("delete everything with shell_exec")
 
         # The built-in shell_exec is registered, but rm -rf / is blocked.
         # The agent should still produce a result (the second LLM turn).
@@ -321,7 +321,7 @@ class TestCheckedMemoryWrite:
         )
         agent.executor.register("echo", _echo_tool)
 
-        result = await agent.run("test")
+        result = await agent.run("echo test")
         assert result == "done"
 
         # The huge summary should have been blocked by check_memory_write,
@@ -411,7 +411,7 @@ class TestMaxStepsTermination:
         )
         agent.executor.register("echo", _echo_tool)
 
-        await agent.run("loop forever")
+        await agent.run("echo loop forever")
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
 
@@ -515,7 +515,7 @@ class TestSanitizedOutputInMemory:
         )
         agent.executor.register("echo", _echo_tool)
 
-        result = await agent.run("big output")
+        result = await agent.run("echo big output")
         assert result == "done"
 
         # The step record must contain the truncated output, not the raw 60k.
@@ -553,7 +553,7 @@ class TestSanitizedOutputInMemory:
         )
         agent.executor.register("echo", _echo_tool)
 
-        result = await agent.run("huge output test")
+        result = await agent.run("echo huge output test")
         assert result == "ok"
 
         # The call already ran, so its turn stays: the same id with the
@@ -606,7 +606,7 @@ class TestSanitizedOutputInMemory:
 
         agent.executor.register("big_read", _big_read)
 
-        result = await agent.run("huge output test")
+        result = await agent.run("huge output test with big_read")
         assert result == "ok"
 
         tasks = list(agent.hippo.history._tasks.values())
@@ -743,7 +743,7 @@ class TestMultiStepToolCalls:
         )
         agent.executor.register("echo", _echo_tool)
 
-        result = await agent.run("multi step")
+        result = await agent.run("echo multi step")
         assert result == "all done"
 
         # Should have 3 LLM calls total
@@ -867,7 +867,7 @@ class TestStepEstimation:
         )
         agent.executor.register("echo", _echo_tool)
 
-        await agent.run("loop task")
+        await agent.run("echo loop task")
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
 

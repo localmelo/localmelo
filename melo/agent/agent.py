@@ -5,7 +5,7 @@ import hashlib
 import json
 import math
 import os
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.agent._chat import Chat
@@ -450,8 +450,13 @@ class Agent:
 
         return response, None
 
-    async def _do_execute(self, call: ToolCall) -> ToolResult:
+    async def _do_execute(
+        self, call: ToolCall, *, allowed: Collection[str]
+    ) -> ToolResult:
         """Stage 4: execute one tool call and validate the result.
+
+        *allowed* holds the names of the tools offered in the planning
+        call that produced *call*; the executor refuses any other tool.
 
         Uses the sanitized payload from the executor-result checker
         when truncation or modification was applied; falls back to
@@ -461,7 +466,7 @@ class Agent:
             tool_name=call.tool_name,
             arguments=dict(call.arguments),
         )
-        outcome = await self.executor.execute_structured(exec_request)
+        outcome = await self.executor.execute_structured(exec_request, allowed=allowed)
 
         exec_result_check = self.checker.check_executor_result(
             ExecutorResultPayload(
@@ -847,11 +852,13 @@ class Agent:
                 task.result = response.content
                 return step + 1, ""
 
-            # Execute every call in order, each through the executor boundary
+            # Execute every call in order, each through the executor boundary,
+            # which runs only the tools this planning call offered.
+            allowed = frozenset(t.name for t in tools)
             calls = list(response.tool_calls)
             results: list[ToolResult] = []
             for call in calls:
-                results.append(await self._do_execute(call))
+                results.append(await self._do_execute(call, allowed=allowed))
             await self._do_memorize(task.task_id, response, results)
 
             # Stuck detection (one fingerprint per step)

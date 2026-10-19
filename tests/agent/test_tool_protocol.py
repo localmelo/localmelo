@@ -244,7 +244,7 @@ class TestMultiCallExecution:
             ]
         )
         agent = _agent(llm)
-        await agent.run("two")
+        await agent.run("echo two")
         task = next(iter(agent.hippo.history._tasks.values()))
         steps = await agent.hippo.history.get_steps(task.task_id)
         assert [s.tool_call.id for s in steps if s.tool_call] == ["call_x", "call_y"]
@@ -266,7 +266,7 @@ class TestMultiCallExecution:
         )
         executed: list[str] = []
         agent = _agent(llm, executed)
-        await agent.run("mixed batch")
+        await agent.run("mixed batch of shell_exec and echo")
         assert executed == ["still runs"]
         second = _planning_calls(llm)[1]["messages"]
         assert_protocol_valid(second)
@@ -300,7 +300,7 @@ class TestMultiCallExecution:
             ]
         )
         agent = _agent(llm)
-        await agent.run("read a blank file")
+        await agent.run("read a blank file with echo")
         second = _planning_calls(llm)[1]["messages"]
         assert [m.content for m in second if m.role == "tool"] == ["(no output)"]
 
@@ -324,7 +324,7 @@ class TestCheckedTurnWrites:
             return big
 
         agent.executor.register("echo", _big)
-        await agent.run("big")
+        await agent.run("echo big")
         window = agent.hippo.working.get_window()
         assert_protocol_valid(window)
         notice = [m for m in window if m.role == "tool"]
@@ -351,7 +351,7 @@ class TestCheckedTurnWrites:
             return part
 
         agent.executor.register("echo", _read)
-        assert await agent.run("summarize three parts") == "done"
+        assert await agent.run("summarize three parts with echo") == "done"
 
         # The second planning call got past pre_plan and answers every call.
         planning = _planning_calls(llm)
@@ -383,7 +383,7 @@ class TestCheckedTurnWrites:
             return text * sizes[text]
 
         agent.executor.register("echo", _read)
-        await agent.run("read three parts")
+        await agent.run("read three parts with echo")
         window = agent.hippo.working.get_window()
         results = {m.tool_call_id: m.content for m in window if m.role == "tool"}
         # Withholding the 40k result is enough; the others stay whole. The
@@ -413,7 +413,7 @@ class TestCheckedTurnWrites:
             return f"saved {len(text)} chars"
 
         agent.executor.register("echo", _save)
-        assert await agent.run("save three sections") == "done"
+        assert await agent.run("save three sections with echo") == "done"
 
         # The executor and history get the real arguments.
         assert received == list(texts.values())
@@ -468,7 +468,7 @@ class TestCheckedTurnWrites:
 
         agent.executor.register("save", _save)
         agent.executor.register("read", _read)
-        query = "Update the draft and read the reference. " * 60
+        query = "Update the draft with save and read the reference. " * 60
         assert await agent.run(query) == "done"
 
         second = _planning_calls(llm)[1]["messages"]
@@ -508,7 +508,7 @@ class TestCheckedTurnWrites:
             return "r" * 30_000
 
         agent.executor.register("echo", _read)
-        assert await agent.run("read it") == "done"
+        assert await agent.run("read it with echo") == "done"
 
         window = agent.hippo.working.get_window()
         assert_protocol_valid(window)
@@ -533,7 +533,7 @@ class TestCheckedTurnWrites:
             ]
         )
         agent = _agent(llm)
-        await agent.run("long thought")
+        await agent.run("echo long thought")
         window = agent.hippo.working.get_window()
         assert_protocol_valid(window)
         assistant = [m for m in window if m.tool_calls]
@@ -563,7 +563,7 @@ class TestCheckedTurnWrites:
             return text
 
         agent.executor.register("echo", _echo)
-        await agent.run("summary")
+        await agent.run("echo summary")
         assert any("[called echo]" in e.text for e in agent.hippo.long._entries)
         window = agent.hippo.working.get_window()
         assert not any("[called echo]" in m.content for m in window)
@@ -642,7 +642,8 @@ class TestToolResultImages:
                 Message(role="assistant", content="done"),
             ]
         )
-        assert await _image_agent(llm).run("take screenshots") == "done"
+        query = "take screenshots with shot, shot_only and shot_error"
+        assert await _image_agent(llm).run(query) == "done"
 
         second = _planning_calls(llm)[1]["messages"]
         assert_protocol_valid(second)
@@ -720,7 +721,7 @@ class TestToolResultImages:
             ]
         )
         agent = _image_agent(llm)
-        assert await agent.run("take screenshots") == "done"
+        assert await agent.run("take screenshots with shot and shot_only") == "done"
         # The same digest, type and size as SHOT, without the base64 data.
         ref = SHOT.as_reference()
 
@@ -771,7 +772,7 @@ class TestToolResultImages:
             ]
         )
         agent = _image_agent(llm)
-        await agent.run("take a screenshot")
+        await agent.run(f"take a screenshot with {tool}")
         window = agent.hippo.working.get_window()
         [result] = [m for m in window if m.role == "tool"]
         # A rejected write keeps neither the text nor the images, but the
@@ -842,7 +843,7 @@ class TestToolResultImages:
             base_url="http://omlx.test/v1", model="m", transport=transport
         )
         agent = _image_agent(llm)
-        assert await agent.run("take screenshots") == "done"
+        assert await agent.run("take screenshots with shot and shot_only") == "done"
         await agent.close()
         _assert_markers_without_images(bodies[1])
 
@@ -864,7 +865,7 @@ class TestToolResultImages:
             base_url="http://ollama.test", model="m", transport=transport
         )
         agent = _image_agent(llm)
-        assert await agent.run("take screenshots") == "done"
+        assert await agent.run("take screenshots with shot and shot_only") == "done"
         await agent.close()
         _assert_markers_without_images(bodies[1])
 
@@ -950,7 +951,7 @@ class TestAgentWindowTruncation:
         llm = FakeLLM(responses)
         agent = _agent(llm, options=options)
         agent.hippo.working = WorkingMemory(max_len=4)
-        assert await agent.run("long task") == "done"
+        assert await agent.run("echo long task") == "done"
 
         planning = _planning_calls(llm)
         assert len(planning) == 7
@@ -959,7 +960,7 @@ class TestAgentWindowTruncation:
             assert_protocol_valid(sent)
             # The task query opens the conversation even after eviction.
             assert sent[1].role == "user"
-            assert sent[1].content == "long task"
+            assert sent[1].content == "echo long task"
 
     @pytest.mark.asyncio
     async def test_reflection_window_is_protocol_valid(self) -> None:
@@ -977,7 +978,7 @@ class TestAgentWindowTruncation:
             Message(role="assistant", content='{"recommended_action": "stop"}')
         )
         agent = _agent(llm, options=options)
-        await agent.run("needs reflection")
+        await agent.run("echo needs reflection")
         reflection = _reflection_calls(llm)
         assert len(reflection) == 1
         sent = reflection[0]["messages"]
@@ -1031,7 +1032,7 @@ class TestStuckDetectionMultiCall:
             Message(role="assistant", content='{"recommended_action": "stop"}')
         )
         agent = _agent(llm, options=options)
-        await agent.run("repeat")
+        await agent.run("echo repeat")
         # 3 planning steps, then stuck -> one reflection call.
         assert len(_planning_calls(llm)) == 3
         assert len(_reflection_calls(llm)) == 1

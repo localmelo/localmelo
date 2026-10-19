@@ -43,7 +43,9 @@ class AgentOptions:
       reflection calls.
     - ``tool_exposure``: ``"retrieve"`` offers the tools that hint
       extraction and BM25 resolve for each step; ``"all"`` offers every
-      registered tool, sorted by name, on every step.
+      registered tool, sorted by name, on every step. In both modes the
+      executor refuses a call to a tool that its step did not offer
+      (``TOOL_NOT_OFFERED``), and that tool does not run.
     - ``builtins``: names of the built-in tools to register. ``None``
       registers all of them, an empty set none. Any iterable of names
       except a bare ``str`` is accepted and stored as a ``frozenset``.

@@ -335,7 +335,7 @@ class TestSingleSystemMessageWithMemory:
         )
         agent.executor.register("echo", _echo_tool)
 
-        await agent.run("multi turn recall")
+        await agent.run("echo multi turn recall")
 
         planning = _planning_calls(llm)
         for i, call in enumerate(planning):
@@ -702,7 +702,7 @@ class TestStructuredExecutorInAgentLoop:
         llm.responses.append(Message(role="assistant", content="aborted"))
 
         agent = Agent(llm=llm, embedding=FakeEmbedding())
-        result = await agent.run("delete everything")
+        result = await agent.run("delete everything with shell_exec")
         assert result == "aborted"
         await agent.close()
 
@@ -1060,7 +1060,7 @@ class TestNoEmbeddingFullPath:
         )
         agent.executor.register("echo", _echo_tool)
 
-        result = await agent.run("multi-step no-emb")
+        result = await agent.run("echo multi-step no-emb")
         assert result == "done"
 
         tasks = list(agent.hippo.history._tasks.values())
@@ -1183,7 +1183,7 @@ class TestThreeWayBoundary:
         llm.responses.append(Message(role="assistant", content="aborted"))
 
         agent = Agent(llm=llm, embedding=FakeEmbedding())
-        result = await agent.run("delete everything")
+        result = await agent.run("delete everything with shell_exec")
         assert result == "aborted"
 
         tasks = list(agent.hippo.history._tasks.values())
