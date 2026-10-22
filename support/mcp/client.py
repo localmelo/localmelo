@@ -501,8 +501,9 @@ class StdioMcpClient:
 
     def _dispatch(self, line: bytes) -> None:
         # errors="replace": text that is not UTF-8 (a stray Latin-1 log line)
-        # must not end the reader.
-        text = line.decode("utf-8", errors="replace")
+        # must not end the reader. utf-8-sig drops a byte order mark at the
+        # start of the line, as json.loads does when given bytes.
+        text = line.decode("utf-8-sig", errors="replace")
         try:
             message = json.loads(text)
         except (ValueError, RecursionError) as exc:

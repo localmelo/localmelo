@@ -18,12 +18,15 @@ FAKE_MCP_PIDFILE, if set. FAKE_MCP_MODE selects misbehaviour:
 - ``garbage_stdout``: write a non-JSON line before every response
 - ``malformed_stdout``: write a line that is not UTF-8 and a line of JSON
   nested too deep to parse before every response
+- ``bom_stdout``: start stdout with a UTF-8 byte order mark, so the first
+  message, the ``initialize`` response, begins with one
 - ``stubborn``: ignore SIGTERM and keep running after stdin closes
 """
 
 from __future__ import annotations
 
 import base64
+import codecs
 import json
 import os
 import signal
@@ -285,6 +288,9 @@ def main() -> None:
     # test lowers the limit and the client does not drain stderr.
     sys.stderr.write("fake-mcp: starting\n" + "." * 200_000 + "\n")
     sys.stderr.flush()
+    if MODE == "bom_stdout":
+        # No newline: the next write, the first message, follows the mark.
+        sys.stdout.buffer.write(codecs.BOM_UTF8)
     while True:
         line = sys.stdin.buffer.readline()
         if not line:

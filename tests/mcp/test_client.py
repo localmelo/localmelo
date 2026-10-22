@@ -375,6 +375,26 @@ class TestFailures:
         result = await asyncio.wait_for(client.call_tool("latin1", {}), 5)
         assert tool_result_to_output(result).text == "caf\ufffd"
 
+    async def test_output_that_starts_with_a_byte_order_mark_is_read(
+        self, log_path: Path
+    ) -> None:
+        # The server's first line, the initialize response, starts with a
+        # UTF-8 byte order mark. The startup timeout makes a client that
+        # drops that line fail, not hang.
+        mcp = StdioMcpClient(
+            fake_server_config(
+                log_path, env={"FAKE_MCP_MODE": "bom_stdout"}, startup_timeout_s=5
+            ),
+            shutdown_grace_s=0.5,
+        )
+        await mcp.start()
+        try:
+            result = await mcp.call_tool("echo", {"text": "ok"})
+        finally:
+            await mcp.close()
+        assert mcp.protocol_version == "2025-06-18"
+        assert tool_result_to_output(result).text == "ok"
+
     async def test_a_message_that_cannot_be_handled_is_skipped(
         self,
         client: StdioMcpClient,
