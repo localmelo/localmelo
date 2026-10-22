@@ -47,11 +47,16 @@ PROTOCOL_VERSION = "2025-06-18"
 KNOWN_PROTOCOL_VERSIONS = frozenset({"2024-11-05", "2025-03-26", "2025-06-18"})
 
 # One message is one line, with any images in it as base64, and a longer
-# line ends the client. The limit holds the largest tools/call result the
-# executor's result check passes unchanged: MAX_IMAGES_PER_RESULT images
-# of MAX_IMAGE_BYTES each, base64-encoded, and MAX_OUTPUT_LEN characters
-# of text at up to 12 bytes each as JSON (two \u escapes), plus 1 MiB for
-# the JSON around them. About 215 MiB; asyncio's default is 64 KiB.
+# line ends the client. The limit holds the largest successful tools/call
+# result the executor's result check passes unchanged, with its images in
+# canonical base64 (no whitespace, no escapes): MAX_IMAGES_PER_RESULT
+# images of MAX_IMAGE_BYTES each, and MAX_OUTPUT_LEN characters of text
+# at up to 12 bytes each as JSON (two \u escapes), plus 1 MiB for the
+# JSON around them. About 215 MiB; asyncio's default is 64 KiB. Near that
+# size, other results the check passes can still end the client: base64
+# that is wrapped or escaped (such as "\/"), the text of an error result
+# (the check does not cut it), and content the client leaves out before
+# the check (audio, other binary data, structuredContent next to text).
 STREAM_LIMIT = (
     MAX_IMAGES_PER_RESULT * 4 * ((MAX_IMAGE_BYTES + 2) // 3)
     + 12 * MAX_OUTPUT_LEN

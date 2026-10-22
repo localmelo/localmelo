@@ -163,10 +163,13 @@ class TestToolCalls:
         image = tool_result_to_output(result).images[0]
         assert image.size_bytes == 3_000_000
 
-    def test_line_limit_holds_the_largest_result_the_checker_passes(self) -> None:
+    def test_line_limit_holds_the_largest_canonical_result(self) -> None:
         # The executor's result check passes MAX_IMAGES_PER_RESULT images of
         # MAX_IMAGE_BYTES each and MAX_OUTPUT_LEN characters of text
-        # unchanged, so the line carrying such a result must fit the limit.
+        # unchanged. The line carrying such a successful result must fit
+        # the limit when its images are canonical base64, as written by
+        # base64.b64encode and json.dumps. Other forms are not covered
+        # (see STREAM_LIMIT).
         data_len = len(base64.b64encode(bytes(MAX_IMAGE_BYTES)))
         image_len = data_len + len(
             json.dumps({"type": "image", "data": "", "mimeType": "image/webp"})
