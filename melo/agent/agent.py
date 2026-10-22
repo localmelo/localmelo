@@ -19,7 +19,11 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
 )
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
-from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.melo.contracts.providers import (
+    BaseEmbeddingProvider,
+    BaseLLMProvider,
+    ProviderError,
+)
 from localmelo.melo.contracts.tools import BaseToolProvider
 from localmelo.melo.executor import Executor, builtin_names, register_builtins
 from localmelo.melo.executor.models import ExecutionRequest
@@ -935,6 +939,10 @@ class Agent:
           best effort, if any, is the result);
         - ``budget_exhausted``: ``max_steps`` or ``max_attempts`` ran out;
         - ``stuck``: stuck detection fired with ``attempt_policy="none"``;
+        - ``provider_error``: a model server request failed with a
+          :class:`~localmelo.melo.contracts.providers.ProviderError`: a
+          chat request after its retries, or an embedding request. The
+          error is the provider's message; no traceback is logged;
         - ``crashed``: an unexpected exception ended the run. It is
           logged and reported as the error, not raised. A cancellation,
           or any other exception that is not an ``Exception``, still
@@ -961,6 +969,10 @@ class Agent:
                 await self._run_single_attempt(task, query, run)
             else:
                 await self._run_reflective_attempts(task, query, run)
+        except ProviderError as exc:
+            # Reported in the result, not a crash: no traceback.
+            logger.info("Task %s ended with provider_error: %s", task.task_id, exc)
+            run.end("provider_error", error=str(exc) or _exception_text(exc))
         except Exception as exc:
             logger.exception("Task %s crashed", task.task_id)
             run.end("crashed", error=_exception_text(exc))

@@ -1,16 +1,28 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.contracts.providers import (
+    LLM_REQUEST_ATTEMPT,
+    BaseLLMProvider,
+    ProviderError,
+)
 from localmelo.melo.memory.short import tail_turns
 from localmelo.melo.schema import Message, ToolDef
 
 if TYPE_CHECKING:
     from localmelo.melo.schema import ReflectionEntry
+
+logger = logging.getLogger(__name__)
+
+# Seconds to wait before each retry of a request that failed with a
+# retryable ProviderError: at most two retries, 1 s and then 4 s apart.
+RETRY_DELAYS_S: tuple[float, ...] = (1.0, 4.0)
 
 SYSTEM_PROMPT = (
     "You are a task-solving agent. You can use tools to accomplish tasks.\n"
@@ -132,8 +144,10 @@ class RequestStats:
     ``n_llm`` counts requests that returned a response; ``n_main`` and
     ``n_aux`` split them by whether the request offered tools, so
     ``n_main + n_aux == n_llm``. ``llm_errors`` counts requests that
-    raised instead. ``usage`` sums the integer usage fields of the
-    responses by name.
+    raised instead: every failed attempt of a retried request, and a
+    request cut short by a cancellation, so ``n_llm + llm_errors`` is the
+    number of requests sent. ``usage`` sums the integer usage fields of
+    the responses by name.
     """
 
     n_llm: int = 0
@@ -150,8 +164,24 @@ class RequestStats:
 
 
 class Chat:
-    def __init__(self, llm: BaseLLMProvider) -> None:
+    """Builds the agent's LLM requests, retries failed ones, counts them.
+
+    A request that fails with a retryable :class:`ProviderError` is sent
+    again after each delay in *retry_delays* (default
+    :data:`RETRY_DELAYS_S`), waited out with *sleep*, so tests can pass a
+    *sleep* that returns at once.
+    """
+
+    def __init__(
+        self,
+        llm: BaseLLMProvider,
+        *,
+        retry_delays: Sequence[float] = RETRY_DELAYS_S,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    ) -> None:
         self.llm = llm
+        self.retry_delays = tuple(retry_delays)
+        self.sleep = sleep
         self.stats = RequestStats()
 
     def reset_stats(self) -> RequestStats:
@@ -169,14 +199,36 @@ class Chat:
         """Send one request to the LLM and count it in :attr:`stats`.
 
         A request with tools counts as main, one without as aux; an empty
-        tool list is sent as ``None`` and counts as aux. A request that
-        raises counts in ``llm_errors``, and the exception propagates.
+        tool list is sent as ``None`` and counts as aux.
+
+        A retryable :class:`ProviderError` is retried after each of
+        :attr:`retry_delays` in turn; each attempt runs with its 1-based
+        number in ``LLM_REQUEST_ATTEMPT``. Every attempt that raises
+        counts in ``llm_errors``, including one cut short by a
+        cancellation. The error of the last attempt, and any other
+        exception at once, propagates.
         """
-        try:
-            response = await self.llm.chat(messages, tools=tools or None)
-        except Exception:
-            self.stats.llm_errors += 1
-            raise
+        attempt = 1
+        while True:
+            try:
+                response = await self._send(messages, tools, attempt)
+                break
+            except ProviderError as exc:
+                self.stats.llm_errors += 1
+                if not exc.retryable or attempt > len(self.retry_delays):
+                    raise
+                delay = self.retry_delays[attempt - 1]
+                logger.info(
+                    "LLM request attempt %d failed, retrying in %g s: %s",
+                    attempt,
+                    delay,
+                    exc,
+                )
+            except BaseException:
+                self.stats.llm_errors += 1
+                raise
+            await self.sleep(delay)
+            attempt += 1
         self.stats.n_llm += 1
         if tools:
             self.stats.n_main += 1
@@ -184,6 +236,16 @@ class Chat:
             self.stats.n_aux += 1
         self.stats.add_usage(response.usage)
         return response
+
+    async def _send(
+        self, messages: list[Message], tools: list[ToolDef] | None, attempt: int
+    ) -> Message:
+        """Send one attempt of a request, with *attempt* in LLM_REQUEST_ATTEMPT."""
+        token = LLM_REQUEST_ATTEMPT.set(attempt)
+        try:
+            return await self.llm.chat(messages, tools=tools or None)
+        finally:
+            LLM_REQUEST_ATTEMPT.reset(token)
 
     async def estimate_steps(self, query: str) -> int:
         """Ask the LLM to estimate how many tool-call steps *query* needs."""

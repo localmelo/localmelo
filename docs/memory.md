@@ -97,7 +97,7 @@ in-memory history when persistence is off):
 | `result`  | the run's result, or its error when the result is empty                  |
 
 The status values after a run are `completed`, `failed`,
-`budget_exhausted`, `stuck` and `crashed`; see
+`budget_exhausted`, `stuck`, `provider_error` and `crashed`; see
 [quickstart.md → Run results](quickstart.md#run-results) for their meaning.
 The row is saved again when the run ends, whatever ended it, including an
 exception or a cancellation. A row that still reads `running` belongs to a

@@ -244,7 +244,10 @@ class RunResult:
       that offered no tool);
     - ``n_tool``: tool calls handed to the executor, including calls it
       refused (an unknown tool, or one that step did not offer);
-    - ``llm_errors``: LLM requests that raised instead of responding;
+    - ``llm_errors``: LLM requests that raised instead of responding,
+      counting each failed attempt of a retried request and a request
+      cut short by a cancellation, so ``n_llm + llm_errors`` is the
+      number of requests sent;
     - ``usage``: the integer usage fields of every response, summed by
       name (for example ``prompt_tokens``, ``completion_tokens``,
       ``total_tokens``).

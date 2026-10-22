@@ -132,6 +132,7 @@ Every run ends with one of these statuses:
 | `failed` | A checker refused the plan or the run (the prompt outgrew the pre-plan cap, tool resolution failed, or the model's response failed its check), or the reflection gate decided not to continue; `result` then holds the reflection's best effort, if any. |
 | `budget_exhausted` | `max_steps` or `max_attempts` ran out before a final answer. |
 | `stuck` | Stuck detection fired (the same tool calls, or the same errors, three steps in a row) with `attempt_policy="none"`. With `"reflect"`, a reflection decides what happens next instead. |
+| `provider_error` | A request to the model server failed: an HTTP error status, a timeout, a connection failure or a malformed response body (see [Provider errors](#provider-errors)). `error` describes the failed request; no traceback is logged. |
 | `crashed` | An unexpected exception ended the run. `error` is `<ExceptionType>: <message>` and the traceback is logged. A cancelled run is recorded as `crashed` too, and the cancellation propagates. |
 
 `Agent.run_task()` returns the run as a `RunResult`; `RunResult.to_dict()`
@@ -149,7 +150,7 @@ gives the same fields as a plain dict, in this order:
 | `n_main` | of those, requests that offered tools |
 | `n_aux` | of those, requests without tools: reflections, and planning calls in a step that offered no tool |
 | `n_tool` | tool calls handed to the executor, including calls it refused |
-| `llm_errors` | LLM requests that raised instead of responding |
+| `llm_errors` | LLM requests that raised instead of responding, each failed attempt of a retried request included, so `n_llm + llm_errors` is the number of requests sent |
 | `usage` | integer usage fields of all responses, summed by name (`prompt_tokens`, `completion_tokens`, `total_tokens`) |
 | `duration_s` | wall-clock time of the run, in seconds |
 | `config` | the effective run configuration (below) |
@@ -162,6 +163,33 @@ so every record says which mode it ran in.
 
 Whatever the status, the run's task record is saved with it; see
 [memory.md → Task records](memory.md#task-records).
+
+### Provider errors
+
+The chat and embedding providers report a failed request as
+`ProviderError` (from `localmelo.melo.contracts.providers`), which says
+whether sending the same request again may succeed:
+
+| Failure | Retried |
+|---|---|
+| timeout, connection failure or another transport error | yes |
+| HTTP 429, 502, 503 or 504 | yes |
+| any other HTTP error status, for example a proxy's 400 or a 500 | no |
+| a response body that is not JSON or lacks the expected fields | no |
+
+A chat request that may succeed is retried at most twice, after 1 s and
+then after 4 s more; if the last attempt fails too, the run ends as
+`provider_error`. Embedding requests are not retried. The error names the
+request and, when the server answered, gives its HTTP status and the first
+500 characters of its response body, for example
+`POST /chat/completions failed with HTTP 400: {"error": ...}`.
+
+Every chat request carries its attempt number (1, then 2 and 3 for the
+retries) in the `X-Localmelo-Attempt` HTTP header, so a proxy in front of
+the model server can match its request log against a run's `n_llm` and
+`llm_errors`. A custom `BaseLLMProvider` gets the same retries by raising
+`ProviderError(message, status_code=..., retryable=True)` for a failure
+worth retrying.
 
 ## Minimum smoke
 
