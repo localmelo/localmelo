@@ -508,6 +508,41 @@ class TestShutdown:
                     os.kill(pid, signal.SIGKILL)
         assert gone
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX sessions")
+    async def test_close_closes_the_pipes_a_helper_holds(
+        self, log_path: Path, tmp_path: Path
+    ) -> None:
+        helper_pid_file = tmp_path / "helper.pid"
+        mcp = StdioMcpClient(
+            fake_server_config(
+                log_path,
+                env={
+                    "FAKE_MCP_MODE": "stubborn_helper",
+                    "FAKE_MCP_HELPER_PIDFILE": str(helper_pid_file),
+                },
+            ),
+            shutdown_grace_s=0.2,
+        )
+        await mcp.start()
+        helper = int(helper_pid_file.read_text())
+        try:
+            # SIGKILL to the group ends the server but not the helper, which
+            # holds the server's stdout and stderr open from a session of
+            # its own. Before Python 3.13 Process.wait() waits for those
+            # pipes, so close() only sees the server exit if it closes them.
+            await asyncio.wait_for(mcp.close(), 5)
+            os.kill(helper, 0)  # the helper still holds the pipes
+        finally:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(helper, signal.SIGKILL)
+        assert mcp.returncode == -signal.SIGKILL
+        # private: asyncio has no public API for the process's pipes
+        transport = getattr(mcp._proc, "_transport", None)
+        assert isinstance(transport, asyncio.SubprocessTransport)
+        for fd in (1, 2):
+            pipe = transport.get_pipe_transport(fd)
+            assert pipe is not None and pipe.is_closing()
+
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
     @pytest.mark.parametrize(
         ("refuse", "message"),

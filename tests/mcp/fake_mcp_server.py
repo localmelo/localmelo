@@ -21,6 +21,9 @@ FAKE_MCP_PIDFILE, if set. FAKE_MCP_MODE selects misbehaviour:
 - ``bom_stdout``: start stdout with a UTF-8 byte order mark, so the first
   message, the ``initialize`` response, begins with one
 - ``stubborn``: ignore SIGTERM and keep running after stdin closes
+- ``stubborn_helper``: as ``stubborn``, and first start a helper process
+  that holds stdout and stderr open from a session of its own; its pid
+  goes to the file named by FAKE_MCP_HELPER_PIDFILE
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ import codecs
 import json
 import os
 import signal
+import subprocess
 import sys
 import threading
 import time
@@ -44,6 +48,8 @@ SLOW_CAP_S = 3.0  # hard cap, so a broken cancel path cannot hang the suite
 MODE = os.environ.get("FAKE_MCP_MODE", "")
 LOG_PATH = os.environ.get("FAKE_MCP_LOG", "")
 PID_PATH = os.environ.get("FAKE_MCP_PIDFILE", "")
+HELPER_PID_PATH = os.environ.get("FAKE_MCP_HELPER_PIDFILE", "")
+STUBBORN_MODES = ("stubborn", "stubborn_helper")
 
 _write_lock = threading.Lock()
 _log_lock = threading.Lock()
@@ -276,8 +282,22 @@ def handle(message: dict[str, Any]) -> None:
         )
 
 
+def start_helper() -> None:
+    # The helper inherits stdout and stderr, the pipes to the client, and
+    # its own session keeps it out of the process group the client signals.
+    helper = subprocess.Popen(
+        [sys.executable, "-I", "-c", "import time; time.sleep(10)"],
+        stdin=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    with open(HELPER_PID_PATH, "w", encoding="utf-8") as fh:
+        fh.write(str(helper.pid))
+
+
 def main() -> None:
-    if MODE == "stubborn":
+    if MODE == "stubborn_helper":
+        start_helper()
+    if MODE in STUBBORN_MODES:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
     if PID_PATH:
         with open(PID_PATH, "w", encoding="utf-8") as fh:
@@ -300,7 +320,7 @@ def main() -> None:
         message = json.loads(line)
         log(message)
         handle(message)
-    if MODE == "stubborn":
+    if MODE in STUBBORN_MODES:
         time.sleep(10)
 
 
