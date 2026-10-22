@@ -19,6 +19,7 @@ import pytest
 import localmelo.melo.executor.builtins as builtin_tools
 from localmelo.melo.checker import Checker
 from localmelo.melo.executor import (
+    ErrorCategory,
     ExecutionRequest,
     ExecutionStatus,
     Executor,
@@ -98,6 +99,30 @@ async def test_its_own_timeout_kills_the_command_and_its_children(
     monkeypatch.setattr(builtin_tools, "SHELL_TIMEOUT_S", 1.0)
     with pytest.raises(TimeoutError):
         await builtin_tools._shell_exec(_command(pid_file))
+    shell, child = await _pids(pid_file)
+    assert await _gone(shell)
+    assert await _gone(child)
+
+
+@pytest.mark.asyncio
+async def test_its_own_timeout_is_reported_with_its_limit(
+    pid_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The command's own limit is shorter than the executor's 60 s, and the
+    # error names it: before, the executor reported a TimeoutError raised
+    # inside the tool as "Execution timed out after 60.0s".
+    monkeypatch.setattr(builtin_tools, "SHELL_TIMEOUT_S", 0.5)
+    hippo = Hippo()
+    executor = Executor(hippo, Checker())
+    register_builtins(executor, hippo, names={"shell_exec"})
+    outcome = await executor.execute_structured(
+        ExecutionRequest(
+            tool_name="shell_exec", arguments={"command": _command(pid_file)}
+        )
+    )
+    assert outcome.status == ExecutionStatus.TIMEOUT
+    assert outcome.error_category == ErrorCategory.TIMEOUT
+    assert outcome.error == "Command timed out after 0.5 s"
     shell, child = await _pids(pid_file)
     assert await _gone(shell)
     assert await _gone(child)

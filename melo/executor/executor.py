@@ -145,14 +145,22 @@ class Executor:
         )
         timeout_s = timeout_ms / 1000
         start = time.perf_counter()
+        deadline = asyncio.timeout(timeout_s)
         try:
-            output = await asyncio.wait_for(fn(**request.arguments), timeout=timeout_s)
-        except TimeoutError:
+            async with deadline:
+                output = await fn(**request.arguments)
+        except TimeoutError as exc:
             duration = (time.perf_counter() - start) * 1000
+            if deadline.expired():
+                error = f"Execution timed out after {timeout_s:.1f}s"
+            else:
+                # A limit of the tool's own, such as shell_exec's command
+                # timeout: the tool's message names it.
+                error = str(exc) or f"{request.tool_name} timed out"
             return ExecutionOutcome(
                 tool_name=request.tool_name,
                 status=ExecutionStatus.TIMEOUT,
-                error=f"Execution timed out after {timeout_s:.1f}s",
+                error=error,
                 error_category=ErrorCategory.TIMEOUT,
                 duration_ms=duration,
             )

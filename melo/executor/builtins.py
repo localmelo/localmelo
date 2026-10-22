@@ -72,6 +72,11 @@ async def _shell_exec(command: str) -> str:
         stdout, stderr = await asyncio.wait_for(
             proc.communicate(), timeout=SHELL_TIMEOUT_S
         )
+    except TimeoutError:
+        await _kill_process_group(proc)
+        # The executor reports a tool's own TimeoutError by its message, so
+        # the error names this limit rather than the executor's timeout.
+        raise TimeoutError(f"Command timed out after {SHELL_TIMEOUT_S:g} s") from None
     except BaseException:
         await _kill_process_group(proc)
         raise
