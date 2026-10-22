@@ -90,7 +90,8 @@ LocalMelo deliberately separates "what happened" from "what to recall":
 - **History (`history.db`)** — append-only record of every task and step.
   This is the raw debug / replay / audit layer. The agent and memory
   subsystems do **not** read history during normal memory recall or write
-  placement.
+  placement. Images that tools return are recorded as references (MIME
+  type, SHA-256 digest, size in bytes), never as image data.
 - **Long-term (`long_term.db`)** — content extracted from agent runs and
   indexed for retrieval. This is the layer `Hippo.retrieve_context` reads
   at planning time, gated by the embedding provider.

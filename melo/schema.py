@@ -45,8 +45,10 @@ class ImagePart:
     ``data`` is the base64 payload without a ``data:`` prefix. ``sha256``
     and ``size_bytes`` describe the decoded bytes and are computed once,
     on construction. A reference copy (:meth:`as_reference`) drops
-    ``data`` and is what history and long-term memory keep. Invalid
-    base64 yields ``size_bytes == 0``, which the checker rejects.
+    ``data``. The agent keeps only reference copies of tool-result images
+    in history and working memory, so no payload outlives the step that
+    produced it; long-term memory gets text only. Invalid base64 yields
+    ``size_bytes == 0``, which the checker rejects.
     """
 
     mime_type: str

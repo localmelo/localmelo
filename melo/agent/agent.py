@@ -136,6 +136,17 @@ def _elide_arguments(call: ToolCall) -> ToolCall:
     )
 
 
+def _image_references(result: ToolResult) -> ToolResult:
+    """Copy of *result* whose images keep no base64 payload.
+
+    History and working memory get this copy, so no payload outlives the
+    step that produced it (see :meth:`ImagePart.as_reference`).
+    """
+    return dataclasses.replace(
+        result, images=[image.as_reference() for image in result.images]
+    )
+
+
 def _tool_result_text(result: ToolResult) -> str:
     """Content of the ``role="tool"`` message that answers a call.
 
@@ -428,9 +439,14 @@ class Agent:
           call paired by ``tool_call_id``, appended as one unit. Checked
           writes may shorten it but never leave a call or result out (see
           :meth:`_checked_tool_turn`).
+
+        History and working memory get the same copies of *results*, whose
+        images are references without the base64 payload (see
+        :func:`_image_references`), so no payload outlives the step.
         """
         calls = response.tool_calls
-        for index, (call, result) in enumerate(zip(calls, results, strict=True)):
+        kept = [_image_references(result) for result in results]
+        for index, (call, result) in enumerate(zip(calls, kept, strict=True)):
             step = StepRecord(
                 thought=response.content if index == 0 else "",
                 tool_call=call,
@@ -451,7 +467,7 @@ class Agent:
                     summary, metadata={"step_id": step.step_id}, to_working=False
                 )
 
-        assistant_msg, tool_msgs = self._checked_tool_turn(response, results)
+        assistant_msg, tool_msgs = self._checked_tool_turn(response, kept)
         self.hippo.working.append_turn(assistant_msg, tool_msgs)
 
     def _memory_write_allowed(self, text: str, role: str) -> bool:
@@ -495,7 +511,9 @@ class Agent:
         rejected tool result is replaced by a short notice bound to the
         same ``tool_call_id``. No call or result is ever left out, so the
         turn stays protocol-valid and the model still sees every call it
-        made and what each returned.
+        made and what each returned. A result's images (references, see
+        :func:`_image_references`) are checked with its text, and its
+        message carries them in ``images`` only if that check passes.
 
         The whole turn also shares one budget of ``MAX_MEMORY_TEXT_LEN``
         characters, half the 100,000 at which ``Checker.pre_plan`` fails
@@ -516,7 +534,7 @@ class Agent:
         for index, result in enumerate(results):
             text = _tool_result_text(result)
             check = self.checker.check_memory_write(
-                MemoryWritePayload(text=text, role="tool")
+                MemoryWritePayload(text=text, role="tool", images=list(result.images))
             )
             if not check.allowed:
                 text = _withheld_notice(text, check.reason)
@@ -536,8 +554,16 @@ class Agent:
         )
 
         tool_msgs = [
-            Message(role="tool", content=text, tool_call_id=call.id, tool_result=result)
-            for call, result, text in zip(calls, results, texts, strict=True)
+            Message(
+                role="tool",
+                content=text,
+                tool_call_id=call.id,
+                tool_result=result,
+                images=[] if index in withheld else result.images,
+            )
+            for index, (call, result, text) in enumerate(
+                zip(calls, results, texts, strict=True)
+            )
         ]
         return assistant_msg, tool_msgs
 

@@ -3,12 +3,19 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 
 from localmelo.melo.memory._sqlite import apply_pragmas
 from localmelo.melo.memory.history import History
-from localmelo.melo.schema import StepRecord, TaskRecord, ToolCall, ToolResult
+from localmelo.melo.schema import (
+    ImagePart,
+    StepRecord,
+    TaskRecord,
+    ToolCall,
+    ToolResult,
+)
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -38,6 +45,10 @@ class SqliteHistory(History):
     All write paths run under ``_write_lock`` so the
     ``SELECT MAX(seq) → INSERT`` sequence in :meth:`add_step` is atomic
     across concurrent callers on the same event loop.
+
+    Tool-result images are stored as references (MIME type, SHA-256
+    digest, size), never their base64 payload, and load back as
+    reference :class:`ImagePart` objects.
     """
 
     def __init__(self, db_path: str | Path) -> None:
@@ -99,14 +110,23 @@ class SqliteHistory(History):
 
         tr_json = None
         if step.tool_result:
-            tr_json = json.dumps(
-                {
-                    "tool_name": step.tool_result.tool_name,
-                    "output": step.tool_result.output,
-                    "error": step.tool_result.error,
-                    "duration_ms": step.tool_result.duration_ms,
-                }
-            )
+            tr_fields: dict[str, Any] = {
+                "tool_name": step.tool_result.tool_name,
+                "output": step.tool_result.output,
+                "error": step.tool_result.error,
+                "duration_ms": step.tool_result.duration_ms,
+            }
+            if step.tool_result.images:
+                # References only: the base64 payload is never stored.
+                tr_fields["images"] = [
+                    {
+                        "mime_type": image.mime_type,
+                        "sha256": image.sha256,
+                        "size_bytes": image.size_bytes,
+                    }
+                    for image in step.tool_result.images
+                ]
+            tr_json = json.dumps(tr_fields)
 
         async with self._write_lock:
             await conn.execute("BEGIN IMMEDIATE")
@@ -162,11 +182,21 @@ class SqliteHistory(History):
             tr = None
             if row[3]:
                 d = json.loads(row[3])
+                # Rows written before image references were stored have
+                # no "images".
                 tr = ToolResult(
                     tool_name=d["tool_name"],
                     output=d.get("output", ""),
                     error=d.get("error", ""),
                     duration_ms=d.get("duration_ms", 0.0),
+                    images=[
+                        ImagePart(
+                            mime_type=image["mime_type"],
+                            sha256=image["sha256"],
+                            size_bytes=image["size_bytes"],
+                        )
+                        for image in d.get("images", [])
+                    ],
                 )
 
             steps.append(

@@ -6,6 +6,7 @@ import dataclasses
 import json
 from collections import deque
 from collections.abc import Callable, Coroutine
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -16,6 +17,7 @@ from localmelo.melo.agent._chat import REFLECTION_PROMPT
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.executor import ToolOutput
+from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.short import WorkingMemory, group_turns, tail_turns
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, ToolResult
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
@@ -667,6 +669,77 @@ class TestToolResultImages:
         assert result.content.startswith("[Tool result withheld")
         size = len(output) + 1 + len(MARKER)
         assert f"Memory write too large: {size} chars" in result.content
+
+    @pytest.mark.asyncio
+    async def test_history_and_working_memory_keep_references(self) -> None:
+        calls = [
+            ToolCall(tool_name="shot", id="call_text"),
+            ToolCall(tool_name="shot_only", id="call_only"),
+        ]
+        llm = FakeLLM(
+            [
+                Message(role="assistant", tool_calls=calls),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _image_agent(llm)
+        assert await agent.run("take screenshots") == "done"
+        # The same digest, type and size as SHOT, without the base64 data.
+        ref = SHOT.as_reference()
+
+        task = next(iter(agent.hippo.history._tasks.values()))
+        steps = await agent.hippo.history.get_steps(task.task_id)
+        assert [s.tool_result.images for s in steps if s.tool_result] == [[ref]] * 2
+
+        # The working-memory turn, as the next planning call received it.
+        second = _planning_calls(llm)[1]["messages"]
+        results = [m for m in second if m.role == "tool"]
+        assert [m.images for m in results] == [[ref]] * 2
+        assert [m.tool_result.images for m in results if m.tool_result] == [[ref]] * 2
+
+    @pytest.mark.asyncio
+    async def test_sqlite_history_keeps_references(self, tmp_path: Path) -> None:
+        llm = FakeLLM(
+            [
+                Message(role="assistant", tool_call=ToolCall("shot", id="call_s")),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _image_agent(llm)
+        history = SqliteHistory(tmp_path / "history.db")
+        agent.hippo.history = history
+        assert await agent.run("take a screenshot") == "done"
+
+        conn = await history._ensure_ready()
+        async with conn.execute("SELECT task_id FROM tasks") as cur:
+            [(task_id,)] = await cur.fetchall()
+        steps = await history.get_steps(task_id)
+        assert [s.tool_result.images for s in steps if s.tool_result] == [
+            [SHOT.as_reference()]
+        ]
+        await agent.close()
+
+    @pytest.mark.asyncio
+    async def test_memory_write_check_covers_the_images(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import localmelo.melo.checker.validators as validators
+
+        monkeypatch.setattr(validators, "MAX_IMAGES_PER_MEMORY_WRITE", 0)
+        llm = FakeLLM(
+            [
+                Message(role="assistant", tool_call=ToolCall("shot", id="call_s")),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _image_agent(llm)
+        await agent.run("take a screenshot")
+        window = agent.hippo.working.get_window()
+        [result] = [m for m in window if m.role == "tool"]
+        # A rejected write keeps neither the text nor the images.
+        assert result.content.startswith("[Tool result withheld")
+        assert "Too many images in one memory write: 1 (max 0)" in result.content
+        assert result.images == []
 
     @pytest.mark.asyncio
     async def test_openai_request_names_images_but_carries_none(self) -> None:
