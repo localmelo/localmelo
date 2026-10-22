@@ -383,6 +383,24 @@ DEFAULT_MEMORY_DIR = "~/.cache/localmelo/memory"
 # own HTTP timeout.
 PROMOTION_TIMEOUT_S = 10.0
 
+# Seconds of an exit's time limit (see Agent.begin_exit) that closing the
+# tool providers leaves for saving the run's task record.
+EXIT_SAVE_RESERVE_S = 1.0
+
+
+@dataclasses.dataclass(frozen=True)
+class _Exit:
+    """An exit under way (see :meth:`Agent.begin_exit`)."""
+
+    reason: str
+    # Event-loop time by which closing and saving must be done.
+    deadline: float
+
+    def time_left(self, *, keep: float = 0.0) -> float:
+        """Seconds until *keep* seconds before the deadline, at least 0."""
+        now = asyncio.get_running_loop().time()
+        return max(self.deadline - keep - now, 0.0)
+
 
 def _resolve_memory_dir(options: AgentOptions) -> str | None:
     """Directory for SQLite-backed memory, or ``None`` for in-memory backends.
@@ -494,8 +512,14 @@ class Agent:
         self._tools_lock = asyncio.Lock()
         self._tools_ready = False
         self._tools_failure: str | None = None
-        # close() has begun: no tool provider is started from then on.
+        # close() or begin_exit() has begun: no tool provider is started
+        # from then on.
         self._closing = False
+        # begin_exit() has been called: the process exits soon.
+        self._exit: _Exit | None = None
+        # Provider close() calls an exit stopped waiting for; kept so they
+        # can finish in the background.
+        self._abandoned_closes: set[asyncio.Task[None]] = set()
 
         # Optional persistent memory backends: options.memory_dir, or the
         # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History is
@@ -610,6 +634,12 @@ class Agent:
         cancellation is raised once they all are. Otherwise a run's
         ``timeout_s`` expiring here could leave a provider half shut down
         and the rest not closed at all, with their processes running.
+
+        Once :meth:`begin_exit` has been called, the waiting ends when only
+        :data:`EXIT_SAVE_RESERVE_S` of the exit's time is left: from then
+        on a provider that has not closed is killed instead
+        (:meth:`BaseToolProvider.kill`), and its close() is left to finish
+        in the background.
         """
         cancelled: asyncio.CancelledError | None = None
         for provider in providers:
@@ -617,11 +647,33 @@ class Agent:
             while not closing.done():
                 try:
                     # wait() neither cancels the task nor raises its outcome.
-                    await asyncio.wait([closing])
+                    await asyncio.wait([closing], timeout=self._close_time_left())
                 except asyncio.CancelledError as exc:
                     cancelled = exc
+                    continue  # begin_exit() may have set a deadline meanwhile
+                if not closing.done():  # only with an exit: out of time
+                    self._kill_provider(provider)
+                    self._abandoned_closes.add(closing)
+                    closing.add_done_callback(self._abandoned_closes.discard)
+                    break
         if cancelled is not None:
             raise cancelled
+
+    def _close_time_left(self) -> float | None:
+        """Seconds closing may still wait for a provider; ``None``: no limit."""
+        if self._exit is None:
+            return None
+        return self._exit.time_left(keep=EXIT_SAVE_RESERVE_S)
+
+    def _kill_provider(self, provider: BaseToolProvider) -> None:
+        name = type(provider).__name__
+        logger.warning("Tool provider %s did not close in time; killing it", name)
+        try:
+            provider.kill()
+        except Exception as exc:
+            logger.warning(
+                "Could not kill tool provider %s: %s", name, _exception_text(exc)
+            )
 
     async def _close_provider(self, provider: BaseToolProvider) -> None:
         try:
@@ -1283,7 +1335,9 @@ class Agent:
         - ``crashed``: an unexpected exception ended the run. It is
           logged and reported as the error, not raised. A cancellation
           from outside the run, or any other exception that is not an
-          ``Exception``, still propagates once the task is saved.
+          ``Exception``, still propagates once the task is saved. A
+          cancellation after :meth:`begin_exit` has the exit's reason as
+          its error, and ends the run as that method describes.
 
         Whatever happens, the task record is saved with the status and
         ``result or error``, and the reflections are cleared (promoted
@@ -1338,14 +1392,21 @@ class Agent:
                 logger.exception("Task %s crashed", task.task_id)
                 run.end("crashed", error=_exception_text(exc))
         except BaseException as exc:
-            run.end("crashed", error=_exception_text(exc))
+            if isinstance(exc, asyncio.CancelledError) and self._exit is not None:
+                error = self._exit.reason  # cancelled for an exit
+            else:
+                error = _exception_text(exc)
+            run.end("crashed", error=error)
             raise
         finally:
             if run.running:
                 # Every path above ends the run; this keeps the record
                 # terminal should a later change miss one.
                 run.end("crashed", error="The run ended without a status")
-            await self._finish_task(task, run)
+            if self._exit is not None:
+                await self._finish_task_for_exit(task, run, self._exit)
+            else:
+                await self._finish_task(task, run)
         return self._run_result(task, run, stats, time.perf_counter() - started)
 
     async def _finish_task(self, task: TaskRecord, run: _RunState) -> None:
@@ -1398,6 +1459,49 @@ class Agent:
                     )
         finally:
             self.hippo.working.clear_reflections()
+
+    async def _finish_task_for_exit(
+        self, task: TaskRecord, run: _RunState, exit_: _Exit
+    ) -> None:
+        """:meth:`_finish_task` for a run that ends because the process exits.
+
+        The tool providers are closed first, since their processes would
+        outlive this one, while a record that is not saved only costs a
+        row: closing them stops waiting with :data:`EXIT_SAVE_RESERVE_S`
+        left and kills a provider still closing then (see
+        :meth:`_close_providers`), so that a close() that hangs cannot
+        prevent the save. The save is bounded by the exit's deadline. The
+        reflections are cleared without being promoted: promotion calls
+        the embedding server and may take longer than the exit allows. A
+        failure is logged, not raised, and a cancellation during the
+        closing is raised once the task is saved.
+        """
+        task.status = run.status
+        task.result = run.result or run.error
+        cancelled: asyncio.CancelledError | None = None
+        try:
+            try:
+                await self._close_providers(self._tool_providers)
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+            bound = asyncio.timeout(exit_.time_left())
+            try:
+                async with bound:
+                    await self.hippo.save_task(task)
+            except Exception as exc:
+                if isinstance(exc, TimeoutError) and bound.expired():
+                    reason = "no time left before the exit"
+                else:
+                    reason = _exception_text(exc)
+                logger.warning(
+                    "Could not save the final state of task %s: %s",
+                    task.task_id,
+                    reason,
+                )
+        finally:
+            self.hippo.working.clear_reflections()
+        if cancelled is not None:
+            raise cancelled
 
     def _run_result(
         self, task: TaskRecord, run: _RunState, stats: RequestStats, duration_s: float
@@ -1524,6 +1628,27 @@ class Agent:
         else:
             run.end("budget_exhausted", error="Max steps reached")
 
+    def begin_exit(self, reason: str, *, within_s: float) -> None:
+        """Prepare for the process to exit within *within_s* seconds.
+
+        For a signal such as SIGTERM: call this from the event loop, then
+        cancel the task that runs :meth:`run_task`, if one does, and await
+        :meth:`close`. A run that the cancellation ends is recorded as
+        ``crashed`` with *reason* as its error. Before it saves its task
+        record, it closes the tool providers, killing any that has not
+        closed when only :data:`EXIT_SAVE_RESERVE_S` of the time is left
+        (:meth:`BaseToolProvider.kill`); its reflections are cleared
+        without being promoted. close() keeps to the same limit when it
+        closes the providers again, and no provider starts any more.
+
+        The first call sets the deadline; later calls change nothing.
+        """
+        if self._exit is not None:
+            return
+        deadline = asyncio.get_running_loop().time() + within_s
+        self._exit = _Exit(reason=reason, deadline=deadline)
+        self._closing = True
+
     async def close(self) -> None:
         """Close the tool providers, the memory backends and the model providers.
 
@@ -1537,15 +1662,36 @@ class Agent:
         effect only once every tool provider is closed. Calling close()
         again closes the providers again, which their contract makes
         harmless.
+
+        After :meth:`begin_exit`, close() waits for the providers and for
+        a setup under way only until the exit's deadline (providers are
+        killed :data:`EXIT_SAVE_RESERVE_S` before it, see
+        :meth:`_close_providers`).
         """
         try:
             self._closing = True
             await self._close_providers(self._tool_providers)
             # Wait for a setup still running in a run (see above).
-            async with self._tools_lock:
-                pass
+            await self._wait_for_setup()
         finally:
             await self.hippo.aclose()
             await self._llm.close()
             if self._embedding:
                 await self._embedding.close()
+
+    async def _wait_for_setup(self) -> None:
+        """Wait until no run is setting up the tool providers.
+
+        After :meth:`begin_exit`, only until the exit's deadline.
+        """
+        if self._exit is None:
+            async with self._tools_lock:
+                return
+        bound = asyncio.timeout(self._exit.time_left())
+        try:
+            async with bound, self._tools_lock:
+                return
+        except TimeoutError:
+            if not bound.expired():
+                raise
+            logger.warning("Tool setup still running at the exit; not waiting for it")

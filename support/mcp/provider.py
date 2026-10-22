@@ -163,6 +163,17 @@ class McpToolProvider(BaseToolProvider):
         self._closing = True
         await self._close_clients(self._clients)
 
+    def kill(self) -> None:
+        """Kill every server whose client has not finished closing.
+
+        See :meth:`StdioMcpClient.kill`: each server's process group gets
+        SIGKILL at once, and close() finishes the shutdown. A client that
+        close() dropped before it had a process is out of reach; its own
+        start() stops the process it gets.
+        """
+        for client in list(self._clients):
+            client.kill()
+
     def _check_open(self) -> None:
         if self._closing:
             raise McpError("Cannot start MCP servers: the tool provider is closed")

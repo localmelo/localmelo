@@ -307,6 +307,28 @@ class StdioMcpClient:
         self._fail_pending(McpError(f"MCP client for {self.name!r} is closed"))
         self._closed = True
 
+    def kill(self) -> None:
+        """Send SIGKILL to the server's process group now, without waiting.
+
+        For a shutdown that has no time left for close()'s grace periods,
+        such as when localmelo itself must exit. On Windows only the
+        process is killed. Like close(), kill() signals nothing before
+        there is a process or once the server has exited. It neither waits
+        for the server to exit nor stops the readers: a close() under way
+        sees the server exit and finishes the shutdown, and so does a later
+        close().
+        """
+        proc = self._proc
+        if proc is None or proc.returncode is not None:
+            return
+        if _signal_server(proc, kill=True):
+            logger.warning(
+                "Cannot kill MCP server %r: process %d could not be signalled "
+                "(permission denied)",
+                self.name,
+                proc.pid,
+            )
+
     async def _wait_exit(self, proc: asyncio.subprocess.Process) -> bool:
         try:
             await asyncio.wait_for(proc.wait(), self._shutdown_grace_s)

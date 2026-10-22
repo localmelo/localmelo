@@ -659,6 +659,75 @@ class TestShutdown:
         assert readers and all(task.done() for task in readers)
 
 
+class TestKill:
+    async def test_kill_stops_a_stubborn_server_at_once(self, log_path: Path) -> None:
+        # A grace period this long would make close() alone take 10 s.
+        mcp = StdioMcpClient(
+            fake_server_config(log_path, env={"FAKE_MCP_MODE": "stubborn"}),
+            shutdown_grace_s=5,
+        )
+        await mcp.start()
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        mcp.kill()
+        # close() finds the server gone and only finishes the shutdown.
+        await asyncio.wait_for(mcp.close(), 5)
+        assert loop.time() - started < 2.5
+        assert mcp.returncode == -signal.SIGKILL
+
+    async def test_kill_ends_a_close_that_is_waiting(self, log_path: Path) -> None:
+        mcp = StdioMcpClient(
+            fake_server_config(log_path, env={"FAKE_MCP_MODE": "stubborn"}),
+            shutdown_grace_s=5,
+        )
+        await mcp.start()
+        closing = asyncio.create_task(mcp.close())
+        await asyncio.sleep(0.1)  # close() waits for the server to exit
+        assert not closing.done()
+        mcp.kill()
+        await asyncio.wait_for(closing, 2.5)
+        assert mcp.returncode == -signal.SIGKILL
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+    async def test_kill_reaches_a_server_behind_a_wrapper(
+        self, log_path: Path, tmp_path: Path
+    ) -> None:
+        pid_file = tmp_path / "server.pid"
+        server = fake_server_config(
+            log_path,
+            env={"FAKE_MCP_MODE": "stubborn", "FAKE_MCP_PIDFILE": str(pid_file)},
+        )
+        # "; true" keeps sh from replacing itself with the server.
+        wrapped = dataclasses.replace(
+            server,
+            command="/bin/sh",
+            args=["-c", shlex.join([server.command, *server.args]) + "; true"],
+        )
+        mcp = StdioMcpClient(wrapped, shutdown_grace_s=5)
+        await mcp.start()
+        pid = int(pid_file.read_text())
+        gone = False
+        try:
+            mcp.kill()
+            gone = await process_gone(pid)
+        finally:
+            if not gone:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+            await asyncio.wait_for(mcp.close(), 5)
+        assert gone
+
+    async def test_kill_without_a_running_server_does_nothing(
+        self, log_path: Path
+    ) -> None:
+        mcp = StdioMcpClient(fake_server_config(log_path), shutdown_grace_s=0.5)
+        mcp.kill()  # no process yet
+        await mcp.start()
+        await mcp.close()
+        mcp.kill()  # the server has exited
+        assert mcp.returncode == 0
+
+
 class TestCloseDuringStart:
     async def test_close_during_the_spawn_stops_the_new_process(
         self, log_path: Path, spawn_gate: SpawnGate

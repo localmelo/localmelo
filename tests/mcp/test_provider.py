@@ -6,6 +6,7 @@ import asyncio
 import dataclasses
 import hashlib
 import logging
+import signal
 import sys
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -429,6 +430,41 @@ class TestClose:
         assert record.levelno == logging.WARNING
         assert "Cannot stop MCP server 'fake': process" in record.getMessage()
         assert [r for r in caplog.records if r.exc_info] == []
+
+
+class TestKill:
+    async def test_kill_stops_every_server_at_once(self, tmp_path: Path) -> None:
+        created: list[StdioMcpClient] = []
+
+        def make(server: McpServerConfig) -> StdioMcpClient:
+            # A grace period this long would make close() alone take 10 s.
+            created.append(StdioMcpClient(server, shutdown_grace_s=5))
+            return created[-1]
+
+        provider = McpToolProvider(
+            [
+                fake_server_config(
+                    tmp_path / f"{name}.log",
+                    name=name,
+                    env={"FAKE_MCP_MODE": "stubborn"},
+                )
+                for name in ("a", "b")
+            ],
+            client_factory=make,
+        )
+        await provider.start()
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        provider.kill()
+        await asyncio.wait_for(provider.close(), 5)
+        assert loop.time() - started < 2.5
+        assert [client.returncode for client in created] == [-signal.SIGKILL] * 2
+        assert provider.clients == []
+
+    def test_kill_before_start_does_nothing(self, log_path: Path) -> None:
+        provider = McpToolProvider([fake_server_config(log_path)])
+        provider.kill()
+        assert provider.clients == []
 
 
 class TestCloseDuringStart:
