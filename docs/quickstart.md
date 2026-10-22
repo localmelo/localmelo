@@ -241,7 +241,7 @@ with `--serve`, or without a query, they are a usage error.
 | `--memory on\|off` | `on` | `off`: no long-term recall, no long-term writes and no reflection promotion. |
 | `--memory-dir DIR` | none | Keep history (and long-term memory, when there is an embedding and memory is on) in SQLite files in `DIR`; see [Memory persistence](#memory-persistence). |
 | `--timeout SECONDS` | none | Wall-clock limit of the run (`timeout_s`); a run still going then ends as `timeout`. |
-| `--request-timeout SECONDS` | `request_timeout_s` of the config file, else `120` (`300` for the `ollama` backend) | HTTP timeout of each chat request, a finite number of seconds > 0. It overrides `request_timeout_s` for this run and does not change the config file; with `--base-url`, which does not read the config file, it goes to the OpenAI-compatible provider. A request that times out is retried twice, each time with the full timeout. It is not an `AgentOptions` field and not part of the run's `config`. See [Chat request timeout](#chat-request-timeout). |
+| `--request-timeout SECONDS` | `request_timeout_s` of the config file, else `120` (`300` for the `ollama` backend) | HTTP timeout of each chat request, a finite number of seconds > 0. It overrides `request_timeout_s` for this run, so a configured value that is not valid is not reported, and does not change the config file; with `--base-url`, which does not read the config file, it goes to the OpenAI-compatible provider. A request that times out is retried twice, each time with the full timeout. It is not an `AgentOptions` field and not part of the run's `config`. See [Chat request timeout](#chat-request-timeout). |
 | `--output-format text\|json` | `text` | How the outcome is reported; see [Output](#output). |
 | `--embedding-base-url URL` | none | An OpenAI-compatible embedding endpoint, for long-term memory. Requires `--base-url`: a query with `--base-url` has no embedding without it, and one without `--base-url` uses the backends of the config file, its embedding backend included. |
 | `--embedding-model NAME` | `default` | The embedding model to request. Requires `--embedding-base-url`. |
@@ -316,7 +316,7 @@ appears only for a run that ended as `crashed`.
 |---|---|
 | `0` | The run ended as `completed`. |
 | `2` | The run ended with any other status except `crashed` (`failed`, `gate_stopped`, `budget_exhausted`, `stuck`, `provider_error`, `setup_error`, `timeout`), or a usage error stopped melo before the run. |
-| `1` | The run ended as `crashed`; its traceback is on stderr. A query without `--base-url` also exits with 1 before the run when no backend is configured or the config file is not valid. |
+| `1` | The run ended as `crashed`; its traceback is on stderr. A query without `--base-url` also exits with 1 before the run when no backend is configured or the config file is not valid, apart from a `request_timeout_s` that `--request-timeout` replaces. |
 
 ### SIGTERM and SIGHUP
 
@@ -586,9 +586,12 @@ chat_model = "Qwen3-8B"
 
 - The value is a finite number of seconds greater than 0, such as `600`
   or `90.5`. Anything else (a string such as `"600"`, a boolean, 0, a
-  negative number, `inf` or `nan`) is reported as a configuration error
-  naming `request_timeout_s` when `melo --serve` or a direct query without
-  `--base-url` starts; the direct query then exits with code 1.
+  negative number, `inf` or `nan`) is reported as an error naming
+  `request_timeout_s`: as a configuration error when `melo --serve` or a
+  direct query without `--base-url` starts, and as a failed probe, before
+  any probe request is sent, in `melo --reconfigure`. Such a direct query
+  exits with code 1, unless `--request-timeout` replaces the value for
+  that run: the configured value is then not checked, and the query runs.
 - Without the key, every provider keeps its default. `melo --reconfigure`
   keeps the key, and the config file has the line only when it is set.
 - It applies to every chat request of the configured backend, for all
