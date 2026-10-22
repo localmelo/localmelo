@@ -17,7 +17,9 @@ RESERVED_BODY_KEYS = frozenset({"model", "messages", "tools", "tool_choice", "st
 # Key used to keep tool-call arguments that are not a JSON object. The
 # call is still executed through the normal executor path, which reports
 # the unexpected argument back to the model instead of the whole run
-# crashing on a parse error.
+# crashing on a parse error. When the call is replayed to the model, the
+# providers send the original text (OpenAI) or an empty object (Ollama)
+# in place of this form; see :func:`raw_tool_arguments`.
 RAW_ARGUMENTS_KEY = "_raw_arguments"
 
 
@@ -42,6 +44,20 @@ def parse_tool_arguments(raw: Any) -> dict[str, Any]:
             return value
         return {RAW_ARGUMENTS_KEY: raw}
     return {RAW_ARGUMENTS_KEY: raw}
+
+
+def raw_tool_arguments(arguments: Mapping[str, Any]) -> str | None:
+    """Return the unparsed ``function.arguments`` text of a stored call.
+
+    That is the text :func:`parse_tool_arguments` keeps when it is not a
+    JSON object. Returns ``None`` unless *arguments* is exactly
+    ``{RAW_ARGUMENTS_KEY: <str>}``.
+    """
+    if len(arguments) == 1:
+        raw = arguments.get(RAW_ARGUMENTS_KEY)
+        if isinstance(raw, str):
+            return raw
+    return None
 
 
 def parse_tool_calls(raw: Any) -> list[ToolCall]:

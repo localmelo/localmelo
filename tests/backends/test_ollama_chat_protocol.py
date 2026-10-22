@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 from localmelo.melo.schema import Message, ToolCall, ToolResult
+from localmelo.support.providers.llm._protocol import RAW_ARGUMENTS_KEY
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 
 
@@ -174,4 +175,66 @@ class TestOllamaResponseParsing:
             "tool_calls": [{"function": {"name": "echo", "arguments": {"text": "hi"}}}],
         }
         assert replayed[2] == {"role": "tool", "content": "hi", "tool_name": "echo"}
+        await llm.close()
+
+    @pytest.mark.asyncio
+    async def test_unparsed_arguments_come_back_as_empty_object(self) -> None:
+        """The native API needs object arguments, so unparsed text becomes {}."""
+        server = FakeOllama(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {"function": {"name": "python_exec", "arguments": "print(6 * 7)"}}
+                ],
+            },
+            {"role": "assistant", "content": "done"},
+        )
+        llm = server.llm()
+        history = [Message(role="user", content="run it")]
+        reply = await llm.chat(history)
+        assert reply.tool_calls[0].arguments == {RAW_ARGUMENTS_KEY: "print(6 * 7)"}
+        history.append(reply)
+        history.append(
+            Message(
+                role="tool",
+                content="Error: bad arguments",
+                tool_call_id=reply.tool_calls[0].id,
+            )
+        )
+        await llm.chat(history)
+
+        replayed = server.requests[1]["messages"]
+        assert replayed[1]["tool_calls"] == [
+            {"function": {"name": "python_exec", "arguments": {}}}
+        ]
+        # The internal key never reaches the model.
+        assert RAW_ARGUMENTS_KEY not in json.dumps(replayed)
+        await llm.close()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "args",
+        [
+            # A real object that happens to use the key is not the raw form.
+            {RAW_ARGUMENTS_KEY: "print(1)", "other": 1},
+            # Only text counts as the raw form.
+            {RAW_ARGUMENTS_KEY: [1, 2]},
+        ],
+    )
+    async def test_only_exact_raw_form_is_replaced(self, args: dict[str, Any]) -> None:
+        server = FakeOllama()
+        llm = server.llm()
+        await llm.chat(
+            [
+                Message(role="user", content="q"),
+                Message(
+                    role="assistant",
+                    tool_call=ToolCall(tool_name="echo", arguments=args, id="c1"),
+                ),
+                Message(role="tool", content="r", tool_call_id="c1"),
+            ]
+        )
+        sent = server.requests[0]["messages"][1]["tool_calls"][0]["function"]
+        assert sent["arguments"] == args
         await llm.close()

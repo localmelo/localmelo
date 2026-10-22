@@ -8,10 +8,11 @@ from typing import Any
 import httpx
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.schema import Message, ToolDef
+from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.providers.llm._protocol import (
     parse_tool_calls,
     prepare_extra_body,
+    raw_tool_arguments,
 )
 
 
@@ -64,15 +65,26 @@ def _inline_thinking_prefix(thinking: str) -> str:
     return f"<think>\n{thinking}\n</think>\n\n"
 
 
+def _tool_call_to_ollama(tc: ToolCall) -> dict[str, Any]:
+    """Serialize a ToolCall for an assistant turn of the native API.
+
+    The native API takes arguments as an object, so arguments that were
+    not a JSON object (see :func:`raw_tool_arguments`) are sent as ``{}``.
+    """
+    arguments = {} if raw_tool_arguments(tc.arguments) is not None else tc.arguments
+    return {"function": {"name": tc.tool_name, "arguments": arguments}}
+
+
 def _message_to_ollama(msg: Message, tool_names: dict[str, str]) -> dict[str, Any]:
     """Serialize a Message for Ollama's native ``/api/chat``.
 
     Assistant turns are sent back the way Ollama returned them: thinking
     in its own field (the inline ``<think>`` copy this provider adds to
-    ``content`` is removed again) and tool calls with object arguments.
-    Tool results carry ``tool_name``, which is how the native API ties a
-    result to its call. *tool_names* maps tool call ids seen earlier in
-    the conversation to their tool names.
+    ``content`` is removed again) and tool calls with object arguments
+    (see :func:`_tool_call_to_ollama`). Tool results carry ``tool_name``,
+    which is how the native API ties a result to its call. *tool_names*
+    maps tool call ids seen earlier in the conversation to their tool
+    names.
     """
     if msg.role == "assistant":
         content = msg.content
@@ -84,10 +96,7 @@ def _message_to_ollama(msg: Message, tool_names: dict[str, str]) -> dict[str, An
         if msg.thinking:
             out["thinking"] = msg.thinking
         if msg.tool_calls:
-            out["tool_calls"] = [
-                {"function": {"name": tc.tool_name, "arguments": tc.arguments}}
-                for tc in msg.tool_calls
-            ]
+            out["tool_calls"] = [_tool_call_to_ollama(tc) for tc in msg.tool_calls]
         return out
     if msg.role == "tool":
         out = {"role": "tool", "content": msg.content}

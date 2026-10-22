@@ -189,6 +189,35 @@ class TestRequestSerialization:
         await llm.close()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "args",
+        [
+            # A real object that happens to use the key is not the raw form.
+            {RAW_ARGUMENTS_KEY: "print(1)", "other": 1},
+            # Only text is replayed verbatim.
+            {RAW_ARGUMENTS_KEY: [1, 2]},
+        ],
+    )
+    async def test_only_exact_raw_form_is_unwrapped(self, args: dict[str, Any]) -> None:
+        server = FakeServer()
+        llm = server.llm()
+        await llm.chat(
+            [
+                Message(role="user", content="q"),
+                Message(
+                    role="assistant",
+                    tool_call=ToolCall(tool_name="echo", arguments=args, id="c1"),
+                ),
+                Message(role="tool", content="r", tool_call_id="c1"),
+            ]
+        )
+        encoded = server.requests[0]["messages"][1]["tool_calls"][0]["function"][
+            "arguments"
+        ]
+        assert json.loads(encoded) == args
+        await llm.close()
+
+    @pytest.mark.asyncio
     async def test_tools_and_tool_choice_only_with_tools(self) -> None:
         server = FakeServer()
         llm = server.llm()
@@ -413,4 +442,38 @@ class TestToolCallIdRoundTrip:
         }
         # Reasoning stays local: it is not part of the OpenAI request format.
         assert "reasoning_content" not in json.dumps(second)
+        await llm.close()
+
+    @pytest.mark.asyncio
+    async def test_unparsed_arguments_come_back_verbatim(self) -> None:
+        """Arguments that were not a JSON object are replayed as sent."""
+        server = FakeServer(
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    _tool_call_entry("call_1", "python_exec", "print(6 * 7)"),
+                    _tool_call_entry("call_2", "echo", "[1, 2]"),
+                ],
+            },
+            {"role": "assistant", "content": "done"},
+        )
+        llm = server.llm()
+        history = [Message(role="user", content="run it")]
+        reply = await llm.chat(history, tools=[ECHO])
+        assert reply.tool_calls[0].arguments == {RAW_ARGUMENTS_KEY: "print(6 * 7)"}
+        history.append(reply)
+        for tc in reply.tool_calls:
+            history.append(
+                Message(role="tool", content="Error: bad arguments", tool_call_id=tc.id)
+            )
+        await llm.chat(history, tools=[ECHO])
+
+        second = server.requests[1]["messages"]
+        assert second[1]["tool_calls"] == [
+            _tool_call_entry("call_1", "python_exec", "print(6 * 7)"),
+            _tool_call_entry("call_2", "echo", "[1, 2]"),
+        ]
+        # The internal key never reaches the model.
+        assert RAW_ARGUMENTS_KEY not in json.dumps(second)
         await llm.close()
