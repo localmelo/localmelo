@@ -185,7 +185,9 @@ class TestOllamaResponseParsing:
                 "role": "assistant",
                 "content": "",
                 "tool_calls": [
-                    {"function": {"name": "python_exec", "arguments": "print(6 * 7)"}}
+                    {"function": {"name": "python_exec", "arguments": "print(6 * 7)"}},
+                    # Neither an object nor a string.
+                    {"function": {"name": "echo", "arguments": [1, 2]}},
                 ],
             },
             {"role": "assistant", "content": "done"},
@@ -193,20 +195,21 @@ class TestOllamaResponseParsing:
         llm = server.llm()
         history = [Message(role="user", content="run it")]
         reply = await llm.chat(history)
-        assert reply.tool_calls[0].arguments == {RAW_ARGUMENTS_KEY: "print(6 * 7)"}
+        assert [tc.arguments for tc in reply.tool_calls] == [
+            {RAW_ARGUMENTS_KEY: "print(6 * 7)"},
+            {RAW_ARGUMENTS_KEY: "[1, 2]"},
+        ]
         history.append(reply)
-        history.append(
-            Message(
-                role="tool",
-                content="Error: bad arguments",
-                tool_call_id=reply.tool_calls[0].id,
+        for tc in reply.tool_calls:
+            history.append(
+                Message(role="tool", content="Error: bad arguments", tool_call_id=tc.id)
             )
-        )
         await llm.chat(history)
 
         replayed = server.requests[1]["messages"]
         assert replayed[1]["tool_calls"] == [
-            {"function": {"name": "python_exec", "arguments": {}}}
+            {"function": {"name": "python_exec", "arguments": {}}},
+            {"function": {"name": "echo", "arguments": {}}},
         ]
         # The internal key never reaches the model.
         assert RAW_ARGUMENTS_KEY not in json.dumps(replayed)
@@ -218,7 +221,8 @@ class TestOllamaResponseParsing:
         [
             # A real object that happens to use the key is not the raw form.
             {RAW_ARGUMENTS_KEY: "print(1)", "other": 1},
-            # Only text counts as the raw form.
+            # The raw form always holds text, so this is an object the
+            # model sent.
             {RAW_ARGUMENTS_KEY: [1, 2]},
         ],
     )

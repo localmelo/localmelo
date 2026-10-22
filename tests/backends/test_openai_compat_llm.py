@@ -194,7 +194,8 @@ class TestRequestSerialization:
         [
             # A real object that happens to use the key is not the raw form.
             {RAW_ARGUMENTS_KEY: "print(1)", "other": 1},
-            # Only text counts as the raw form.
+            # The raw form always holds text, so this is an object the
+            # model sent.
             {RAW_ARGUMENTS_KEY: [1, 2]},
         ],
     )
@@ -309,6 +310,8 @@ class TestResponseParsing:
                     {"id": "c3", "function": {"name": "obj", "arguments": {"k": 1}}},
                     _tool_call_entry("c4", "bad", "{not json"),
                     _tool_call_entry("c5", "list", "[1, 2]"),
+                    {"id": "c6", "function": {"name": "array", "arguments": [1, 2]}},
+                    {"id": "c7", "function": {"name": "number", "arguments": 42}},
                 ],
             }
         )
@@ -321,6 +324,9 @@ class TestResponseParsing:
         # Not a JSON object: kept raw instead of crashing the run.
         assert args["bad"] == {RAW_ARGUMENTS_KEY: "{not json"}
         assert args["list"] == {RAW_ARGUMENTS_KEY: "[1, 2]"}
+        # A value sent in place of the string is kept as its JSON text.
+        assert args["array"] == {RAW_ARGUMENTS_KEY: "[1, 2]"}
+        assert args["number"] == {RAW_ARGUMENTS_KEY: "42"}
         await llm.close()
 
     @pytest.mark.asyncio
@@ -455,6 +461,8 @@ class TestToolCallIdRoundTrip:
                     _tool_call_entry("call_1", "python_exec", "print(6 * 7)"),
                     _tool_call_entry("call_2", "echo", "[1, 2]"),
                     _tool_call_entry("call_3", "echo", '"print(6 * 7)"'),
+                    # Not a string at all.
+                    {"id": "call_4", "function": {"name": "echo", "arguments": [1]}},
                 ],
             },
             {"role": "assistant", "content": "done"},
@@ -475,6 +483,7 @@ class TestToolCallIdRoundTrip:
             _tool_call_entry("call_1", "python_exec", "{}"),
             _tool_call_entry("call_2", "echo", "{}"),
             _tool_call_entry("call_3", "echo", "{}"),
+            _tool_call_entry("call_4", "echo", "{}"),
         ]
         # The internal key never reaches the model.
         assert RAW_ARGUMENTS_KEY not in json.dumps(second)
