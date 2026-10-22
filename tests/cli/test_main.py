@@ -292,7 +292,8 @@ class TestDirectMode:
             main()
 
         agent.run_task.assert_called_once_with("hello")
-        mock_print.assert_any_call("Hello back!")
+        # Printed to the stream that stdout keeps for the report.
+        assert ("Hello back!",) in [c.args for c in mock_print.call_args_list]
 
     def test_direct_mode_multi_word_query(self) -> None:
         """melo "do the thing" passes joined words to Agent.run_task()."""

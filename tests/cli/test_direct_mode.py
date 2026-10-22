@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import importlib.metadata
+import io
 import json
+import os
 import shutil
 import signal
 import subprocess
@@ -331,17 +333,40 @@ class TestUsageErrors:
             ("{not json", "is not valid JSON"),
             ('{"mcpServers": []}', "expected an object under 'mcpServers'"),
             (None, "Cannot read MCP config"),
+            # Not UTF-8: a byte that starts no character, and UTF-16.
+            (b'{"mcpServers": {"x": {"command": "\xff"}}}', "Cannot read MCP config"),
+            ('{"mcpServers": {}}'.encode("utf-16"), "Cannot read MCP config"),
+            # Nested deeper than the JSON decoder can follow.
+            ("[" * 100_000, "Cannot parse MCP config"),
+            # An integer too long for Python to convert.
+            (
+                '{"mcpServers": {"x": {"command": "c", "timeout": '
+                + "9" * 5_000
+                + "}}}",
+                "Cannot parse MCP config",
+            ),
+        ],
+        ids=[
+            "not-json",
+            "not-a-config",
+            "missing",
+            "not-utf-8",
+            "utf-16",
+            "too-deep",
+            "huge-integer",
         ],
     )
     def test_a_bad_mcp_config_is_reported_before_the_run(
         self,
         tmp_path: Path,
-        content: str | None,
+        content: str | bytes | None,
         message: str,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
         path = tmp_path / "mcp.json"
-        if content is not None:
+        if isinstance(content, bytes):
+            path.write_bytes(content)
+        elif content is not None:
             path.write_text(content, encoding="utf-8")
         ran = _main("--mcp-config", str(path), "q")
         assert ran.code == 2
@@ -349,8 +374,62 @@ class TestUsageErrors:
         out, err = capsys.readouterr()
         assert out == ""
         assert err.startswith("melo: error: ")
+        assert err.count("\n") == 1
         assert message in err
         assert str(path) in err
+
+    @pytest.mark.parametrize(
+        ("below_a_file", "reason"),
+        [(False, "not a directory"), (True, "Not a directory")],
+        ids=["a-file", "below-a-file"],
+    )
+    def test_a_memory_dir_that_cannot_be_made_is_reported_before_the_run(
+        self,
+        tmp_path: Path,
+        below_a_file: bool,
+        reason: str,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        a_file = tmp_path / "file"
+        a_file.write_text("", encoding="utf-8")
+        memory_dir = a_file / "memory" if below_a_file else a_file
+        self._assert_memory_dir_refused(memory_dir, reason, capsys)
+
+    @pytest.mark.skipif(
+        sys.platform == "win32" or os.geteuid() == 0,
+        reason="POSIX permissions, which root bypasses",
+    )
+    def test_a_memory_dir_without_permission_is_reported_before_the_run(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        locked = tmp_path / "locked"
+        locked.mkdir(mode=0o555)
+        try:
+            self._assert_memory_dir_refused(
+                locked / "memory", "Permission denied", capsys
+            )
+        finally:
+            locked.chmod(0o755)
+
+    def _assert_memory_dir_refused(
+        self, memory_dir: Path, reason: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """main() refuses --memory-dir *memory_dir* for *reason* (exit code 2)."""
+        argv = ["--base-url", "http://127.0.0.1:9/v1", "--memory-dir", str(memory_dir)]
+        with (
+            mock.patch.object(cli, "_register_backends"),
+            mock.patch.object(cli, "Agent") as agent_cls,
+            mock.patch("sys.argv", ["melo", *argv, "q"]),
+            pytest.raises(SystemExit) as exited,
+        ):
+            cli.main()
+        assert exited.value.code == 2
+        agent_cls.assert_not_called()
+        assert capsys.readouterr() == (
+            "",
+            f"melo: error: argument --memory-dir: cannot use {memory_dir}: "
+            f"{reason}\n",
+        )
 
 
 # ── Exit codes ──────────────────────────────────────────────────────────────
@@ -468,6 +547,37 @@ class TestJsonOutput:
         ran = _main("--output-format", "json", "q", outcome=_outcome(status))
         assert ran.code == code
         assert self._record(capsys.readouterr().out)["status"] == status
+
+
+# ── Stdout is for the report ────────────────────────────────────────────────
+
+
+class TestStdoutForTheReport:
+    def test_what_reaches_fd_1_meanwhile_goes_to_stderr(
+        self, capfd: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # sys.stdout as melo has it when it runs as a program: on fd 1.
+        stdout = io.TextIOWrapper(io.FileIO(1, "w", closefd=False), encoding="utf-8")
+        monkeypatch.setattr(sys, "stdout", stdout)
+        with cli._stdout_for_the_report() as out:
+            os.write(1, b"written to fd 1\n")
+            subprocess.run(["echo", "from a child process"], check=True)
+            stdout.write("written to sys.stdout\n")  # still buffered
+            print("the report", file=out, flush=True)
+        os.write(1, b"after the run\n")
+        out_text, err_text = capfd.readouterr()
+        assert out_text == "the report\nafter the run\n"
+        assert err_text == (
+            "written to fd 1\nfrom a child process\nwritten to sys.stdout\n"
+        )
+
+    def test_a_stdout_that_is_not_fd_1_is_used_as_it_is(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with cli._stdout_for_the_report() as out:
+            assert out is sys.stdout
+            print("the report", file=out)
+        assert capsys.readouterr() == ("the report\n", "")
 
 
 # ── localmelo_version ───────────────────────────────────────────────────────

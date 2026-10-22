@@ -10,9 +10,9 @@ import os
 import signal
 import subprocess
 import sys
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn
+from typing import TYPE_CHECKING, Any, NoReturn, TextIO
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.executor import builtin_names
@@ -100,6 +100,11 @@ def _one_line(text: str) -> str:
     return line
 
 
+def _exception_text(exc: BaseException) -> str:
+    """``"<type>: <message>"``, or the type alone when the message is empty."""
+    return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+
+
 def _status_line(outcome: RunResult) -> str:
     """``melo: run ended with status <status>: <error>``, as one line.
 
@@ -146,22 +151,74 @@ def _localmelo_version() -> str:
         return "unknown"
 
 
-def _report(outcome: RunResult, output_format: str, version: str = "") -> None:
+def _report(
+    outcome: RunResult,
+    output_format: str,
+    version: str = "",
+    out: TextIO | None = None,
+) -> None:
     """Print a finished run in *output_format*.
 
     ``json``: exactly one line on stdout, the ``RunResult.to_dict()``
     object (fields in dataclass order) plus ``localmelo_version``, which
     is *version*. ``text``: the result, if any, on stdout, and the status
-    line on stderr when the run did not complete.
+    line on stderr when the run did not complete. Stdout is *out*, by
+    default ``sys.stdout`` (see :func:`_stdout_for_the_report`); it is
+    flushed at once, so the report is out before the agent closes.
     """
+    out = out if out is not None else sys.stdout
     if output_format == "json":
         record = {**outcome.to_dict(), "localmelo_version": version}
-        print(json.dumps(record))
+        print(json.dumps(record), file=out, flush=True)
         return
     if outcome.result:
-        print(outcome.result)
+        print(outcome.result, file=out, flush=True)
     if outcome.status != "completed":
         print(_status_line(outcome), file=sys.stderr)
+
+
+@contextlib.contextmanager
+def _stdout_for_the_report() -> Iterator[TextIO]:
+    """Keep stdout for the report of a direct run, and yield its stream.
+
+    When ``sys.stdout`` writes to file descriptor 1, as it does when melo
+    runs as a program, fd 1 points at stderr until the block ends, and
+    the stream yielded writes to the original stdout. Output that a tool
+    writes to fd 1 itself, rather than through ``sys.stdout`` (a
+    subprocess that ``python_exec`` code starts without capturing its
+    output, ``os.write(1, ...)``, ``sys.__stdout__``), then goes to stderr
+    and cannot mix with the result or the JSON line. When ``sys.stdout``
+    is something else, such as a test's capture, nothing written to fd 1
+    can reach it: it is yielded as it is, and fd 1 is left alone.
+    """
+    stdout = sys.stdout
+    try:
+        fd = stdout.fileno()
+    except (AttributeError, OSError, ValueError):  # no file, or closed
+        fd = -1
+    if fd != 1:
+        yield stdout
+        return
+    stdout.flush()
+    saved = os.dup(1)
+    try:
+        os.dup2(2, 1)
+    except OSError:  # no stderr to send it to: leave stdout as it is
+        os.close(saved)
+        yield stdout
+        return
+    try:
+        with open(
+            saved, "w", encoding=stdout.encoding, errors=stdout.errors, closefd=False
+        ) as report:
+            yield report
+    finally:
+        # What the run wrote to sys.stdout itself goes where fd 1 pointed
+        # meanwhile: to stderr.
+        with contextlib.suppress(OSError, ValueError):
+            stdout.flush()
+        os.dup2(saved, 1)
+        os.close(saved)
 
 
 # ── Direct mode: signals ──
@@ -257,13 +314,15 @@ async def _run(
     output_format: str = "text",
     version: str = "",
     exit_signals: _ExitSignals | None = None,
+    out: TextIO | None = None,
 ) -> int:
     """Run *query*, or with no query the interactive loop; return the exit code.
 
-    One query is reported in *output_format* (see :func:`_report`), unless
-    one of *exit_signals* arrived during the run. The interactive loop
-    prints text: each turn's result on stdout and, for a turn that did not
-    complete, the status line on stderr, and goes on to the next turn.
+    One query is reported in *output_format* on *out* (see
+    :func:`_report`), unless one of *exit_signals* arrived during the
+    run. The interactive loop prints text: each turn's result on stdout
+    and, for a turn that did not complete, the status line on stderr,
+    and goes on to the next turn.
     *exit_signals* is installed for the whole run, closing the agent
     included.
     """
@@ -274,7 +333,7 @@ async def _run(
             outcome = await agent.run_task(query)
             if exit_signals is not None and exit_signals.received is not None:
                 return EXIT_CRASHED  # not used: the process exits by the signal
-            _report(outcome, output_format, version)
+            _report(outcome, output_format, version, out)
             return _exit_code(outcome.status)
         print("melo agent (type 'exit' to quit)")
         while True:
@@ -308,6 +367,9 @@ def _run_direct(
 ) -> int:
     """Run *query* in direct mode and return the exit code.
 
+    Stdout carries the report alone: what tools write to it during the
+    run goes to stderr (see :func:`_stdout_for_the_report`).
+
     A run ended by SIGTERM or SIGHUP does not return: the process exits by
     that signal (see :class:`_ExitSignals`), also when closing the agent
     then fails, which is reported in one line on stderr.
@@ -316,20 +378,22 @@ def _run_direct(
     version = _localmelo_version() if output_format == "json" else ""
     exit_signals = _ExitSignals(agent, tool_providers)
     try:
-        code = asyncio.run(
-            _run(
-                agent,
-                query,
-                output_format=output_format,
-                version=version,
-                exit_signals=exit_signals,
+        with _stdout_for_the_report() as out:
+            code = asyncio.run(
+                _run(
+                    agent,
+                    query,
+                    output_format=output_format,
+                    version=version,
+                    exit_signals=exit_signals,
+                    out=out,
+                )
             )
-        )
     except BaseException as exc:
         if exit_signals.received is None:
             raise
         if not isinstance(exc, asyncio.CancelledError):
-            text = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            text = _exception_text(exc)
             print(f"melo: error while stopping: {_one_line(text)}", file=sys.stderr)
         code = EXIT_CRASHED  # not used: the signal ends the process below
     if exit_signals.received is not None:
@@ -453,11 +517,22 @@ def _direct_tool_providers(
         return []
     from localmelo.support.mcp import McpConfigError, McpToolProvider, load_mcp_config
 
+    # load_mcp_config reports a file it cannot read, or one that is not
+    # valid JSON or not a valid config, as McpConfigError, but not text
+    # that is not UTF-8 (a UTF-16 file, say), an integer too long to
+    # convert, or JSON nested deeper than the decoder can follow.
+    path = args.mcp_config
     try:
-        servers = load_mcp_config(args.mcp_config)
+        servers = load_mcp_config(path)
     except McpConfigError as exc:
-        parser.exit(EXIT_NOT_COMPLETED, f"{parser.prog}: error: {exc}\n")
-    return [McpToolProvider(servers)]
+        problem = str(exc)
+    except UnicodeDecodeError as exc:
+        problem = f"Cannot read MCP config {path}: {exc}"
+    except (ValueError, RecursionError) as exc:
+        problem = f"Cannot parse MCP config {path}: {_exception_text(exc)}"
+    else:
+        return [McpToolProvider(servers)]
+    parser.exit(EXIT_NOT_COMPLETED, f"{parser.prog}: error: {problem}\n")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -620,6 +695,31 @@ def main() -> None:
     _start_gateway(cfg)
 
 
+def _make_memory_dir(memory_dir: str) -> None:
+    """Create --memory-dir, as the Agent would, or end melo with exit code 2.
+
+    The Agent creates the directory too (with ``~`` expanded the same
+    way), so this changes nothing for a path it can create. A path that
+    cannot be a directory, such as an existing file, a path through a
+    file, or a new directory where there is no permission to create one,
+    is a flag value that is not valid: it is reported in one line before
+    the run, as ``melo: error: ...``, rather than as the Agent's
+    traceback.
+    """
+    try:
+        os.makedirs(os.path.expanduser(memory_dir), exist_ok=True)
+    except OSError as exc:
+        if isinstance(exc, FileExistsError):
+            reason = "not a directory"
+        else:
+            reason = exc.strerror or _exception_text(exc)
+        print(
+            f"melo: error: argument --memory-dir: cannot use {memory_dir}: {reason}",
+            file=sys.stderr,
+        )
+        raise SystemExit(EXIT_NOT_COMPLETED) from None
+
+
 def _direct_embedding(args: argparse.Namespace) -> BaseEmbeddingProvider | None:
     """The embedding provider --embedding-base-url names, or None (no embedding)."""
     base_url = getattr(args, "embedding_base_url", None)
@@ -649,8 +749,12 @@ def _build_direct_mode_agent(
        config is validated first, as for gateway startup, so a bad value
        (e.g. an invalid extra_body) is reported instead of a traceback.
 
-    *options* and *tool_providers* go to the Agent in both cases.
+    *options* and *tool_providers* go to the Agent in both cases. The
+    memory directory that *options* name is created first (see
+    :func:`_make_memory_dir`).
     """
+    if options is not None and options.memory_dir is not None:
+        _make_memory_dir(options.memory_dir)
     base_url = args.base_url
 
     if base_url:

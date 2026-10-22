@@ -526,3 +526,39 @@ def test_sys_exit_in_python_exec_fails_only_the_call(
     assert _tool_messages(chat_server.bodies[1]) == [
         "Error: Code called sys.exit(0), which python_exec does not allow"
     ]
+
+
+# Code that writes to fd 1 past python_exec's own capture of sys.stdout.
+LEAKING_CODE = """\
+import os, subprocess, sys
+os.system("echo LEAK_FROM_OS_SYSTEM")
+subprocess.run(["echo", "LEAK_FROM_SUBPROCESS"])
+os.write(1, b"LEAK_FROM_OS_WRITE\\n")
+sys.__stdout__.write("LEAK_FROM_DUNDER_STDOUT\\n")
+print("printed")
+"""
+LEAKS = [
+    "LEAK_FROM_OS_SYSTEM",
+    "LEAK_FROM_SUBPROCESS",
+    "LEAK_FROM_OS_WRITE",
+    "LEAK_FROM_DUNDER_STDOUT",
+]
+
+
+@pytest.mark.parametrize("output_format", ["text", "json"])
+def test_what_tools_write_to_stdout_goes_to_stderr(
+    chat_server: FakeChatServer, tmp_path: Path, output_format: str
+) -> None:
+    """Stdout carries the result or the one JSON line, and nothing else."""
+    chat_server.replies.append(_tool_call("python_exec", {"code": LEAKING_CODE}))
+    done = _run_melo(chat_server, tmp_path, output_format)
+
+    assert done.returncode == 0, done.stderr
+    if output_format == "json":
+        assert _json_record(done.stdout)["status"] == "completed"
+    else:
+        assert done.stdout == "done\n"
+    for leak in LEAKS:
+        assert leak in done.stderr.splitlines(), done.stderr
+    # What the code printed is still the call's output.
+    assert _tool_messages(chat_server.bodies[1]) == ["printed"]
