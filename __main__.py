@@ -2,12 +2,65 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from typing import TYPE_CHECKING
+import contextlib
+import importlib.metadata
+import json
+import math
+import os
+import signal
+import subprocess
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, NoReturn
 
-from localmelo.melo.agent import Agent
+from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.executor import builtin_names
+from localmelo.melo.schema import RunResult
 
 if TYPE_CHECKING:
+    from localmelo.melo.contracts.providers import BaseEmbeddingProvider
+    from localmelo.melo.contracts.tools import BaseToolProvider
     from localmelo.support.config import Config
+
+# Exit codes of a direct-mode run: completed, crashed, and every other status.
+EXIT_COMPLETED = 0
+EXIT_CRASHED = 1
+EXIT_NOT_COMPLETED = 2
+
+# Seconds within which SIGTERM or SIGHUP ends a direct-mode run, clean-up
+# included. The benchmark harness sends SIGKILL to melo's process group 10 s
+# after its SIGTERM, and that SIGKILL does not reach shell commands or MCP
+# servers: they run in sessions of their own, so only melo can stop them.
+SIGNAL_CLEANUP_S = 8.0
+
+# Part of SIGNAL_CLEANUP_S left over from the agent's own clean-up (see
+# Agent.begin_exit), for the rest of close() and asyncio's shutdown.
+_SIGNAL_EXIT_MARGIN_S = 1.0
+
+# Signals that end a direct-mode run the way Ctrl+C does.
+EXIT_SIGNALS = tuple(
+    getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name)
+)
+
+# Characters of the error that the text-mode status line shows at most.
+STATUS_LINE_ERROR_CHARS = 500
+
+# Flags that apply to direct mode only (a query without --serve), by dest.
+_DIRECT_FLAGS = {
+    "max_steps": "--max-steps",
+    "attempt_policy": "--attempt-policy",
+    "tool_exposure": "--tool-exposure",
+    "builtins": "--builtins",
+    "mcp_config": "--mcp-config",
+    "mcp_only": "--mcp-only",
+    "memory": "--memory",
+    "memory_dir": "--memory-dir",
+    "timeout": "--timeout",
+    "output_format": "--output-format",
+    "embedding_base_url": "--embedding-base-url",
+    "embedding_model": "--embedding-model",
+}
 
 
 def _register_backends() -> None:
@@ -22,35 +75,461 @@ def _register_backends() -> None:
     ensure_defaults_registered()
 
 
-async def _run(agent: Agent, query: str | None) -> None:
+# ── Direct mode: output ──
+
+
+def _exit_code(status: str) -> int:
+    """0 for ``completed``, 1 for ``crashed``, 2 for any other status."""
+    if status == "completed":
+        return EXIT_COMPLETED
+    if status == "crashed":
+        return EXIT_CRASHED
+    return EXIT_NOT_COMPLETED
+
+
+def _one_line(text: str) -> str:
+    """*text* as one line of at most :data:`STATUS_LINE_ERROR_CHARS` characters.
+
+    Whitespace, newlines included (a proxy's HTML error page quoted in a
+    provider error has them), is collapsed to single spaces; a longer text
+    is cut and ends with ``...``.
+    """
+    line = " ".join(text.split())
+    if len(line) > STATUS_LINE_ERROR_CHARS:
+        line = line[: STATUS_LINE_ERROR_CHARS - 3] + "..."
+    return line
+
+
+def _status_line(outcome: RunResult) -> str:
+    """``melo: run ended with status <status>: <error>``, as one line.
+
+    The error goes through :func:`_one_line`.
+    """
+    reason = _one_line(outcome.error) or "no error message"
+    return f"melo: run ended with status {outcome.status}: {reason}"
+
+
+def _localmelo_version() -> str:
+    """``git describe --tags --always --dirty`` of the package's checkout.
+
+    Only when the package directory is the top of a git checkout; otherwise
+    (no git, not a checkout, or the package inside another repository) the
+    installed package's version, or ``unknown``.
+    """
+    package_dir = Path(__file__).resolve().parent
+    # Read-only: never take the index lock, which a concurrent git command
+    # in the same checkout may hold.
+    env = {**os.environ, "GIT_OPTIONAL_LOCKS": "0"}
+
+    def git(*args: str) -> str:
+        done = subprocess.run(
+            ["git", *args],
+            cwd=package_dir,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        )
+        return done.stdout.strip()
+
+    try:
+        if Path(git("rev-parse", "--show-toplevel")).resolve() == package_dir:
+            described = git("describe", "--tags", "--always", "--dirty")
+            if described:
+                return described
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        return importlib.metadata.version("localmelo")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def _report(outcome: RunResult, output_format: str, version: str = "") -> None:
+    """Print a finished run in *output_format*.
+
+    ``json``: exactly one line on stdout, the ``RunResult.to_dict()``
+    object (fields in dataclass order) plus ``localmelo_version``, which
+    is *version*. ``text``: the result, if any, on stdout, and the status
+    line on stderr when the run did not complete.
+    """
+    if output_format == "json":
+        record = {**outcome.to_dict(), "localmelo_version": version}
+        print(json.dumps(record))
+        return
+    if outcome.result:
+        print(outcome.result)
+    if outcome.status != "completed":
+        print(_status_line(outcome), file=sys.stderr)
+
+
+# ── Direct mode: signals ──
+
+
+def _exit_by_signal(signum: int) -> NoReturn:
+    """End the process by *signum*, as its default action would."""
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(OSError, ValueError):
+            stream.flush()
+    signal.signal(signum, signal.SIG_DFL)
+    signal.raise_signal(signum)
+    # Reached only if the signal is blocked: exit as a shell reports it.
+    os._exit(128 + signum)
+
+
+class _ExitSignals:
+    """Ends a direct-mode run on SIGTERM or SIGHUP the way Ctrl+C does.
+
+    The first of these signals cancels the main task, as Ctrl+C does, once
+    :meth:`Agent.begin_exit` has bounded the clean-up: a shell command is
+    killed with its process group as the cancellation lands, the tool
+    providers are closed (killed if they do not close in time), then the
+    task record is saved, and reflections are not promoted. main() then
+    re-raises the signal with its default handler, so the process exits by
+    it, and prints no result. Should the clean-up still be running after
+    :data:`SIGNAL_CLEANUP_S`, the tool providers are killed and the signal
+    re-raised there and then. Later signals change nothing.
+
+    A signal that melo was started with ignored (``nohup`` ignores SIGHUP)
+    stays ignored.
+    """
+
+    def __init__(
+        self, agent: Agent, tool_providers: Sequence[BaseToolProvider] = ()
+    ) -> None:
+        self._agent = agent
+        self._tool_providers = tuple(tool_providers)
+        self._previous: list[tuple[int, Any]] = []
+        # The signal that ended the run, if one did.
+        self.received: int | None = None
+
+    def install(self) -> None:
+        """Handle the signals in the running loop, for its current task."""
+        loop = asyncio.get_running_loop()
+        task = asyncio.current_task()
+        for signum in EXIT_SIGNALS:
+            previous = signal.getsignal(signum)
+            if previous == signal.SIG_IGN:
+                continue
+            try:
+                loop.add_signal_handler(signum, self._receive, signum, task)
+            except (NotImplementedError, RuntimeError):
+                continue  # not on this platform, or not the main thread
+            self._previous.append((signum, previous))
+
+    def uninstall(self) -> None:
+        """Give the signals back to the handlers they had before install()."""
+        loop = asyncio.get_running_loop()
+        for signum, previous in self._previous:
+            loop.remove_signal_handler(signum)
+            if previous is not None:
+                signal.signal(signum, previous)
+        self._previous.clear()
+
+    def _receive(self, signum: int, task: asyncio.Task[Any] | None) -> None:
+        if self.received is not None:
+            return  # the clean-up is under way already
+        self.received = signum
+        self._agent.begin_exit(
+            f"Cancelled by {signal.Signals(signum).name}",
+            within_s=SIGNAL_CLEANUP_S - _SIGNAL_EXIT_MARGIN_S,
+        )
+        asyncio.get_running_loop().call_later(SIGNAL_CLEANUP_S, self._overdue)
+        if task is not None:
+            task.cancel()
+
+    def _overdue(self) -> None:
+        for provider in self._tool_providers:
+            with contextlib.suppress(Exception):
+                provider.kill()
+        assert self.received is not None
+        _exit_by_signal(self.received)
+
+
+# ── Direct mode: run ──
+
+
+async def _run(
+    agent: Agent,
+    query: str | None,
+    *,
+    output_format: str = "text",
+    version: str = "",
+    exit_signals: _ExitSignals | None = None,
+) -> int:
+    """Run *query*, or with no query the interactive loop; return the exit code.
+
+    One query is reported in *output_format* (see :func:`_report`), unless
+    one of *exit_signals* arrived during the run. The interactive loop
+    prints text: each turn's result on stdout and, for a turn that did not
+    complete, the status line on stderr, and goes on to the next turn.
+    *exit_signals* is installed for the whole run, closing the agent
+    included.
+    """
+    if exit_signals is not None:
+        exit_signals.install()
     try:
         if query:
-            result = await agent.run(query)
-            print(result)
-        else:
-            print("melo agent (type 'exit' to quit)")
-            while True:
-                try:
-                    q = input("\n> ")
-                except (EOFError, KeyboardInterrupt):
-                    break
-                if q.strip().lower() in ("exit", "quit"):
-                    break
-                if not q.strip():
-                    continue
-                result = await agent.run(q)
-                print(f"\n{result}")
+            outcome = await agent.run_task(query)
+            if exit_signals is not None and exit_signals.received is not None:
+                return EXIT_CRASHED  # not used: the process exits by the signal
+            _report(outcome, output_format, version)
+            return _exit_code(outcome.status)
+        print("melo agent (type 'exit' to quit)")
+        while True:
+            try:
+                q = input("\n> ")
+            except (EOFError, KeyboardInterrupt):
+                break
+            if q.strip().lower() in ("exit", "quit"):
+                break
+            if not q.strip():
+                continue
+            outcome = await agent.run_task(q)
+            if outcome.result:
+                print(f"\n{outcome.result}")
+            if outcome.status != "completed":
+                print(_status_line(outcome), file=sys.stderr)
+        return EXIT_COMPLETED
     finally:
-        await agent.close()
+        try:
+            await agent.close()
+        finally:
+            if exit_signals is not None:
+                exit_signals.uninstall()
 
 
-def main() -> None:
-    _register_backends()
+def _run_direct(
+    agent: Agent,
+    query: str,
+    output_format: str,
+    tool_providers: Sequence[BaseToolProvider] = (),
+) -> int:
+    """Run *query* in direct mode and return the exit code.
 
+    A run ended by SIGTERM or SIGHUP does not return: the process exits by
+    that signal (see :class:`_ExitSignals`), also when closing the agent
+    then fails, which is reported in one line on stderr.
+    """
+    # Taken before the run, so the record names the code that was loaded.
+    version = _localmelo_version() if output_format == "json" else ""
+    exit_signals = _ExitSignals(agent, tool_providers)
+    try:
+        code = asyncio.run(
+            _run(
+                agent,
+                query,
+                output_format=output_format,
+                version=version,
+                exit_signals=exit_signals,
+            )
+        )
+    except BaseException as exc:
+        if exit_signals.received is None:
+            raise
+        if not isinstance(exc, asyncio.CancelledError):
+            text = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+            print(f"melo: error while stopping: {_one_line(text)}", file=sys.stderr)
+        code = EXIT_CRASHED  # not used: the signal ends the process below
+    if exit_signals.received is not None:
+        _exit_by_signal(exit_signals.received)
+    return code
+
+
+# ── Direct mode: flags ──
+
+
+def _positive_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {text!r}") from None
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
+def _seconds(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
+    if not math.isfinite(value) or value <= 0:
+        raise argparse.ArgumentTypeError(
+            f"must be a finite number of seconds > 0, got {text}"
+        )
+    return value
+
+
+def _non_empty(text: str) -> str:
+    if not text:
+        raise argparse.ArgumentTypeError("must not be empty")
+    return text
+
+
+def _parse_builtins(
+    parser: argparse.ArgumentParser, text: str
+) -> frozenset[str] | None:
+    """``all`` (None: every built-in), ``none`` or comma-separated names."""
+    if text == "all":
+        return None
+    if text == "none":
+        return frozenset()
+    names = [name.strip() for name in text.split(",")]
+    if not all(names):
+        parser.error(
+            "argument --builtins: expected all, none or built-in tool names "
+            f"separated by commas, got {text!r}"
+        )
+    known = builtin_names()
+    unknown = sorted(set(names) - known)
+    if unknown:
+        parser.error(
+            f"argument --builtins: unknown built-in tools {', '.join(unknown)}; "
+            f"known: {', '.join(sorted(known))}"
+        )
+    return frozenset(names)
+
+
+def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Reject flag combinations before anything runs (argparse exit code 2)."""
+    if args.mcp_only and args.mcp_config is None:
+        parser.error("--mcp-only requires --mcp-config")
+    if args.mcp_only:
+        for dest in ("builtins", "tool_exposure"):
+            if getattr(args, dest) is not None:
+                parser.error(f"--mcp-only sets {_DIRECT_FLAGS[dest]}; do not give both")
+    if args.embedding_model is not None and args.embedding_base_url is None:
+        parser.error("--embedding-model requires --embedding-base-url")
+    if args.embedding_base_url is not None and not args.base_url:
+        parser.error("--embedding-base-url requires --base-url")
+    direct = bool(args.query) and not args.serve
+    if not direct:
+        given = [
+            flag
+            for dest, flag in _DIRECT_FLAGS.items()
+            if getattr(args, dest) not in (None, False)
+        ]
+        if given:
+            parser.error(
+                "only for direct mode (a query without --serve): " + ", ".join(given)
+            )
+
+
+def _direct_options(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> AgentOptions:
+    """The AgentOptions the direct-mode flags ask for; defaults otherwise."""
+    fields: dict[str, Any] = {}
+    if args.max_steps is not None:
+        fields["max_steps"] = args.max_steps
+    if args.attempt_policy is not None:
+        fields["attempt_policy"] = args.attempt_policy
+    if args.tool_exposure is not None:
+        fields["tool_exposure"] = args.tool_exposure
+    if args.builtins is not None:
+        fields["builtins"] = _parse_builtins(parser, args.builtins)
+    if args.mcp_only:
+        fields["builtins"] = frozenset()
+        fields["tool_exposure"] = "all"
+    if args.memory is not None:
+        fields["memory"] = args.memory == "on"
+    if args.memory_dir is not None:
+        fields["memory_dir"] = args.memory_dir
+    if args.timeout is not None:
+        fields["timeout_s"] = args.timeout
+    try:
+        return AgentOptions(**fields)
+    except ValueError as exc:  # the flag types should have caught it
+        parser.error(str(exc))
+
+
+def _direct_tool_providers(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> list[BaseToolProvider]:
+    """One McpToolProvider for --mcp-config; a bad file ends melo (exit 2)."""
+    if args.mcp_config is None:
+        return []
+    from localmelo.support.mcp import McpConfigError, McpToolProvider, load_mcp_config
+
+    try:
+        servers = load_mcp_config(args.mcp_config)
+    except McpConfigError as exc:
+        parser.exit(EXIT_NOT_COMPLETED, f"{parser.prog}: error: {exc}\n")
+    return [McpToolProvider(servers)]
+
+
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="melo", description="localmelo agent")
     parser.add_argument("query", nargs="*", help="Task to execute (direct mode)")
     parser.add_argument("--base-url", default=None, help="LLM API base URL")
     parser.add_argument("--chat-model", default=None, help="Chat model name")
+
+    direct = parser.add_argument_group(
+        "direct mode", "Options for a query run without --serve."
+    )
+    direct.add_argument(
+        "--max-steps",
+        type=_positive_int,
+        metavar="N",
+        help="Cap on planning calls for the run (default 30)",
+    )
+    direct.add_argument(
+        "--attempt-policy",
+        choices=["reflect", "none"],
+        help="Reflect between attempts (default), or run one attempt",
+    )
+    direct.add_argument(
+        "--tool-exposure",
+        choices=["retrieve", "all"],
+        help="Offer the tools retrieved for each step (default), or all tools",
+    )
+    direct.add_argument(
+        "--builtins",
+        metavar="all|none|NAME,...",
+        help="Built-in tools to register (default all)",
+    )
+    direct.add_argument(
+        "--mcp-config",
+        metavar="PATH",
+        help="MCP servers to use, in the mcpServers JSON format",
+    )
+    direct.add_argument(
+        "--mcp-only",
+        action="store_true",
+        help="Only the MCP tools: --builtins none --tool-exposure all",
+    )
+    direct.add_argument(
+        "--memory", choices=["on", "off"], help="Long-term memory (default on)"
+    )
+    direct.add_argument(
+        "--memory-dir",
+        type=_non_empty,
+        metavar="DIR",
+        help="Directory for SQLite memory (history.db, long_term.db)",
+    )
+    direct.add_argument(
+        "--timeout",
+        type=_seconds,
+        metavar="SECONDS",
+        help="Wall-clock limit of the run (default none)",
+    )
+    direct.add_argument(
+        "--output-format",
+        choices=["text", "json"],
+        help="text (default), or one JSON line with the run's record",
+    )
+    direct.add_argument(
+        "--embedding-base-url",
+        metavar="URL",
+        help="OpenAI-compatible embedding endpoint (with --base-url)",
+    )
+    direct.add_argument(
+        "--embedding-model",
+        metavar="NAME",
+        help="Embedding model name (with --embedding-base-url)",
+    )
 
     # gateway mode
     parser.add_argument("--serve", action="store_true", help="Run as gateway server")
@@ -66,8 +545,15 @@ def main() -> None:
         choices=["install", "uninstall", "status"],
         help="Manage launchd daemon",
     )
+    return parser
 
+
+def main() -> None:
+    _register_backends()
+
+    parser = _build_parser()
     args = parser.parse_args()
+    _check_args(parser, args)
 
     # daemon commands
     if args.daemon:
@@ -90,11 +576,17 @@ def main() -> None:
                 print(f"  {k}: {v}")
         return
 
-    # direct mode (no gateway, original behavior)
+    # direct mode (no gateway): exit code 0 completed, 1 crashed, 2 otherwise
     if args.query and not args.serve:
         query = " ".join(args.query)
-        agent = _build_direct_mode_agent(args)
-        asyncio.run(_run(agent, query))
+        options = _direct_options(parser, args)
+        tool_providers = _direct_tool_providers(parser, args)
+        agent = _build_direct_mode_agent(
+            args, options=options, tool_providers=tool_providers
+        )
+        code = _run_direct(agent, query, args.output_format or "text", tool_providers)
+        if code != EXIT_COMPLETED:
+            raise SystemExit(code)
         return
 
     # gateway mode: load or create config
@@ -121,36 +613,60 @@ def main() -> None:
     try:
         cfg.validate_or_raise()
     except ConfigError as e:
-        print(f"\n  {e}\n", file=__import__("sys").stderr)
+        print(f"\n  {e}\n", file=sys.stderr)
         raise SystemExit(1) from e
 
     # start gateway
     _start_gateway(cfg)
 
 
-def _build_direct_mode_agent(args: argparse.Namespace) -> Agent:
+def _direct_embedding(args: argparse.Namespace) -> BaseEmbeddingProvider | None:
+    """The embedding provider --embedding-base-url names, or None (no embedding)."""
+    base_url = getattr(args, "embedding_base_url", None)
+    if not base_url:
+        return None
+    from localmelo.support.providers.embedding.openai_compat import (
+        OpenAICompatEmbedding,
+    )
+
+    model = getattr(args, "embedding_model", None) or "default"
+    return OpenAICompatEmbedding(base_url=base_url, model=model)
+
+
+def _build_direct_mode_agent(
+    args: argparse.Namespace,
+    *,
+    options: AgentOptions | None = None,
+    tool_providers: Sequence[BaseToolProvider] = (),
+) -> Agent:
     """Build an Agent for direct CLI mode from CLI flags.
 
     Two cases:
-    1. --base-url provided: generic OpenAI-compatible endpoint injection,
-       no embedding (preserves the exact URL as given).
+    1. --base-url provided: generic OpenAI-compatible endpoint injection
+       (preserves the exact URL as given). There is no embedding unless
+       --embedding-base-url names an OpenAI-compatible embedding endpoint.
     2. No --base-url: use configured backends from the config file. The
        config is validated first, as for gateway startup, so a bad value
        (e.g. an invalid extra_body) is reported instead of a traceback.
+
+    *options* and *tool_providers* go to the Agent in both cases.
     """
     base_url = args.base_url
 
     if base_url:
-        # Generic OpenAI-compatible endpoint — no embedding in direct mode
+        # Generic OpenAI-compatible endpoint
         from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
         model = args.chat_model or "default"
         llm = OpenAICompatLLM(base_url=base_url, model=model)
-        return Agent(llm=llm, embedding=None)
+        return Agent(
+            llm=llm,
+            embedding=_direct_embedding(args),
+            options=options,
+            tool_providers=tool_providers,
+        )
 
     # No --base-url: use configured backends from config file
-    import sys
-
     from localmelo.support import config
 
     cfg = config.load()
@@ -168,7 +684,7 @@ def _build_direct_mode_agent(args: argparse.Namespace) -> Agent:
         print(f"\n  {e}\n", file=sys.stderr)
         raise SystemExit(1) from e
 
-    return Agent(config=cfg)
+    return Agent(config=cfg, options=options, tool_providers=tool_providers)
 
 
 def _start_gateway(cfg: Config) -> None:
