@@ -26,6 +26,19 @@ MAX_ATTEMPTS = 5
 MAX_REFLECTIONS_IN_PROMPT = 1
 MAX_REFLECTION_CHARS = 2000
 
+# ── Empty replies ──
+
+# A planning reply with neither a tool call nor text is no answer. Working
+# memory records it as EMPTY_REPLY_LABEL, an assistant message, followed by
+# EMPTY_REPLY_NUDGE, a user message, and the agent plans again. The two
+# form one unit of the window (see melo.memory.short.group_turns), so the
+# nudge never follows another user message.
+EMPTY_REPLY_LABEL = "[empty reply]"
+EMPTY_REPLY_NUDGE = (
+    "Your last reply was empty. Continue the task: call a tool or give your "
+    "final answer."
+)
+
 
 # ── Data types ──
 

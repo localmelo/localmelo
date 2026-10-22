@@ -31,6 +31,8 @@ from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.schema import (
+    EMPTY_REPLY_LABEL,
+    EMPTY_REPLY_NUDGE,
     MAX_AGENT_STEPS,
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
@@ -322,14 +324,10 @@ def _within_turn_budget(
     return fitted
 
 
-# Working-memory message that answers a planning reply with neither a
-# tool call nor text: such a reply is no final answer.
-EMPTY_REPLY_NUDGE = (
-    "Your last reply was empty. Continue the task: call a tool or give your "
-    "final answer."
-)
-
 # Empty replies in a row that end the run as failed ("empty replies").
+# Until then, working memory records each one as EMPTY_REPLY_LABEL
+# followed by EMPTY_REPLY_NUDGE (see melo.schema), and the model plans
+# again (see Agent._run_attempt).
 MAX_EMPTY_REPLIES = 2
 
 CONTINUATION_UTILITY_THRESHOLD = 0.1
@@ -1230,8 +1228,14 @@ class Agent:
         ``failed`` with a checker's refusal as the error.
 
         A reply with neither a tool call nor text is no answer: its step
-        counts, :data:`EMPTY_REPLY_NUDGE` is appended to working memory
-        as a user message, and the model plans again. The
+        counts, working memory records it as :data:`EMPTY_REPLY_LABEL`,
+        an assistant message, followed by :data:`EMPTY_REPLY_NUDGE` as a
+        user message, and the model plans again. The label keeps the
+        roles alternating, since some chat templates (Mistral, Gemma)
+        reject two user messages in a row, such as the query and the
+        nudge. Neither message goes to history, and neither counts as a
+        reply of the model: the latest text, the empty-reply count and
+        stuck detection only see what the model returned. The
         :data:`MAX_EMPTY_REPLIES`-th empty reply in a row in this run
         (reflections in between do not break the row) ends it as
         ``failed`` with the error ``empty replies``.
@@ -1272,8 +1276,12 @@ class Agent:
                 if run.empty_replies >= MAX_EMPTY_REPLIES:
                     run.end("failed", error="empty replies")
                     return step + 1, ""
-                self.hippo.working.append(
-                    Message(role="user", content=EMPTY_REPLY_NUDGE)
+                # The label stands in for the reply, so the nudge does not
+                # follow another user message; as one unit, the two are
+                # only ever dropped together.
+                self.hippo.working.append_turn(
+                    Message(role="assistant", content=EMPTY_REPLY_LABEL),
+                    [Message(role="user", content=EMPTY_REPLY_NUDGE)],
                 )
                 continue
             run.empty_replies = 0

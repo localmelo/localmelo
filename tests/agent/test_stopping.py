@@ -3,6 +3,8 @@ and stuck detection — no real model."""
 
 from __future__ import annotations
 
+import dataclasses
+import itertools
 import json
 from collections import deque
 from typing import Any
@@ -11,10 +13,11 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import FINAL_REFLECTION_NOTE, REFLECTION_PROMPT
-from localmelo.melo.agent.agent import EMPTY_REPLY_NUDGE
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.memory.short import WorkingMemory
 from localmelo.melo.schema import (
+    EMPTY_REPLY_LABEL,
+    EMPTY_REPLY_NUDGE,
     MAX_REFLECTION_CHARS,
     ImagePart,
     Message,
@@ -408,12 +411,21 @@ def _empty(**fields: Any) -> Message:
     return Message(role="assistant", content="", **fields)
 
 
+def _assert_no_user_after_user(messages: list[Message]) -> None:
+    """No two user messages in a row: some chat templates reject them."""
+    roles = [m.role for m in messages]
+    assert ("user", "user") not in itertools.pairwise(roles), roles
+
+
 class TestEmptyReplies:
     def test_the_nudge_text(self) -> None:
         assert EMPTY_REPLY_NUDGE == (
             "Your last reply was empty. Continue the task: call a tool or give "
             "your final answer."
         )
+
+    def test_the_label_text(self) -> None:
+        assert EMPTY_REPLY_LABEL == "[empty reply]"
 
     @pytest.mark.asyncio
     async def test_an_empty_reply_is_answered_with_the_nudge(self) -> None:
@@ -423,11 +435,61 @@ class TestEmptyReplies:
         assert (result.status, result.result) == ("completed", "42")
         # The empty reply's step counts.
         assert (result.steps, result.n_llm) == (2, 2)
+        # The label stands in for the empty reply, so the query and the
+        # nudge are not two user messages in a row.
         second = llm.calls[1]["messages"]
         assert [(m.role, m.content) for m in second[1:]] == [
             ("user", "what is the answer"),
+            ("assistant", EMPTY_REPLY_LABEL),
             ("user", EMPTY_REPLY_NUDGE),
         ]
+
+    @pytest.mark.asyncio
+    async def test_the_request_after_a_tool_call_alternates(self) -> None:
+        llm = FakeLLM([_echo_call("a"), _empty(), _answer("42")])
+        agent = _agent(llm)
+        assert (await agent.run_task("echo the answer")).result == "42"
+        third = llm.calls[2]["messages"]
+        _assert_no_user_after_user(third)
+        assert [(m.role, m.content) for m in third[-2:]] == [
+            ("assistant", EMPTY_REPLY_LABEL),
+            ("user", EMPTY_REPLY_NUDGE),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_eviction_drops_the_label_with_its_nudge(self) -> None:
+        # The tool turn pushes the window past three messages: the query
+        # goes, and the label and nudge go together. A nudge left behind
+        # would follow the query that the next request puts back in front.
+        llm = FakeLLM([_empty(), _echo_call("a"), _answer("42")])
+        agent = _agent(llm)
+        agent.hippo.working = WorkingMemory(max_len=3)
+        assert (await agent.run_task("echo the answer")).result == "42"
+        third = llm.calls[2]["messages"]
+        _assert_no_user_after_user(third)
+        assert [m.role for m in third] == ["system", "user", "assistant", "tool"]
+
+    @pytest.mark.asyncio
+    async def test_history_records_neither_the_label_nor_the_nudge(self) -> None:
+        llm = FakeLLM([_empty(), _echo_call("a"), _answer("42")])
+        agent = _agent(llm)
+        result = await agent.run_task("echo the answer")
+        assert (result.status, result.result) == ("completed", "42")
+        task = await agent.hippo.get_task(result.task_id)
+        assert task is not None
+        assert [s.tool_call.tool_name for s in task.steps if s.tool_call] == ["echo"]
+        recorded = json.dumps(dataclasses.asdict(task), default=str)
+        assert EMPTY_REPLY_LABEL not in recorded
+        assert EMPTY_REPLY_NUDGE not in recorded
+
+    @pytest.mark.asyncio
+    async def test_the_label_is_not_the_latest_text(self) -> None:
+        # A done without an answer falls back to the latest text the model
+        # wrote, and the label is not the model's.
+        llm = FakeLLM([_empty(), _reflection("done")])
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
+        result = await agent.run_task("what is the answer")
+        assert (result.status, result.result, result.error) == ("completed", "", "")
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -476,17 +538,21 @@ class TestEmptyReplies:
         )
 
     @pytest.mark.asyncio
-    async def test_the_query_returns_when_only_the_nudge_is_left(self) -> None:
-        # Eviction drops the query, but the nudge after it is a user
-        # message too; the next planning call must still open with the task.
+    async def test_the_query_returns_when_only_the_empty_reply_is_left(self) -> None:
+        # Eviction drops the query and the tool turns. The nudge left is a
+        # user message too, but no stand-in for the query: the next planning
+        # call must still open with the task, and the label keeps the roles
+        # alternating.
         llm = FakeLLM([_echo_call("a"), _echo_call("b"), _empty(), _answer("42")])
         agent = _agent(llm)
         agent.hippo.working = WorkingMemory(max_len=3)
         assert (await agent.run_task("echo the answer")).result == "42"
         last = _planning_calls(llm)[-1]["messages"]
-        assert last[1].role == "user"
-        assert last[1].content == "echo the answer"
-        assert last[-1].content == EMPTY_REPLY_NUDGE
+        assert [(m.role, m.content) for m in last[1:]] == [
+            ("user", "echo the answer"),
+            ("assistant", EMPTY_REPLY_LABEL),
+            ("user", EMPTY_REPLY_NUDGE),
+        ]
 
 
 # ── Stuck detection compares results ────────────────────────────────────────

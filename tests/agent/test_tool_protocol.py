@@ -29,7 +29,15 @@ from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMPro
 from localmelo.melo.executor import ToolOutput
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.short import WorkingMemory, group_turns, tail_turns
-from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, ToolResult
+from localmelo.melo.schema import (
+    EMPTY_REPLY_LABEL,
+    EMPTY_REPLY_NUDGE,
+    ImagePart,
+    Message,
+    ToolCall,
+    ToolDef,
+    ToolResult,
+)
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
@@ -1123,6 +1131,44 @@ class TestWorkingMemoryTurns:
         assert tail_turns(msgs, 1) == [b, *b_results]  # newest turn is kept
         assert tail_turns(msgs, 100) == msgs
 
+    def test_an_empty_reply_label_owns_its_nudge(self) -> None:
+        query = Message(role="user", content="q")
+        label = Message(role="assistant", content=EMPTY_REPLY_LABEL)
+        nudge = Message(role="user", content=EMPTY_REPLY_NUDGE)
+        a, a_results = _turn(1, "a")
+        msgs = [query, label, nudge, a, *a_results]
+        assert group_turns(msgs) == [[query], [label, nudge], [a, *a_results]]
+        # Only that pair: either one next to another message stands alone.
+        answer = Message(role="assistant", content="x")
+        assert group_turns([label, query]) == [[label], [query]]
+        assert group_turns([answer, nudge]) == [[answer], [nudge]]
+        assert group_turns([label, nudge, nudge]) == [[label, nudge], [nudge]]
+        # Trimming keeps both or neither.
+        assert tail_turns(msgs, 3) == [a, *a_results]
+        assert tail_turns(msgs, 4) == [label, nudge, a, *a_results]
+
+    def test_eviction_and_dropping_keep_the_label_with_its_nudge(self) -> None:
+        label = Message(role="assistant", content=EMPTY_REPLY_LABEL)
+        nudge = Message(role="user", content=EMPTY_REPLY_NUDGE)
+        a, a_results = _turn(1, "a")
+        wm = WorkingMemory(max_len=3)
+        wm.append(Message(role="user", content="q"))
+        wm.append_turn(label, [nudge])  # 3
+        wm.append_turn(a, a_results)  # 5 > 3: drop "q", then label and nudge
+        assert wm.get_window() == [a, *a_results]
+
+        wm = WorkingMemory(max_len=20)
+        wm.append(Message(role="user", content="q"))
+        wm.append_turn(label, [nudge])
+        wm.append_turn(a, a_results)
+        assert wm.drop_oldest_units(2) == 3  # "q", then label and nudge
+        assert wm.get_window() == [a, *a_results]
+
+        # The newest unit stays whole, even past max_len.
+        wm = WorkingMemory(max_len=1)
+        wm.append_turn(label, [nudge])
+        assert wm.get_window() == [label, nudge]
+
 
 class TestAgentWindowTruncation:
     @pytest.mark.asyncio
@@ -1282,6 +1328,23 @@ class TestPromptCapRecovery:
         assert llm.calls == []
         window = agent.hippo.working.get_window()
         assert [m.content for m in window] == ["earlier", query]
+
+    @pytest.mark.asyncio
+    async def test_an_empty_reply_label_goes_only_with_its_nudge(self) -> None:
+        # The prompt fits with the nudge and the newest turn, but not with
+        # the label as well. Dropping the label alone would leave the nudge
+        # to follow the query that plan_step puts back in front, so the
+        # label and the nudge go together.
+        agent = _agent(FakeLLM())
+        label = Message(role="assistant", content=EMPTY_REPLY_LABEL)
+        nudge = Message(role="user", content=EMPTY_REPLY_NUDGE)
+        a, a_results = _turn(1, "a")
+        agent.hippo.working.append(Message(role="user", content="q"))
+        agent.hippo.working.append_turn(label, [nudge])
+        agent.hippo.working.append_turn(a, a_results)
+        room = PROMPT_CAP - _prompt_chars([nudge, a, *a_results])
+        await agent._fit_prompt_cap([Message(role="system", content="x" * room)])
+        assert agent.hippo.working.get_window() == [a, *a_results]
 
 
 # ── Stuck detection with several calls per step ────────────────────────────
