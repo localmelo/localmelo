@@ -291,6 +291,9 @@ enable_thinking = false
   shorthand and is rewritten as `extra_body` the next time the config is saved.
 - `model`, `messages`, `tools`, `tool_choice` and `stream` are managed by
   localmelo and cannot be set through `extra_body`.
+- An invalid `extra_body`, such as one that sets one of those fields, is
+  reported as a configuration error when `melo --serve` or a direct query
+  without `--base-url` starts, and as a failed probe in `melo --reconfigure`.
 - For the `ollama` backend the table is merged into the native `/api/chat`
   body, e.g. `extra_body = { think = false }`.
 - Direct `--base-url` mode does not read the config file, so `extra_body`
