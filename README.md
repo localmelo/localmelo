@@ -135,6 +135,8 @@ Current safeguards include:
 
 - workspace policy for file operations
 - blocked shell command patterns
+- a `shell_exec` command is killed together with its process group (every
+  process it started) on timeout or cancellation
 - execution allowlist: a tool call runs only if its planning step offered
   that tool to the model
 - output size limits

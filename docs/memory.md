@@ -26,6 +26,7 @@ Sections:
 |----------------------|--------------------------------------------------------------------------|
 | Enable persistence   | `LOCALMELO_PERSIST_MEMORY=1`                                             |
 | Storage directory    | `LOCALMELO_MEMORY_DIR` (default `~/.cache/localmelo/memory`)             |
+| Direct query         | `melo --memory-dir DIR "<query>"` turns persistence on, in `DIR`         |
 | History DB           | `<dir>/history.db` (always when persistence is on)                       |
 | Long-term DB         | `<dir>/long_term.db` (only if an embedding provider is configured)       |
 | Reset                | stop the localmelo process → `rm` the chosen file(s) → restart           |
@@ -101,8 +102,14 @@ The status values after a run are `completed`, `failed`, `gate_stopped`,
 `crashed`; see [quickstart.md → Run results](quickstart.md#run-results) for
 their meaning.
 The row is saved again when the run ends, whatever ended it, including an
-exception or a cancellation. A row that still reads `running` belongs to a
-run in progress, or to a process that was killed before its run could end.
+exception or a cancellation. A direct query (`melo "<query>"`) that
+SIGTERM or SIGHUP ends is saved as `crashed`, with `Cancelled by SIGTERM`
+or `Cancelled by SIGHUP` as its result (see
+[quickstart.md → SIGTERM and SIGHUP](quickstart.md#sigterm-and-sighup)).
+A row that still reads `running` belongs to a run in progress, or to a
+process that ended before its run could save the row: one killed with
+SIGKILL, or one stopped by SIGTERM or SIGHUP whose final save failed or
+had no time left before the exit (melo then logs a warning).
 
 Rows written before these statuses existed use only `running`,
 `completed` and `failed`; in them, `failed` also covers the runs that now

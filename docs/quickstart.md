@@ -8,6 +8,8 @@ Sections:
 - [Installation](#installation)
 - [Usage modes](#usage-modes)
 - [Run results](#run-results) — statuses and the `RunResult` record of a run
+- [Direct CLI options](#direct-cli-options) — flags, output, exit codes and
+  signals of a direct query
 - [Minimum smoke](#minimum-smoke) — verify each mode end-to-end after install
 - [Backend options](#backend-options)
 - [No-embedding mode](#no-embedding-mode)
@@ -41,6 +43,9 @@ Override the backend URL and model on the fly:
 ```bash
 melo --base-url http://localhost:11434/v1 --chat-model qwen3:8b "what is 2+2"
 ```
+
+Further flags set the run's limits, its tools and memory, and how it
+reports its outcome; see [Direct CLI options](#direct-cli-options).
 
 ### Gateway mode
 
@@ -145,7 +150,7 @@ Every run ends with one of these statuses:
 | `provider_error` | A request to the model server failed: an HTTP error status, a timeout, a connection failure or a malformed response body (see [Provider errors](#provider-errors)). `error` describes the failed request; no traceback is logged. |
 | `setup_error` | The agent's tool providers (see [Python API](#python-api)) could not be set up at the start of its first run: one failed to start, for example an MCP server that could not be launched, or a provided tool has the name of a tool already registered. `error` says which. No provider is left running, and setup is not retried: every later run on the same agent ends as `setup_error` too, with `error` naming the first failure. |
 | `timeout` | The run was still going after `AgentOptions.timeout_s` seconds and was cancelled where it stood: an LLM request in flight is abandoned and counts in `llm_errors`, and a `shell_exec` command is killed together with every process it started. `python_exec` is the exception: it runs its code inside the agent itself, which can do nothing else until the code returns, so neither `timeout_s` nor the executor's timeout can stop it; a run that times out during that code ends only once the code returns, and code that never returns keeps the run from ever ending. Tool providers still being set up are closed, so later runs end as `setup_error`. Closing them is never cut short, also when the deadline expires while a failed setup is closing them (the run then ends as `timeout` rather than `setup_error`): the run returns once every provider is closed, which can be after `timeout_s`. `error` is `Timed out after <timeout_s> s`. |
-| `crashed` | An unexpected exception ended the run. `error` is `<ExceptionType>: <message>` and the traceback is logged. A run cancelled from outside is recorded as `crashed` too, and the cancellation propagates. |
+| `crashed` | An unexpected exception ended the run. `error` is `<ExceptionType>: <message>` and the traceback is logged. A run cancelled from outside is recorded as `crashed` too, and the cancellation propagates. A direct-mode run ended by SIGTERM or SIGHUP is recorded as `crashed` with the error `Cancelled by SIGTERM` or `Cancelled by SIGHUP` (see [SIGTERM and SIGHUP](#sigterm-and-sighup)). |
 
 `Agent.run_task()` returns the run as a `RunResult`; `RunResult.to_dict()`
 gives the same fields as a plain dict, in this order:
@@ -202,6 +207,124 @@ the model server can match its request log against a run's `n_llm` and
 `llm_errors`. A custom `BaseLLMProvider` gets the same retries by raising
 `ProviderError(message, status_code=..., retryable=True)` for a failure
 worth retrying.
+
+## Direct CLI options
+
+A direct query (`melo "<query>"` without `--serve`) takes the flags below,
+each of which sets the [`AgentOptions`](#python-api) field it names or
+adds tools or an embedding endpoint. Given with `--serve`, or without a
+query, they are a usage error.
+
+| Flag | Default | Effect |
+|---|---|---|
+| `--max-steps N` | `30` | Cap on planning calls for the whole run (`max_steps`), at least 1. |
+| `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection between them. `none`: one attempt of up to `--max-steps` steps and no reflection calls. |
+| `--tool-exposure retrieve\|all` | `retrieve` | `retrieve`: each step offers the tools that hint extraction and BM25 search resolve for it. `all`: every registered tool, sorted by name, on every step. |
+| `--builtins all\|none\|NAME,...` | `all` | The built-in tools to register: all, none, or a comma-separated list out of `file_read`, `file_write`, `python_exec` and `shell_exec`. |
+| `--mcp-config PATH` | none | Add the tools of the MCP servers in this file (see below). |
+| `--mcp-only` | off | Only the MCP tools: the same as `--builtins none --tool-exposure all`. Requires `--mcp-config`, and cannot be combined with `--builtins` or `--tool-exposure`. |
+| `--memory on\|off` | `on` | `off`: no long-term recall, no long-term writes and no reflection promotion. |
+| `--memory-dir DIR` | none | Keep history (and long-term memory, when there is an embedding and memory is on) in SQLite files in `DIR`; see [Memory persistence](#memory-persistence). |
+| `--timeout SECONDS` | none | Wall-clock limit of the run (`timeout_s`); a run still going then ends as `timeout`. |
+| `--output-format text\|json` | `text` | How the outcome is reported; see [Output](#output). |
+| `--embedding-base-url URL` | none | An OpenAI-compatible embedding endpoint, for long-term memory. Requires `--base-url`: a query with `--base-url` has no embedding without it, and one without `--base-url` uses the backends of the config file, its embedding backend included. |
+| `--embedding-model NAME` | `default` | The embedding model to request. Requires `--embedding-base-url`. |
+
+`--mcp-config` reads the `mcpServers` JSON format that other MCP clients
+use. Only stdio servers are supported:
+
+```json
+{
+  "mcpServers": {
+    "notes": {
+      "command": "python",
+      "args": ["-m", "notes_mcp"],
+      "env": {"NOTES_DIR": "/srv/notes"}
+    }
+  }
+}
+```
+
+Each server may also set `cwd`, `timeout` (seconds per tool call, default
+120), `startup_timeout` (seconds to start and list tools, default 30),
+`include_tools` (the names of the tools to register; the others are left
+out) and `disabled` (`true` skips the server). A server gets only a
+minimal environment (`PATH`, `HOME`, the locale and a few more) plus its
+`env`. The servers start when the run starts, and their tools are
+registered as `mcp__<server>__<tool>`; a server that cannot be started
+ends the run as `setup_error`.
+
+A flag value that is not valid (for example `--max-steps 0` or an unknown
+built-in name), a flag combination that is not allowed (such as
+`--mcp-only` without `--mcp-config`), and an MCP config file that cannot
+be read or is malformed end melo before the run, with exit code 2 and a
+`melo: error: ...` message on stderr.
+
+### Output
+
+With `--output-format text`, the default, the run's result, if it is not
+empty, goes to stdout. A run that did not complete adds one line on
+stderr, for example:
+
+```text
+melo: run ended with status budget_exhausted: Max steps reached
+```
+
+The error in that line has its whitespace and line breaks collapsed to
+single spaces and is cut to 500 characters (ending in `...`), so an HTML
+error page that a provider error quotes stays on one line; a blank error
+reads `no error message`.
+
+With `--output-format json`, melo prints exactly one line to stdout: the
+`RunResult.to_dict()` object, with the fields of [Run results](#run-results)
+in that order, and a last key `localmelo_version`. That is the output of
+`git describe --tags --always --dirty` when localmelo runs from a git
+checkout of its own, and otherwise the installed package version (or
+`unknown`). Nothing else goes to stdout, and there is no status line:
+
+```json
+{"task_id": "3f0c1d2e4b5a46978899aabbccddeeff", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 812, "completion_tokens": 9, "total_tokens": 821}, "duration_s": 1.84, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "tool_exposure": "retrieve", "builtins": ["file_read", "file_write", "python_exec", "shell_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec", "shell_exec"]}, "localmelo_version": "v0.1.0-42-g1a2b3c4"}
+```
+
+In both formats, warnings go to stderr one line each, for example a tool
+provider that could not be closed or a task record that could not be
+saved. A traceback appears only for a run that ended as `crashed`.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | The run ended as `completed`. |
+| `2` | The run ended with any other status except `crashed` (`failed`, `gate_stopped`, `budget_exhausted`, `stuck`, `provider_error`, `setup_error`, `timeout`), or a usage error stopped melo before the run. |
+| `1` | The run ended as `crashed`; its traceback is on stderr. A query without `--base-url` also exits with 1 before the run when no backend is configured or the config file is not valid. |
+
+### SIGTERM and SIGHUP
+
+SIGTERM and SIGHUP cancel a direct run, and melo's clean-up ends within
+8 seconds, so a supervisor that sends SIGKILL 10 seconds after its SIGTERM
+finds nothing left to kill. Shell commands and MCP servers run in sessions
+of their own, so a signal sent to melo's process group does not reach
+them: melo stops them itself, in this order:
+
+1. A running `shell_exec` command is killed with its process group as the
+   cancellation lands.
+2. The MCP servers are closed. A server that has not stopped within 6
+   seconds of the signal is killed with its process group, so a server
+   that will not stop cannot keep the task record from being saved.
+3. The task record is saved as `crashed`, with the error `Cancelled by
+   SIGTERM` or `Cancelled by SIGHUP`. The reflections are not promoted to
+   long-term memory: that calls the embedding server and could take longer
+   than the time left.
+4. melo exits by the signal itself (a shell reports exit status 143 for
+   SIGTERM and 129 for SIGHUP), and prints no result, no status line and
+   no JSON line.
+
+If the clean-up is still running after 8 seconds, melo kills the MCP
+servers and exits by the signal at once. Further SIGTERM or SIGHUP signals
+during the clean-up change nothing, and a signal that melo was started
+with ignored stays ignored (`nohup` ignores SIGHUP). `python_exec` is the
+exception here, as it is for `--timeout`: its code runs inside melo, which
+handles the signal only once that code returns.
 
 ## Minimum smoke
 
@@ -492,6 +615,14 @@ lost on process exit. To persist memory across runs, set
 export LOCALMELO_PERSIST_MEMORY=1
 # optional: export LOCALMELO_MEMORY_DIR=/var/lib/localmelo/memory
 melo --serve
+```
+
+A direct query can name the directory itself: `--memory-dir DIR` turns
+persistence on for that run, in `DIR` (`~` is expanded), whatever the
+environment variables say (`AgentOptions.memory_dir` in the Python API).
+
+```bash
+melo --memory-dir ~/melo-memory "what is 2+2"
 ```
 
 See [memory.md](memory.md) for the full operational guide: env vars, file

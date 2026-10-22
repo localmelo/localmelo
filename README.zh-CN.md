@@ -131,6 +131,7 @@ executor result 和 memory write 在跨越主要边界前都会被校验。
 
 - 文件操作的 workspace policy
 - blocked shell command patterns
+- `shell_exec` 命令在 timeout 或 cancellation 时会连同其 process group（它启动的所有 process）一起被 kill
 - execution allowlist：tool call 只有在其所在 planning step 向模型提供了该工具时才会执行
 - output size limits
 - prompt 和 memory write size limits
