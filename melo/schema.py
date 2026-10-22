@@ -205,19 +205,30 @@ class ToolResult:
     images: list[ImagePart] = field(default_factory=list)
 
 
+def new_record_id() -> str:
+    """Return a fresh task or step id: a full UUID4 as 32 hex characters.
+
+    History keeps every task and step under its id for good, so ids must
+    not collide in a long-lived ``history.db``. A repeated task id would
+    make ``save_task`` (an ``INSERT OR REPLACE``) overwrite the older
+    task, and a repeated step id would fail the newer step's insert.
+    """
+    return uuid.uuid4().hex
+
+
 @dataclass
 class StepRecord:
     thought: str = ""
     tool_call: ToolCall | None = None
     tool_result: ToolResult | None = None
-    step_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+    step_id: str = field(default_factory=new_record_id)
     timestamp: float = field(default_factory=time.time)
 
 
 @dataclass
 class TaskRecord:
     query: str
-    task_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+    task_id: str = field(default_factory=new_record_id)
     steps: list[StepRecord] = field(default_factory=list)
     # "running" until the run ends, then the run's status: one of the
     # RunResult statuses documented in docs/quickstart.md ("Run results").

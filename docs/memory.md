@@ -91,7 +91,7 @@ in-memory history when persistence is off):
 
 | Column    | Value                                                                    |
 |-----------|--------------------------------------------------------------------------|
-| `task_id` | the run's `RunResult.task_id`                                            |
+| `task_id` | the run's `RunResult.task_id`, 32 hex characters (a UUID4)               |
 | `query`   | the task as given                                                        |
 | `status`  | `running` while the run is in progress, then the run's status            |
 | `result`  | the run's result, or its error when the result is empty                  |

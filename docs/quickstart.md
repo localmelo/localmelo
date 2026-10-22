@@ -152,7 +152,7 @@ gives the same fields as a plain dict, in this order:
 
 | Field | Meaning |
 |---|---|
-| `task_id` | id of the run's task record in history |
+| `task_id` | id of the run's task record in history: 32 hex characters (a UUID4) |
 | `status` | one of the statuses above |
 | `result` | the final answer or a best effort; may be empty |
 | `error` | why the run did not complete; empty when it completed |
