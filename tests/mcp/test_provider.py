@@ -204,6 +204,66 @@ class TestStart:
         assert len(created) == 2
         assert all(client.returncode is not None for client in created)
 
+    @pytest.mark.parametrize(
+        ("mode", "asked"),
+        [("prompts_only", False), ("no_tools_list", True)],
+        ids=["no_tools_capability", "tools_list_not_found"],
+    )
+    async def test_server_without_tools_adds_none(
+        self,
+        tmp_path: Path,
+        mode: str,
+        asked: bool,
+        created: list[StdioMcpClient],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # A server that offers only prompts or resources answers tools/list
+        # with METHOD_NOT_FOUND. It neither fails start() nor keeps the
+        # next server's tools from being registered.
+        bare_log = tmp_path / "bare.log"
+        provider = McpToolProvider(
+            [
+                fake_server_config(bare_log, name="bare", env={"FAKE_MCP_MODE": mode}),
+                fake_server_config(tmp_path / "fake.log"),
+            ],
+            client_factory=recording_factory(created),
+        )
+        try:
+            tools = await provider.start()
+            # Both servers are still listed and running.
+            assert [client.name for client in provider.clients] == ["bare", "fake"]
+            assert all(client.returncode is None for client in created)
+        finally:
+            await provider.close()
+        assert [tool.definition.name for tool in tools] == [
+            "mcp__fake__" + t["name"].replace(".", "_") for t in TOOLS
+        ]
+        # Only a server that declares the tools capability is asked for them.
+        methods = [m.get("method") for m in read_log(bare_log)]
+        assert ("tools/list" in methods) is asked
+        assert "MCP server 'bare'" in caplog.text
+
+    async def test_other_tools_list_errors_fail_start(
+        self, tmp_path: Path, created: list[StdioMcpClient]
+    ) -> None:
+        # Only METHOD_NOT_FOUND means the server has no tools.
+        provider = McpToolProvider(
+            [
+                fake_server_config(tmp_path / "fake.log"),
+                fake_server_config(
+                    tmp_path / "bad.log",
+                    name="bad",
+                    env={"FAKE_MCP_MODE": "tools_list_error"},
+                ),
+            ],
+            client_factory=recording_factory(created),
+        )
+        with pytest.raises(McpError, match="MCP server 'bad': Internal error"):
+            await provider.start()
+        assert provider.clients == []
+        assert len(created) == 2
+        assert all(client.returncode is not None for client in created)
+
     async def test_failing_server_closes_the_started_ones(
         self, log_path: Path, tmp_path: Path
     ) -> None:

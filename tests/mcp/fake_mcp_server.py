@@ -9,6 +9,12 @@ FAKE_MCP_PIDFILE, if set. FAKE_MCP_MODE selects misbehaviour:
 
 - ``hang_initialize``: never answer ``initialize``
 - ``hang_tools_list``: never answer ``tools/list``
+- ``prompts_only``: declare the ``prompts`` capability instead of
+  ``tools`` and answer ``tools/list`` with METHOD_NOT_FOUND, like a
+  server that offers no tools
+- ``no_tools_list``: declare the ``tools`` capability but answer
+  ``tools/list`` with METHOD_NOT_FOUND
+- ``tools_list_error``: answer ``tools/list`` with an internal error
 - ``garbage_stdout``: write a non-JSON line before every response
 - ``malformed_stdout``: write a line that is not UTF-8 and a line of JSON
   nested too deep to parse before every response
@@ -217,21 +223,33 @@ def handle(message: dict[str, Any]) -> None:
     if method == "initialize":
         if MODE == "hang_initialize":
             return
+        capabilities: dict[str, Any] = (
+            {"prompts": {}} if MODE == "prompts_only" else {"tools": {}}
+        )
         send(
             {
                 "jsonrpc": "2.0",
                 "id": message["id"],
                 "result": {
                     "protocolVersion": params.get("protocolVersion", "2025-06-18"),
-                    "capabilities": {"tools": {}},
+                    "capabilities": capabilities,
                     "serverInfo": {"name": "fake-mcp", "version": "1.0"},
                 },
             }
         )
     elif method == "notifications/cancelled":
         _cancelled.add(params.get("requestId"))
-    elif method == "tools/list":
+    elif method == "tools/list" and MODE not in ("prompts_only", "no_tools_list"):
         if MODE == "hang_tools_list":
+            return
+        if MODE == "tools_list_error":
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": message["id"],
+                    "error": {"code": -32603, "message": "Internal error"},
+                }
+            )
             return
         start = int(params.get("cursor") or 0)
         page: dict[str, Any] = {"tools": TOOLS[start : start + PAGE_SIZE]}
@@ -245,6 +263,7 @@ def handle(message: dict[str, Any]) -> None:
             daemon=True,
         ).start()
     elif "id" in message:
+        # Also tools/list in prompts_only and no_tools_list mode.
         send(
             {
                 "jsonrpc": "2.0",

@@ -12,7 +12,12 @@ from typing import Any
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.executor.models import ToolOutput
 from localmelo.melo.schema import ToolDef
-from localmelo.support.mcp.client import McpError, StdioMcpClient
+from localmelo.support.mcp.client import (
+    METHOD_NOT_FOUND,
+    McpError,
+    McpTool,
+    StdioMcpClient,
+)
 from localmelo.support.mcp.config import McpServerConfig, sanitize_name
 from localmelo.support.mcp.results import tool_result_to_output
 
@@ -38,6 +43,28 @@ def _bind(client: StdioMcpClient, tool_name: str) -> ToolFunction:
     return call
 
 
+async def _list_tools(client: StdioMcpClient) -> list[McpTool]:
+    """The tools of a started server; none for a server without tools."""
+    if "tools" not in client.server_capabilities:
+        logger.warning(
+            "MCP server %r offers no tools: it does not declare the tools "
+            "capability",
+            client.name,
+        )
+        return []
+    try:
+        return await client.list_tools()
+    except McpError as exc:
+        if exc.code != METHOD_NOT_FOUND:
+            raise
+        logger.warning(
+            "MCP server %r offers no tools: it declares the tools capability "
+            "but has no tools/list method",
+            client.name,
+        )
+        return []
+
+
 class McpToolProvider(BaseToolProvider):
     """Tools of one or more stdio MCP servers.
 
@@ -45,6 +72,11 @@ class McpToolProvider(BaseToolProvider):
     server's input schema and description. A call goes to ``tools/call``
     with the original tool name; the executor bounds it with the server's
     ``timeout``. ``include_tools`` restricts which tools are registered.
+
+    A server without tools adds none, with a warning: one that does not
+    declare the ``tools`` capability is not asked for them, and one that
+    answers ``tools/list`` with METHOD_NOT_FOUND has none. Any other error
+    from a server fails start().
     """
 
     def __init__(
@@ -80,7 +112,7 @@ class McpToolProvider(BaseToolProvider):
                 self._clients.append(client)
                 started.append(client)
                 await client.start()
-                listed = await client.list_tools()
+                listed = await _list_tools(client)
                 wanted = set(server.include_tools or [])
                 missing = wanted - {tool.name for tool in listed}
                 if missing:
