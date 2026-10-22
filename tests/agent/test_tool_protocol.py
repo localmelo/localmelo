@@ -15,7 +15,11 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import REFLECTION_PROMPT
-from localmelo.melo.agent.agent import WITHHELD_PREVIEW_CHARS, _cut_to
+from localmelo.melo.agent.agent import (
+    ASSISTANT_TEXT_SHARE,
+    WITHHELD_PREVIEW_CHARS,
+    _cut_to,
+)
 from localmelo.melo.checker.validators import (
     MAX_MEMORY_TEXT_LEN,
     MAX_OUTPUT_LEN,
@@ -343,6 +347,46 @@ class TestCutTo:
         assert len(kept) + left_out == length
 
 
+async def _text_beside_a_long_result(thought: str) -> tuple[Message, Message]:
+    """Run one call whose result has 120,000 characters, with *thought*
+    as the assistant text beside it; return the working-memory turn."""
+    llm = FakeLLM(
+        [
+            Message(
+                role="assistant",
+                content=thought,
+                thinking="plan",
+                tool_call=_echo_call("x", "call_r"),
+            ),
+            Message(role="assistant", content="done"),
+        ]
+    )
+    agent = _agent(llm)
+
+    async def _read(text: str) -> str:
+        return "r" * 120_000
+
+    agent.executor.register("echo", _read)
+    assert await agent.run("read it with echo") == "done"
+
+    window = agent.hippo.working.get_window()
+    assert_protocol_valid(window)
+    assistant, result = [m for m in window if m.tool_calls or m.role == "tool"]
+    # History keeps the text, and the result as the executor-result check
+    # left it, whatever working memory keeps.
+    task = next(iter(agent.hippo.history._tasks.values()))
+    [step] = await agent.hippo.history.get_steps(task.task_id)
+    assert step.thought == thought
+    assert step.tool_result is not None
+    assert step.tool_result.output == "r" * MAX_OUTPUT_LEN + TRUNCATION_SUFFIX
+    # Working memory keeps the start of that output, with a marker that
+    # counts the characters left out.
+    kept, left_out = _cut_parts(result.content)
+    assert kept == "r" * len(kept)
+    assert len(kept) + left_out == MAX_OUTPUT_LEN + len(TRUNCATION_SUFFIX)
+    return assistant, result
+
+
 class TestCheckedTurnWrites:
     @pytest.mark.asyncio
     async def test_too_long_result_is_cut_to_the_room_left(self) -> None:
@@ -585,6 +629,32 @@ class TestCheckedTurnWrites:
         task = next(iter(agent.hippo.history._tasks.values()))
         steps = await agent.hippo.history.get_steps(task.task_id)
         assert steps[0].thought == thought
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("size", [500, ASSISTANT_TEXT_SHARE])
+    async def test_a_short_text_stays_beside_a_cut_result(self, size: int) -> None:
+        # The text keeps its share of the turn, so the result is cut to the
+        # room that the call and the text leave it.
+        thought = "t" * size
+        assistant, result = await _text_beside_a_long_result(thought)
+        assert (assistant.content, assistant.thinking) == (thought, "plan")
+        calls_text = 'echo({"text": "x"})'
+        room = MAX_MEMORY_TEXT_LEN - len(calls_text) - len(f"{thought}\n")
+        assert room - 10 <= len(result.content) <= room
+        # The turn as the budget counts it: text, line break, calls, result.
+        turn = f"{assistant.content}\n{calls_text}{result.content}"
+        assert len(turn) <= MAX_MEMORY_TEXT_LEN
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("size", [ASSISTANT_TEXT_SHARE + 1, 3_000])
+    async def test_a_longer_text_gives_way_to_a_cut_result(self, size: int) -> None:
+        # A longer text gets no share: it could not fit beside a result
+        # that has to be cut. It is dropped, and the result gets all the
+        # room the call leaves it.
+        assistant, result = await _text_beside_a_long_result("t" * size)
+        assert (assistant.content, assistant.thinking) == ("", "")
+        room = MAX_MEMORY_TEXT_LEN - len('echo({"text": "x"})')
+        assert room - 10 <= len(result.content) <= room
 
     @pytest.mark.asyncio
     async def test_rejected_text_keeps_the_calls(self) -> None:

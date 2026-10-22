@@ -136,8 +136,11 @@ LocalMelo deliberately separates "what happened" from "what to recall":
   oldest whole turns are dropped when the prompt would otherwise pass the
   100,000-character pre-plan cap. A tool result too long for working
   memory is kept cut to the room its turn has left, ending with
-  `... [truncated: <n> more characters]`; history keeps the result as the
-  executor's output check left it.
+  `... [truncated: <n> more characters]`. The tool calls take their room
+  first, and so does the model's text beside them when it has at most
+  2,000 characters; a longer text that does not fit beside the results is
+  dropped from working memory. History keeps the text, and the result as
+  the executor's output check left it.
 
 In short: history is the raw event log, long-term is the queryable memory,
 and `PersonalizedMemory` is selected sleep input — not a dump of history.

@@ -164,6 +164,12 @@ def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
 # result left less room than this in its turn is withheld, not cut.
 WITHHELD_PREVIEW_CHARS = 200
 
+# Characters of a turn's working-memory budget that the assistant's text
+# keeps ahead of the tool results. A text this short stays beside results
+# cut to fit; a longer one is dropped when it does not fit beside them
+# (see Agent._checked_tool_turn). History keeps the text either way.
+ASSISTANT_TEXT_SHARE = 2_000
+
 # Key of the placeholder that replaces tool-call arguments too long for
 # working memory. Only the working-memory copy of a turn carries it:
 # history and the executor always get the real arguments.
@@ -270,27 +276,29 @@ def _cut_to(text: str, room: int) -> str:
 
 
 def _within_turn_budget(
-    texts: Sequence[str], withheld: set[int], calls_chars: int
+    texts: Sequence[str], withheld: set[int], calls_chars: int, *, limit: int
 ) -> list[str]:
     """Return *texts* with the largest cut, or replaced, until they fit.
 
     The rendered tool calls of one turn (*calls_chars* characters) and its
-    tool results share ``MAX_MEMORY_TEXT_LEN`` characters: the calls keep
-    their share and the results get the rest. While the results do not
-    fit, the largest is cut to the room the others leave it, with a
-    marker that says how much was left out (see :func:`_cut_to`). A
-    result left less than ``WITHHELD_PREVIEW_CHARS`` of room is replaced
-    by the withheld notice instead, and its index added to *withheld*.
-    Indices already in *withheld* hold notices and are left alone.
+    tool results share *limit* characters: ``MAX_MEMORY_TEXT_LEN`` less
+    the share kept for the assistant's text (see
+    :meth:`Agent._checked_tool_turn`). The calls keep their share and the
+    results get the rest. While the results do not fit, the largest is
+    cut to the room the others leave it, with a marker that says how much
+    was left out (see :func:`_cut_to`). A result left less than
+    ``WITHHELD_PREVIEW_CHARS`` of room is replaced by the withheld notice
+    instead, and its index added to *withheld*. Indices already in
+    *withheld* hold notices and are left alone.
     """
     fitted = list(texts)
-    budget = MAX_MEMORY_TEXT_LEN - calls_chars
+    budget = limit - calls_chars
     total = sum(len(text) for text in fitted)
     if total <= budget:
         return fitted
     reason = (
         f"Tool calls and results too large: {calls_chars + total} chars "
-        f"(max {MAX_MEMORY_TEXT_LEN})"
+        f"(max {limit})"
     )
     largest_first = sorted(
         (i for i in range(len(fitted)) if i not in withheld),
@@ -944,14 +952,18 @@ class Agent:
         The whole turn also shares one budget of ``MAX_MEMORY_TEXT_LEN``
         characters, half the 100,000 at which ``Checker.pre_plan`` fails
         the task, so that one step leaves room in the next planning
-        prompt. The calls keep their share; the results share the rest,
+        prompt. The calls keep their share, and so does the assistant
+        text when the check allows it and it has at most
+        ``ASSISTANT_TEXT_SHARE`` characters. The results share the rest,
         the largest cut first to the room the others leave it, ending
         with a marker that says how many characters were left out (see
         :func:`_within_turn_budget`). This is also how a result longer
         than one memory write allows is shortened. A result left less
         than ``WITHHELD_PREVIEW_CHARS`` of room is replaced by the notice
-        instead. The assistant text, which history keeps, is dropped when
-        it does not fit beside them. Notices, and results shorter than
+        instead. A longer text gets no share: it could not fit beside
+        results that had to be cut, so room kept for it would only cut
+        them further. A text that does not fit beside the results is
+        dropped, and history keeps it. Notices, and results shorter than
         one, cannot shrink further, so a turn whose calls nearly fill the
         budget, or a turn of hundreds of calls, can still pass it.
         History keeps each result as the executor-result check left it.
@@ -963,6 +975,13 @@ class Agent:
         """
         calls = self._checked_calls(response.tool_calls)
         calls_text = _render_tool_calls(calls)
+        content, thinking = response.content, response.thinking
+        full_text = "\n".join(part for part in (content, calls_text) if part)
+        text_allowed = self._memory_write_allowed(full_text, "assistant")
+        # The text's share includes the line break that joins it to the calls.
+        text_share = 0
+        if text_allowed and len(content) <= ASSISTANT_TEXT_SHARE:
+            text_share = len(full_text) - len(calls_text)
 
         texts: list[str] = []
         withheld: set[int] = set()
@@ -983,14 +1002,12 @@ class Agent:
                 text = _withheld_notice(text, check.reason)
                 withheld.add(index)
             texts.append(text)
-        texts = _within_turn_budget(texts, withheld, len(calls_text))
+        texts = _within_turn_budget(
+            texts, withheld, len(calls_text), limit=MAX_MEMORY_TEXT_LEN - text_share
+        )
 
-        content, thinking = response.content, response.thinking
-        full_text = "\n".join(part for part in (content, calls_text) if part)
         turn_chars = len(full_text) + sum(len(text) for text in texts)
-        if turn_chars > MAX_MEMORY_TEXT_LEN or not self._memory_write_allowed(
-            full_text, "assistant"
-        ):
+        if turn_chars > MAX_MEMORY_TEXT_LEN or not text_allowed:
             content, thinking = "", ""
         assistant_msg = Message(
             role="assistant", content=content, tool_calls=calls, thinking=thinking
