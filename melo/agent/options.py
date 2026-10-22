@@ -25,7 +25,10 @@ def _is_positive_int(value: object) -> bool:
 def _is_positive_finite(value: object) -> bool:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return False
-    return math.isfinite(value) and value > 0
+    try:
+        return math.isfinite(value) and value > 0
+    except OverflowError:  # an int too large for a float
+        return False
 
 
 @dataclass(frozen=True)

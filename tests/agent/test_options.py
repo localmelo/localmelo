@@ -128,6 +128,11 @@ def test_invalid_value_raises_naming_the_field(field: str, value: Any) -> None:
         AgentOptions(**{field: value})
 
 
+def test_timeout_too_large_for_a_float_raises_naming_the_field() -> None:
+    with pytest.raises(ValueError, match=r"^timeout_s "):
+        AgentOptions(timeout_s=10**400)
+
+
 def test_unknown_builtins_lists_unknown_and_known_names() -> None:
     with pytest.raises(ValueError) as excinfo:
         AgentOptions(builtins=frozenset({"file_read", "zap", "nope"}))
