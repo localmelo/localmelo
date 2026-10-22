@@ -376,9 +376,10 @@ class TestCheckedTurnWrites:
         await agent.run("read three parts")
         window = agent.hippo.working.get_window()
         results = {m.tool_call_id: m.content for m in window if m.role == "tool"}
-        # Withholding the 40k result is enough; the others stay whole.
+        # Withholding the 40k result is enough; the others stay whole. The
+        # notice counts the 59 chars of rendered calls with the results.
         assert results["call_a"].startswith("[Tool result withheld")
-        assert "80000 chars (max 50000)" in results["call_a"]
+        assert "too large: 80059 chars (max 50000)" in results["call_a"]
         assert results["call_b"] == "b" * 10_000
         assert results["call_c"] == "c" * 30_000
 
@@ -427,6 +428,87 @@ class TestCheckedTurnWrites:
             ("call_b", "saved 20000 chars"),
             ("call_c", "saved 18000 chars"),
         ]
+
+    @pytest.mark.asyncio
+    async def test_arguments_and_results_share_one_budget(self) -> None:
+        # The calls and the results each fit on their own. Together, with
+        # a long query, they would pass the pre_plan cap, fail the task,
+        # and fail the session's next runs too until eviction.
+        draft = "d" * 49_000
+        calls = [
+            ToolCall(tool_name="save", arguments={"text": draft}, id="call_save"),
+            ToolCall(tool_name="read", arguments={"text": "ref.txt"}, id="call_read"),
+        ]
+        llm = FakeLLM(
+            [
+                Message(role="assistant", tool_calls=calls),
+                Message(role="assistant", content="done"),
+                Message(role="assistant", content="next"),
+            ]
+        )
+        agent = Agent(llm=llm, embedding=None)
+        for name in ("save", "read"):
+            agent.hippo.register_tool(_echo_def(name))
+
+        async def _save(text: str) -> str:
+            return f"saved {len(text)} chars"
+
+        async def _read(text: str) -> str:
+            return "r" * 49_000
+
+        agent.executor.register("save", _save)
+        agent.executor.register("read", _read)
+        query = "Update the draft and read the reference. " * 60
+        assert await agent.run(query) == "done"
+
+        second = _planning_calls(llm)[1]["messages"]
+        assert_protocol_valid(second)
+        turn = [m for m in second if m.tool_calls or m.role == "tool"]
+        # The calls keep their share; the large result gives way.
+        assert [(tc.id, tc.arguments) for tc in turn[0].tool_calls] == [
+            ("call_save", {"text": draft}),
+            ("call_read", {"text": "ref.txt"}),
+        ]
+        results = {m.tool_call_id: m.content for m in turn[1:]}
+        assert results["call_save"] == "saved 49000 chars"
+        assert results["call_read"].startswith("[Tool result withheld")
+        assert "Tool calls and results too large" in results["call_read"]
+        # The session's next run is not affected.
+        assert await agent.run("unrelated question") == "next"
+
+    @pytest.mark.asyncio
+    async def test_text_gives_way_before_results(self) -> None:
+        # The text and the result each fit beside the call, but not both.
+        # History keeps the text, so the text is what working memory drops.
+        thought = "t" * 30_000
+        llm = FakeLLM(
+            [
+                Message(
+                    role="assistant",
+                    content=thought,
+                    thinking="plan",
+                    tool_call=_echo_call("x", "call_r"),
+                ),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _agent(llm)
+
+        async def _read(text: str) -> str:
+            return "r" * 30_000
+
+        agent.executor.register("echo", _read)
+        assert await agent.run("read it") == "done"
+
+        window = agent.hippo.working.get_window()
+        assert_protocol_valid(window)
+        assistant = next(m for m in window if m.tool_calls)
+        assert (assistant.content, assistant.thinking) == ("", "")
+        assert assistant.tool_calls[0].id == "call_r"
+        assert [m.content for m in window if m.role == "tool"] == ["r" * 30_000]
+        task = next(iter(agent.hippo.history._tasks.values()))
+        steps = await agent.hippo.history.get_steps(task.task_id)
+        assert steps[0].thought == thought
 
     @pytest.mark.asyncio
     async def test_rejected_text_keeps_the_calls(self) -> None:

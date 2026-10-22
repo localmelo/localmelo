@@ -154,18 +154,23 @@ def _withheld_notice(text: str, reason: str) -> str:
     )
 
 
-def _within_step_budget(texts: Sequence[str], withheld: set[int]) -> list[str]:
+def _within_turn_budget(
+    texts: Sequence[str], withheld: set[int], calls_chars: int
+) -> list[str]:
     """Return *texts* with the largest replaced by notices until they fit.
 
-    The tool results of one step share ``MAX_MEMORY_TEXT_LEN`` characters.
-    Indices in *withheld* already hold notices and are left alone.
+    The rendered tool calls of one turn (*calls_chars* characters) and its
+    tool results share ``MAX_MEMORY_TEXT_LEN`` characters: the calls keep
+    their share and the results get the rest. Indices in *withheld*
+    already hold notices and are left alone.
     """
     fitted = list(texts)
+    budget = MAX_MEMORY_TEXT_LEN - calls_chars
     total = sum(len(text) for text in fitted)
-    if total <= MAX_MEMORY_TEXT_LEN:
+    if total <= budget:
         return fitted
     reason = (
-        f"Combined tool results too large: {total} chars "
+        f"Tool calls and results too large: {calls_chars + total} chars "
         f"(max {MAX_MEMORY_TEXT_LEN})"
     )
     largest_first = sorted(
@@ -174,7 +179,7 @@ def _within_step_budget(texts: Sequence[str], withheld: set[int]) -> list[str]:
         reverse=True,
     )
     for index in largest_first:
-        if total <= MAX_MEMORY_TEXT_LEN:
+        if total <= budget:
             break
         notice = _withheld_notice(fitted[index], reason)
         if len(notice) >= len(fitted[index]):
@@ -481,22 +486,19 @@ class Agent:
         turn stays protocol-valid and the model still sees every call it
         made and what each returned.
 
-        The results of one step also share one budget of
-        ``MAX_MEMORY_TEXT_LEN`` characters. When they add up to more, the
-        largest are replaced by the notice first until they fit. A
-        multi-call step therefore cannot fill the next planning prompt with
-        its results; ``Checker.pre_plan`` fails the task once that prompt
-        passes 100,000 characters.
+        The whole turn also shares one budget of ``MAX_MEMORY_TEXT_LEN``
+        characters, half the 100,000 at which ``Checker.pre_plan`` fails
+        the task, so that one step leaves room in the next planning
+        prompt. The calls keep their share; the results share the rest,
+        the largest replaced by the notice first (see
+        :func:`_within_turn_budget`); and the assistant text, which history
+        keeps, is dropped when it does not fit beside them. Notices, and
+        results shorter than one, cannot shrink further, so a turn whose
+        calls nearly fill the budget, or a turn of hundreds of calls, can
+        still pass it.
         """
         calls = self._checked_calls(response.tool_calls)
         calls_text = _render_tool_calls(calls)
-        content, thinking = response.content, response.thinking
-        full_text = "\n".join(part for part in (content, calls_text) if part)
-        if not self._memory_write_allowed(full_text, "assistant"):
-            content, thinking = "", ""
-        assistant_msg = Message(
-            role="assistant", content=content, tool_calls=calls, thinking=thinking
-        )
 
         texts: list[str] = []
         withheld: set[int] = set()
@@ -509,7 +511,18 @@ class Agent:
                 text = _withheld_notice(text, check.reason)
                 withheld.add(index)
             texts.append(text)
-        texts = _within_step_budget(texts, withheld)
+        texts = _within_turn_budget(texts, withheld, len(calls_text))
+
+        content, thinking = response.content, response.thinking
+        full_text = "\n".join(part for part in (content, calls_text) if part)
+        turn_chars = len(full_text) + sum(len(text) for text in texts)
+        if turn_chars > MAX_MEMORY_TEXT_LEN or not self._memory_write_allowed(
+            full_text, "assistant"
+        ):
+            content, thinking = "", ""
+        assistant_msg = Message(
+            role="assistant", content=content, tool_calls=calls, thinking=thinking
+        )
 
         tool_msgs = [
             Message(role="tool", content=text, tool_call_id=call.id, tool_result=result)
