@@ -13,7 +13,11 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.melo.contracts.providers import (
+    BaseEmbeddingProvider,
+    BaseLLMProvider,
+    ProviderError,
+)
 from localmelo.melo.executor import builtin_names
 from localmelo.melo.memory.history import History
 from localmelo.melo.memory.history.sqlite import SqliteHistory
@@ -162,16 +166,32 @@ class BlockingLLM(FakeLLM):
 
 
 class FakeEmbedding(BaseEmbeddingProvider):
-    """Embeds every text alike; fails for texts that start with *fail_prefix*."""
+    """Embeds every text alike; fails for texts that start with *fail_prefix*.
 
-    def __init__(self, fail_prefix: str | None = None) -> None:
+    The failure raises *error* (by default a ConnectionError), or with
+    *hang* the request never answers.
+    """
+
+    def __init__(
+        self,
+        fail_prefix: str | None = None,
+        *,
+        error: Exception | None = None,
+        hang: bool = False,
+    ) -> None:
         self.calls = 0
         self.fail_prefix = fail_prefix
+        self.error = (
+            error if error is not None else ConnectionError("embedding server down")
+        )
+        self.hang = hang
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         self.calls += 1
         if self.fail_prefix and any(t.startswith(self.fail_prefix) for t in texts):
-            raise ConnectionError("embedding server down")
+            if self.hang:
+                await asyncio.Event().wait()
+            raise self.error
         return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
 
     async def close(self) -> None:
@@ -530,6 +550,52 @@ class TestFinally:
         assert "Could not promote the reflections of task" in caplog.text
         assert agent.hippo.working.get_reflections() == []
         assert _only_task(agent).status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_a_provider_error_during_promotion_logs_no_traceback(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        down = ProviderError("POST /embeddings failed: ConnectError", retryable=True)
+        emb = FakeEmbedding(fail_prefix="Attempt ", error=down)
+        refused = ProviderError(
+            "POST /chat/completions failed with HTTP 400: no",
+            status_code=400,
+            retryable=False,
+        )
+        llm = FakeLLM([_echo_call("a"), _reflection("continue"), refused])
+        agent = _agent(llm, _options(steps_per_attempt=1, max_attempts=2), emb)
+        with caplog.at_level(logging.DEBUG):
+            result = await agent.run_task("echo q")
+        assert (result.status, result.error) == ("provider_error", str(refused))
+        [record] = [r for r in caplog.records if "Could not promote" in r.getMessage()]
+        assert record.levelno == logging.INFO
+        assert record.getMessage().endswith(f": {down}")
+        # A failed request, not a crash: nothing logged with a traceback.
+        assert [r for r in caplog.records if r.exc_info] == []
+        assert agent.hippo.working.get_reflections() == []
+        assert _only_task(agent).status == "provider_error"
+
+    @pytest.mark.asyncio
+    async def test_a_promotion_without_an_answer_is_cut_short(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("localmelo.melo.agent.agent.PROMOTION_TIMEOUT_S", 0.05)
+        emb = FakeEmbedding(fail_prefix="Attempt ", hang=True)
+        # Attempt 0 reflects; attempt 1 waits for the model until timeout_s.
+        llm = BlockingLLM([_echo_call("a"), _reflection("continue")])
+        options = _options(steps_per_attempt=1, max_attempts=2, timeout_s=0.2)
+        agent = _agent(llm, options, emb)
+        with caplog.at_level(logging.DEBUG):
+            result = await asyncio.wait_for(agent.run_task("echo q"), 5)
+        assert (result.status, result.error) == ("timeout", "Timed out after 0.2 s")
+        # timeout_s, then at most the promotion's bound.
+        assert result.duration_s < 2.0
+        [record] = [r for r in caplog.records if "Could not promote" in r.getMessage()]
+        assert record.levelno == logging.INFO
+        assert record.getMessage().endswith(": no answer within 0.05 s")
+        assert [r for r in caplog.records if r.exc_info] == []
+        assert agent.hippo.working.get_reflections() == []
+        assert _only_task(agent).status == "timeout"
 
 
 # ── Counters ────────────────────────────────────────────────────────────────

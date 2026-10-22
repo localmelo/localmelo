@@ -282,6 +282,12 @@ def _providers_from_config(
 # LOCALMELO_MEMORY_DIR. Expanded when used, not at import.
 DEFAULT_MEMORY_DIR = "~/.cache/localmelo/memory"
 
+# Seconds that promoting a run's reflections may take once the run is
+# over. Without a bound, a run that ended because the embedding server
+# stopped answering would wait for it again, as long as the provider's
+# own HTTP timeout.
+PROMOTION_TIMEOUT_S = 10.0
+
 
 def _resolve_memory_dir(options: AgentOptions) -> str | None:
     """Directory for SQLite-backed memory, or ``None`` for in-memory backends.
@@ -1081,7 +1087,11 @@ class Agent:
         ``result or error``, and the reflections are cleared (promoted
         to long-term memory first when ``memory`` is on); a failure while
         doing so is logged and does not replace the run's own outcome.
-        ``timeout_s`` bounds the run itself, not this final save.
+        ``timeout_s`` bounds the run itself, not this final step. The
+        save has no bound of its own; promotion has
+        :data:`PROMOTION_TIMEOUT_S`, so an embedding server that stopped
+        answering delays the return by that much at most, and a failed
+        or unanswered embedding request is logged without a traceback.
 
         ``RunResult.config`` reports the effective configuration: the
         options, the registered built-ins (``builtins``), the resolved
@@ -1141,7 +1151,11 @@ class Agent:
         """Save *task* with the run's terminal status and clear reflections.
 
         A failure is logged, not raised, so it cannot replace the run's
-        outcome or the exception that ended it.
+        outcome or the exception that ended it. Promoting the reflections
+        may take at most :data:`PROMOTION_TIMEOUT_S` seconds. A failed
+        embedding request (``ProviderError``) or one that the bound cuts
+        short is logged at INFO without a traceback, as ``provider_error``
+        is; any other exception is logged with its traceback.
         """
         task.status = run.status
         task.result = run.result or run.error
@@ -1152,14 +1166,30 @@ class Agent:
                 logger.exception(
                     "Could not save the final state of task %s", task.task_id
                 )
+            bound = asyncio.timeout(PROMOTION_TIMEOUT_S)
             try:
                 # With memory=False Hippo has no embedding, so this only
                 # clears the reflections (see __init__).
-                await self.hippo.promote_reflections(task.task_id)
-            except Exception:
-                logger.exception(
-                    "Could not promote the reflections of task %s", task.task_id
+                async with bound:
+                    await self.hippo.promote_reflections(task.task_id)
+            except ProviderError as exc:
+                logger.info(
+                    "Could not promote the reflections of task %s: %s",
+                    task.task_id,
+                    exc,
                 )
+            except Exception as exc:
+                if isinstance(exc, TimeoutError) and bound.expired():
+                    logger.info(
+                        "Could not promote the reflections of task %s: "
+                        "no answer within %g s",
+                        task.task_id,
+                        PROMOTION_TIMEOUT_S,
+                    )
+                else:
+                    logger.exception(
+                        "Could not promote the reflections of task %s", task.task_id
+                    )
         finally:
             self.hippo.working.clear_reflections()
 
