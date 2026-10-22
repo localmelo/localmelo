@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 from unittest import mock
 
@@ -194,6 +195,77 @@ def test_run_probes_reports_invalid_extra_body(
     out = capsys.readouterr().out
     assert "Probe failed: chat probe failed: [vllm] extra_body must not set" in out
     assert "config not saved" in out
+
+
+def _timeout_cfg(
+    key: str, chat: _FakeChat, request_timeout_s: Any
+) -> _config_mod.Config:
+    """A config for a fake chat backend *key*, with *request_timeout_s*."""
+    _register(_FakeBackend(key, chat=chat))
+    cfg = _cfg(key, "none")
+    cfg.request_timeout_s = request_timeout_s
+    return cfg
+
+
+@pytest.mark.parametrize(
+    "value",
+    [0, -1, "600", True, math.inf, math.nan],
+    ids=["zero", "negative", "string", "true", "inf", "nan"],
+)
+@pytest.mark.asyncio
+async def test_probe_chat_reports_an_invalid_request_timeout(value: Any) -> None:
+    """The key is named before a provider is built or a request is sent.
+
+    As the provider's HTTP timeout such a value would fail the ping with an
+    error that does not name it (a timeout, or a TypeError), or, as
+    ``True``, let it pass.
+    """
+    chat = _FakeChat()
+    cfg = _timeout_cfg("probe-timeout-chat", chat, value)
+
+    with pytest.raises(ProbeError) as raised:
+        await probe_chat(cfg)
+
+    assert str(raised.value) == (
+        "chat probe failed: request_timeout_s must be a finite number of "
+        f"seconds > 0, got {value!r}"
+    )
+    assert chat.calls == []  # no ping
+    assert not chat.closed  # no provider was built
+
+
+@pytest.mark.parametrize("value", [None, 600, 0.5])
+@pytest.mark.asyncio
+async def test_probe_chat_pings_with_a_valid_request_timeout(
+    value: float | None,
+) -> None:
+    chat = _FakeChat()
+    cfg = _timeout_cfg("probe-timeout-ok-chat", chat, value)
+
+    await probe_chat(cfg)
+
+    assert [[m.content for m in call] for call in chat.calls] == [["ping"]]
+    assert chat.closed
+
+
+def test_run_probes_reports_an_invalid_request_timeout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Setup names the key and asks whether to save, as for extra_body."""
+    chat = _FakeChat()
+    cfg = _timeout_cfg("probe-timeout-chat", chat, 0)
+
+    with mock.patch("localmelo.support.onboard._ask", return_value="N") as ask:
+        assert _run_probes(cfg) is False
+
+    ask.assert_called_once()
+    out = capsys.readouterr().out
+    assert (
+        "Probe failed: chat probe failed: request_timeout_s must be a finite "
+        "number of seconds > 0, got 0\n" in out
+    )
+    assert "config not saved" in out
+    assert chat.calls == []
 
 
 @pytest.mark.asyncio

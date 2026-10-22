@@ -1009,3 +1009,42 @@ class TestRequestTimeoutConfig:
         loaded = load()
         assert (loaded.chat_backend, loaded.request_timeout_s) == ("ollama", 600)
         assert "\nrequest_timeout_s = 600\n" in config_path.read_text(encoding="utf-8")
+
+    @pytest.mark.parametrize("value", [0, "600"], ids=["zero", "string"])
+    def test_reconfigure_reports_a_bad_value_as_a_failed_probe(
+        self, config_path: Path, capsys: pytest.CaptureFixture[str], value: Any
+    ) -> None:
+        """melo --reconfigure names the key instead of probing with the value.
+
+        The setup does not validate the config before it probes, so the
+        chat probe checks the value itself, before it builds a provider.
+        """
+        save(_timeout_cfg(value))
+        before = config_path.read_bytes()
+
+        import localmelo.support.onboard as onboard
+
+        with (
+            # 3 = vllm in CHAT_BACKENDS, 5 = none in EMBEDDING_BACKENDS
+            mock.patch.object(onboard, "_ask_choice", side_effect=[3, 5]),
+            # Keep the saved [vllm] section as it is.
+            mock.patch.dict(onboard._CHAT_SETUP, {"vllm": lambda cfg: True}),
+            # "Save config anyway?" is answered with its default, No.
+            mock.patch.object(onboard, "_ask", return_value="N") as ask,
+            # No provider is built, so nothing is sent to the configured URL.
+            mock.patch(
+                "localmelo.support.onboard_probe.get_backend",
+                side_effect=AssertionError("the probe built a provider"),
+            ),
+        ):
+            result = onboard.run_backend_setup()
+
+        assert result is None
+        ask.assert_called_once_with("Save config anyway?", "N")
+        out = capsys.readouterr().out
+        assert (
+            "Probe failed: chat probe failed: request_timeout_s must be a finite "
+            f"number of seconds > 0, got {value!r}\n" in out
+        )
+        assert "config not saved" in out
+        assert config_path.read_bytes() == before
