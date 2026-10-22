@@ -12,6 +12,7 @@ import pytest
 
 from localmelo.melo.agent import Agent
 from localmelo.melo.agent._chat import REFLECTION_PROMPT
+from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.short import WorkingMemory, group_turns, tail_turns
 from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
@@ -305,6 +306,65 @@ class TestCheckedTurnWrites:
         assert notice[0].tool_call_id == "call_big"
         assert notice[0].content.startswith("[Tool result withheld")
         assert len(notice[0].content) < 1_000
+
+    @pytest.mark.asyncio
+    async def test_step_results_share_one_budget(self) -> None:
+        # Each 34k result fits the memory-write check on its own; together
+        # they would push the next planning prompt over the pre_plan cap.
+        part = "x" * 34_000
+        calls = [_echo_call(tag, f"call_{tag}") for tag in "abc"]
+        llm = FakeLLM(
+            [
+                Message(role="assistant", content="read three", tool_calls=calls),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _agent(llm)
+
+        async def _read(text: str) -> str:
+            return part
+
+        agent.executor.register("echo", _read)
+        assert await agent.run("summarize three parts") == "done"
+
+        # The second planning call got past pre_plan and answers every call.
+        planning = _planning_calls(llm)
+        assert len(planning) == 2
+        second = planning[1]["messages"]
+        assert_protocol_valid(second)
+        ids = ["call_a", "call_b", "call_c"]
+        assert [tc.id for m in second for tc in m.tool_calls] == ids
+        results = [(m.tool_call_id, m.content) for m in second if m.role == "tool"]
+        assert [call_id for call_id, _ in results] == ids
+        contents = [content for _, content in results]
+        assert sum(len(c) for c in contents) <= MAX_MEMORY_TEXT_LEN
+        assert contents.count(part) == 1
+        assert sum(c.startswith("[Tool result withheld") for c in contents) == 2
+
+    @pytest.mark.asyncio
+    async def test_largest_results_are_withheld_first(self) -> None:
+        sizes = {"a": 40_000, "b": 10_000, "c": 30_000}
+        calls = [_echo_call(tag, f"call_{tag}") for tag in sizes]
+        llm = FakeLLM(
+            [
+                Message(role="assistant", tool_calls=calls),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _agent(llm)
+
+        async def _read(text: str) -> str:
+            return text * sizes[text]
+
+        agent.executor.register("echo", _read)
+        await agent.run("read three parts")
+        window = agent.hippo.working.get_window()
+        results = {m.tool_call_id: m.content for m in window if m.role == "tool"}
+        # Withholding the 40k result is enough; the others stay whole.
+        assert results["call_a"].startswith("[Tool result withheld")
+        assert "80000 chars (max 50000)" in results["call_a"]
+        assert results["call_b"] == "b" * 10_000
+        assert results["call_c"] == "c" * 30_000
 
     @pytest.mark.asyncio
     async def test_oversized_arguments_are_elided_not_dropped(self) -> None:

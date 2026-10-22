@@ -15,6 +15,7 @@ from localmelo.melo.checker.payloads import (
     MemoryWritePayload,
     ToolResolutionResult,
 )
+from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.executor import Executor, register_builtins
 from localmelo.melo.executor.models import ExecutionRequest
@@ -142,12 +143,42 @@ def _tool_result_text(result: ToolResult) -> str:
 
 
 def _withheld_notice(text: str, reason: str) -> str:
-    """Stand-in for a tool result the memory-write check rejected."""
+    """Stand-in for a tool result kept out of working memory."""
     preview = text[:WITHHELD_PREVIEW_CHARS]
     return (
         f"[Tool result withheld from working memory: {reason}. "
         f"First {len(preview)} characters follow.]\n{preview}"
     )
+
+
+def _within_step_budget(texts: Sequence[str], withheld: set[int]) -> list[str]:
+    """Return *texts* with the largest replaced by notices until they fit.
+
+    The tool results of one step share ``MAX_MEMORY_TEXT_LEN`` characters.
+    Indices in *withheld* already hold notices and are left alone.
+    """
+    fitted = list(texts)
+    total = sum(len(text) for text in fitted)
+    if total <= MAX_MEMORY_TEXT_LEN:
+        return fitted
+    reason = (
+        f"Combined tool results too large: {total} chars "
+        f"(max {MAX_MEMORY_TEXT_LEN})"
+    )
+    largest_first = sorted(
+        (i for i in range(len(fitted)) if i not in withheld),
+        key=lambda i: len(fitted[i]),
+        reverse=True,
+    )
+    for index in largest_first:
+        if total <= MAX_MEMORY_TEXT_LEN:
+            break
+        notice = _withheld_notice(fitted[index], reason)
+        if len(notice) >= len(fitted[index]):
+            break  # only results a notice would not shorten are left
+        total += len(notice) - len(fitted[index])
+        fitted[index] = notice
+    return fitted
 
 
 CONTINUATION_UTILITY_THRESHOLD = 0.1
@@ -446,6 +477,13 @@ class Agent:
         same ``tool_call_id``. No call or result is ever left out, so the
         turn stays protocol-valid and the model still sees every call it
         made and what each returned.
+
+        The results of one step also share one budget of
+        ``MAX_MEMORY_TEXT_LEN`` characters. When they add up to more, the
+        largest are replaced by the notice first until they fit. A
+        multi-call step therefore cannot fill the next planning prompt with
+        its results; ``Checker.pre_plan`` fails the task once that prompt
+        passes 100,000 characters.
         """
         calls = self._checked_calls(response.tool_calls)
         calls_text = _render_tool_calls(calls)
@@ -457,22 +495,23 @@ class Agent:
             role="assistant", content=content, tool_calls=calls, thinking=thinking
         )
 
-        tool_msgs: list[Message] = []
-        for call, result in zip(calls, results, strict=True):
+        texts: list[str] = []
+        withheld: set[int] = set()
+        for index, result in enumerate(results):
             text = _tool_result_text(result)
             check = self.checker.check_memory_write(
                 MemoryWritePayload(text=text, role="tool")
             )
             if not check.allowed:
                 text = _withheld_notice(text, check.reason)
-            tool_msgs.append(
-                Message(
-                    role="tool",
-                    content=text,
-                    tool_call_id=call.id,
-                    tool_result=result,
-                )
-            )
+                withheld.add(index)
+            texts.append(text)
+        texts = _within_step_budget(texts, withheld)
+
+        tool_msgs = [
+            Message(role="tool", content=text, tool_call_id=call.id, tool_result=result)
+            for call, result, text in zip(calls, results, texts, strict=True)
+        ]
         return assistant_msg, tool_msgs
 
     # ── Step estimation (kept for backward compat, no longer called by run) ──
