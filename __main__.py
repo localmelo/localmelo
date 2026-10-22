@@ -597,8 +597,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "--request-timeout",
         type=_seconds,
         metavar="SECONDS",
-        help="HTTP timeout of each chat request, in seconds (default 120; 300 "
-        "for the ollama backend)",
+        help="HTTP timeout of each chat request, in seconds (default: "
+        "request_timeout_s from the config file, else 120; 300 for the ollama "
+        "backend)",
     )
     direct.add_argument(
         "--output-format",
