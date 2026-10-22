@@ -46,10 +46,25 @@ class TestHandshake:
         assert echo.description == "Echo text."
         assert echo.input_schema["properties"] == {"text": {"type": "string"}}
 
-    async def test_stderr_is_drained(self, client: StdioMcpClient) -> None:
-        # The fake server writes 200 KB to stderr before reading stdin; the
-        # handshake only completes because the client drains it.
-        assert any("fake-mcp: starting" in line for line in client.stderr_tail)
+    async def test_stderr_is_drained(
+        self, log_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The fake server writes 200 KB to stderr before it reads stdin.
+        # asyncio reads a pipe into a buffer of about twice the stream limit
+        # even if nobody reads that buffer, so with the default limit the
+        # handshake would complete anyway. With a 16 KiB limit, asyncio and
+        # the kernel's pipe buffer hold well under 200 KB: the server blocks
+        # in its write and answers initialize only if the client drains
+        # stderr. The startup timeout makes a regression fail, not hang.
+        monkeypatch.setattr("localmelo.support.mcp.client.STREAM_LIMIT", 16 * 1024)
+        mcp = StdioMcpClient(
+            fake_server_config(log_path, startup_timeout_s=5), shutdown_grace_s=0.5
+        )
+        try:
+            await mcp.start()
+            assert any("fake-mcp: starting" in line for line in mcp.stderr_tail)
+        finally:
+            await mcp.close()
 
     async def test_stderr_tail_keeps_the_end_of_each_line(
         self, client: StdioMcpClient

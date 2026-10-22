@@ -260,8 +260,10 @@ def main() -> None:
     if PID_PATH:
         with open(PID_PATH, "w", encoding="utf-8") as fh:
             fh.write(str(os.getpid()))
-    # More than a pipe buffer of stderr before reading anything: the client
-    # must drain stderr or the handshake deadlocks.
+    # 200 KB of stderr before reading anything. The client's asyncio reads
+    # a pipe into a buffer of about twice its stream limit whether or not
+    # the client reads that buffer, so this blocks the server only when a
+    # test lowers the limit and the client does not drain stderr.
     sys.stderr.write("fake-mcp: starting\n" + "." * 200_000 + "\n")
     sys.stderr.flush()
     while True:
