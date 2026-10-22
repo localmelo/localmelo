@@ -69,6 +69,11 @@ class Config:
     )
     embedding_backend: str = ""  # mlc | ollama | vllm | sglang | none
 
+    # HTTP timeout of each chat request, in seconds, for every chat backend.
+    # None keeps each chat provider's own default (120 s; 300 s for the
+    # ollama backend). Embedding requests keep their own timeout.
+    request_timeout_s: float | None = None
+
     # Local backends
     mlc: LocalBackendConfig = field(default_factory=LocalBackendConfig)
     ollama: LocalBackendConfig = field(default_factory=LocalBackendConfig)
@@ -137,6 +142,9 @@ class Config:
             emb_errors = self._validate_embedding_backend()
             errors.extend(emb_errors)
 
+        # -- Chat request timeout --
+        errors.extend(self._validate_request_timeout())
+
         # -- Gateway validation --
         if self.gateway.port <= 0 or self.gateway.port > 65535:
             errors.append(
@@ -144,6 +152,16 @@ class Config:
             )
 
         return errors
+
+    def _validate_request_timeout(self) -> list[str]:
+        """``request_timeout_s`` is unset or a finite number of seconds > 0."""
+        value: object = self.request_timeout_s
+        if value is None or _is_positive_seconds(value):
+            return []
+        return [
+            "request_timeout_s must be a finite number of seconds > 0, "
+            f"got {value!r}"
+        ]
 
     def _validate_chat_backend(self) -> list[str]:
         from localmelo.support.backends.registry import get_backend
@@ -183,6 +201,21 @@ class Config:
         if errors:
             msg = "Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
             raise ConfigError(msg)
+
+
+def _is_positive_seconds(value: object) -> bool:
+    """Whether *value* is a finite number > 0.
+
+    An integer counts (TOML reads ``600`` as one); a bool does not, and
+    neither does an integer too large to be a float.
+    """
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return False
+    try:
+        seconds = float(value)
+    except OverflowError:
+        return False
+    return math.isfinite(seconds) and seconds > 0
 
 
 # -- Compatibility aliases (temporary, reduces churn in files not yet migrated) --
@@ -259,6 +292,9 @@ def load() -> Config:
         for k, v in data["gateway"].items():
             if hasattr(cfg.gateway, k):
                 setattr(cfg.gateway, k, v)
+
+    # A bad value is left for Config.validate to report.
+    cfg.request_timeout_s = data.get("request_timeout_s")
 
     return cfg
 
@@ -362,6 +398,8 @@ def _migrate_legacy(data: dict) -> Config:
             if hasattr(cfg.gateway, k):
                 setattr(cfg.gateway, k, v)
 
+    cfg.request_timeout_s = data.get("request_timeout_s")
+
     return cfg
 
 
@@ -409,6 +447,10 @@ def save(cfg: Config) -> None:
     lines: list[str] = []
     lines.append(f'chat_backend = "{cfg.chat_backend}"')
     lines.append(f'embedding_backend = "{cfg.embedding_backend}"')
+    # Top-level keys go before the first table. Only a value that is set
+    # is written, so a config without one is saved as it was before.
+    if cfg.request_timeout_s is not None:
+        lines.append(f"request_timeout_s = {_toml_value(cfg.request_timeout_s)}")
     lines.append("")
 
     # Local backend sections
