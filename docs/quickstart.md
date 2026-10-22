@@ -31,9 +31,10 @@ pip install -e ".[dev,gateway]"
 
 ### Direct CLI mode
 
-Run a one-shot query without starting a server. No configuration file is
-needed -- localmelo defaults to a local Ollama backend at
-`http://127.0.0.1:11434/v1`.
+Run a one-shot query without starting a server. With `--base-url` (below)
+no configuration file is needed; otherwise the query uses the backends of
+the configuration file, so run `melo --reconfigure` first. Without either,
+melo prints `No backend configured` and exits with code 1.
 
 ```bash
 melo "what is 2+2"
@@ -212,9 +213,11 @@ request and, when the server answered, gives its HTTP status and the first
 
 A chat request that times out is retried the same way, and each attempt
 waits the full [chat request timeout](#chat-request-timeout) again. So a
-model server that does not answer ends the run as `provider_error` after
+model server that sends nothing ends the run as `provider_error` after
 about 3 × the timeout + 5 s: 365 s with the default of 120 s, and 905 s
-with the 300 s of the `ollama` backend.
+with the 300 s of the `ollama` backend. A server that sends keep-alive
+bytes while it generates may never time out (see
+[Chat request timeout](#chat-request-timeout)).
 
 Every chat request carries its attempt number (1, then 2 and 3 for the
 retries) in the `X-Localmelo-Attempt` HTTP header, so a proxy in front of
@@ -308,7 +311,9 @@ stdout by itself during the run, such as a command that `python_exec`
 code starts without capturing its output, goes to stderr instead.
 Warnings go to stderr one line each, for example a tool provider that
 could not be closed or a task record that could not be saved. A traceback
-appears only for a run that ended as `crashed`.
+appears only for a run that ended as `crashed`, or, before any run, for an
+error that melo does not report in one line, such as a configuration file
+that cannot be parsed (exit code 1).
 
 ### Exit codes
 
@@ -316,7 +321,7 @@ appears only for a run that ended as `crashed`.
 |---|---|
 | `0` | The run ended as `completed`. |
 | `2` | The run ended with any other status except `crashed` (`failed`, `gate_stopped`, `budget_exhausted`, `stuck`, `provider_error`, `setup_error`, `timeout`), or a usage error stopped melo before the run. |
-| `1` | The run ended as `crashed`; its traceback is on stderr. A query without `--base-url` also exits with 1 before the run when no backend is configured or the config file is not valid, apart from a `request_timeout_s` that `--request-timeout` replaces. |
+| `1` | The run ended as `crashed`; its traceback is on stderr. A query without `--base-url` also exits with 1 before the run when no backend is configured or the config file is not valid, apart from a `request_timeout_s` that `--request-timeout` replaces; a config file that is not valid TOML prints a traceback. |
 
 ### SIGTERM and SIGHUP
 
@@ -566,13 +571,21 @@ enable_thinking = false
 The HTTP timeout of each chat request is 120 seconds with the
 OpenAI-compatible chat provider, which every backend but `ollama` uses,
 and 300 seconds with the `ollama` backend, which talks to Ollama's native
-`/api/chat`. It bounds connecting, sending the request and each wait for
-data from the server; localmelo does not stream replies, so the last wait
-lasts until the model has written its whole reply. A local thinking model
-can take longer than that for one reply. Set a longer timeout with a
-top-level `request_timeout_s` in `~/.cache/localmelo/config.toml`, in the
-block before the first table: a key written below a `[table]` header
-belongs to that table, and localmelo does not read it there.
+`/api/chat`. It limits inactivity, not the whole request: it bounds
+connecting, sending the request and each wait for the next data from the
+server, and starts again whenever data arrives. localmelo does not stream
+replies, so with a server that sends nothing until its reply is complete,
+the last wait lasts until the model has written its whole reply, which
+can take a local thinking model longer than the timeout. A server that
+sends keep-alive bytes while it generates restarts the timeout with each
+of them. oMLX, for example, sends a space every 10 seconds while it writes
+a reply that is not streamed, so against it a timeout longer than 10
+seconds never fires, however long the reply takes; only `--timeout`
+(`AgentOptions.timeout_s`), when set, limits the run. Set a longer
+timeout with a top-level `request_timeout_s` in
+`~/.cache/localmelo/config.toml`, in the block before the first table: a
+key written below a `[table]` header belongs to that table, and
+localmelo does not read it there.
 
 ```toml
 chat_backend = "vllm"
@@ -609,10 +622,11 @@ chat_model = "Qwen3-8B"
   `/v1` URL.
 - A chat request that times out is retried twice, after 1 s and then 4 s,
   each attempt with the full timeout (see [Provider errors](#provider-errors)).
-  One chat request can therefore take about 3 × the timeout + 5 s before
-  the run ends as `provider_error`: about 30 minutes with
-  `request_timeout_s = 600`. `--timeout` (`AgentOptions.timeout_s`) bounds
-  the whole run.
+  Against a server that sends nothing, one chat request can therefore take
+  about 3 × the timeout + 5 s before the run ends as `provider_error`:
+  about 30 minutes with `request_timeout_s = 600`. Against one that sends
+  keep-alive bytes, it can take as long as the reply. `--timeout`
+  (`AgentOptions.timeout_s`) bounds the whole run either way.
 - It is a setting of the chat provider, not a run option: it does not
   appear in `RunResult.config` or in the JSON line of `--output-format json`.
 
