@@ -96,7 +96,7 @@ in-memory history when persistence is off):
 | `status`  | `running` while the run is in progress, then the run's status            |
 | `result`  | the run's result, or its error when the result is empty                  |
 
-The status values after a run are `completed`, `failed`,
+The status values after a run are `completed`, `failed`, `gate_stopped`,
 `budget_exhausted`, `stuck`, `provider_error`, `setup_error`, `timeout` and
 `crashed`; see [quickstart.md → Run results](quickstart.md#run-results) for
 their meaning.
@@ -106,8 +106,8 @@ run in progress, or to a process that was killed before its run could end.
 
 Rows written before these statuses existed use only `running`,
 `completed` and `failed`; in them, `failed` also covers the runs that now
-end as `budget_exhausted` or `stuck`, and an exception left the row
-`running`.
+end as `gate_stopped`, `budget_exhausted` or `stuck`, and an exception left
+the row `running`.
 
 ## Retention semantics
 
@@ -125,7 +125,12 @@ LocalMelo deliberately separates "what happened" from "what to recall":
   sleep pipeline. Not part of normal online recall. See
   [PersonalizedSample v1 schema](#personalizedsample-v1-schema).
 - **Working memory** — short-lived per-session LRU cache. Lives in RAM,
-  not persisted, lost on process exit.
+  not persisted, lost on process exit. Before each planning step, its
+  oldest whole turns are dropped when the prompt would otherwise pass the
+  100,000-character pre-plan cap. A tool result too long for working
+  memory is kept cut to the room its turn has left, ending with
+  `... [truncated: <n> more characters]`; history keeps the result as the
+  executor's output check left it.
 
 In short: history is the raw event log, long-term is the queryable memory,
 and `PersonalizedMemory` is selected sleep input — not a dump of history.
