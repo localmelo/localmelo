@@ -35,8 +35,10 @@ def _is_positive_finite(value: object) -> bool:
 class AgentOptions:
     """How an :class:`Agent` runs its tasks.
 
-    The defaults reproduce the agent's behavior from before these options
-    existed. An invalid value raises ``ValueError`` naming the field.
+    The defaults match the agent's behavior from before these options
+    existed, except that a step now runs only the tools it offered (see
+    ``tool_exposure``). An invalid value raises ``ValueError`` naming the
+    field.
 
     - ``max_steps``: cap on planning calls for the whole run.
     - ``attempt_policy``: ``"reflect"`` runs attempts of at most

@@ -305,7 +305,8 @@ class Agent:
 
     Either mode takes ``options=AgentOptions(...)`` to set step budgets,
     the attempt policy, tool exposure, the built-in tools and memory; the
-    defaults keep the behavior from before options existed.
+    defaults keep the behavior from before options existed, except that a
+    step now runs only the tools it offered.
     ``tool_providers`` are only stored so far: nothing starts them or
     registers their tools.
     """
