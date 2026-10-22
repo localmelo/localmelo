@@ -34,6 +34,11 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
+from localmelo.melo.checker.validators import (
+    MAX_IMAGE_BYTES,
+    MAX_IMAGES_PER_RESULT,
+    MAX_OUTPUT_LEN,
+)
 from localmelo.support.mcp.config import McpServerConfig
 
 logger = logging.getLogger(__name__)
@@ -41,9 +46,17 @@ logger = logging.getLogger(__name__)
 PROTOCOL_VERSION = "2025-06-18"
 KNOWN_PROTOCOL_VERSIONS = frozenset({"2024-11-05", "2025-03-26", "2025-06-18"})
 
-# Base64 screenshots arrive as one JSON line; asyncio's default line limit
-# is 64 KiB.
-STREAM_LIMIT = 64 * 1024 * 1024
+# One message is one line, with any images in it as base64, and a longer
+# line ends the client. The limit holds the largest tools/call result the
+# executor's result check passes unchanged: MAX_IMAGES_PER_RESULT images
+# of MAX_IMAGE_BYTES each, base64-encoded, and MAX_OUTPUT_LEN characters
+# of text at up to 12 bytes each as JSON (two \u escapes), plus 1 MiB for
+# the JSON around them. About 215 MiB; asyncio's default is 64 KiB.
+STREAM_LIMIT = (
+    MAX_IMAGES_PER_RESULT * 4 * ((MAX_IMAGE_BYTES + 2) // 3)
+    + 12 * MAX_OUTPUT_LEN
+    + 1024 * 1024
+)
 # stderr_tail keeps the last STDERR_TAIL_LINES lines of the server's
 # stderr, each cut to its last STDERR_LINE_CHARS characters.
 STDERR_TAIL_LINES = 200

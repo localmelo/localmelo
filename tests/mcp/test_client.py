@@ -7,6 +7,7 @@ import base64
 import contextlib
 import dataclasses
 import hashlib
+import json
 import os
 import shlex
 import signal
@@ -17,8 +18,13 @@ from typing import Any, cast
 
 import pytest
 
+from localmelo.melo.checker.validators import (
+    MAX_IMAGE_BYTES,
+    MAX_IMAGES_PER_RESULT,
+    MAX_OUTPUT_LEN,
+)
 from localmelo.support.mcp import McpError, StdioMcpClient, tool_result_to_output
-from localmelo.support.mcp.client import STDERR_LINE_CHARS
+from localmelo.support.mcp.client import STDERR_LINE_CHARS, STREAM_LIMIT
 from localmelo.tests.mcp.conftest import (
     SpawnGate,
     fake_server_config,
@@ -125,6 +131,24 @@ class TestToolCalls:
         result = await client.call_tool("big_image", {"size": 3_000_000})
         image = tool_result_to_output(result).images[0]
         assert image.size_bytes == 3_000_000
+
+    def test_line_limit_holds_the_largest_result_the_checker_passes(self) -> None:
+        # The executor's result check passes MAX_IMAGES_PER_RESULT images of
+        # MAX_IMAGE_BYTES each and MAX_OUTPUT_LEN characters of text
+        # unchanged, so the line carrying such a result must fit the limit.
+        data_len = len(base64.b64encode(bytes(MAX_IMAGE_BYTES)))
+        image_len = data_len + len(
+            json.dumps({"type": "image", "data": "", "mimeType": "image/webp"})
+        )
+        # json.dumps writes a character outside the BMP as two \u escapes.
+        text = "\U0001f600" * MAX_OUTPUT_LEN
+        text_len = len(json.dumps({"type": "text", "text": text}))
+        envelope_len = len(
+            json.dumps({"jsonrpc": "2.0", "id": 2**53, "result": {"content": []}})
+        )
+        parts = [text_len] + [image_len] * MAX_IMAGES_PER_RESULT
+        line_len = envelope_len + sum(parts) + len(", ") * (len(parts) - 1)
+        assert line_len <= STREAM_LIMIT
 
     async def test_answers_server_ping(self, client: StdioMcpClient) -> None:
         result = await client.call_tool("ping_client", {})
