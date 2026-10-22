@@ -42,10 +42,13 @@ def decode_base64(data: str) -> bytes | None:
 class ImagePart:
     """An image attached to a message or a tool result.
 
-    ``data`` is the base64 payload without a ``data:`` prefix. ``sha256``
-    and ``size_bytes`` describe the decoded bytes and are computed once,
-    on construction. A reference copy (:meth:`as_reference`) drops
-    ``data``. The agent keeps only reference copies of tool-result images
+    ``data`` is the base64 payload without a ``data:`` prefix. Whitespace
+    in it (line-wrapped base64) is removed on construction, so what is
+    sent is what the checker saw. Whenever there is ``data``, ``sha256``
+    and ``size_bytes`` are derived from it on construction (values passed
+    in are ignored) and describe the decoded bytes. A reference copy
+    (:meth:`as_reference`) drops ``data`` and keeps the digest and size it
+    is given. The agent keeps only reference copies of tool-result images
     in history and working memory, so no payload outlives the step that
     produced it; long-term memory gets text only. Invalid base64 yields
     ``size_bytes == 0``, which the checker rejects.
@@ -57,20 +60,18 @@ class ImagePart:
     size_bytes: int = 0
 
     def __post_init__(self) -> None:
-        if self.data and not self.sha256:
-            raw = decode_base64(self.data)
-            digest_input = raw if raw is not None else self.data.encode()
-            object.__setattr__(self, "sha256", hashlib.sha256(digest_input).hexdigest())
-            object.__setattr__(self, "size_bytes", len(raw) if raw is not None else 0)
+        if not self.data:
+            return  # a reference copy keeps the digest and size it is given
+        data = "".join(self.data.split())
+        raw = decode_base64(data)
+        digest_input = raw if raw is not None else data.encode()
+        object.__setattr__(self, "data", data)
+        object.__setattr__(self, "sha256", hashlib.sha256(digest_input).hexdigest())
+        object.__setattr__(self, "size_bytes", len(raw) if raw is not None else 0)
 
     @classmethod
     def from_bytes(cls, raw: bytes, mime_type: str) -> ImagePart:
-        return cls(
-            mime_type=mime_type,
-            data=base64.b64encode(raw).decode("ascii"),
-            sha256=hashlib.sha256(raw).hexdigest(),
-            size_bytes=len(raw),
-        )
+        return cls(mime_type=mime_type, data=base64.b64encode(raw).decode("ascii"))
 
     @property
     def data_url(self) -> str:

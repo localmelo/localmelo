@@ -1,5 +1,8 @@
 """Tests for Checker boundary validators."""
 
+import base64
+import dataclasses
+
 import pytest
 
 from localmelo.melo.checker import (
@@ -684,6 +687,29 @@ class TestImageValidation:
         assert sp is not None
         assert sp.images == []
         assert "too large" in sp.output
+
+    def test_size_check_uses_the_real_size(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import localmelo.melo.checker.validators as validators
+
+        monkeypatch.setattr(validators, "MAX_IMAGE_BYTES", 4)
+        five_bytes = base64.b64encode(b"12345").decode()
+        images = [
+            # A copy of a 4-byte image with new data, and an image that
+            # claims a digest and size its data does not have.
+            dataclasses.replace(_png(b"1234"), data=five_bytes),
+            ImagePart(
+                mime_type="image/png", data=five_bytes, sha256="0" * 64, size_bytes=1
+            ),
+        ]
+        result = validate_executor_result(
+            ExecutorResultPayload(tool_name="shot", images=images)
+        )
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert sp.images == []
+        assert sp.output == "[2 images dropped: image too large (max 4 bytes)]"
 
     def test_too_many_images_trimmed(self) -> None:
         images = [_png(bytes([i])) for i in range(MAX_IMAGES_PER_RESULT + 2)]

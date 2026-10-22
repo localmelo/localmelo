@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
 
@@ -14,6 +15,11 @@ from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
 SHOT = ImagePart.from_bytes(b"screenshot bytes", "image/png")
 SHOT2 = ImagePart.from_bytes(b"second screenshot", "image/jpeg")
+
+# Base64 in MIME-style 76-character lines, with spaces and tabs added.
+WRAPPED_RAW = bytes(range(256))
+WRAPPED_B64 = base64.encodebytes(WRAPPED_RAW).decode().replace("\n", "\r\n \t")
+COMPACT_B64 = base64.b64encode(WRAPPED_RAW).decode()
 
 
 class Recorder:
@@ -31,6 +37,19 @@ async def _openai_messages(messages: list[Message]) -> list[dict[str, Any]]:
     llm = OpenAICompatLLM(
         base_url="http://omlx.test/v1",
         model="m",
+        transport=httpx.MockTransport(rec.handler),
+    )
+    await llm.chat(messages)
+    await llm.close()
+    result: list[dict[str, Any]] = rec.bodies[0]["messages"]
+    return result
+
+
+async def _ollama_messages(messages: list[Message]) -> list[dict[str, Any]]:
+    rec = Recorder({"message": {"role": "assistant", "content": "ok"}})
+    llm = OllamaNativeChat(
+        base_url="http://ollama.test",
+        model="qwen3-vl",
         transport=httpx.MockTransport(rec.handler),
     )
     await llm.chat(messages)
@@ -193,3 +212,36 @@ class TestOllamaImages:
         assert sent[3]["role"] == "user"
         assert sent[3]["images"] == [SHOT2.data]
         assert "call_s" in sent[3]["content"]
+
+
+class TestWrappedBase64:
+    """Line-wrapped base64 is sent compact, as the checker saw it."""
+
+    @pytest.mark.asyncio
+    async def test_openai_data_urls(self) -> None:
+        image = ImagePart(mime_type="image/png", data=WRAPPED_B64)
+        sent = await _openai_messages(
+            [
+                Message(role="user", content="look", images=[image]),
+                *_tool_turn(("call_s", "shot", [image])),
+            ]
+        )
+        urls = [
+            part["image_url"]["url"]
+            for m in sent
+            if isinstance(m["content"], list)
+            for part in m["content"]
+            if part["type"] == "image_url"
+        ]
+        assert urls == [f"data:image/png;base64,{COMPACT_B64}"] * 2
+
+    @pytest.mark.asyncio
+    async def test_ollama_images_field(self) -> None:
+        image = ImagePart(mime_type="image/png", data=WRAPPED_B64)
+        sent = await _ollama_messages(
+            [
+                Message(role="user", content="look", images=[image]),
+                *_tool_turn(("call_s", "shot", [image])),
+            ]
+        )
+        assert [m["images"] for m in sent if "images" in m] == [[COMPACT_B64]] * 2

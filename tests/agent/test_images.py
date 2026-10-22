@@ -31,9 +31,37 @@ class TestImagePart:
             mime_type="image/png", data=B64
         )
 
-    def test_whitespace_in_base64_is_ignored(self) -> None:
+    def test_whitespace_in_base64_is_removed(self) -> None:
         wrapped = "\n".join(B64[i : i + 8] for i in range(0, len(B64), 8))
-        assert ImagePart(mime_type="image/png", data=wrapped).size_bytes == len(RAW)
+        image = ImagePart(mime_type="image/png", data=f" {wrapped}\r\n\t")
+        assert image.size_bytes == len(RAW)
+        # What is sent is what the checker saw (see test_provider_vision.py
+        # for the request bodies).
+        assert image.data == B64
+        assert image.data_url == f"data:image/png;base64,{B64}"
+
+    def test_digest_and_size_always_come_from_data(self) -> None:
+        real = (hashlib.sha256(RAW).hexdigest(), len(RAW))
+        stale = ImagePart(
+            mime_type="image/png", data=B64, sha256="0" * 64, size_bytes=1
+        )
+        assert (stale.sha256, stale.size_bytes) == real
+        # A known digest without a size still gets the real size.
+        digest_only = ImagePart(mime_type="image/png", data=B64, sha256=real[0])
+        assert (digest_only.sha256, digest_only.size_bytes) == real
+
+    def test_replacing_data_updates_digest_and_size(self) -> None:
+        other = b"a different, larger fake image"
+        image = dataclasses.replace(
+            ImagePart.from_bytes(RAW, "image/png"),
+            data=base64.b64encode(other).decode(),
+        )
+        assert image.sha256 == hashlib.sha256(other).hexdigest()
+        assert image.size_bytes == len(other)
+
+    def test_reference_keeps_given_digest_and_size(self) -> None:
+        ref = ImagePart(mime_type="image/png", sha256="ab" * 32, size_bytes=7)
+        assert (ref.data, ref.sha256, ref.size_bytes) == ("", "ab" * 32, 7)
 
     def test_invalid_base64_has_zero_size(self) -> None:
         image = ImagePart(mime_type="image/png", data="not base64!")
