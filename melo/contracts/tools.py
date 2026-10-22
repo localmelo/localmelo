@@ -26,11 +26,12 @@ class ProvidedTool:
 class BaseToolProvider(ABC):
     """Supplies tools from outside ``melo/``.
 
-    The agent calls :meth:`start` once, before its first run, and registers
-    every returned tool with the tool registry and the executor. Calls to
-    those tools therefore pass the same checker and executor boundaries
-    (registry lookup, pre-execute check, timeout, result check) as the
-    built-in tools. :meth:`close` releases the provider's resources.
+    The provider's owner calls :meth:`start` once, before the first run,
+    and registers every returned tool with the tool registry and the
+    executor. Calls to those tools therefore pass the same checker and
+    executor boundaries (registry lookup, pre-execute check, timeout,
+    result check) as the built-in tools. :meth:`close` releases the
+    provider's resources.
     """
 
     @abstractmethod

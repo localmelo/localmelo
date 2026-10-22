@@ -34,6 +34,7 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
     ToolResult,
+    describe_images,
 )
 
 if TYPE_CHECKING:
@@ -138,11 +139,19 @@ def _elide_arguments(call: ToolCall) -> ToolCall:
 def _tool_result_text(result: ToolResult) -> str:
     """Content of the ``role="tool"`` message that answers a call.
 
-    Empty or whitespace-only output reads ``(no output)``.
+    The images of a result are not sent to the model, so a result with
+    images ends with a line that names them (see :func:`describe_images`).
+    An image-only result reads just that line. Empty or whitespace-only
+    output without images reads ``(no output)``.
     """
+    lines: list[str] = []
     if result.error:
-        return f"Error: {result.error}"
-    return result.output if result.output.strip() else "(no output)"
+        lines.append(f"Error: {result.error}")
+    elif result.output.strip():
+        lines.append(result.output)
+    if result.images:
+        lines.append(describe_images(result.images))
+    return "\n".join(lines) or "(no output)"
 
 
 def _withheld_notice(text: str, reason: str) -> str:

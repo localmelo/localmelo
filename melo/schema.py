@@ -26,11 +26,6 @@ MAX_ATTEMPTS = 5
 MAX_REFLECTIONS_IN_PROMPT = 1
 MAX_REFLECTION_CHARS = 2000
 
-# Image budget. Only the most recent images keep their pixels in a prompt;
-# older ones are replaced by their text reference (see ImagePart.ref), the
-# usual practice for screenshot-driven computer use.
-MAX_IMAGES_IN_PROMPT = 3
-
 
 # ── Data types ──
 

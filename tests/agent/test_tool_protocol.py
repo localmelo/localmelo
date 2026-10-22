@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from collections import deque
+from collections.abc import Callable, Coroutine
 from typing import Any
 
 import httpx
@@ -14,8 +15,10 @@ from localmelo.melo.agent import Agent
 from localmelo.melo.agent._chat import REFLECTION_PROMPT
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.melo.executor import ToolOutput
 from localmelo.melo.memory.short import WorkingMemory, group_turns, tail_turns
-from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
+from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, ToolResult
+from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
 # ── Schema: tool call ids ──────────────────────────────────────────────────
@@ -557,6 +560,161 @@ class TestCheckedTurnWrites:
         assert any("[called echo]" in e.text for e in agent.hippo.long._entries)
         window = agent.hippo.working.get_window()
         assert not any("[called echo]" in m.content for m in window)
+
+
+# ── Tool results with images ───────────────────────────────────────────────
+
+SHOT = ImagePart.from_bytes(b"\x89PNG\r\n\x1a\n screenshot bytes", "image/png")
+# What the model reads in place of SHOT.
+MARKER = f"[1 image: sha256:{SHOT.sha256[:12]} image/png]"
+
+
+def _returning(output: ToolOutput) -> Callable[[], Coroutine[Any, Any, ToolOutput]]:
+    async def _tool() -> ToolOutput:
+        return output
+
+    return _tool
+
+
+def _image_agent(llm: BaseLLMProvider) -> Agent:
+    """Agent whose tools return an image with text, alone, or with an error."""
+    agent = Agent(llm=llm, embedding=None)
+    outputs = {
+        "shot": ToolOutput(text="captured", images=[SHOT]),
+        "shot_only": ToolOutput(images=[SHOT]),
+        "shot_error": ToolOutput(text="window not found", images=[SHOT], is_error=True),
+    }
+    for name, output in outputs.items():
+        agent.hippo.register_tool(
+            ToolDef(
+                name=name, description=f"{name} tool", parameters={"type": "object"}
+            )
+        )
+        agent.executor.register(name, _returning(output))
+    return agent
+
+
+def _recording_transport(
+    replies: list[dict[str, Any]], bodies: list[dict[str, Any]]
+) -> httpx.MockTransport:
+    """Answer with *replies* in order and record every request body."""
+    queue = deque(replies)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return httpx.Response(200, json=queue.popleft())
+
+    return httpx.MockTransport(handler)
+
+
+def _assert_markers_without_images(body: dict[str, Any]) -> None:
+    """*body* answers the shot and shot_only calls and carries no image."""
+    sent = body["messages"]
+    assert [m["role"] for m in sent] == ["system", "user", "assistant", "tool", "tool"]
+    assert [m["content"] for m in sent[3:]] == [f"captured\n{MARKER}", MARKER]
+    # No Ollama "images" field, no OpenAI content parts, no base64 anywhere.
+    assert not any("images" in m or not isinstance(m["content"], str) for m in sent)
+    assert SHOT.data not in json.dumps(body)
+
+
+class TestToolResultImages:
+    @pytest.mark.asyncio
+    async def test_tool_message_names_the_images(self) -> None:
+        calls = [
+            ToolCall(tool_name="shot", id="call_text"),
+            ToolCall(tool_name="shot_only", id="call_only"),
+            ToolCall(tool_name="shot_error", id="call_error"),
+        ]
+        llm = FakeLLM(
+            [
+                Message(role="assistant", tool_calls=calls),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        assert await _image_agent(llm).run("take screenshots") == "done"
+
+        second = _planning_calls(llm)[1]["messages"]
+        assert_protocol_valid(second)
+        results = {m.tool_call_id: m.content for m in second if m.role == "tool"}
+        # An image-only result reads the marker, not "(no output)".
+        assert results == {
+            "call_text": f"captured\n{MARKER}",
+            "call_only": MARKER,
+            "call_error": f"Error: window not found\n{MARKER}",
+        }
+        # The images themselves are not sent yet.
+        assert not [img for m in second for img in m.images if img.data]
+        assert not any(SHOT.data in m.content for m in second)
+
+    @pytest.mark.asyncio
+    async def test_marker_counts_toward_the_memory_write_check(self) -> None:
+        # The output alone fits the check and the turn budget; with the
+        # marker it no longer fits the check.
+        output = "x" * (MAX_MEMORY_TEXT_LEN - 10)
+        llm = FakeLLM(
+            [
+                Message(role="assistant", tool_call=ToolCall("shot", id="call_big")),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _image_agent(llm)
+        agent.executor.register(
+            "shot", _returning(ToolOutput(text=output, images=[SHOT]))
+        )
+        await agent.run("take a large screenshot")
+        window = agent.hippo.working.get_window()
+        [result] = [m for m in window if m.role == "tool"]
+        assert result.content.startswith("[Tool result withheld")
+        size = len(output) + 1 + len(MARKER)
+        assert f"Memory write too large: {size} chars" in result.content
+
+    @pytest.mark.asyncio
+    async def test_openai_request_names_images_but_carries_none(self) -> None:
+        calls = [
+            {
+                "id": f"call_{name}",
+                "type": "function",
+                "function": {"name": name, "arguments": "{}"},
+            }
+            for name in ("shot", "shot_only")
+        ]
+        bodies: list[dict[str, Any]] = []
+        transport = _recording_transport(
+            [
+                {"choices": [{"message": {"role": "assistant", "tool_calls": calls}}]},
+                {"choices": [{"message": {"role": "assistant", "content": "done"}}]},
+            ],
+            bodies,
+        )
+        llm = OpenAICompatLLM(
+            base_url="http://omlx.test/v1", model="m", transport=transport
+        )
+        agent = _image_agent(llm)
+        assert await agent.run("take screenshots") == "done"
+        await agent.close()
+        _assert_markers_without_images(bodies[1])
+
+    @pytest.mark.asyncio
+    async def test_ollama_request_names_images_but_carries_none(self) -> None:
+        calls: list[dict[str, Any]] = [
+            {"function": {"name": name, "arguments": {}}}
+            for name in ("shot", "shot_only")
+        ]
+        bodies: list[dict[str, Any]] = []
+        transport = _recording_transport(
+            [
+                {"message": {"role": "assistant", "content": "", "tool_calls": calls}},
+                {"message": {"role": "assistant", "content": "done"}},
+            ],
+            bodies,
+        )
+        llm = OllamaNativeChat(
+            base_url="http://ollama.test", model="m", transport=transport
+        )
+        agent = _image_agent(llm)
+        assert await agent.run("take screenshots") == "done"
+        await agent.close()
+        _assert_markers_without_images(bodies[1])
 
 
 # ── Window truncation keeps pairs ──────────────────────────────────────────
