@@ -88,6 +88,10 @@ def _config(backend: str, request_timeout_s: Any = None) -> Config:
 async def test_base_url_gives_the_provider_the_flag_or_its_default(
     config_path: Path, argv: tuple[str, ...], seconds: float
 ) -> None:
+    """A configured request_timeout_s does not apply with --base-url."""
+    # --base-url does not read the config file, so its 900 s is not used.
+    save(_config("vllm", 900))
+    before = config_path.read_bytes()
     agent = cli._build_direct_mode_agent(
         _args("--base-url", "http://127.0.0.1:9/v1", *argv)
     )
@@ -95,7 +99,7 @@ async def test_base_url_gives_the_provider_the_flag_or_its_default(
         assert _chat_timeout(agent) == httpx.Timeout(seconds)
     finally:
         await agent.close()
-    assert not config_path.exists()  # --base-url does not read the config file
+    assert config_path.read_bytes() == before
 
 
 # ── The config file's backends ──────────────────────────────────────────────
