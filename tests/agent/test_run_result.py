@@ -697,3 +697,15 @@ class TestConfig:
         data = result.to_dict()
         assert list(data) == SPEC_FIELDS
         assert json.loads(json.dumps(data)) == data
+
+
+# ── Public surface ──────────────────────────────────────────────────────────
+
+
+def test_exported_from_the_package_root() -> None:
+    import localmelo
+
+    assert localmelo.Agent is Agent
+    assert localmelo.AgentOptions is AgentOptions
+    assert localmelo.RunResult is RunResult
+    assert {"Agent", "AgentOptions", "RunResult"} <= set(localmelo.__all__)
