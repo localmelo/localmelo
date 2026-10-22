@@ -161,7 +161,10 @@ class StdioMcpClient:
         Once close() has begun, start() raises McpError instead. A close()
         that comes while the process is being spawned finds no process to
         stop, so start() stops the new process itself, without the
-        handshake, and raises McpError.
+        handshake, and raises McpError. So does a close() that comes after
+        the server's reply to ``initialize`` but before start() returns:
+        start() then stops the server as well and raises McpError, rather
+        than return a closed client.
         """
         if self._closing:
             raise McpError(
@@ -239,6 +242,14 @@ class StdioMcpClient:
         except BaseException:
             await self.close()
             raise
+        if self._closing:
+            # close() began after the server's reply arrived. It may still be
+            # stopping the server; stopping it here too is harmless.
+            await self.close()
+            raise McpError(
+                f"Cannot start MCP server {self.name!r}: the client was closed "
+                "during start-up"
+            )
 
     async def close(self) -> None:
         """Shut the server down: close stdin, then terminate, then kill.

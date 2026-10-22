@@ -27,6 +27,7 @@ from localmelo.melo.checker.validators import (
 from localmelo.support.mcp import McpError, StdioMcpClient, tool_result_to_output
 from localmelo.support.mcp.client import STDERR_LINE_CHARS, STREAM_LIMIT
 from localmelo.tests.mcp.conftest import (
+    Gate,
     SpawnGate,
     fake_server_config,
     read_log,
@@ -663,6 +664,39 @@ class TestCloseDuringStart:
         with pytest.raises(McpError, match="the client is closed"):
             await mcp.start()
         assert len(spawn_gate.processes) == 1
+
+    async def test_close_after_the_handshake_fails_start(
+        self, log_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gate = Gate()
+        mcp = StdioMcpClient(fake_server_config(log_path), shutdown_grace_s=0.5)
+        notify = mcp._notify  # private: sends one notification
+
+        async def notify_then_hold(
+            method: str, params: dict[str, Any] | None = None
+        ) -> None:
+            await notify(method, params)
+            if method == "notifications/initialized":
+                await gate.hold()
+
+        monkeypatch.setattr(mcp, "_notify", notify_then_hold)
+        starting = asyncio.create_task(mcp.start())
+        # The handshake is done, but start() has not returned yet: a close()
+        # now stops the server ...
+        await wait_held(gate, starting)
+        await mcp.close()
+        assert mcp.returncode is not None
+        gate.release()
+        # ... and start() fails instead of returning a closed client.
+        with pytest.raises(
+            McpError, match="Cannot start MCP server 'fake': the client was closed"
+        ):
+            await starting
+        assert not mcp._tasks  # private: no reader task is running
+        assert [m.get("method") for m in read_log(log_path)] == [
+            "initialize",
+            "notifications/initialized",
+        ]
 
     async def test_start_after_close_is_refused(
         self, log_path: Path, spawn_gate: SpawnGate
