@@ -9,6 +9,11 @@ import httpx
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef, describe_images
+from localmelo.support.providers._http import (
+    attempt_headers,
+    malformed_body,
+    post_json,
+)
 from localmelo.support.providers.llm._protocol import (
     parse_tool_calls,
     prepare_extra_body,
@@ -155,6 +160,11 @@ class OllamaNativeChat(BaseLLMProvider):
     Uses the Ollama-specific chat endpoint (NOT the OpenAI-compat layer)
     so that extended-thinking (``think: true``) is supported natively.
 
+    A failed request raises
+    :class:`~localmelo.melo.contracts.providers.ProviderError`. Every
+    request sends ``LLM_REQUEST_ATTEMPT`` in the ``X-Localmelo-Attempt``
+    header.
+
     Parameters
     ----------
     base_url : str
@@ -204,11 +214,13 @@ class OllamaNativeChat(BaseLLMProvider):
         if tools:
             payload["tools"] = [_tool_def_to_openai(t) for t in tools]
 
-        resp = await self._http.post("/api/chat", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-
-        msg = data.get("message", {})
+        path = "/api/chat"
+        resp, data = await post_json(
+            self._http, path, payload, headers=attempt_headers()
+        )
+        msg = data.get("message", {}) if isinstance(data, dict) else None
+        if not isinstance(msg, dict):
+            raise malformed_body(resp, path, "message is not an object")
         thinking = msg.get("thinking") or ""
         content = msg.get("content") or ""
 

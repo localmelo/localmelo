@@ -8,6 +8,11 @@ import httpx
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, describe_images
+from localmelo.support.providers._http import (
+    attempt_headers,
+    malformed_body,
+    post_json,
+)
 from localmelo.support.providers.llm._protocol import (
     parse_tool_calls,
     prepare_extra_body,
@@ -142,6 +147,17 @@ def _messages_to_openai(messages: Sequence[Message]) -> list[dict[str, Any]]:
     return out
 
 
+def _choice_message(data: Any) -> dict[str, Any] | None:
+    """``choices[0].message`` of a chat completion, or ``None`` if it has none."""
+    if not isinstance(data, dict):
+        return None
+    choices = data.get("choices")
+    if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+        return None
+    message = choices[0].get("message")
+    return message if isinstance(message, dict) else None
+
+
 def _reasoning_text(msg: dict[str, Any]) -> str:
     """Return the reasoning text a server split out of the answer, if any.
 
@@ -202,6 +218,11 @@ class OpenAICompatLLM(BaseLLMProvider):
     - **Local**: MLC LLM, Ollama, vLLM, LMStudio, llama.cpp server
     - **Cloud**: OpenAI, Groq, Together AI, Fireworks, DeepSeek, Mistral
 
+    A failed request raises
+    :class:`~localmelo.melo.contracts.providers.ProviderError`. Every
+    request sends ``LLM_REQUEST_ATTEMPT`` in the ``X-Localmelo-Attempt``
+    header.
+
     Parameters
     ----------
     base_url : str
@@ -259,12 +280,13 @@ class OpenAICompatLLM(BaseLLMProvider):
             payload["tools"] = [_tool_def_to_openai(t) for t in tools]
             payload["tool_choice"] = "auto"
 
-        resp = await self._http.post("/chat/completions", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-
-        choice = data["choices"][0]
-        msg = choice["message"]
+        path = "/chat/completions"
+        resp, data = await post_json(
+            self._http, path, payload, headers=attempt_headers()
+        )
+        msg = _choice_message(data)
+        if msg is None:
+            raise malformed_body(resp, path, "no choices[0].message object")
 
         return Message(
             role="assistant",
