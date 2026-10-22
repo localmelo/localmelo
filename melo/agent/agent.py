@@ -136,10 +136,13 @@ def _elide_arguments(call: ToolCall) -> ToolCall:
 
 
 def _tool_result_text(result: ToolResult) -> str:
-    """Content of the ``role="tool"`` message that answers a call."""
+    """Content of the ``role="tool"`` message that answers a call.
+
+    Empty or whitespace-only output reads ``(no output)``.
+    """
     if result.error:
         return f"Error: {result.error}"
-    return result.output or "(no output)"
+    return result.output if result.output.strip() else "(no output)"
 
 
 def _withheld_notice(text: str, reason: str) -> str:

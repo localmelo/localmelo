@@ -278,6 +278,22 @@ class TestMultiCallExecution:
         second = _planning_calls(llm)[1]["messages"]
         assert [m.content for m in second if m.role == "tool"] == ["(no output)"]
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("blank", ["\n\n", "   ", " \t\n"])
+    async def test_whitespace_output_is_marked(self, blank: str) -> None:
+        # e.g. file_read on a blank file: nothing was withheld, so the
+        # result must not read as a withheld-result notice.
+        llm = FakeLLM(
+            [
+                Message(role="assistant", tool_call=_echo_call(blank, "call_w")),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _agent(llm)
+        await agent.run("read a blank file")
+        second = _planning_calls(llm)[1]["messages"]
+        assert [m.content for m in second if m.role == "tool"] == ["(no output)"]
+
 
 # ── Checked writes keep the turn valid ─────────────────────────────────────
 
