@@ -286,7 +286,7 @@ def main() -> None:
     # a pipe into a buffer of about twice its stream limit whether or not
     # the client reads that buffer, so this blocks the server only when a
     # test lowers the limit and the client does not drain stderr.
-    sys.stderr.write("fake-mcp: starting\n" + "." * 200_000 + "\n")
+    sys.stderr.write("fake-mcp: starting\n" + "x" * 200_000 + "\n")
     sys.stderr.flush()
     if MODE == "bom_stdout":
         # No newline: the next write, the first message, follows the mark.

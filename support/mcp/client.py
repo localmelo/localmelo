@@ -57,8 +57,9 @@ STREAM_LIMIT = (
     + 12 * MAX_OUTPUT_LEN
     + 1024 * 1024
 )
-# stderr_tail keeps the last STDERR_TAIL_LINES lines of the server's
-# stderr, each cut to its last STDERR_LINE_CHARS characters.
+# Each line of the server's stderr is cut to its last STDERR_LINE_CHARS
+# characters, after "..." if its start was dropped. That text goes to the
+# debug log and to stderr_tail, which keeps the last STDERR_TAIL_LINES.
 STDERR_TAIL_LINES = 200
 STDERR_LINE_CHARS = 1000
 STDERR_LINE_BYTES = 4 * STDERR_LINE_CHARS  # UTF-8: at most 4 bytes a character
@@ -490,20 +491,29 @@ class StdioMcpClient:
         proc = self._proc
         assert proc is not None and proc.stderr is not None
         partial = b""  # the line still being read
+        cut = False  # whether the start of that line was dropped
         while True:
             chunk = await proc.stderr.read(64 * 1024)
             if not chunk:
                 if partial:
-                    self._add_stderr_line(partial)
+                    self._add_stderr_line(partial, cut)
                 return
-            *lines, partial = (partial + chunk).split(b"\n")
+            *lines, rest = (partial + chunk).split(b"\n")
             for line in lines:
-                self._add_stderr_line(line)
-            partial = partial[-STDERR_LINE_BYTES:]
+                self._add_stderr_line(line, cut)
+                cut = False
+            cut = cut or len(rest) > STDERR_LINE_BYTES
+            partial = rest[-STDERR_LINE_BYTES:]
 
-    def _add_stderr_line(self, line: bytes) -> None:
+    def _add_stderr_line(self, line: bytes, cut: bool) -> None:
+        """Log the end of a stderr line and keep it in stderr_tail.
+
+        *cut* says the reader already dropped the start of the line.
+        """
+        cut = cut or len(line) > STDERR_LINE_BYTES
         text = line[-STDERR_LINE_BYTES:].decode("utf-8", errors="replace").rstrip()
-        text = text[-STDERR_LINE_CHARS:]
+        if cut or len(text) > STDERR_LINE_CHARS:
+            text = "..." + text[-STDERR_LINE_CHARS:]
         self.stderr_tail.append(text)
         logger.debug("[mcp %s] %s", self.name, text)
 

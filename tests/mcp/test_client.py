@@ -8,6 +8,7 @@ import contextlib
 import dataclasses
 import hashlib
 import json
+import logging
 import os
 import shlex
 import signal
@@ -75,32 +76,62 @@ class TestHandshake:
     async def test_stderr_tail_keeps_the_end_of_each_line(
         self, client: StdioMcpClient
     ) -> None:
-        # The fake server's second stderr line is 200,000 dots long.
+        # The fake server's second stderr line is 200,000 characters long.
         assert list(client.stderr_tail) == [
             "fake-mcp: starting",
-            "." * STDERR_LINE_CHARS,
+            "..." + "x" * STDERR_LINE_CHARS,
         ]
 
-    async def test_stderr_lines_across_chunks(self, log_path: Path) -> None:
+    async def test_stderr_lines_across_chunks(
+        self, log_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        caplog.set_level(logging.DEBUG, logger="localmelo.support.mcp.client")
         mcp = StdioMcpClient(fake_server_config(log_path))
         stderr = asyncio.StreamReader()
         # private: a stand-in process, so the reader sees exactly these chunks
         mcp._proc = cast(asyncio.subprocess.Process, SimpleNamespace(stderr=stderr))
+        full = "f" * STDERR_LINE_CHARS  # as long as a kept line can be
         long_line = "x" * 100_000 + "end"
+        wide = "\U0001f600" * STDERR_LINE_CHARS  # 4 bytes a character in UTF-8
 
         async def write() -> None:
-            for chunk in ("first\r\nsec", "ond\n", long_line, "\nno newline at EOF"):
+            chunks = (
+                "first\r\nsec",
+                "ond\n",
+                full + "\r\n",  # fits
+                "+" + full + "\n",  # one character too long
+                "+" + wide + "\n",  # one byte too long
+                long_line,
+                # 6,000 bytes: before this line ends, the reader drops all
+                # but its last 4,000 bytes, which are 1,000 characters.
+                "\n" + "\U0001f600" * 500 + wide,
+                "\nno newline at EOF",
+            )
+            for chunk in chunks:
                 stderr.feed_data(chunk.encode())
                 await asyncio.sleep(0)  # the reader takes each chunk alone
             stderr.feed_eof()
 
         await asyncio.wait_for(asyncio.gather(mcp._read_stderr(), write()), 5)
-        assert list(mcp.stderr_tail) == [
+        # A line whose start was dropped begins with "...".
+        expected = [
             "first",
             "second",
-            long_line[-STDERR_LINE_CHARS:],
+            full,
+            "..." + full,
+            "..." + wide,
+            "..." + long_line[-STDERR_LINE_CHARS:],
+            "..." + wide,
             "no newline at EOF",
         ]
+        assert list(mcp.stderr_tail) == expected
+        # The debug log shows the same text.
+        logged = [
+            record.getMessage()
+            for record in caplog.records
+            if record.name == "localmelo.support.mcp.client"
+        ]
+        assert logged == [f"[mcp fake] {line}" for line in expected]
 
 
 class TestToolCalls:
