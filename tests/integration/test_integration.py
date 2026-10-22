@@ -1082,15 +1082,17 @@ class TestThreeWayBoundary:
     @pytest.mark.asyncio
     async def test_truncated_output_flows_through_all_layers(self) -> None:
         """Large tool output -> Checker truncates -> step record truncated
-        -> memory-write blocks oversized tool message -> planning prompt
-        carries a short notice bound to the call instead of the output.
+        -> memory-write rejects the oversized tool message -> planning
+        prompt carries the start of the output, cut to fit, bound to the
+        call.
 
         This exercises three boundaries in sequence:
         1. Executor result checker truncates output > MAX_OUTPUT_LEN
         2. Agent memory-write checker rejects the tool message because
-           truncation tail + tool-name prefix push it over MAX_MEMORY_TEXT_LEN
-           (both limits are currently 50,000 — any truncated message exceeds)
-        3. The follow-up planning prompt answers the call with a notice
+           the truncation tail pushes it over MAX_MEMORY_TEXT_LEN (both
+           limits are currently 50,000 — any truncated message exceeds)
+        3. The follow-up planning prompt answers the call with the
+           output's start, cut to the room the turn has left
         """
         from localmelo.melo.checker.validators import (
             MAX_MEMORY_TEXT_LEN,
@@ -1137,19 +1139,19 @@ class TestThreeWayBoundary:
         assert len(truncated_output) < raw_len
 
         # ── Boundary 2: truncated tool message exceeds memory limit ──
-        # The agent builds: f"[{tool_name}] {truncated_output}"
-        tool_msg_len = len(f"[{tool_name}] ") + len(truncated_output)
+        # The tool message is the truncated output itself.
+        tool_msg_len = len(truncated_output)
         assert tool_msg_len > MAX_MEMORY_TEXT_LEN, (
             f"Expected tool message ({tool_msg_len}) to exceed "
             f"MAX_MEMORY_TEXT_LEN ({MAX_MEMORY_TEXT_LEN}); "
             f"if limits diverge, this test should be updated"
         )
 
-        # ── Boundary 3: planning prompt carries a notice, not the output ──
-        # Memory-write blocked the oversized result, but the tool call still
-        # needs exactly one answer (OpenAI-compatible servers reject an
-        # unanswered call), so the prompt holds a short notice bound to the
-        # same tool_call_id instead of the raw output.
+        # ── Boundary 3: planning prompt carries the output, cut to fit ──
+        # Memory-write rejected the oversized result, but the tool call
+        # still needs exactly one answer (OpenAI-compatible servers reject
+        # an unanswered call), so the prompt holds the output's start, cut
+        # to the room the turn has left and bound to the same tool_call_id.
         planning = _planning_calls(llm)
         assert len(planning) >= 2
         second_plan_msgs = planning[1]["messages"]
@@ -1157,10 +1159,12 @@ class TestThreeWayBoundary:
         tool_msgs = [m for m in second_plan_msgs if m.role == "tool"]
         assert len(calls) == 1 and len(tool_msgs) == 1
         assert tool_msgs[0].tool_call_id == calls[0].id
-        assert "withheld" in tool_msgs[0].content
-        assert len(tool_msgs[0].content) < 1_000, (
-            f"Expected a short notice instead of the {tool_msg_len}-char "
-            f"result, got {len(tool_msgs[0].content)} chars"
+        content = tool_msgs[0].content
+        assert content.startswith("x" * 49_000)
+        assert content.endswith(" more characters]")
+        assert len(content) < MAX_MEMORY_TEXT_LEN, (
+            f"Expected the {tool_msg_len}-char result cut to fit working "
+            f"memory, got {len(content)} chars"
         )
 
         await agent.close()

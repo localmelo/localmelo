@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import re
 from collections import deque
 from collections.abc import Callable, Coroutine
 from pathlib import Path
@@ -14,7 +15,12 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import REFLECTION_PROMPT
-from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
+from localmelo.melo.agent.agent import WITHHELD_PREVIEW_CHARS, _cut_to
+from localmelo.melo.checker.validators import (
+    MAX_MEMORY_TEXT_LEN,
+    MAX_OUTPUT_LEN,
+    TRUNCATION_SUFFIX,
+)
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.executor import ToolOutput
 from localmelo.melo.memory.history.sqlite import SqliteHistory
@@ -190,6 +196,17 @@ def assert_protocol_valid(messages: list[Message]) -> None:
     assert not pending, f"unanswered tool calls {pending}"
 
 
+_CUT_MARKER = re.compile(r"\n\.\.\. \[truncated: (\d+) more characters\]$")
+
+
+def _cut_parts(content: str) -> tuple[str, int]:
+    """Split a result cut to fit working memory into the start it kept and
+    the number of characters it left out."""
+    match = _CUT_MARKER.search(content)
+    assert match, f"not a cut result: ...{content[-80:]!r}"
+    return content[: match.start()], int(match.group(1))
+
+
 def _is_reflection(call: dict[str, Any]) -> bool:
     return bool(call["messages"]) and call["messages"][0].content.startswith(
         REFLECTION_PROMPT
@@ -308,9 +325,30 @@ class TestMultiCallExecution:
 # ── Checked writes keep the turn valid ─────────────────────────────────────
 
 
+class TestCutTo:
+    @pytest.mark.parametrize("length", [250, 999, 1_000, 1_001, 60_000, 100_000])
+    @pytest.mark.parametrize("room", [WITHHELD_PREVIEW_CHARS, 1_000, 49_950])
+    def test_fits_the_room_and_counts_what_it_left_out(
+        self, length: int, room: int
+    ) -> None:
+        text = "".join(chr(ord("a") + i % 26) for i in range(length))
+        cut = _cut_to(text, room)
+        if length <= room:
+            assert cut == text
+            return
+        # The marker's count may have fewer digits than the length.
+        assert room - len(str(length)) <= len(cut) <= room
+        kept, left_out = _cut_parts(cut)
+        assert text.startswith(kept)
+        assert len(kept) + left_out == length
+
+
 class TestCheckedTurnWrites:
     @pytest.mark.asyncio
-    async def test_rejected_result_becomes_bound_notice(self) -> None:
+    async def test_too_long_result_is_cut_to_the_room_left(self) -> None:
+        # Cut to MAX_OUTPUT_LEN by the executor-result check, the result is
+        # still too long for one memory write. Working memory keeps as much
+        # of it as the turn has room for, under the same tool_call_id.
         big = "z" * 60_000
         llm = FakeLLM(
             [
@@ -327,11 +365,22 @@ class TestCheckedTurnWrites:
         await agent.run("echo big")
         window = agent.hippo.working.get_window()
         assert_protocol_valid(window)
-        notice = [m for m in window if m.role == "tool"]
-        assert len(notice) == 1
-        assert notice[0].tool_call_id == "call_big"
-        assert notice[0].content.startswith("[Tool result withheld")
-        assert len(notice[0].content) < 1_000
+        [result] = [m for m in window if m.role == "tool"]
+        assert result.tool_call_id == "call_big"
+
+        # History keeps the checked text; working memory its start, with a
+        # marker that counts the characters left out.
+        task = next(iter(agent.hippo.history._tasks.values()))
+        [step] = await agent.hippo.history.get_steps(task.task_id)
+        assert step.tool_result is not None
+        checked = step.tool_result.output
+        assert checked == "z" * MAX_OUTPUT_LEN + TRUNCATION_SUFFIX
+        kept, left_out = _cut_parts(result.content)
+        assert checked.startswith(kept)
+        assert len(kept) + left_out == len(checked)
+        # The call keeps its share of the turn; the result gets the rest.
+        room = MAX_MEMORY_TEXT_LEN - len('echo({"text": "x"})')
+        assert room - 10 <= len(result.content) <= room
 
     @pytest.mark.asyncio
     async def test_step_results_share_one_budget(self) -> None:
@@ -365,10 +414,17 @@ class TestCheckedTurnWrites:
         contents = [content for _, content in results]
         assert sum(len(c) for c in contents) <= MAX_MEMORY_TEXT_LEN
         assert contents.count(part) == 1
-        assert sum(c.startswith("[Tool result withheld") for c in contents) == 2
+        # One result is left less room than a preview and is withheld; the
+        # next is cut to the room the others leave it.
+        withheld = [c for c in contents if c.startswith("[Tool result withheld")]
+        cut = [c for c in contents if c != part and c not in withheld]
+        assert (len(withheld), len(cut)) == (1, 1)
+        kept, left_out = _cut_parts(cut[0])
+        assert kept == "x" * len(kept)
+        assert len(kept) + left_out == len(part)
 
     @pytest.mark.asyncio
-    async def test_largest_results_are_withheld_first(self) -> None:
+    async def test_largest_results_are_cut_first(self) -> None:
         sizes = {"a": 40_000, "b": 10_000, "c": 30_000}
         calls = [_echo_call(tag, f"call_{tag}") for tag in sizes]
         llm = FakeLLM(
@@ -386,10 +442,13 @@ class TestCheckedTurnWrites:
         await agent.run("read three parts with echo")
         window = agent.hippo.working.get_window()
         results = {m.tool_call_id: m.content for m in window if m.role == "tool"}
-        # Withholding the 40k result is enough; the others stay whole. The
-        # notice counts the 59 chars of rendered calls with the results.
-        assert results["call_a"].startswith("[Tool result withheld")
-        assert "too large: 80059 chars (max 50000)" in results["call_a"]
+        # Cutting the 40k result is enough; the others stay whole. It gets
+        # what the 59 chars of rendered calls and the others leave.
+        room = MAX_MEMORY_TEXT_LEN - 59 - 10_000 - 30_000
+        assert room - 10 <= len(results["call_a"]) <= room
+        kept, left_out = _cut_parts(results["call_a"])
+        assert kept == "a" * len(kept)
+        assert len(kept) + left_out == 40_000
         assert results["call_b"] == "b" * 10_000
         assert results["call_c"] == "c" * 30_000
 
@@ -481,8 +540,15 @@ class TestCheckedTurnWrites:
         ]
         results = {m.tool_call_id: m.content for m in turn[1:]}
         assert results["call_save"] == "saved 49000 chars"
-        assert results["call_read"].startswith("[Tool result withheld")
-        assert "Tool calls and results too large" in results["call_read"]
+        # The large result is cut to the few hundred characters left.
+        calls_chars = len(f'save({json.dumps({"text": draft})})') + len(
+            '\nread({"text": "ref.txt"})'
+        )
+        room = MAX_MEMORY_TEXT_LEN - calls_chars - len(results["call_save"])
+        assert WITHHELD_PREVIEW_CHARS <= len(results["call_read"]) <= room
+        kept, left_out = _cut_parts(results["call_read"])
+        assert kept == "r" * len(kept)
+        assert len(kept) + left_out == 49_000
         # The session's next run is not affected.
         assert await agent.run("unrelated question") == "next"
 
@@ -688,9 +754,10 @@ class TestToolResultImages:
         assert result.images == [SHOT.as_reference()]
 
     @pytest.mark.asyncio
-    async def test_withheld_result_still_names_its_images(self) -> None:
+    async def test_cut_result_still_names_its_images(self) -> None:
         # Cut to MAX_OUTPUT_LEN and marked as truncated by the executor-
-        # result check, the output is still too large for working memory.
+        # result check, the output is still too large for working memory,
+        # which keeps its start.
         llm = FakeLLM(
             [
                 Message(role="assistant", tool_call=ToolCall("shot", id="call_big")),
@@ -701,10 +768,44 @@ class TestToolResultImages:
         await agent.run("take a large screenshot")
         window = agent.hippo.working.get_window()
         [result] = [m for m in window if m.role == "tool"]
+        text, marker = result.content.rsplit("\n", 1)
+        assert marker == MARKER
+        kept, left_out = _cut_parts(text)
+        assert kept == "x" * len(kept)
+        assert len(kept) + left_out == MAX_OUTPUT_LEN + len(TRUNCATION_SUFFIX)
+        # The rendered call "shot({})" takes 8 of the turn's characters.
+        assert len(text) <= MAX_MEMORY_TEXT_LEN - 8
+        # Unlike a withheld result, a cut one keeps its image references.
+        assert result.images == [SHOT.as_reference()]
+
+    @pytest.mark.asyncio
+    async def test_a_result_left_no_room_is_withheld(self) -> None:
+        # The call's arguments leave its result less room than a preview,
+        # so the result is withheld rather than cut to almost nothing. Like
+        # any withheld result it keeps no images, but still names them.
+        call = ToolCall("annotate", arguments={"text": "a" * 49_900}, id="call_a")
+        llm = FakeLLM(
+            [
+                Message(role="assistant", tool_call=call),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _image_agent(llm)
+
+        async def _annotate(text: str) -> ToolOutput:
+            return ToolOutput(text="y" * 1_000, images=[SHOT])
+
+        agent.hippo.register_tool(
+            ToolDef(name="annotate", description="annotate", parameters={})
+        )
+        agent.executor.register("annotate", _annotate)
+        assert await agent.run("annotate the screenshot") == "done"
+        window = agent.hippo.working.get_window()
+        [result] = [m for m in window if m.role == "tool"]
         notice, preview, marker = result.content.split("\n")
         assert notice.startswith("[Tool result withheld")
-        assert "Memory write too large: 50016 chars" in notice
-        assert preview == "x" * 200
+        assert "Tool calls and results too large" in notice
+        assert preview == "y" * WITHHELD_PREVIEW_CHARS
         assert marker == MARKER
         assert result.images == []
 
@@ -788,7 +889,7 @@ class TestToolResultImages:
         assert result.images == []
 
     @pytest.mark.asyncio
-    async def test_turn_budget_withholds_the_images_too(self) -> None:
+    async def test_turn_budget_cuts_a_result_with_images(self) -> None:
         # Each result fits the memory-write check on its own; together they
         # do not fit the turn budget, so the larger one gives way.
         calls = [
@@ -814,12 +915,15 @@ class TestToolResultImages:
         page, shot = results["call_page"], results["call_shot"]
         assert page.content == f"{'p' * 20_000}\n{MARKER}"
         assert page.images == [SHOT.as_reference()]
-        # Like a result the memory-write check rejects, it keeps no images
-        # on its message, but the notice still names them.
-        assert shot.content.startswith("[Tool result withheld")
-        assert "Tool calls and results too large" in shot.content
-        assert shot.content.endswith(f"\n{MARKER}")
-        assert shot.images == []
+        # Cut to the room the other result leaves it, it keeps its images,
+        # and its message still ends with the line that names them.
+        text, marker = shot.content.rsplit("\n", 1)
+        assert marker == MARKER
+        kept, left_out = _cut_parts(text)
+        assert kept == "x" * len(kept)
+        assert len(kept) + left_out == 30_000
+        assert len(text) <= MAX_MEMORY_TEXT_LEN - len("page({})\nshot({})") - 20_000
+        assert shot.images == [SHOT.as_reference()]
 
     @pytest.mark.asyncio
     async def test_openai_request_names_images_but_carries_none(self) -> None:

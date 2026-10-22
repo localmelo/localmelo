@@ -159,7 +159,8 @@ def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
     return [Message(role="system", content="\n".join(parts))]
 
 
-# Characters of a withheld tool result that stay visible to the model.
+# Characters of a withheld tool result that stay visible to the model. A
+# result left less room than this in its turn is withheld, not cut.
 WITHHELD_PREVIEW_CHARS = 200
 
 # Key of the placeholder that replaces tool-call arguments too long for
@@ -229,10 +230,11 @@ def _tool_result_text(result: ToolResult) -> str:
 def _tool_message_content(text: str, images: Sequence[ImagePart]) -> str:
     """Content of the ``role="tool"`` message that answers a call.
 
-    *text* is the result's text (see :func:`_tool_result_text`) or the
-    notice that replaced it. The images of a result are not sent to the
-    model, so a result with images ends with a line that names them (see
-    :func:`describe_images`), whether its text is kept or withheld.
+    *text* is the result's text (see :func:`_tool_result_text`), cut to
+    fit or not, or the notice that replaced it. The images of a result
+    are not sent to the model, so a result with images ends with a line
+    that names them (see :func:`describe_images`), whether its text is
+    kept, cut or withheld.
     """
     return "\n".join(part for part in (text, describe_images(images)) if part)
 
@@ -246,16 +248,39 @@ def _withheld_notice(text: str, reason: str) -> str:
     return f"{notice} First {len(preview)} characters follow.]\n{preview}"
 
 
+def _truncation_marker(left_out: int) -> str:
+    """Ends a tool result that was cut to fit working memory."""
+    return f"\n... [truncated: {left_out} more characters]"
+
+
+def _cut_to(text: str, room: int) -> str:
+    """*text*, or its start and a truncation marker, in at most *room* chars.
+
+    The marker says how many characters of *text* were left out (see
+    :func:`_truncation_marker`). Every caller leaves at least
+    ``WITHHELD_PREVIEW_CHARS`` of room, which is ample for the marker.
+    """
+    if len(text) <= room:
+        return text
+    # The marker is never longer than this one, whose count is the
+    # largest possible, so the cut text never passes *room*.
+    keep = max(room - len(_truncation_marker(len(text))), 0)
+    return text[:keep] + _truncation_marker(len(text) - keep)
+
+
 def _within_turn_budget(
     texts: Sequence[str], withheld: set[int], calls_chars: int
 ) -> list[str]:
-    """Return *texts* with the largest replaced by notices until they fit.
+    """Return *texts* with the largest cut, or replaced, until they fit.
 
     The rendered tool calls of one turn (*calls_chars* characters) and its
     tool results share ``MAX_MEMORY_TEXT_LEN`` characters: the calls keep
-    their share and the results get the rest. Indices in *withheld*
-    already hold notices and are left alone; the index of each text
-    replaced here is added to it.
+    their share and the results get the rest. While the results do not
+    fit, the largest is cut to the room the others leave it, with a
+    marker that says how much was left out (see :func:`_cut_to`). A
+    result left less than ``WITHHELD_PREVIEW_CHARS`` of room is replaced
+    by the withheld notice instead, and its index added to *withheld*.
+    Indices already in *withheld* hold notices and are left alone.
     """
     fitted = list(texts)
     budget = MAX_MEMORY_TEXT_LEN - calls_chars
@@ -274,12 +299,17 @@ def _within_turn_budget(
     for index in largest_first:
         if total <= budget:
             break
-        notice = _withheld_notice(fitted[index], reason)
-        if len(notice) >= len(fitted[index]):
-            break  # only results a notice would not shorten are left
-        total += len(notice) - len(fitted[index])
-        fitted[index] = notice
-        withheld.add(index)
+        text = fitted[index]
+        room = budget - (total - len(text))
+        if room >= WITHHELD_PREVIEW_CHARS:
+            kept = _cut_to(text, room)
+        else:
+            kept = _withheld_notice(text, reason)
+            if len(kept) >= len(text):
+                break  # only results a notice would not shorten are left
+            withheld.add(index)
+        total += len(kept) - len(text)
+        fitted[index] = kept
     return fitted
 
 
@@ -806,28 +836,34 @@ class Agent:
         Every part goes through ``Checker.check_memory_write``. Oversized
         arguments are elided (see :meth:`_checked_calls`), rejected
         assistant text is dropped while its tool calls are kept, and a
-        rejected tool result is replaced by a short notice bound to the
-        same ``tool_call_id``. No call or result is ever left out, so the
-        turn stays protocol-valid and the model still sees every call it
-        made and what each returned. A result's images (references, see
-        :func:`_image_references`) are checked with its text. A result
-        replaced by a notice, by that check or by the budget below, keeps
-        no images on its message, but its message still ends with the
-        line that names them (see :func:`_tool_message_content`).
+        tool result too long for working memory is cut (see below). A
+        result the check rejects for any other reason is replaced by a
+        short notice bound to the same ``tool_call_id``. No call or result
+        is ever left out, so the turn stays protocol-valid and the model
+        still sees every call it made and what each returned. A result's
+        images (references, see :func:`_image_references`) are checked
+        with its text, cut as it will be kept. A result replaced by a
+        notice keeps no images on its message, but its message still
+        ends with the line that names them (see
+        :func:`_tool_message_content`); a cut result keeps its images.
 
         The whole turn also shares one budget of ``MAX_MEMORY_TEXT_LEN``
         characters, half the 100,000 at which ``Checker.pre_plan`` fails
         the task, so that one step leaves room in the next planning
         prompt. The calls keep their share; the results share the rest,
-        the largest replaced by the notice first (see
-        :func:`_within_turn_budget`); and the assistant text, which history
-        keeps, is dropped when it does not fit beside them. Notices, and
-        results shorter than one, cannot shrink further, so a turn whose
-        calls nearly fill the budget, or a turn of hundreds of calls, can
-        still pass it.
+        the largest cut first to the room the others leave it, ending
+        with a marker that says how many characters were left out (see
+        :func:`_within_turn_budget`). This is also how a result longer
+        than one memory write allows is shortened. A result left less
+        than ``WITHHELD_PREVIEW_CHARS`` of room is replaced by the notice
+        instead. The assistant text, which history keeps, is dropped when
+        it does not fit beside them. Notices, and results shorter than
+        one, cannot shrink further, so a turn whose calls nearly fill the
+        budget, or a turn of hundreds of calls, can still pass it.
+        History keeps each result as the executor-result check left it.
 
         The lines that name images are added after the check and the
-        budget and count toward neither, so they never withhold a result
+        budget and count toward neither, so they never shorten a result
         that fits without them. Each is at most a few hundred characters,
         so a turn can pass the budget by that much per result with images.
         """
@@ -838,11 +874,13 @@ class Agent:
         withheld: set[int] = set()
         for index, result in enumerate(results):
             text = _tool_result_text(result)
-            # A memory write needs text: an image-only result is checked
-            # with the line that names its images.
+            # A text too long for one write is checked as the budget below
+            # keeps it: cut. A memory write needs text: an image-only
+            # result is checked with the line that names its images.
+            checked = _cut_to(text, MAX_MEMORY_TEXT_LEN)
             check = self.checker.check_memory_write(
                 MemoryWritePayload(
-                    text=text or describe_images(result.images),
+                    text=checked or describe_images(result.images),
                     role="tool",
                     images=list(result.images),
                 )

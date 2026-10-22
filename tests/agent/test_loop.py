@@ -9,6 +9,7 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import Chat
+from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
@@ -530,7 +531,7 @@ class TestSanitizedOutputInMemory:
         assert len(tool_result.output) < 60_000
 
     @pytest.mark.asyncio
-    async def test_truncated_tool_msg_blocked_from_short_memory(self) -> None:
+    async def test_truncated_tool_msg_is_cut_in_short_memory(self) -> None:
         """When the call's arguments and its truncated output are both too
         long for memory, nothing oversized reaches short-term memory, but
         the next planning prompt still holds the call and its result."""
@@ -557,18 +558,19 @@ class TestSanitizedOutputInMemory:
         assert result == "ok"
 
         # The call already ran, so its turn stays: the same id with the
-        # 60k-char arguments replaced by a placeholder, answered by a
-        # notice that stands in for the truncated output.
+        # 60k-char arguments replaced by a placeholder, answered by the
+        # start of the truncated output, cut to the room the turn has left.
         second_call_msgs = llm.calls[1]["messages"]
         sent_calls = [tc for m in second_call_msgs for tc in m.tool_calls]
         assert [tc.id for tc in sent_calls] == [call.id]
         assert sent_calls[0].arguments == {"_elided": "60012 chars withheld"}
         tool_msgs = [m for m in second_call_msgs if m.role == "tool"]
         assert [m.tool_call_id for m in tool_msgs] == [call.id]
-        assert tool_msgs[0].content.startswith("[Tool result withheld")
+        assert tool_msgs[0].content.startswith("b" * 49_000)
+        assert tool_msgs[0].content.endswith(" more characters]")
 
         window = agent.hippo.short.get_window()
-        assert all(len(m.content) < 1_000 for m in window)
+        assert all(len(m.content) < MAX_MEMORY_TEXT_LEN for m in window)
 
         # History keeps the real call, which the executor ran as sent.
         tasks = list(agent.hippo.history._tasks.values())
@@ -579,10 +581,10 @@ class TestSanitizedOutputInMemory:
         assert steps[0].tool_result.output.startswith("b" * 50_000)
 
     @pytest.mark.asyncio
-    async def test_truncated_result_blocked_with_small_arguments(self) -> None:
+    async def test_truncated_result_is_cut_with_small_arguments(self) -> None:
         """When both executor truncation and memory-write check apply to
         a result, nothing oversized reaches short-term memory: the call
-        keeps its arguments and is answered by a short notice."""
+        keeps its arguments and is answered by the result's start."""
         llm = FakeLLM()
         call = ToolCall(tool_name="big_read", arguments={"path": "big.txt"})
         llm.enqueue(Message(role="assistant", content="big read", tool_call=call))
@@ -621,19 +623,20 @@ class TestSanitizedOutputInMemory:
         ]
         tool_msgs = [m for m in second_call_msgs if m.role == "tool"]
         assert [m.tool_call_id for m in tool_msgs] == [call.id]
-        assert tool_msgs[0].content.startswith("[Tool result withheld")
+        assert tool_msgs[0].content.startswith("b" * 49_000)
+        assert tool_msgs[0].content.endswith(" more characters]")
 
         window = agent.hippo.short.get_window()
-        assert all(len(m.content) < 1_000 for m in window)
+        assert all(len(m.content) < MAX_MEMORY_TEXT_LEN for m in window)
 
 
 class TestToolResultMemoryWriteBlocked:
     """Tool result memory write is checked and can be blocked."""
 
     @pytest.mark.asyncio
-    async def test_huge_tool_error_blocked(self) -> None:
-        """A tool returning a huge error string must not be written to
-        short-term memory if the memory-write check blocks it."""
+    async def test_huge_tool_error_is_cut(self) -> None:
+        """A tool returning a huge error string must not be written whole
+        to short-term memory: the memory-write check rejects it."""
         llm = FakeLLM()
         llm.enqueue(
             Message(
@@ -661,16 +664,17 @@ class TestToolResultMemoryWriteBlocked:
         result = await agent.run("do fail")
         assert result == "handled"
 
-        # The huge error is blocked from short-term memory by the
-        # memory-write checker (text > 50k chars). The call still gets an
-        # answer: a short notice bound to the same tool_call_id.
+        # The huge error is too large for the memory-write checker (text >
+        # 50k chars), so short-term memory keeps its start, cut to the room
+        # the turn has left, bound to the same tool_call_id.
         window = agent.hippo.short.get_window()
         calls = [tc for m in window for tc in m.tool_calls]
         tool_msgs = [m for m in window if m.role == "tool"]
         assert len(calls) == 1 and len(tool_msgs) == 1
         assert tool_msgs[0].tool_call_id == calls[0].id
-        assert tool_msgs[0].content.startswith("[Tool result withheld")
-        assert len(tool_msgs[0].content) < 1_000
+        assert tool_msgs[0].content.startswith("Error: " + "E" * 49_000)
+        assert tool_msgs[0].content.endswith(" more characters]")
+        assert len(tool_msgs[0].content) < MAX_MEMORY_TEXT_LEN
 
 
 class TestDirectAnswerEdgeCases:
