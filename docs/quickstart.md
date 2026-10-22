@@ -123,6 +123,14 @@ gateway and its web pages show: the result when it is non-empty, otherwise
 `[<status>] <error>`, for example `[budget_exhausted] Max steps reached`.
 One agent runs one task at a time.
 
+`Agent(..., tool_providers=[...])` adds tools from outside the core, such
+as the tools of MCP servers (`McpToolProvider` from `localmelo.support.mcp`,
+named `mcp__<server>__<tool>`). The first run starts every provider and
+registers its tools next to the built-ins; a name that is already taken
+ends the run as `setup_error`. Provided tools pass the same executor checks
+as the built-ins, each call bounded by the timeout its provider gives.
+`Agent.close()` closes the providers.
+
 ## Run results
 
 Every run ends with one of these statuses:
@@ -134,7 +142,8 @@ Every run ends with one of these statuses:
 | `budget_exhausted` | `max_steps` or `max_attempts` ran out before a final answer. |
 | `stuck` | Stuck detection fired (the same tool calls, or the same errors, three steps in a row) with `attempt_policy="none"`. With `"reflect"`, a reflection decides what happens next instead. |
 | `provider_error` | A request to the model server failed: an HTTP error status, a timeout, a connection failure or a malformed response body (see [Provider errors](#provider-errors)). `error` describes the failed request; no traceback is logged. |
-| `timeout` | The run was still going after `AgentOptions.timeout_s` seconds and was cancelled where it stood: an LLM request in flight is abandoned and counts in `llm_errors`, and a `shell_exec` command is killed together with every process it started. `error` is `Timed out after <timeout_s> s`. |
+| `setup_error` | The agent's tool providers (see [Python API](#python-api)) could not be set up at the start of its first run: one failed to start, for example an MCP server that could not be launched, or a provided tool has the name of a tool already registered. `error` says which. No provider is left running, and setup is not retried: every later run on the same agent ends as `setup_error` too, with `error` naming the first failure. |
+| `timeout` | The run was still going after `AgentOptions.timeout_s` seconds and was cancelled where it stood: an LLM request in flight is abandoned and counts in `llm_errors`, and a `shell_exec` command is killed together with every process it started. Tool providers still being set up are closed, so later runs end as `setup_error`. `error` is `Timed out after <timeout_s> s`. |
 | `crashed` | An unexpected exception ended the run. `error` is `<ExceptionType>: <message>` and the traceback is logged. A run cancelled from outside is recorded as `crashed` too, and the cancellation propagates. |
 
 `Agent.run_task()` returns the run as a `RunResult`; `RunResult.to_dict()`
@@ -160,8 +169,8 @@ gives the same fields as a plain dict, in this order:
 `config` holds `max_steps`, `attempt_policy`, `steps_per_attempt`,
 `max_attempts`, `tool_exposure`, `builtins` (sorted names of the registered
 built-in tools), `memory`, `memory_dir` (the resolved directory, or `null`),
-`timeout_s` (or `null`) and `tools` (sorted names of every registered tool),
-so every record says which mode it ran in.
+`timeout_s` (or `null`) and `tools` (sorted names of every registered tool,
+built-in and provided), so every record says which mode it ran in.
 
 Whatever the status, the run's task record is saved with it; see
 [memory.md → Task records](memory.md#task-records).
