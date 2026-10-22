@@ -51,9 +51,11 @@ class FakeToolProvider(BaseToolProvider):
     """Provides tools that answer ``"<tool>: <text>"`` after *delay_s*.
 
     *error* is raised by start() and *close_error* by close(). With a
-    *gate*, start() waits until the gate is set. ``starting`` is set once
-    start() is called, ``closed`` once close() is. *events* records each
-    start and close in order, and may be shared between providers.
+    *gate*, start() waits until the gate is set, and with a *close_gate*,
+    close() does. ``starting`` is set once start() is called, ``closed``
+    once close() is; ``closes_done`` counts the close() calls that ran to
+    their end. *events* records each start and close in order, and may be
+    shared between providers.
     """
 
     def __init__(
@@ -66,6 +68,7 @@ class FakeToolProvider(BaseToolProvider):
         error: Exception | None = None,
         close_error: Exception | None = None,
         gate: asyncio.Event | None = None,
+        close_gate: asyncio.Event | None = None,
         events: list[str] | None = None,
     ) -> None:
         self.name = name
@@ -75,11 +78,13 @@ class FakeToolProvider(BaseToolProvider):
         self.error = error
         self.close_error = close_error
         self.gate = gate
+        self.close_gate = close_gate
         self.events = events if events is not None else []
         self.starting = asyncio.Event()
         self.closed = asyncio.Event()
         self.starts = 0
         self.closes = 0
+        self.closes_done = 0
         # start() returned its tools and close() was not called since.
         self.running = False
 
@@ -113,6 +118,9 @@ class FakeToolProvider(BaseToolProvider):
         self.running = False
         self.events.append(f"close {self.name}")
         self.closed.set()
+        if self.close_gate is not None:
+            await self.close_gate.wait()
+        self.closes_done += 1
         if self.close_error is not None:
             raise self.close_error
 
@@ -397,6 +405,28 @@ class TestSetupErrors:
         assert (first.closes, second.closes) == (1, 1)
         assert "Could not close tool provider FakeToolProvider" in caplog.text
 
+    @pytest.mark.asyncio
+    async def test_a_cancellation_during_the_clean_up_waits_for_it(self) -> None:
+        gate = asyncio.Event()
+        slow = FakeToolProvider("a", ["a_tool"], close_gate=gate)
+        failing = FakeToolProvider("b", error=ConnectionError("b is down"))
+        agent = _agent(FakeLLM(), [slow, failing])
+        running = asyncio.create_task(agent.run_task("q"))
+        await slow.closed.wait()  # b failed to start; a is being closed
+
+        running.cancel()
+        await asyncio.sleep(0.05)
+        # The cancellation does not interrupt a's close() ...
+        assert not running.done()
+        assert (slow.closes_done, failing.closes) == (0, 0)
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await running
+        # ... and propagates once every started provider is closed.
+        assert (slow.closes_done, failing.closes_done) == (1, 1)
+        [task] = _tasks(agent)
+        assert (task.status, task.result) == ("crashed", "CancelledError")
+
 
 # ── timeout_s ───────────────────────────────────────────────────────────────
 
@@ -423,6 +453,46 @@ class TestSetupTimeout:
             "Tool setup failed in an earlier run: CancelledError",
         )
         assert provider.starts == 1
+
+    @pytest.mark.asyncio
+    async def test_a_timeout_during_the_clean_up_does_not_cut_it_short(
+        self,
+    ) -> None:
+        events: list[str] = []
+        gate = asyncio.Event()
+        slow = FakeToolProvider("a", ["a_tool"], close_gate=gate, events=events)
+        failing = FakeToolProvider(
+            "b", error=ConnectionError("b is down"), events=events
+        )
+        unused = FakeToolProvider("c", ["c_tool"], events=events)
+        llm = FakeLLM([_answer("never sent")])
+        agent = _agent(llm, [slow, failing, unused], AgentOptions(timeout_s=0.05))
+        running = asyncio.create_task(agent.run_task("q"))
+        await slow.closed.wait()  # b failed to start; a is being closed
+
+        # This sleep starts after the deadline was set, so the deadline
+        # expires first, while a's close() is still waiting.
+        await asyncio.sleep(0.1)
+        assert not running.done()
+        assert (slow.closes_done, failing.closes) == (0, 0)
+        gate.set()
+        result = await asyncio.wait_for(running, 10)
+        # The deadline expired before the setup was over, clean-up included.
+        assert (result.status, result.error) == ("timeout", "Timed out after 0.05 s")
+        # a's close() ran to its end and b, whose start() was called, was
+        # closed after it; c never started, so it was not closed.
+        assert events == ["start a", "start b", "close a", "close b"]
+        assert (slow.closes_done, failing.closes_done, unused.closes) == (1, 1, 0)
+        assert agent.hippo.get_tool("a_tool") is None
+        assert llm.calls == []
+
+        # Later runs name the failure that started the clean-up.
+        later = await agent.run_task("q2")
+        assert (later.status, later.error) == (
+            "setup_error",
+            "Tool setup failed in an earlier run: b is down",
+        )
+        assert [task.status for task in _tasks(agent)] == ["timeout", "setup_error"]
 
 
 # ── close() ─────────────────────────────────────────────────────────────────
@@ -472,6 +542,28 @@ class TestClose:
             if "Could not close tool provider" in r.getMessage()
         ]
         assert record.exc_info is not None
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_close_still_closes_every_provider(self) -> None:
+        gate = asyncio.Event()
+        slow = FakeToolProvider("a", close_gate=gate)
+        other = FakeToolProvider("b")
+        llm = FakeLLM()
+        agent = _agent(llm, [slow, other])
+        closing = asyncio.create_task(agent.close())
+        await slow.closed.wait()
+
+        closing.cancel()
+        await asyncio.sleep(0.05)
+        # The cancellation waits until every provider is closed ...
+        assert not closing.done()
+        assert other.closes == 0
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await closing
+        assert (slow.closes_done, other.closes_done) == (1, 1)
+        # ... and the model provider is still closed.
+        assert llm.closed
 
     @pytest.mark.asyncio
     async def test_no_provider_starts_after_close(self) -> None:

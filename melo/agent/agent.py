@@ -440,7 +440,9 @@ class Agent:
         of a provider's ``start()`` propagates unchanged. On any failure,
         cancellation included, every provider whose ``start()`` was called
         is closed before the exception propagates, so none is left
-        running.
+        running. A cancellation that arrives during this clean-up waits
+        for it to finish and then propagates in place of the failure (see
+        :meth:`_close_providers`).
 
         Setup is not retried, because the providers it closed may not
         start again: after a failure every call raises ``RuntimeError``
@@ -495,14 +497,33 @@ class Agent:
             names.add(name)
 
     async def _close_providers(self, providers: Iterable[BaseToolProvider]) -> None:
-        """Close each of *providers*; a failure is logged, not raised."""
+        """Close each of *providers* in turn; a failure is logged, not raised.
+
+        A cancellation does not cut this short: the close() it interrupts
+        runs to its end, the remaining providers are still closed, and the
+        cancellation is raised once they all are. Otherwise a run's
+        ``timeout_s`` expiring here could leave a provider half shut down
+        and the rest not closed at all, with their processes running.
+        """
+        cancelled: asyncio.CancelledError | None = None
         for provider in providers:
-            try:
-                await provider.close()
-            except Exception:
-                logger.exception(
-                    "Could not close tool provider %s", type(provider).__name__
-                )
+            closing = asyncio.create_task(self._close_provider(provider))
+            while not closing.done():
+                try:
+                    # wait() neither cancels the task nor raises its outcome.
+                    await asyncio.wait([closing])
+                except asyncio.CancelledError as exc:
+                    cancelled = exc
+        if cancelled is not None:
+            raise cancelled
+
+    async def _close_provider(self, provider: BaseToolProvider) -> None:
+        try:
+            await provider.close()
+        except Exception:
+            logger.exception(
+                "Could not close tool provider %s", type(provider).__name__
+            )
 
     # ── Stage helpers ──
     # Each helper owns one phase of the agent loop.  They return a
@@ -1047,7 +1068,10 @@ class Agent:
           seconds. It is cancelled wherever it was: a request in flight
           is abandoned (and counts in ``llm_errors``), a shell command is
           killed with every process it started, and tool providers still
-          being set up are closed (so later runs end as ``setup_error``);
+          being set up are closed (so later runs end as ``setup_error``).
+          Closing the providers is not cut short, also when the deadline
+          expires while a failed setup is closing them, so the run
+          returns once they are closed, which can be after ``timeout_s``;
         - ``crashed``: an unexpected exception ended the run. It is
           logged and reported as the error, not raised. A cancellation
           from outside the run, or any other exception that is not an
@@ -1248,8 +1272,10 @@ class Agent:
         still starting the providers, close() waits for that setup to end
         (closing an MCP tool provider makes its ``start()`` give up); the
         setup then closes whatever it started, so no provider is left
-        running when close() returns. Calling close() again closes the
-        providers again, which their contract makes harmless.
+        running when close() returns. A cancellation of close() takes
+        effect only once every tool provider is closed. Calling close()
+        again closes the providers again, which their contract makes
+        harmless.
         """
         try:
             self._closing = True
