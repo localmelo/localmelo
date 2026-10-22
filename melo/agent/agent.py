@@ -8,7 +8,7 @@ import logging
 import math
 import os
 import time
-from collections.abc import Collection, Sequence
+from collections.abc import Collection, Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.agent._chat import Chat, RequestStats
@@ -25,7 +25,7 @@ from localmelo.melo.contracts.providers import (
     BaseLLMProvider,
     ProviderError,
 )
-from localmelo.melo.contracts.tools import BaseToolProvider
+from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor import Executor, builtin_names, register_builtins
 from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
@@ -331,6 +331,10 @@ def _exception_text(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
+class _ToolSetupError(Exception):
+    """The tool providers could not be set up; the message is the run's error."""
+
+
 class Agent:
     """Task-solving agent with tool use and memory.
 
@@ -349,8 +353,10 @@ class Agent:
     the attempt policy, tool exposure, the built-in tools, memory and a
     run timeout; the defaults keep the behavior from before options
     existed, except that a step now runs only the tools it offered.
-    ``tool_providers`` are only stored so far: nothing starts them or
-    registers their tools.
+    ``tool_providers`` supply further tools, for example those of MCP
+    servers: the first run starts them and registers their tools next to
+    the built-ins (see :meth:`_ensure_tools`), and :meth:`close` closes
+    them.
 
     :meth:`run_task` runs one task and returns a
     :class:`~localmelo.melo.schema.RunResult`; :meth:`run` returns its
@@ -377,6 +383,13 @@ class Agent:
 
         self.options = options if options is not None else AgentOptions()
         self._tool_providers: tuple[BaseToolProvider, ...] = tuple(tool_providers)
+        # Tool setup (_ensure_tools) runs once, under this lock. It ends
+        # either ready or failed; a failure is kept as its error text.
+        self._tools_lock = asyncio.Lock()
+        self._tools_ready = False
+        self._tools_failure: str | None = None
+        # close() has begun: no tool provider is started from then on.
+        self._closing = False
 
         # Optional persistent memory backends: options.memory_dir, or the
         # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History is
@@ -412,6 +425,84 @@ class Agent:
         self.chat = Chat(self._llm)
 
         register_builtins(self.executor, self.hippo, names=self.options.builtins)
+
+    # ── Tool providers ──
+
+    async def _ensure_tools(self) -> None:
+        """Start the tool providers and register their tools, once.
+
+        The first call starts every provider in order and collects the
+        tools they return. Only when all of them have started, and no
+        provided tool's name is taken by a registered tool or by another
+        provided tool, are the tools registered with the tool registry and
+        the executor (with each tool's ``timeout_ms``), so a failed setup
+        registers nothing. A taken name raises ``ValueError``; a failure
+        of a provider's ``start()`` propagates unchanged. On any failure,
+        cancellation included, every provider whose ``start()`` was called
+        is closed before the exception propagates, so none is left
+        running.
+
+        Setup is not retried, because the providers it closed may not
+        start again: after a failure every call raises ``RuntimeError``
+        naming that failure. Calls are serialized, so no provider starts
+        twice, and none starts once :meth:`close` has begun.
+        """
+        if self._tools_ready or not self._tool_providers:
+            return
+        async with self._tools_lock:
+            if self._tools_ready:
+                return
+            if self._tools_failure is not None:
+                raise RuntimeError(
+                    f"Tool setup failed in an earlier run: {self._tools_failure}"
+                )
+            started: list[BaseToolProvider] = []
+            try:
+                provided: list[ProvidedTool] = []
+                for provider in self._tool_providers:
+                    self._check_not_closing()
+                    started.append(provider)
+                    provided.extend(await provider.start())
+                # close() may have begun while the last provider started.
+                self._check_not_closing()
+                self._check_tool_names(provided)
+            except BaseException as exc:
+                self._tools_failure = str(exc) or _exception_text(exc)
+                await self._close_providers(started)
+                raise
+            for tool in provided:
+                self.hippo.register_tool(tool.definition)
+                self.executor.register(
+                    tool.definition.name, tool.function, timeout_ms=tool.timeout_ms
+                )
+            self._tools_ready = True
+
+    def _check_not_closing(self) -> None:
+        if self._closing:
+            raise RuntimeError("Cannot start the tool providers: the agent is closed")
+
+    def _check_tool_names(self, provided: Sequence[ProvidedTool]) -> None:
+        """Raise ``ValueError`` if a provided tool's name is already taken."""
+        names: set[str] = set()
+        for tool in provided:
+            name = tool.definition.name
+            if self.hippo.get_tool(name) is not None:
+                raise ValueError(
+                    f"Provided tool {name!r} collides with a registered tool"
+                )
+            if name in names:
+                raise ValueError(f"More than one provided tool is named {name!r}")
+            names.add(name)
+
+    async def _close_providers(self, providers: Iterable[BaseToolProvider]) -> None:
+        """Close each of *providers*; a failure is logged, not raised."""
+        for provider in providers:
+            try:
+                await provider.close()
+            except Exception:
+                logger.exception(
+                    "Could not close tool provider %s", type(provider).__name__
+                )
 
     # ── Stage helpers ──
     # Each helper owns one phase of the agent loop.  They return a
@@ -946,10 +1037,17 @@ class Agent:
           :class:`~localmelo.melo.contracts.providers.ProviderError`: a
           chat request after its retries, or an embedding request. The
           error is the provider's message; no traceback is logged;
+        - ``setup_error``: the tool providers could not be set up at the
+          start of the first run (see :meth:`_ensure_tools`): one failed
+          to start, or a provided tool has the name of a registered tool.
+          The error says which, and no provider is left running. Setup
+          is not retried: every later run on this agent ends as
+          ``setup_error`` too, before its first step;
         - ``timeout``: the run was still going after ``timeout_s``
           seconds. It is cancelled wherever it was: a request in flight
           is abandoned (and counts in ``llm_errors``), a shell command is
-          killed with every process it started;
+          killed with every process it started, and tool providers still
+          being set up are closed (so later runs end as ``setup_error``);
         - ``crashed``: an unexpected exception ended the run. It is
           logged and reported as the error, not raised. A cancellation
           from outside the run, or any other exception that is not an
@@ -963,8 +1061,8 @@ class Agent:
 
         ``RunResult.config`` reports the effective configuration: the
         options, the registered built-ins (``builtins``), the resolved
-        ``memory_dir`` and every registered tool (``tools``), with tool
-        names sorted.
+        ``memory_dir`` and every tool registered once the tool providers
+        are set up (``tools``), with tool names sorted.
         """
         started = time.perf_counter()
         task = TaskRecord(query=query)
@@ -975,11 +1073,19 @@ class Agent:
         try:
             async with deadline:
                 await self.hippo.save_task(task)
+                try:
+                    await self._ensure_tools()
+                except Exception as exc:
+                    raise _ToolSetupError(str(exc) or _exception_text(exc)) from exc
                 self.hippo.working.append(Message(role="user", content=query))
                 if self.options.attempt_policy == "none":
                     await self._run_single_attempt(task, query, run)
                 else:
                     await self._run_reflective_attempts(task, query, run)
+        except _ToolSetupError as exc:
+            # Reported in the result, not a crash: no traceback.
+            logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
+            run.end("setup_error", error=str(exc))
         except ProviderError as exc:
             # Reported in the result, not a crash: no traceback.
             logger.info("Task %s ended with provider_error: %s", task.task_id, exc)
@@ -1134,7 +1240,25 @@ class Agent:
             run.end("budget_exhausted", error="Max steps reached")
 
     async def close(self) -> None:
-        await self.hippo.aclose()
-        await self._llm.close()
-        if self._embedding:
-            await self._embedding.close()
+        """Close the tool providers, the memory backends and the model providers.
+
+        Every tool provider is closed, whether or not it was started; a
+        provider that fails to close is logged and the others are still
+        closed. No provider starts once close() has begun. If a run is
+        still starting the providers, close() waits for that setup to end
+        (closing an MCP tool provider makes its ``start()`` give up); the
+        setup then closes whatever it started, so no provider is left
+        running when close() returns. Calling close() again closes the
+        providers again, which their contract makes harmless.
+        """
+        try:
+            self._closing = True
+            await self._close_providers(self._tool_providers)
+            # Wait for a setup still running in a run (see above).
+            async with self._tools_lock:
+                pass
+        finally:
+            await self.hippo.aclose()
+            await self._llm.close()
+            if self._embedding:
+                await self._embedding.close()
