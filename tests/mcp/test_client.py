@@ -471,6 +471,24 @@ class TestShutdown:
         with pytest.raises(McpError):
             await client.call_tool("echo", {"text": "x"})
 
+    async def test_server_that_exits_in_time_gets_no_signal(
+        self, log_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        signals: list[bool] = []
+
+        def record(proc: asyncio.subprocess.Process, *, kill: bool) -> bool:
+            signals.append(kill)
+            return False
+
+        monkeypatch.setattr("localmelo.support.mcp.client._signal_server", record)
+        # The fake server exits as soon as its stdin closes, well within the
+        # grace period, so neither it nor its process group gets a signal.
+        mcp = StdioMcpClient(fake_server_config(log_path), shutdown_grace_s=5)
+        await mcp.start()
+        await asyncio.wait_for(mcp.close(), 5)
+        assert mcp.returncode == 0
+        assert signals == []
+
     async def test_stubborn_server_is_killed(self, log_path: Path) -> None:
         mcp = StdioMcpClient(
             fake_server_config(log_path, env={"FAKE_MCP_MODE": "stubborn"}),

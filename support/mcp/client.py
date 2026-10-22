@@ -15,10 +15,12 @@ is inherited, so API keys and other secrets in the agent's environment
 do not reach MCP servers; a server that needs another variable must
 list it in its ``env``.
 
-On POSIX the server runs in a session of its own, and close() signals
-its whole process group, so a server started through a wrapper
-(``sh -c``, a launcher script) is stopped together with the wrapper. A
-Ctrl-C in the agent's terminal does not reach the server.
+On POSIX the server runs in a session of its own. If it has not exited
+within the grace period after its stdin closes, close() signals its
+whole process group, so a server started through a wrapper (``sh -c``,
+a launcher script) is stopped together with the wrapper. A server that
+exits in time gets no signal, and neither does anything else left in
+its group. A Ctrl-C in the agent's terminal does not reach the server.
 """
 
 from __future__ import annotations
