@@ -182,7 +182,8 @@ def _within_turn_budget(
     The rendered tool calls of one turn (*calls_chars* characters) and its
     tool results share ``MAX_MEMORY_TEXT_LEN`` characters: the calls keep
     their share and the results get the rest. Indices in *withheld*
-    already hold notices and are left alone.
+    already hold notices and are left alone; the index of each text
+    replaced here is added to it.
     """
     fitted = list(texts)
     budget = MAX_MEMORY_TEXT_LEN - calls_chars
@@ -206,6 +207,7 @@ def _within_turn_budget(
             break  # only results a notice would not shorten are left
         total += len(notice) - len(fitted[index])
         fitted[index] = notice
+        withheld.add(index)
     return fitted
 
 
@@ -512,8 +514,9 @@ class Agent:
         same ``tool_call_id``. No call or result is ever left out, so the
         turn stays protocol-valid and the model still sees every call it
         made and what each returned. A result's images (references, see
-        :func:`_image_references`) are checked with its text, and its
-        message carries them in ``images`` only if that check passes.
+        :func:`_image_references`) are checked with its text. A result
+        replaced by a notice, by that check or by the budget below, keeps
+        no images on its message.
 
         The whole turn also shares one budget of ``MAX_MEMORY_TEXT_LEN``
         characters, half the 100,000 at which ``Checker.pre_plan`` fails

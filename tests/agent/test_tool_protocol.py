@@ -578,13 +578,17 @@ def _returning(output: ToolOutput) -> Callable[[], Coroutine[Any, Any, ToolOutpu
     return _tool
 
 
-def _image_agent(llm: BaseLLMProvider) -> Agent:
-    """Agent whose tools return an image with text, alone, or with an error."""
+def _image_agent(llm: BaseLLMProvider, **overrides: ToolOutput) -> Agent:
+    """Agent whose tools return an image with text, alone, or with an error.
+
+    *overrides* replace those outputs, or add tools, by name.
+    """
     agent = Agent(llm=llm, embedding=None)
     outputs = {
         "shot": ToolOutput(text="captured", images=[SHOT]),
         "shot_only": ToolOutput(images=[SHOT]),
         "shot_error": ToolOutput(text="window not found", images=[SHOT], is_error=True),
+        **overrides,
     }
     for name, output in outputs.items():
         agent.hippo.register_tool(
@@ -740,6 +744,38 @@ class TestToolResultImages:
         assert result.content.startswith("[Tool result withheld")
         assert "Too many images in one memory write: 1 (max 0)" in result.content
         assert result.images == []
+
+    @pytest.mark.asyncio
+    async def test_turn_budget_withholds_the_images_too(self) -> None:
+        # Each result fits the memory-write check on its own; together they
+        # do not fit the turn budget, so the larger one gives way.
+        calls = [
+            ToolCall(tool_name="page", id="call_page"),
+            ToolCall(tool_name="shot", id="call_shot"),
+        ]
+        llm = FakeLLM(
+            [
+                Message(role="assistant", tool_calls=calls),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _image_agent(
+            llm,
+            page=ToolOutput(text="p" * 20_000, images=[SHOT]),
+            shot=ToolOutput(text="x" * 30_000, images=[SHOT]),
+        )
+        assert await agent.run("save the page and a screenshot") == "done"
+
+        second = _planning_calls(llm)[1]["messages"]
+        assert_protocol_valid(second)
+        results = {m.tool_call_id: m for m in second if m.role == "tool"}
+        page, shot = results["call_page"], results["call_shot"]
+        assert page.content == f"{'p' * 20_000}\n{MARKER}"
+        assert page.images == [SHOT.as_reference()]
+        # Like a result the memory-write check rejects.
+        assert shot.content.startswith("[Tool result withheld")
+        assert "Tool calls and results too large" in shot.content
+        assert shot.images == []
 
     @pytest.mark.asyncio
     async def test_openai_request_names_images_but_carries_none(self) -> None:
