@@ -469,7 +469,9 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         parser.error("--embedding-model requires --embedding-base-url")
     if args.embedding_base_url is not None and not args.base_url:
         parser.error("--embedding-base-url requires --base-url")
-    direct = bool(args.query) and not args.serve
+    # main() joins the words into the query, and an empty one (`melo ""`)
+    # runs no task, so the direct-mode flags would have nothing to apply to.
+    direct = bool(" ".join(args.query)) and not args.serve
     if not direct:
         given = [
             flag

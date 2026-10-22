@@ -338,6 +338,11 @@ class TestUsageErrors:
                 "only for direct mode (a query without --serve): --max-steps",
             ),
             (
+                # An empty query runs no task, so there is no run to report.
+                ["--output-format", "json", ""],
+                "only for direct mode (a query without --serve): --output-format",
+            ),
+            (
                 ["--serve", "--timeout", "5", "--output-format", "json", "q"],
                 "only for direct mode (a query without --serve): --timeout, "
                 "--output-format",
