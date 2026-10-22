@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.support.providers.llm._protocol import (
+    parse_tool_calls,
+    prepare_extra_body,
+    raw_tool_arguments,
+)
 
 
 def _tool_def_to_openai(td: ToolDef) -> dict[str, Any]:
@@ -19,6 +25,62 @@ def _tool_def_to_openai(td: ToolDef) -> dict[str, Any]:
             "parameters": td.parameters,
         },
     }
+
+
+def _tool_call_to_openai(tc: ToolCall) -> dict[str, Any]:
+    """Serialize a ToolCall as an OpenAI ``tool_calls[]`` entry.
+
+    Arguments that were not a JSON object (see :func:`raw_tool_arguments`)
+    are sent as ``{}``. Servers that check the calls in a request's history
+    need an object there: SGLang rejects the whole request otherwise, and
+    vLLM replaces such arguments with ``{}`` itself.
+    """
+    arguments = {} if raw_tool_arguments(tc.arguments) is not None else tc.arguments
+    return {
+        "id": tc.id,
+        "type": "function",
+        "function": {
+            "name": tc.tool_name,
+            # The spec carries arguments as a JSON-encoded string.
+            "arguments": json.dumps(arguments, ensure_ascii=False),
+        },
+    }
+
+
+def _message_to_openai(msg: Message) -> dict[str, Any]:
+    """Serialize a Message as an OpenAI chat message.
+
+    Only spec fields are sent: ``thinking``, ``usage``, ``timestamp`` and
+    ``tool_result`` stay local. An assistant message with tool calls keeps
+    its (possibly empty) text and lists every call; a tool result names
+    the call it answers through ``tool_call_id``.
+    """
+    if msg.role == "assistant" and msg.tool_calls:
+        return {
+            "role": "assistant",
+            "content": msg.content,
+            "tool_calls": [_tool_call_to_openai(tc) for tc in msg.tool_calls],
+        }
+    if msg.role == "tool":
+        out: dict[str, Any] = {"role": "tool"}
+        if msg.tool_call_id:
+            out["tool_call_id"] = msg.tool_call_id
+        out["content"] = msg.content
+        return out
+    return {"role": msg.role, "content": msg.content}
+
+
+def _reasoning_text(msg: dict[str, Any]) -> str:
+    """Return the reasoning text a server split out of the answer, if any.
+
+    vLLM-style reasoning parsers (and oMLX) use ``reasoning_content``;
+    newer servers use ``reasoning``.
+    """
+    for key in ("reasoning_content", "reasoning"):
+        value = msg.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
 
 
 def _coerce_token_count(value: Any) -> int:
@@ -79,6 +141,13 @@ class OpenAICompatLLM(BaseLLMProvider):
         Bearer token for authenticated endpoints.
     timeout : float
         HTTP timeout in seconds (default 120).
+    extra_body : Mapping[str, Any] | None
+        Extra top-level fields merged into every request body, e.g.
+        ``{"chat_template_kwargs": {"enable_thinking": False}}``. Fields
+        the provider owns (``model``, ``messages``, ``tools``,
+        ``tool_choice``, ``stream``) are rejected with ``ValueError``.
+    transport : httpx.AsyncBaseTransport | None
+        Optional HTTP transport, e.g. ``httpx.MockTransport`` in tests.
     """
 
     def __init__(
@@ -87,9 +156,13 @@ class OpenAICompatLLM(BaseLLMProvider):
         model: str,
         api_key: str | None = None,
         timeout: float = 120.0,
+        *,
+        extra_body: Mapping[str, Any] | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
         **kwargs: Any,
     ) -> None:
         self.model = model
+        self.extra_body = prepare_extra_body(extra_body)
         headers: dict[str, str] = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -97,6 +170,7 @@ class OpenAICompatLLM(BaseLLMProvider):
             base_url=base_url.rstrip("/"),
             timeout=timeout,
             headers=headers,
+            transport=transport,
         )
 
     async def chat(
@@ -105,8 +179,9 @@ class OpenAICompatLLM(BaseLLMProvider):
         tools: list[ToolDef] | None = None,
     ) -> Message:
         payload: dict[str, Any] = {
+            **self.extra_body,
             "model": self.model,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": [_message_to_openai(m) for m in messages],
         }
         if tools:
             payload["tools"] = [_tool_def_to_openai(t) for t in tools]
@@ -119,20 +194,12 @@ class OpenAICompatLLM(BaseLLMProvider):
         choice = data["choices"][0]
         msg = choice["message"]
 
-        tool_call = None
-        if msg.get("tool_calls"):
-            tc = msg["tool_calls"][0]
-            fn = tc["function"]
-            args = fn.get("arguments", "{}")
-            if isinstance(args, str):
-                args = json.loads(args)
-            tool_call = ToolCall(tool_name=fn["name"], arguments=args)
-
         return Message(
             role="assistant",
             content=msg.get("content") or "",
-            tool_call=tool_call,
+            tool_calls=parse_tool_calls(msg.get("tool_calls")),
             usage=_normalize_usage(data.get("usage")),
+            thinking=_reasoning_text(msg),
         )
 
     async def close(self) -> None:

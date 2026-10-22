@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
 import os
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.agent._chat import Chat
 from localmelo.melo.checker import Checker
@@ -13,6 +15,7 @@ from localmelo.melo.checker.payloads import (
     MemoryWritePayload,
     ToolResolutionResult,
 )
+from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.executor import Executor, register_builtins
 from localmelo.melo.executor.models import ExecutionRequest
@@ -28,6 +31,7 @@ from localmelo.melo.schema import (
     ReflectionEntry,
     StepRecord,
     TaskRecord,
+    ToolCall,
     ToolDef,
     ToolResult,
 )
@@ -97,6 +101,92 @@ def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
             lines.append(f"  Failed: {'; '.join(r.failed_hypotheses)}")
         parts.append("\n".join(lines))
     return [Message(role="system", content="\n".join(parts))]
+
+
+# Characters of a withheld tool result that stay visible to the model.
+WITHHELD_PREVIEW_CHARS = 200
+
+# Key of the placeholder that replaces tool-call arguments too long for
+# working memory. Only the working-memory copy of a turn carries it:
+# history and the executor always get the real arguments.
+ELIDED_ARGUMENTS_KEY = "_elided"
+
+
+def _render_arguments(arguments: dict[str, Any]) -> str:
+    """Text form of one call's arguments, as memory-write checks see it."""
+    return json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _render_tool_calls(calls: Sequence[ToolCall]) -> str:
+    """Text form of tool calls, used for memory-write checks."""
+    return "\n".join(
+        f"{tc.tool_name}({_render_arguments(tc.arguments)})" for tc in calls
+    )
+
+
+def _elide_arguments(call: ToolCall) -> ToolCall:
+    """Copy of *call* with its arguments replaced by a short placeholder.
+
+    The copy keeps the call's id, so the call's result still pairs with it.
+    """
+    size = len(_render_arguments(call.arguments))
+    return dataclasses.replace(
+        call, arguments={ELIDED_ARGUMENTS_KEY: f"{size} chars withheld"}
+    )
+
+
+def _tool_result_text(result: ToolResult) -> str:
+    """Content of the ``role="tool"`` message that answers a call.
+
+    Empty or whitespace-only output reads ``(no output)``.
+    """
+    if result.error:
+        return f"Error: {result.error}"
+    return result.output if result.output.strip() else "(no output)"
+
+
+def _withheld_notice(text: str, reason: str) -> str:
+    """Stand-in for a tool result kept out of working memory."""
+    preview = text[:WITHHELD_PREVIEW_CHARS]
+    return (
+        f"[Tool result withheld from working memory: {reason}. "
+        f"First {len(preview)} characters follow.]\n{preview}"
+    )
+
+
+def _within_turn_budget(
+    texts: Sequence[str], withheld: set[int], calls_chars: int
+) -> list[str]:
+    """Return *texts* with the largest replaced by notices until they fit.
+
+    The rendered tool calls of one turn (*calls_chars* characters) and its
+    tool results share ``MAX_MEMORY_TEXT_LEN`` characters: the calls keep
+    their share and the results get the rest. Indices in *withheld*
+    already hold notices and are left alone.
+    """
+    fitted = list(texts)
+    budget = MAX_MEMORY_TEXT_LEN - calls_chars
+    total = sum(len(text) for text in fitted)
+    if total <= budget:
+        return fitted
+    reason = (
+        f"Tool calls and results too large: {calls_chars + total} chars "
+        f"(max {MAX_MEMORY_TEXT_LEN})"
+    )
+    largest_first = sorted(
+        (i for i in range(len(fitted)) if i not in withheld),
+        key=lambda i: len(fitted[i]),
+        reverse=True,
+    )
+    for index in largest_first:
+        if total <= budget:
+            break
+        notice = _withheld_notice(fitted[index], reason)
+        if len(notice) >= len(fitted[index]):
+            break  # only results a notice would not shorten are left
+        total += len(notice) - len(fitted[index])
+        fitted[index] = notice
+    return fitted
 
 
 CONTINUATION_UTILITY_THRESHOLD = 0.1
@@ -282,17 +372,16 @@ class Agent:
 
         return response, None
 
-    async def _do_execute(self, response: Message) -> ToolResult:
-        """Stage 4: execute tool call and validate the result.
+    async def _do_execute(self, call: ToolCall) -> ToolResult:
+        """Stage 4: execute one tool call and validate the result.
 
         Uses the sanitized payload from the executor-result checker
         when truncation or modification was applied; falls back to
         the raw outcome otherwise.
         """
-        assert response.tool_call is not None
         exec_request = ExecutionRequest(
-            tool_name=response.tool_call.tool_name,
-            arguments=dict(response.tool_call.arguments),
+            tool_name=call.tool_name,
+            arguments=dict(call.arguments),
         )
         outcome = await self.executor.execute_structured(exec_request)
 
@@ -315,35 +404,131 @@ class Agent:
         return outcome.to_tool_result()
 
     async def _do_memorize(
-        self, task_id: str, response: Message, result: ToolResult
+        self, task_id: str, response: Message, results: Sequence[ToolResult]
     ) -> None:
-        """Stage 5: record step and write checked results to memory."""
-        step = StepRecord(
-            thought=response.content,
-            tool_call=response.tool_call,
-            tool_result=result,
-        )
-        summary = await self.hippo.store_step(task_id, step)
+        """Stage 5: record the step and write checked results to memory.
 
-        # Checked write: step summary -> short + long memory
-        mem_check = self.checker.check_memory_write(
-            MemoryWritePayload(
-                text=summary,
-                role="assistant",
-                metadata={"step_id": step.step_id},
+        - History gets one StepRecord per executed call (the assistant
+          text is attached to the first), unconditionally.
+        - Long-term memory gets each record's text summary, if the checker
+          allows the write.
+        - Working memory always gets the real protocol turn: the assistant
+          message with its tool calls, then one ``role="tool"`` message per
+          call paired by ``tool_call_id``, appended as one unit. Checked
+          writes may shorten it but never leave a call or result out (see
+          :meth:`_checked_tool_turn`).
+        """
+        calls = response.tool_calls
+        for index, (call, result) in enumerate(zip(calls, results, strict=True)):
+            step = StepRecord(
+                thought=response.content if index == 0 else "",
+                tool_call=call,
+                tool_result=result,
             )
-        )
-        if mem_check.allowed:
-            await self.hippo.memorize(summary, metadata={"step_id": step.step_id})
+            summary = await self.hippo.store_step(task_id, step)
 
-        # Checked write: tool result -> short memory
-        output = result.error if result.error else result.output
-        tool_msg = f"[{result.tool_name}] {output}"
-        tool_mem_check = self.checker.check_memory_write(
-            MemoryWritePayload(text=tool_msg, role="tool")
+            # Checked write: step summary -> long-term memory only
+            mem_check = self.checker.check_memory_write(
+                MemoryWritePayload(
+                    text=summary,
+                    role="assistant",
+                    metadata={"step_id": step.step_id},
+                )
+            )
+            if mem_check.allowed:
+                await self.hippo.memorize(
+                    summary, metadata={"step_id": step.step_id}, to_working=False
+                )
+
+        assistant_msg, tool_msgs = self._checked_tool_turn(response, results)
+        self.hippo.working.append_turn(assistant_msg, tool_msgs)
+
+    def _memory_write_allowed(self, text: str, role: str) -> bool:
+        check = self.checker.check_memory_write(
+            MemoryWritePayload(text=text, role=role)
         )
-        if tool_mem_check.allowed:
-            self.hippo.working.append(Message(role="tool", content=tool_msg))
+        return check.allowed
+
+    def _checked_calls(self, calls: Sequence[ToolCall]) -> list[ToolCall]:
+        """Return the working-memory copy of one turn's tool calls.
+
+        ``Checker.check_memory_write`` sees the calls together, as one
+        rendered text. While it rejects them (oversized arguments), the
+        largest arguments are replaced first by an
+        ``{"_elided": "<n> chars withheld"}`` placeholder. Ids are kept, so
+        every result still pairs with its call, and the original calls,
+        which history holds, are not modified. Calls still rejected with
+        every argument elided (thousands of calls, or a huge tool name) are
+        kept anyway: a call that already ran must stay visible.
+        """
+        kept = list(calls)
+        largest_first = sorted(
+            range(len(kept)),
+            key=lambda i: len(_render_arguments(kept[i].arguments)),
+            reverse=True,
+        )
+        for index in largest_first:
+            if self._memory_write_allowed(_render_tool_calls(kept), "assistant"):
+                break
+            kept[index] = _elide_arguments(kept[index])
+        return kept
+
+    def _checked_tool_turn(
+        self, response: Message, results: Sequence[ToolResult]
+    ) -> tuple[Message, list[Message]]:
+        """Build the working-memory copy of one tool-call turn.
+
+        Every part goes through ``Checker.check_memory_write``. Oversized
+        arguments are elided (see :meth:`_checked_calls`), rejected
+        assistant text is dropped while its tool calls are kept, and a
+        rejected tool result is replaced by a short notice bound to the
+        same ``tool_call_id``. No call or result is ever left out, so the
+        turn stays protocol-valid and the model still sees every call it
+        made and what each returned.
+
+        The whole turn also shares one budget of ``MAX_MEMORY_TEXT_LEN``
+        characters, half the 100,000 at which ``Checker.pre_plan`` fails
+        the task, so that one step leaves room in the next planning
+        prompt. The calls keep their share; the results share the rest,
+        the largest replaced by the notice first (see
+        :func:`_within_turn_budget`); and the assistant text, which history
+        keeps, is dropped when it does not fit beside them. Notices, and
+        results shorter than one, cannot shrink further, so a turn whose
+        calls nearly fill the budget, or a turn of hundreds of calls, can
+        still pass it.
+        """
+        calls = self._checked_calls(response.tool_calls)
+        calls_text = _render_tool_calls(calls)
+
+        texts: list[str] = []
+        withheld: set[int] = set()
+        for index, result in enumerate(results):
+            text = _tool_result_text(result)
+            check = self.checker.check_memory_write(
+                MemoryWritePayload(text=text, role="tool")
+            )
+            if not check.allowed:
+                text = _withheld_notice(text, check.reason)
+                withheld.add(index)
+            texts.append(text)
+        texts = _within_turn_budget(texts, withheld, len(calls_text))
+
+        content, thinking = response.content, response.thinking
+        full_text = "\n".join(part for part in (content, calls_text) if part)
+        turn_chars = len(full_text) + sum(len(text) for text in texts)
+        if turn_chars > MAX_MEMORY_TEXT_LEN or not self._memory_write_allowed(
+            full_text, "assistant"
+        ):
+            content, thinking = "", ""
+        assistant_msg = Message(
+            role="assistant", content=content, tool_calls=calls, thinking=thinking
+        )
+
+        tool_msgs = [
+            Message(role="tool", content=text, tool_call_id=call.id, tool_result=result)
+            for call, result, text in zip(calls, results, texts, strict=True)
+        ]
+        return assistant_msg, tool_msgs
 
     # ── Step estimation (kept for backward compat, no longer called by run) ──
 
@@ -362,15 +547,24 @@ class Agent:
 
     @staticmethod
     def _make_fingerprint(
-        response: Message, result: ToolResult
+        calls: Sequence[ToolCall], results: Sequence[ToolResult]
     ) -> tuple[str, str, str]:
-        """Return (tool_name, args_hash, error) for stuck detection."""
-        tc = response.tool_call
-        args_json = json.dumps(tc.arguments if tc else {}, sort_keys=True)
+        """Return one ``(tool_names, args_hash, errors)`` fingerprint per step.
+
+        A step with several calls is fingerprinted as a whole: calls are
+        sorted (the same batch in another order matches) and their errors
+        joined. ``_detect_stuck`` therefore fires when the same batch, or
+        the same errors, repeat across steps — not merely because one step
+        contains several calls.
+        """
+        pairs = sorted(
+            (tc.tool_name, json.dumps(tc.arguments, sort_keys=True, default=str))
+            for tc in calls
+        )
         return (
-            tc.tool_name if tc else "",
-            hashlib.sha256(args_json.encode()).hexdigest()[:16],
-            result.error,
+            ",".join(name for name, _ in pairs),
+            hashlib.sha256(json.dumps(pairs).encode()).hexdigest()[:16],
+            "\n".join(sorted(r.error for r in results if r.error)),
         )
 
     @staticmethod
@@ -540,18 +734,20 @@ class Agent:
                 return step + 1, ""
 
             # No tool call → direct answer
-            if response.tool_call is None:
+            if not response.tool_calls:
                 task.status = "completed"
                 task.result = response.content
                 return step + 1, ""
 
-            # Execute + memorize
-            result = await self._do_execute(response)
-            await self._do_memorize(task.task_id, response, result)
+            # Execute every call in order, each through the executor boundary
+            calls = list(response.tool_calls)
+            results: list[ToolResult] = []
+            for call in calls:
+                results.append(await self._do_execute(call))
+            await self._do_memorize(task.task_id, response, results)
 
-            # Stuck detection
-            fp = self._make_fingerprint(response, result)
-            fingerprints.append(fp)
+            # Stuck detection (one fingerprint per step)
+            fingerprints.append(self._make_fingerprint(calls, results))
             stuck = self._detect_stuck(fingerprints)
             if stuck:
                 return step + 1, stuck

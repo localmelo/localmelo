@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from localmelo.melo.checker.payloads import (
     ExecutorRequest,
     ExecutorResultPayload,
@@ -23,6 +25,15 @@ from localmelo.melo.checker.validators import (
 from localmelo.melo.schema import CheckResult, Message, ToolCall, ToolDef
 
 
+def _prompt_chars(msg: Message) -> int:
+    """Characters *msg* contributes to a planning prompt."""
+    total = len(msg.content)
+    for tc in msg.tool_calls:
+        total += len(tc.tool_name)
+        total += len(json.dumps(tc.arguments, ensure_ascii=False, default=str))
+    return total
+
+
 class Checker:
     def __init__(self) -> None:
         self._blocked = _BLOCKED_RE
@@ -30,14 +41,23 @@ class Checker:
     # ── Core → Memory boundary ──
 
     async def pre_plan(self, messages: list[Message]) -> CheckResult:
-        total = sum(len(m.content) for m in messages)
+        # Tool-call arguments are replayed to the model with the assistant
+        # message, so they count toward the prompt size as well.
+        total = sum(_prompt_chars(m) for m in messages)
         if total > 100_000:
             return CheckResult(allowed=False, reason=f"Prompt too large: {total} chars")
         return CheckResult(allowed=True)
 
     async def post_plan(self, response: Message) -> CheckResult:
-        if response.tool_call and not response.tool_call.tool_name:
-            return CheckResult(allowed=False, reason="Empty tool name in response")
+        seen_ids: set[str] = set()
+        for tc in response.tool_calls:
+            if not tc.tool_name:
+                return CheckResult(allowed=False, reason="Empty tool name in response")
+            if tc.id in seen_ids:
+                return CheckResult(
+                    allowed=False, reason=f"Duplicate tool call id in response: {tc.id}"
+                )
+            seen_ids.add(tc.id)
         return CheckResult(allowed=True)
 
     # ── Core → Executor boundary ──

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from unittest import mock
 
 import pytest
 
@@ -13,6 +14,7 @@ from localmelo.melo.contracts.providers import (
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support import config as _config_mod
 from localmelo.support.backends.base import BaseBackend
+from localmelo.support.onboard import _run_probes
 from localmelo.support.onboard_probe import (
     ProbeError,
     probe_chat,
@@ -159,6 +161,39 @@ async def test_probe_chat_rejects_non_message_response() -> None:
 
     with pytest.raises(ProbeError, match="no message"):
         await probe_chat(cfg)
+
+
+def _invalid_extra_body_cfg() -> _config_mod.Config:
+    """A config whose chat provider cannot be built (real vllm backend)."""
+    cfg = _cfg("vllm", "none")
+    cfg.vllm = _config_mod.LocalBackendConfig(
+        chat_url="http://127.0.0.1:8000/v1",
+        chat_model="m",
+        extra_body={"model": "other"},
+    )
+    return cfg
+
+
+@pytest.mark.asyncio
+async def test_probe_chat_wraps_provider_build_failure() -> None:
+    """An invalid extra_body fails the probe instead of escaping it."""
+    with pytest.raises(
+        ProbeError, match=r"chat probe failed: \[vllm\] extra_body must not set"
+    ):
+        await probe_chat(_invalid_extra_body_cfg())
+
+
+def test_run_probes_reports_invalid_extra_body(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Setup reports the failure and asks whether to save; no traceback."""
+    with mock.patch("localmelo.support.onboard._ask", return_value="N") as ask:
+        assert _run_probes(_invalid_extra_body_cfg()) is False
+
+    ask.assert_called_once()
+    out = capsys.readouterr().out
+    assert "Probe failed: chat probe failed: [vllm] extra_body must not set" in out
+    assert "config not saved" in out
 
 
 @pytest.mark.asyncio

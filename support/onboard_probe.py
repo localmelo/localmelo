@@ -22,9 +22,16 @@ class ProbeError(RuntimeError):
 
 
 async def probe_chat(cfg: _config_mod.Config) -> None:
-    """Send a one-message ping through the configured chat backend."""
+    """Send a one-message ping through the configured chat backend.
+
+    A provider that cannot be built, e.g. because ``extra_body`` sets a
+    field localmelo manages, fails the probe too.
+    """
     backend = get_backend(cfg.chat_backend)
-    provider: BaseLLMProvider = backend.build_chat_provider(cfg)
+    try:
+        provider: BaseLLMProvider = backend.build_chat_provider(cfg)
+    except Exception as exc:  # noqa: BLE001 — wrap as ProbeError for callers
+        raise ProbeError(f"chat probe failed: [{cfg.chat_backend}] {exc}") from exc
     try:
         response = await provider.chat(
             [Message(role="user", content="ping")],

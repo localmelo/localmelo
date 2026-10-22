@@ -433,6 +433,64 @@ class TestAsyncBoundaryChecks:
         assert not result.allowed
 
     @pytest.mark.asyncio
+    async def test_post_plan_checks_every_tool_call(self, checker: Checker) -> None:
+        """An empty name in a later call is caught, not just the first."""
+        msg = Message(
+            role="assistant",
+            tool_calls=[
+                ToolCall(tool_name="echo", arguments={"text": "a"}),
+                ToolCall(tool_name="", arguments={}),
+            ],
+        )
+        result = await checker.post_plan(msg)
+        assert not result.allowed
+        assert "Empty tool name" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_post_plan_multiple_calls_ok(self, checker: Checker) -> None:
+        msg = Message(
+            role="assistant",
+            tool_calls=[
+                ToolCall(tool_name="echo", arguments={"text": "a"}),
+                ToolCall(tool_name="echo", arguments={"text": "b"}),
+            ],
+        )
+        result = await checker.post_plan(msg)
+        assert result.allowed
+
+    @pytest.mark.asyncio
+    async def test_post_plan_rejects_duplicate_ids(self, checker: Checker) -> None:
+        """Two calls sharing an id could not be paired with their results."""
+        msg = Message(
+            role="assistant",
+            tool_calls=[
+                ToolCall(tool_name="echo", arguments={}, id="call_same"),
+                ToolCall(tool_name="echo", arguments={}, id="call_same"),
+            ],
+        )
+        result = await checker.post_plan(msg)
+        assert not result.allowed
+        assert "call_same" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_pre_plan_counts_tool_call_arguments(self, checker: Checker) -> None:
+        """Arguments are replayed to the model, so they count toward the cap."""
+        msgs = [
+            Message(role="user", content="write it"),
+            Message(
+                role="assistant",
+                content="",
+                tool_call=ToolCall(
+                    tool_name="file_write",
+                    arguments={"path": "a.txt", "content": "x" * 120_000},
+                ),
+            ),
+        ]
+        result = await checker.pre_plan(msgs)
+        assert not result.allowed
+        assert "Prompt too large" in result.reason
+
+    @pytest.mark.asyncio
     async def test_pre_execute_blocks_dangerous(self, checker: Checker) -> None:
         td = ToolDef(name="shell_exec", description="", parameters={})
         tc = ToolCall(tool_name="shell_exec", arguments={"command": "rm -rf /"})

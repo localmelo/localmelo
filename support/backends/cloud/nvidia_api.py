@@ -59,7 +59,10 @@ class NvidiaBackend(BaseBackend):
         base_url = cfg.nvidia.base_url or _DEFAULT_BASE_URL
         api_key = os.environ.get(cfg.nvidia.api_key_env, "")
         return build_openai_chat(
-            base_url=base_url, model=cfg.nvidia.chat_model, api_key=api_key
+            base_url=base_url,
+            model=cfg.nvidia.chat_model,
+            api_key=api_key,
+            extra_body=cfg.nvidia.extra_body,
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

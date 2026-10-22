@@ -64,6 +64,7 @@ class SglangBackend(BaseBackend):
         return build_openai_chat(
             base_url=normalize_url(cfg.sglang.chat_url),
             model=cfg.sglang.chat_model,
+            extra_body=cfg.sglang.extra_body,
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

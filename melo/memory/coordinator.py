@@ -125,9 +125,17 @@ class Hippo:
         text: str,
         role: str = "assistant",
         metadata: dict[str, Any] | None = None,
+        *,
+        to_working: bool = True,
     ) -> None:
-        """Write text to working memory and (if embedding available) long-term memory."""
-        self.working.append(Message(role=role, content=text))
+        """Write text to working memory and (if embedding available) long-term memory.
+
+        Pass ``to_working=False`` to write long-term memory only. The agent
+        does this for step summaries, because working memory already holds
+        the real tool-call turn for the current task.
+        """
+        if to_working:
+            self.working.append(Message(role=role, content=text))
 
         if self.embedding:
             emb = await self.embedding.embed([text])
@@ -194,14 +202,18 @@ class Hippo:
     # ── Tool hint extraction (pure text scan, no execution) ──
 
     def extract_tool_hints(self, messages: list[Message]) -> list[str]:
-        """Extract tool-name hints from message contents.
+        """Extract tool-name hints from messages.
 
-        Scans for registered tool names and ``[called X]`` patterns.
-        This is a read-only text scan — no tools are resolved or executed.
+        Collects the names of structured tool calls, then scans contents
+        for registered tool names and ``[called X]`` patterns. This is a
+        read-only scan — no tools are resolved or executed.
         """
         tool_hints: list[str] = []
         all_tool_names = {t.name for t in self.tools.list_all()}
         for msg in messages:
+            for tc in msg.tool_calls:
+                if tc.tool_name and tc.tool_name not in tool_hints:
+                    tool_hints.append(tc.tool_name)
             for name in all_tool_names:
                 if name in msg.content and name not in tool_hints:
                     tool_hints.append(name)

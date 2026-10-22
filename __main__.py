@@ -134,7 +134,9 @@ def _build_direct_mode_agent(args: argparse.Namespace) -> Agent:
     Two cases:
     1. --base-url provided: generic OpenAI-compatible endpoint injection,
        no embedding (preserves the exact URL as given).
-    2. No --base-url: use configured backends from the config file.
+    2. No --base-url: use configured backends from the config file. The
+       config is validated first, as for gateway startup, so a bad value
+       (e.g. an invalid extra_body) is reported instead of a traceback.
     """
     base_url = args.base_url
 
@@ -147,18 +149,24 @@ def _build_direct_mode_agent(args: argparse.Namespace) -> Agent:
         return Agent(llm=llm, embedding=None)
 
     # No --base-url: use configured backends from config file
+    import sys
+
     from localmelo.support import config
 
     cfg = config.load()
     if not cfg.is_configured:
-        import sys
-
         print(
             "No backend configured. Run 'melo --serve --reconfigure' to set up,\n"
             "or use --base-url to connect to an OpenAI-compatible endpoint.",
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+    try:
+        cfg.validate_or_raise()
+    except config.ConfigError as e:
+        print(f"\n  {e}\n", file=sys.stderr)
+        raise SystemExit(1) from e
 
     return Agent(config=cfg)
 

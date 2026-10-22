@@ -7,7 +7,7 @@ Covers:
 - Config validation failure: bad config -> error on stderr, exit 1
 - Reconfigure: `melo --reconfigure` -> runs backend setup
 - Direct mode semantics: no config.load() call when --base-url given
-- Direct mode without --base-url uses config
+- Direct mode without --base-url uses config, validated as for the gateway
 
 CRITICAL: These tests must run without fastapi/uvicorn installed.
 We never import localmelo.support.gateway at module level.
@@ -379,6 +379,31 @@ class TestBuildDirectModeAgent:
             _build_direct_mode_agent(ns)
 
         assert exc_info.value.code == 1
+
+    def test_no_base_url_invalid_config_exits(self) -> None:
+        """No --base-url and an invalid config -> error on stderr, exit 1."""
+        cfg = _valid_cfg()
+        cfg.mlc.extra_body = {"model": "other"}
+
+        with (
+            mock.patch("localmelo.support.config.load", return_value=cfg),
+            mock.patch("localmelo.__main__.Agent") as cls,
+            mock.patch("builtins.print") as mock_print,
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            from localmelo.__main__ import _build_direct_mode_agent
+
+            ns = argparse.Namespace(base_url=None, chat_model=None)
+            _build_direct_mode_agent(ns)
+
+        assert exc_info.value.code == 1
+        cls.assert_not_called()
+        stderr_text = " ".join(
+            str(c.args[0])
+            for c in mock_print.call_args_list
+            if c.kwargs.get("file") is sys.stderr
+        )
+        assert "[mlc] extra_body must not set 'model'" in stderr_text
 
     def test_default_model_when_base_url_no_model(self) -> None:
         """--base-url without --chat-model uses 'default' as model name."""

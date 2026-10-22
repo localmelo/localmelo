@@ -1004,9 +1004,14 @@ class TestNoEmbeddingFullPath:
         # Long-term memory must be empty (no embedding)
         assert len(agent.hippo.long._entries) == 0
 
-        # Short-term memory should have the tool message
-        short_contents = [m.content for m in agent.hippo.short.get_window()]
-        assert any("echo" in c and "hello" in c for c in short_contents)
+        # Short-term memory holds the echo call and its paired result
+        window = agent.hippo.short.get_window()
+        calls = [tc for m in window for tc in m.tool_calls]
+        results = [m for m in window if m.role == "tool"]
+        assert [tc.tool_name for tc in calls] == ["echo"]
+        assert [(m.tool_call_id, m.content) for m in results] == [
+            (calls[0].id, "hello")
+        ]
 
         # History should have the task and step
         tasks = list(agent.hippo.history._tasks.values())
@@ -1078,14 +1083,14 @@ class TestThreeWayBoundary:
     async def test_truncated_output_flows_through_all_layers(self) -> None:
         """Large tool output -> Checker truncates -> step record truncated
         -> memory-write blocks oversized tool message -> planning prompt
-        has no tool message.
+        carries a short notice bound to the call instead of the output.
 
         This exercises three boundaries in sequence:
         1. Executor result checker truncates output > MAX_OUTPUT_LEN
         2. Agent memory-write checker rejects the tool message because
            truncation tail + tool-name prefix push it over MAX_MEMORY_TEXT_LEN
            (both limits are currently 50,000 — any truncated message exceeds)
-        3. The follow-up planning prompt correctly reflects the absence
+        3. The follow-up planning prompt answers the call with a notice
         """
         from localmelo.melo.checker.validators import (
             MAX_MEMORY_TEXT_LEN,
@@ -1140,17 +1145,22 @@ class TestThreeWayBoundary:
             f"if limits diverge, this test should be updated"
         )
 
-        # ── Boundary 3: planning prompt has no tool message ──
-        # Because memory-write correctly blocked the oversized message,
-        # the follow-up planning call must not contain a tool role message.
+        # ── Boundary 3: planning prompt carries a notice, not the output ──
+        # Memory-write blocked the oversized result, but the tool call still
+        # needs exactly one answer (OpenAI-compatible servers reject an
+        # unanswered call), so the prompt holds a short notice bound to the
+        # same tool_call_id instead of the raw output.
         planning = _planning_calls(llm)
         assert len(planning) >= 2
         second_plan_msgs = planning[1]["messages"]
+        calls = [tc for m in second_plan_msgs for tc in m.tool_calls]
         tool_msgs = [m for m in second_plan_msgs if m.role == "tool"]
-        assert tool_msgs == [], (
-            f"Expected no tool messages in planning prompt (memory-write "
-            f"should have blocked the {tool_msg_len}-char message), "
-            f"but found {len(tool_msgs)}"
+        assert len(calls) == 1 and len(tool_msgs) == 1
+        assert tool_msgs[0].tool_call_id == calls[0].id
+        assert "withheld" in tool_msgs[0].content
+        assert len(tool_msgs[0].content) < 1_000, (
+            f"Expected a short notice instead of the {tool_msg_len}-char "
+            f"result, got {len(tool_msgs[0].content)} chars"
         )
 
         await agent.close()

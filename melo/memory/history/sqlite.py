@@ -93,6 +93,7 @@ class SqliteHistory(History):
                 {
                     "tool_name": step.tool_call.tool_name,
                     "arguments": step.tool_call.arguments,
+                    "id": step.tool_call.id,
                 }
             )
 
@@ -150,9 +151,12 @@ class SqliteHistory(History):
             tc = None
             if row[2]:
                 d = json.loads(row[2])
+                # Rows written before tool call ids were stored have no
+                # "id"; ToolCall then generates a fresh one.
                 tc = ToolCall(
                     tool_name=d["tool_name"],
                     arguments=d.get("arguments", {}),
+                    id=d.get("id", ""),
                 )
 
             tr = None
