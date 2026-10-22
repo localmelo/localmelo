@@ -1404,6 +1404,57 @@ class TestPromptCapRecovery:
         [sent] = [call["messages"] for call in _planning_calls(llm)]
         assert _prompt_chars(sent[1:]) <= PROMPT_CAP
 
+    @pytest.mark.asyncio
+    async def test_the_query_counts_once_eviction_dropped_its_message(self) -> None:
+        # A 60,000-character task, then results of 10, 10 and 45,000
+        # characters. Eviction by message count drops the task's message
+        # after the second turn, so the window alone fits the cap, but not
+        # with the task the request puts back in front: the check before
+        # the step must count the task too, and fail the run instead of
+        # sending a request over the cap.
+        query = "q" * 60_000
+        llm = FakeLLM(
+            [
+                _read_call("1"),
+                _read_call("2"),
+                _read_call("3"),
+                Message(role="assistant", content="never"),
+            ]
+        )
+        agent = Agent(
+            llm=llm,
+            options=AgentOptions(
+                builtins=frozenset(), tool_exposure="all", memory=False
+            ),
+        )
+        agent.hippo.working = WorkingMemory(max_len=4)
+        agent.hippo.register_tool(_echo_def("read"))
+
+        async def _read(text: str) -> str:
+            return "r" * (45_000 if text == "3" else 10)
+
+        agent.executor.register("read", _read)
+        result = await agent.run_task(query)
+        assert (result.status, result.error, result.steps) == (
+            "failed",
+            "Plan check failed: Prompt too large: 105044 chars",
+            3,
+        )
+
+        planning = _planning_calls(llm)
+        assert len(planning) == 3
+        for call in planning:
+            assert _prompt_chars(call["messages"][1:]) <= PROMPT_CAP
+        # Eviction took the task's message out of the window. Nothing was
+        # dropped to fit the cap: not even the newest turn fits beside the
+        # task.
+        window = agent.hippo.working.get_window()
+        assert query not in [m.content for m in window]
+        assert [m.tool_call_id for m in window if m.role == "tool"] == [
+            "call_2",
+            "call_3",
+        ]
+
 
 # ── Stuck detection with several calls per step ────────────────────────────
 
