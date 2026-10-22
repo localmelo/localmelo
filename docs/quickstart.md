@@ -7,6 +7,7 @@ Sections:
 
 - [Installation](#installation)
 - [Usage modes](#usage-modes)
+- [Run results](#run-results) — statuses and the `RunResult` record of a run
 - [Minimum smoke](#minimum-smoke) — verify each mode end-to-end after install
 - [Backend options](#backend-options)
 - [No-embedding mode](#no-embedding-mode)
@@ -86,6 +87,81 @@ curl http://localhost:8401/v1/sessions
 # Delete a session
 curl -X DELETE http://localhost:8401/v1/sessions/my-session
 ```
+
+### Python API
+
+`Agent`, `AgentOptions` and `RunResult` are importable from the package
+root:
+
+```python
+import asyncio
+
+from localmelo import Agent, AgentOptions
+from localmelo.support.config import load
+
+
+async def main() -> None:
+    agent = Agent(config=load(), options=AgentOptions(max_steps=10))
+    try:
+        result = await agent.run_task("What is 6*7?")
+        print(result.status, result.result or result.error)
+    finally:
+        await agent.close()
+
+
+asyncio.run(main())
+```
+
+`AgentOptions` sets the step budget (`max_steps`), the attempt policy
+(`attempt_policy`, `steps_per_attempt`, `max_attempts`), tool exposure
+(`tool_exposure`), the built-in tools (`builtins`) and memory (`memory`,
+`memory_dir`); its docstring describes each option and its default.
+`Agent.run_task(query)` returns a [`RunResult`](#run-results).
+`Agent.run(query)` returns the run's outcome as text, which is what the
+gateway and its web pages show: the result when it is non-empty, otherwise
+`[<status>] <error>`, for example `[budget_exhausted] Max steps reached`.
+One agent runs one task at a time.
+
+## Run results
+
+Every run ends with one of these statuses:
+
+| Status | Meaning |
+|---|---|
+| `completed` | The model gave a final answer. |
+| `failed` | A checker refused the plan or the run (the prompt outgrew the pre-plan cap, tool resolution failed, or the model's response failed its check), or the reflection gate decided not to continue; `result` then holds the reflection's best effort, if any. |
+| `budget_exhausted` | `max_steps` or `max_attempts` ran out before a final answer. |
+| `stuck` | Stuck detection fired (the same tool calls, or the same errors, three steps in a row) with `attempt_policy="none"`. With `"reflect"`, a reflection decides what happens next instead. |
+| `crashed` | An unexpected exception ended the run. `error` is `<ExceptionType>: <message>` and the traceback is logged. A cancelled run is recorded as `crashed` too, and the cancellation propagates. |
+
+`Agent.run_task()` returns the run as a `RunResult`; `RunResult.to_dict()`
+gives the same fields as a plain dict, in this order:
+
+| Field | Meaning |
+|---|---|
+| `task_id` | id of the run's task record in history |
+| `status` | one of the statuses above |
+| `result` | the final answer or a best effort; may be empty |
+| `error` | why the run did not complete; empty when it completed |
+| `steps` | planning calls made, at most `max_steps` |
+| `attempts` | attempts started (1 when the first attempt answered) |
+| `n_llm` | LLM requests that returned a response |
+| `n_main` | of those, requests that offered tools |
+| `n_aux` | of those, requests without tools: reflections, and planning calls in a step that offered no tool |
+| `n_tool` | tool calls handed to the executor, including calls it refused |
+| `llm_errors` | LLM requests that raised instead of responding |
+| `usage` | integer usage fields of all responses, summed by name (`prompt_tokens`, `completion_tokens`, `total_tokens`) |
+| `duration_s` | wall-clock time of the run, in seconds |
+| `config` | the effective run configuration (below) |
+
+`config` holds `max_steps`, `attempt_policy`, `steps_per_attempt`,
+`max_attempts`, `tool_exposure`, `builtins` (sorted names of the registered
+built-in tools), `memory`, `memory_dir` (the resolved directory, or `null`),
+`timeout_s` (or `null`) and `tools` (sorted names of every registered tool),
+so every record says which mode it ran in.
+
+Whatever the status, the run's task record is saved with it; see
+[memory.md → Task records](memory.md#task-records).
 
 ## Minimum smoke
 

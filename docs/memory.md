@@ -12,6 +12,7 @@ Sections:
 - [Quick reference](#quick-reference)
 - [Environment variables](#environment-variables)
 - [File layout](#file-layout)
+- [Task records](#task-records)
 - [Retention semantics](#retention-semantics)
 - [No-embedding mode](#no-embedding-mode)
 - [Reset workflow](#reset-workflow)
@@ -82,6 +83,30 @@ while a localmelo process is running.
 
 In no-embedding mode the `long_term.db*` files are not created; only
 `history.db*` exist.
+
+## Task records
+
+Every run writes one row to the `tasks` table of `history.db` (or to the
+in-memory history when persistence is off):
+
+| Column    | Value                                                                    |
+|-----------|--------------------------------------------------------------------------|
+| `task_id` | the run's `RunResult.task_id`                                            |
+| `query`   | the task as given                                                        |
+| `status`  | `running` while the run is in progress, then the run's status            |
+| `result`  | the run's result, or its error when the result is empty                  |
+
+The status values after a run are `completed`, `failed`,
+`budget_exhausted`, `stuck` and `crashed`; see
+[quickstart.md → Run results](quickstart.md#run-results) for their meaning.
+The row is saved again when the run ends, whatever ended it, including an
+exception or a cancellation. A row that still reads `running` belongs to a
+run in progress, or to a process that was killed before its run could end.
+
+Rows written before these statuses existed use only `running`,
+`completed` and `failed`; in them, `failed` also covers the runs that now
+end as `budget_exhausted` or `stuck`, and an exception left the row
+`running`.
 
 ## Retention semantics
 
@@ -158,6 +183,10 @@ sqlite3 ~/.cache/localmelo/memory/history.db '.tables'
 sqlite3 ~/.cache/localmelo/memory/history.db \
   'SELECT task_id, status, substr(query, 1, 60) AS query
      FROM tasks ORDER BY rowid DESC LIMIT 10'
+
+# How runs ended (see "Task records" for the status values)
+sqlite3 ~/.cache/localmelo/memory/history.db \
+  'SELECT status, COUNT(*) FROM tasks GROUP BY status'
 
 # Recent steps across all tasks
 sqlite3 ~/.cache/localmelo/memory/history.db \
