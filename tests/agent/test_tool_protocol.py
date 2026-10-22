@@ -653,26 +653,54 @@ class TestToolResultImages:
         assert not any(SHOT.data in m.content for m in second)
 
     @pytest.mark.asyncio
-    async def test_marker_counts_toward_the_memory_write_check(self) -> None:
-        # The output alone fits the check and the turn budget; with the
-        # marker it no longer fits the check.
-        output = "x" * (MAX_MEMORY_TEXT_LEN - 10)
+    @pytest.mark.parametrize(
+        "size",
+        [
+            # With the marker, too large for the memory-write check.
+            MAX_MEMORY_TEXT_LEN - 10,
+            # With the marker, MAX_MEMORY_TEXT_LEN - 4 characters: fits the
+            # check, but not the turn budget, of which the rendered call
+            # "shot({})" takes 8 characters.
+            MAX_MEMORY_TEXT_LEN - 1 - len(MARKER) - 4,
+        ],
+    )
+    async def test_marker_is_not_counted_against_the_limits(self, size: int) -> None:
+        # The output fits the check and the turn budget on its own, so the
+        # marker after it must not get it withheld.
+        output = "x" * size
         llm = FakeLLM(
             [
                 Message(role="assistant", tool_call=ToolCall("shot", id="call_big")),
                 Message(role="assistant", content="done"),
             ]
         )
-        agent = _image_agent(llm)
-        agent.executor.register(
-            "shot", _returning(ToolOutput(text=output, images=[SHOT]))
+        agent = _image_agent(llm, shot=ToolOutput(text=output, images=[SHOT]))
+        assert await agent.run("take a large screenshot") == "done"
+        window = agent.hippo.working.get_window()
+        [result] = [m for m in window if m.role == "tool"]
+        assert result.content == f"{output}\n{MARKER}"
+        assert result.images == [SHOT.as_reference()]
+
+    @pytest.mark.asyncio
+    async def test_withheld_result_still_names_its_images(self) -> None:
+        # Cut to MAX_OUTPUT_LEN and marked as truncated by the executor-
+        # result check, the output is still too large for working memory.
+        llm = FakeLLM(
+            [
+                Message(role="assistant", tool_call=ToolCall("shot", id="call_big")),
+                Message(role="assistant", content="done"),
+            ]
         )
+        agent = _image_agent(llm, shot=ToolOutput(text="x" * 60_000, images=[SHOT]))
         await agent.run("take a large screenshot")
         window = agent.hippo.working.get_window()
         [result] = [m for m in window if m.role == "tool"]
-        assert result.content.startswith("[Tool result withheld")
-        size = len(output) + 1 + len(MARKER)
-        assert f"Memory write too large: {size} chars" in result.content
+        notice, preview, marker = result.content.split("\n")
+        assert notice.startswith("[Tool result withheld")
+        assert "Memory write too large: 50016 chars" in notice
+        assert preview == "x" * 200
+        assert marker == MARKER
+        assert result.images == []
 
     @pytest.mark.asyncio
     async def test_history_and_working_memory_keep_references(self) -> None:
@@ -724,15 +752,16 @@ class TestToolResultImages:
         await agent.close()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("tool", ["shot", "shot_only"])
     async def test_memory_write_check_covers_the_images(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tool: str
     ) -> None:
         import localmelo.melo.checker.validators as validators
 
         monkeypatch.setattr(validators, "MAX_IMAGES_PER_MEMORY_WRITE", 0)
         llm = FakeLLM(
             [
-                Message(role="assistant", tool_call=ToolCall("shot", id="call_s")),
+                Message(role="assistant", tool_call=ToolCall(tool, id="call_s")),
                 Message(role="assistant", content="done"),
             ]
         )
@@ -740,9 +769,16 @@ class TestToolResultImages:
         await agent.run("take a screenshot")
         window = agent.hippo.working.get_window()
         [result] = [m for m in window if m.role == "tool"]
-        # A rejected write keeps neither the text nor the images.
-        assert result.content.startswith("[Tool result withheld")
-        assert "Too many images in one memory write: 1 (max 0)" in result.content
+        # A rejected write keeps neither the text nor the images, but the
+        # notice still names the images.
+        reason = "Too many images in one memory write: 1 (max 0)"
+        notice = f"[Tool result withheld from working memory: {reason}."
+        expected = {
+            "shot": f"{notice} First 8 characters follow.]\ncaptured\n{MARKER}",
+            # An image-only result has no text to preview.
+            "shot_only": f"{notice}]\n{MARKER}",
+        }
+        assert result.content == expected[tool]
         assert result.images == []
 
     @pytest.mark.asyncio
@@ -772,9 +808,11 @@ class TestToolResultImages:
         page, shot = results["call_page"], results["call_shot"]
         assert page.content == f"{'p' * 20_000}\n{MARKER}"
         assert page.images == [SHOT.as_reference()]
-        # Like a result the memory-write check rejects.
+        # Like a result the memory-write check rejects, it keeps no images
+        # on its message, but the notice still names them.
         assert shot.content.startswith("[Tool result withheld")
         assert "Tool calls and results too large" in shot.content
+        assert shot.content.endswith(f"\n{MARKER}")
         assert shot.images == []
 
     @pytest.mark.asyncio

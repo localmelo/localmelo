@@ -26,6 +26,7 @@ from localmelo.melo.schema import (
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
     STEPS_PER_ATTEMPT,
+    ImagePart,
     Message,
     ReflectionDecision,
     ReflectionEntry,
@@ -148,30 +149,37 @@ def _image_references(result: ToolResult) -> ToolResult:
 
 
 def _tool_result_text(result: ToolResult) -> str:
+    """Text of a tool result, without the line that names its images.
+
+    Empty or whitespace-only output reads ``(no output)``, unless the
+    result has images: an image-only result has no text, and its tool
+    message is just that line (see :func:`_tool_message_content`).
+    """
+    if result.error:
+        return f"Error: {result.error}"
+    if result.output.strip():
+        return result.output
+    return "" if result.images else "(no output)"
+
+
+def _tool_message_content(text: str, images: Sequence[ImagePart]) -> str:
     """Content of the ``role="tool"`` message that answers a call.
 
-    The images of a result are not sent to the model, so a result with
-    images ends with a line that names them (see :func:`describe_images`).
-    An image-only result reads just that line. Empty or whitespace-only
-    output without images reads ``(no output)``.
+    *text* is the result's text (see :func:`_tool_result_text`) or the
+    notice that replaced it. The images of a result are not sent to the
+    model, so a result with images ends with a line that names them (see
+    :func:`describe_images`), whether its text is kept or withheld.
     """
-    lines: list[str] = []
-    if result.error:
-        lines.append(f"Error: {result.error}")
-    elif result.output.strip():
-        lines.append(result.output)
-    if result.images:
-        lines.append(describe_images(result.images))
-    return "\n".join(lines) or "(no output)"
+    return "\n".join(part for part in (text, describe_images(images)) if part)
 
 
 def _withheld_notice(text: str, reason: str) -> str:
     """Stand-in for a tool result kept out of working memory."""
+    notice = f"[Tool result withheld from working memory: {reason}."
     preview = text[:WITHHELD_PREVIEW_CHARS]
-    return (
-        f"[Tool result withheld from working memory: {reason}. "
-        f"First {len(preview)} characters follow.]\n{preview}"
-    )
+    if not preview:
+        return f"{notice}]"  # an image-only result: nothing to preview
+    return f"{notice} First {len(preview)} characters follow.]\n{preview}"
 
 
 def _within_turn_budget(
@@ -516,7 +524,8 @@ class Agent:
         made and what each returned. A result's images (references, see
         :func:`_image_references`) are checked with its text. A result
         replaced by a notice, by that check or by the budget below, keeps
-        no images on its message.
+        no images on its message, but its message still ends with the
+        line that names them (see :func:`_tool_message_content`).
 
         The whole turn also shares one budget of ``MAX_MEMORY_TEXT_LEN``
         characters, half the 100,000 at which ``Checker.pre_plan`` fails
@@ -528,6 +537,11 @@ class Agent:
         results shorter than one, cannot shrink further, so a turn whose
         calls nearly fill the budget, or a turn of hundreds of calls, can
         still pass it.
+
+        The lines that name images are added after the check and the
+        budget and count toward neither, so they never withhold a result
+        that fits without them. Each is at most a few hundred characters,
+        so a turn can pass the budget by that much per result with images.
         """
         calls = self._checked_calls(response.tool_calls)
         calls_text = _render_tool_calls(calls)
@@ -536,8 +550,14 @@ class Agent:
         withheld: set[int] = set()
         for index, result in enumerate(results):
             text = _tool_result_text(result)
+            # A memory write needs text: an image-only result is checked
+            # with the line that names its images.
             check = self.checker.check_memory_write(
-                MemoryWritePayload(text=text, role="tool", images=list(result.images))
+                MemoryWritePayload(
+                    text=text or describe_images(result.images),
+                    role="tool",
+                    images=list(result.images),
+                )
             )
             if not check.allowed:
                 text = _withheld_notice(text, check.reason)
@@ -559,7 +579,7 @@ class Agent:
         tool_msgs = [
             Message(
                 role="tool",
-                content=text,
+                content=_tool_message_content(text, result.images),
                 tool_call_id=call.id,
                 tool_result=result,
                 images=[] if index in withheld else result.images,
