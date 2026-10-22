@@ -531,7 +531,7 @@ class TestClose:
         other = FakeToolProvider("b")
         llm = FakeLLM()
         agent = _agent(llm, [failing, other])
-        with caplog.at_level(logging.ERROR, logger="localmelo.melo.agent.agent"):
+        with caplog.at_level(logging.WARNING, logger="localmelo.melo.agent.agent"):
             await agent.close()
         # The other provider and the model provider are still closed.
         assert other.closes == 1
@@ -541,7 +541,12 @@ class TestClose:
             for r in caplog.records
             if "Could not close tool provider" in r.getMessage()
         ]
-        assert record.exc_info is not None
+        # One line, no traceback: closing a provider is not a crash.
+        assert record.levelno == logging.WARNING
+        assert record.exc_info is None
+        assert record.getMessage() == (
+            "Could not close tool provider FakeToolProvider: RuntimeError: stuck"
+        )
 
     @pytest.mark.asyncio
     async def test_a_cancelled_close_still_closes_every_provider(self) -> None:

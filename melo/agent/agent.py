@@ -626,9 +626,13 @@ class Agent:
     async def _close_provider(self, provider: BaseToolProvider) -> None:
         try:
             await provider.close()
-        except Exception:
-            logger.exception(
-                "Could not close tool provider %s", type(provider).__name__
+        except Exception as exc:
+            # Not a crash: one line, no traceback (the CLI prints tracebacks
+            # only for crashed runs).
+            logger.warning(
+                "Could not close tool provider %s: %s",
+                type(provider).__name__,
+                _exception_text(exc),
             )
 
     # ── Stage helpers ──
@@ -1284,12 +1288,11 @@ class Agent:
         Whatever happens, the task record is saved with the status and
         ``result or error``, and the reflections are cleared (promoted
         to long-term memory first when ``memory`` is on); a failure while
-        doing so is logged and does not replace the run's own outcome.
-        ``timeout_s`` bounds the run itself, not this final step. The
-        save has no bound of its own; promotion has
+        doing so is logged without a traceback and does not replace the
+        run's own outcome. ``timeout_s`` bounds the run itself, not this
+        final step. The save has no bound of its own; promotion has
         :data:`PROMOTION_TIMEOUT_S`, so an embedding server that stopped
-        answering delays the return by that much at most, and a failed
-        or unanswered embedding request is logged without a traceback.
+        answering delays the return by that much at most.
 
         ``RunResult.config`` reports the effective configuration: the
         options, the registered built-ins (``builtins``), the resolved
@@ -1349,20 +1352,23 @@ class Agent:
         """Save *task* with the run's terminal status and clear reflections.
 
         A failure is logged, not raised, so it cannot replace the run's
-        outcome or the exception that ended it. Promoting the reflections
-        may take at most :data:`PROMOTION_TIMEOUT_S` seconds. A failed
-        embedding request (``ProviderError``) or one that the bound cuts
-        short is logged at INFO without a traceback, as ``provider_error``
-        is; any other exception is logged with its traceback.
+        outcome or the exception that ended it, and is logged without a
+        traceback: the run did not crash because of it. Promoting the
+        reflections may take at most :data:`PROMOTION_TIMEOUT_S` seconds.
+        A failed embedding request (``ProviderError``) or one that the
+        bound cuts short is logged at INFO, as ``provider_error`` is; any
+        other failure at WARNING.
         """
         task.status = run.status
         task.result = run.result or run.error
         try:
             try:
                 await self.hippo.save_task(task)
-            except Exception:
-                logger.exception(
-                    "Could not save the final state of task %s", task.task_id
+            except Exception as exc:
+                logger.warning(
+                    "Could not save the final state of task %s: %s",
+                    task.task_id,
+                    _exception_text(exc),
                 )
             bound = asyncio.timeout(PROMOTION_TIMEOUT_S)
             try:
@@ -1385,8 +1391,10 @@ class Agent:
                         PROMOTION_TIMEOUT_S,
                     )
                 else:
-                    logger.exception(
-                        "Could not promote the reflections of task %s", task.task_id
+                    logger.warning(
+                        "Could not promote the reflections of task %s: %s",
+                        task.task_id,
+                        _exception_text(exc),
                     )
         finally:
             self.hippo.working.clear_reflections()

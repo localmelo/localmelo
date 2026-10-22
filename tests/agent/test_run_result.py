@@ -479,6 +479,24 @@ class TestFinally:
         assert "Could not save the final state of task" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_save_failure_is_logged_without_a_traceback(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        agent = _agent(FakeLLM([_answer("ok")]))
+        agent.hippo.history = FailingHistory(fail_from=2)
+        with caplog.at_level(logging.DEBUG):
+            result = await agent.run_task("q")
+        assert result.status == "completed"
+        [record] = [r for r in caplog.records if "Could not save" in r.getMessage()]
+        assert record.levelno == logging.WARNING
+        assert record.getMessage() == (
+            f"Could not save the final state of task {result.task_id}: "
+            "OSError: disk full"
+        )
+        # The run did not crash: nothing is logged with a traceback.
+        assert [r for r in caplog.records if r.exc_info] == []
+
+    @pytest.mark.asyncio
     async def test_save_failure_does_not_replace_the_crash_error(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -551,6 +569,21 @@ class TestFinally:
         assert "Could not promote the reflections of task" in caplog.text
         assert agent.hippo.working.get_reflections() == []
         assert _only_task(agent).status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_another_promotion_failure_logs_no_traceback(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        emb = FakeEmbedding(fail_prefix="Attempt ", error=RuntimeError("bad vector"))
+        llm = FakeLLM([_echo_call("a"), _reflection("continue"), _answer("done")])
+        agent = _agent(llm, _options(steps_per_attempt=1, max_attempts=2), emb)
+        with caplog.at_level(logging.DEBUG):
+            result = await agent.run_task("echo q")
+        assert (result.status, result.result) == ("completed", "done")
+        [record] = [r for r in caplog.records if "Could not promote" in r.getMessage()]
+        assert record.levelno == logging.WARNING
+        assert record.getMessage().endswith(": RuntimeError: bad vector")
+        assert [r for r in caplog.records if r.exc_info] == []
 
     @pytest.mark.asyncio
     async def test_a_provider_error_during_promotion_logs_no_traceback(

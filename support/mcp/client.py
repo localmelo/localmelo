@@ -473,13 +473,20 @@ class StdioMcpClient:
                     break
                 try:
                     self._dispatch(line)
-                except Exception:
+                except Exception as exc:
                     # One message the client cannot handle must not end the
-                    # reader: the server is still there.
+                    # reader: the server is still there. One line at WARNING
+                    # (a traceback on stderr would read as a crash); the
+                    # traceback goes to the debug log.
                     logger.warning(
-                        "MCP server %r: a message could not be handled; skipped",
+                        "MCP server %r: a message could not be handled (%s: %s); "
+                        "skipped",
                         self.name,
-                        exc_info=True,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    logger.debug(
+                        "MCP server %r: skipped message", self.name, exc_info=True
                     )
         finally:
             if error is None:

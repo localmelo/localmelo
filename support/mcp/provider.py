@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import logging
 from collections.abc import Callable, Iterable, Sequence
@@ -155,7 +154,7 @@ class McpToolProvider(BaseToolProvider):
         return tools
 
     async def close(self) -> None:
-        """Close every server's client; errors are ignored.
+        """Close every server's client; errors are logged, not raised.
 
         From the moment close() begins, start() starts no further server.
         A client is dropped only once its close() has finished, so if this
@@ -178,8 +177,19 @@ class McpToolProvider(BaseToolProvider):
         )
 
     async def _close_client(self, client: StdioMcpClient) -> None:
-        with contextlib.suppress(Exception):
+        try:
             await client.close()
+        except McpError as exc:
+            # A server that close() could not stop: worth a line on stderr,
+            # not a traceback (the run did not crash because of it).
+            logger.warning("%s", exc)
+        except Exception as exc:
+            logger.warning(
+                "Could not close MCP server %r: %s: %s",
+                client.name,
+                type(exc).__name__,
+                exc,
+            )
         # Not reached when close() is cancelled: the client stays listed.
         if client in self._clients:
             self._clients.remove(client)

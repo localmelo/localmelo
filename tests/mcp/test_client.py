@@ -450,6 +450,31 @@ class TestFailures:
         assert tool_result_to_output(second).text == "two"
         assert "handler failed" in caplog.text
 
+    async def test_a_skipped_message_is_logged_without_a_traceback(
+        self,
+        client: StdioMcpClient,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        handle = client._dispatch_one  # private: handles one parsed message
+
+        def handle_then_fail(message: dict[str, Any]) -> None:
+            handle(message)
+            raise RuntimeError("handler failed")
+
+        monkeypatch.setattr(client, "_dispatch_one", handle_then_fail)
+        with caplog.at_level(logging.DEBUG, logger="localmelo.support.mcp.client"):
+            await client.call_tool("echo", {"text": "one"})
+        [warning] = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warning.getMessage() == (
+            "MCP server 'fake': a message could not be handled "
+            "(RuntimeError: handler failed); skipped"
+        )
+        # A traceback on stderr would read as a crash; the debug log has it.
+        assert warning.exc_info is None
+        [debug] = [r for r in caplog.records if r.exc_info]
+        assert debug.levelno == logging.DEBUG
+
     async def test_closed_stdout_is_not_reported_as_an_exit(
         self, client: StdioMcpClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
