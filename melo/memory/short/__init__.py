@@ -87,6 +87,24 @@ class WorkingMemory:
         """Clear conversation buffer only. The latest reflection survives."""
         self._buf.clear()
 
+    def drop_oldest_units(self, count: int) -> int:
+        """Drop the *count* oldest units of the buffer (see :func:`group_turns`).
+
+        Units go whole, so a tool call never loses its results, and the
+        newest unit always stays. Returns the number of messages dropped.
+        """
+        dropped = 0
+        for _ in range(count):
+            if not self._buf:
+                break
+            size = self._leading_unit_size()
+            if size >= len(self._buf):
+                break  # only the newest unit is left
+            for _ in range(size):
+                self._buf.popleft()
+            dropped += size
+        return dropped
+
     def _evict(self) -> None:
         while len(self._buf) > self._max_len:
             size = self._leading_unit_size()

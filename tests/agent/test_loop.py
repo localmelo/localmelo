@@ -473,10 +473,9 @@ class TestPrePlanCheckFailure:
 
         agent = Agent(llm=llm, embedding=FakeEmbedding())
 
-        # Inject a huge message into short-term to trigger pre_plan block.
-        agent.hippo.short.append(Message(role="system", content="x" * 110_000))
-
-        result = await agent.run("test")
+        # A query too large on its own triggers the pre_plan block: it is
+        # the newest message, so dropping older ones cannot make room.
+        result = await agent.run("x" * 110_000)
         assert "Plan check failed" in result
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"

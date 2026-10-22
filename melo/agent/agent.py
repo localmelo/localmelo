@@ -29,6 +29,7 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor import Executor, builtin_names, register_builtins
 from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
+from localmelo.melo.memory.short import group_turns
 from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
     MAX_REFLECTION_CHARS,
@@ -635,6 +636,38 @@ class Agent:
     # short status string when the loop should break, or None to
     # continue to the next stage.
 
+    async def _fit_prompt_cap(self, others: list[Message]) -> None:
+        """Drop the oldest working memory that the planning prompt has no room for.
+
+        ``Checker.pre_plan`` refuses a step whose prompt, the working-memory
+        window plus *others* (long-term recall and the reflection), is
+        over its cap. Units of the window (see :func:`group_turns`) are
+        dropped oldest first and whole, so a tool call keeps its results,
+        until the prompt fits; the newest unit always stays. When even the
+        newest unit alone does not fit, nothing is dropped and pre_plan
+        refuses the step as before.
+
+        Each turn fits half the cap (see :meth:`_checked_tool_turn`), but
+        several large turns, of one run or of earlier runs on this agent,
+        can pass it together. Without this, the task would fail with
+        "Prompt too large", and so would each later run on this agent,
+        until eviction by message count caught up.
+        """
+        units = group_turns(self.hippo.working.get_window())
+        for first in range(len(units)):
+            kept = [msg for unit in units[first:] for msg in unit]
+            if (await self.checker.pre_plan(others + kept)).allowed:
+                break
+        else:
+            return  # not even the newest unit fits: keep the window
+        if first:
+            dropped = self.hippo.working.drop_oldest_units(first)
+            logger.info(
+                "Dropped the %d oldest working-memory messages so that the "
+                "planning prompt fits",
+                dropped,
+            )
+
     async def _do_retrieval(
         self, query: str
     ) -> tuple[list[Message], list[Message], list[ToolDef], str | None]:
@@ -644,12 +677,17 @@ class Agent:
         extraction plus BM25; with ``"all"`` they are every registered
         tool, sorted by name.
 
+        Before anything reads the working-memory window, its oldest units
+        are dropped when the planning prompt would not fit
+        ``Checker.pre_plan``'s cap otherwise (see :meth:`_fit_prompt_cap`).
+
         Returns (long_context, short_window, tools, fail_reason).
         *fail_reason* is non-None when a check fails and the loop must break.
         """
         long_context = await self.hippo.retrieve_context(query)
-        short_window = self.hippo.working.get_window()
         reflection_msgs = _serialize_reflections(self.hippo.working.get_reflections())
+        await self._fit_prompt_cap(long_context + reflection_msgs)
+        short_window = self.hippo.working.get_window()
 
         tool_hints: list[str] = []
         if self.options.tool_exposure == "all":

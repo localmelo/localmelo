@@ -330,8 +330,8 @@ class TestStatuses:
     async def test_failed_when_the_pre_plan_check_refuses(self) -> None:
         llm = FakeLLM([_answer("never sent")])
         agent = _agent(llm)
-        agent.hippo.working.append(Message(role="system", content="x" * 110_000))
-        result = await agent.run_task("q")
+        # Too large on its own: no older working memory to drop helps.
+        result = await agent.run_task("x" * 110_000)
         assert (result.status, result.result) == ("failed", "")
         assert result.error.startswith("Plan check failed: ")
         # The check refused the step before its planning call was made.

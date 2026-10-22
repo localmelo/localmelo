@@ -215,9 +215,9 @@ class TestAllExposure:
     async def test_pre_plan_check_still_runs(self) -> None:
         llm = FakeLLM([_answer("should not reach")])
         agent, _ = _agent(llm, AgentOptions(tool_exposure="all"), {})
-        agent.hippo.short.append(Message(role="system", content="x" * 110_000))
 
-        assert "Plan check failed" in await agent.run("hello")
+        # Too large on its own: no older working memory to drop helps.
+        assert "Plan check failed" in await agent.run("x" * 110_000)
         assert llm.calls == []
 
 

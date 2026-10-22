@@ -1029,6 +1029,20 @@ class TestWorkingMemoryTurns:
             assert window[0].role != "tool"
             assert_protocol_valid(window)
 
+    def test_drop_oldest_units_keeps_whole_units_and_the_newest(self) -> None:
+        wm = WorkingMemory(max_len=20)
+        wm.append(Message(role="user", content="q"))
+        wm.append_turn(*_turn(2, "a"))
+        wm.append_turn(*_turn(1, "b"))
+        assert wm.drop_oldest_units(2) == 4  # "q", then the "a" turn
+        window = wm.get_window()
+        assert_protocol_valid(window)
+        assert [m.tool_call_id for m in window if m.role == "tool"] == ["call_b0"]
+        # The newest unit always stays.
+        assert wm.drop_oldest_units(5) == 0
+        assert len(wm.get_window()) == 2
+        assert WorkingMemory(max_len=2).drop_oldest_units(1) == 0
+
     def test_tail_turns_never_splits(self) -> None:
         msgs: list[Message] = [Message(role="user", content="q")]
         a, a_results = _turn(2, "a")
@@ -1089,6 +1103,115 @@ class TestAgentWindowTruncation:
         assert_protocol_valid(sent)
         assert sent[-1].role == "user"
         assert any(m.tool_calls for m in sent)
+
+
+# ── Working memory that outgrows the prompt cap ────────────────────────────
+
+# Checker.pre_plan fails a step whose prompt is larger than this.
+PROMPT_CAP = 100_000
+
+
+def _prompt_chars(messages: list[Message]) -> int:
+    """What Checker.pre_plan counts of *messages*."""
+    return sum(
+        len(m.content)
+        + sum(len(tc.tool_name) + len(json.dumps(tc.arguments)) for tc in m.tool_calls)
+        for m in messages
+    )
+
+
+def _reader(llm: BaseLLMProvider) -> Agent:
+    """Agent whose read tool returns 40,000 characters a call."""
+    agent = Agent(llm=llm, embedding=None)
+    agent.hippo.register_tool(_echo_def("read"))
+
+    async def _read(text: str) -> str:
+        return text[-1] * 40_000
+
+    agent.executor.register("read", _read)
+    return agent
+
+
+def _read_call(part: str) -> Message:
+    call = ToolCall(tool_name="read", arguments={"text": part}, id=f"call_{part}")
+    return Message(role="assistant", tool_call=call)
+
+
+class TestPromptCapRecovery:
+    @pytest.mark.asyncio
+    async def test_later_runs_drop_old_turns_instead_of_failing(self) -> None:
+        # One large turn a run. From the third run on, the turns no longer
+        # fit the cap together; the oldest whole units are dropped, so no
+        # run fails with "Prompt too large".
+        replies = []
+        for i in range(6):
+            replies += [_read_call(str(i)), Message(role="assistant", content=f"a{i}")]
+        llm = FakeLLM(replies)
+        agent = _reader(llm)
+        for i in range(6):
+            result = await agent.run_task(f"read part {i}")
+            assert (result.status, result.result) == ("completed", f"a{i}")
+
+        for call in _planning_calls(llm):
+            sent = call["messages"]
+            assert_protocol_valid(sent)
+            assert _prompt_chars(sent[1:]) <= PROMPT_CAP
+        window = agent.hippo.working.get_window()
+        assert_protocol_valid(window)
+        assert [m.tool_call_id for m in window if m.role == "tool"] == [
+            "call_4",
+            "call_5",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_large_turns_within_one_run(self) -> None:
+        llm = FakeLLM(
+            [
+                _read_call("1"),
+                _read_call("2"),
+                _read_call("3"),
+                _read_call("4"),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _reader(llm)
+        result = await agent.run_task("read parts 1 to 4")
+        assert (result.status, result.result, result.steps) == ("completed", "done", 5)
+
+        planning = _planning_calls(llm)
+        for call in planning:
+            sent = call["messages"]
+            assert_protocol_valid(sent)
+            assert _prompt_chars(sent[1:]) <= PROMPT_CAP
+            # The task still opens the conversation after its message left.
+            assert (sent[1].role, sent[1].content) == ("user", "read parts 1 to 4")
+        last = planning[-1]["messages"]
+        assert [m.tool_call_id for m in last if m.role == "tool"] == [
+            "call_3",
+            "call_4",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_leftover_oversized_message_is_dropped(self) -> None:
+        llm = FakeLLM([Message(role="assistant", content="ok")])
+        agent = _agent(llm)
+        agent.hippo.working.append(Message(role="system", content="x" * 110_000))
+        result = await agent.run_task("hello")
+        assert (result.status, result.result) == ("completed", "ok")
+        assert [m.content for m in agent.hippo.working.get_window()] == ["hello"]
+
+    @pytest.mark.asyncio
+    async def test_nothing_is_dropped_when_the_newest_unit_cannot_fit(self) -> None:
+        llm = FakeLLM([Message(role="assistant", content="never sent")])
+        agent = _agent(llm)
+        agent.hippo.working.append(Message(role="user", content="earlier"))
+        query = "x" * (PROMPT_CAP + 1)
+        result = await agent.run_task(query)
+        assert result.status == "failed"
+        assert result.error.startswith("Plan check failed: Prompt too large")
+        assert llm.calls == []
+        window = agent.hippo.working.get_window()
+        assert [m.content for m in window] == ["earlier", query]
 
 
 # ── Stuck detection with several calls per step ────────────────────────────
