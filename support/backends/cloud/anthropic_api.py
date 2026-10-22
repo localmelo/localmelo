@@ -63,6 +63,7 @@ class AnthropicBackend(BaseBackend):
             model=cfg.anthropic.chat_model,
             api_key=api_key,
             extra_body=cfg.anthropic.extra_body,
+            timeout=cfg.request_timeout_s,
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

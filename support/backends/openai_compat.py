@@ -29,14 +29,22 @@ def build_openai_chat(
     model: str,
     api_key: str | None = None,
     extra_body: Mapping[str, Any] | None = None,
+    timeout: float | None = None,
 ) -> BaseLLMProvider:
     """Build an :class:`OpenAICompatLLM` with consistent URL handling.
 
     *extra_body* is merged into every chat request (see
-    :class:`OpenAICompatLLM`).
+    :class:`OpenAICompatLLM`). *timeout* is the HTTP timeout of each chat
+    request in seconds; None keeps the provider's default (120 s).
     """
+    # Passed only when set: httpx reads timeout=None as no timeout at all.
+    options: dict[str, Any] = {} if timeout is None else {"timeout": timeout}
     return OpenAICompatLLM(
-        base_url=base_url, model=model, api_key=api_key, extra_body=extra_body
+        base_url=base_url,
+        model=model,
+        api_key=api_key,
+        extra_body=extra_body,
+        **options,
     )
 
 

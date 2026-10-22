@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from localmelo.support.backends.base import BaseBackend
 from localmelo.support.backends.openai_compat import (
@@ -68,10 +68,15 @@ class OllamaBackend(BaseBackend):
         url = cfg.ollama.chat_url.rstrip("/")
         if url.endswith("/v1"):
             url = url[:-3]
+        # Unless request_timeout_s is set, the provider keeps its default
+        # (300 s); httpx would read timeout=None as no timeout at all.
+        timeout = cfg.request_timeout_s
+        options: dict[str, Any] = {} if timeout is None else {"timeout": timeout}
         return OllamaNativeChat(
             base_url=url,
             model=cfg.ollama.chat_model,
             extra_body=cfg.ollama.extra_body,
+            **options,
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

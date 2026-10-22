@@ -66,6 +66,7 @@ class MlcBackend(BaseBackend):
             base_url=normalize_url(cfg.mlc.chat_url),
             model=cfg.mlc.chat_model,
             extra_body=cfg.mlc.extra_body,
+            timeout=cfg.request_timeout_s,
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

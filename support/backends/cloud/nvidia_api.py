@@ -63,6 +63,7 @@ class NvidiaBackend(BaseBackend):
             model=cfg.nvidia.chat_model,
             api_key=api_key,
             extra_body=cfg.nvidia.extra_body,
+            timeout=cfg.request_timeout_s,
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:
