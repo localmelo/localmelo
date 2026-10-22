@@ -44,7 +44,11 @@ KNOWN_PROTOCOL_VERSIONS = frozenset({"2024-11-05", "2025-03-26", "2025-06-18"})
 # Base64 screenshots arrive as one JSON line; asyncio's default line limit
 # is 64 KiB.
 STREAM_LIMIT = 64 * 1024 * 1024
+# stderr_tail keeps the last STDERR_TAIL_LINES lines of the server's
+# stderr, each cut to its last STDERR_LINE_CHARS characters.
 STDERR_TAIL_LINES = 200
+STDERR_LINE_CHARS = 1000
+STDERR_LINE_BYTES = 4 * STDERR_LINE_CHARS  # UTF-8: at most 4 bytes a character
 MAX_TOOL_PAGES = 100
 # How long the stdout reader waits for the exit code once the server's
 # output has ended.
@@ -460,18 +464,27 @@ class StdioMcpClient:
         return proc.returncode
 
     async def _read_stderr(self) -> None:
+        # Chunks, not lines, so that a huge log line is never held whole:
+        # only the end of each line is kept.
         proc = self._proc
         assert proc is not None and proc.stderr is not None
+        partial = b""  # the line still being read
         while True:
-            try:
-                line = await proc.stderr.readline()
-            except ValueError:
-                continue  # an over-long log line; keep draining
-            if not line:
+            chunk = await proc.stderr.read(64 * 1024)
+            if not chunk:
+                if partial:
+                    self._add_stderr_line(partial)
                 return
-            text = line.decode("utf-8", errors="replace").rstrip()
-            self.stderr_tail.append(text)
-            logger.debug("[mcp %s] %s", self.name, text)
+            *lines, partial = (partial + chunk).split(b"\n")
+            for line in lines:
+                self._add_stderr_line(line)
+            partial = partial[-STDERR_LINE_BYTES:]
+
+    def _add_stderr_line(self, line: bytes) -> None:
+        text = line[-STDERR_LINE_BYTES:].decode("utf-8", errors="replace").rstrip()
+        text = text[-STDERR_LINE_CHARS:]
+        self.stderr_tail.append(text)
+        logger.debug("[mcp %s] %s", self.name, text)
 
     def _dispatch(self, line: bytes) -> None:
         # errors="replace": text that is not UTF-8 (a stray Latin-1 log line)

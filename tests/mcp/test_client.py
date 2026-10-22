@@ -12,11 +12,13 @@ import shlex
 import signal
 import sys
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from localmelo.support.mcp import McpError, StdioMcpClient, tool_result_to_output
+from localmelo.support.mcp.client import STDERR_LINE_CHARS
 from localmelo.tests.mcp.conftest import (
     SpawnGate,
     fake_server_config,
@@ -48,6 +50,36 @@ class TestHandshake:
         # The fake server writes 200 KB to stderr before reading stdin; the
         # handshake only completes because the client drains it.
         assert any("fake-mcp: starting" in line for line in client.stderr_tail)
+
+    async def test_stderr_tail_keeps_the_end_of_each_line(
+        self, client: StdioMcpClient
+    ) -> None:
+        # The fake server's second stderr line is 200,000 dots long.
+        assert list(client.stderr_tail) == [
+            "fake-mcp: starting",
+            "." * STDERR_LINE_CHARS,
+        ]
+
+    async def test_stderr_lines_across_chunks(self, log_path: Path) -> None:
+        mcp = StdioMcpClient(fake_server_config(log_path))
+        stderr = asyncio.StreamReader()
+        # private: a stand-in process, so the reader sees exactly these chunks
+        mcp._proc = cast(asyncio.subprocess.Process, SimpleNamespace(stderr=stderr))
+        long_line = "x" * 100_000 + "end"
+
+        async def write() -> None:
+            for chunk in ("first\r\nsec", "ond\n", long_line, "\nno newline at EOF"):
+                stderr.feed_data(chunk.encode())
+                await asyncio.sleep(0)  # the reader takes each chunk alone
+            stderr.feed_eof()
+
+        await asyncio.wait_for(asyncio.gather(mcp._read_stderr(), write()), 5)
+        assert list(mcp.stderr_tail) == [
+            "first",
+            "second",
+            long_line[-STDERR_LINE_CHARS:],
+            "no newline at EOF",
+        ]
 
 
 class TestToolCalls:
