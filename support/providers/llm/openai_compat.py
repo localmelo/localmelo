@@ -63,9 +63,10 @@ def _message_to_openai(msg: Message) -> dict[str, Any]:
     ``tool_result`` stay local. An assistant message with tool calls keeps
     its (possibly empty) text and lists every call; a tool result names
     the call it answers through ``tool_call_id``. A user message with
-    images becomes a content array of ``text`` and ``image_url`` parts.
-    Images on other roles are not sent here (see :func:`_messages_to_openai`
-    for tool results; the spec allows images only in user content).
+    images that have data becomes a content array of ``text`` and
+    ``image_url`` parts. Images on other roles are not sent here (see
+    :func:`_messages_to_openai` for tool results and for images without
+    data; the spec allows images only in user content).
     """
     if msg.role == "user" and msg.images:
         parts = _image_parts(msg.images)
@@ -88,17 +89,22 @@ def _message_to_openai(msg: Message) -> dict[str, Any]:
 
 
 def _tool_images_message(msg: Message, tool_names: dict[str, str]) -> dict[str, Any]:
-    """The user message that carries the images of one tool result."""
+    """The user message that carries the images of one tool result.
+
+    Its label names the tool call and describes only the images it
+    attaches, the ones with data.
+    """
+    attached = [img for img in msg.images if img.data]
     name = tool_names.get(msg.tool_call_id, "")
     if not name and msg.tool_result is not None:
         name = msg.tool_result.tool_name
     label = f"Output of tool call {msg.tool_call_id}"
     if name:
         label += f" ({name})"
-    label += f": {describe_images(msg.images)}"
+    label += f": {describe_images(attached)}"
     return {
         "role": "user",
-        "content": [{"type": "text", "text": label}, *_image_parts(msg.images)],
+        "content": [{"type": "text", "text": label}, *_image_parts(attached)],
     }
 
 
@@ -111,6 +117,14 @@ def _messages_to_openai(messages: Sequence[Message]) -> list[dict[str, Any]]:
     blocks). So the images of each tool result travel in their own
     ``role="user"`` message, placed right after the run of tool results
     and labelled with the tool call they belong to.
+
+    Only images with data are sent. Reference-only images (see
+    :meth:`ImagePart.as_reference`) are not rendered at all: the label
+    describes only the attached images, and a message whose images are
+    all references is sent as text alone, with no extra user message.
+    Whoever writes a message's text names its reference-only images
+    there; the Agent does, with :func:`describe_images` in the tool
+    message.
     """
     out: list[dict[str, Any]] = []
     trailing: list[dict[str, Any]] = []

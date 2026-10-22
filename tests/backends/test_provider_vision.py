@@ -9,7 +9,13 @@ from typing import Any
 import httpx
 import pytest
 
-from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolResult
+from localmelo.melo.schema import (
+    ImagePart,
+    Message,
+    ToolCall,
+    ToolResult,
+    describe_images,
+)
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
@@ -107,6 +113,27 @@ class TestOpenAIUserImages:
         )
         assert sent == [{"role": "user", "content": "old"}]
 
+    @pytest.mark.asyncio
+    async def test_only_attached_images_are_sent(self) -> None:
+        sent = await _openai_messages(
+            [
+                Message(
+                    role="user",
+                    content="compare",
+                    images=[SHOT.as_reference(), SHOT2],
+                )
+            ]
+        )
+        assert sent == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "compare"},
+                    {"type": "image_url", "image_url": {"url": SHOT2.data_url}},
+                ],
+            }
+        ]
+
 
 class TestOpenAIToolImages:
     @pytest.mark.asyncio
@@ -177,6 +204,19 @@ class TestOpenAIToolImages:
         assert [m["role"] for m in sent] == ["assistant", "tool"]
 
     @pytest.mark.asyncio
+    async def test_label_describes_only_attached_images(self) -> None:
+        sent = await _openai_messages(
+            _tool_turn(("call_s", "shot", [SHOT.as_reference(), SHOT2]))
+        )
+        assert [m["role"] for m in sent] == ["assistant", "tool", "user"]
+        label, *images = sent[2]["content"]
+        assert label == {
+            "type": "text",
+            "text": f"Output of tool call call_s (shot): {describe_images([SHOT2])}",
+        }
+        assert images == [{"type": "image_url", "image_url": {"url": SHOT2.data_url}}]
+
+    @pytest.mark.asyncio
     async def test_images_on_other_roles_are_not_sent(self) -> None:
         sent = await _openai_messages(
             [
@@ -212,6 +252,42 @@ class TestOllamaImages:
         assert sent[3]["role"] == "user"
         assert sent[3]["images"] == [SHOT2.data]
         assert "call_s" in sent[3]["content"]
+
+    @pytest.mark.asyncio
+    async def test_reference_only_images_add_nothing(self) -> None:
+        sent = await _ollama_messages(
+            [
+                Message(role="user", content="old", images=[SHOT.as_reference()]),
+                *_tool_turn(("call_s", "shot", [SHOT.as_reference()])),
+            ]
+        )
+        assert [m["role"] for m in sent] == ["user", "assistant", "tool"]
+        assert not any("images" in m for m in sent)
+
+    @pytest.mark.asyncio
+    async def test_only_attached_images_are_sent(self) -> None:
+        sent = await _ollama_messages(
+            [
+                Message(
+                    role="user",
+                    content="compare",
+                    images=[SHOT.as_reference(), SHOT2],
+                )
+            ]
+        )
+        assert sent == [{"role": "user", "content": "compare", "images": [SHOT2.data]}]
+
+    @pytest.mark.asyncio
+    async def test_label_describes_only_attached_images(self) -> None:
+        sent = await _ollama_messages(
+            _tool_turn(("call_s", "shot", [SHOT.as_reference(), SHOT2]))
+        )
+        assert [m["role"] for m in sent] == ["assistant", "tool", "user"]
+        assert sent[2] == {
+            "role": "user",
+            "content": f"Output of tool call call_s: {describe_images([SHOT2])}",
+            "images": [SHOT2.data],
+        }
 
 
 class TestWrappedBase64:

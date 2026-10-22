@@ -115,7 +115,15 @@ def _messages_to_ollama(messages: list[Message]) -> list[dict[str, Any]]:
 
     Images use the native ``images`` field (raw base64). Like the OpenAI
     provider, images of a tool result go into a user message after the
-    run of tool results.
+    run of tool results, labelled with the tool call they belong to.
+
+    Only images with data are sent. Reference-only images (see
+    :meth:`ImagePart.as_reference`) are not rendered at all: the label
+    describes only the attached images, and a message whose images are
+    all references gets no ``images`` field and no extra user message.
+    Whoever writes a message's text names its reference-only images
+    there; the Agent does, with :func:`describe_images` in the tool
+    message.
     """
     tool_names: dict[str, str] = {}
     out: list[dict[str, Any]] = []
@@ -127,10 +135,11 @@ def _messages_to_ollama(messages: list[Message]) -> list[dict[str, Any]]:
         for tc in msg.tool_calls:
             tool_names[tc.id] = tc.tool_name
         entry = _message_to_ollama(msg, tool_names)
-        images = [img.data for img in msg.images if img.data]
+        attached = [img for img in msg.images if img.data]
+        images = [img.data for img in attached]
         if images and msg.role == "tool":
             label = (
-                f"Output of tool call {msg.tool_call_id}: {describe_images(msg.images)}"
+                f"Output of tool call {msg.tool_call_id}: {describe_images(attached)}"
             )
             trailing.append({"role": "user", "content": label, "images": images})
         elif images:
