@@ -9,6 +9,8 @@ named by FAKE_MCP_LOG. FAKE_MCP_MODE selects misbehaviour:
 - ``hang_initialize``: never answer ``initialize``
 - ``hang_tools_list``: never answer ``tools/list``
 - ``garbage_stdout``: write a non-JSON line before every response
+- ``malformed_stdout``: write a line that is not UTF-8 and a line of JSON
+  nested too deep to parse before every response
 - ``stubborn``: ignore SIGTERM and keep running after stdin closes
 """
 
@@ -83,6 +85,16 @@ TOOLS: list[dict[str, Any]] = [
     },
     {"name": "structured", "description": "Structured only.", "inputSchema": _schema()},
     {"name": "read.file", "description": "Name with a dot.", "inputSchema": _schema()},
+    {
+        "name": "close_stdout",
+        "description": "Close stdout and keep running.",
+        "inputSchema": _schema(),
+    },
+    {
+        "name": "latin1",
+        "description": "Text that is not UTF-8.",
+        "inputSchema": _schema(),
+    },
 ]
 
 
@@ -91,6 +103,9 @@ def send(message: dict[str, Any]) -> None:
     with _write_lock:
         if MODE == "garbage_stdout":
             sys.stdout.buffer.write(b"this is not JSON\n")
+        elif MODE == "malformed_stdout":
+            sys.stdout.buffer.write(b"caf\xe9 log line\n")  # Latin-1
+            sys.stdout.buffer.write(b"[" * 200_000 + b"\n")
         sys.stdout.buffer.write(data)
         sys.stdout.buffer.flush()
 
@@ -159,6 +174,22 @@ def call_tool(request_id: Any, name: str, args: dict[str, Any]) -> None:
         result = {"content": [], "structuredContent": {"answer": 42}}
     elif name == "read.file":
         result = text_result("dotted name ok")
+    elif name == "latin1":
+        # The response is encoded as Latin-1, not UTF-8.
+        message = {"jsonrpc": "2.0", "id": request_id, "result": text_result("caf\xe9")}
+        data = (json.dumps(message, ensure_ascii=False) + "\n").encode("latin-1")
+        with _write_lock:
+            sys.stdout.buffer.write(data)
+            sys.stdout.buffer.flush()
+        return
+    elif name == "close_stdout":
+        # stdout becomes /dev/null: the client reads EOF while this process
+        # keeps running, and this call gets no response.
+        with _write_lock:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            os.close(devnull)
+        return
     else:
         send(
             {

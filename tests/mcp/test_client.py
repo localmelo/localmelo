@@ -258,6 +258,63 @@ class TestFailures:
             await mcp.close()
         assert tool_result_to_output(result).text == "ok"
 
+    async def test_malformed_stdout_lines_are_skipped(self, log_path: Path) -> None:
+        # Before every response the server writes a line that is not UTF-8
+        # and a line of JSON nested deeper than the parser's recursion limit.
+        mcp = StdioMcpClient(
+            fake_server_config(log_path, env={"FAKE_MCP_MODE": "malformed_stdout"}),
+            shutdown_grace_s=0.5,
+        )
+        await mcp.start()
+        try:
+            first = await mcp.call_tool("echo", {"text": "ok"})
+            second = await mcp.call_tool("echo", {"text": "again"})
+        finally:
+            await mcp.close()
+        assert tool_result_to_output(first).text == "ok"
+        assert tool_result_to_output(second).text == "again"
+
+    async def test_response_that_is_not_utf8_is_read(
+        self, client: StdioMcpClient
+    ) -> None:
+        # The server encodes this response as Latin-1; the byte that is not
+        # UTF-8 becomes U+FFFD instead of losing the response.
+        result = await asyncio.wait_for(client.call_tool("latin1", {}), 5)
+        assert tool_result_to_output(result).text == "caf\ufffd"
+
+    async def test_a_message_that_cannot_be_handled_is_skipped(
+        self,
+        client: StdioMcpClient,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        handle = client._dispatch_one  # private: handles one parsed message
+
+        def handle_then_fail(message: dict[str, Any]) -> None:
+            handle(message)
+            raise RuntimeError("handler failed")
+
+        monkeypatch.setattr(client, "_dispatch_one", handle_then_fail)
+        first = await client.call_tool("echo", {"text": "one"})
+        # The reader outlived the failure, so the next response arrives too.
+        second = await client.call_tool("echo", {"text": "two"})
+        assert tool_result_to_output(first).text == "one"
+        assert tool_result_to_output(second).text == "two"
+        assert "handler failed" in caplog.text
+
+    async def test_closed_stdout_is_not_reported_as_an_exit(
+        self, client: StdioMcpClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The wait for an exit code once the output has ended.
+        monkeypatch.setattr("localmelo.support.mcp.client.EXIT_WAIT_S", 0.1)
+        # The server replaces its stdout with /dev/null and keeps running.
+        with pytest.raises(McpError, match="stopped responding") as info:
+            await client.call_tool("close_stdout", {})
+        assert "exited" not in str(info.value)
+        assert client.returncode is None
+        with pytest.raises(McpError, match="stopped responding"):
+            await client.call_tool("echo", {"text": "x"})
+
 
 class TestShutdown:
     async def test_close_is_idempotent(self, client: StdioMcpClient) -> None:

@@ -39,6 +39,9 @@ KNOWN_PROTOCOL_VERSIONS = frozenset({"2024-11-05", "2025-03-26", "2025-06-18"})
 STREAM_LIMIT = 64 * 1024 * 1024
 STDERR_TAIL_LINES = 200
 MAX_TOOL_PAGES = 100
+# How long the stdout reader waits for the exit code once the server's
+# output has ended.
+EXIT_WAIT_S = 1.0
 
 METHOD_NOT_FOUND = -32601
 
@@ -380,20 +383,36 @@ class StdioMcpClient:
                     break
                 if not line:
                     break
-                self._dispatch(line)
+                try:
+                    self._dispatch(line)
+                except Exception:
+                    # One message the client cannot handle must not end the
+                    # reader: the server is still there.
+                    logger.warning(
+                        "MCP server %r: a message could not be handled; skipped",
+                        self.name,
+                        exc_info=True,
+                    )
         finally:
             if error is None:
                 code = await self._returncode_soon(proc)
-                error = McpError(
-                    f"MCP server {self.name!r} exited (code {code})"
-                    f"{self._stderr_hint()}"
-                )
+                if code is None:
+                    error = McpError(
+                        f"MCP server {self.name!r} stopped responding: its output "
+                        f"ended while the process is still running"
+                        f"{self._stderr_hint()}"
+                    )
+                else:
+                    error = McpError(
+                        f"MCP server {self.name!r} exited (code {code})"
+                        f"{self._stderr_hint()}"
+                    )
             self._exit_error = error
             self._fail_pending(error)
 
     async def _returncode_soon(self, proc: asyncio.subprocess.Process) -> int | None:
         with contextlib.suppress(TimeoutError):
-            await asyncio.wait_for(proc.wait(), 1.0)
+            await asyncio.wait_for(proc.wait(), EXIT_WAIT_S)
         return proc.returncode
 
     async def _read_stderr(self) -> None:
@@ -411,10 +430,18 @@ class StdioMcpClient:
             logger.debug("[mcp %s] %s", self.name, text)
 
     def _dispatch(self, line: bytes) -> None:
+        # errors="replace": text that is not UTF-8 (a stray Latin-1 log line)
+        # must not end the reader.
+        text = line.decode("utf-8", errors="replace")
         try:
-            message = json.loads(line)
-        except json.JSONDecodeError:
-            logger.debug("MCP server %r wrote a non-JSON line; ignored", self.name)
+            message = json.loads(text)
+        except (ValueError, RecursionError) as exc:
+            # RecursionError: JSON nested deeper than the parser can follow.
+            logger.debug(
+                "MCP server %r wrote a line that is not a JSON message (%s); ignored",
+                self.name,
+                exc,
+            )
             return
         for item in message if isinstance(message, list) else [message]:
             if isinstance(item, dict):
