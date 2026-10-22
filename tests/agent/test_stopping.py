@@ -525,6 +525,44 @@ class TestEmptyReplies:
         assert (result.status, result.error) == ("failed", "empty replies")
         assert (result.steps, result.attempts) == (2, 2)
         assert (result.n_main, result.n_aux) == (2, 1)
+        assert _is_reflection(llm.calls[1])
+        _assert_no_user_after_user(llm.calls[1]["messages"])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("replies", "options", "roles"),
+        [
+            (
+                [_empty(), _reflection("stop")],
+                {"steps_per_attempt": 1, "max_attempts": 2},
+                ["system", "user", "assistant", "user"],
+            ),
+            (
+                [_echo_call("a"), _empty(), _reflection("stop")],
+                {"steps_per_attempt": 2, "max_attempts": 2},
+                ["system", "user", "assistant", "tool", "assistant", "user"],
+            ),
+            (
+                [_empty(), _reflection("stop")],
+                {"max_steps": 1},
+                ["system", "user", "assistant", "user"],
+            ),
+        ],
+        ids=["only-an-empty-reply", "after-a-tool-call", "final-reflection"],
+    )
+    async def test_a_reflection_after_an_empty_reply_alternates(
+        self, replies: list[Message], options: dict[str, Any], roles: list[str]
+    ) -> None:
+        # The attempt's last step was an empty reply, so working memory
+        # ends with the nudge, a user message. The reflection request, a
+        # user message too, takes its place after the empty reply's label.
+        llm = FakeLLM(replies)
+        await _agent(llm, **options).run_task("echo the answer")
+        [sent] = [call["messages"] for call in llm.calls if _is_reflection(call)]
+        _assert_no_user_after_user(sent)
+        assert [m.role for m in sent] == roles
+        assert sent[-2].content == EMPTY_REPLY_LABEL
+        assert sent[-1].content.startswith("Original task: echo the answer")
 
     @pytest.mark.asyncio
     async def test_an_empty_reply_uses_up_a_step(self) -> None:

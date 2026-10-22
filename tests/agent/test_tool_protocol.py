@@ -1236,13 +1236,13 @@ def _prompt_chars(messages: list[Message]) -> int:
     )
 
 
-def _reader(llm: BaseLLMProvider) -> Agent:
-    """Agent whose read tool returns 40,000 characters a call."""
+def _reader(llm: BaseLLMProvider, size: int = 40_000) -> Agent:
+    """Agent whose read tool returns *size* characters a call."""
     agent = Agent(llm=llm, embedding=None)
     agent.hippo.register_tool(_echo_def("read"))
 
     async def _read(text: str) -> str:
-        return text[-1] * 40_000
+        return text[-1] * size
 
     agent.executor.register("read", _read)
     return agent
@@ -1331,20 +1331,63 @@ class TestPromptCapRecovery:
 
     @pytest.mark.asyncio
     async def test_an_empty_reply_label_goes_only_with_its_nudge(self) -> None:
-        # The prompt fits with the nudge and the newest turn, but not with
-        # the label as well. Dropping the label alone would leave the nudge
-        # to follow the query that plan_step puts back in front, so the
-        # label and the nudge go together.
+        # The prompt, with the query that plan_step puts back in front,
+        # fits with the nudge and the newest turn, but not with the label
+        # as well. Dropping the label alone would leave the nudge to follow
+        # that query, so the label and the nudge go together.
         agent = _agent(FakeLLM())
+        query = Message(role="user", content="q")
         label = Message(role="assistant", content=EMPTY_REPLY_LABEL)
         nudge = Message(role="user", content=EMPTY_REPLY_NUDGE)
         a, a_results = _turn(1, "a")
-        agent.hippo.working.append(Message(role="user", content="q"))
+        agent.hippo.working.append(query)
         agent.hippo.working.append_turn(label, [nudge])
         agent.hippo.working.append_turn(a, a_results)
-        room = PROMPT_CAP - _prompt_chars([nudge, a, *a_results])
-        await agent._fit_prompt_cap([Message(role="system", content="x" * room)])
+        room = PROMPT_CAP - _prompt_chars([query, nudge, a, *a_results])
+        await agent._fit_prompt_cap([Message(role="system", content="x" * room)], "q")
         assert agent.hippo.working.get_window() == [a, *a_results]
+
+    @pytest.mark.asyncio
+    async def test_the_query_counts_once_its_message_is_dropped(self) -> None:
+        # A 60,000-character task and two 20,000-character results: the
+        # second result does not fit beside the task and the first. The
+        # request puts the task back in front once its message is dropped,
+        # so dropping that message alone saves nothing: the first result
+        # goes too.
+        query = "read parts 1 and 2: " + "q" * 60_000
+        llm = FakeLLM(
+            [
+                _read_call("1"),
+                _read_call("2"),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        result = await _reader(llm, size=20_000).run_task(query)
+        assert (result.status, result.result) == ("completed", "done")
+
+        planning = _planning_calls(llm)
+        assert len(planning) == 3
+        for call in planning:
+            sent = call["messages"]
+            assert_protocol_valid(sent)
+            assert _prompt_chars(sent[1:]) <= PROMPT_CAP
+            assert (sent[1].role, sent[1].content) == ("user", query)
+        last = planning[-1]["messages"]
+        assert [m.tool_call_id for m in last if m.role == "tool"] == ["call_2"]
+
+    @pytest.mark.asyncio
+    async def test_a_task_that_cannot_fit_beside_the_newest_turn_fails(self) -> None:
+        # A 70,000-character task and one 45,000-character result: every
+        # request would carry both, whatever is dropped, so the task fails
+        # with "Prompt too large" instead of sending a request over the cap.
+        query = "read this: " + "q" * 70_000
+        llm = FakeLLM([_read_call("1"), Message(role="assistant", content="never")])
+        result = await _reader(llm, size=45_000).run_task(query)
+        assert result.status == "failed"
+        assert result.error == "Plan check failed: Prompt too large: 115028 chars"
+
+        [sent] = [call["messages"] for call in _planning_calls(llm)]
+        assert _prompt_chars(sent[1:]) <= PROMPT_CAP
 
 
 # ── Stuck detection with several calls per step ────────────────────────────

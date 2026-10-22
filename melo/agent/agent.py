@@ -11,7 +11,7 @@ import time
 from collections.abc import Collection, Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
-from localmelo.melo.agent._chat import Chat, RequestStats
+from localmelo.melo.agent._chat import Chat, RequestStats, lacks_task_query
 from localmelo.melo.agent.options import AgentOptions
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
@@ -141,6 +141,18 @@ def _decode_reflection(text: str) -> object:
         except RecursionError:
             break
     raise ValueError("No JSON object in the reflection response")
+
+
+def _as_planned(window: list[Message], query: str) -> list[Message]:
+    """*window* as a planning request carries it, for size checks.
+
+    That is with the task *query* in front once the window no longer holds
+    it, as :meth:`Chat.plan_step` puts it back (see
+    :func:`~localmelo.melo.agent._chat.lacks_task_query`).
+    """
+    if lacks_task_query(window, query):
+        return [Message(role="user", content=query), *window]
+    return window
 
 
 def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
@@ -739,16 +751,19 @@ class Agent:
     # short status string when the loop should break, or None to
     # continue to the next stage.
 
-    async def _fit_prompt_cap(self, others: list[Message]) -> None:
+    async def _fit_prompt_cap(self, others: list[Message], query: str) -> None:
         """Drop the oldest working memory that the planning prompt has no room for.
 
         ``Checker.pre_plan`` refuses a step whose prompt, the working-memory
         window plus *others* (long-term recall and the reflection), is
         over its cap. Units of the window (see :func:`group_turns`) are
         dropped oldest first and whole, so a tool call keeps its results,
-        until the prompt fits; the newest unit always stays. When even the
-        newest unit alone does not fit, nothing is dropped and pre_plan
-        refuses the step as before.
+        until the prompt fits; the newest unit always stays. The window is
+        measured as the planning request carries it: once the unit that
+        holds the task *query* is dropped, the request puts the query back
+        in front (see :func:`_as_planned`), so dropping that unit saves
+        nothing. When even the newest unit alone, with the query, does not
+        fit, nothing is dropped and pre_plan refuses the step as before.
 
         Each turn fits half the cap (see :meth:`_checked_tool_turn`), but
         several large turns, of one run or of earlier runs on this agent,
@@ -759,7 +774,7 @@ class Agent:
         units = group_turns(self.hippo.working.get_window())
         for first in range(len(units)):
             kept = [msg for unit in units[first:] for msg in unit]
-            if (await self.checker.pre_plan(others + kept)).allowed:
+            if (await self.checker.pre_plan(others + _as_planned(kept, query))).allowed:
                 break
         else:
             return  # not even the newest unit fits: keep the window
@@ -789,7 +804,7 @@ class Agent:
         """
         long_context = await self.hippo.retrieve_context(query)
         reflection_msgs = _serialize_reflections(self.hippo.working.get_reflections())
-        await self._fit_prompt_cap(long_context + reflection_msgs)
+        await self._fit_prompt_cap(long_context + reflection_msgs, query)
         short_window = self.hippo.working.get_window()
 
         tool_hints: list[str] = []
@@ -818,7 +833,8 @@ class Agent:
                 (f"Tool resolution failed: {resolution_check.reason}"),
             )
 
-        all_msgs = long_context + short_window + reflection_msgs
+        # As the planning request will carry it: with the query put back.
+        all_msgs = long_context + _as_planned(short_window, query) + reflection_msgs
         check = await self.checker.pre_plan(all_msgs)
         if not check.allowed:
             return (

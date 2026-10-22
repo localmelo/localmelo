@@ -95,6 +95,16 @@ _MEMORY_PREFIX = "[memory] "
 REFLECTION_WINDOW = 10
 
 
+def lacks_task_query(short: Sequence[Message], query: str) -> bool:
+    """Whether the working-memory window *short* no longer holds *query*.
+
+    A planning request then puts the task query back in front of the
+    window (see :meth:`Chat.plan_step`). Other user messages, such as the
+    agent's note after an empty reply, do not stand in for it.
+    """
+    return not any(m.role == "user" and m.content == query for m in short)
+
+
 def _build_system_prompt(
     context: list[Message],
     short: list[Message],
@@ -276,12 +286,12 @@ class Chat:
     ) -> Message:
         system_prompt, other_msgs = _build_system_prompt(context, short, reflections)
         messages = [Message(role="system", content=system_prompt)]
-        if not any(m.role == "user" and m.content == query for m in short):
-            # The task query is no longer in the window (evicted). Put it
-            # back ahead of the remaining turns so the conversation still
-            # opens with the request instead of ending with it. Other user
-            # messages, such as the agent's note after an empty reply,
-            # do not stand in for it.
+        if lacks_task_query(short, query):
+            # The task query is no longer in the window (evicted, or dropped
+            # to fit the prompt cap). Put it back ahead of the remaining
+            # turns so the conversation still opens with the request instead
+            # of ending with it. The agent counts it when it checks the
+            # prompt's size (see Agent._fit_prompt_cap).
             messages.append(Message(role="user", content=query))
         messages.extend(other_msgs)
 
@@ -299,6 +309,7 @@ class Chat:
     ) -> Message:
         """Ask the LLM to reflect on the current attempt.
 
+        The request is a user message after the newest turns of *short*.
         With *final*, no further attempt can start, and the request says
         so: the reflection can only finalize the answer.
         """
@@ -332,7 +343,14 @@ class Chat:
         if final:
             request += f" {FINAL_REFLECTION_NOTE}"
 
+        tail = tail_turns(short, REFLECTION_WINDOW)
+        if tail and tail[-1].role == "user":
+            # Some chat templates (Mistral, Gemma) reject two user messages
+            # in a row, so the request does not follow one: the agent's
+            # nudge after an empty reply is left out, and the empty reply's
+            # label, an assistant message, ends the turns instead.
+            tail.pop()
         messages = [Message(role="system", content="\n\n".join(system_parts))]
-        messages.extend(tail_turns(short, REFLECTION_WINDOW))
+        messages.extend(tail)
         messages.append(Message(role="user", content=request))
         return await self._request(messages, tools=None)
