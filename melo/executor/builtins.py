@@ -148,6 +148,9 @@ async def _python_exec(code: str) -> str:
 
     buf = io.StringIO()
     ns: dict[str, Any] = {}
+    # exec() runs on the event loop's thread and holds it until the code
+    # returns, so neither the executor's timeout nor the run's timeout_s
+    # can interrupt it (a documented limit).
     with contextlib.redirect_stdout(buf):
         exec(code, ns)
     return buf.getvalue().strip()

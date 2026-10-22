@@ -1075,6 +1075,9 @@ class Agent:
           is abandoned (and counts in ``llm_errors``), a shell command is
           killed with every process it started, and tool providers still
           being set up are closed (so later runs end as ``setup_error``).
+          ``python_exec`` code is the exception: it runs on the event
+          loop, so neither ``timeout_s`` nor the executor's timeout can
+          interrupt it, and the run ends only once that code returns.
           Closing the providers is not cut short, also when the deadline
           expires while a failed setup is closing them, so the run
           returns once they are closed, which can be after ``timeout_s``;

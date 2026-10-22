@@ -218,3 +218,23 @@ async def test_a_timeout_kills_the_shell_command_it_interrupts(pid_file: Path) -
     shell, child = (int(pid) for pid in pid_file.read_text().split())
     assert await _gone(shell)
     assert await _gone(child)
+
+
+@pytest.mark.asyncio
+async def test_a_timeout_cannot_interrupt_python_exec() -> None:
+    # A documented limit: python_exec runs its code on the event loop, so
+    # the deadline takes effect only once the code returns.
+    code = "import time\ntime.sleep(0.3)"
+    call = Message(
+        role="assistant",
+        tool_call=ToolCall(tool_name="python_exec", arguments={"code": code}),
+    )
+    agent = Agent(
+        llm=ScriptedLLM([call]),
+        options=AgentOptions(
+            builtins=frozenset({"python_exec"}), tool_exposure="all", timeout_s=0.05
+        ),
+    )
+    result = await agent.run_task("run python")
+    assert (result.status, result.n_tool) == ("timeout", 1)
+    assert result.duration_s >= 0.3

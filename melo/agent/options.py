@@ -62,7 +62,9 @@ class AgentOptions:
       ``LOCALMELO_MEMORY_DIR`` environment variables decide.
     - ``timeout_s``: wall-clock bound for one run, in seconds; ``None``
       means no bound. A run still going when it expires is cancelled and
-      ends with status ``timeout``.
+      ends with status ``timeout``, except while ``python_exec`` code
+      runs: that code runs on the agent's event loop and cannot be
+      interrupted, so the run ends only once the code returns.
     """
 
     max_steps: int = MAX_AGENT_STEPS
