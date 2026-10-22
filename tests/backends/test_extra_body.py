@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from localmelo.support.backends.registry import ensure_defaults_registered, get_
 from localmelo.support.config import (
     CloudVendorConfig,
     Config,
+    ConfigError,
     LocalBackendConfig,
     load,
     save,
@@ -242,7 +244,7 @@ def _save_and_load(tmp_path: Path, cfg: Config) -> tuple[Config, str]:
     ):
         save(cfg)
         loaded = load()
-    return loaded, (tmp_path / "config.toml").read_text()
+    return loaded, (tmp_path / "config.toml").read_text(encoding="utf-8")
 
 
 class TestExtraBodyConfig:
@@ -302,6 +304,72 @@ class TestExtraBodyConfig:
         assert loaded.vllm.extra_body == cfg.vllm.extra_body
         assert loaded.openai.extra_body == LOW_EFFORT
         assert loaded.mlc.extra_body == {}
+
+    def test_roundtrip_keeps_non_bmp_and_control_characters(
+        self, tmp_path: Path
+    ) -> None:
+        # An emoji and a CJK Extension B character (both outside the BMP),
+        # a control character, DEL, characters JSON escapes, and a key
+        # that has to be quoted.
+        text = 'ok \U0001f600 \U00020bb7 \x01 \x7f "q" \\'
+        extra = {
+            "chat_template_kwargs": {"system_suffix": text, "\u00e9t\u00e9": "key"}
+        }
+        cfg = Config(
+            chat_backend="vllm",
+            embedding_backend="none",
+            vllm=LocalBackendConfig(
+                chat_url="http://localhost:8000/v1", chat_model="m", extra_body=extra
+            ),
+        )
+        loaded, written = _save_and_load(tmp_path, cfg)
+        assert loaded.vllm.extra_body == extra
+        assert loaded.validate() == []
+        # Written as UTF-8, not as the surrogate-pair escapes TOML rejects.
+        assert "\U0001f600" in written
+        assert "\U00020bb7" in written
+        assert "\\ud83d" not in written
+        assert "\\ud842" not in written
+        assert "\\u007f" in written
+
+    @pytest.mark.parametrize(
+        ("field", "value"),
+        [
+            ("extra_body", {"chat_template_kwargs": {"system_suffix": "a\ud800b"}}),
+            ("chat_model", "a\ud800b"),
+        ],
+        ids=["extra_body", "chat_model"],
+    )
+    def test_unencodable_text_fails_save_and_keeps_file(
+        self, tmp_path: Path, field: str, value: Any
+    ) -> None:
+        # A str can hold a lone surrogate, which UTF-8 cannot encode.
+        good = Config(
+            chat_backend="vllm",
+            embedding_backend="none",
+            vllm=LocalBackendConfig(
+                chat_url="http://localhost:8000/v1",
+                chat_model="m",
+                extra_body=NO_THINKING,
+            ),
+        )
+        _, before = _save_and_load(tmp_path, good)
+        bad = Config(
+            chat_backend="vllm",
+            embedding_backend="none",
+            vllm=dataclasses.replace(good.vllm, **{field: value}),
+        )
+        config_path = str(tmp_path / "config.toml")
+        with (
+            mock.patch("localmelo.support.config.CONFIG_PATH", config_path),
+            mock.patch("localmelo.support.config.CONFIG_DIR", str(tmp_path)),
+        ):
+            with pytest.raises(ConfigError, match="surrogate"):
+                save(bad)
+            loaded = load()
+        # The file from the previous save is left untouched.
+        assert (tmp_path / "config.toml").read_text(encoding="utf-8") == before
+        assert loaded.vllm.extra_body == NO_THINKING
 
     def test_save_without_extra_body_writes_no_line(self, tmp_path: Path) -> None:
         cfg = Config(

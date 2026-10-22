@@ -369,9 +369,12 @@ _BARE_TOML_KEY = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
 def _toml_string(text: str) -> str:
-    # A JSON string literal (ASCII-only) is also a valid TOML basic
-    # string, except that TOML additionally requires DEL to be escaped.
-    return json.dumps(text).replace("\x7f", "\\u007f")
+    # JSON escapes the quotation mark, the backslash and the control
+    # characters below U+0020 the way a TOML basic string does; TOML also
+    # requires DEL to be escaped. Everything else is written as is: an
+    # ASCII-only JSON literal would escape characters outside the BMP as
+    # UTF-16 surrogate pairs, which TOML rejects.
+    return json.dumps(text, ensure_ascii=False).replace("\x7f", "\\u007f")
 
 
 def _toml_value(value: Any) -> str:
@@ -436,5 +439,14 @@ def save(cfg: Config) -> None:
     lines.append(f'host = "{cfg.gateway.host}"')
     lines.append("")
 
-    with open(CONFIG_PATH, "w") as f:
-        f.write("\n".join(lines))
+    # TOML files are UTF-8. Encode before opening the file, so text that
+    # cannot be encoded (a str holding a lone surrogate) fails the save
+    # without truncating the existing config.
+    text = "\n".join(lines)
+    try:
+        data = text.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        bad = exc.object[exc.start : exc.end]
+        raise ConfigError(f"Cannot write {bad!r} to TOML: {exc.reason}") from exc
+    with open(CONFIG_PATH, "wb") as f:
+        f.write(data)
