@@ -172,6 +172,11 @@ Supported backend families:
 Chat and embedding backends are configured separately. Set the embedding backend
 to `none` when you do not want to run embedding retrieval.
 
+Each chat request times out after 120 s (300 s with the `ollama` backend). For a
+slower model, such as a local thinking model, set `request_timeout_s` at the top
+of `~/.cache/localmelo/config.toml`, or pass `--request-timeout SECONDS` to a
+direct query; see [docs/quickstart.md](docs/quickstart.md#chat-request-timeout).
+
 ## Development
 
 Install development dependencies with [uv](https://docs.astral.sh/uv/). This

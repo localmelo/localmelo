@@ -11,7 +11,8 @@ Sections:
 - [Direct CLI options](#direct-cli-options) — flags, output, exit codes and
   signals of a direct query
 - [Minimum smoke](#minimum-smoke) — verify each mode end-to-end after install
-- [Backend options](#backend-options)
+- [Backend options](#backend-options) — backends, `extra_body` and the
+  [chat request timeout](#chat-request-timeout)
 - [No-embedding mode](#no-embedding-mode)
 - [Memory persistence](#memory-persistence)
 - [Running tests](#running-tests)
@@ -122,6 +123,11 @@ asyncio.run(main())
 (`tool_exposure`), the built-in tools (`builtins`), memory (`memory`,
 `memory_dir`) and a wall-clock bound for each run in seconds (`timeout_s`,
 off by default); its docstring describes each option and its default.
+The HTTP timeout of each chat request is not one of them: it belongs to
+the chat provider. `Config.request_timeout_s` sets it for
+`Agent(config=...)` (see [Chat request timeout](#chat-request-timeout)),
+and the `timeout` argument of `OpenAICompatLLM` or `OllamaNativeChat` for
+a provider passed as `llm`.
 `Agent.run_task(query)` returns a [`RunResult`](#run-results).
 `Agent.run(query)` returns the run's outcome as text, which is what the
 gateway and its web pages show: the result when it is non-empty, otherwise
@@ -176,7 +182,10 @@ gives the same fields as a plain dict, in this order:
 `max_attempts`, `tool_exposure`, `builtins` (sorted names of the registered
 built-in tools), `memory`, `memory_dir` (the resolved directory, or `null`),
 `timeout_s` (or `null`) and `tools` (sorted names of every registered tool,
-built-in and provided), so every record says which mode it ran in.
+built-in and provided), so every record says which mode it ran in. The
+[chat request timeout](#chat-request-timeout) (`request_timeout_s`,
+`--request-timeout`) is a setting of the chat provider, not of the run, so
+it is not part of `config`.
 
 Whatever the status, the run's task record is saved with it; see
 [memory.md → Task records](memory.md#task-records).
@@ -201,6 +210,12 @@ request and, when the server answered, gives its HTTP status and the first
 500 characters of its response body, for example
 `POST /chat/completions failed with HTTP 400: {"error": ...}`.
 
+A chat request that times out is retried the same way, and each attempt
+waits the full [chat request timeout](#chat-request-timeout) again. So a
+model server that does not answer ends the run as `provider_error` after
+about 3 × the timeout + 5 s: 365 s with the default of 120 s, and 905 s
+with the 300 s of the `ollama` backend.
+
 Every chat request carries its attempt number (1, then 2 and 3 for the
 retries) in the `X-Localmelo-Attempt` HTTP header, so a proxy in front of
 the model server can match its request log against a run's `n_llm` and
@@ -211,9 +226,9 @@ worth retrying.
 ## Direct CLI options
 
 A direct query (`melo "<query>"` without `--serve`) takes the flags below,
-each of which sets the [`AgentOptions`](#python-api) field it names or
-adds tools or an embedding endpoint. Given with `--serve`, or without a
-query, they are a usage error.
+each of which sets the [`AgentOptions`](#python-api) field it names, adds
+tools or an embedding endpoint, or sets the chat request timeout. Given
+with `--serve`, or without a query, they are a usage error.
 
 | Flag | Default | Effect |
 |---|---|---|
@@ -226,6 +241,7 @@ query, they are a usage error.
 | `--memory on\|off` | `on` | `off`: no long-term recall, no long-term writes and no reflection promotion. |
 | `--memory-dir DIR` | none | Keep history (and long-term memory, when there is an embedding and memory is on) in SQLite files in `DIR`; see [Memory persistence](#memory-persistence). |
 | `--timeout SECONDS` | none | Wall-clock limit of the run (`timeout_s`); a run still going then ends as `timeout`. |
+| `--request-timeout SECONDS` | `request_timeout_s` of the config file, else `120` (`300` for the `ollama` backend) | HTTP timeout of each chat request, a finite number of seconds > 0. It overrides `request_timeout_s` for this run and does not change the config file; with `--base-url`, which does not read the config file, it goes to the OpenAI-compatible provider. A request that times out is retried twice, each time with the full timeout. It is not an `AgentOptions` field and not part of the run's `config`. See [Chat request timeout](#chat-request-timeout). |
 | `--output-format text\|json` | `text` | How the outcome is reported; see [Output](#output). |
 | `--embedding-base-url URL` | none | An OpenAI-compatible embedding endpoint, for long-term memory. Requires `--base-url`: a query with `--base-url` has no embedding without it, and one without `--base-url` uses the backends of the config file, its embedding backend included. |
 | `--embedding-model NAME` | `default` | The embedding model to request. Requires `--embedding-base-url`. |
@@ -544,6 +560,58 @@ enable_thinking = false
   body, e.g. `extra_body = { think = false }`.
 - Direct `--base-url` mode does not read the config file, so `extra_body`
   does not apply there.
+
+### Chat request timeout
+
+The HTTP timeout of each chat request is 120 seconds with the
+OpenAI-compatible chat provider, which every backend but `ollama` uses,
+and 300 seconds with the `ollama` backend, which talks to Ollama's native
+`/api/chat`. It bounds connecting, sending the request and each wait for
+data from the server; localmelo does not stream replies, so the last wait
+lasts until the model has written its whole reply. A local thinking model
+can take longer than that for one reply. Set a longer timeout with a
+top-level `request_timeout_s` in `~/.cache/localmelo/config.toml`, in the
+block before the first table: a key written below a `[table]` header
+belongs to that table, and localmelo does not read it there.
+
+```toml
+chat_backend = "vllm"
+embedding_backend = "none"
+request_timeout_s = 600
+
+[vllm]
+chat_url = "http://127.0.0.1:8000/v1"
+chat_model = "Qwen3-8B"
+```
+
+- The value is a finite number of seconds greater than 0, such as `600`
+  or `90.5`. Anything else (a string such as `"600"`, a boolean, 0, a
+  negative number, `inf` or `nan`) is reported as a configuration error
+  naming `request_timeout_s` when `melo --serve` or a direct query without
+  `--base-url` starts; the direct query then exits with code 1.
+- Without the key, every provider keeps its default. `melo --reconfigure`
+  keeps the key, and the config file has the line only when it is set.
+- It applies to every chat request of the configured backend, for all
+  eight backends: planning and reflection requests of direct queries
+  without `--base-url` and of gateway sessions, and the connectivity probe
+  of `melo --reconfigure`.
+- Embedding requests keep their own timeout of 120 seconds. The setting is
+  for chat requests only, on purpose: long thinking is what needs a longer
+  timeout, and long-term recall and reflection promotion keep their
+  current bounds.
+- `--request-timeout SECONDS` sets it for one direct query: it overrides
+  `request_timeout_s` for that run and does not change the config file.
+  With `--base-url` the config file is not read, so the timeout is the
+  flag's value or 120 seconds, also for an Ollama server's OpenAI-compatible
+  `/v1` URL.
+- A chat request that times out is retried twice, after 1 s and then 4 s,
+  each attempt with the full timeout (see [Provider errors](#provider-errors)).
+  One chat request can therefore take about 3 × the timeout + 5 s before
+  the run ends as `provider_error`: about 30 minutes with
+  `request_timeout_s = 600`. `--timeout` (`AgentOptions.timeout_s`) bounds
+  the whole run.
+- It is a setting of the chat provider, not a run option: it does not
+  appear in `RunResult.config` or in the JSON line of `--output-format json`.
 
 ### Deployment matrix
 

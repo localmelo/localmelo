@@ -127,6 +127,14 @@ curl -X DELETE http://127.0.0.1:8401/v1/sessions/demo123</code></pre>
           <tr><td>Other local</td><td><code>vllm</code> or <code>sglang</code></td><td>same local backend or <code>none</code></td><td>Runtime lifecycle remains outside localmelo.</td></tr>
           <tr><td>Cloud chat</td><td><code>openai</code>, <code>anthropic</code>, <code>gemini</code>, or <code>nvidia</code></td><td>local backend or <code>none</code></td><td>Set the configured API key environment variable before running.</td></tr>
         </table>
+        <p>
+          Each chat request times out after 120 s (300 s with the
+          <code>ollama</code> backend). For a slower model, such as a local
+          thinking model, set <code>request_timeout_s</code> at the top of
+          <code>~/.cache/localmelo/config.toml</code>, or pass
+          <code>--request-timeout SECONDS</code> to a direct query. A request
+          that times out is retried twice, each time with the full timeout.
+        </p>
         <div class="callout warning">
           <strong>Local backend rule:</strong> localmelo does not host, compile, or
           start model runtimes. Start your local server separately, then point
