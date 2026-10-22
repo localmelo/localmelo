@@ -274,9 +274,10 @@ class TestMaxAttemptsExhausted:
 
         agent = _make_echo_agent(llm, options=options)
         result = await agent.run("echo endless")
-        assert "Max attempts reached" in result
+        assert result == "[budget_exhausted] Max attempts reached"
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "failed"
+        assert tasks[0].status == "budget_exhausted"
+        assert tasks[0].result == "Max attempts reached"
 
 
 class TestStuckDetection:

@@ -146,7 +146,7 @@ class Hippo:
     async def promote_reflections(self, task_id: str) -> None:
         """Promote reflection entries to long-term memory and clear them.
 
-        Called at terminal task state (completed or failed).
+        Called when a run ends, whatever its status.
         """
         reflections = self.working.get_reflections()
         if not reflections or not self.embedding:

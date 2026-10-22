@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
@@ -123,9 +125,65 @@ def _build_system_prompt(
     return "\n\n".join(parts), non_system
 
 
+@dataclass
+class RequestStats:
+    """Counts of the LLM requests a :class:`Chat` sent, and their usage.
+
+    ``n_llm`` counts requests that returned a response; ``n_main`` and
+    ``n_aux`` split them by whether the request offered tools, so
+    ``n_main + n_aux == n_llm``. ``llm_errors`` counts requests that
+    raised instead. ``usage`` sums the integer usage fields of the
+    responses by name.
+    """
+
+    n_llm: int = 0
+    n_main: int = 0
+    n_aux: int = 0
+    llm_errors: int = 0
+    usage: dict[str, int] = field(default_factory=dict)
+
+    def add_usage(self, usage: Mapping[str, object] | None) -> None:
+        """Add the integer fields of one response's usage to the totals."""
+        for name, value in (usage or {}).items():
+            if isinstance(value, int) and not isinstance(value, bool):
+                self.usage[name] = self.usage.get(name, 0) + value
+
+
 class Chat:
     def __init__(self, llm: BaseLLMProvider) -> None:
         self.llm = llm
+        self.stats = RequestStats()
+
+    def reset_stats(self) -> RequestStats:
+        """Count from zero again; returns the new :attr:`stats`.
+
+        The agent calls this at the start of each run, so the counts
+        cover one run.
+        """
+        self.stats = RequestStats()
+        return self.stats
+
+    async def _request(
+        self, messages: list[Message], tools: list[ToolDef] | None
+    ) -> Message:
+        """Send one request to the LLM and count it in :attr:`stats`.
+
+        A request with tools counts as main, one without as aux; an empty
+        tool list is sent as ``None`` and counts as aux. A request that
+        raises counts in ``llm_errors``, and the exception propagates.
+        """
+        try:
+            response = await self.llm.chat(messages, tools=tools or None)
+        except Exception:
+            self.stats.llm_errors += 1
+            raise
+        self.stats.n_llm += 1
+        if tools:
+            self.stats.n_main += 1
+        else:
+            self.stats.n_aux += 1
+        self.stats.add_usage(response.usage)
+        return response
 
     async def estimate_steps(self, query: str) -> int:
         """Ask the LLM to estimate how many tool-call steps *query* needs."""
@@ -133,7 +191,7 @@ class Chat:
             Message(role="system", content=STEP_ESTIMATE_PROMPT),
             Message(role="user", content=query),
         ]
-        response = await self.llm.chat(messages, tools=None)
+        response = await self._request(messages, tools=None)
         return _parse_step_estimate(response.content)
 
     async def plan_step(
@@ -153,7 +211,7 @@ class Chat:
             messages.append(Message(role="user", content=query))
         messages.extend(other_msgs)
 
-        return await self.llm.chat(messages, tools=tools or None)
+        return await self._request(messages, tools=tools)
 
     async def reflect(
         self,
@@ -200,4 +258,4 @@ class Chat:
                 ),
             ),
         )
-        return await self.llm.chat(messages, tools=None)
+        return await self._request(messages, tools=None)

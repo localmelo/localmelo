@@ -1211,8 +1211,13 @@ class TestLLMErrorPropagation:
                 raise ConnectionError("LLM server unreachable")
 
         agent = Agent(llm=ExplodingLLM(), embedding=FakeEmbedding())
-        with pytest.raises(ConnectionError, match="unreachable"):
-            await agent.run("hello")
+        result = await agent.run("hello")
+        assert result == "[crashed] ConnectionError: LLM server unreachable"
+        # The task is saved with the terminal status, not left running.
+        tasks = list(agent.hippo.history._tasks.values())
+        assert [(t.status, t.result) for t in tasks] == [
+            ("crashed", "ConnectionError: LLM server unreachable")
+        ]
         await agent.close()
 
     @pytest.mark.asyncio
@@ -1255,12 +1260,14 @@ class TestLLMErrorPropagation:
         )
         agent.executor.register("echo", _echo_tool)
 
-        with pytest.raises(ConnectionError, match="crashed"):
-            await agent.run("echo hi")
+        result = await agent.run_task("echo hi")
+        assert result.status == "crashed"
+        assert result.error == "ConnectionError: LLM crashed mid-conversation"
 
         # The first step should still be recorded in history
         tasks = list(agent.hippo.history._tasks.values())
         assert len(tasks) == 1
+        assert tasks[0].status == "crashed"
         steps = await agent.hippo.history.get_steps(tasks[0].task_id)
         assert len(steps) == 1
         assert steps[0].tool_call is not None

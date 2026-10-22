@@ -3,12 +3,14 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import logging
 import math
 import os
+import time
 from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING, Any
 
-from localmelo.melo.agent._chat import Chat
+from localmelo.melo.agent._chat import Chat, RequestStats
 from localmelo.melo.agent.options import AgentOptions
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
@@ -19,7 +21,7 @@ from localmelo.melo.checker.payloads import (
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider
-from localmelo.melo.executor import Executor, register_builtins
+from localmelo.melo.executor import Executor, builtin_names, register_builtins
 from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
@@ -30,6 +32,7 @@ from localmelo.melo.schema import (
     Message,
     ReflectionDecision,
     ReflectionEntry,
+    RunResult,
     StepRecord,
     TaskRecord,
     ToolCall,
@@ -40,6 +43,8 @@ from localmelo.melo.schema import (
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
+
+logger = logging.getLogger(__name__)
 
 # ── Reflection coercion helpers ──
 
@@ -289,6 +294,38 @@ def _resolve_memory_dir(options: AgentOptions) -> str | None:
     return None
 
 
+@dataclasses.dataclass
+class _RunState:
+    """Progress of one :meth:`Agent.run_task` call.
+
+    ``status`` stays ``"running"`` until :meth:`end` sets one of the
+    RunResult statuses. The counters cover this run only (see
+    :class:`~localmelo.melo.schema.RunResult`).
+    """
+
+    status: str = "running"
+    result: str = ""
+    error: str = ""
+    steps: int = 0
+    attempts: int = 0
+    n_tool: int = 0
+
+    @property
+    def running(self) -> bool:
+        return self.status == "running"
+
+    def end(self, status: str, *, result: str = "", error: str = "") -> None:
+        self.status = status
+        self.result = result
+        self.error = error
+
+
+def _exception_text(exc: BaseException) -> str:
+    """``"<type>: <message>"``, or the type alone when the message is empty."""
+    message = str(exc)
+    return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
 class Agent:
     """Task-solving agent with tool use and memory.
 
@@ -309,6 +346,11 @@ class Agent:
     step now runs only the tools it offered.
     ``tool_providers`` are only stored so far: nothing starts them or
     registers their tools.
+
+    :meth:`run_task` runs one task and returns a
+    :class:`~localmelo.melo.schema.RunResult`; :meth:`run` returns its
+    outcome as text. Runs on one agent share its working memory and
+    request counters, so they must not overlap.
     """
 
     def __init__(
@@ -812,16 +854,16 @@ class Agent:
     # ── Attempt ──
 
     async def _run_attempt(
-        self, task: TaskRecord, query: str, budget: int
+        self, task: TaskRecord, query: str, budget: int, run: _RunState
     ) -> tuple[int, str]:
         """Run one attempt of the agent loop.
 
         Returns ``(steps_used, failure_type)``.
-        *failure_type* is ``""`` when the task reached a terminal state
-        (completed or failed via checker), ``"budget"`` when the step
-        budget was exhausted, or ``"stuck"`` when stuck detection fired.
-        The method mutates *task.status* / *task.result* on terminal
-        conditions (direct answer or checker failure).
+        *failure_type* is ``""`` when the attempt ended the run,
+        ``"budget"`` when the step budget was exhausted, or ``"stuck"``
+        when stuck detection fired. The attempt ends *run* as
+        ``completed`` with a direct answer as the result, or as
+        ``failed`` with a checker's refusal as the error.
         """
         fingerprints: list[tuple[str, str, str]] = []
         reflections = self.hippo.working.get_reflections() or None
@@ -830,11 +872,12 @@ class Agent:
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(query)
             if fail is not None:
-                task.status = "failed"
-                task.result = fail
+                run.end("failed", error=fail)
                 return step + 1, ""
 
-            # LLM planning step (with reflection context)
+            # LLM planning step (with reflection context). The step counts
+            # once the planning call is made, even if it then raises.
+            run.steps += 1
             response, fail = await self._do_plan(
                 long_context,
                 short_window,
@@ -843,14 +886,12 @@ class Agent:
                 reflections=reflections,
             )
             if fail is not None:
-                task.status = "failed"
-                task.result = fail
+                run.end("failed", error=fail)
                 return step + 1, ""
 
             # No tool call → direct answer
             if not response.tool_calls:
-                task.status = "completed"
-                task.result = response.content
+                run.end("completed", result=response.content)
                 return step + 1, ""
 
             # Execute every call in order, each through the executor boundary,
@@ -860,6 +901,7 @@ class Agent:
             results: list[ToolResult] = []
             for call in calls:
                 results.append(await self._do_execute(call, allowed=allowed))
+                run.n_tool += 1
             await self._do_memorize(task.task_id, response, results)
 
             # Stuck detection (one fingerprint per step)
@@ -873,26 +915,139 @@ class Agent:
     # ── Main loop ──
 
     async def run(self, query: str) -> str:
+        """Run one task and return its outcome as text.
+
+        The text is the run's result when that is non-empty, otherwise
+        ``"[<status>] <error>"``, so a run that failed never reads as an
+        empty answer. :meth:`run_task` returns the whole record.
+        """
+        outcome = await self.run_task(query)
+        return outcome.result or f"[{outcome.status}] {outcome.error}"
+
+    async def run_task(self, query: str) -> RunResult:
+        """Run one task and report how it ended.
+
+        The run ends with one of these statuses:
+
+        - ``completed``: the model gave a final answer (the result);
+        - ``failed``: a checker refused the plan or the run (the error
+          says why), or the reflection gate decided not to continue (its
+          best effort, if any, is the result);
+        - ``budget_exhausted``: ``max_steps`` or ``max_attempts`` ran out;
+        - ``stuck``: stuck detection fired with ``attempt_policy="none"``;
+        - ``crashed``: an unexpected exception ended the run. It is
+          logged and reported as the error, not raised. A cancellation,
+          or any other exception that is not an ``Exception``, still
+          propagates once the task is saved.
+
+        Whatever happens, the task record is saved with the status and
+        ``result or error``, and the reflections are cleared (promoted
+        to long-term memory first when ``memory`` is on); a failure while
+        doing so is logged and does not replace the run's own outcome.
+
+        ``RunResult.config`` reports the effective configuration: the
+        options, the registered built-ins (``builtins``), the resolved
+        ``memory_dir`` and every registered tool (``tools``), with tool
+        names sorted.
+        """
+        started = time.perf_counter()
         task = TaskRecord(query=query)
-        await self.hippo.save_task(task)
-        self.hippo.working.append(Message(role="user", content=query))
+        run = _RunState()
+        stats = self.chat.reset_stats()
+        try:
+            await self.hippo.save_task(task)
+            self.hippo.working.append(Message(role="user", content=query))
+            if self.options.attempt_policy == "none":
+                await self._run_single_attempt(task, query, run)
+            else:
+                await self._run_reflective_attempts(task, query, run)
+        except Exception as exc:
+            logger.exception("Task %s crashed", task.task_id)
+            run.end("crashed", error=_exception_text(exc))
+        except BaseException as exc:
+            run.end("crashed", error=_exception_text(exc))
+            raise
+        finally:
+            if run.running:
+                # Every path above ends the run; this keeps the record
+                # terminal should a later change miss one.
+                run.end("crashed", error="The run ended without a status")
+            await self._finish_task(task, run)
+        return self._run_result(task, run, stats, time.perf_counter() - started)
 
-        if self.options.attempt_policy == "none":
-            await self._run_single_attempt(task, query)
-        else:
-            await self._run_reflective_attempts(task, query)
+    async def _finish_task(self, task: TaskRecord, run: _RunState) -> None:
+        """Save *task* with the run's terminal status and clear reflections.
 
-        await self.hippo.promote_reflections(task.task_id)
-        await self.hippo.save_task(task)
-        return task.result
+        A failure is logged, not raised, so it cannot replace the run's
+        outcome or the exception that ended it.
+        """
+        task.status = run.status
+        task.result = run.result or run.error
+        try:
+            try:
+                await self.hippo.save_task(task)
+            except Exception:
+                logger.exception(
+                    "Could not save the final state of task %s", task.task_id
+                )
+            try:
+                # With memory=False Hippo has no embedding, so this only
+                # clears the reflections (see __init__).
+                await self.hippo.promote_reflections(task.task_id)
+            except Exception:
+                logger.exception(
+                    "Could not promote the reflections of task %s", task.task_id
+                )
+        finally:
+            self.hippo.working.clear_reflections()
 
-    async def _run_reflective_attempts(self, task: TaskRecord, query: str) -> None:
+    def _run_result(
+        self, task: TaskRecord, run: _RunState, stats: RequestStats, duration_s: float
+    ) -> RunResult:
+        return RunResult(
+            task_id=task.task_id,
+            status=run.status,
+            result=run.result,
+            error=run.error,
+            steps=run.steps,
+            attempts=run.attempts,
+            n_llm=stats.n_llm,
+            n_main=stats.n_main,
+            n_aux=stats.n_aux,
+            n_tool=run.n_tool,
+            llm_errors=stats.llm_errors,
+            usage=dict(stats.usage),
+            duration_s=duration_s,
+            config=self._run_config(),
+        )
+
+    def _run_config(self) -> dict[str, Any]:
+        """The effective configuration that ``RunResult.config`` reports."""
+        opts = self.options
+        builtins = builtin_names() if opts.builtins is None else opts.builtins
+        return {
+            "max_steps": opts.max_steps,
+            "attempt_policy": opts.attempt_policy,
+            "steps_per_attempt": opts.steps_per_attempt,
+            "max_attempts": opts.max_attempts,
+            "tool_exposure": opts.tool_exposure,
+            "builtins": sorted(builtins),
+            "memory": opts.memory,
+            "memory_dir": self._memory_dir,
+            "timeout_s": opts.timeout_s,
+            "tools": sorted(tool.name for tool in self.hippo.list_tools()),
+        }
+
+    async def _run_reflective_attempts(
+        self, task: TaskRecord, query: str, run: _RunState
+    ) -> None:
         """``attempt_policy="reflect"``: attempts with reflection between them.
 
         Each attempt gets at most ``steps_per_attempt`` steps, and all
         attempts together at most ``max_steps``. An attempt that runs out
         of steps or gets stuck is followed by a reflection, whose decision
-        gates the next attempt.
+        gates the next attempt. A gate that stops the run fails it; running
+        out of steps or attempts ends it as ``budget_exhausted``.
         """
         opts = self.options
         total_steps = 0
@@ -900,14 +1055,14 @@ class Agent:
         for attempt_id in range(opts.max_attempts):
             budget = min(opts.steps_per_attempt, opts.max_steps - total_steps)
             if budget <= 0:
-                task.status = "failed"
-                task.result = "Max steps reached"
+                run.end("budget_exhausted", error="Max steps reached")
                 break
 
-            steps_used, failure_type = await self._run_attempt(task, query, budget)
+            run.attempts += 1
+            steps_used, failure_type = await self._run_attempt(task, query, budget, run)
             total_steps += steps_used
 
-            if task.status in ("completed", "failed"):
+            if not run.running:
                 break
 
             # Reflect at attempt boundary
@@ -916,32 +1071,35 @@ class Agent:
             self.hippo.working.add_reflection(entry)
 
             if not _should_continue(decision):
-                task.status = "failed"
-                task.result = (
-                    decision.best_effort_result
-                    or f"Stopped after attempt {attempt_id}: {decision.rationale}"
+                run.end(
+                    "failed",
+                    result=decision.best_effort_result,
+                    error=f"Stopped after attempt {attempt_id}: {decision.rationale}",
                 )
                 break
         else:
-            if task.status == "running":
-                task.status = "failed"
-                task.result = "Max attempts reached"
+            if run.running:
+                run.end("budget_exhausted", error="Max attempts reached")
 
-    async def _run_single_attempt(self, task: TaskRecord, query: str) -> None:
+    async def _run_single_attempt(
+        self, task: TaskRecord, query: str, run: _RunState
+    ) -> None:
         """``attempt_policy="none"``: one attempt with budget ``max_steps``.
 
-        No reflection call is made. An attempt that runs out of steps or
-        gets stuck fails the task.
+        No reflection call is made. An attempt that runs out of steps ends
+        the run as ``budget_exhausted``, one that gets stuck as ``stuck``.
         """
-        _, failure_type = await self._run_attempt(task, query, self.options.max_steps)
-        if task.status != "running":
+        run.attempts += 1
+        _, failure_type = await self._run_attempt(
+            task, query, self.options.max_steps, run
+        )
+        if not run.running:
             return
         task.attempts_completed = 1
-        task.status = "failed"
         if failure_type == "stuck":
-            task.result = "Stuck: the same tool calls or errors repeated"
+            run.end("stuck", error="Stuck: the same tool calls or errors repeated")
         else:
-            task.result = "Max steps reached"
+            run.end("budget_exhausted", error="Max steps reached")
 
     async def close(self) -> None:
         await self.hippo.aclose()

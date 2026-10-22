@@ -684,7 +684,8 @@ class TestDirectAnswerEdgeCases:
             embedding=FakeEmbedding(),
         )
         result = await agent.run("hello")
-        assert result == ""
+        # run() shows "[<status>] <error>" whenever the result is empty.
+        assert result == "[completed] "
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "completed"
 

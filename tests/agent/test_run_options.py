@@ -370,11 +370,12 @@ class TestNoReflectionPolicy:
             attempt_policy="none", max_steps=4, steps_per_attempt=1, max_attempts=1
         )
         agent = _echo_agent(llm, options)
-        assert await agent.run("echo q") == "Max steps reached"
+        assert await agent.run("echo q") == "[budget_exhausted] Max steps reached"
         assert len(llm.calls) == 4
         assert _reflection_calls(llm) == []
         task = _only_task(agent)
-        assert task.status == "failed"
+        assert task.status == "budget_exhausted"
+        assert task.result == "Max steps reached"
         assert task.attempts_completed == 1
 
     @pytest.mark.asyncio
@@ -382,10 +383,10 @@ class TestNoReflectionPolicy:
         llm = FakeLLM([_echo_call("same") for _ in range(6)])
         agent = _echo_agent(llm, AgentOptions(attempt_policy="none", max_steps=10))
         result = await agent.run("echo q")
-        assert result == "Stuck: the same tool calls or errors repeated"
+        assert result == "[stuck] Stuck: the same tool calls or errors repeated"
         assert len(llm.calls) == 3
         assert _reflection_calls(llm) == []
-        assert _only_task(agent).status == "failed"
+        assert _only_task(agent).status == "stuck"
 
 
 # ── attempt_policy="reflect" ────────────────────────────────────────────────
@@ -407,8 +408,8 @@ class TestReflectPolicyBudgets:
         )
         options = AgentOptions(max_steps=3, steps_per_attempt=2, max_attempts=5)
         agent = _echo_agent(llm, options)
-        assert await agent.run("echo q") == "Max steps reached"
+        assert await agent.run("echo q") == "[budget_exhausted] Max steps reached"
         # Attempt 0 uses 2 steps, attempt 1 the 1 step left; no attempt 2.
         assert len(_planning_calls(llm)) == 3
         assert len(_reflection_calls(llm)) == 2
-        assert _only_task(agent).status == "failed"
+        assert _only_task(agent).status == "budget_exhausted"
