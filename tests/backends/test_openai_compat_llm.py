@@ -194,11 +194,11 @@ class TestRequestSerialization:
         [
             # A real object that happens to use the key is not the raw form.
             {RAW_ARGUMENTS_KEY: "print(1)", "other": 1},
-            # Only text is replayed verbatim.
+            # Only text counts as the raw form.
             {RAW_ARGUMENTS_KEY: [1, 2]},
         ],
     )
-    async def test_only_exact_raw_form_is_unwrapped(self, args: dict[str, Any]) -> None:
+    async def test_only_exact_raw_form_is_replaced(self, args: dict[str, Any]) -> None:
         server = FakeServer()
         llm = server.llm()
         await llm.chat(
@@ -445,8 +445,8 @@ class TestToolCallIdRoundTrip:
         await llm.close()
 
     @pytest.mark.asyncio
-    async def test_unparsed_arguments_come_back_verbatim(self) -> None:
-        """Arguments that were not a JSON object are replayed as sent."""
+    async def test_unparsed_arguments_come_back_as_empty_object(self) -> None:
+        """Arguments that were not a JSON object are replayed as {}."""
         server = FakeServer(
             {
                 "role": "assistant",
@@ -454,6 +454,7 @@ class TestToolCallIdRoundTrip:
                 "tool_calls": [
                     _tool_call_entry("call_1", "python_exec", "print(6 * 7)"),
                     _tool_call_entry("call_2", "echo", "[1, 2]"),
+                    _tool_call_entry("call_3", "echo", '"print(6 * 7)"'),
                 ],
             },
             {"role": "assistant", "content": "done"},
@@ -471,8 +472,9 @@ class TestToolCallIdRoundTrip:
 
         second = server.requests[1]["messages"]
         assert second[1]["tool_calls"] == [
-            _tool_call_entry("call_1", "python_exec", "print(6 * 7)"),
-            _tool_call_entry("call_2", "echo", "[1, 2]"),
+            _tool_call_entry("call_1", "python_exec", "{}"),
+            _tool_call_entry("call_2", "echo", "{}"),
+            _tool_call_entry("call_3", "echo", "{}"),
         ]
         # The internal key never reaches the model.
         assert RAW_ARGUMENTS_KEY not in json.dumps(second)

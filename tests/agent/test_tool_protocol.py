@@ -740,3 +740,51 @@ class TestEndToEndOpenAIWire:
             {"role": "tool", "tool_call_id": "chatcmpl-tool-b", "content": "two"},
         ]
         assert "reasoning_content" not in json.dumps(bodies[1])
+
+    @pytest.mark.asyncio
+    async def test_unparsed_arguments_pass_a_strict_server(self) -> None:
+        # Like SGLang, the server rejects a request whose history holds
+        # tool-call arguments that do not parse to a JSON object.
+        unparsed = ["print(6 * 7)", "[1, 2]", '"print(6 * 7)"']
+        replies: deque[dict[str, Any]] = deque(
+            [
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {
+                            "id": f"call_{i}",
+                            "type": "function",
+                            "function": {"name": "echo", "arguments": arguments},
+                        }
+                        for i, arguments in enumerate(unparsed)
+                    ],
+                },
+                {"role": "assistant", "content": "first"},
+                {"role": "assistant", "content": "second"},
+            ]
+        )
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            for msg in json.loads(request.content)["messages"]:
+                for tc in msg.get("tool_calls", []):
+                    try:
+                        arguments = json.loads(tc["function"]["arguments"])
+                    except json.JSONDecodeError:
+                        arguments = None
+                    if not isinstance(arguments, dict):
+                        return httpx.Response(400, json={"error": "not an object"})
+            return httpx.Response(
+                200, json={"choices": [{"message": replies.popleft()}]}
+            )
+
+        llm = OpenAICompatLLM(
+            base_url="http://sglang.test/v1",
+            model="Qwen3.8-27B-8bit",
+            transport=httpx.MockTransport(handler),
+        )
+        agent = _agent(llm)
+        assert await agent.run("run the code") == "first"
+        # The turn stays in working memory, so the next run replays it too.
+        assert await agent.run("and now?") == "second"
+        await agent.close()

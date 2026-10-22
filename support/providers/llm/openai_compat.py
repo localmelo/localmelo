@@ -30,17 +30,20 @@ def _tool_def_to_openai(td: ToolDef) -> dict[str, Any]:
 def _tool_call_to_openai(tc: ToolCall) -> dict[str, Any]:
     """Serialize a ToolCall as an OpenAI ``tool_calls[]`` entry.
 
-    Arguments that were not a JSON object are sent back as the text the
-    model wrote (see :func:`raw_tool_arguments`).
+    Arguments that were not a JSON object (see :func:`raw_tool_arguments`)
+    are sent as ``{}``. Servers that check the calls in a request's history
+    need an object there: SGLang rejects the whole request otherwise, and
+    vLLM replaces such arguments with ``{}`` itself.
     """
-    arguments = raw_tool_arguments(tc.arguments)
-    if arguments is None:
-        # The spec carries arguments as a JSON-encoded string.
-        arguments = json.dumps(tc.arguments, ensure_ascii=False)
+    arguments = {} if raw_tool_arguments(tc.arguments) is not None else tc.arguments
     return {
         "id": tc.id,
         "type": "function",
-        "function": {"name": tc.tool_name, "arguments": arguments},
+        "function": {
+            "name": tc.tool_name,
+            # The spec carries arguments as a JSON-encoded string.
+            "arguments": json.dumps(arguments, ensure_ascii=False),
+        },
     }
 
 

@@ -18,8 +18,8 @@ RESERVED_BODY_KEYS = frozenset({"model", "messages", "tools", "tool_choice", "st
 # call is still executed through the normal executor path, which reports
 # the unexpected argument back to the model instead of the whole run
 # crashing on a parse error. When the call is replayed to the model, the
-# providers send the original text (OpenAI) or an empty object (Ollama)
-# in place of this form; see :func:`raw_tool_arguments`.
+# providers send an empty object in place of text kept under this key;
+# see :func:`raw_tool_arguments`.
 RAW_ARGUMENTS_KEY = "_raw_arguments"
 
 
