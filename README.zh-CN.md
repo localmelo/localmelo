@@ -158,25 +158,26 @@ Chat backend 和 embedding backend 独立配置。如果不想运行 embedding r
 
 ## 开发
 
-安装开发依赖：
+用 [uv](https://docs.astral.sh/uv/) 安装开发依赖，会按仓库里的 `uv.lock`
+创建 `.venv/`：
 
 ```bash
-pip install -e ".[dev,gateway]"
+uv sync --extra dev --extra gateway
 ```
 
 运行 focused checks：
 
 ```bash
-python -m pytest tests/agent tests/checker tests/executor \
-                 tests/cli tests/memory tests/integration -q
-python -m pytest tests/gateway -q
-python -m ruff check .
+uv run pytest tests/agent tests/checker tests/executor \
+              tests/cli tests/memory tests/integration -q
+uv run pytest tests/gateway -q
+uv run ruff check .
 ```
 
 合并前运行完整测试：
 
 ```bash
-python -m pytest tests/ -q
+uv run pytest tests/ -q
 ```
 
 开发进度见 [更新](https://localmelo.github.io/localmelo/zh-CN/updates.html)

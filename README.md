@@ -162,25 +162,26 @@ to `none` when you do not want to run embedding retrieval.
 
 ## Development
 
-Install development dependencies:
+Install development dependencies with [uv](https://docs.astral.sh/uv/). This
+creates `.venv/` from the committed `uv.lock`:
 
 ```bash
-pip install -e ".[dev,gateway]"
+uv sync --extra dev --extra gateway
 ```
 
 Run focused checks:
 
 ```bash
-python -m pytest tests/agent tests/checker tests/executor \
-                 tests/cli tests/memory tests/integration -q
-python -m pytest tests/gateway -q
-python -m ruff check .
+uv run pytest tests/agent tests/checker tests/executor \
+              tests/cli tests/memory tests/integration -q
+uv run pytest tests/gateway -q
+uv run ruff check .
 ```
 
 Run the full suite before merging:
 
 ```bash
-python -m pytest tests/ -q
+uv run pytest tests/ -q
 ```
 
 Development priorities are tracked in

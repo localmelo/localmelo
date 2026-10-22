@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 
 
-class SleepStage(str, Enum):
+class SleepStage(StrEnum):
     IDLE = "idle"
     PREPROCESSING = "preprocessing"
     TRAINING = "training"
