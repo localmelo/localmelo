@@ -140,6 +140,11 @@ class StdioMcpClient:
         # later calls do nothing. A close() before there is a process only
         # sets _closing.
         self._closed = False
+        # close() has sent SIGTERM to the server's process group. A wrapper
+        # that died of it can leave the server running in the group, so
+        # kill() still signals the group once the process started has
+        # exited (see kill()).
+        self._signalled = False
         self.stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
         self.protocol_version = ""
         self.server_info: dict[str, Any] = {}
@@ -284,6 +289,7 @@ class StdioMcpClient:
                 with contextlib.suppress(Exception):
                     proc.stdin.close()
             if not await self._wait_exit(proc):
+                self._signalled = True
                 refused = _signal_server(proc, kill=False)
                 if not await self._wait_stopped(proc):
                     refused = _signal_server(proc, kill=True)
@@ -312,15 +318,22 @@ class StdioMcpClient:
 
         For a shutdown that has no time left for close()'s grace periods,
         such as when localmelo itself must exit. On Windows only the
-        process is killed. Like close(), kill() signals nothing before
-        there is a process or once the server has exited. It neither waits
-        for the server to exit nor stops the readers: a close() under way
-        sees the server exit and finishes the shutdown, and so does a later
-        close().
+        process is killed. kill() signals nothing before there is a
+        process, once close() has finished, or once the server has exited
+        by itself (close() does not signal a server that exits in time
+        either). Once close() has sent SIGTERM, though, kill() signals the
+        group even after the process started has exited: a wrapper
+        (``sh -c``) that died of the SIGTERM can leave a server that
+        ignores it running in the group, and close() would only send its
+        SIGKILL a grace period later. kill() neither waits for the server
+        to exit nor stops the readers: a close() under way sees the server
+        exit and finishes the shutdown, and so does a later close().
         """
         proc = self._proc
-        if proc is None or proc.returncode is not None:
+        if proc is None or self._closed:
             return
+        if proc.returncode is not None and not self._signalled:
+            return  # exited by itself, with nothing signalled to its group
         if _signal_server(proc, kill=True):
             logger.warning(
                 "Cannot kill MCP server %r: process %d could not be signalled "

@@ -717,6 +717,51 @@ class TestKill:
             await asyncio.wait_for(mcp.close(), 5)
         assert gone
 
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+    async def test_kill_reaches_a_server_whose_wrapper_died_of_close(
+        self, log_path: Path, tmp_path: Path
+    ) -> None:
+        pid_file = tmp_path / "server.pid"
+        server = fake_server_config(
+            log_path,
+            env={"FAKE_MCP_MODE": "stubborn", "FAKE_MCP_PIDFILE": str(pid_file)},
+        )
+        # "; true" keeps sh from replacing itself with the server.
+        wrapped = dataclasses.replace(
+            server,
+            command="/bin/sh",
+            args=["-c", shlex.join([server.command, *server.args]) + "; true"],
+        )
+        mcp = StdioMcpClient(wrapped, shutdown_grace_s=1.0)
+        await mcp.start()
+        pid = int(pid_file.read_text())
+        closing = asyncio.create_task(mcp.close())
+        gone = False
+        try:
+            # close() sends SIGTERM a grace period after closing stdin. That
+            # ends sh, while the server ignores it and runs on in the group
+            # until close() sends SIGKILL, another grace period later.
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 5
+            while mcp.returncode is None and loop.time() < deadline:
+                await asyncio.sleep(0.02)
+            assert mcp.returncode == -signal.SIGTERM
+            assert not closing.done()
+            # An exit that cannot wait for that kills the server at once,
+            # even though the process started (sh) has exited, and then
+            # abandons close() (asyncio.run cancels it on the way out).
+            mcp.kill()
+            closing.cancel()
+            gone = await process_gone(pid)
+        finally:
+            if not gone:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+            with contextlib.suppress(asyncio.CancelledError):
+                await closing
+            await asyncio.wait_for(mcp.close(), 5)
+        assert gone
+
     async def test_kill_without_a_running_server_does_nothing(
         self, log_path: Path
     ) -> None:
