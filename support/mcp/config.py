@@ -181,11 +181,14 @@ def _reject_nul(where: str, key: str, *values: str) -> None:
 
 def _seconds(raw: dict[str, Any], key: str, default: float, where: str) -> float:
     value = raw.get(key, default)
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int | float)
-        or not math.isfinite(value)
-        or value <= 0
-    ):
-        raise McpConfigError(f"{where}: {key!r} must be a positive number of seconds")
-    return float(value)
+    message = f"{where}: {key!r} must be a positive number of seconds"
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        raise McpConfigError(message)
+    try:
+        seconds = float(value)
+    except OverflowError as exc:
+        # JSON integers have no size limit, so one may not fit a float.
+        raise McpConfigError(message) from exc
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise McpConfigError(message)
+    return seconds

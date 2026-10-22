@@ -93,6 +93,12 @@ class TestParse:
             ({"command": "x", "cwd": 3}, "'cwd'"),
             ({"command": "x", "timeout": 0}, "'timeout'"),
             ({"command": "x", "timeout": True}, "'timeout'"),
+            # JSON integers have no size limit; these are too large for a float.
+            ({"command": "x", "timeout": 10**400}, "server 'srv': 'timeout'"),
+            (
+                {"command": "x", "startup_timeout": 10**400},
+                "server 'srv': 'startup_timeout'",
+            ),
             ({"command": "x", "startup_timeout": "5"}, "'startup_timeout'"),
             ({"command": "x", "include_tools": "screenshot"}, "'include_tools'"),
         ],
