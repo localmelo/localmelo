@@ -202,6 +202,16 @@ def _image_references(result: ToolResult) -> ToolResult:
     )
 
 
+def _result_digest(result: ToolResult) -> str:
+    """Digest of what one call returned, for stuck detection.
+
+    It covers the output, the error and each image's digest, but not the
+    duration, so the same result read twice gives the same digest.
+    """
+    returned = [result.output, result.error, [image.sha256 for image in result.images]]
+    return hashlib.sha256(json.dumps(returned).encode()).hexdigest()[:16]
+
+
 def _tool_result_text(result: ToolResult) -> str:
     """Text of a tool result, without the line that names its images.
 
@@ -887,21 +897,29 @@ class Agent:
     def _make_fingerprint(
         calls: Sequence[ToolCall], results: Sequence[ToolResult]
     ) -> tuple[str, str, str]:
-        """Return one ``(tool_names, args_hash, errors)`` fingerprint per step.
+        """Return one ``(tool_names, step_hash, errors)`` fingerprint per step.
 
-        A step with several calls is fingerprinted as a whole: calls are
-        sorted (the same batch in another order matches) and their errors
-        joined. ``_detect_stuck`` therefore fires when the same batch, or
-        the same errors, repeat across steps — not merely because one step
-        contains several calls.
+        ``step_hash`` covers each call's name and arguments together with
+        what the call returned: its output, its error and the digests of
+        its images (see :func:`_result_digest`). A step with several calls
+        is fingerprinted as a whole: calls are sorted (the same batch in
+        another order matches) and their errors joined. ``_detect_stuck``
+        therefore fires when the same batch returns the same results, or
+        the same errors repeat, across steps — not merely because one step
+        contains several calls, and not when repeated polling returns
+        new results.
         """
-        pairs = sorted(
-            (tc.tool_name, json.dumps(tc.arguments, sort_keys=True, default=str))
-            for tc in calls
+        entries = sorted(
+            (
+                tc.tool_name,
+                json.dumps(tc.arguments, sort_keys=True, default=str),
+                _result_digest(result),
+            )
+            for tc, result in zip(calls, results, strict=True)
         )
         return (
-            ",".join(name for name, _ in pairs),
-            hashlib.sha256(json.dumps(pairs).encode()).hexdigest()[:16],
+            ",".join(name for name, _, _ in entries),
+            hashlib.sha256(json.dumps(entries).encode()).hexdigest()[:16],
             "\n".join(sorted(r.error for r in results if r.error)),
         )
 
@@ -913,8 +931,8 @@ class Agent:
         if len(fingerprints) < 3:
             return ""
         last3 = fingerprints[-3:]
-        # Same tool+args repeated 3 times
-        keys = {(name, args_h) for name, args_h, _ in last3}
+        # The same calls with the same results 3 times
+        keys = {(name, step_h) for name, step_h, _ in last3}
         if len(keys) == 1 and last3[0][0]:
             return "stuck"
         # Same error repeated 3 times

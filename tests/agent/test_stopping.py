@@ -1,5 +1,5 @@
-"""How a run stops: reflection decisions and their parsing, and empty
-replies — no real model."""
+"""How a run stops: reflection decisions and their parsing, empty replies
+and stuck detection — no real model."""
 
 from __future__ import annotations
 
@@ -14,7 +14,14 @@ from localmelo.melo.agent._chat import FINAL_REFLECTION_NOTE, REFLECTION_PROMPT
 from localmelo.melo.agent.agent import EMPTY_REPLY_NUDGE
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.memory.short import WorkingMemory
-from localmelo.melo.schema import MAX_REFLECTION_CHARS, Message, ToolCall, ToolDef
+from localmelo.melo.schema import (
+    MAX_REFLECTION_CHARS,
+    ImagePart,
+    Message,
+    ToolCall,
+    ToolDef,
+    ToolResult,
+)
 
 # ── Fakes and helpers ───────────────────────────────────────────────────────
 
@@ -480,3 +487,96 @@ class TestEmptyReplies:
         assert last[1].role == "user"
         assert last[1].content == "echo the answer"
         assert last[-1].content == EMPTY_REPLY_NUDGE
+
+
+# ── Stuck detection compares results ────────────────────────────────────────
+
+RED = ImagePart.from_bytes(b"red pixels", "image/png")
+BLUE = ImagePart.from_bytes(b"blue pixels", "image/png")
+
+
+def _fingerprint(*results: ToolResult) -> tuple[str, str, str]:
+    calls = [ToolCall(tool_name="poll", arguments={"job": 1}) for _ in results]
+    return Agent._make_fingerprint(calls, list(results))
+
+
+class TestStuckDetection:
+    def test_same_calls_with_new_results_are_not_stuck(self) -> None:
+        polls = [_fingerprint(ToolResult("poll", output=f"{i}%")) for i in (10, 20, 30)]
+        assert len(set(polls)) == 3
+        assert Agent._detect_stuck(polls) == ""
+
+    def test_same_calls_with_the_same_results_are_stuck(self) -> None:
+        polls = [_fingerprint(ToolResult("poll", output="running")) for _ in range(3)]
+        assert Agent._detect_stuck(polls) == "stuck"
+
+    def test_image_digests_count_as_results(self) -> None:
+        red = _fingerprint(ToolResult("poll", output="frame", images=[RED]))
+        blue = _fingerprint(ToolResult("poll", output="frame", images=[BLUE]))
+        assert red != blue
+        assert Agent._detect_stuck([red, blue, red]) == ""
+        # A reference copy has the same digest as the image it stands for.
+        ref = _fingerprint(
+            ToolResult("poll", output="frame", images=[RED.as_reference()])
+        )
+        assert ref == red
+
+    def test_the_error_is_part_of_the_result(self) -> None:
+        failed = _fingerprint(ToolResult("poll", error="busy"))
+        assert failed != _fingerprint(ToolResult("poll", output="busy"))
+        assert failed != _fingerprint(ToolResult("poll", error="gone"))
+
+    def test_the_duration_is_not(self) -> None:
+        fast = _fingerprint(ToolResult("poll", output="done", duration_ms=1.0))
+        slow = _fingerprint(ToolResult("poll", output="done", duration_ms=900.0))
+        assert fast == slow
+
+    def test_the_same_errors_are_stuck_whatever_the_calls(self) -> None:
+        fingerprints = [
+            Agent._make_fingerprint(
+                [ToolCall(tool_name="poll", arguments={"job": i})],
+                [ToolResult("poll", error="job not found")],
+            )
+            for i in range(3)
+        ]
+        assert len(set(fingerprints)) == 3
+        assert Agent._detect_stuck(fingerprints) == "stuck"
+
+    @pytest.mark.asyncio
+    async def test_polling_that_makes_progress_runs_on(self) -> None:
+        progress = iter(["10%", "40%", "70%", "90%"])
+
+        async def _poll(job: str) -> str:
+            return next(progress)
+
+        poll = Message(
+            role="assistant",
+            tool_call=ToolCall(tool_name="poll", arguments={"job": "build"}),
+        )
+        llm = FakeLLM([poll, poll, poll, poll, _answer("built")])
+        agent = _agent(llm, attempt_policy="none", max_steps=10)
+        agent.hippo.register_tool(
+            ToolDef(name="poll", description="poll a job", parameters={})
+        )
+        agent.executor.register("poll", _poll)
+        result = await agent.run_task("poll the build job")
+        assert (result.status, result.result) == ("completed", "built")
+        assert (result.steps, result.n_tool) == (5, 4)
+
+    @pytest.mark.asyncio
+    async def test_polling_that_returns_the_same_result_is_stuck(self) -> None:
+        async def _poll(job: str) -> str:
+            return "queued"
+
+        poll = Message(
+            role="assistant",
+            tool_call=ToolCall(tool_name="poll", arguments={"job": "build"}),
+        )
+        llm = FakeLLM([poll] * 3)
+        agent = _agent(llm, attempt_policy="none", max_steps=10)
+        agent.hippo.register_tool(
+            ToolDef(name="poll", description="poll a job", parameters={})
+        )
+        agent.executor.register("poll", _poll)
+        result = await agent.run_task("poll the build job")
+        assert (result.status, result.steps) == ("stuck", 3)
