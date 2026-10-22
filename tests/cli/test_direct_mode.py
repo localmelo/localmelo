@@ -157,6 +157,20 @@ class TestFlags:
     def test_memory_on(self) -> None:
         assert _main("--memory", "on", "q").options.memory is True
 
+    @pytest.mark.parametrize(("value", "seconds"), [("600", 600.0), ("0.5", 0.5)])
+    def test_request_timeout_goes_to_the_provider_not_the_options(
+        self, value: str, seconds: float
+    ) -> None:
+        ran = _main("--request-timeout", value, "q")
+        assert ran.code == 0
+        assert ran.options == AgentOptions()  # not a run option
+        [args] = ran.build.call_args.args
+        assert args.request_timeout == seconds
+
+    def test_no_request_timeout_by_default(self) -> None:
+        [args] = _main("q").build.call_args.args
+        assert args.request_timeout is None
+
     def test_mcp_config_gives_one_provider_that_is_not_started(
         self, tmp_path: Path
     ) -> None:
@@ -268,6 +282,30 @@ class TestUsageErrors:
             (["--timeout", "nan", "q"], "argument --timeout: must be a finite"),
             (["--timeout", "inf", "q"], "argument --timeout: must be a finite"),
             (["--timeout", "soon", "q"], "argument --timeout: not a number: 'soon'"),
+            (
+                ["--request-timeout", "0", "q"],
+                "argument --request-timeout: must be a finite number of seconds > 0, "
+                "got 0",
+            ),
+            (
+                ["--request-timeout", "-1", "q"],
+                "argument --request-timeout: must be a finite number of seconds > 0, "
+                "got -1",
+            ),
+            (
+                ["--request-timeout", "nan", "q"],
+                "argument --request-timeout: must be a finite number of seconds > 0, "
+                "got nan",
+            ),
+            (
+                ["--request-timeout", "inf", "q"],
+                "argument --request-timeout: must be a finite number of seconds > 0, "
+                "got inf",
+            ),
+            (
+                ["--request-timeout", "abc", "q"],
+                "argument --request-timeout: not a number: 'abc'",
+            ),
             (["--memory-dir", "", "q"], "argument --memory-dir: must not be empty"),
             (
                 ["--attempt-policy", "retry", "q"],
@@ -303,6 +341,14 @@ class TestUsageErrors:
                 ["--serve", "--timeout", "5", "--output-format", "json", "q"],
                 "only for direct mode (a query without --serve): --timeout, "
                 "--output-format",
+            ),
+            (
+                ["--request-timeout", "600"],
+                "only for direct mode (a query without --serve): --request-timeout",
+            ),
+            (
+                ["--serve", "--request-timeout", "600", "q"],
+                "only for direct mode (a query without --serve): --request-timeout",
             ),
         ],
     )

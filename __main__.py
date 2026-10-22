@@ -57,6 +57,7 @@ _DIRECT_FLAGS = {
     "memory": "--memory",
     "memory_dir": "--memory-dir",
     "timeout": "--timeout",
+    "request_timeout": "--request-timeout",
     "output_format": "--output-format",
     "embedding_base_url": "--embedding-base-url",
     "embedding_model": "--embedding-model",
@@ -591,6 +592,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Wall-clock limit of the run (default none)",
     )
     direct.add_argument(
+        "--request-timeout",
+        type=_seconds,
+        metavar="SECONDS",
+        help="HTTP timeout of each chat request, in seconds (default 120; 300 "
+        "for the ollama backend)",
+    )
+    direct.add_argument(
         "--output-format",
         choices=["text", "json"],
         help="text (default), or one JSON line with the run's record",
@@ -745,9 +753,12 @@ def _build_direct_mode_agent(
     1. --base-url provided: generic OpenAI-compatible endpoint injection
        (preserves the exact URL as given). There is no embedding unless
        --embedding-base-url names an OpenAI-compatible embedding endpoint.
+       --request-timeout, when given, is the chat provider's HTTP timeout.
     2. No --base-url: use configured backends from the config file. The
        config is validated first, as for gateway startup, so a bad value
        (e.g. an invalid extra_body) is reported instead of a traceback.
+       --request-timeout, when given, replaces the configured
+       request_timeout_s for this run; the file is not written.
 
     *options* and *tool_providers* go to the Agent in both cases. The
     memory directory that *options* name is created first (see
@@ -756,13 +767,19 @@ def _build_direct_mode_agent(
     if options is not None and options.memory_dir is not None:
         _make_memory_dir(options.memory_dir)
     base_url = args.base_url
+    request_timeout = getattr(args, "request_timeout", None)
 
     if base_url:
         # Generic OpenAI-compatible endpoint
         from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
         model = args.chat_model or "default"
-        llm = OpenAICompatLLM(base_url=base_url, model=model)
+        # Without --request-timeout the provider keeps its default (120 s);
+        # httpx would read timeout=None as no timeout at all.
+        llm_options: dict[str, Any] = (
+            {} if request_timeout is None else {"timeout": request_timeout}
+        )
+        llm = OpenAICompatLLM(base_url=base_url, model=model, **llm_options)
         return Agent(
             llm=llm,
             embedding=_direct_embedding(args),
@@ -781,6 +798,11 @@ def _build_direct_mode_agent(
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+    if request_timeout is not None:
+        # For this run only, like the gateway's --host and --port: the
+        # loaded config is changed in memory and never saved.
+        cfg.request_timeout_s = request_timeout
 
     try:
         cfg.validate_or_raise()
