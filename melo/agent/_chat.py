@@ -276,10 +276,12 @@ class Chat:
     ) -> Message:
         system_prompt, other_msgs = _build_system_prompt(context, short, reflections)
         messages = [Message(role="system", content=system_prompt)]
-        if not any(m.role == "user" for m in short):
+        if not any(m.role == "user" and m.content == query for m in short):
             # The task query is no longer in the window (evicted). Put it
             # back ahead of the remaining turns so the conversation still
-            # opens with the request instead of ending with it.
+            # opens with the request instead of ending with it. Other user
+            # messages, such as the agent's note after an empty reply,
+            # do not stand in for it.
             messages.append(Message(role="user", content=query))
         messages.extend(other_msgs)
 

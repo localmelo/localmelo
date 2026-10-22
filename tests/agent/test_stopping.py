@@ -1,4 +1,5 @@
-"""How a run stops: reflection decisions and their parsing — no real model."""
+"""How a run stops: reflection decisions and their parsing, and empty
+replies — no real model."""
 
 from __future__ import annotations
 
@@ -10,7 +11,9 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import FINAL_REFLECTION_NOTE, REFLECTION_PROMPT
+from localmelo.melo.agent.agent import EMPTY_REPLY_NUDGE
 from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.memory.short import WorkingMemory
 from localmelo.melo.schema import MAX_REFLECTION_CHARS, Message, ToolCall, ToolDef
 
 # ── Fakes and helpers ───────────────────────────────────────────────────────
@@ -96,6 +99,10 @@ def _reflection(action: str, **fields: Any) -> Message:
 def _is_reflection(call: dict[str, Any]) -> bool:
     system: Message = call["messages"][0]
     return system.content.startswith(REFLECTION_PROMPT)
+
+
+def _planning_calls(llm: FakeLLM) -> list[dict[str, Any]]:
+    return [call for call in llm.calls if not _is_reflection(call)]
 
 
 def _reflection_requests(llm: FakeLLM) -> list[str]:
@@ -385,3 +392,91 @@ class TestTolerantParsing:
         agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
         result = await agent.run_task("echo the answer")
         assert (result.status, result.result, result.attempts) == ("completed", "42", 2)
+
+
+# ── Empty replies ───────────────────────────────────────────────────────────
+
+
+def _empty(**fields: Any) -> Message:
+    return Message(role="assistant", content="", **fields)
+
+
+class TestEmptyReplies:
+    def test_the_nudge_text(self) -> None:
+        assert EMPTY_REPLY_NUDGE == (
+            "Your last reply was empty. Continue the task: call a tool or give "
+            "your final answer."
+        )
+
+    @pytest.mark.asyncio
+    async def test_an_empty_reply_is_answered_with_the_nudge(self) -> None:
+        llm = FakeLLM([_empty(), _answer("42")])
+        agent = _agent(llm)
+        result = await agent.run_task("what is the answer")
+        assert (result.status, result.result) == ("completed", "42")
+        # The empty reply's step counts.
+        assert (result.steps, result.n_llm) == (2, 2)
+        second = llm.calls[1]["messages"]
+        assert [(m.role, m.content) for m in second[1:]] == [
+            ("user", "what is the answer"),
+            ("user", EMPTY_REPLY_NUDGE),
+        ]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "reply",
+        [_empty(), _answer(" \n\t"), _empty(thinking="I should answer")],
+        ids=["empty", "whitespace", "thinking only"],
+    )
+    async def test_two_in_a_row_fail_the_run(self, reply: Message) -> None:
+        llm = FakeLLM([reply, reply])
+        agent = _agent(llm)
+        result = await agent.run_task("what is the answer")
+        assert (result.status, result.result, result.error) == (
+            "failed",
+            "",
+            "empty replies",
+        )
+        assert (result.steps, result.attempts) == (2, 1)
+        task = await agent.hippo.get_task(result.task_id)
+        assert task is not None
+        assert (task.status, task.result) == ("failed", "empty replies")
+
+    @pytest.mark.asyncio
+    async def test_a_tool_call_breaks_the_row(self) -> None:
+        llm = FakeLLM([_empty(), _echo_call("a"), _empty(), _answer("42")])
+        result = await _agent(llm).run_task("echo the answer")
+        assert (result.status, result.result, result.steps) == ("completed", "42", 4)
+
+    @pytest.mark.asyncio
+    async def test_a_reflection_does_not_break_the_row(self) -> None:
+        llm = FakeLLM([_empty(), _reflection("continue"), _empty()])
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=3)
+        result = await agent.run_task("echo the answer")
+        assert (result.status, result.error) == ("failed", "empty replies")
+        assert (result.steps, result.attempts) == (2, 2)
+        assert (result.n_main, result.n_aux) == (2, 1)
+
+    @pytest.mark.asyncio
+    async def test_an_empty_reply_uses_up_a_step(self) -> None:
+        llm = FakeLLM([_empty()])
+        agent = _agent(llm, attempt_policy="none", max_steps=1)
+        result = await agent.run_task("what is the answer")
+        assert (result.status, result.error, result.steps) == (
+            "budget_exhausted",
+            "Max steps reached",
+            1,
+        )
+
+    @pytest.mark.asyncio
+    async def test_the_query_returns_when_only_the_nudge_is_left(self) -> None:
+        # Eviction drops the query, but the nudge after it is a user
+        # message too; the next planning call must still open with the task.
+        llm = FakeLLM([_echo_call("a"), _echo_call("b"), _empty(), _answer("42")])
+        agent = _agent(llm)
+        agent.hippo.working = WorkingMemory(max_len=3)
+        assert (await agent.run_task("echo the answer")).result == "42"
+        last = _planning_calls(llm)[-1]["messages"]
+        assert last[1].role == "user"
+        assert last[1].content == "echo the answer"
+        assert last[-1].content == EMPTY_REPLY_NUDGE

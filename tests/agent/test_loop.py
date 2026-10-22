@@ -677,17 +677,18 @@ class TestDirectAnswerEdgeCases:
     """Edge cases for the direct-answer (no tool_call) path."""
 
     @pytest.mark.asyncio
-    async def test_empty_content_direct_answer(self) -> None:
-        """Direct answer with empty content still completes the task."""
+    async def test_empty_content_is_not_a_final_answer(self) -> None:
+        """A reply with neither a tool call nor text is no answer: after
+        two in a row the task fails."""
         agent = _make_agent(
-            [Message(role="assistant", content="")],
+            [Message(role="assistant", content="")] * 2,
             embedding=FakeEmbedding(),
         )
         result = await agent.run("hello")
         # run() shows "[<status>] <error>" whenever the result is empty.
-        assert result == "[completed] "
+        assert result == "[failed] empty replies"
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "completed"
+        assert tasks[0].status == "failed"
 
     @pytest.mark.asyncio
     async def test_task_saved_on_direct_answer(self) -> None:

@@ -273,6 +273,16 @@ def _within_turn_budget(
     return fitted
 
 
+# Working-memory message that answers a planning reply with neither a
+# tool call nor text: such a reply is no final answer.
+EMPTY_REPLY_NUDGE = (
+    "Your last reply was empty. Continue the task: call a tool or give your "
+    "final answer."
+)
+
+# Empty replies in a row that end the run as failed ("empty replies").
+MAX_EMPTY_REPLIES = 2
+
 CONTINUATION_UTILITY_THRESHOLD = 0.1
 
 
@@ -367,6 +377,8 @@ class _RunState:
     # The latest non-blank text of a planning reply in this run: the
     # answer of a reflection's "done" that gives none.
     last_text: str = ""
+    # Planning replies in a row with neither a tool call nor text.
+    empty_replies: int = 0
 
     @property
     def running(self) -> bool:
@@ -1049,6 +1061,13 @@ class Agent:
         when stuck detection fired. The attempt ends *run* as
         ``completed`` with a direct answer as the result, or as
         ``failed`` with a checker's refusal as the error.
+
+        A reply with neither a tool call nor text is no answer: its step
+        counts, :data:`EMPTY_REPLY_NUDGE` is appended to working memory
+        as a user message, and the model plans again. The
+        :data:`MAX_EMPTY_REPLIES`-th empty reply in a row in this run
+        (reflections in between do not break the row) ends it as
+        ``failed`` with the error ``empty replies``.
         """
         fingerprints: list[tuple[str, str, str]] = []
         reflections = self.hippo.working.get_reflections() or None
@@ -1076,10 +1095,21 @@ class Agent:
             if response.content.strip():
                 run.last_text = response.content
 
-            # No tool call → direct answer
             if not response.tool_calls:
-                run.end("completed", result=response.content)
-                return step + 1, ""
+                if response.content.strip():
+                    # No tool call → direct answer
+                    run.end("completed", result=response.content)
+                    return step + 1, ""
+                # An empty reply is no answer: ask for one and plan again.
+                run.empty_replies += 1
+                if run.empty_replies >= MAX_EMPTY_REPLIES:
+                    run.end("failed", error="empty replies")
+                    return step + 1, ""
+                self.hippo.working.append(
+                    Message(role="user", content=EMPTY_REPLY_NUDGE)
+                )
+                continue
+            run.empty_replies = 0
 
             # Execute every call in order, each through the executor boundary,
             # which runs only the tools this planning call offered.
@@ -1122,7 +1152,8 @@ class Agent:
           reflection decided that the task was done (its answer, see
           :meth:`_run_reflective_attempts`);
         - ``failed``: a checker refused the plan or the run (the error
-          says why);
+          says why), or the model gave two empty replies in a row (the
+          error is ``empty replies``, see :meth:`_run_attempt`);
         - ``gate_stopped``: the reflection gate decided not to continue
           while attempts and steps were left. The reflection's best
           effort, if any, is the result and its rationale the error;
