@@ -4,7 +4,8 @@ It speaks newline-delimited JSON-RPC 2.0. Tool calls run on worker
 threads, so the main loop keeps reading stdin while a call is in flight;
 that is what lets the tests exercise cancellation and a server-to-client
 ping. Every message received is appended (one JSON per line) to the file
-named by FAKE_MCP_LOG. FAKE_MCP_MODE selects misbehaviour:
+named by FAKE_MCP_LOG, and the server writes its pid to the file named by
+FAKE_MCP_PIDFILE, if set. FAKE_MCP_MODE selects misbehaviour:
 
 - ``hang_initialize``: never answer ``initialize``
 - ``hang_tools_list``: never answer ``tools/list``
@@ -33,6 +34,7 @@ PAGE_SIZE = 4
 SLOW_CAP_S = 3.0  # hard cap, so a broken cancel path cannot hang the suite
 MODE = os.environ.get("FAKE_MCP_MODE", "")
 LOG_PATH = os.environ.get("FAKE_MCP_LOG", "")
+PID_PATH = os.environ.get("FAKE_MCP_PIDFILE", "")
 
 _write_lock = threading.Lock()
 _log_lock = threading.Lock()
@@ -255,6 +257,9 @@ def handle(message: dict[str, Any]) -> None:
 def main() -> None:
     if MODE == "stubborn":
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    if PID_PATH:
+        with open(PID_PATH, "w", encoding="utf-8") as fh:
+            fh.write(str(os.getpid()))
     # More than a pipe buffer of stderr before reading anything: the client
     # must drain stderr or the handshake deadlocks.
     sys.stderr.write("fake-mcp: starting\n" + "." * 200_000 + "\n")

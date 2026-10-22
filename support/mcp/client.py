@@ -14,6 +14,11 @@ the server's configured ``env`` on top, as literal values. Nothing else
 is inherited, so API keys and other secrets in the agent's environment
 do not reach MCP servers; a server that needs another variable must
 list it in its ``env``.
+
+On POSIX the server runs in a session of its own, and close() signals
+its whole process group, so a server started through a wrapper
+(``sh -c``, a launcher script) is stopped together with the wrapper. A
+Ctrl-C in the agent's terminal does not reach the server.
 """
 
 from __future__ import annotations
@@ -23,6 +28,8 @@ import contextlib
 import json
 import logging
 import os
+import signal
+import sys
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
@@ -42,6 +49,8 @@ MAX_TOOL_PAGES = 100
 # How long the stdout reader waits for the exit code once the server's
 # output has ended.
 EXIT_WAIT_S = 1.0
+# How often close() checks whether the server's process group is gone.
+GROUP_POLL_S = 0.05
 
 METHOD_NOT_FOUND = -32601
 
@@ -147,6 +156,8 @@ class StdioMcpClient:
                 env=env,
                 cwd=self.config.cwd,
                 limit=STREAM_LIMIT,
+                # Its own process group, which close() signals as a whole.
+                start_new_session=sys.platform != "win32",
             )
         except (OSError, ValueError) as exc:
             # ValueError: a string the OS cannot take (a NUL, "=" in an env
@@ -207,6 +218,13 @@ class StdioMcpClient:
     async def close(self) -> None:
         """Shut the server down: close stdin, then terminate, then kill.
 
+        If the server has not exited within the grace period after its
+        stdin is closed, it gets SIGTERM, and if anything is left running a
+        grace period later, SIGKILL. On POSIX both go to the server's
+        process group, so a server behind a wrapper is stopped too; on
+        Windows only the process is terminated. A process that survives
+        even SIGKILL makes close() raise McpError.
+
         Requests are refused as soon as close() begins, but the client only
         counts as closed once the process has exited and the readers have
         stopped. A close() cancelled part-way therefore leaves the shutdown
@@ -228,12 +246,17 @@ class StdioMcpClient:
                 with contextlib.suppress(Exception):
                     proc.stdin.close()
             if not await self._wait_exit(proc):
-                with contextlib.suppress(ProcessLookupError):
-                    proc.terminate()
+                _signal_server(proc, kill=False)
+                if not await self._wait_stopped(proc):
+                    _signal_server(proc, kill=True)
+                # A process that left the group can hold the pipes open, and
+                # before Python 3.13 Process.wait() waits for them to close.
+                _close_pipes(proc)
                 if not await self._wait_exit(proc):
-                    with contextlib.suppress(ProcessLookupError):
-                        proc.kill()
-                    await proc.wait()
+                    raise McpError(
+                        f"Cannot stop MCP server {self.name!r}: process "
+                        f"{proc.pid} is still running after SIGKILL"
+                    )
         for task in list(self._tasks):
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
@@ -246,6 +269,27 @@ class StdioMcpClient:
         except TimeoutError:
             return False
         return True
+
+    async def _wait_stopped(self, proc: asyncio.subprocess.Process) -> bool:
+        """Wait up to the grace period for the server to stop.
+
+        On POSIX that means every process in its group, not only the one
+        started: a wrapper often dies of SIGTERM while the server goes on.
+        """
+        if sys.platform == "win32":
+            return await self._wait_exit(proc)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + self._shutdown_grace_s
+        while True:
+            try:
+                os.killpg(proc.pid, 0)
+            except ProcessLookupError:
+                return True
+            except PermissionError:
+                pass  # zombies not yet reaped (macOS), or a setuid process
+            if loop.time() >= deadline:
+                return False
+            await asyncio.sleep(GROUP_POLL_S)
 
     # ── Requests ──
 
@@ -497,6 +541,36 @@ class StdioMcpClient:
             return ""
         tail = " | ".join(list(self.stderr_tail)[-5:])
         return f"; stderr: {tail[-500:]}"
+
+
+def _signal_server(proc: asyncio.subprocess.Process, *, kill: bool) -> None:
+    """Send SIGTERM, or SIGKILL with *kill*, to the server's process group.
+
+    The server leads a session of its own, so its pid is the group id; the
+    group lives on while any of its processes does, even once the server
+    has exited. On Windows the process is terminated instead.
+    """
+    if sys.platform == "win32":
+        with contextlib.suppress(ProcessLookupError):
+            if kill:
+                proc.kill()
+            else:
+                proc.terminate()
+        return
+    # PermissionError: macOS refuses to signal a group of zombies, and a
+    # setuid process may refuse the signal.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
+        os.killpg(proc.pid, signal.SIGKILL if kill else signal.SIGTERM)
+
+
+def _close_pipes(proc: asyncio.subprocess.Process) -> None:
+    """Close the pipes to the server; asyncio has no public API for them."""
+    transport = getattr(proc, "_transport", None)
+    if isinstance(transport, asyncio.SubprocessTransport):
+        for fd in (0, 1, 2):
+            pipe = transport.get_pipe_transport(fd)
+            if pipe is not None:
+                pipe.close()
 
 
 def _parse_tool(item: Any) -> McpTool | None:

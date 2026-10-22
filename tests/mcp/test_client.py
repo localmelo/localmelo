@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import dataclasses
 import hashlib
 import os
+import shlex
+import signal
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -110,6 +114,24 @@ class TestCancellation:
 async def env_var(mcp: StdioMcpClient, name: str) -> str:
     """The value of *name* in the server's environment, or ``<unset>``."""
     return tool_result_to_output(await mcp.call_tool("env", {"name": name})).text
+
+
+async def process_gone(pid: int, timeout: float = 3.0) -> bool:
+    """Whether process *pid* is gone within *timeout* seconds.
+
+    A killed process is a zombie until it is reaped, and kill(pid, 0) still
+    succeeds on a zombie.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while True:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        if loop.time() >= deadline:
+            return False
+        await asyncio.sleep(0.02)
 
 
 class TestEnvironment:
@@ -331,6 +353,62 @@ class TestShutdown:
         )
         await mcp.start()
         await asyncio.wait_for(mcp.close(), 5)
+        assert mcp.returncode is not None
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+    async def test_server_behind_a_wrapper_is_killed(
+        self, log_path: Path, tmp_path: Path
+    ) -> None:
+        pid_file = tmp_path / "server.pid"
+        server = fake_server_config(
+            log_path,
+            env={"FAKE_MCP_MODE": "stubborn", "FAKE_MCP_PIDFILE": str(pid_file)},
+        )
+        # "; true" keeps sh from replacing itself with the server, so sh is
+        # the client's child and the server is sh's child.
+        wrapped = dataclasses.replace(
+            server,
+            command="/bin/sh",
+            args=["-c", shlex.join([server.command, *server.args]) + "; true"],
+        )
+        mcp = StdioMcpClient(wrapped, shutdown_grace_s=0.2)
+        await mcp.start()
+        pid = int(pid_file.read_text())
+        gone = False
+        try:
+            # The server ignores its closed stdin and SIGTERM, which ends sh,
+            # so only a SIGKILL sent to the whole group stops it.
+            await asyncio.wait_for(mcp.close(), 5)
+            gone = await process_gone(pid)
+        finally:
+            if not gone:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+        assert gone
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+    async def test_close_raises_when_the_server_cannot_be_killed(
+        self, log_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        mcp = StdioMcpClient(
+            fake_server_config(log_path, env={"FAKE_MCP_MODE": "stubborn"}),
+            shutdown_grace_s=0.1,
+        )
+        await mcp.start()
+
+        def refuse(pgid: int, sig: int) -> None:
+            raise PermissionError("Operation not permitted")
+
+        # As for a server started through sudo, no signal gets through.
+        monkeypatch.setattr("localmelo.support.mcp.client.os.killpg", refuse)
+        try:
+            with pytest.raises(McpError, match="still running after SIGKILL"):
+                await asyncio.wait_for(mcp.close(), 5)
+            assert mcp.returncode is None
+        finally:
+            monkeypatch.undo()
+            # Once signals get through, the next close() finishes the shutdown.
+            await asyncio.wait_for(mcp.close(), 5)
         assert mcp.returncode is not None
 
     @pytest.mark.parametrize(
