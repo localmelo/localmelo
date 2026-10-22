@@ -1082,17 +1082,19 @@ class TestThreeWayBoundary:
     @pytest.mark.asyncio
     async def test_truncated_output_flows_through_all_layers(self) -> None:
         """Large tool output -> Checker truncates -> step record truncated
-        -> memory-write rejects the oversized tool message -> planning
+        -> the tool message is too long for one memory write -> planning
         prompt carries the start of the output, cut to fit, bound to the
         call.
 
         This exercises three boundaries in sequence:
         1. Executor result checker truncates output > MAX_OUTPUT_LEN
-        2. Agent memory-write checker rejects the tool message because
-           the truncation tail pushes it over MAX_MEMORY_TEXT_LEN (both
-           limits are currently 50,000 — any truncated message exceeds)
-        3. The follow-up planning prompt answers the call with the
-           output's start, cut to the room the turn has left
+        2. The truncation tail pushes the tool message over
+           MAX_MEMORY_TEXT_LEN (both limits are currently 50,000, so any
+           truncated message exceeds it). The agent's memory-write check
+           passes the message once it is cut to that length
+        3. The turn budget cuts it to the room the turn has left, and the
+           follow-up planning prompt answers the call with the output's
+           start
         """
         from localmelo.melo.checker.validators import (
             MAX_MEMORY_TEXT_LEN,
@@ -1148,10 +1150,12 @@ class TestThreeWayBoundary:
         )
 
         # ── Boundary 3: planning prompt carries the output, cut to fit ──
-        # Memory-write rejected the oversized result, but the tool call
+        # The result is too long for one memory write, and the tool call
         # still needs exactly one answer (OpenAI-compatible servers reject
-        # an unanswered call), so the prompt holds the output's start, cut
-        # to the room the turn has left and bound to the same tool_call_id.
+        # an unanswered call). The memory-write check passes the result
+        # cut to that length, and the turn budget cuts it to the room the
+        # turn has left, so the prompt holds the output's start, bound to
+        # the same tool_call_id.
         planning = _planning_calls(llm)
         assert len(planning) >= 2
         second_plan_msgs = planning[1]["messages"]

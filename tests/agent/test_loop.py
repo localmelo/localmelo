@@ -635,7 +635,8 @@ class TestToolResultMemoryWriteBlocked:
     @pytest.mark.asyncio
     async def test_huge_tool_error_is_cut(self) -> None:
         """A tool returning a huge error string must not be written whole
-        to short-term memory: the memory-write check rejects it."""
+        to short-term memory: it is too long for one memory write, so it
+        is cut."""
         llm = FakeLLM()
         llm.enqueue(
             Message(
@@ -663,9 +664,10 @@ class TestToolResultMemoryWriteBlocked:
         result = await agent.run("do fail")
         assert result == "handled"
 
-        # The huge error is too large for the memory-write checker (text >
-        # 50k chars), so short-term memory keeps its start, cut to the room
-        # the turn has left, bound to the same tool_call_id.
+        # The huge error is too long for one memory write (text > 50k
+        # chars). The memory-write check passes it cut to that length, and
+        # the turn budget cuts it to the room the turn has left, so
+        # short-term memory keeps its start, bound to the same tool_call_id.
         window = agent.hippo.short.get_window()
         calls = [tc for m in window for tc in m.tool_calls]
         tool_msgs = [m for m in window if m.role == "tool"]
