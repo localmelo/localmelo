@@ -478,8 +478,23 @@ class TestShutdown:
         assert gone
 
     @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+    @pytest.mark.parametrize(
+        ("refuse", "message"),
+        [
+            (
+                True,
+                r"could not be signalled \(permission denied\) and is still running",
+            ),
+            (False, r"is still running after SIGKILL"),
+        ],
+        ids=["signals_refused", "signals_without_effect"],
+    )
     async def test_close_raises_when_the_server_cannot_be_killed(
-        self, log_path: Path, monkeypatch: pytest.MonkeyPatch
+        self,
+        log_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        refuse: bool,
+        message: str,
     ) -> None:
         mcp = StdioMcpClient(
             fake_server_config(log_path, env={"FAKE_MCP_MODE": "stubborn"}),
@@ -487,13 +502,18 @@ class TestShutdown:
         )
         await mcp.start()
 
-        def refuse(pgid: int, sig: int) -> None:
-            raise PermissionError("Operation not permitted")
+        def killpg(pgid: int, sig: int) -> None:
+            # Every signal is refused, as for a server started through sudo,
+            # or delivered without effect, as to a process stuck in the
+            # kernel.
+            if refuse:
+                raise PermissionError("Operation not permitted")
 
-        # As for a server started through sudo, no signal gets through.
-        monkeypatch.setattr("localmelo.support.mcp.client.os.killpg", refuse)
+        monkeypatch.setattr("localmelo.support.mcp.client.os.killpg", killpg)
         try:
-            with pytest.raises(McpError, match="still running after SIGKILL"):
+            with pytest.raises(
+                McpError, match=rf"Cannot stop MCP server 'fake': process \d+ {message}"
+            ):
                 await asyncio.wait_for(mcp.close(), 5)
             assert mcp.returncode is None
         finally:

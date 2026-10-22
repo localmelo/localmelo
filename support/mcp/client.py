@@ -239,8 +239,10 @@ class StdioMcpClient:
         stdin is closed, it gets SIGTERM, and if anything is left running a
         grace period later, SIGKILL. On POSIX both go to the server's
         process group, so a server behind a wrapper is stopped too; on
-        Windows only the process is terminated. A process that survives
-        even SIGKILL makes close() raise McpError.
+        Windows only the process is terminated. A process still running a
+        grace period after that makes close() raise McpError, which says
+        whether the signals were refused (permission denied, as for a
+        server started through sudo) or SIGKILL had no effect.
 
         Requests are refused as soon as close() begins, but the client only
         counts as closed once the process has exited and the readers have
@@ -263,16 +265,22 @@ class StdioMcpClient:
                 with contextlib.suppress(Exception):
                     proc.stdin.close()
             if not await self._wait_exit(proc):
-                _signal_server(proc, kill=False)
+                refused = _signal_server(proc, kill=False)
                 if not await self._wait_stopped(proc):
-                    _signal_server(proc, kill=True)
+                    refused = _signal_server(proc, kill=True)
                 # A process that left the group can hold the pipes open, and
                 # before Python 3.13 Process.wait() waits for them to close.
                 _close_pipes(proc)
                 if not await self._wait_exit(proc):
+                    state = (
+                        "could not be signalled (permission denied) and is still "
+                        "running"
+                        if refused
+                        else "is still running after SIGKILL"
+                    )
                     raise McpError(
                         f"Cannot stop MCP server {self.name!r}: process "
-                        f"{proc.pid} is still running after SIGKILL"
+                        f"{proc.pid} {state}"
                     )
         for task in list(self._tasks):
             task.cancel()
@@ -570,12 +578,13 @@ class StdioMcpClient:
         return f"; stderr: {tail[-500:]}"
 
 
-def _signal_server(proc: asyncio.subprocess.Process, *, kill: bool) -> None:
+def _signal_server(proc: asyncio.subprocess.Process, *, kill: bool) -> bool:
     """Send SIGTERM, or SIGKILL with *kill*, to the server's process group.
 
     The server leads a session of its own, so its pid is the group id; the
     group lives on while any of its processes does, even once the server
-    has exited. On Windows the process is terminated instead.
+    has exited. On Windows the process is terminated instead. Returns
+    whether the signal was refused (permission denied).
     """
     if sys.platform == "win32":
         with contextlib.suppress(ProcessLookupError):
@@ -583,11 +592,16 @@ def _signal_server(proc: asyncio.subprocess.Process, *, kill: bool) -> None:
                 proc.kill()
             else:
                 proc.terminate()
-        return
-    # PermissionError: macOS refuses to signal a group of zombies, and a
-    # setuid process may refuse the signal.
-    with contextlib.suppress(ProcessLookupError, PermissionError):
+        return False
+    try:
         os.killpg(proc.pid, signal.SIGKILL if kill else signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    except PermissionError:
+        # macOS refuses to signal a group of zombies, and a setuid process
+        # may refuse the signal.
+        return True
+    return False
 
 
 def _close_pipes(proc: asyncio.subprocess.Process) -> None:
