@@ -44,16 +44,19 @@ class FakeChatServer:
     """An OpenAI-compatible ``/chat/completions`` that replays queued replies.
 
     Once ``replies`` is empty, every reply is the final answer ``done``.
+    ``bodies`` keeps the body of every request, in order.
     """
 
     def __init__(self) -> None:
         self.replies: list[dict[str, Any]] = []
         self.requests = 0
+        self.bodies: list[dict[str, Any]] = []
         server = self
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self) -> None:
-                self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+                server.bodies.append(json.loads(body))
                 server.requests += 1
                 message = (
                     server.replies.pop(0)
@@ -465,3 +468,61 @@ def test_a_crashed_run_prints_its_traceback(tmp_path: Path, output_format: str) 
             "melo: run ended with status crashed: "
             "RuntimeError: the model server exploded"
         )
+
+
+# ── python_exec ─────────────────────────────────────────────────────────────
+
+
+def _run_melo(
+    chat_server: FakeChatServer, tmp_path: Path, output_format: str
+) -> subprocess.CompletedProcess[str]:
+    """Run the real CLI on one query with every built-in tool offered."""
+    return subprocess.run(
+        [
+            sys.executable,
+            "-I",
+            "-m",
+            "localmelo",
+            "--base-url",
+            chat_server.base_url,
+            "--tool-exposure",
+            "all",
+            "--output-format",
+            output_format,
+            "run the code",
+        ],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=_env(tmp_path),
+        cwd=tmp_path,
+        check=False,
+    )
+
+
+def _tool_messages(body: dict[str, Any]) -> list[str]:
+    return [m["content"] for m in body["messages"] if m["role"] == "tool"]
+
+
+@pytest.mark.parametrize("output_format", ["text", "json"])
+def test_sys_exit_in_python_exec_fails_only_the_call(
+    chat_server: FakeChatServer, tmp_path: Path, output_format: str
+) -> None:
+    """Code that calls sys.exit(0) must not end melo, unreported, with 0."""
+    code = "import sys\nprint('hi')\nsys.exit(0)"
+    chat_server.replies.append(_tool_call("python_exec", {"code": code}))
+    done = _run_melo(chat_server, tmp_path, output_format)
+
+    assert done.returncode == 0, done.stderr
+    assert "Traceback" not in done.stderr, done.stderr
+    if output_format == "json":
+        record = _json_record(done.stdout)
+        assert (record["status"], record["n_tool"]) == ("completed", 1)
+    else:
+        assert done.stdout == "done\n"
+    # The model was told, and answered.
+    assert chat_server.requests == 2
+    assert _tool_messages(chat_server.bodies[1]) == [
+        "Error: Code called sys.exit(0), which python_exec does not allow"
+    ]

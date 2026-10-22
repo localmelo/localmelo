@@ -157,5 +157,14 @@ async def _python_exec(code: str) -> str:
     # returns, so neither the executor's timeout nor the run's timeout_s
     # can interrupt it (a documented limit).
     with contextlib.redirect_stdout(buf):
-        exec(code, ns)
+        try:
+            exec(code, ns)
+        except SystemExit as exc:
+            # sys.exit() and exit() raise SystemExit, which would end melo
+            # itself, before the run is reported. The call fails instead,
+            # as for any other exception, and the run goes on.
+            raise RuntimeError(
+                f"Code called sys.exit({exc.code!r}), which python_exec "
+                "does not allow"
+            ) from None
     return buf.getvalue().strip()
