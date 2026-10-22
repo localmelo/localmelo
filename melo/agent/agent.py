@@ -26,6 +26,7 @@ from localmelo.melo.schema import (
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
     STEPS_PER_ATTEMPT,
+    ImagePart,
     Message,
     ReflectionDecision,
     ReflectionEntry,
@@ -34,6 +35,7 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolDef,
     ToolResult,
+    describe_images,
 )
 
 if TYPE_CHECKING:
@@ -135,23 +137,49 @@ def _elide_arguments(call: ToolCall) -> ToolCall:
     )
 
 
-def _tool_result_text(result: ToolResult) -> str:
-    """Content of the ``role="tool"`` message that answers a call.
+def _image_references(result: ToolResult) -> ToolResult:
+    """Copy of *result* whose images keep no base64 payload.
 
-    Empty or whitespace-only output reads ``(no output)``.
+    History and working memory get this copy, so no payload outlives the
+    step that produced it (see :meth:`ImagePart.as_reference`).
+    """
+    return dataclasses.replace(
+        result, images=[image.as_reference() for image in result.images]
+    )
+
+
+def _tool_result_text(result: ToolResult) -> str:
+    """Text of a tool result, without the line that names its images.
+
+    Empty or whitespace-only output reads ``(no output)``, unless the
+    result has images: an image-only result has no text, and its tool
+    message is just that line (see :func:`_tool_message_content`).
     """
     if result.error:
         return f"Error: {result.error}"
-    return result.output if result.output.strip() else "(no output)"
+    if result.output.strip():
+        return result.output
+    return "" if result.images else "(no output)"
+
+
+def _tool_message_content(text: str, images: Sequence[ImagePart]) -> str:
+    """Content of the ``role="tool"`` message that answers a call.
+
+    *text* is the result's text (see :func:`_tool_result_text`) or the
+    notice that replaced it. The images of a result are not sent to the
+    model, so a result with images ends with a line that names them (see
+    :func:`describe_images`), whether its text is kept or withheld.
+    """
+    return "\n".join(part for part in (text, describe_images(images)) if part)
 
 
 def _withheld_notice(text: str, reason: str) -> str:
     """Stand-in for a tool result kept out of working memory."""
+    notice = f"[Tool result withheld from working memory: {reason}."
     preview = text[:WITHHELD_PREVIEW_CHARS]
-    return (
-        f"[Tool result withheld from working memory: {reason}. "
-        f"First {len(preview)} characters follow.]\n{preview}"
-    )
+    if not preview:
+        return f"{notice}]"  # an image-only result: nothing to preview
+    return f"{notice} First {len(preview)} characters follow.]\n{preview}"
 
 
 def _within_turn_budget(
@@ -162,7 +190,8 @@ def _within_turn_budget(
     The rendered tool calls of one turn (*calls_chars* characters) and its
     tool results share ``MAX_MEMORY_TEXT_LEN`` characters: the calls keep
     their share and the results get the rest. Indices in *withheld*
-    already hold notices and are left alone.
+    already hold notices and are left alone; the index of each text
+    replaced here is added to it.
     """
     fitted = list(texts)
     budget = MAX_MEMORY_TEXT_LEN - calls_chars
@@ -186,6 +215,7 @@ def _within_turn_budget(
             break  # only results a notice would not shorten are left
         total += len(notice) - len(fitted[index])
         fitted[index] = notice
+        withheld.add(index)
     return fitted
 
 
@@ -391,6 +421,7 @@ class Agent:
                 output=outcome.output,
                 error=outcome.error,
                 duration_ms=outcome.duration_ms,
+                images=list(outcome.images),
             )
         )
         if exec_result_check.sanitized_payload is not None:
@@ -400,6 +431,7 @@ class Agent:
                 output=sp.output,
                 error=sp.error,
                 duration_ms=sp.duration_ms,
+                images=list(sp.images),
             )
         return outcome.to_tool_result()
 
@@ -417,9 +449,14 @@ class Agent:
           call paired by ``tool_call_id``, appended as one unit. Checked
           writes may shorten it but never leave a call or result out (see
           :meth:`_checked_tool_turn`).
+
+        History and working memory get the same copies of *results*, whose
+        images are references without the base64 payload (see
+        :func:`_image_references`), so no payload outlives the step.
         """
         calls = response.tool_calls
-        for index, (call, result) in enumerate(zip(calls, results, strict=True)):
+        kept = [_image_references(result) for result in results]
+        for index, (call, result) in enumerate(zip(calls, kept, strict=True)):
             step = StepRecord(
                 thought=response.content if index == 0 else "",
                 tool_call=call,
@@ -440,7 +477,7 @@ class Agent:
                     summary, metadata={"step_id": step.step_id}, to_working=False
                 )
 
-        assistant_msg, tool_msgs = self._checked_tool_turn(response, results)
+        assistant_msg, tool_msgs = self._checked_tool_turn(response, kept)
         self.hippo.working.append_turn(assistant_msg, tool_msgs)
 
     def _memory_write_allowed(self, text: str, role: str) -> bool:
@@ -484,7 +521,11 @@ class Agent:
         rejected tool result is replaced by a short notice bound to the
         same ``tool_call_id``. No call or result is ever left out, so the
         turn stays protocol-valid and the model still sees every call it
-        made and what each returned.
+        made and what each returned. A result's images (references, see
+        :func:`_image_references`) are checked with its text. A result
+        replaced by a notice, by that check or by the budget below, keeps
+        no images on its message, but its message still ends with the
+        line that names them (see :func:`_tool_message_content`).
 
         The whole turn also shares one budget of ``MAX_MEMORY_TEXT_LEN``
         characters, half the 100,000 at which ``Checker.pre_plan`` fails
@@ -496,6 +537,11 @@ class Agent:
         results shorter than one, cannot shrink further, so a turn whose
         calls nearly fill the budget, or a turn of hundreds of calls, can
         still pass it.
+
+        The lines that name images are added after the check and the
+        budget and count toward neither, so they never withhold a result
+        that fits without them. Each is at most a few hundred characters,
+        so a turn can pass the budget by that much per result with images.
         """
         calls = self._checked_calls(response.tool_calls)
         calls_text = _render_tool_calls(calls)
@@ -504,8 +550,14 @@ class Agent:
         withheld: set[int] = set()
         for index, result in enumerate(results):
             text = _tool_result_text(result)
+            # A memory write needs text: an image-only result is checked
+            # with the line that names its images.
             check = self.checker.check_memory_write(
-                MemoryWritePayload(text=text, role="tool")
+                MemoryWritePayload(
+                    text=text or describe_images(result.images),
+                    role="tool",
+                    images=list(result.images),
+                )
             )
             if not check.allowed:
                 text = _withheld_notice(text, check.reason)
@@ -525,8 +577,16 @@ class Agent:
         )
 
         tool_msgs = [
-            Message(role="tool", content=text, tool_call_id=call.id, tool_result=result)
-            for call, result, text in zip(calls, results, texts, strict=True)
+            Message(
+                role="tool",
+                content=_tool_message_content(text, result.images),
+                tool_call_id=call.id,
+                tool_result=result,
+                images=[] if index in withheld else result.images,
+            )
+            for index, (call, result, text) in enumerate(
+                zip(calls, results, texts, strict=True)
+            )
         ]
         return assistant_msg, tool_msgs
 

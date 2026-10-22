@@ -1,5 +1,8 @@
 """Tests for Checker boundary validators."""
 
+import base64
+import dataclasses
+
 import pytest
 
 from localmelo.melo.checker import (
@@ -14,9 +17,11 @@ from localmelo.melo.checker import (
 )
 from localmelo.melo.checker.validators import (
     BLOCKED_COMMANDS,
+    MAX_IMAGES_PER_RESULT,
     MAX_MEMORY_TEXT_LEN,
     MAX_OUTPUT_LEN,
     MAX_QUERY_LEN,
+    TRUNCATION_SUFFIX,
     validate_executor_request,
     validate_executor_result,
     validate_gateway_ingress,
@@ -24,7 +29,7 @@ from localmelo.melo.checker.validators import (
     validate_session_transition,
     validate_tool_resolution,
 )
-from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef
 
 
 @pytest.fixture
@@ -630,3 +635,219 @@ class TestAllBlockedCommandsPreExecute:
         result = await checker.pre_execute(tc, td)
         assert not result.allowed, f"{label!r} should be blocked"
         assert "Blocked" in result.reason
+
+
+# ── Images at the executor-result and memory boundaries ──
+
+
+def _png(raw: bytes = b"png bytes") -> ImagePart:
+    return ImagePart.from_bytes(raw, "image/png")
+
+
+class TestImageValidation:
+    def test_valid_image_passes_untouched(self) -> None:
+        payload = ExecutorResultPayload(tool_name="shot", output="ok", images=[_png()])
+        result = validate_executor_result(payload)
+        assert result.allowed
+        assert result.sanitized_payload is None
+
+    def test_unsupported_type_dropped_with_note(self) -> None:
+        bad = ImagePart.from_bytes(b"svg", "image/svg+xml")
+        payload = ExecutorResultPayload(
+            tool_name="shot", output="ok", images=[_png(), bad]
+        )
+        result = validate_executor_result(payload)
+        assert result.allowed
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert sp.images == [payload.images[0]]
+        assert sp.output == (
+            "ok\n[1 image dropped: unsupported image type "
+            "(allowed: image/gif, image/jpeg, image/png, image/webp)]"
+        )
+
+    def test_invalid_base64_dropped(self) -> None:
+        bad = ImagePart(mime_type="image/png", data="%%%")
+        result = validate_executor_result(
+            ExecutorResultPayload(tool_name="shot", images=[bad])
+        )
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert sp.images == []
+        assert "not valid base64" in sp.output
+
+    def test_oversized_image_dropped(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import localmelo.melo.checker.validators as validators
+
+        monkeypatch.setattr(validators, "MAX_IMAGE_BYTES", 4)
+        result = validate_executor_result(
+            ExecutorResultPayload(tool_name="shot", images=[_png(b"12345")])
+        )
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert sp.images == []
+        assert "too large" in sp.output
+
+    def test_size_check_uses_the_real_size(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import localmelo.melo.checker.validators as validators
+
+        monkeypatch.setattr(validators, "MAX_IMAGE_BYTES", 4)
+        five_bytes = base64.b64encode(b"12345").decode()
+        images = [
+            # A copy of a 4-byte image with new data, and an image that
+            # claims a digest and size its data does not have.
+            dataclasses.replace(_png(b"1234"), data=five_bytes),
+            ImagePart(
+                mime_type="image/png", data=five_bytes, sha256="0" * 64, size_bytes=1
+            ),
+        ]
+        result = validate_executor_result(
+            ExecutorResultPayload(tool_name="shot", images=images)
+        )
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert sp.images == []
+        assert sp.output == "[2 images dropped: image too large (max 4 bytes)]"
+
+    def test_too_many_images_trimmed(self) -> None:
+        images = [_png(bytes([i])) for i in range(MAX_IMAGES_PER_RESULT + 2)]
+        result = validate_executor_result(
+            ExecutorResultPayload(tool_name="shot", images=images)
+        )
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert sp.images == images[:MAX_IMAGES_PER_RESULT]
+        assert sp.output == (
+            f"[2 images dropped: more than {MAX_IMAGES_PER_RESULT} images in one result]"
+        )
+
+    def test_one_note_per_kind_of_problem(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import localmelo.melo.checker.validators as validators
+
+        monkeypatch.setattr(validators, "MAX_IMAGE_BYTES", 4)
+        unsupported = ImagePart.from_bytes(b"svg", "image/svg+xml")
+        invalid = ImagePart(mime_type="image/png", data="%%%")
+        fitting = [_png(bytes([i])) for i in range(MAX_IMAGES_PER_RESULT + 3)]
+        images = [unsupported] * 1000 + [invalid] * 2 + [_png(b"12345")] + fitting
+        result = validate_executor_result(
+            ExecutorResultPayload(tool_name="shot", output="ok", images=images)
+        )
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert sp.images == fitting[:MAX_IMAGES_PER_RESULT]
+        # However many images are dropped, each kind of problem gets one
+        # line with a count.
+        assert sp.output.split("\n") == [
+            "ok",
+            "[1000 images dropped: unsupported image type "
+            "(allowed: image/gif, image/jpeg, image/png, image/webp)]",
+            "[2 images dropped: image data is empty or not valid base64]",
+            "[1 image dropped: image too large (max 4 bytes)]",
+            f"[3 images dropped: more than {MAX_IMAGES_PER_RESULT} images in one result]",
+        ]
+
+    def test_truncation_keeps_images(self) -> None:
+        image = _png()
+        result = validate_executor_result(
+            ExecutorResultPayload(
+                tool_name="shot", output="x" * (MAX_OUTPUT_LEN + 10), images=[image]
+            )
+        )
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert sp.images == [image]
+        assert sp.output.endswith("[truncated]")
+
+    def test_truncation_with_dropped_images(self) -> None:
+        # The text, notes and truncation suffix included, is no longer than
+        # a truncated output alone, and the notes are not cut off.
+        image = _png()
+        unsupported = ImagePart.from_bytes(b"svg", "image/svg+xml")
+        invalid = ImagePart(mime_type="image/png", data="%%%")
+        result = validate_executor_result(
+            ExecutorResultPayload(
+                tool_name="shot",
+                output="x" * (MAX_OUTPUT_LEN + 10),
+                images=[image, unsupported, invalid],
+            )
+        )
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert sp.images == [image]
+        assert len(sp.output) == MAX_OUTPUT_LEN + len(TRUNCATION_SUFFIX)
+        body, first_note, second_note = sp.output.rsplit("\n", 2)
+        assert body.endswith(TRUNCATION_SUFFIX)
+        assert set(body[: -len(TRUNCATION_SUFFIX)]) == {"x"}
+        assert first_note.startswith("[1 image dropped: unsupported image type")
+        assert first_note.endswith("]")
+        assert second_note == (
+            "[1 image dropped: image data is empty or not valid base64]"
+        )
+        assert result.reason == "Images dropped; Output truncated"
+
+    def test_note_cuts_an_output_that_fit_without_it(self) -> None:
+        # The output alone is under MAX_OUTPUT_LEN; with the note it is not.
+        bad = ImagePart.from_bytes(b"x", "image/tiff")
+        result = validate_executor_result(
+            ExecutorResultPayload(
+                tool_name="shot", output="x" * (MAX_OUTPUT_LEN - 10), images=[bad]
+            )
+        )
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert len(sp.output) == MAX_OUTPUT_LEN + len(TRUNCATION_SUFFIX)
+        body, note = sp.output.rsplit("\n", 1)
+        assert body.endswith(TRUNCATION_SUFFIX)
+        assert note.startswith("[1 image dropped: unsupported image type")
+        assert note.endswith("]")
+
+    def test_notes_go_to_error_for_failed_calls(self) -> None:
+        bad = ImagePart.from_bytes(b"x", "image/tiff")
+        result = validate_executor_result(
+            ExecutorResultPayload(tool_name="shot", error="boom", images=[bad])
+        )
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert sp.error.startswith("boom\n[1 image dropped: unsupported image type")
+        assert sp.output == ""
+
+    def test_failed_call_output_is_truncated_without_notes(self) -> None:
+        bad = ImagePart.from_bytes(b"x", "image/tiff")
+        result = validate_executor_result(
+            ExecutorResultPayload(
+                tool_name="shot",
+                output="x" * (MAX_OUTPUT_LEN + 10),
+                error="boom",
+                images=[bad],
+            )
+        )
+        sp = result.sanitized_payload
+        assert sp is not None
+        assert sp.output == "x" * MAX_OUTPUT_LEN + TRUNCATION_SUFFIX
+        assert sp.error.startswith("boom\n[1 image dropped")
+
+    def test_memory_write_image_limits(self) -> None:
+        from localmelo.melo.checker.validators import MAX_IMAGES_PER_MEMORY_WRITE
+
+        ok = validate_memory_write(
+            MemoryWritePayload(text="shot", role="tool", images=[_png()])
+        )
+        assert ok.allowed
+        too_many = validate_memory_write(
+            MemoryWritePayload(
+                text="shot",
+                role="tool",
+                images=[_png() for _ in range(MAX_IMAGES_PER_MEMORY_WRITE + 1)],
+            )
+        )
+        assert not too_many.allowed
+        unhashed = validate_memory_write(
+            MemoryWritePayload(
+                text="shot", role="tool", images=[ImagePart(mime_type="image/png")]
+            )
+        )
+        assert not unhashed.allowed

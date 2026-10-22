@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -26,6 +30,73 @@ MAX_REFLECTION_CHARS = 2000
 # ── Data types ──
 
 
+def decode_base64(data: str) -> bytes | None:
+    """Strictly decode base64 *data* (whitespace ignored); ``None`` if invalid."""
+    try:
+        return base64.b64decode("".join(data.split()), validate=True)
+    except (binascii.Error, ValueError):
+        return None
+
+
+@dataclass(frozen=True)
+class ImagePart:
+    """An image attached to a message or a tool result.
+
+    ``data`` is the base64 payload without a ``data:`` prefix. Whitespace
+    in it (line-wrapped base64) is removed on construction, so what is
+    sent is what the checker saw. Whenever there is ``data``, ``sha256``
+    and ``size_bytes`` are derived from it on construction (values passed
+    in are ignored) and describe the decoded bytes. A reference copy
+    (:meth:`as_reference`) drops ``data`` and keeps the digest and size it
+    is given. The agent keeps only reference copies of tool-result images
+    in history and working memory, so no payload outlives the step that
+    produced it; long-term memory gets text only. Invalid base64 yields
+    ``size_bytes == 0``, which the checker rejects.
+    """
+
+    mime_type: str
+    data: str = field(default="", repr=False)
+    sha256: str = ""
+    size_bytes: int = 0
+
+    def __post_init__(self) -> None:
+        if not self.data:
+            return  # a reference copy keeps the digest and size it is given
+        data = "".join(self.data.split())
+        raw = decode_base64(data)
+        digest_input = raw if raw is not None else data.encode()
+        object.__setattr__(self, "data", data)
+        object.__setattr__(self, "sha256", hashlib.sha256(digest_input).hexdigest())
+        object.__setattr__(self, "size_bytes", len(raw) if raw is not None else 0)
+
+    @classmethod
+    def from_bytes(cls, raw: bytes, mime_type: str) -> ImagePart:
+        return cls(mime_type=mime_type, data=base64.b64encode(raw).decode("ascii"))
+
+    @property
+    def data_url(self) -> str:
+        return f"data:{self.mime_type};base64,{self.data}"
+
+    @property
+    def ref(self) -> str:
+        """Stable text reference, e.g. ``sha256:3f2a9c0d1b7e image/png``."""
+        return f"sha256:{self.sha256[:12]} {self.mime_type}"
+
+    def as_reference(self) -> ImagePart:
+        """Copy without the base64 payload."""
+        return ImagePart(
+            mime_type=self.mime_type, sha256=self.sha256, size_bytes=self.size_bytes
+        )
+
+
+def describe_images(images: Sequence[ImagePart]) -> str:
+    """In-text marker for images, e.g. ``[1 image: sha256:3f2a9c0d1b7e image/png]``."""
+    if not images:
+        return ""
+    noun = "image" if len(images) == 1 else "images"
+    return f"[{len(images)} {noun}: {', '.join(img.ref for img in images)}]"
+
+
 @dataclass(init=False)
 class Message:
     """One chat message.
@@ -42,6 +113,9 @@ class Message:
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_result: ToolResult | None = None
     tool_call_id: str = ""
+    # Images that belong to this message (e.g. a screenshot a tool returned).
+    # ``content`` stays plain text; providers render the multimodal form.
+    images: list[ImagePart] = field(default_factory=list)
     timestamp: float = field(default_factory=time.time)
     usage: dict[str, int] | None = None
     thinking: str = ""
@@ -58,6 +132,7 @@ class Message:
         *,
         tool_calls: list[ToolCall] | None = None,
         tool_call_id: str = "",
+        images: Sequence[ImagePart] | None = None,
     ) -> None:
         # The positional order matches the previous dataclass signature so
         # existing ``Message(...)`` calls keep working unchanged.
@@ -71,6 +146,7 @@ class Message:
             self.tool_calls = [tool_call] if tool_call is not None else []
         self.tool_result = tool_result
         self.tool_call_id = tool_call_id
+        self.images = list(images) if images else []
         self.timestamp = time.time() if timestamp is None else timestamp
         self.usage = usage
         self.thinking = thinking
@@ -98,6 +174,14 @@ def new_tool_call_id() -> str:
     return f"call_{uuid.uuid4().hex[:24]}"
 
 
+# Providers keep tool-call arguments that are not a JSON object as
+# ``{RAW_ARGUMENTS_KEY: <text>}`` instead of failing the run. The executor
+# rejects such a call before running anything and reports it to the model.
+# When the call is replayed to the model, the providers send an empty
+# object in place of this form.
+RAW_ARGUMENTS_KEY = "_raw_arguments"
+
+
 @dataclass
 class ToolCall:
     tool_name: str
@@ -118,6 +202,7 @@ class ToolResult:
     output: str = ""
     error: str = ""
     duration_ms: float = 0.0
+    images: list[ImagePart] = field(default_factory=list)
 
 
 @dataclass

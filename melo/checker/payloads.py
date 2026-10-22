@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from localmelo.melo.schema import ImagePart
+
 
 @dataclass
 class ValidationResult:
@@ -70,6 +72,7 @@ class ExecutorResultPayload:
     output: str = ""
     error: str = ""
     duration_ms: float = 0.0
+    images: list[ImagePart] = field(default_factory=list)
 
 
 # ── Memory boundary ──
@@ -82,3 +85,4 @@ class MemoryWritePayload:
     text: str = ""
     role: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
+    images: list[ImagePart] = field(default_factory=list)

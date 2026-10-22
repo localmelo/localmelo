@@ -1,6 +1,7 @@
 """Tests for memory persistence (SQLite) and registry/index split."""
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
@@ -8,7 +9,14 @@ import pytest
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.tools import ToolIndex, ToolRegistry
-from localmelo.melo.schema import StepRecord, TaskRecord, ToolCall, ToolDef, ToolResult
+from localmelo.melo.schema import (
+    ImagePart,
+    StepRecord,
+    TaskRecord,
+    ToolCall,
+    ToolDef,
+    ToolResult,
+)
 
 # ── ToolRegistry vs ToolIndex split ──
 
@@ -186,6 +194,78 @@ class TestSqliteHistory:
         assert steps[0].tool_call.tool_name == "echo"
         assert steps[0].tool_call.arguments == {"text": "hi"}
         assert steps[0].tool_call.id.startswith("call_")
+        await h.aclose()
+
+    @pytest.mark.asyncio
+    async def test_image_references_roundtrip(self, tmp_path: Path) -> None:
+        """Tool-result images are stored as references, never as base64."""
+        db = tmp_path / "history.db"
+        h = SqliteHistory(db)
+        await h.save_task(TaskRecord(query="shot", task_id="t5"))
+        image = ImagePart.from_bytes(b"\x89PNG screenshot bytes", "image/png")
+        shot = ToolResult(tool_name="shot", output="captured", images=[image])
+        await h.add_step("t5", StepRecord(tool_result=shot))
+        await h.add_step(
+            "t5", StepRecord(tool_result=ToolResult(tool_name="echo", output="ok"))
+        )
+
+        steps = await h.get_steps("t5")
+        assert steps[0].tool_result is not None
+        [restored] = steps[0].tool_result.images
+        assert restored.data == ""
+        assert (restored.mime_type, restored.sha256, restored.size_bytes) == (
+            "image/png",
+            image.sha256,
+            image.size_bytes,
+        )
+        assert steps[1].tool_result is not None
+        assert steps[1].tool_result.images == []
+
+        # Only results with images get an "images" key.
+        conn = await h._ensure_ready()
+        async with conn.execute(
+            "SELECT tool_result_json FROM steps WHERE task_id = ? ORDER BY seq",
+            ("t5",),
+        ) as cur:
+            stored = [json.loads(row[0]) for row in await cur.fetchall()]
+        assert stored[0]["images"] == [
+            {
+                "mime_type": "image/png",
+                "sha256": image.sha256,
+                "size_bytes": image.size_bytes,
+            }
+        ]
+        assert "images" not in stored[1]
+        await h.aclose()
+
+    @pytest.mark.asyncio
+    async def test_rows_without_images_still_load(self, tmp_path: Path) -> None:
+        """Rows written before image references were stored have no images."""
+        db = tmp_path / "history.db"
+        h = SqliteHistory(db)
+        await h.save_task(TaskRecord(query="old", task_id="t6"))
+        conn = await h._ensure_ready()
+        await conn.execute(
+            """INSERT INTO steps
+               (step_id, task_id, thought, tool_call_json, tool_result_json,
+                timestamp, seq)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (
+                "s-old",
+                "t6",
+                "legacy",
+                None,
+                '{"tool_name": "echo", "output": "hi", "error": "", '
+                '"duration_ms": 1.5}',
+                0.0,
+                0,
+            ),
+        )
+        await conn.commit()
+        steps = await h.get_steps("t6")
+        assert steps[0].tool_result == ToolResult(
+            tool_name="echo", output="hi", duration_ms=1.5
+        )
         await h.aclose()
 
     @pytest.mark.asyncio

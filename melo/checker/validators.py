@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
+from dataclasses import replace
 
 from localmelo.melo.checker.payloads import (
     ExecutorRequest,
@@ -13,11 +15,14 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
     ValidationResult,
 )
+from localmelo.melo.schema import ImagePart
 
 # ── Constants ──
 
 MAX_QUERY_LEN = 100_000
 MAX_OUTPUT_LEN = 50_000
+# Ends an output cut to fit MAX_OUTPUT_LEN; the one text allowed past it.
+TRUNCATION_SUFFIX = "\n... [truncated]"
 MAX_MEMORY_TEXT_LEN = 50_000
 SESSION_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
@@ -31,6 +36,14 @@ LEGAL_SESSION_TRANSITIONS: set[tuple[str, str]] = {
 }
 
 VALID_MEMORY_ROLES = {"user", "assistant", "system", "tool"}
+
+# Images a tool may hand back to the model.
+ALLOWED_IMAGE_MIME_TYPES = frozenset(
+    {"image/png", "image/jpeg", "image/webp", "image/gif"}
+)
+MAX_IMAGE_BYTES = 20 * 1024 * 1024  # decoded size per image
+MAX_IMAGES_PER_RESULT = 8
+MAX_IMAGES_PER_MEMORY_WRITE = MAX_IMAGES_PER_RESULT
 
 BLOCKED_COMMANDS = [
     r"\brm\s+-rf\s+/",
@@ -162,6 +175,49 @@ def validate_executor_request(request: ExecutorRequest) -> ValidationResult:
     return ValidationResult(allowed=True)
 
 
+# ── Images ──
+
+
+def image_problem(image: ImagePart) -> str:
+    """Return why *image* cannot be passed to the model, or ``""``.
+
+    The reason names a kind of problem, not the image, so that notes about
+    dropped images can be counted per kind (see :func:`_sanitize_images`).
+    """
+    if image.mime_type not in ALLOWED_IMAGE_MIME_TYPES:
+        allowed = ", ".join(sorted(ALLOWED_IMAGE_MIME_TYPES))
+        return f"unsupported image type (allowed: {allowed})"
+    if not image.data or image.size_bytes <= 0:
+        return "image data is empty or not valid base64"
+    if image.size_bytes > MAX_IMAGE_BYTES:
+        return f"image too large (max {MAX_IMAGE_BYTES} bytes)"
+    return ""
+
+
+def _sanitize_images(images: list[ImagePart]) -> tuple[list[ImagePart], list[str]]:
+    """Split *images* into the ones to keep and notes about dropped ones.
+
+    The notes hold one line per kind of problem, with a count, e.g.
+    ``[3 images dropped: more than 8 images in one result]``. However many
+    images are dropped, that is at most four short lines.
+    """
+    kept: list[ImagePart] = []
+    dropped: Counter[str] = Counter()
+    for image in images:
+        problem = image_problem(image)
+        if not problem and len(kept) >= MAX_IMAGES_PER_RESULT:
+            problem = f"more than {MAX_IMAGES_PER_RESULT} images in one result"
+        if problem:
+            dropped[problem] += 1
+        else:
+            kept.append(image)
+    notes = [
+        f"[{count} {'image' if count == 1 else 'images'} dropped: {problem}]"
+        for problem, count in dropped.items()
+    ]
+    return kept, notes
+
+
 # ── Executor result ──
 
 
@@ -177,21 +233,38 @@ def validate_executor_result(result: ExecutorResultPayload) -> ValidationResult:
             allowed=False, reason="Executor result must have a tool_name"
         )
 
-    # Truncate oversized output
-    if len(result.output) > MAX_OUTPUT_LEN:
-        truncated = result.output[:MAX_OUTPUT_LEN] + "\n... [truncated]"
-        sanitized = ExecutorResultPayload(
-            tool_name=result.tool_name,
-            output=truncated,
-            error=result.error,
-            duration_ms=result.duration_ms,
-        )
+    reasons: list[str] = []
+    output, error = result.output, result.error
+
+    # Drop images the model cannot (or should not) receive. The notes go
+    # where the model will read them: the error text for failed calls,
+    # after the output otherwise.
+    kept, notes = _sanitize_images(result.images)
+    note_text = ""
+    if notes:
+        if error:
+            error = "\n".join((error, *notes))
+        else:
+            note_text = "\n".join(notes)
+        reasons.append("Images dropped")
+
+    # Truncate oversized output. Notes after it count toward MAX_OUTPUT_LEN
+    # and are never cut off, so the output is cut to leave room for them
+    # (and the newline before them): the text is never longer than
+    # MAX_OUTPUT_LEN plus TRUNCATION_SUFFIX.
+    room = MAX_OUTPUT_LEN - (len(note_text) + 1 if note_text else 0)
+    if len(output) > room:
+        output = output[: max(room, 0)] + TRUNCATION_SUFFIX
+        reasons.append("Output truncated")
+    if note_text:
+        output = "\n".join(part for part in (output, note_text) if part)
+
+    if reasons:
         return ValidationResult(
             allowed=True,
-            reason="Output truncated",
-            sanitized_payload=sanitized,
+            reason="; ".join(reasons),
+            sanitized_payload=replace(result, output=output, error=error, images=kept),
         )
-
     return ValidationResult(allowed=True)
 
 
@@ -215,5 +288,19 @@ def validate_memory_write(payload: MemoryWritePayload) -> ValidationResult:
             allowed=False,
             reason=f"Invalid memory role: {payload.role!r}",
         )
+
+    if len(payload.images) > MAX_IMAGES_PER_MEMORY_WRITE:
+        return ValidationResult(
+            allowed=False,
+            reason=(
+                f"Too many images in one memory write: {len(payload.images)} "
+                f"(max {MAX_IMAGES_PER_MEMORY_WRITE})"
+            ),
+        )
+    for image in payload.images:
+        if not image.sha256:
+            return ValidationResult(
+                allowed=False, reason="Image in memory write has no sha256"
+            )
 
     return ValidationResult(allowed=True)

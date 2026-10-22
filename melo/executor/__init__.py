@@ -8,6 +8,7 @@ from localmelo.melo.executor.models import (
     ExecutionOutcome,
     ExecutionRequest,
     ExecutionStatus,
+    ToolOutput,
 )
 from localmelo.melo.executor.policy import WorkspacePolicy
 
@@ -27,6 +28,7 @@ __all__ = [
     "ExecutionRequest",
     "ExecutionStatus",
     "Executor",
+    "ToolOutput",
     "WorkspacePolicy",
     "register_builtins",
 ]
