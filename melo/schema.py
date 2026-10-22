@@ -6,7 +6,7 @@ import hashlib
 import time
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 # ── Config ──
@@ -219,9 +219,59 @@ class TaskRecord:
     query: str
     task_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
     steps: list[StepRecord] = field(default_factory=list)
-    status: str = "running"  # running, completed, failed
+    # "running" until the run ends, then the run's status: one of the
+    # RunResult statuses documented in docs/quickstart.md ("Run results").
+    status: str = "running"
+    # The run's result, or its error when the result is empty.
     result: str = ""
     attempts_completed: int = 0
+
+
+@dataclass
+class RunResult:
+    """How one run of :meth:`Agent.run_task` ended.
+
+    ``status`` is one of the statuses documented in ``docs/quickstart.md``
+    ("Run results"). ``result`` is the final answer or a best effort, and
+    may be empty; ``error`` is empty unless something failed. The counters
+    cover this run only:
+
+    - ``steps``: planning calls made, counted when each is sent;
+    - ``attempts``: attempts started (1 for an answer on the first try);
+    - ``n_llm``: LLM requests that returned a response, split into
+      ``n_main`` (requests that offered tools) and ``n_aux`` (requests
+      without tools, such as a reflection, or a planning call in a step
+      that offered no tool);
+    - ``n_tool``: tool calls handed to the executor, including calls it
+      refused (an unknown tool, or one that step did not offer);
+    - ``llm_errors``: LLM requests that raised instead of responding;
+    - ``usage``: the integer usage fields of every response, summed by
+      name (for example ``prompt_tokens``, ``completion_tokens``,
+      ``total_tokens``).
+
+    ``duration_s`` is the run's wall-clock time in seconds, and
+    ``config`` is the effective run configuration (see
+    :meth:`Agent.run_task`), so every record says which mode it ran in.
+    """
+
+    task_id: str
+    status: str
+    result: str = ""
+    error: str = ""
+    steps: int = 0
+    attempts: int = 0
+    n_llm: int = 0
+    n_main: int = 0
+    n_aux: int = 0
+    n_tool: int = 0
+    llm_errors: int = 0
+    usage: dict[str, int] = field(default_factory=dict)
+    duration_s: float = 0.0
+    config: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """A deep copy as a plain dict, with keys in field order."""
+        return asdict(self)
 
 
 @dataclass
