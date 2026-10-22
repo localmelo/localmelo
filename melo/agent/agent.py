@@ -523,9 +523,9 @@ class Agent:
         self._closing = False
         # begin_exit() has been called: the process exits soon.
         self._exit: _Exit | None = None
-        # Provider close() calls an exit stopped waiting for; kept so they
-        # can finish in the background.
-        self._abandoned_closes: set[asyncio.Task[None]] = set()
+        # Provider start() and close() calls an exit stopped waiting for;
+        # kept so they can finish in the background.
+        self._abandoned: set[asyncio.Future[Any]] = set()
 
         # Optional persistent memory backends: options.memory_dir, or the
         # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History is
@@ -578,7 +578,10 @@ class Agent:
         is closed before the exception propagates, so none is left
         running. A cancellation that arrives during this clean-up waits
         for it to finish and then propagates in place of the failure (see
-        :meth:`_close_providers`).
+        :meth:`_close_providers`). A cancellation during a ``start()`` is
+        passed on to it, and the clean-up that ``start()`` does itself is
+        waited for the same way (see :meth:`_start_provider`); after
+        :meth:`begin_exit`, both waits keep to the exit's time limit.
 
         Setup is not retried, because the providers it closed may not
         start again: after a failure every call raises ``RuntimeError``
@@ -600,7 +603,7 @@ class Agent:
                 for provider in self._tool_providers:
                     self._check_not_closing()
                     started.append(provider)
-                    provided.extend(await provider.start())
+                    provided.extend(await self._start_provider(provider))
                 # close() may have begun while the last provider started.
                 self._check_not_closing()
                 self._check_tool_names(provided)
@@ -614,6 +617,28 @@ class Agent:
                     tool.definition.name, tool.function, timeout_ms=tool.timeout_ms
                 )
             self._tools_ready = True
+
+    async def _start_provider(self, provider: BaseToolProvider) -> list[ProvidedTool]:
+        """Return ``await provider.start()``, with an exit's limit on its clean-up.
+
+        A cancellation is passed on to ``start()``, and the clean-up that
+        ``start()`` then does itself (an MCP provider closes the servers it
+        started, with their grace periods) is waited for before the
+        cancellation propagates, as :meth:`_close_providers` waits for a
+        ``close()``. After :meth:`begin_exit`, that waiting ends when only
+        :data:`EXIT_SAVE_RESERVE_S` of the exit's time is left: the provider
+        is killed and its ``start()`` left to end in the background, so the
+        task record can still be saved in time.
+        """
+        # shield(): a cancellation reaches start() only through the cancel()
+        # below, once this coroutine has caught it.
+        starting = asyncio.ensure_future(provider.start())
+        try:
+            return await asyncio.shield(starting)
+        except asyncio.CancelledError:
+            starting.cancel()
+            await self._wait_for_provider(starting, provider)
+            raise
 
     def _check_not_closing(self) -> None:
         if self._closing:
@@ -645,25 +670,41 @@ class Agent:
         :data:`EXIT_SAVE_RESERVE_S` of the exit's time is left: from then
         on a provider that has not closed is killed instead
         (:meth:`BaseToolProvider.kill`), and its close() is left to finish
-        in the background.
+        in the background (see :meth:`_wait_for_provider`).
         """
         cancelled: asyncio.CancelledError | None = None
         for provider in providers:
             closing = asyncio.create_task(self._close_provider(provider))
-            while not closing.done():
-                try:
-                    # wait() neither cancels the task nor raises its outcome.
-                    await asyncio.wait([closing], timeout=self._close_time_left())
-                except asyncio.CancelledError as exc:
-                    cancelled = exc
-                    continue  # begin_exit() may have set a deadline meanwhile
-                if not closing.done():  # only with an exit: out of time
-                    self._kill_provider(provider)
-                    self._abandoned_closes.add(closing)
-                    closing.add_done_callback(self._abandoned_closes.discard)
-                    break
+            cancelled = await self._wait_for_provider(closing, provider) or cancelled
         if cancelled is not None:
             raise cancelled
+
+    async def _wait_for_provider(
+        self, call: asyncio.Future[Any], provider: BaseToolProvider
+    ) -> asyncio.CancelledError | None:
+        """Wait for *call*, a ``start()`` or ``close()`` of *provider*, to end.
+
+        A cancellation does not cut the waiting short: it is returned, for
+        the caller to raise once it is done. Without an exit the waiting has
+        no limit. After :meth:`begin_exit` it ends when only
+        :data:`EXIT_SAVE_RESERVE_S` of the exit's time is left: *provider*
+        is then killed (:meth:`BaseToolProvider.kill`) and *call* is left
+        to end in the background.
+        """
+        cancelled: asyncio.CancelledError | None = None
+        while not call.done():
+            try:
+                # wait() neither cancels the call nor raises its outcome.
+                await asyncio.wait([call], timeout=self._close_time_left())
+            except asyncio.CancelledError as exc:
+                cancelled = exc
+                continue  # begin_exit() may have set a deadline meanwhile
+            if not call.done():  # only with an exit: out of time
+                self._kill_provider(provider)
+                self._abandoned.add(call)
+                call.add_done_callback(self._abandoned.discard)
+                break
+        return cancelled
 
     def _close_time_left(self) -> float | None:
         """Seconds closing may still wait for a provider; ``None``: no limit."""
@@ -1371,7 +1412,11 @@ class Agent:
         run's own outcome. ``timeout_s`` bounds the run itself, not this
         final step. The save has no bound of its own; promotion has
         :data:`PROMOTION_TIMEOUT_S`, so an embedding server that stopped
-        answering delays the return by that much at most.
+        answering delays the return by that much at most. A cancellation
+        for an exit (see :meth:`begin_exit`) that lands during this final
+        step does not leave the record unsaved: the record, with the
+        run's own status, is saved again as that method describes, and
+        the cancellation then propagates.
 
         ``RunResult.config`` reports the effective configuration: the
         options, the registered built-ins (``builtins``), the resolved
@@ -1431,7 +1476,16 @@ class Agent:
             if self._exit is not None:
                 await self._finish_task_for_exit(task, run, self._exit)
             else:
-                await self._finish_task(task, run)
+                try:
+                    await self._finish_task(task, run)
+                except asyncio.CancelledError:
+                    # An exit that began during the final save cancelled it,
+                    # perhaps before it was committed: save again, within
+                    # the exit's time.
+                    if self._exit is None:
+                        raise
+                    await self._finish_task_for_exit(task, run, self._exit)
+                    raise
         return self._run_result(task, run, stats, time.perf_counter() - started)
 
     async def _finish_task(self, task: TaskRecord, run: _RunState) -> None:
@@ -1663,8 +1717,13 @@ class Agent:
         record, it closes the tool providers, killing any that has not
         closed when only :data:`EXIT_SAVE_RESERVE_S` of the time is left
         (:meth:`BaseToolProvider.kill`); its reflections are cleared
-        without being promoted. close() keeps to the same limit when it
-        closes the providers again, and no provider starts any more.
+        without being promoted. A provider that the cancellation finds
+        still starting is waited for to the same limit, then killed (see
+        :meth:`_start_provider`). A run that had already ended, and whose
+        final save the cancellation cuts short, saves its record again
+        the same way, with the status it ended with. close() keeps to the
+        same limit when it closes the providers again, and no provider
+        starts any more.
 
         The first call sets the deadline; later calls change nothing.
         """

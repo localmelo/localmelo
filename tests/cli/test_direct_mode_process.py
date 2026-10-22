@@ -285,6 +285,99 @@ def test_a_signal_stops_the_run_and_everything_it_started(
         _kill_leftovers(melo, started)
 
 
+def _read_methods(log: Path) -> list[str]:
+    """The methods of the messages a fake MCP server has logged so far."""
+    if not log.exists():
+        return []
+    # Only whole lines: the server may be writing the last one.
+    lines = log.read_text().split("\n")[:-1]
+    return [json.loads(line).get("method", "") for line in lines]
+
+
+def test_a_signal_while_an_mcp_server_starts_keeps_to_the_limit(
+    chat_server: FakeChatServer, tmp_path: Path
+) -> None:
+    """SIGTERM while the second of two stubborn servers is starting.
+
+    Its start-up then stops both servers itself, each with two grace
+    periods of 2 s, about 8 s in all: melo must stop waiting in time, kill
+    them, and still save the task record.
+    """
+    memory_dir = tmp_path / "memory"
+    pid_files = {name: tmp_path / f"{name}.pid" for name in "ab"}
+    b_log = tmp_path / "b.log"
+    modes = {"a": "stubborn", "b": "stubborn_hang_initialize"}
+    mcp_config = tmp_path / "mcp.json"
+    mcp_config.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    name: {
+                        "command": sys.executable,
+                        "args": ["-I", str(FAKE_MCP_SERVER)],
+                        "env": {
+                            "FAKE_MCP_MODE": mode,
+                            "FAKE_MCP_PIDFILE": str(pid_files[name]),
+                            "FAKE_MCP_LOG": str(tmp_path / f"{name}.log"),
+                        },
+                    }
+                    for name, mode in modes.items()
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    melo = subprocess.Popen(
+        [
+            sys.executable,
+            "-I",
+            "-m",
+            "localmelo",
+            "--base-url",
+            chat_server.base_url,
+            "--mcp-config",
+            str(mcp_config),
+            "--memory-dir",
+            str(memory_dir),
+            "--output-format",
+            "json",
+            "use the servers",
+        ],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        env=_env(tmp_path),
+        cwd=tmp_path,
+    )
+    started: list[int] = []
+    try:
+        assert _wait_until(
+            lambda: "initialize" in _read_methods(b_log), 30
+        ), "server b got no initialize"
+        started += [int(pid_files[name].read_text()) for name in "ab"]
+
+        sent = time.monotonic()
+        os.killpg(melo.pid, signal.SIGTERM)
+        out, err = melo.communicate(timeout=30)
+        elapsed = time.monotonic() - sent
+        stderr = err.decode(errors="replace")
+
+        assert melo.returncode == -signal.SIGTERM, stderr
+        assert elapsed < SIGNAL_CLEANUP_S, f"exited {elapsed:.1f} s after SIGTERM"
+        assert out == b""
+        assert "Traceback" not in stderr, stderr
+        assert chat_server.requests == 0  # the run never got to plan
+
+        for pid in started:
+            assert _wait_until(functools.partial(_process_gone, pid)), f"{pid} runs"
+        with contextlib.closing(sqlite3.connect(memory_dir / "history.db")) as db:
+            rows = db.execute("SELECT status, result FROM tasks").fetchall()
+        assert rows == [("crashed", "Cancelled by SIGTERM")]
+    finally:
+        _kill_leftovers(melo, started)
+
+
 # ── Tracebacks only for crashed runs ────────────────────────────────────────
 
 

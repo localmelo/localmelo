@@ -7,9 +7,12 @@ happens to it, and the history records each save.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import sqlite3
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -19,6 +22,7 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.memory.history import History
+from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.schema import Message, TaskRecord, ToolCall, ToolDef
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
@@ -308,6 +312,70 @@ class TestExitingRun:
             "Cannot start the tool providers: the agent is closed",
         )
         assert "start" not in events
+
+
+class AnswerWhenToldLLM(BaseLLMProvider):
+    """Answers ``done`` once ``answer`` is set; ``asked`` is set meanwhile."""
+
+    def __init__(self) -> None:
+        self.asked = asyncio.Event()
+        self.answer = asyncio.Event()
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        self.asked.set()
+        await self.answer.wait()
+        return Message(role="assistant", content="done")
+
+    async def close(self) -> None:
+        pass
+
+
+class TestExitDuringTheFinalSave:
+    @pytest.mark.asyncio
+    async def test_a_save_the_exit_cuts_short_is_made_again(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        llm = AnswerWhenToldLLM()
+        agent = Agent(
+            llm=llm,
+            options=AgentOptions(builtins=frozenset(), memory_dir=str(tmp_path)),
+        )
+        history = agent.hippo.history
+        assert isinstance(history, SqliteHistory)
+        final_save = asyncio.Event()
+        save_task = history.save_task
+
+        async def save_and_tell(task: TaskRecord) -> None:
+            if task.status != "running":
+                final_save.set()
+            await save_task(task)
+
+        monkeypatch.setattr(history, "save_task", save_and_tell)
+        running = asyncio.create_task(agent.run_task("q"))
+        await llm.asked.wait()  # the row reads "running" by now
+
+        # Another process holds history.db's write lock, so the final save
+        # of the run, which has completed, waits for it ...
+        db_path = tmp_path / "history.db"
+        with contextlib.closing(sqlite3.connect(db_path, isolation_level=None)) as db:
+            db.execute("BEGIN IMMEDIATE")
+            llm.answer.set()
+            await final_save.wait()
+            # ... when the exit cancels it, before it is committed.
+            agent.begin_exit("Cancelled by SIGTERM", within_s=3.0)
+            running.cancel()
+            db.execute("ROLLBACK")
+            with pytest.raises(asyncio.CancelledError):
+                await running
+        await agent.close()
+
+        # Saved again, within the exit's time, with the status the run
+        # ended with.
+        with contextlib.closing(sqlite3.connect(db_path)) as db:
+            rows = db.execute("SELECT status, result FROM tasks").fetchall()
+        assert rows == [("completed", "done")]
 
 
 class TestExitingClose:

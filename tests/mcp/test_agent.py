@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import functools
+import os
+import signal
+import sqlite3
+import sys
 from collections import deque
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -10,6 +16,7 @@ from typing import Any
 
 import pytest
 
+import localmelo.melo.agent.agent as agent_mod
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef
@@ -252,3 +259,83 @@ class TestCloseDuringSetup:
             "Cannot start MCP server 'fake': the client was closed during start-up",
         )
         assert read_log(log_path) == []  # the server got no handshake
+
+
+async def _until(check: Callable[[], bool], timeout: float = 5.0) -> bool:
+    """Whether *check* holds within *timeout* seconds."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while not check():
+        if loop.time() >= deadline:
+            return False
+        await asyncio.sleep(0.02)
+    return True
+
+
+def _gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)  # also succeeds for a zombie not yet reaped
+    except ProcessLookupError:
+        return True
+    return False
+
+
+class TestExitDuringSetup:
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX signals")
+    async def test_the_clean_up_of_a_start_it_cuts_short_keeps_to_the_limit(
+        self,
+        tmp_path: Path,
+        created: list[StdioMcpClient],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # Server a has started; b has not answered initialize. Both ignore
+        # SIGTERM and their closed stdin, so each takes two grace periods
+        # of 0.5 s to stop, and the clean-up that the cancelled start()
+        # does itself, b and then a, takes about 2 s: more than the exit
+        # allows.
+        monkeypatch.setattr(agent_mod, "EXIT_SAVE_RESERVE_S", 0.3)
+        pid_files = {name: tmp_path / f"{name}.pid" for name in "ab"}
+        modes = {"a": "stubborn", "b": "stubborn_hang_initialize"}
+        servers = [
+            fake_server_config(
+                tmp_path / f"{name}.log",
+                name=name,
+                env={"FAKE_MCP_MODE": mode, "FAKE_MCP_PIDFILE": str(pid_files[name])},
+            )
+            for name, mode in modes.items()
+        ]
+        memory_dir = tmp_path / "memory"
+        agent, _ = _mcp_agent(
+            FakeLLM([_answer("never sent")]),
+            servers,
+            created,
+            memory_dir=str(memory_dir),
+        )
+        running = asyncio.create_task(agent.run_task("q"))
+        b_log = tmp_path / "b.log"
+        assert await _until(
+            lambda: "initialize" in [m.get("method") for m in read_log(b_log)]
+        )
+        pids = [int(pid_files[name].read_text()) for name in "ab"]
+        try:
+            loop = asyncio.get_running_loop()
+            began = loop.time()
+            agent.begin_exit("Cancelled by SIGTERM", within_s=1.0)
+            running.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await running
+            # The waiting ended 0.3 s before the limit and the provider was
+            # killed, so there was still time to save the task record.
+            assert loop.time() - began < 1.0
+            await agent.close()
+            for pid in pids:
+                assert await _until(functools.partial(_gone, pid)), f"{pid} runs"
+        finally:
+            for pid in pids:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+            # private: the start() and close() calls the exit left running
+            assert await _until(lambda: not agent._abandoned)
+        with contextlib.closing(sqlite3.connect(memory_dir / "history.db")) as db:
+            rows = db.execute("SELECT status, result FROM tasks").fetchall()
+        assert rows == [("crashed", "Cancelled by SIGTERM")]

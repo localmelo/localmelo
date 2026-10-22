@@ -57,9 +57,11 @@ class BaseToolProvider(ABC):
     def kill(self) -> None:  # noqa: B027 – optional hook, empty by default
         """Stop the provider's processes at once, without waiting for them.
 
-        Called when a close() has not finished in time, for example when
-        the process must exit (see ``Agent.begin_exit``). close() may be
-        running when kill() is called, and may be called again after it.
-        The default does nothing, which suits a provider that starts no
-        processes.
+        Called when a close(), or the clean-up of a start() that was
+        cancelled, has not finished in time, for example when the process
+        must exit (see ``Agent.begin_exit``). kill() must then also reach
+        the processes that clean-up is still stopping. close() or start()
+        may be running when kill() is called, and close() may be called
+        again after it. The default does nothing, which suits a provider
+        that starts no processes.
         """
