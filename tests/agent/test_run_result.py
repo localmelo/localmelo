@@ -348,20 +348,21 @@ class TestStatuses:
         assert (result.steps, result.n_llm, result.n_tool) == (1, 1, 0)
 
     @pytest.mark.asyncio
-    async def test_failed_when_the_reflection_gate_stops(self) -> None:
+    async def test_gate_stopped_when_the_reflection_gate_stops(self) -> None:
         llm = FakeLLM([_echo_call("a"), _reflection("stop", best_effort="partial")])
         agent = _agent(llm, _options(steps_per_attempt=1, max_attempts=2))
         result = await agent.run_task("echo q")
-        assert (result.status, result.result) == ("failed", "partial")
-        assert result.error == "Stopped after attempt 0: test"
+        assert (result.status, result.result) == ("gate_stopped", "partial")
+        # The error is the decision's rationale.
+        assert result.error == "test"
         assert _only_task(agent).result == "partial"
 
     @pytest.mark.asyncio
     async def test_gate_stop_without_a_best_effort_reports_the_error(self) -> None:
         llm = FakeLLM([_echo_call("a"), _reflection("stop")])
         agent = _agent(llm, _options(steps_per_attempt=1, max_attempts=2))
-        assert await agent.run("echo q") == "[failed] Stopped after attempt 0: test"
-        assert _only_task(agent).result == "Stopped after attempt 0: test"
+        assert await agent.run("echo q") == "[gate_stopped] test"
+        assert _only_task(agent).result == "test"
 
     @pytest.mark.asyncio
     async def test_budget_exhausted_by_max_steps(self) -> None:

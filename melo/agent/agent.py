@@ -96,6 +96,50 @@ def _coerce_str_list(value: object) -> list[str]:
     return [str(value)]
 
 
+# The decisions a reflection may recommend; any other value reads "stop".
+REFLECTION_ACTIONS = ("continue", "stop", "decompose", "done")
+
+
+def _strip_code_fences(text: str) -> str:
+    """*text* without a Markdown code fence around it, such as ```json ... ```."""
+    body = text.strip()
+    if body.startswith("```"):
+        # The opening fence may name a language; drop its whole line.
+        newline = body.find("\n")
+        body = body[newline + 1 :] if newline != -1 else body[3:]
+    if body.endswith("```"):
+        body = body[:-3]
+    return body.strip()
+
+
+def _decode_reflection(text: str) -> object:
+    """Return the JSON value of a reflection reply; ``ValueError`` if none.
+
+    A Markdown code fence around the reply is stripped first. When the
+    rest is not JSON as a whole, the first balanced ``{...}`` in it that
+    parses as a JSON object is used, so text around the object does not
+    matter. After a ``{`` that does not start one, the search goes on
+    from where the decoder gave up, so it reads the reply about once
+    and never starts inside a string of the text it already read.
+    Nesting deeper than the decoder's recursion limit ends the search.
+    """
+    body = _strip_code_fences(text)
+    try:
+        return json.loads(body)
+    except (ValueError, RecursionError):
+        pass
+    decoder = json.JSONDecoder()
+    start = body.find("{")
+    while start != -1:
+        try:
+            return decoder.raw_decode(body, start)[0]
+        except json.JSONDecodeError as exc:
+            start = body.find("{", max(exc.pos, start + 1))
+        except RecursionError:
+            break
+    raise ValueError("No JSON object in the reflection response")
+
+
 def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
     """Convert reflection entries into compact system Messages for retrieval context."""
     if not entries:
@@ -320,6 +364,9 @@ class _RunState:
     steps: int = 0
     attempts: int = 0
     n_tool: int = 0
+    # The latest non-blank text of a planning reply in this run: the
+    # answer of a reflection's "done" that gives none.
+    last_text: str = ""
 
     @property
     def running(self) -> bool:
@@ -871,15 +918,21 @@ class Agent:
         task: TaskRecord,
         attempt_id: int,
         failure_type: str,
+        *,
+        final: bool = False,
     ) -> tuple[ReflectionEntry, ReflectionDecision]:
         """Structured reflection at attempt boundary.
+
+        *final* says that no further attempt can start; the request then
+        tells the model so (see :meth:`Chat.reflect`).
 
         After parsing, enforce :data:`MAX_REFLECTION_CHARS`: if the
         serialized form of the new reflection exceeds the budget, force
         ``decision.recommended_action = "decompose"`` so the next attempt
         does not start. The model is meant to keep the reflection compact
         — when it cannot, the agent stops chasing instead of carrying an
-        ever-growing scratchpad.
+        ever-growing scratchpad. A ``done`` decision is left as it is: it
+        ends the run, so no attempt would carry the reflection.
         """
         short_window = self.hippo.working.get_window()
         prior_reflections = self.hippo.working.get_reflections()
@@ -889,13 +942,14 @@ class Agent:
             attempt_id=attempt_id,
             failure_type=failure_type,
             prior_reflections=prior_reflections or None,
+            final=final,
         )
         entry, decision = self._parse_reflection(
             response.content, attempt_id, failure_type
         )
         serialized = _serialize_reflections([entry])
         size = serialized[0].content.__len__() if serialized else 0
-        if size > MAX_REFLECTION_CHARS:
+        if size > MAX_REFLECTION_CHARS and decision.recommended_action != "done":
             decision.recommended_action = "decompose"
             note = f" (reflection budget exceeded: {size} > {MAX_REFLECTION_CHARS})"
             decision.rationale = (decision.rationale or "") + note
@@ -907,10 +961,18 @@ class Agent:
         attempt_id: int,
         failure_type: str,
     ) -> tuple[ReflectionEntry, ReflectionDecision]:
-        """Parse LLM reflection JSON with strict coercion and conservative fallback."""
+        """Parse LLM reflection JSON with strict coercion and conservative fallback.
+
+        Parsing is tolerant: a Markdown code fence around the reply is
+        stripped, and a reply that is not JSON as a whole is read from the
+        first ``{...}`` object in it (see :func:`_decode_reflection`). Only
+        a reply without such an object falls back to ``stop``, with the
+        rationale "Could not parse reflection response"; a reply that is
+        JSON but not an object stops too.
+        """
         try:
-            data = json.loads(text)
-        except (json.JSONDecodeError, TypeError):
+            data = _decode_reflection(_coerce_str(text))
+        except ValueError:
             entry = ReflectionEntry(
                 attempt_id=attempt_id,
                 summary=_coerce_str(text)[:200],
@@ -952,7 +1014,7 @@ class Agent:
         )
 
         action = _coerce_str(data.get("recommended_action")) or "stop"
-        if action not in ("continue", "stop", "decompose"):
+        if action not in REFLECTION_ACTIONS:
             action = "stop"
 
         decision = ReflectionDecision(
@@ -1011,6 +1073,8 @@ class Agent:
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""
+            if response.content.strip():
+                run.last_text = response.content
 
             # No tool call → direct answer
             if not response.tool_calls:
@@ -1054,11 +1118,17 @@ class Agent:
 
         The run ends with one of these statuses:
 
-        - ``completed``: the model gave a final answer (the result);
+        - ``completed``: the model gave a final answer (the result), or a
+          reflection decided that the task was done (its answer, see
+          :meth:`_run_reflective_attempts`);
         - ``failed``: a checker refused the plan or the run (the error
-          says why), or the reflection gate decided not to continue (its
-          best effort, if any, is the result);
-        - ``budget_exhausted``: ``max_steps`` or ``max_attempts`` ran out;
+          says why);
+        - ``gate_stopped``: the reflection gate decided not to continue
+          while attempts and steps were left. The reflection's best
+          effort, if any, is the result and its rationale the error;
+        - ``budget_exhausted``: ``max_steps`` or ``max_attempts`` ran out.
+          With ``attempt_policy="reflect"`` the last reflection's best
+          effort, if any, is the result;
         - ``stuck``: stuck detection fired with ``attempt_policy="none"``;
         - ``provider_error``: a model server request failed with a
           :class:`~localmelo.melo.contracts.providers.ProviderError`: a
@@ -1241,40 +1311,65 @@ class Agent:
         Each attempt gets at most ``steps_per_attempt`` steps, and all
         attempts together at most ``max_steps``. An attempt that runs out
         of steps or gets stuck is followed by a reflection, whose decision
-        gates the next attempt. A gate that stops the run fails it; running
-        out of steps or attempts ends it as ``budget_exhausted``.
+        ends the run or starts the next attempt:
+
+        - ``done`` ends the run as ``completed``. The answer is the
+          decision's ``best_effort_result`` or, when that is blank, the
+          latest non-blank text of a planning reply in this run (``""`` if
+          there is none).
+        - After the last attempt, or once ``max_steps`` is used up, no
+          further attempt can start, and the reflection is told so: it can
+          only finalize the answer. Any decision but ``done`` ends the run
+          as ``budget_exhausted``, with its ``best_effort_result`` as the
+          result.
+        - Otherwise the continuation gate (:func:`_should_continue`)
+          decides. A gate that stops the run ends it as ``gate_stopped``,
+          with the ``best_effort_result`` as the result and the decision's
+          rationale as the error, or ``Stopped after attempt <n>`` (``n``
+          counting from 1) when the rationale is blank.
         """
         opts = self.options
         total_steps = 0
 
         for attempt_id in range(opts.max_attempts):
+            # Never below 1: the previous attempt ended the run otherwise.
             budget = min(opts.steps_per_attempt, opts.max_steps - total_steps)
-            if budget <= 0:
-                run.end("budget_exhausted", error="Max steps reached")
-                break
-
             run.attempts += 1
             steps_used, failure_type = await self._run_attempt(task, query, budget, run)
             total_steps += steps_used
 
             if not run.running:
-                break
+                return
 
             # Reflect at attempt boundary
             task.attempts_completed = attempt_id + 1
-            entry, decision = await self._do_reflect(task, attempt_id, failure_type)
+            if run.attempts >= opts.max_attempts:
+                out_of = "Max attempts reached"
+            elif total_steps >= opts.max_steps:
+                out_of = "Max steps reached"
+            else:
+                out_of = ""  # another attempt can start
+            entry, decision = await self._do_reflect(
+                task, attempt_id, failure_type, final=bool(out_of)
+            )
             self.hippo.working.add_reflection(entry)
 
+            best_effort = decision.best_effort_result
+            if decision.recommended_action == "done":
+                answer = best_effort if best_effort.strip() else run.last_text
+                run.end("completed", result=answer)
+                return
+            if out_of:
+                run.end("budget_exhausted", result=best_effort, error=out_of)
+                return
             if not _should_continue(decision):
+                stopped = f"Stopped after attempt {run.attempts}"
                 run.end(
-                    "failed",
-                    result=decision.best_effort_result,
-                    error=f"Stopped after attempt {attempt_id}: {decision.rationale}",
+                    "gate_stopped",
+                    result=best_effort,
+                    error=decision.rationale.strip() or stopped,
                 )
-                break
-        else:
-            if run.running:
-                run.end("budget_exhausted", error="Max attempts reached")
+                return
 
     async def _run_single_attempt(
         self, task: TaskRecord, query: str, run: _RunState

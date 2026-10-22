@@ -55,6 +55,8 @@ REFLECTION_PROMPT = (
     "rest. The total reflection should stay under ~1500 characters when "
     "serialized — if you cannot fit it, choose 'stop' or 'decompose' "
     "instead of 'continue'.\n\n"
+    "Choose 'done' only if the task is already complete, and put the final "
+    "answer in best_effort_result.\n\n"
     "Respond with a JSON object (no markdown fences):\n"
     "{\n"
     '  "summary": "one-sentence summary of what was attempted",\n'
@@ -67,15 +69,23 @@ REFLECTION_PROMPT = (
     '  "new_information_gained": true/false,\n'
     '  "next_step_is_concrete": true/false,\n'
     '  "next_step_is_novel": true/false,\n'
-    '  "recommended_action": "continue" or "stop" or "decompose",\n'
+    '  "recommended_action": "continue" | "stop" | "decompose" | "done",\n'
     '  "rationale": "why you chose this action",\n'
-    '  "best_effort_result": "best partial answer so far, or empty string",\n'
+    '  "best_effort_result": "the final answer if done, else the best partial '
+    'answer so far, or empty string",\n'
     '  "estimated_info_gain": 0.0-1.0,\n'
     '  "estimated_cost": 0.0-1.0,\n'
     '  "repeat_risk": 0.0-1.0,\n'
     '  "novelty": 0.0-1.0,\n'
     '  "feasibility": 0.0-1.0\n'
     "}"
+)
+
+# Ends the request of a reflection after which no further attempt can
+# start: its decision cannot continue the run, only finalize its answer.
+FINAL_REFLECTION_NOTE = (
+    "No further attempt can start: choose 'done' if the task is complete, and "
+    "either way put your best answer in best_effort_result."
 )
 
 _MEMORY_PREFIX = "[memory] "
@@ -282,8 +292,14 @@ class Chat:
         attempt_id: int,
         failure_type: str = "",
         prior_reflections: list[ReflectionEntry] | None = None,
+        *,
+        final: bool = False,
     ) -> Message:
-        """Ask the LLM to reflect on the current attempt."""
+        """Ask the LLM to reflect on the current attempt.
+
+        With *final*, no further attempt can start, and the request says
+        so: the reflection can only finalize the answer.
+        """
         # Build system prompt with prior reflection context
         system_parts = [REFLECTION_PROMPT]
         if prior_reflections:
@@ -307,17 +323,14 @@ class Chat:
         reason = reason_map.get(
             failure_type, "The attempt ended without a final answer."
         )
+        request = (
+            f"Original task: {query}\n"
+            f"This was attempt {attempt_id}. {reason} Reflect and decide."
+        )
+        if final:
+            request += f" {FINAL_REFLECTION_NOTE}"
 
         messages = [Message(role="system", content="\n\n".join(system_parts))]
         messages.extend(tail_turns(short, REFLECTION_WINDOW))
-        messages.append(
-            Message(
-                role="user",
-                content=(
-                    f"Original task: {query}\n"
-                    f"This was attempt {attempt_id}. {reason} "
-                    "Reflect and decide."
-                ),
-            ),
-        )
+        messages.append(Message(role="user", content=request))
         return await self._request(messages, tools=None)

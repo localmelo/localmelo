@@ -313,7 +313,7 @@ class ReflectionDecision:
     new_information_gained: bool = False
     next_step_is_concrete: bool = False
     next_step_is_novel: bool = False
-    recommended_action: str = "stop"  # "continue" | "stop" | "decompose"
+    recommended_action: str = "stop"  # "continue" | "stop" | "decompose" | "done"
     rationale: str = ""
     handoff_summary: str = ""
     tried_memory: ReflectionEntry | None = None

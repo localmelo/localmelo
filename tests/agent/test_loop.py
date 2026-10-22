@@ -375,7 +375,7 @@ class TestMaxStepsTermination:
     """Loop terminates cleanly when step/attempt budget is exhausted."""
 
     @pytest.mark.asyncio
-    async def test_max_steps_sets_failed(self) -> None:
+    async def test_max_steps_ends_as_budget_exhausted(self) -> None:
         """Agent that always requests tool calls must hit the step limit."""
         options = AgentOptions(steps_per_attempt=3, max_attempts=1, max_steps=3)
 
@@ -413,7 +413,7 @@ class TestMaxStepsTermination:
 
         await agent.run("echo loop forever")
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "failed"
+        assert tasks[0].status == "budget_exhausted"
 
 
 class TestNoEmbeddingToolLoop:
@@ -870,7 +870,7 @@ class TestStepEstimation:
 
         await agent.run("echo loop task")
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "failed"
+        assert tasks[0].status == "budget_exhausted"
 
 
 class TestBuildSystemPrompt:

@@ -160,7 +160,9 @@ class TestAttemptBudgetTriggersReflection:
         result = await agent.run("echo test")
         assert result == "partial answer"
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "failed"
+        # The only attempt was the last one, so its reflection could only
+        # finalize the answer.
+        assert tasks[0].status == "budget_exhausted"
 
 
 class TestReflectionContinue:
@@ -230,7 +232,7 @@ class TestReflectionStop:
         result = await agent.run("echo hard task")
         assert result == "best I can do"
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "failed"
+        assert tasks[0].status == "gate_stopped"
 
 
 class TestMaxAttemptsExhausted:
@@ -307,8 +309,11 @@ class TestStuckDetection:
 
         agent = _make_echo_agent(llm, options=options)
         await agent.run("echo stuck task")
+        # Three planning calls, then stuck detection fired: one reflection.
+        assert len(llm.calls) == 4
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "failed"
+        # The only attempt was the last one.
+        assert tasks[0].status == "budget_exhausted"
 
     def test_detect_stuck_unit(self) -> None:
         fp = ("echo", "abc123", "")
@@ -606,7 +611,7 @@ class TestUtilityContinuationGate:
         result = await agent.run("echo test")
         assert result == "low utility answer"
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "failed"
+        assert tasks[0].status == "gate_stopped"
 
 
 class TestReflectionReceivesPriorReflections:
@@ -757,10 +762,10 @@ class TestPrePlanIncludesReflections:
         result = await agent.run("echo test")
 
         # Decompose is not "continue", so _should_continue returns False
-        # and the task is marked failed. The result string carries the
+        # and the gate stops the task. The result string carries the
         # rationale, which must mention the budget overflow.
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "failed"
+        assert tasks[0].status == "gate_stopped"
         assert "reflection budget exceeded" in result
         assert tasks[0].attempts_completed == 1  # second attempt did not start
 
