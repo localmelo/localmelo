@@ -52,7 +52,10 @@ class FakeToolProvider(BaseToolProvider):
 
     *error* is raised by start() and *close_error* by close(). With a
     *gate*, start() waits until the gate is set, and with a *close_gate*,
-    close() does. ``starting`` is set once start() is called, ``closed``
+    close() does. With *stop_s*, a start() cancelled while it waits for
+    its gate takes *stop_s* seconds to stop what it started, as an MCP
+    provider stops the servers it spawned, records ``stopped <name>`` and
+    then gives up. ``starting`` is set once start() is called, ``closed``
     once close() is; ``closes_done`` counts the close() calls that ran to
     their end. *events* records each start and close in order, and may be
     shared between providers.
@@ -69,6 +72,7 @@ class FakeToolProvider(BaseToolProvider):
         close_error: Exception | None = None,
         gate: asyncio.Event | None = None,
         close_gate: asyncio.Event | None = None,
+        stop_s: float | None = None,
         events: list[str] | None = None,
     ) -> None:
         self.name = name
@@ -79,6 +83,7 @@ class FakeToolProvider(BaseToolProvider):
         self.close_error = close_error
         self.gate = gate
         self.close_gate = close_gate
+        self.stop_s = stop_s
         self.events = events if events is not None else []
         self.starting = asyncio.Event()
         self.closed = asyncio.Event()
@@ -93,7 +98,13 @@ class FakeToolProvider(BaseToolProvider):
         self.events.append(f"start {self.name}")
         self.starting.set()
         if self.gate is not None:
-            await self.gate.wait()
+            try:
+                await self.gate.wait()
+            except asyncio.CancelledError:
+                if self.stop_s is not None:
+                    await asyncio.sleep(self.stop_s)
+                    self.events.append(f"stopped {self.name}")
+                raise
         if self.error is not None:
             raise self.error
         self.running = True
@@ -493,6 +504,30 @@ class TestSetupTimeout:
             "Tool setup failed in an earlier run: b is down",
         )
         assert [task.status for task in _tasks(agent)] == ["timeout", "setup_error"]
+
+    @pytest.mark.asyncio
+    async def test_the_clean_up_of_a_start_it_cancels_is_waited_for(self) -> None:
+        # timeout_s cancels start(), which then takes 0.3 s to stop what it
+        # started. close() returns at once, as an MCP provider's can while
+        # its start() still stops a server, so closing the provider does
+        # not wait for that: only waiting for start() itself does.
+        events: list[str] = []
+        provider = FakeToolProvider(
+            "a", ["a_tool"], gate=asyncio.Event(), stop_s=0.3, events=events
+        )
+        llm = FakeLLM([_answer("never sent")])
+        agent = _agent(llm, [provider], AgentOptions(timeout_s=0.1))
+
+        result = await asyncio.wait_for(agent.run_task("q"), 10)
+        assert (result.status, result.error) == ("timeout", "Timed out after 0.1 s")
+        # The run returned only once start() had stopped, and closed the
+        # provider after that.
+        assert events == ["start a", "stopped a", "close a"]
+        assert agent.hippo.get_tool("a_tool") is None
+        assert llm.calls == []
+
+        await agent.close()
+        assert events == ["start a", "stopped a", "close a", "close a"]
 
 
 # ── close() ─────────────────────────────────────────────────────────────────
