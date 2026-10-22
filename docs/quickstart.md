@@ -114,8 +114,9 @@ asyncio.run(main())
 
 `AgentOptions` sets the step budget (`max_steps`), the attempt policy
 (`attempt_policy`, `steps_per_attempt`, `max_attempts`), tool exposure
-(`tool_exposure`), the built-in tools (`builtins`) and memory (`memory`,
-`memory_dir`); its docstring describes each option and its default.
+(`tool_exposure`), the built-in tools (`builtins`), memory (`memory`,
+`memory_dir`) and a wall-clock bound for each run in seconds (`timeout_s`,
+off by default); its docstring describes each option and its default.
 `Agent.run_task(query)` returns a [`RunResult`](#run-results).
 `Agent.run(query)` returns the run's outcome as text, which is what the
 gateway and its web pages show: the result when it is non-empty, otherwise
@@ -133,7 +134,8 @@ Every run ends with one of these statuses:
 | `budget_exhausted` | `max_steps` or `max_attempts` ran out before a final answer. |
 | `stuck` | Stuck detection fired (the same tool calls, or the same errors, three steps in a row) with `attempt_policy="none"`. With `"reflect"`, a reflection decides what happens next instead. |
 | `provider_error` | A request to the model server failed: an HTTP error status, a timeout, a connection failure or a malformed response body (see [Provider errors](#provider-errors)). `error` describes the failed request; no traceback is logged. |
-| `crashed` | An unexpected exception ended the run. `error` is `<ExceptionType>: <message>` and the traceback is logged. A cancelled run is recorded as `crashed` too, and the cancellation propagates. |
+| `timeout` | The run was still going after `AgentOptions.timeout_s` seconds and was cancelled where it stood: an LLM request in flight is abandoned and counts in `llm_errors`, and a `shell_exec` command is killed together with every process it started. `error` is `Timed out after <timeout_s> s`. |
+| `crashed` | An unexpected exception ended the run. `error` is `<ExceptionType>: <message>` and the traceback is logged. A run cancelled from outside is recorded as `crashed` too, and the cancellation propagates. |
 
 `Agent.run_task()` returns the run as a `RunResult`; `RunResult.to_dict()`
 gives the same fields as a plain dict, in this order:
@@ -150,7 +152,7 @@ gives the same fields as a plain dict, in this order:
 | `n_main` | of those, requests that offered tools |
 | `n_aux` | of those, requests without tools: reflections, and planning calls in a step that offered no tool |
 | `n_tool` | tool calls handed to the executor, including calls it refused |
-| `llm_errors` | LLM requests that raised instead of responding, each failed attempt of a retried request included, so `n_llm + llm_errors` is the number of requests sent |
+| `llm_errors` | LLM requests that raised instead of responding, each failed attempt of a retried request and a request cut short by `timeout_s` included, so `n_llm + llm_errors` is the number of requests sent |
 | `usage` | integer usage fields of all responses, summed by name (`prompt_tokens`, `completion_tokens`, `total_tokens`) |
 | `duration_s` | wall-clock time of the run, in seconds |
 | `config` | the effective run configuration (below) |

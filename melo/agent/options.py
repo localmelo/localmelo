@@ -60,10 +60,9 @@ class AgentOptions:
     - ``memory_dir``: directory for SQLite persistence. When it is
       ``None``, the ``LOCALMELO_PERSIST_MEMORY`` and
       ``LOCALMELO_MEMORY_DIR`` environment variables decide.
-    - ``timeout_s``: wall-clock bound for one run; ``None`` means no bound.
-
-    ``timeout_s`` is stored but not acted on yet: the agent does not bound
-    a run's duration.
+    - ``timeout_s``: wall-clock bound for one run, in seconds; ``None``
+      means no bound. A run still going when it expires is cancelled and
+      ends with status ``timeout``.
     """
 
     max_steps: int = MAX_AGENT_STEPS

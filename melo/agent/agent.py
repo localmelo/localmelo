@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import hashlib
 import json
@@ -345,9 +346,9 @@ class Agent:
         agent = Agent(llm=my_llm_provider, embedding=my_emb_provider)
 
     Either mode takes ``options=AgentOptions(...)`` to set step budgets,
-    the attempt policy, tool exposure, the built-in tools and memory; the
-    defaults keep the behavior from before options existed, except that a
-    step now runs only the tools it offered.
+    the attempt policy, tool exposure, the built-in tools, memory and a
+    run timeout; the defaults keep the behavior from before options
+    existed, except that a step now runs only the tools it offered.
     ``tool_providers`` are only stored so far: nothing starts them or
     registers their tools.
 
@@ -904,8 +905,10 @@ class Agent:
             calls = list(response.tool_calls)
             results: list[ToolResult] = []
             for call in calls:
-                results.append(await self._do_execute(call, allowed=allowed))
+                # Counted when handed over, so a call that timeout_s cuts
+                # short counts too.
                 run.n_tool += 1
+                results.append(await self._do_execute(call, allowed=allowed))
             await self._do_memorize(task.task_id, response, results)
 
             # Stuck detection (one fingerprint per step)
@@ -943,15 +946,20 @@ class Agent:
           :class:`~localmelo.melo.contracts.providers.ProviderError`: a
           chat request after its retries, or an embedding request. The
           error is the provider's message; no traceback is logged;
+        - ``timeout``: the run was still going after ``timeout_s``
+          seconds. It is cancelled wherever it was: a request in flight
+          is abandoned (and counts in ``llm_errors``), a shell command is
+          killed with every process it started;
         - ``crashed``: an unexpected exception ended the run. It is
-          logged and reported as the error, not raised. A cancellation,
-          or any other exception that is not an ``Exception``, still
-          propagates once the task is saved.
+          logged and reported as the error, not raised. A cancellation
+          from outside the run, or any other exception that is not an
+          ``Exception``, still propagates once the task is saved.
 
         Whatever happens, the task record is saved with the status and
         ``result or error``, and the reflections are cleared (promoted
         to long-term memory first when ``memory`` is on); a failure while
         doing so is logged and does not replace the run's own outcome.
+        ``timeout_s`` bounds the run itself, not this final save.
 
         ``RunResult.config`` reports the effective configuration: the
         options, the registered built-ins (``builtins``), the resolved
@@ -962,20 +970,32 @@ class Agent:
         task = TaskRecord(query=query)
         run = _RunState()
         stats = self.chat.reset_stats()
+        timeout_s = self.options.timeout_s
+        deadline = asyncio.timeout(timeout_s)  # never expires when None
         try:
-            await self.hippo.save_task(task)
-            self.hippo.working.append(Message(role="user", content=query))
-            if self.options.attempt_policy == "none":
-                await self._run_single_attempt(task, query, run)
-            else:
-                await self._run_reflective_attempts(task, query, run)
+            async with deadline:
+                await self.hippo.save_task(task)
+                self.hippo.working.append(Message(role="user", content=query))
+                if self.options.attempt_policy == "none":
+                    await self._run_single_attempt(task, query, run)
+                else:
+                    await self._run_reflective_attempts(task, query, run)
         except ProviderError as exc:
             # Reported in the result, not a crash: no traceback.
             logger.info("Task %s ended with provider_error: %s", task.task_id, exc)
             run.end("provider_error", error=str(exc) or _exception_text(exc))
         except Exception as exc:
-            logger.exception("Task %s crashed", task.task_id)
-            run.end("crashed", error=_exception_text(exc))
+            if (
+                isinstance(exc, TimeoutError)
+                and timeout_s is not None
+                and deadline.expired()
+            ):
+                # This run's own deadline; any other TimeoutError is a crash.
+                logger.info("Task %s timed out after %g s", task.task_id, timeout_s)
+                run.end("timeout", error=f"Timed out after {timeout_s:g} s")
+            else:
+                logger.exception("Task %s crashed", task.task_id)
+                run.end("crashed", error=_exception_text(exc))
         except BaseException as exc:
             run.end("crashed", error=_exception_text(exc))
             raise
