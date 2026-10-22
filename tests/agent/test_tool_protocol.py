@@ -307,6 +307,52 @@ class TestCheckedTurnWrites:
         assert len(notice[0].content) < 1_000
 
     @pytest.mark.asyncio
+    async def test_oversized_arguments_are_elided_not_dropped(self) -> None:
+        # Each call fits the memory-write check on its own; together they
+        # do not, so the largest arguments give way to a placeholder.
+        texts = {"a": "p" * 15_000, "b": "q" * 20_000, "c": "r" * 18_000}
+        calls = [_echo_call(text, f"call_{tag}") for tag, text in texts.items()]
+        llm = FakeLLM(
+            [
+                Message(role="assistant", content="save three", tool_calls=calls),
+                Message(role="assistant", content="done"),
+            ]
+        )
+        agent = _agent(llm)
+        received: list[str] = []
+
+        async def _save(text: str) -> str:
+            received.append(text)
+            return f"saved {len(text)} chars"
+
+        agent.executor.register("echo", _save)
+        assert await agent.run("save three sections") == "done"
+
+        # The executor and history get the real arguments.
+        assert received == list(texts.values())
+        task = next(iter(agent.hippo.history._tasks.values()))
+        steps = await agent.hippo.history.get_steps(task.task_id)
+        assert [s.tool_call.arguments for s in steps if s.tool_call] == [
+            {"text": text} for text in texts.values()
+        ]
+
+        # The next prompt keeps the whole turn under the same ids.
+        second = _planning_calls(llm)[1]["messages"]
+        assert_protocol_valid(second)
+        turn = [m for m in second if m.tool_calls or m.role == "tool"]
+        assert turn[0].content == "save three"
+        assert [(tc.id, tc.arguments) for tc in turn[0].tool_calls] == [
+            ("call_a", {"text": texts["a"]}),
+            ("call_b", {"_elided": "20012 chars withheld"}),
+            ("call_c", {"text": texts["c"]}),
+        ]
+        assert [(m.tool_call_id, m.content) for m in turn[1:]] == [
+            ("call_a", "saved 15000 chars"),
+            ("call_b", "saved 20000 chars"),
+            ("call_c", "saved 18000 chars"),
+        ]
+
+    @pytest.mark.asyncio
     async def test_rejected_text_keeps_the_calls(self) -> None:
         llm = FakeLLM(
             [

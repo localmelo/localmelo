@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import math
 import os
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.agent._chat import Chat
 from localmelo.melo.checker import Checker
@@ -104,13 +105,32 @@ def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
 # Characters of a withheld tool result that stay visible to the model.
 WITHHELD_PREVIEW_CHARS = 200
 
+# Key of the placeholder that replaces tool-call arguments too long for
+# working memory. Only the working-memory copy of a turn carries it:
+# history and the executor always get the real arguments.
+ELIDED_ARGUMENTS_KEY = "_elided"
+
+
+def _render_arguments(arguments: dict[str, Any]) -> str:
+    """Text form of one call's arguments, as memory-write checks see it."""
+    return json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str)
+
 
 def _render_tool_calls(calls: Sequence[ToolCall]) -> str:
     """Text form of tool calls, used for memory-write checks."""
     return "\n".join(
-        f"{tc.tool_name}("
-        f"{json.dumps(tc.arguments, ensure_ascii=False, sort_keys=True, default=str)})"
-        for tc in calls
+        f"{tc.tool_name}({_render_arguments(tc.arguments)})" for tc in calls
+    )
+
+
+def _elide_arguments(call: ToolCall) -> ToolCall:
+    """Copy of *call* with its arguments replaced by a short placeholder.
+
+    The copy keeps the call's id, so the call's result still pairs with it.
+    """
+    size = len(_render_arguments(call.arguments))
+    return dataclasses.replace(
+        call, arguments={ELIDED_ARGUMENTS_KEY: f"{size} chars withheld"}
     )
 
 
@@ -353,9 +373,10 @@ class Agent:
           text is attached to the first), unconditionally.
         - Long-term memory gets each record's text summary, if the checker
           allows the write.
-        - Working memory gets the real protocol turn: the assistant message
-          with its tool calls, then one ``role="tool"`` message per call
-          paired by ``tool_call_id``, appended as one unit (see
+        - Working memory always gets the real protocol turn: the assistant
+          message with its tool calls, then one ``role="tool"`` message per
+          call paired by ``tool_call_id``, appended as one unit. Checked
+          writes may shorten it but never leave a call or result out (see
           :meth:`_checked_tool_turn`).
         """
         calls = response.tool_calls
@@ -380,10 +401,8 @@ class Agent:
                     summary, metadata={"step_id": step.step_id}, to_working=False
                 )
 
-        turn = self._checked_tool_turn(response, results)
-        if turn is not None:
-            assistant_msg, tool_msgs = turn
-            self.hippo.working.append_turn(assistant_msg, tool_msgs)
+        assistant_msg, tool_msgs = self._checked_tool_turn(response, results)
+        self.hippo.working.append_turn(assistant_msg, tool_msgs)
 
     def _memory_write_allowed(self, text: str, role: str) -> bool:
         check = self.checker.check_memory_write(
@@ -391,26 +410,48 @@ class Agent:
         )
         return check.allowed
 
+    def _checked_calls(self, calls: Sequence[ToolCall]) -> list[ToolCall]:
+        """Return the working-memory copy of one turn's tool calls.
+
+        ``Checker.check_memory_write`` sees the calls together, as one
+        rendered text. While it rejects them (oversized arguments), the
+        largest arguments are replaced first by an
+        ``{"_elided": "<n> chars withheld"}`` placeholder. Ids are kept, so
+        every result still pairs with its call, and the original calls,
+        which history holds, are not modified. Calls still rejected with
+        every argument elided (thousands of calls, or a huge tool name) are
+        kept anyway: a call that already ran must stay visible.
+        """
+        kept = list(calls)
+        largest_first = sorted(
+            range(len(kept)),
+            key=lambda i: len(_render_arguments(kept[i].arguments)),
+            reverse=True,
+        )
+        for index in largest_first:
+            if self._memory_write_allowed(_render_tool_calls(kept), "assistant"):
+                break
+            kept[index] = _elide_arguments(kept[index])
+        return kept
+
     def _checked_tool_turn(
         self, response: Message, results: Sequence[ToolResult]
-    ) -> tuple[Message, list[Message]] | None:
+    ) -> tuple[Message, list[Message]]:
         """Build the working-memory copy of one tool-call turn.
 
-        Every message goes through ``Checker.check_memory_write``. A
+        Every part goes through ``Checker.check_memory_write``. Oversized
+        arguments are elided (see :meth:`_checked_calls`), rejected
+        assistant text is dropped while its tool calls are kept, and a
         rejected tool result is replaced by a short notice bound to the
-        same ``tool_call_id``; rejected assistant text is dropped while its
-        tool calls are kept. The turn therefore stays protocol-valid. When
-        even the tool calls are rejected (oversized arguments), the whole
-        turn is left out of working memory — history and long-term memory
-        still record it.
+        same ``tool_call_id``. No call or result is ever left out, so the
+        turn stays protocol-valid and the model still sees every call it
+        made and what each returned.
         """
-        calls = list(response.tool_calls)
+        calls = self._checked_calls(response.tool_calls)
         calls_text = _render_tool_calls(calls)
         content, thinking = response.content, response.thinking
         full_text = "\n".join(part for part in (content, calls_text) if part)
         if not self._memory_write_allowed(full_text, "assistant"):
-            if not self._memory_write_allowed(calls_text, "assistant"):
-                return None
             content, thinking = "", ""
         assistant_msg = Message(
             role="assistant", content=content, tool_calls=calls, thinking=thinking
@@ -424,8 +465,6 @@ class Agent:
             )
             if not check.allowed:
                 text = _withheld_notice(text, check.reason)
-                if not self._memory_write_allowed(text, "tool"):
-                    return None
             tool_msgs.append(
                 Message(
                     role="tool",

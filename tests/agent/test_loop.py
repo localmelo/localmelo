@@ -535,16 +535,12 @@ class TestSanitizedOutputInMemory:
 
     @pytest.mark.asyncio
     async def test_truncated_tool_msg_blocked_from_short_memory(self) -> None:
-        """When both executor truncation and memory-write check apply,
-        nothing oversized reaches short-term memory."""
+        """When the call's arguments and its truncated output are both too
+        long for memory, nothing oversized reaches short-term memory, but
+        the next planning prompt still holds the call and its result."""
         llm = FakeLLM()
-        llm.enqueue(
-            Message(
-                role="assistant",
-                content="big read",
-                tool_call=ToolCall(tool_name="echo", arguments={"text": "b" * 60_000}),
-            )
-        )
+        call = ToolCall(tool_name="echo", arguments={"text": "b" * 60_000})
+        llm.enqueue(Message(role="assistant", content="big read", tool_call=call))
         llm.enqueue(Message(role="assistant", content="ok"))
 
         agent = Agent(llm=llm, embedding=FakeEmbedding())
@@ -564,12 +560,75 @@ class TestSanitizedOutputInMemory:
         result = await agent.run("huge output test")
         assert result == "ok"
 
-        # The call's own arguments (60k chars) exceed the memory-write
-        # limit, so the whole turn (call + result) stays out of short-term;
-        # a lone result without its call would be invalid on the wire.
+        # The call already ran, so its turn stays: the same id with the
+        # 60k-char arguments replaced by a placeholder, answered by a
+        # notice that stands in for the truncated output.
+        second_call_msgs = llm.calls[1]["messages"]
+        sent_calls = [tc for m in second_call_msgs for tc in m.tool_calls]
+        assert [tc.id for tc in sent_calls] == [call.id]
+        assert sent_calls[0].arguments == {"_elided": "60012 chars withheld"}
+        tool_msgs = [m for m in second_call_msgs if m.role == "tool"]
+        assert [m.tool_call_id for m in tool_msgs] == [call.id]
+        assert tool_msgs[0].content.startswith("[Tool result withheld")
+
         window = agent.hippo.short.get_window()
-        assert [m for m in window if m.role == "tool"] == []
-        assert [m for m in window if m.tool_calls] == []
+        assert all(len(m.content) < 1_000 for m in window)
+
+        # History keeps the real call, which the executor ran as sent.
+        tasks = list(agent.hippo.history._tasks.values())
+        steps = await agent.hippo.history.get_steps(tasks[0].task_id)
+        assert steps[0].tool_call is not None
+        assert steps[0].tool_call.arguments == {"text": "b" * 60_000}
+        assert steps[0].tool_result is not None
+        assert steps[0].tool_result.output.startswith("b" * 50_000)
+
+    @pytest.mark.asyncio
+    async def test_truncated_result_blocked_with_small_arguments(self) -> None:
+        """When both executor truncation and memory-write check apply to
+        a result, nothing oversized reaches short-term memory: the call
+        keeps its arguments and is answered by a short notice."""
+        llm = FakeLLM()
+        call = ToolCall(tool_name="big_read", arguments={"path": "big.txt"})
+        llm.enqueue(Message(role="assistant", content="big read", tool_call=call))
+        llm.enqueue(Message(role="assistant", content="ok"))
+
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        agent.hippo.register_tool(
+            ToolDef(
+                name="big_read",
+                description="read a big file",
+                parameters={
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"],
+                },
+            )
+        )
+
+        async def _big_read(path: str) -> str:
+            return "b" * 60_000
+
+        agent.executor.register("big_read", _big_read)
+
+        result = await agent.run("huge output test")
+        assert result == "ok"
+
+        tasks = list(agent.hippo.history._tasks.values())
+        steps = await agent.hippo.history.get_steps(tasks[0].task_id)
+        assert steps[0].tool_result is not None
+        assert "[truncated]" in steps[0].tool_result.output
+
+        second_call_msgs = llm.calls[1]["messages"]
+        sent_calls = [tc for m in second_call_msgs for tc in m.tool_calls]
+        assert [(tc.id, tc.arguments) for tc in sent_calls] == [
+            (call.id, {"path": "big.txt"})
+        ]
+        tool_msgs = [m for m in second_call_msgs if m.role == "tool"]
+        assert [m.tool_call_id for m in tool_msgs] == [call.id]
+        assert tool_msgs[0].content.startswith("[Tool result withheld")
+
+        window = agent.hippo.short.get_window()
+        assert all(len(m.content) < 1_000 for m in window)
 
 
 class TestToolResultMemoryWriteBlocked:
