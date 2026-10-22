@@ -354,6 +354,18 @@ class TestCutTo:
         assert text.startswith(kept)
         assert len(kept) + left_out == length
 
+    @pytest.mark.parametrize("cut_before", [1, 9_984, 999_984])
+    def test_counts_what_the_result_check_cut_before(self, cut_before: int) -> None:
+        # What the executor-result check left of a longer output: the start
+        # of it, then its own suffix. The marker counts the whole output.
+        text = "x" * MAX_OUTPUT_LEN + TRUNCATION_SUFFIX
+        room = MAX_MEMORY_TEXT_LEN - 100
+        cut = _cut_to(text, room, cut_before=cut_before)
+        assert len(cut) <= room
+        kept, left_out = _cut_parts(cut)
+        assert kept == "x" * len(kept)
+        assert len(kept) + left_out == len(text) + cut_before
+
 
 async def _text_beside_a_long_result(thought: str) -> tuple[Message, Message]:
     """Run one call whose result has 120,000 characters, with *thought*
@@ -388,10 +400,11 @@ async def _text_beside_a_long_result(thought: str) -> tuple[Message, Message]:
     assert step.tool_result is not None
     assert step.tool_result.output == "r" * MAX_OUTPUT_LEN + TRUNCATION_SUFFIX
     # Working memory keeps the start of that output, with a marker that
-    # counts the characters left out.
+    # counts every character of the tool's output left out, those the
+    # executor-result check had cut included.
     kept, left_out = _cut_parts(result.content)
     assert kept == "r" * len(kept)
-    assert len(kept) + left_out == MAX_OUTPUT_LEN + len(TRUNCATION_SUFFIX)
+    assert len(kept) + left_out == 120_000
     return assistant, result
 
 
@@ -421,7 +434,8 @@ class TestCheckedTurnWrites:
         assert result.tool_call_id == "call_big"
 
         # History keeps the checked text; working memory its start, with a
-        # marker that counts the characters left out.
+        # marker that counts every character of the tool's output left out,
+        # those the executor-result check had cut included.
         task = next(iter(agent.hippo.history._tasks.values()))
         [step] = await agent.hippo.history.get_steps(task.task_id)
         assert step.tool_result is not None
@@ -429,7 +443,7 @@ class TestCheckedTurnWrites:
         assert checked == "z" * MAX_OUTPUT_LEN + TRUNCATION_SUFFIX
         kept, left_out = _cut_parts(result.content)
         assert checked.startswith(kept)
-        assert len(kept) + left_out == len(checked)
+        assert len(kept) + left_out == len(big)
         # The call keeps its share of the turn; the result gets the rest.
         room = MAX_MEMORY_TEXT_LEN - len('echo({"text": "x"})')
         assert room - 10 <= len(result.content) <= room
@@ -850,7 +864,8 @@ class TestToolResultImages:
         assert marker == MARKER
         kept, left_out = _cut_parts(text)
         assert kept == "x" * len(kept)
-        assert len(kept) + left_out == MAX_OUTPUT_LEN + len(TRUNCATION_SUFFIX)
+        # The count covers the whole output, as the tool returned it.
+        assert len(kept) + left_out == 60_000
         # The rendered call "shot({})" takes 8 of the turn's characters.
         assert len(text) <= MAX_MEMORY_TEXT_LEN - 8
         # Unlike a withheld result, a cut one keeps its image references.

@@ -274,23 +274,35 @@ def _truncation_marker(left_out: int) -> str:
     return f"\n... [truncated: {left_out} more characters]"
 
 
-def _cut_to(text: str, room: int) -> str:
+def _cut_to(text: str, room: int, *, cut_before: int = 0) -> str:
     """*text*, or its start and a truncation marker, in at most *room* chars.
 
-    The marker says how many characters of *text* were left out (see
-    :func:`_truncation_marker`). Every caller leaves at least
-    ``WITHHELD_PREVIEW_CHARS`` of room, which is ample for the marker.
+    The marker says how many characters were left out (see
+    :func:`_truncation_marker`): those of *text*, plus *cut_before*, the
+    characters by which the executor-result check had already shortened
+    the tool's output when it made *text* (it cuts the output to
+    ``MAX_OUTPUT_LEN`` and ends it with a short suffix of its own, which
+    this cut drops). So the count covers the tool's whole output, and a
+    model that sees a 120,000-character output cut to fit learns that
+    about 70,000 characters are missing, not the few its last cut took.
+    Every caller leaves at least ``WITHHELD_PREVIEW_CHARS`` of room, which
+    is ample for the marker.
     """
     if len(text) <= room:
         return text
     # The marker is never longer than this one, whose count is the
     # largest possible, so the cut text never passes *room*.
-    keep = max(room - len(_truncation_marker(len(text))), 0)
-    return text[:keep] + _truncation_marker(len(text) - keep)
+    keep = max(room - len(_truncation_marker(len(text) + cut_before)), 0)
+    return text[:keep] + _truncation_marker(len(text) - keep + cut_before)
 
 
 def _within_turn_budget(
-    texts: Sequence[str], withheld: set[int], calls_chars: int, *, limit: int
+    texts: Sequence[str],
+    withheld: set[int],
+    calls_chars: int,
+    *,
+    limit: int,
+    cut_before: Sequence[int],
 ) -> list[str]:
     """Return *texts* with the largest cut, or replaced, until they fit.
 
@@ -300,10 +312,12 @@ def _within_turn_budget(
     :meth:`Agent._checked_tool_turn`). The calls keep their share and the
     results get the rest. While the results do not fit, the largest is
     cut to the room the others leave it, with a marker that says how much
-    was left out (see :func:`_cut_to`). A result left less than
-    ``WITHHELD_PREVIEW_CHARS`` of room is replaced by the withheld notice
-    instead, and its index added to *withheld*. Indices already in
-    *withheld* hold notices and are left alone.
+    was left out, counting the characters by which the executor-result
+    check had already shortened it (*cut_before*, one count per text; see
+    :func:`_cut_to`). A result left less than ``WITHHELD_PREVIEW_CHARS``
+    of room is replaced by the withheld notice instead, and its index
+    added to *withheld*. Indices already in *withheld* hold notices and
+    are left alone.
     """
     fitted = list(texts)
     budget = limit - calls_chars
@@ -325,7 +339,7 @@ def _within_turn_budget(
         text = fitted[index]
         room = budget - (total - len(text))
         if room >= WITHHELD_PREVIEW_CHARS:
-            kept = _cut_to(text, room)
+            kept = _cut_to(text, room, cut_before=cut_before[index])
         else:
             kept = _withheld_notice(text, reason)
             if len(kept) >= len(text):
@@ -874,7 +888,7 @@ class Agent:
 
     async def _do_execute(
         self, call: ToolCall, *, allowed: Collection[str]
-    ) -> ToolResult:
+    ) -> tuple[ToolResult, int]:
         """Stage 4: execute one tool call and validate the result.
 
         *allowed* holds the names of the tools offered in the planning
@@ -883,6 +897,11 @@ class Agent:
         Uses the sanitized payload from the executor-result checker
         when truncation or modification was applied; falls back to
         the raw outcome otherwise.
+
+        Returns the result and the number of characters by which the
+        check shortened its output (0 when it did not), so that working
+        memory can count them when it cuts the result further (see
+        :func:`_cut_to`).
         """
         exec_request = ExecutionRequest(
             tool_name=call.tool_name,
@@ -901,17 +920,25 @@ class Agent:
         )
         if exec_result_check.sanitized_payload is not None:
             sp = exec_result_check.sanitized_payload
-            return ToolResult(
+            result = ToolResult(
                 tool_name=sp.tool_name,
                 output=sp.output,
                 error=sp.error,
                 duration_ms=sp.duration_ms,
                 images=list(sp.images),
             )
-        return outcome.to_tool_result()
+            # The model reads the error of a failed call, which the check
+            # never cuts, and the output otherwise.
+            cut = 0 if sp.error else max(len(outcome.output) - len(sp.output), 0)
+            return result, cut
+        return outcome.to_tool_result(), 0
 
     async def _do_memorize(
-        self, task_id: str, response: Message, results: Sequence[ToolResult]
+        self,
+        task_id: str,
+        response: Message,
+        results: Sequence[ToolResult],
+        cut_before: Sequence[int],
     ) -> None:
         """Stage 5: record the step and write checked results to memory.
 
@@ -923,7 +950,8 @@ class Agent:
           message with its tool calls, then one ``role="tool"`` message per
           call paired by ``tool_call_id``, appended as one unit. Checked
           writes may shorten it but never leave a call or result out (see
-          :meth:`_checked_tool_turn`).
+          :meth:`_checked_tool_turn`, which gets *cut_before*: for each
+          result, the characters the executor-result check cut from it).
 
         History and working memory get the same copies of *results*, whose
         images are references without the base64 payload (see
@@ -952,7 +980,7 @@ class Agent:
                     summary, metadata={"step_id": step.step_id}, to_working=False
                 )
 
-        assistant_msg, tool_msgs = self._checked_tool_turn(response, kept)
+        assistant_msg, tool_msgs = self._checked_tool_turn(response, kept, cut_before)
         self.hippo.working.append_turn(assistant_msg, tool_msgs)
 
     def _memory_write_allowed(self, text: str, role: str) -> bool:
@@ -986,7 +1014,10 @@ class Agent:
         return kept
 
     def _checked_tool_turn(
-        self, response: Message, results: Sequence[ToolResult]
+        self,
+        response: Message,
+        results: Sequence[ToolResult],
+        cut_before: Sequence[int],
     ) -> tuple[Message, list[Message]]:
         """Build the working-memory copy of one tool-call turn.
 
@@ -1012,7 +1043,10 @@ class Agent:
         ``ASSISTANT_TEXT_SHARE`` characters. The results share the rest,
         the largest cut first to the room the others leave it, ending
         with a marker that says how many characters were left out (see
-        :func:`_within_turn_budget`). This is also how a result longer
+        :func:`_within_turn_budget`); for a result whose output the
+        executor-result check had cut, the count includes the characters
+        that check left out (*cut_before*, one count per result, see
+        :func:`_cut_to`). This is also how a result longer
         than one memory write allows is shortened. A result left less
         than ``WITHHELD_PREVIEW_CHARS`` of room is replaced by the notice
         instead. A longer text gets no share: it could not fit beside
@@ -1045,7 +1079,7 @@ class Agent:
             # A text too long for one write is checked as the budget below
             # keeps it: cut. A memory write needs text: an image-only
             # result is checked with the line that names its images.
-            checked = _cut_to(text, MAX_MEMORY_TEXT_LEN)
+            checked = _cut_to(text, MAX_MEMORY_TEXT_LEN, cut_before=cut_before[index])
             check = self.checker.check_memory_write(
                 MemoryWritePayload(
                     text=checked or describe_images(result.images),
@@ -1058,7 +1092,11 @@ class Agent:
                 withheld.add(index)
             texts.append(text)
         texts = _within_turn_budget(
-            texts, withheld, len(calls_text), limit=MAX_MEMORY_TEXT_LEN - text_share
+            texts,
+            withheld,
+            len(calls_text),
+            limit=MAX_MEMORY_TEXT_LEN - text_share,
+            cut_before=cut_before,
         )
 
         turn_chars = len(full_text) + sum(len(text) for text in texts)
@@ -1348,12 +1386,15 @@ class Agent:
             allowed = frozenset(t.name for t in tools)
             calls = list(response.tool_calls)
             results: list[ToolResult] = []
+            cut_before: list[int] = []
             for call in calls:
                 # Counted when handed over, so a call that timeout_s cuts
                 # short counts too.
                 run.n_tool += 1
-                results.append(await self._do_execute(call, allowed=allowed))
-            await self._do_memorize(task.task_id, response, results)
+                result, cut = await self._do_execute(call, allowed=allowed)
+                results.append(result)
+                cut_before.append(cut)
+            await self._do_memorize(task.task_id, response, results, cut_before)
 
             # Stuck detection (one fingerprint per step)
             fingerprints.append(self._make_fingerprint(calls, results))
