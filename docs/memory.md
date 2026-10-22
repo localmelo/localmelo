@@ -134,9 +134,14 @@ LocalMelo deliberately separates "what happened" from "what to recall":
 - **Working memory** — short-lived per-session LRU cache. Lives in RAM,
   not persisted, lost on process exit. Before each planning step, its
   oldest whole turns are dropped when the prompt would otherwise pass the
-  100,000-character pre-plan cap. A tool result too long for working
+  100,000-character pre-plan cap. The task counts toward that cap even
+  once its own message is dropped, since the planning request puts it
+  back in front, so a task too long to fit beside the newest turn still
+  fails with `Prompt too large`. A tool result too long for working
   memory is kept cut to the room its turn has left, ending with
-  `... [truncated: <n> more characters]`. The tool calls take their room
+  `... [truncated: <n> more characters]`, where `<n>` counts every
+  character of the tool's output left out, those the executor's output
+  check had already cut included. The tool calls take their room
   first, and so does the model's text beside them when it has at most
   2,000 characters; a longer text that does not fit beside the results is
   dropped from working memory. History keeps the text, and the result as

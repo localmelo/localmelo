@@ -143,14 +143,14 @@ Every run ends with one of these statuses:
 | Status | Meaning |
 |---|---|
 | `completed` | The model gave a final answer, or a reflection decided that the task was already done (`done`). The answer of a `done` is the reflection's `best_effort_result` or, when that is blank, the latest non-blank text the model wrote in this run. |
-| `failed` | A checker refused the plan or the run (the prompt outgrew the pre-plan cap even with only the newest working-memory turn left, tool resolution failed, or the model's response failed its check), or the model gave two empty replies in a row: `error` is then `empty replies`. An empty reply, with neither a tool call nor text, is no answer; the agent records it in the conversation as the assistant message `[empty reply]`, adds the user message "Your last reply was empty. Continue the task: call a tool or give your final answer." after it and plans again, and the step counts. Neither message goes to history. |
+| `failed` | A checker refused the plan or the run (the prompt outgrew the pre-plan cap even with only the task and the newest working-memory turn left, tool resolution failed, or the model's response failed its check), or the model gave two empty replies in a row: `error` is then `empty replies`. An empty reply, with neither a tool call nor text, is no answer; the agent records it in the conversation as the assistant message `[empty reply]`, adds the user message "Your last reply was empty. Continue the task: call a tool or give your final answer." after it and plans again, and the step counts. Neither message goes to history. |
 | `gate_stopped` | With `attempt_policy="reflect"`, the reflection after an attempt decided not to continue while attempts and steps were left: it chose `stop` or `decompose`, its `continue` did not pass the continuation gate, or its reply could not be parsed. `result` holds the reflection's best effort, if any; `error` is its rationale (`Could not parse reflection response` for an unreadable reply), or `Stopped after attempt <n>` when the rationale is blank. |
 | `budget_exhausted` | `max_steps` or `max_attempts` ran out before a final answer. With `attempt_policy="reflect"`, the reflection that follows is told that no further attempt can start; unless it chooses `done`, the run ends here, and `result` holds its best effort, if any. |
 | `stuck` | Stuck detection fired (the same tool calls with the same results, or the same errors, three steps in a row) with `attempt_policy="none"`. With `"reflect"`, a reflection decides what happens next instead. Repeated calls that return new results, such as polling a job, are not stuck. |
 | `provider_error` | A request to the model server failed: an HTTP error status, a timeout, a connection failure or a malformed response body (see [Provider errors](#provider-errors)). `error` describes the failed request; no traceback is logged. |
 | `setup_error` | The agent's tool providers (see [Python API](#python-api)) could not be set up at the start of its first run: one failed to start, for example an MCP server that could not be launched, or a provided tool has the name of a tool already registered. `error` says which. No provider is left running, and setup is not retried: every later run on the same agent ends as `setup_error` too, with `error` naming the first failure. |
 | `timeout` | The run was still going after `AgentOptions.timeout_s` seconds and was cancelled where it stood: an LLM request in flight is abandoned and counts in `llm_errors`, and a `shell_exec` command is killed together with every process it started. `python_exec` is the exception: it runs its code inside the agent itself, which can do nothing else until the code returns, so neither `timeout_s` nor the executor's timeout can stop it; a run that times out during that code ends only once the code returns, and code that never returns keeps the run from ever ending. Tool providers still being set up are closed, so later runs end as `setup_error`. Closing them is never cut short, also when the deadline expires while a failed setup is closing them (the run then ends as `timeout` rather than `setup_error`): the run returns once every provider is closed, which can be after `timeout_s`. `error` is `Timed out after <timeout_s> s`. |
-| `crashed` | An unexpected exception ended the run. `error` is `<ExceptionType>: <message>` and the traceback is logged. A run cancelled from outside is recorded as `crashed` too, and the cancellation propagates. A direct-mode run ended by SIGTERM or SIGHUP is recorded as `crashed` with the error `Cancelled by SIGTERM` or `Cancelled by SIGHUP` (see [SIGTERM and SIGHUP](#sigterm-and-sighup)). |
+| `crashed` | An unexpected exception ended the run. `error` is `<ExceptionType>: <message>` and the traceback is logged. A run cancelled from outside is recorded as `crashed` too, and the cancellation propagates. A direct-mode run ended by SIGTERM or SIGHUP is recorded as `crashed` with the error `Cancelled by SIGTERM` or `Cancelled by SIGHUP` (see [SIGTERM and SIGHUP](#sigterm-and-sighup)). Code that `python_exec` runs cannot end the run this way: `sys.exit()` and `exit()` fail that tool call, with an error the model sees, and the run goes on. |
 
 `Agent.run_task()` returns the run as a `RunResult`; `RunResult.to_dict()`
 gives the same fields as a plain dict, in this order:
@@ -254,11 +254,12 @@ minimal environment (`PATH`, `HOME`, the locale and a few more) plus its
 registered as `mcp__<server>__<tool>`; a server that cannot be started
 ends the run as `setup_error`.
 
-A flag value that is not valid (for example `--max-steps 0` or an unknown
-built-in name), a flag combination that is not allowed (such as
+A flag value that is not valid (for example `--max-steps 0`, an unknown
+built-in name, or a `--memory-dir` that cannot be created, such as the
+path of a file), a flag combination that is not allowed (such as
 `--mcp-only` without `--mcp-config`), and an MCP config file that cannot
-be read or is malformed end melo before the run, with exit code 2 and a
-`melo: error: ...` message on stderr.
+be read or is malformed (text that is not UTF-8 included) end melo before
+the run, with exit code 2 and a `melo: error: ...` message on stderr.
 
 ### Output
 
@@ -286,9 +287,12 @@ checkout of its own, and otherwise the installed package version (or
 {"task_id": "3f0c1d2e4b5a46978899aabbccddeeff", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 812, "completion_tokens": 9, "total_tokens": 821}, "duration_s": 1.84, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "tool_exposure": "retrieve", "builtins": ["file_read", "file_write", "python_exec", "shell_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec", "shell_exec"]}, "localmelo_version": "v0.1.0-42-g1a2b3c4"}
 ```
 
-In both formats, warnings go to stderr one line each, for example a tool
-provider that could not be closed or a task record that could not be
-saved. A traceback appears only for a run that ended as `crashed`.
+In both formats, stdout carries only the report. What a tool writes to
+stdout by itself during the run, such as a command that `python_exec`
+code starts without capturing its output, goes to stderr instead.
+Warnings go to stderr one line each, for example a tool provider that
+could not be closed or a task record that could not be saved. A traceback
+appears only for a run that ended as `crashed`.
 
 ### Exit codes
 
@@ -308,13 +312,16 @@ them: melo stops them itself, in this order:
 
 1. A running `shell_exec` command is killed with its process group as the
    cancellation lands.
-2. The MCP servers are closed. A server that has not stopped within 6
-   seconds of the signal is killed with its process group, so a server
-   that will not stop cannot keep the task record from being saved.
+2. The MCP servers are closed, those still starting included. A server
+   that has not stopped within 6 seconds of the signal is killed with its
+   process group (a server started through a wrapper such as `sh -c`
+   too, after the wrapper has exited), so a server that will not stop
+   cannot keep the task record from being saved.
 3. The task record is saved as `crashed`, with the error `Cancelled by
-   SIGTERM` or `Cancelled by SIGHUP`. The reflections are not promoted to
-   long-term memory: that calls the embedding server and could take longer
-   than the time left.
+   SIGTERM` or `Cancelled by SIGHUP`; a run that had already ended, and
+   was only saving its record, keeps its own status. The reflections are
+   not promoted to long-term memory: that calls the embedding server and
+   could take longer than the time left.
 4. melo exits by the signal itself (a shell reports exit status 143 for
    SIGTERM and 129 for SIGHUP), and prints no result, no status line and
    no JSON line.
