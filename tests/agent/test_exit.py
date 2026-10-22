@@ -306,7 +306,9 @@ class TestExitingRun:
         agent = _agent(BlockingLLM(), events, provider)
         agent.begin_exit("Cancelled by SIGTERM", within_s=5.0)
 
-        result = await agent.run_task("q")
+        # Bounded: a provider that started anyway would let the run reach
+        # BlockingLLM, which never answers.
+        result = await asyncio.wait_for(agent.run_task("q"), 1.0)
         assert (result.status, result.error) == (
             "setup_error",
             "Cannot start the tool providers: the agent is closed",
@@ -359,17 +361,22 @@ class TestExitDuringTheFinalSave:
         # Another process holds history.db's write lock, so the final save
         # of the run, which has completed, waits for it ...
         db_path = tmp_path / "history.db"
-        with contextlib.closing(sqlite3.connect(db_path, isolation_level=None)) as db:
-            db.execute("BEGIN IMMEDIATE")
-            llm.answer.set()
-            await final_save.wait()
-            # ... when the exit cancels it, before it is committed.
-            agent.begin_exit("Cancelled by SIGTERM", within_s=3.0)
-            running.cancel()
-            db.execute("ROLLBACK")
-            with pytest.raises(asyncio.CancelledError):
-                await running
-        await agent.close()
+        try:
+            with contextlib.closing(
+                sqlite3.connect(db_path, isolation_level=None)
+            ) as db:
+                db.execute("BEGIN IMMEDIATE")
+                llm.answer.set()
+                await final_save.wait()
+                # ... when the exit cancels it, before it is committed.
+                agent.begin_exit("Cancelled by SIGTERM", within_s=3.0)
+                running.cancel()
+                db.execute("ROLLBACK")
+                with pytest.raises(asyncio.CancelledError):
+                    await running
+        finally:
+            # Whatever happens: aiosqlite's thread would keep pytest running.
+            await agent.close()
 
         # Saved again, within the exit's time, with the status the run
         # ended with.

@@ -278,8 +278,10 @@ class TestPersistence:
         assert agent._memory_dir == str(mem)
         assert isinstance(agent.hippo.history, SqliteHistory)
         assert isinstance(agent.hippo.long, SqliteLongTerm)
-        assert await agent.run("q") == "ok"
-        await agent.close()
+        try:
+            assert await agent.run("q") == "ok"
+        finally:
+            await agent.close()
         assert (mem / "history.db").exists()
         assert (mem / "long_term.db").exists()
 
@@ -343,8 +345,10 @@ class TestPersistence:
         )
         assert isinstance(agent.hippo.history, SqliteHistory)
         assert type(agent.hippo.long) is LongTerm
-        assert await agent.run("q") == "ok"
-        await agent.close()
+        try:
+            assert await agent.run("q") == "ok"
+        finally:
+            await agent.close()
         assert (mem / "history.db").exists()
         assert not (mem / "long_term.db").exists()
 

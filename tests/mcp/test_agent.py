@@ -322,12 +322,14 @@ class TestExitDuringSetup:
             began = loop.time()
             agent.begin_exit("Cancelled by SIGTERM", within_s=1.0)
             running.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await running
-            # The waiting ended 0.3 s before the limit and the provider was
-            # killed, so there was still time to save the task record.
-            assert loop.time() - began < 1.0
-            await agent.close()
+            try:
+                with pytest.raises(asyncio.CancelledError):
+                    await running
+                # The waiting ended 0.3 s before the limit and the provider
+                # was killed, so there was still time to save the task record.
+                assert loop.time() - began < 1.0
+            finally:
+                await agent.close()
             for pid in pids:
                 assert await _until(functools.partial(_gone, pid)), f"{pid} runs"
         finally:
