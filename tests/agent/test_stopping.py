@@ -205,10 +205,17 @@ class TestDone:
         assert (result.status, result.result) == ("completed", "42")
 
     @pytest.mark.asyncio
-    async def test_an_oversized_done_is_not_forced_to_decompose(self) -> None:
+    @pytest.mark.parametrize("gate", ["flags", "utility"])
+    async def test_an_oversized_done_is_not_forced_to_decompose(
+        self, gate: str
+    ) -> None:
         summary = "x" * (MAX_REFLECTION_CHARS + 100)
         reply = _reflection("done", best_effort_result="42", summary=summary)
-        agent = _agent(FakeLLM([_echo_call("a"), reply]), steps_per_attempt=1)
+        agent = _agent(
+            FakeLLM([_echo_call("a"), reply]),
+            steps_per_attempt=1,
+            reflection_gate=gate,
+        )
         result = await agent.run_task("echo the answer")
         assert (result.status, result.result) == ("completed", "42")
 

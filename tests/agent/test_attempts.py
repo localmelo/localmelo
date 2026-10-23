@@ -12,6 +12,7 @@ from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent.agent import _providers_from_config  # noqa: F401
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.schema import (
+    MAX_REFLECTION_CHARS,
     Message,
     ReflectionDecision,
     ToolCall,
@@ -732,16 +733,21 @@ class TestPrePlanIncludesReflections:
 
     @pytest.mark.asyncio
     async def test_oversized_reflection_forces_decompose(self) -> None:
-        """A parsed reflection whose serialized form exceeds
-        :data:`MAX_REFLECTION_CHARS` must override the model's choice
-        and force ``recommended_action='decompose'`` so the next attempt
-        does not start.
+        """Under ``reflection_gate="utility"``, a parsed reflection whose
+        serialized form exceeds :data:`MAX_REFLECTION_CHARS` must override
+        the model's choice and force ``recommended_action='decompose'`` so
+        the next attempt does not start.
 
         Single-latest semantics mean a pre-injected huge reflection is
         replaced by every subsequent ``add_reflection`` call, so the
         budget cap has to fire on the *parsed* reflection itself.
         """
-        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
+        options = AgentOptions(
+            steps_per_attempt=1,
+            max_attempts=3,
+            max_steps=10,
+            reflection_gate="utility",
+        )
 
         llm = FakeLLM()
         # Attempt 0: a tool call so the attempt exhausts its 1-step budget.
@@ -777,6 +783,49 @@ class TestPrePlanIncludesReflections:
         assert tasks[0].status == "gate_stopped"
         assert "reflection budget exceeded" in result
         assert tasks[0].attempts_completed == 1  # second attempt did not start
+
+    @pytest.mark.asyncio
+    async def test_oversized_reflection_is_trimmed_under_flags(self) -> None:
+        """Under ``reflection_gate="flags"``, the default, the same
+        reflection keeps the model's ``continue``: its summary is cut to
+        fit :data:`MAX_REFLECTION_CHARS`, and the next attempt starts and
+        plans with it."""
+        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
+
+        llm = FakeLLM()
+        llm.enqueue(
+            Message(
+                role="assistant",
+                content="try",
+                tool_call=ToolCall(tool_name="echo", arguments={"text": "a"}),
+            )
+        )
+        bloat = "x" * 4000
+        llm.enqueue(
+            Message(
+                role="assistant",
+                content=_reflection_json(
+                    "continue",
+                    summary=bloat,
+                    rationale="model wants to continue",
+                ),
+            )
+        )
+        llm.enqueue(Message(role="assistant", content="final answer"))
+
+        agent = _make_echo_agent(llm, options=options)
+        result = await agent.run("echo test")
+
+        assert result == "final answer"
+        tasks = list(agent.hippo.history._tasks.values())
+        assert tasks[0].status == "completed"
+        assert tasks[0].attempts_completed == 1  # the second attempt answered
+        # The second attempt's prompt carries the summary as cut to fit
+        # "[reflection] Attempt 0: <summary>" in the budget.
+        room = MAX_REFLECTION_CHARS - len("[reflection] Attempt 0: ")
+        cut = "x" * (room - 1) + "…"
+        system_msg = llm.calls[-1]["messages"][0].content
+        assert system_msg.endswith(f"[REFLECTION]\nAttempt 0: {cut}")
 
 
 class TestReflectionFailureTypeInPrompt:

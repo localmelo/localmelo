@@ -49,13 +49,18 @@ class AgentOptions:
       reflection after each attempt that runs out of steps or gets stuck;
       ``"none"`` runs one attempt with budget ``max_steps`` and makes no
       reflection calls.
-    - ``reflection_gate``: when the next attempt starts after a
-      reflection; it matters only with ``attempt_policy="reflect"``.
+    - ``reflection_gate``: how a reflection decides whether the next
+      attempt starts; it matters only with ``attempt_policy="reflect"``.
       ``"flags"`` starts it when the reflection chooses ``continue`` and
       its three checks hold (``task_still_feasible``,
-      ``next_step_is_concrete`` and ``next_step_is_novel``). ``"utility"``,
-      the behavior from before this option, also requires the utility
-      score computed from the reflection's own estimates to reach 0.1.
+      ``next_step_is_concrete`` and ``next_step_is_novel``). A reply that
+      holds no reflection, also when asked again, starts it too when one
+      can start, and is not kept; a reflection over
+      ``MAX_REFLECTION_CHARS`` keeps its decision and is trimmed to fit.
+      ``"utility"``, the behavior from before this option, also requires
+      the utility score computed from the reflection's own estimates to
+      reach 0.1; a reply without a reflection reads as ``stop``, and a
+      reflection over the budget as ``decompose``.
     - ``tool_exposure``: ``"retrieve"`` offers, on every step, each
       registered built-in, sorted by name, then the other tools (provided
       tools, such as MCP tools) that hint extraction and BM25 resolve for

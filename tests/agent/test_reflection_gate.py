@@ -1,8 +1,10 @@
-"""AgentOptions.reflection_gate: when the next attempt starts after a
-reflection, under "flags" (the default) and "utility" — no real model."""
+"""AgentOptions.reflection_gate: how a run acts on a reflection under
+"flags" (the default) and "utility": the gate, replies that hold no
+reflection, and reflections over the budget — no real model."""
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 from collections import deque
@@ -19,14 +21,18 @@ from localmelo.melo.agent._chat import (
 )
 from localmelo.melo.agent.agent import (
     CONTINUATION_UTILITY_THRESHOLD,
+    REFLECTION_TRIM_ORDER,
     _find_reflection,
+    _fit_reflection,
     _holds_reflection_object,
+    _serialize_reflections,
     _should_continue,
     _utility,
 )
 from localmelo.melo.agent.options import ReflectionGate
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.schema import (
+    MAX_REFLECTION_CHARS,
     Message,
     ReflectionDecision,
     ReflectionEntry,
@@ -645,3 +651,183 @@ class TestUnreadableReflection:
                 "ending the run: Max attempts reached",
             ),
         ]
+
+
+# ── A reflection over the budget ────────────────────────────────────────────
+
+# How a serialized reflection starts after the first attempt.
+PREFIX = "[reflection] Attempt 0: "
+
+
+def _size(entry: ReflectionEntry) -> int:
+    return len(_serialize_reflections([entry])[0].content)
+
+
+def _lists(entry: ReflectionEntry) -> list[list[str]]:
+    return [getattr(entry, name) for name in REFLECTION_TRIM_ORDER]
+
+
+class TestFitReflection:
+    def test_the_trim_order(self) -> None:
+        assert REFLECTION_TRIM_ORDER == (
+            "failed_hypotheses",
+            "useful_evidence",
+            "recommended_avoids",
+            "next_promising_directions",
+        )
+
+    def test_an_entry_that_fits_is_returned_as_it_is(self) -> None:
+        entry = ReflectionEntry(summary="short", failed_hypotheses=["a"])
+        assert _fit_reflection(entry, _size(entry)) is entry
+
+    def test_items_go_from_the_end_of_each_list_in_turn(self) -> None:
+        entry = ReflectionEntry(
+            summary="tried both ways",
+            failed_hypotheses=["f1", "f2"],
+            useful_evidence=["e1", "e2"],
+            recommended_avoids=["a1", "a2"],
+            next_promising_directions=["d1", "d2"],
+        )
+        # Each limit is the size after one more item is dropped, so the
+        # trimming stops there and drops nothing more.
+        steps: list[tuple[list[str], list[str], list[str], list[str]]] = [
+            (["f1"], ["e1", "e2"], ["a1", "a2"], ["d1", "d2"]),
+            ([], ["e1", "e2"], ["a1", "a2"], ["d1", "d2"]),
+            ([], ["e1"], ["a1", "a2"], ["d1", "d2"]),
+            ([], [], ["a1", "a2"], ["d1", "d2"]),
+            ([], [], ["a1"], ["d1", "d2"]),
+            ([], [], [], ["d1", "d2"]),
+            ([], [], [], ["d1"]),
+            ([], [], [], []),
+        ]
+        for failed, evidence, avoids, directions in steps:
+            step = dataclasses.replace(
+                entry,
+                failed_hypotheses=failed,
+                useful_evidence=evidence,
+                recommended_avoids=avoids,
+                next_promising_directions=directions,
+            )
+            fitted = _fit_reflection(entry, _size(step))
+            assert _lists(fitted) == [failed, evidence, avoids, directions]
+            assert fitted.summary == entry.summary
+        # The entry itself is not changed.
+        assert _lists(entry) == [["f1", "f2"], ["e1", "e2"], ["a1", "a2"], ["d1", "d2"]]
+
+    @pytest.mark.parametrize(
+        ("room", "summary"),
+        [(12, "the quick…"), (10, "the quick…"), (9, "the…")],
+        ids=["inside_a_word", "after_a_word", "inside_the_second_word"],
+    )
+    def test_then_the_summary_is_cut_at_a_word_boundary(
+        self, room: int, summary: str
+    ) -> None:
+        entry = ReflectionEntry(
+            summary="the quick brown fox",
+            failed_hypotheses=["f"],
+            next_promising_directions=["d"],
+        )
+        fitted = _fit_reflection(entry, len(PREFIX) + room)
+        assert (fitted.summary, _lists(fitted)) == (summary, [[], [], [], []])
+        assert _size(fitted) <= len(PREFIX) + room
+
+    def test_a_summary_of_one_word_is_cut_where_the_limit_falls(self) -> None:
+        entry = ReflectionEntry(summary="x" * 3_000)
+        fitted = _fit_reflection(entry, MAX_REFLECTION_CHARS)
+        assert fitted.summary == "x" * (MAX_REFLECTION_CHARS - len(PREFIX) - 1) + "…"
+        assert _size(fitted) == MAX_REFLECTION_CHARS
+
+    def test_the_fields_it_does_not_serialize_are_kept(self) -> None:
+        entry = ReflectionEntry(
+            attempt_id=2,
+            summary="so far " * 500,
+            disproven_actions=["echo z"],
+            unresolved_questions=["why"],
+            failure_type="stuck",
+            confidence=0.4,
+        )
+        fitted = _fit_reflection(entry, MAX_REFLECTION_CHARS)
+        assert fitted.summary.endswith("so far…")
+        assert dataclasses.replace(fitted, summary=entry.summary) == entry
+
+
+def _bulky(action: str, **fields: Any) -> dict[str, Any]:
+    """A decision whose entry serializes to about 2,500 characters."""
+    return _decision(
+        action,
+        summary="Tried echo on every input.",
+        failed_hypotheses=[f"hypothesis {i}: " + "f" * 280 for i in range(5)],
+        useful_evidence=[f"evidence {i}: " + "e" * 200 for i in range(4)],
+        recommended_avoids=["echo a again", "echo b again"],
+        next_promising_directions=["echo c", "echo d"],
+        **fields,
+    )
+
+
+def _parsed_size(data: dict[str, Any]) -> int:
+    """The serialized size of the reflection that *data* gives after attempt 0."""
+    entry, _ = Agent._parse_reflection(json.dumps(data), 0, "budget")
+    return _size(entry)
+
+
+class TestOverBudget:
+    def test_the_bulky_reflection_is_about_2500_characters(self) -> None:
+        assert 2_400 <= _parsed_size(_bulky("continue")) <= 2_600
+
+    @pytest.mark.asyncio
+    async def test_flags_trim_a_continue_and_start_the_next_attempt(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        data = _bulky("continue")
+        llm = FakeLLM([_echo_call("a"), _answer(json.dumps(data)), _answer("42")])
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=3)
+        added = _added_reflections(agent, monkeypatch)
+        result = await agent.run_task("echo the answer")
+        assert (result.status, result.result, result.attempts) == ("completed", "42", 2)
+        [stored] = added
+        assert _size(stored) <= MAX_REFLECTION_CHARS
+        # Hypotheses from the end made the room; the rest is whole.
+        kept = len(stored.failed_hypotheses)
+        assert 0 < kept < len(data["failed_hypotheses"])
+        assert stored.failed_hypotheses == data["failed_hypotheses"][:kept]
+        assert stored.summary == data["summary"]
+        for name in REFLECTION_TRIM_ORDER[1:]:
+            assert getattr(stored, name) == data[name]
+        # The next attempt plans with the trimmed reflection.
+        assert "\n  Try: echo c; echo d" in _planning_systems(llm)[-1]
+
+    @pytest.mark.asyncio
+    async def test_utility_stops_a_continue_with_the_budget_note(self) -> None:
+        data = _bulky("continue", rationale="run the tests")
+        llm = FakeLLM([_echo_call("a"), _answer(json.dumps(data))])
+        agent = _agent(
+            llm, steps_per_attempt=1, max_attempts=3, reflection_gate="utility"
+        )
+        result = await agent.run_task("echo the answer")
+        note = f"(reflection budget exceeded: {_parsed_size(data)} > 2000)"
+        assert (result.status, result.error) == (
+            "gate_stopped",
+            f"run the tests {note}",
+        )
+        assert result.attempts == 1
+
+    @pytest.mark.asyncio
+    async def test_flags_trim_a_done_and_keep_its_answer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        embedding = FakeEmbedding()
+        data = _bulky("done", best_effort_result="42")
+        llm = FakeLLM([_echo_call("a"), _answer(json.dumps(data))])
+        agent = _agent(llm, embedding=embedding, steps_per_attempt=1, max_attempts=3)
+        added = _added_reflections(agent, monkeypatch)
+        result = await agent.run_task("echo the answer")
+        assert (result.status, result.result, result.error) == ("completed", "42", "")
+        [stored] = added
+        assert _size(stored) <= MAX_REFLECTION_CHARS
+        # Long-term memory receives the trimmed copy, never what it dropped.
+        dropped = data["failed_hypotheses"][len(stored.failed_hypotheses) :]
+        assert dropped
+        assert any(
+            t.startswith(f"Attempt 0: {data['summary']}") for t in embedding.texts
+        )
+        assert _never_embedded(embedding, *dropped)

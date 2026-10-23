@@ -223,6 +223,68 @@ def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
     return [Message(role="system", content="\n".join(parts))]
 
 
+# The lists of a reflection entry that _fit_reflection empties, in this
+# order and each from its end, until the entry fits its budget.
+REFLECTION_TRIM_ORDER = (
+    "failed_hypotheses",
+    "useful_evidence",
+    "recommended_avoids",
+    "next_promising_directions",
+)
+
+
+def _reflection_size(entry: ReflectionEntry) -> int:
+    """Characters of *entry* as :func:`_serialize_reflections` writes it."""
+    return len(_serialize_reflections([entry])[0].content)
+
+
+def _shorten(text: str, width: int) -> str:
+    """*text* in at most *width* characters, cut at a word boundary, ending in "…".
+
+    Text that fits is returned as it is. When the cut falls inside the
+    first word, there is no boundary to go back to, and the text is cut
+    where *width* falls.
+    """
+    if len(text) <= width:
+        return text
+    if width < 1:
+        return ""
+    head = text[: width - 1]
+    if not text[len(head)].isspace():
+        # The cut falls inside a word: leave that word out.
+        words = head.rsplit(None, 1)
+        if len(words) == 2:
+            head = words[0]
+    return head.rstrip() + "…"
+
+
+def _fit_reflection(entry: ReflectionEntry, limit: int) -> ReflectionEntry:
+    """*entry*, trimmed until its serialized form fits in *limit* characters.
+
+    The serialized form is the one :func:`_serialize_reflections` writes.
+    Items are dropped from the end of each list of
+    :data:`REFLECTION_TRIM_ORDER` in turn (``failed_hypotheses`` first,
+    ``next_promising_directions`` last), one at a time and only until the
+    entry fits. When the lists are empty and it still does not fit, the
+    summary is shortened at a word boundary and ends with "…" (see
+    :func:`_shorten`). *entry* itself is not changed: one that fits is
+    returned as it is, any other as a trimmed copy.
+    """
+    if _reflection_size(entry) <= limit:
+        return entry
+    fitted = dataclasses.replace(entry)
+    for name in REFLECTION_TRIM_ORDER:
+        items = list(getattr(entry, name))  # a copy: entry keeps its own
+        setattr(fitted, name, items)
+        while items:
+            items.pop()
+            if _reflection_size(fitted) <= limit:
+                return fitted
+    room = limit - _reflection_size(dataclasses.replace(fitted, summary=""))
+    fitted.summary = _shorten(fitted.summary, room)
+    return fitted
+
+
 # Characters of a withheld tool result that stay visible to the model. A
 # result left less room than this in its turn is withheld, not cut.
 WITHHELD_PREVIEW_CHARS = 200
@@ -577,9 +639,11 @@ class Agent:
     built-in tools, memory and a run timeout; the defaults keep the
     behavior from before options existed, except that every step now
     offers all registered built-ins and runs only the tools it offered,
-    and that a reflection decides on its own checks whether the next
-    attempt starts (``reflection_gate="flags"``; ``"utility"`` keeps the
-    gate from before that option, see :meth:`_run_reflective_attempts`).
+    and that with ``reflection_gate="flags"`` a reflection decides on its
+    own checks whether the next attempt starts, a reply without a
+    reflection does not stop the run, and an over-long reflection is
+    trimmed (``"utility"`` keeps the behavior from before that option,
+    see :meth:`_run_reflective_attempts`).
     ``tool_providers`` supply further tools, for example those of MCP
     servers: the first run starts them and registers their tools next to
     the built-ins (see :meth:`_ensure_tools`), and :meth:`close` closes
@@ -1289,26 +1353,30 @@ class Agent:
         A reply that holds no reflection, often a tool call, is asked for
         once more, with the window's turns written out as text and
         :data:`REFLECTION_RETRY_NOTE` at the end (see :meth:`Chat.reflect`).
-        What counts as a reflection depends on ``reflection_gate``:
+        What counts as a reflection, and how one whose serialized form
+        exceeds :data:`MAX_REFLECTION_CHARS` is kept to that budget,
+        depends on ``reflection_gate``:
 
         - ``"flags"``: a JSON object with a valid ``recommended_action``
           (see :func:`_find_reflection`), so a reply whose only JSON is
           something else, such as a tool call written out as text, is
           asked for again too. When the second reply holds no reflection
           either, this returns ``None``: the boundary has no reflection
-          (see :meth:`_run_reflective_attempts`).
+          (see :meth:`_run_reflective_attempts`). A reflection over the
+          budget is trimmed to fit (see :func:`_fit_reflection`),
+          whatever its decision: the decision and its rationale stay the
+          model's, and its ``tried_memory`` is the trimmed entry.
         - ``"utility"``, the behavior from before that option: any JSON
           object (see :func:`_holds_reflection_object`). The second reply
           is parsed whatever it holds, so one that still has no object
-          falls back to ``stop`` (see :meth:`_parse_reflection`).
-
-        After parsing, enforce :data:`MAX_REFLECTION_CHARS`: if the
-        serialized form of the new reflection exceeds the budget, force
-        ``decision.recommended_action = "decompose"`` so the next attempt
-        does not start. The model is meant to keep the reflection compact
-        — when it cannot, the agent stops chasing instead of carrying an
-        ever-growing scratchpad. A ``done`` decision is left as it is: it
-        ends the run, so no attempt would carry the reflection.
+          falls back to ``stop`` (see :meth:`_parse_reflection`). A
+          reflection over the budget forces
+          ``decision.recommended_action = "decompose"``, with a note in
+          the rationale, so the next attempt does not start. The model is
+          meant to keep the reflection compact — when it cannot, the
+          agent stops chasing instead of carrying an ever-growing
+          scratchpad. A ``done`` decision is left as it is: it ends the
+          run, so no attempt would carry the reflection.
         """
         flags = self.options.reflection_gate == "flags"
         short_window = self.hippo.working.get_window()
@@ -1345,10 +1413,12 @@ class Agent:
             entry, decision = self._reflection_from_object(
                 data, attempt_id, failure_type
             )
-        else:
-            entry, decision = self._parse_reflection(
-                response.content, attempt_id, failure_type
-            )
+            entry = _fit_reflection(entry, MAX_REFLECTION_CHARS)
+            decision.tried_memory = entry
+            return entry, decision
+        entry, decision = self._parse_reflection(
+            response.content, attempt_id, failure_type
+        )
         serialized = _serialize_reflections([entry])
         size = serialized[0].content.__len__() if serialized else 0
         if size > MAX_REFLECTION_CHARS and decision.recommended_action != "done":
@@ -1869,6 +1939,11 @@ class Agent:
         reply in this run as the result. One INFO line names the attempt.
         With ``"utility"`` such a reply reads ``stop`` (see
         :meth:`_parse_reflection`) and is kept as the reflection.
+
+        A reflection over :data:`MAX_REFLECTION_CHARS` keeps its decision
+        with ``"flags"`` and is trimmed to fit before it is kept; with
+        ``"utility"`` its decision becomes ``decompose``, which the gate
+        stops (see :meth:`_do_reflect`).
         """
         opts = self.options
         total_steps = 0
