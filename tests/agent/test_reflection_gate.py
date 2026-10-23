@@ -37,6 +37,7 @@ from localmelo.melo.schema import (
     Message,
     ReflectionDecision,
     ReflectionEntry,
+    TaskRecord,
     ToolCall,
     ToolDef,
 )
@@ -801,6 +802,42 @@ class TestOverBudget:
             assert getattr(stored, name) == data[name]
         # The next attempt plans with the trimmed reflection.
         assert "\n  Try: echo c; echo d" in _planning_systems(llm)[-1]
+
+    @pytest.mark.asyncio
+    async def test_flags_point_the_decision_at_the_trimmed_entry(self) -> None:
+        data = _bulky("continue", rationale="run the tests")
+        agent = _agent(FakeLLM([_answer(json.dumps(data))]))
+        reflection = await agent._do_reflect(
+            TaskRecord(query="echo the answer"), 0, "budget"
+        )
+        assert reflection is not None
+        entry, decision = reflection
+        assert _size(entry) <= MAX_REFLECTION_CHARS < _parsed_size(data)
+        assert decision.tried_memory is entry
+        # The decision is the model's own, rationale and all.
+        assert (decision.recommended_action, decision.rationale) == (
+            "continue",
+            "run the tests",
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", ["stop", "decompose"])
+    async def test_flags_keep_the_rationale_of_a_trimmed_reflection(
+        self, action: str
+    ) -> None:
+        data = _bulky(action, rationale="nope", best_effort_result="7")
+        assert _parsed_size(data) > MAX_REFLECTION_CHARS
+        llm = FakeLLM([_echo_call("a"), _answer(json.dumps(data))])
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=3)
+        result = await agent.run_task("echo the answer")
+        # The gate stops the run with the model's rationale, and no budget
+        # note is added to it.
+        assert (result.status, result.result, result.error) == (
+            "gate_stopped",
+            "7",
+            "nope",
+        )
+        assert result.attempts == 1
 
     @pytest.mark.asyncio
     async def test_utility_stops_a_continue_with_the_budget_note(self) -> None:
