@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from typing import Any
 
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
@@ -225,16 +226,32 @@ class Hippo:
     # ── Level 2: Tool Resolution (BM25 over registry) ──
 
     def resolve_tools(
-        self, query: str, hints: list[str] | None = None
+        self,
+        query: str,
+        hints: list[str] | None = None,
+        *,
+        exclude: Collection[str] = (),
     ) -> list[ToolDef]:
+        """Return the registered tools that *hints* name, then BM25's matches.
+
+        The hinted tools come first, in hint order. Then come the best
+        ``tool_search_top_k`` matches of a BM25 search over *query*, less
+        the ones hinted already. The tools named in *exclude* take no part:
+        no hint resolves to them, and the search ranks the other tools
+        among themselves.
+        """
         results: dict[str, ToolDef] = {}
 
         for name in hints or []:
+            if name in exclude:
+                continue
             td = self.tools.get(name)
             if td:
                 results[td.name] = td
 
-        for td in self.tools.search(query, top_k=self._tool_search_top_k):
+        for td in self.tools.search(
+            query, top_k=self._tool_search_top_k, exclude=exclude
+        ):
             if td.name not in results:
                 results[td.name] = td
 
