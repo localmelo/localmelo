@@ -230,6 +230,16 @@ class TestExecutorRequest:
         assert not result.allowed
         assert "mismatch" in result.reason
 
+    def test_command_that_is_not_text_rejected(self) -> None:
+        req = ExecutorRequest(
+            tool_name="shell_exec",
+            arguments={"command": ["rm", "-rf", "/"]},
+            tool_def_name="shell_exec",
+        )
+        result = validate_executor_request(req)
+        assert not result.allowed
+        assert result.reason == "shell_exec command must be a string"
+
     def test_blocked_shell_command(self) -> None:
         req = ExecutorRequest(
             tool_name="shell_exec",
@@ -508,6 +518,16 @@ class TestAsyncBoundaryChecks:
         tc = ToolCall(tool_name="shell_exec", arguments={"command": "ls -la"})
         result = await checker.pre_execute(tc, td)
         assert result.allowed
+
+    @pytest.mark.asyncio
+    async def test_pre_execute_refuses_a_command_that_is_not_text(
+        self, checker: Checker
+    ) -> None:
+        td = ToolDef(name="shell_exec", description="", parameters={})
+        tc = ToolCall(tool_name="shell_exec", arguments={"command": ["rm", "-rf", "/"]})
+        result = await checker.pre_execute(tc, td)
+        assert not result.allowed
+        assert result.reason == "shell_exec command must be a string"
 
     @pytest.mark.asyncio
     async def test_pre_execute_unknown_tool(self, checker: Checker) -> None:

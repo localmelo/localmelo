@@ -165,6 +165,10 @@ def validate_executor_request(request: ExecutorRequest) -> ValidationResult:
     # Block dangerous shell commands
     if request.tool_name == "shell_exec":
         cmd = request.arguments.get("command", "")
+        if not isinstance(cmd, str):
+            return ValidationResult(
+                allowed=False, reason="shell_exec command must be a string"
+            )
         for pattern in _BLOCKED_RE:
             if pattern.search(cmd):
                 return ValidationResult(

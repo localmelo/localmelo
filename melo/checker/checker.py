@@ -73,6 +73,10 @@ class Checker:
         # check dangerous shell commands
         if tool_call.tool_name == "shell_exec":
             cmd = tool_call.arguments.get("command", "")
+            if not isinstance(cmd, str):
+                return CheckResult(
+                    allowed=False, reason="shell_exec command must be a string"
+                )
             for pattern in self._blocked:
                 if pattern.search(cmd):
                     return CheckResult(
