@@ -91,15 +91,19 @@ Every key of a server entry:
 | `include_tools` | all tools | Register only these tools, by the names the server uses. |
 | `disabled` | `false` | `true` skips the server. |
 
-- `servers` is accepted in place of `mcpServers`. Other keys are ignored, so
-  files written for other MCP clients still load.
-- Only stdio servers work. An entry with a `url` and no `command` is a usage
-  error: `'command' must be a non-empty string (HTTP/SSE servers are not supported)`.
+- `servers` is accepted in place of `mcpServers`. Other keys are ignored,
+  except `type` (or `transport`): when present, it must be `stdio`.
+- Only stdio servers work. Any other `type` is a usage error, such as
+  `only stdio servers are supported (got type 'sse')`. So is an entry with a
+  `url` and no `command`:
+  `'command' must be a non-empty string (HTTP/SSE servers are not supported)`.
 - A server does not inherit your environment. It gets `HOME`, `LOGNAME`,
   `PATH`, `SHELL`, `TERM`, `USER`, `LANG`, `LC_ALL`, `LC_CTYPE` and
   `TMPDIR`, plus its `env`.
 - Tools are named `mcp__<server>__<tool>`. Characters other than letters,
-  digits, `_` and `-` become `_`, and names are cut to 64 characters.
+  digits, `_` and `-` become `_`. Names longer than 64 characters are
+  shortened to 64 and end with a short hash; `config.tools` in the JSON line
+  shows the names used.
 - The servers start when the run starts. A server that cannot start ends the
   run with status `setup_error`, for example
   `MCP server 'notes' exited (code 1)`.

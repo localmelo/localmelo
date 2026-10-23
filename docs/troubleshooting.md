@@ -13,9 +13,8 @@ the JSON line.
 ModuleNotFoundError: No module named 'localmelo'
 ```
 
-- **Cause:** the clone's directory is not named `localmelo` (for example, a
-  ZIP download unpacked as `localmelo-main`), or pip installed it without
-  `-e`.
+- **Cause:** the clone's directory is not named `localmelo`, for example a
+  renamed folder or a ZIP download unpacked as `localmelo-main`.
 - **Fix:** rename the directory to `localmelo` and install again, as in
   [Install](quickstart.md#install).
 
@@ -135,10 +134,10 @@ melo: run ended with status provider_error: POST /chat/completions failed: Conne
 melo: run ended with status provider_error: POST /chat/completions failed with HTTP 404: …
 ```
 
-- **Cause:** the server answered with an error; the start of its answer
-  follows the status. 404 usually means a wrong URL: with `--base-url`,
-  include the `/v1` part. 400 often means a wrong model name. 500 is an
-  error in the server or in a proxy in front of it.
+- **Cause:** the server answered with an error status, and the start of its
+  answer follows it. 404 means a wrong URL (with `--base-url`, include the
+  `/v1` part) or a model that the server does not have; the answer usually
+  says which. 500 is an error in the server or in a proxy in front of it.
 - **Fix:** check the URL and the model name; `GET /v1/models` lists the
   models.
 
@@ -281,10 +280,17 @@ melo: run ended with status setup_error: Cannot start MCP server 'notes' (my-not
 ### HTTP/SSE servers are not supported
 
 ```text
+melo: error: mcp.json: server 'docs': only stdio servers are supported (got type 'sse')
+```
+
+or, for an entry without `type`:
+
+```text
 melo: error: mcp.json: server 'docs': 'command' must be a non-empty string (HTTP/SSE servers are not supported)
 ```
 
-- **Cause:** the entry describes an HTTP or SSE server (it has a `url`).
+- **Cause:** the entry describes an HTTP or SSE server: its `type` (or
+  `transport`) is not `stdio`, or it has a `url` and no `command`.
   localmelo supports stdio servers only.
 - **Fix:** use the server's stdio mode, if it has one.
 

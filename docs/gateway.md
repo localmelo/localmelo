@@ -82,8 +82,8 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 |---|---|---|
 | 200 | `{"result": "…", "session_id": "…"}` | The run ended, whatever its status. |
 | 400 | `{"error": "…"}` | The query is empty or too long, or the `session_id` is not valid. |
-| 409 | `{"error": "…", "session_id": "…"}` | The session was closed while the request waited for it. |
-| 422 | `{"detail": […]}` | The body is not valid JSON. |
+| 409 | `{"error": "…", "session_id": "…"}` | Rare: the session was closed just before this request could start. |
+| 422 | `{"detail": […]}` | The body is not a JSON object. |
 | 500 | `{"error": "…", "session_id": "…"}` | An unexpected error in the gateway. |
 
 The 400 errors read `Query must be a non-empty string`,
@@ -122,6 +122,12 @@ curl -X DELETE http://127.0.0.1:8401/v1/sessions/demo123
 
 The answer is HTTP 200 with `{"closed": "demo123"}`, or HTTP 404 with
 `{"error": "session not found"}`.
+
+Closing a busy session closes its agent: the running task and any request
+waiting for the session end as `crashed`, still with HTTP 200 and the result
+`[crashed] RuntimeError: Cannot send a request, as the client has been closed.`
+Close only idle sessions; `is_busy` in [GET /v1/sessions](#get-v1sessions)
+shows which ones are busy.
 
 ## Sessions
 
@@ -176,7 +182,7 @@ melo --daemon uninstall
 - `install` writes `~/Library/LaunchAgents/ai.localmelo.gateway.plist` and
   loads it. launchd then runs `<python> -m localmelo --serve --port 8401`
   with the Python of your environment, starts it at login, and restarts it
-  about 3 seconds after it exits.
+  whenever it exits (at most once every 3 seconds).
 - `install --port N` uses another port. The address is `[gateway] host` from
   the config file; `--host` is ignored.
 - Logs go to `~/.localmelo/logs/gateway.stdout.log` and

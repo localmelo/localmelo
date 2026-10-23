@@ -70,19 +70,13 @@ tools that match the task or the conversation. See
 
 ## Memory in the loop
 
-- **Working memory** holds the conversation of the run, or of a gateway
-  session: the last 20 messages. A tool call always stays together with its
-  results. A planning prompt may hold up to 100,000 characters; when it would
-  hold more, the oldest turns are dropped first. One turn of tool calls and
-  results may use up to 50,000 characters, and longer results are cut.
-- **Long-term memory** needs an embedding backend. On each step, the 5
-  entries closest to the task are recalled into the prompt. After each tool
-  call, a short summary of the step is written to long-term memory, and when
-  the run ends, its latest reflection is too.
-- **History** records every task and step, in full. The agent does not read
-  it back during a run.
-
-See [Memory](memory.md) for where each one is stored.
+On each step, the planning request includes the recent conversation from
+working memory and, with an embedding backend, the long-term memories closest
+to the task. After each tool call, the step is recorded in history and, with
+an embedding backend, summarized into long-term memory, which also receives
+the run's latest reflection when the run ends. See
+[How memory works](memory.md#how-memory-works) for the limits and the exact
+behavior.
 
 ## Timeouts
 

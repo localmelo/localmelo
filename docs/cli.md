@@ -83,6 +83,8 @@ These options apply to a task run without `--serve`.
   `--base-url` it is 120 seconds, also for an Ollama `/v1` URL. It does not
   change the config file. See
   [Chat request timeout](configuration.md#chat-request-timeout).
+- `--embedding-base-url` is also used exactly as given: include `/v1`, as in
+  `http://127.0.0.1:11434/v1`.
 - `--embedding-base-url` needs `--base-url`, and `--embedding-model` needs
   `--embedding-base-url`. Without `--base-url`, the configured embedding
   backend is used.

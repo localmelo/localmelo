@@ -84,7 +84,7 @@
             </a>
             <a class="node" id="n-executor" href="#c-executor" style="left:215px;top:250px;width:160px">
               <span class="node-title">执行器</span>
-              <span class="node-sub">内置工具和 MCP 工具<br>运行时限</span>
+              <span class="node-sub">内置工具和 MCP 工具<br>时间限制</span>
             </a>
             <a class="node" id="n-memory" href="#c-memory" style="left:395px;top:250px;width:160px">
               <span class="node-title">记忆</span>
@@ -155,7 +155,7 @@
         <p>关键文件：<code>melo/checker/checker.py</code>、<code>validators.py</code>、<code>payloads.py</code>。</p>
 
         <h3 id="c-executor">执行器</h3>
-        <p>按顺序运行一步中的工具调用。以下调用会被拒绝：本步没有提供的工具、参数不是 JSON 对象的调用，以及内置工具参数类型不对的调用；剩下的每个调用再交给检查器检查。每个工具都有运行时限：<code>shell_exec</code> 30 秒，<code>file_read</code> 和 <code>file_write</code> 60 秒，MCP 工具使用其服务器的 <code>timeout</code>。<code>python_exec</code> 的代码在 localmelo 进程内运行，无法中断。拒绝、超时或出错都会作为工具的错误返回。</p>
+        <p>按顺序运行一步中的工具调用。以下调用会被拒绝：本步没有提供的工具、参数不是 JSON 对象的调用，以及内置工具参数类型不对的调用；剩下的每个调用再交给检查器检查。每个工具都有时间限制：<code>shell_exec</code> 30 秒，<code>file_read</code> 和 <code>file_write</code> 60 秒，MCP 工具使用其服务器的 <code>timeout</code>。<code>python_exec</code> 的代码在 localmelo 进程内运行，无法中断。拒绝、超时或出错都会作为工具的错误返回。</p>
         <p>四个内置工具是 <code>shell_exec</code>、<code>python_exec</code>、<code>file_read</code> 和 <code>file_write</code>。<code>policy.py</code> 可以把文件工具限制在一个目录中，但智能体没有启用它：文件工具可以访问你能访问的任何文件。</p>
         <p>关键文件：<code>melo/executor/executor.py</code>、<code>builtins.py</code>、<code>policy.py</code>。</p>
 

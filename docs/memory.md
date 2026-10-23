@@ -185,7 +185,7 @@ that directory instead.
 - One turn of tool calls and results may use up to 50,000 characters. A
   longer result is cut and ends with `... [truncated: <n> more characters]`;
   a result left less than 200 characters is replaced by a short notice.
-  History keeps the full result.
+  History keeps the result as the tool returned it, up to 50,000 characters.
 
 **Long-term memory** needs an embedding backend:
 
