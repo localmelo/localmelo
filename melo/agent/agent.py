@@ -12,7 +12,7 @@ from collections.abc import Collection, Iterable, Sequence
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.agent._chat import Chat, RequestStats, lacks_task_query
-from localmelo.melo.agent.options import AgentOptions
+from localmelo.melo.agent.options import AgentOptions, ReflectionGate
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
     ExecutorResultPayload,
@@ -364,14 +364,36 @@ def _within_turn_budget(
 # again (see Agent._run_attempt).
 MAX_EMPTY_REPLIES = 2
 
+# The utility (see _utility) that reflection_gate="utility" requires for
+# the next attempt to start.
 CONTINUATION_UTILITY_THRESHOLD = 0.1
 
 
-def _should_continue(decision: ReflectionDecision) -> bool:
-    """Active-learning style continuation gate.
+def _utility(decision: ReflectionDecision) -> float:
+    """The utility of another attempt, from the reflection's own estimates.
 
-    Computes a lightweight utility score and checks structured signals.
-    Returns True only if all conditions suggest another attempt is worthwhile.
+    ``estimated_info_gain * feasibility * novelty - estimated_cost -
+    repeat_risk``, each a number in [0, 1] that the model chose. Only
+    ``reflection_gate="utility"`` acts on it (see :func:`_should_continue`).
+    """
+    return (
+        decision.estimated_info_gain * decision.feasibility * decision.novelty
+        - decision.estimated_cost
+        - decision.repeat_risk
+    )
+
+
+def _should_continue(
+    decision: ReflectionDecision, gate: ReflectionGate = "flags"
+) -> bool:
+    """Whether the next attempt starts after a reflection's *decision*.
+
+    With either *gate* (see ``AgentOptions.reflection_gate``), only when
+    the decision is ``continue`` and its three checks hold:
+    ``task_still_feasible``, ``next_step_is_concrete`` and
+    ``next_step_is_novel``. ``"flags"`` asks nothing more. ``"utility"``,
+    the gate from before that option, also requires :func:`_utility` to
+    reach :data:`CONTINUATION_UTILITY_THRESHOLD`.
     """
     if decision.recommended_action != "continue":
         return False
@@ -381,13 +403,9 @@ def _should_continue(decision: ReflectionDecision) -> bool:
         return False
     if not decision.next_step_is_novel:
         return False
-
-    utility = (
-        decision.estimated_info_gain * decision.feasibility * decision.novelty
-        - decision.estimated_cost
-        - decision.repeat_risk
-    )
-    return utility >= CONTINUATION_UTILITY_THRESHOLD
+    if gate == "utility":
+        return _utility(decision) >= CONTINUATION_UTILITY_THRESHOLD
+    return True
 
 
 def _providers_from_config(
@@ -514,10 +532,13 @@ class Agent:
         agent = Agent(llm=my_llm_provider, embedding=my_emb_provider)
 
     Either mode takes ``options=AgentOptions(...)`` to set step budgets,
-    the attempt policy, tool exposure, the built-in tools, memory and a
-    run timeout; the defaults keep the behavior from before options
-    existed, except that every step now offers all registered built-ins
-    and runs only the tools it offered.
+    the attempt policy and its reflection gate, tool exposure, the
+    built-in tools, memory and a run timeout; the defaults keep the
+    behavior from before options existed, except that every step now
+    offers all registered built-ins and runs only the tools it offered,
+    and that a reflection decides on its own checks whether the next
+    attempt starts (``reflection_gate="flags"``; ``"utility"`` keeps the
+    gate from before that option, see :meth:`_run_reflective_attempts`).
     ``tool_providers`` supply further tools, for example those of MCP
     servers: the first run starts them and registers their tools next to
     the built-ins (see :meth:`_ensure_tools`), and :meth:`close` closes
@@ -1713,6 +1734,7 @@ class Agent:
             "attempt_policy": opts.attempt_policy,
             "steps_per_attempt": opts.steps_per_attempt,
             "max_attempts": opts.max_attempts,
+            "reflection_gate": opts.reflection_gate,
             "tool_exposure": opts.tool_exposure,
             "builtins": sorted(builtins),
             "memory": opts.memory,
@@ -1741,10 +1763,17 @@ class Agent:
           as ``budget_exhausted``, with its ``best_effort_result`` as the
           result.
         - Otherwise the continuation gate (:func:`_should_continue`)
-          decides. A gate that stops the run ends it as ``gate_stopped``,
-          with the ``best_effort_result`` as the result and the decision's
-          rationale as the error, or ``Stopped after attempt <n>`` (``n``
-          counting from 1) when the rationale is blank.
+          decides, as ``reflection_gate`` says. With ``"flags"`` the next
+          attempt starts when the decision is ``continue`` and its three
+          checks hold (``task_still_feasible``, ``next_step_is_concrete``
+          and ``next_step_is_novel``). ``"utility"``, the gate from before
+          that option, also requires the utility computed from the
+          decision's own estimates (:func:`_utility`) to reach
+          :data:`CONTINUATION_UTILITY_THRESHOLD`. A gate that stops the
+          run ends it as ``gate_stopped``, with the ``best_effort_result``
+          as the result and the decision's rationale as the error, or
+          ``Stopped after attempt <n>`` (``n`` counting from 1) when the
+          rationale is blank.
         """
         opts = self.options
         total_steps = 0
@@ -1780,7 +1809,7 @@ class Agent:
             if out_of:
                 run.end("budget_exhausted", result=best_effort, error=out_of)
                 return
-            if not _should_continue(decision):
+            if not _should_continue(decision, opts.reflection_gate):
                 stopped = f"Stopped after attempt {run.attempts}"
                 run.end(
                     "gate_stopped",

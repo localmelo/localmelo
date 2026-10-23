@@ -237,7 +237,7 @@ class TestGateStopped:
 
     @pytest.mark.asyncio
     async def test_a_continue_the_gate_refuses_stops_too(self) -> None:
-        reply = _reflection("continue", estimated_info_gain=0.0, rationale="meh")
+        reply = _reflection("continue", next_step_is_novel=False, rationale="meh")
         agent = _agent(FakeLLM([_echo_call("a"), reply]), steps_per_attempt=1)
         result = await agent.run_task("echo the answer")
         assert (result.status, result.error) == ("gate_stopped", "meh")

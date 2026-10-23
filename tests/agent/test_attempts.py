@@ -520,7 +520,7 @@ class TestUtilityContinuationGate:
         )
         assert _should_continue(decision) is True
 
-    def test_low_utility_blocks_continue(self) -> None:
+    def test_low_utility_blocks_continue_under_utility(self) -> None:
         from localmelo.melo.agent.agent import _should_continue
 
         decision = ReflectionDecision(
@@ -534,7 +534,9 @@ class TestUtilityContinuationGate:
             estimated_cost=0.5,
             repeat_risk=0.5,
         )
-        assert _should_continue(decision) is False
+        assert _should_continue(decision, "utility") is False
+        # The default gate, "flags", looks only at the action and the checks.
+        assert _should_continue(decision) is True
 
     def test_stop_action_always_blocks(self) -> None:
         from localmelo.melo.agent.agent import _should_continue
@@ -580,8 +582,14 @@ class TestUtilityContinuationGate:
 
     @pytest.mark.asyncio
     async def test_utility_blocks_continuation_in_loop(self) -> None:
-        """Even with recommended_action=continue, low utility stops the loop."""
-        options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
+        """Under reflection_gate="utility", low utility stops the loop even
+        with recommended_action=continue."""
+        options = AgentOptions(
+            steps_per_attempt=1,
+            max_attempts=3,
+            max_steps=10,
+            reflection_gate="utility",
+        )
 
         llm = FakeLLM()
         llm.enqueue(
