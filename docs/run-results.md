@@ -29,16 +29,25 @@ Details:
   an empty reply: localmelo asks the model to continue and plans again, and
   the step counts. Two empty replies in a row end the run with the error
   `empty replies`.
-- **`gate_stopped`.** The reflection chose to stop, its decision to continue
-  did not pass the continuation gate, or its reply could not be read.
-  `result` holds the reflection's best effort, if any, and `error` its
-  reason, or `Stopped after attempt <n>` when it gave none.
-- **Unreadable reflections.** A reflection reply without a JSON object is
-  asked for once more, without tools: the attempt's turns are written out as
-  text, and a closing line asks for the JSON object only. A second such reply
-  counts as a decision to stop: the run ends as `gate_stopped` with the error
-  `Could not parse reflection response`, or as `budget_exhausted` when no
-  attempt was left anyway. Both requests count in `n_aux`.
+- **`gate_stopped`.** The reflection chose `stop` or `decompose`, or its
+  decision to continue did not pass the continuation gate (see
+  [Reflection](how-it-works.md#reflection)). `result` holds the reflection's
+  best effort, if any, and `error` its reason, or `Stopped after attempt <n>`
+  when it gave none. With `--reflection-gate utility`, an unreadable
+  reflection stops the run too, and so does one over the size limit unless
+  it chose `done`.
+- **Unreadable reflections.** A reflection reply is readable when it holds a
+  JSON object whose `recommended_action` is `done`, `continue`, `stop` or
+  `decompose`; other JSON, such as a tool call written out as text, does not
+  count. An unreadable reply is asked for once more, without tools: the
+  attempt's turns are written out as text, and a closing line asks for the
+  JSON object only. Both requests count in `n_aux`. When the second reply is
+  unreadable too, nothing of it is kept and the next attempt starts. If none
+  can start, the run ends as `budget_exhausted`, with the latest text the
+  model wrote in the run as `result`. With `--reflection-gate utility`, any
+  JSON object counts as readable, and a second reply without one ends the
+  run as `gate_stopped` with the error `Could not parse reflection response`,
+  or as `budget_exhausted` when no attempt was left anyway.
 - **`budget_exhausted`.** The error is `Max steps reached` or
   `Max attempts reached`. With `--attempt-policy reflect`, a last reflection
   can still choose `done`; otherwise its best effort becomes `result`.
@@ -88,7 +97,7 @@ continuation gate.
 
 | Key | Meaning |
 |---|---|
-| `max_steps`, `attempt_policy`, `steps_per_attempt`, `max_attempts`, `tool_exposure`, `memory`, `timeout_s` | The run options. `timeout_s` is `null` when no time limit is set. |
+| `max_steps`, `attempt_policy`, `steps_per_attempt`, `max_attempts`, `reflection_gate`, `tool_exposure`, `memory`, `timeout_s` | The run options. `timeout_s` is `null` when no time limit is set. |
 | `builtins` | The registered built-in tools, sorted by name. |
 | `memory_dir` | The directory of the SQLite files, or `null` when memory stays in RAM. |
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |

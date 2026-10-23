@@ -11,6 +11,7 @@ from localmelo.melo.executor.builtins import builtin_names
 from localmelo.melo.schema import MAX_AGENT_STEPS, MAX_ATTEMPTS, STEPS_PER_ATTEMPT
 
 AttemptPolicy = Literal["reflect", "none"]
+ReflectionGate = Literal["flags", "utility"]
 ToolExposure = Literal["retrieve", "all"]
 
 
@@ -37,8 +38,10 @@ class AgentOptions:
 
     The defaults match the agent's behavior from before these options
     existed, except that every step now offers all registered built-ins
-    and runs only the tools it offered (see ``tool_exposure``). An
-    invalid value raises ``ValueError`` naming the field.
+    and runs only the tools it offered (see ``tool_exposure``), and that
+    a reflection decides on its own checks whether the next attempt
+    starts (see ``reflection_gate``). An invalid value raises
+    ``ValueError`` naming the field.
 
     - ``max_steps``: cap on planning calls for the whole run.
     - ``attempt_policy``: ``"reflect"`` runs attempts of at most
@@ -46,6 +49,19 @@ class AgentOptions:
       reflection after each attempt that runs out of steps or gets stuck;
       ``"none"`` runs one attempt with budget ``max_steps`` and makes no
       reflection calls.
+    - ``reflection_gate``: how a reflection decides whether the next
+      attempt starts; it matters only with ``attempt_policy="reflect"``.
+      ``"flags"`` starts it when the reflection chooses ``continue`` and
+      its three checks hold (``task_still_feasible``,
+      ``next_step_is_concrete`` and ``next_step_is_novel``). A reply that
+      holds no reflection, also when asked again, starts it too when one
+      can start, and is not kept; a reflection over
+      ``MAX_REFLECTION_CHARS`` keeps its decision and is trimmed to fit.
+      ``"utility"``, the behavior from before this option, also requires
+      the utility score computed from the reflection's own estimates to
+      reach 0.1; a reply without a reflection reads as ``stop``, and a
+      reflection over the budget as ``decompose``, unless it chooses
+      ``done``, which ends the run as it is.
     - ``tool_exposure``: ``"retrieve"`` offers, on every step, each
       registered built-in, sorted by name, then the other tools (provided
       tools, such as MCP tools) that hint extraction and BM25 resolve for
@@ -74,6 +90,7 @@ class AgentOptions:
     attempt_policy: AttemptPolicy = "reflect"
     steps_per_attempt: int = STEPS_PER_ATTEMPT
     max_attempts: int = MAX_ATTEMPTS
+    reflection_gate: ReflectionGate = "flags"
     tool_exposure: ToolExposure = "retrieve"
     builtins: frozenset[str] | None = None
     memory: bool = True
@@ -88,6 +105,7 @@ class AgentOptions:
 
         for name, allowed in (
             ("attempt_policy", get_args(AttemptPolicy)),
+            ("reflection_gate", get_args(ReflectionGate)),
             ("tool_exposure", get_args(ToolExposure)),
         ):
             value = getattr(self, name)

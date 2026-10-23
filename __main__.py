@@ -50,6 +50,7 @@ STATUS_LINE_ERROR_CHARS = 500
 _DIRECT_FLAGS = {
     "max_steps": "--max-steps",
     "attempt_policy": "--attempt-policy",
+    "reflection_gate": "--reflection-gate",
     "tool_exposure": "--tool-exposure",
     "builtins": "--builtins",
     "mcp_config": "--mcp-config",
@@ -493,6 +494,8 @@ def _direct_options(
         fields["max_steps"] = args.max_steps
     if args.attempt_policy is not None:
         fields["attempt_policy"] = args.attempt_policy
+    if args.reflection_gate is not None:
+        fields["reflection_gate"] = args.reflection_gate
     if args.tool_exposure is not None:
         fields["tool_exposure"] = args.tool_exposure
     if args.builtins is not None:
@@ -557,6 +560,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--attempt-policy",
         choices=["reflect", "none"],
         help="Reflect between attempts (default), or run one attempt",
+    )
+    direct.add_argument(
+        "--reflection-gate",
+        choices=["flags", "utility"],
+        help="After a reflection, start the next attempt when it chooses continue "
+        "and its three checks hold (flags, default), or also require its utility "
+        "score to reach 0.1 (utility, the behavior before this option)",
     )
     direct.add_argument(
         "--tool-exposure",

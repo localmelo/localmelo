@@ -86,6 +86,19 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-23">
+          <h3>Reflections decide on their own checks</h3>
+          <p class="update-date">
+            <time datetime="2026-10-23">2026-10-23</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/34">#34</a>
+          </p>
+          <ul>
+            <li>After a reflection, the next attempt starts when the reflection chooses <code>continue</code> and its three checks hold. Its utility score no longer has to reach 0.1.</li>
+            <li>A reflection reply that still cannot be read after the retry no longer ends a run that has attempts and steps left, and a reflection over 2,000 characters is trimmed instead of ending the run.</li>
+            <li><code>--reflection-gate utility</code> keeps the previous behavior, so the two can be compared.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-22">
           <h3>Run options, run results and exit codes</h3>
           <p class="update-date">

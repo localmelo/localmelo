@@ -21,8 +21,9 @@ STEPS_PER_ATTEMPT = 10
 MAX_ATTEMPTS = 5
 
 # Reflection budget. Only one reflection is carried into the next attempt's
-# prompt. If its serialized form exceeds the char cap the agent forces a
-# decompose action instead of continuing.
+# prompt. If its serialized form exceeds the char cap, the agent trims it to
+# fit (AgentOptions.reflection_gate="flags", the default) or forces a
+# decompose action instead of continuing ("utility").
 MAX_REFLECTIONS_IN_PROMPT = 1
 MAX_REFLECTION_CHARS = 2000
 

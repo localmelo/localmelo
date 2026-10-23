@@ -8,11 +8,11 @@ import logging
 import math
 import os
 import time
-from collections.abc import Collection, Iterable, Sequence
+from collections.abc import Collection, Iterable, Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.agent._chat import Chat, RequestStats, lacks_task_query
-from localmelo.melo.agent.options import AgentOptions
+from localmelo.melo.agent.options import AgentOptions, ReflectionGate
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
     ExecutorResultPayload,
@@ -99,7 +99,9 @@ def _coerce_str_list(value: object) -> list[str]:
     return [str(value)]
 
 
-# The decisions a reflection may recommend; any other value reads "stop".
+# The decisions a reflection may recommend. Under reflection_gate="utility"
+# any other value reads "stop"; under "flags" an object without one of them
+# is no reflection (see _find_reflection).
 REFLECTION_ACTIONS = ("continue", "stop", "decompose", "done")
 
 
@@ -115,31 +117,49 @@ def _strip_code_fences(text: str) -> str:
     return body.strip()
 
 
-def _decode_reflection(text: str) -> object:
-    """Return the JSON value of a reflection reply; ``ValueError`` if none.
+def _json_values(text: str) -> Iterator[object]:
+    """Yield the JSON values of a reflection reply, in the order they are read.
 
     A Markdown code fence around the reply is stripped first. When the
-    rest is not JSON as a whole, the first balanced ``{...}`` in it that
-    parses as a JSON object is used, so text around the object does not
-    matter. After a ``{`` that does not start one, the search goes on
-    from where the decoder gave up, so it reads the reply about once
-    and never starts inside a string of the text it already read.
-    Nesting deeper than the decoder's recursion limit ends the search.
+    rest is JSON as a whole, that value is the only one. Otherwise each
+    balanced ``{...}`` in it that parses as a JSON object is one, so text
+    around the objects does not matter. After a ``{`` that does not
+    start one, the search goes on from where the decoder gave up, and
+    after an object, from its end, so it reads the reply about once and
+    never starts inside a string of the text it already read, nor inside
+    an object it yielded. Nesting deeper than the decoder's recursion
+    limit ends the search.
     """
     body = _strip_code_fences(text)
     try:
-        return json.loads(body)
+        value = json.loads(body)
     except (ValueError, RecursionError):
         pass
+    else:
+        yield value
+        return
     decoder = json.JSONDecoder()
     start = body.find("{")
     while start != -1:
         try:
-            return decoder.raw_decode(body, start)[0]
+            value, end = decoder.raw_decode(body, start)
         except json.JSONDecodeError as exc:
             start = body.find("{", max(exc.pos, start + 1))
+            continue
         except RecursionError:
-            break
+            return
+        yield value
+        start = body.find("{", end)
+
+
+def _decode_reflection(text: str) -> object:
+    """Return the first JSON value of a reflection reply; ``ValueError`` if none.
+
+    See :func:`_json_values` for how the reply is read: the reply as a
+    whole when it is JSON, else the first ``{...}`` object in it.
+    """
+    for value in _json_values(text):
+        return value
     raise ValueError("No JSON object in the reflection response")
 
 
@@ -149,6 +169,27 @@ def _holds_reflection_object(text: str) -> bool:
         return isinstance(_decode_reflection(_coerce_str(text)), dict)
     except ValueError:
         return False
+
+
+def _find_reflection(text: str) -> dict[str, Any] | None:
+    """The reflection a reply holds under ``reflection_gate="flags"``, or ``None``.
+
+    That is the first JSON value of the reply (see :func:`_json_values`)
+    that is an object whose ``recommended_action``, as a string, is one
+    of :data:`REFLECTION_ACTIONS`. An object without one, such as the
+    arguments of a tool call written out as text, is passed over for the
+    objects after it, but an object nested inside it is not looked at.
+    JSON that is not an object holds no reflection.
+    """
+    try:
+        for value in _json_values(_coerce_str(text)):
+            if not isinstance(value, dict):
+                continue
+            if _coerce_str(value.get("recommended_action")) in REFLECTION_ACTIONS:
+                return value
+    except ValueError:  # a number the decoder cannot convert ends the search
+        pass
+    return None
 
 
 def _as_planned(window: list[Message], query: str) -> list[Message]:
@@ -180,6 +221,68 @@ def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
             lines.append(f"  Failed: {'; '.join(r.failed_hypotheses)}")
         parts.append("\n".join(lines))
     return [Message(role="system", content="\n".join(parts))]
+
+
+# The lists of a reflection entry that _fit_reflection empties, in this
+# order and each from its end, until the entry fits its budget.
+REFLECTION_TRIM_ORDER = (
+    "failed_hypotheses",
+    "useful_evidence",
+    "recommended_avoids",
+    "next_promising_directions",
+)
+
+
+def _reflection_size(entry: ReflectionEntry) -> int:
+    """Characters of *entry* as :func:`_serialize_reflections` writes it."""
+    return len(_serialize_reflections([entry])[0].content)
+
+
+def _shorten(text: str, width: int) -> str:
+    """*text* in at most *width* characters, cut at a word boundary, ending in "…".
+
+    Text that fits is returned as it is. When the cut falls inside the
+    first word, there is no boundary to go back to, and the text is cut
+    where *width* falls.
+    """
+    if len(text) <= width:
+        return text
+    if width < 1:
+        return ""
+    head = text[: width - 1]
+    if not text[len(head)].isspace() and not head[-1:].isspace():
+        # The cut falls inside a word: leave that word out.
+        words = head.rsplit(None, 1)
+        if len(words) == 2:
+            head = words[0]
+    return head.rstrip() + "…"
+
+
+def _fit_reflection(entry: ReflectionEntry, limit: int) -> ReflectionEntry:
+    """*entry*, trimmed until its serialized form fits in *limit* characters.
+
+    The serialized form is the one :func:`_serialize_reflections` writes.
+    Items are dropped from the end of each list of
+    :data:`REFLECTION_TRIM_ORDER` in turn (``failed_hypotheses`` first,
+    ``next_promising_directions`` last), one at a time and only until the
+    entry fits. When the lists are empty and it still does not fit, the
+    summary is shortened at a word boundary and ends with "…" (see
+    :func:`_shorten`). *entry* itself is not changed: one that fits is
+    returned as it is, any other as a trimmed copy.
+    """
+    if _reflection_size(entry) <= limit:
+        return entry
+    fitted = dataclasses.replace(entry)
+    for name in REFLECTION_TRIM_ORDER:
+        items = list(getattr(entry, name))  # a copy: entry keeps its own
+        setattr(fitted, name, items)
+        while items:
+            items.pop()
+            if _reflection_size(fitted) <= limit:
+                return fitted
+    room = limit - _reflection_size(dataclasses.replace(fitted, summary=""))
+    fitted.summary = _shorten(fitted.summary, room)
+    return fitted
 
 
 # Characters of a withheld tool result that stay visible to the model. A
@@ -364,14 +467,36 @@ def _within_turn_budget(
 # again (see Agent._run_attempt).
 MAX_EMPTY_REPLIES = 2
 
+# The utility (see _utility) that reflection_gate="utility" requires for
+# the next attempt to start.
 CONTINUATION_UTILITY_THRESHOLD = 0.1
 
 
-def _should_continue(decision: ReflectionDecision) -> bool:
-    """Active-learning style continuation gate.
+def _utility(decision: ReflectionDecision) -> float:
+    """The utility of another attempt, from the reflection's own estimates.
 
-    Computes a lightweight utility score and checks structured signals.
-    Returns True only if all conditions suggest another attempt is worthwhile.
+    ``estimated_info_gain * feasibility * novelty - estimated_cost -
+    repeat_risk``, each a number in [0, 1] that the model chose. Only
+    ``reflection_gate="utility"`` acts on it (see :func:`_should_continue`).
+    """
+    return (
+        decision.estimated_info_gain * decision.feasibility * decision.novelty
+        - decision.estimated_cost
+        - decision.repeat_risk
+    )
+
+
+def _should_continue(
+    decision: ReflectionDecision, gate: ReflectionGate = "flags"
+) -> bool:
+    """Whether the next attempt starts after a reflection's *decision*.
+
+    With either *gate* (see ``AgentOptions.reflection_gate``), only when
+    the decision is ``continue`` and its three checks hold:
+    ``task_still_feasible``, ``next_step_is_concrete`` and
+    ``next_step_is_novel``. ``"flags"`` asks nothing more. ``"utility"``,
+    the gate from before that option, also requires :func:`_utility` to
+    reach :data:`CONTINUATION_UTILITY_THRESHOLD`.
     """
     if decision.recommended_action != "continue":
         return False
@@ -381,13 +506,9 @@ def _should_continue(decision: ReflectionDecision) -> bool:
         return False
     if not decision.next_step_is_novel:
         return False
-
-    utility = (
-        decision.estimated_info_gain * decision.feasibility * decision.novelty
-        - decision.estimated_cost
-        - decision.repeat_risk
-    )
-    return utility >= CONTINUATION_UTILITY_THRESHOLD
+    if gate == "utility":
+        return _utility(decision) >= CONTINUATION_UTILITY_THRESHOLD
+    return True
 
 
 def _providers_from_config(
@@ -474,7 +595,8 @@ class _RunState:
     attempts: int = 0
     n_tool: int = 0
     # The latest non-blank text of a planning reply in this run: the
-    # answer of a reflection's "done" that gives none.
+    # answer of a reflection's "done" that gives none, and the result of a
+    # final boundary whose reflection is unreadable (reflection_gate="flags").
     last_text: str = ""
     # Planning replies in a row with neither a tool call nor text.
     empty_replies: int = 0
@@ -514,10 +636,15 @@ class Agent:
         agent = Agent(llm=my_llm_provider, embedding=my_emb_provider)
 
     Either mode takes ``options=AgentOptions(...)`` to set step budgets,
-    the attempt policy, tool exposure, the built-in tools, memory and a
-    run timeout; the defaults keep the behavior from before options
-    existed, except that every step now offers all registered built-ins
-    and runs only the tools it offered.
+    the attempt policy and its reflection gate, tool exposure, the
+    built-in tools, memory and a run timeout; the defaults keep the
+    behavior from before options existed, except that every step now
+    offers all registered built-ins and runs only the tools it offered,
+    and that with ``reflection_gate="flags"`` a reflection decides on its
+    own checks whether the next attempt starts, a reply without a
+    reflection does not stop the run, and an over-long reflection is
+    trimmed (``"utility"`` keeps the behavior from before that option,
+    see :meth:`_run_reflective_attempts`).
     ``tool_providers`` supply further tools, for example those of MCP
     servers: the first run starts them and registers their tools next to
     the built-ins (see :meth:`_ensure_tools`), and :meth:`close` closes
@@ -1218,26 +1345,41 @@ class Agent:
         failure_type: str,
         *,
         final: bool = False,
-    ) -> tuple[ReflectionEntry, ReflectionDecision]:
+    ) -> tuple[ReflectionEntry, ReflectionDecision] | None:
         """Structured reflection at attempt boundary.
 
         *final* says that no further attempt can start; the request then
         tells the model so (see :meth:`Chat.reflect`).
 
-        A reply that holds no JSON object, such as a tool call, is asked
-        for once more, with the window's turns written out as text and
+        A reply that holds no reflection, often a tool call, is asked for
+        once more, with the window's turns written out as text and
         :data:`REFLECTION_RETRY_NOTE` at the end (see :meth:`Chat.reflect`).
-        The second reply is parsed whatever it holds, so one that still has
-        no object falls back to ``stop`` (see :meth:`_parse_reflection`).
+        What counts as a reflection, and how one whose serialized form
+        exceeds :data:`MAX_REFLECTION_CHARS` is kept to that budget,
+        depends on ``reflection_gate``:
 
-        After parsing, enforce :data:`MAX_REFLECTION_CHARS`: if the
-        serialized form of the new reflection exceeds the budget, force
-        ``decision.recommended_action = "decompose"`` so the next attempt
-        does not start. The model is meant to keep the reflection compact
-        — when it cannot, the agent stops chasing instead of carrying an
-        ever-growing scratchpad. A ``done`` decision is left as it is: it
-        ends the run, so no attempt would carry the reflection.
+        - ``"flags"``: a JSON object with a valid ``recommended_action``
+          (see :func:`_find_reflection`), so a reply whose only JSON is
+          something else, such as a tool call written out as text, is
+          asked for again too. When the second reply holds no reflection
+          either, this returns ``None``: the boundary has no reflection
+          (see :meth:`_run_reflective_attempts`). A reflection over the
+          budget is trimmed to fit (see :func:`_fit_reflection`),
+          whatever its decision: the decision and its rationale stay the
+          model's, and its ``tried_memory`` is the trimmed entry.
+        - ``"utility"``, the behavior from before that option: any JSON
+          object (see :func:`_holds_reflection_object`). The second reply
+          is parsed whatever it holds, so one that still has no object
+          falls back to ``stop`` (see :meth:`_parse_reflection`). A
+          reflection over the budget forces
+          ``decision.recommended_action = "decompose"``, with a note in
+          the rationale, so the next attempt does not start. The model is
+          meant to keep the reflection compact — when it cannot, the
+          agent stops chasing instead of carrying an ever-growing
+          scratchpad. A ``done`` decision is left as it is: it ends the
+          run, so no attempt would carry the reflection.
         """
+        flags = self.options.reflection_gate == "flags"
         short_window = self.hippo.working.get_window()
         prior_reflections = self.hippo.working.get_reflections()
         response = await self.chat.reflect(
@@ -1248,7 +1390,11 @@ class Agent:
             prior_reflections=prior_reflections or None,
             final=final,
         )
-        if not _holds_reflection_object(response.content):
+        if flags:
+            readable = _find_reflection(response.content) is not None
+        else:
+            readable = _holds_reflection_object(response.content)
+        if not readable:
             # Often a tool call: the window ends in tool turns, and some
             # models continue them although the request offers no tools.
             # Ask once more, with those turns written out as text.
@@ -1261,6 +1407,16 @@ class Agent:
                 final=final,
                 retry=True,
             )
+        if flags:
+            data = _find_reflection(response.content)
+            if data is None:
+                return None
+            entry, decision = self._reflection_from_object(
+                data, attempt_id, failure_type
+            )
+            entry = _fit_reflection(entry, MAX_REFLECTION_CHARS)
+            decision.tried_memory = entry
+            return entry, decision
         entry, decision = self._parse_reflection(
             response.content, attempt_id, failure_type
         )
@@ -1280,12 +1436,17 @@ class Agent:
     ) -> tuple[ReflectionEntry, ReflectionDecision]:
         """Parse LLM reflection JSON with strict coercion and conservative fallback.
 
+        The parser of ``reflection_gate="utility"``; ``"flags"`` reads the
+        object that :func:`_find_reflection` finds instead (see
+        :meth:`_do_reflect`).
+
         Parsing is tolerant: a Markdown code fence around the reply is
         stripped, and a reply that is not JSON as a whole is read from the
         first ``{...}`` object in it (see :func:`_decode_reflection`). Only
         a reply without such an object falls back to ``stop``, with the
         rationale "Could not parse reflection response"; a reply that is
-        JSON but not an object stops too.
+        JSON but not an object stops too. The object itself is read by
+        :meth:`_reflection_from_object`.
         """
         try:
             data = _decode_reflection(_coerce_str(text))
@@ -1314,7 +1475,21 @@ class Agent:
                 best_effort_result="",
                 tried_memory=entry,
             )
+        return Agent._reflection_from_object(data, attempt_id, failure_type)
 
+    @staticmethod
+    def _reflection_from_object(
+        data: dict[str, Any],
+        attempt_id: int,
+        failure_type: str,
+    ) -> tuple[ReflectionEntry, ReflectionDecision]:
+        """The reflection entry and decision that the JSON object *data* gives.
+
+        Each value is coerced to its field's type, the five estimates
+        clamped to [0, 1], and a missing one takes a default. A
+        ``recommended_action`` that is not one of
+        :data:`REFLECTION_ACTIONS` reads ``stop``.
+        """
         entry = ReflectionEntry(
             attempt_id=attempt_id,
             summary=_coerce_str(data.get("summary")),
@@ -1477,7 +1652,9 @@ class Agent:
           effort, if any, is the result and its rationale the error;
         - ``budget_exhausted``: ``max_steps`` or ``max_attempts`` ran out.
           With ``attempt_policy="reflect"`` the last reflection's best
-          effort, if any, is the result;
+          effort, if any, is the result, or the latest planning text when
+          that reflection was unreadable (``reflection_gate="flags"``, see
+          :meth:`_run_reflective_attempts`);
         - ``stuck``: stuck detection fired with ``attempt_policy="none"``;
         - ``provider_error``: a model server request failed with a
           :class:`~localmelo.melo.contracts.providers.ProviderError`: a
@@ -1713,6 +1890,7 @@ class Agent:
             "attempt_policy": opts.attempt_policy,
             "steps_per_attempt": opts.steps_per_attempt,
             "max_attempts": opts.max_attempts,
+            "reflection_gate": opts.reflection_gate,
             "tool_exposure": opts.tool_exposure,
             "builtins": sorted(builtins),
             "memory": opts.memory,
@@ -1741,10 +1919,34 @@ class Agent:
           as ``budget_exhausted``, with its ``best_effort_result`` as the
           result.
         - Otherwise the continuation gate (:func:`_should_continue`)
-          decides. A gate that stops the run ends it as ``gate_stopped``,
-          with the ``best_effort_result`` as the result and the decision's
-          rationale as the error, or ``Stopped after attempt <n>`` (``n``
-          counting from 1) when the rationale is blank.
+          decides, as ``reflection_gate`` says. With ``"flags"`` the next
+          attempt starts when the decision is ``continue`` and its three
+          checks hold (``task_still_feasible``, ``next_step_is_concrete``
+          and ``next_step_is_novel``). ``"utility"``, the gate from before
+          that option, also requires the utility computed from the
+          decision's own estimates (:func:`_utility`) to reach
+          :data:`CONTINUATION_UTILITY_THRESHOLD`. A gate that stops the
+          run ends it as ``gate_stopped``, with the ``best_effort_result``
+          as the result and the decision's rationale as the error, or
+          ``Stopped after attempt <n>`` (``n`` counting from 1) when the
+          rationale is blank.
+
+        With ``"flags"``, a reply that holds no reflection even when asked
+        again (see :meth:`_do_reflect`) gives no decision and adds no
+        reflection: the previous one, if any, stays in working memory, and
+        nothing of the reply reaches long-term memory. The next attempt
+        starts; when none can start, the run ends as ``budget_exhausted``
+        with the boundary's usual error, ``Max attempts reached`` or
+        ``Max steps reached``, and the latest non-blank text of a planning
+        reply in this run as the result. One INFO line names the attempt.
+        With ``"utility"`` such a reply reads ``stop`` (see
+        :meth:`_parse_reflection`) and is kept as the reflection.
+
+        A reflection over :data:`MAX_REFLECTION_CHARS` keeps its decision
+        with ``"flags"`` and is trimmed to fit before it is kept; with
+        ``"utility"`` any decision but ``done`` becomes ``decompose``,
+        which the gate stops, and ``done`` ends the run as it is (see
+        :meth:`_do_reflect`).
         """
         opts = self.options
         total_steps = 0
@@ -1767,9 +1969,27 @@ class Agent:
                 out_of = "Max steps reached"
             else:
                 out_of = ""  # another attempt can start
-            entry, decision = await self._do_reflect(
+            reflection = await self._do_reflect(
                 task, attempt_id, failure_type, final=bool(out_of)
             )
+            if reflection is None:  # only with reflection_gate="flags"
+                if out_of:
+                    logger.info(
+                        "Reflection after attempt %d unreadable after a retry, "
+                        "ending the run: %s",
+                        run.attempts,
+                        out_of,
+                    )
+                    run.end("budget_exhausted", result=run.last_text, error=out_of)
+                    return
+                logger.info(
+                    "Reflection after attempt %d unreadable after a retry, "
+                    "starting attempt %d",
+                    run.attempts,
+                    run.attempts + 1,
+                )
+                continue
+            entry, decision = reflection
             self.hippo.working.add_reflection(entry)
 
             best_effort = decision.best_effort_result
@@ -1780,7 +2000,7 @@ class Agent:
             if out_of:
                 run.end("budget_exhausted", result=best_effort, error=out_of)
                 return
-            if not _should_continue(decision):
+            if not _should_continue(decision, opts.reflection_gate):
                 stopped = f"Stopped after attempt {run.attempts}"
                 run.end(
                     "gate_stopped",
