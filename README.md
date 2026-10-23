@@ -144,13 +144,14 @@ Current safeguards include:
 - provider probing during onboarding
 
 In the default `retrieve` tool exposure, each step offers every registered
-built-in tool, sorted by name, plus the other tools (MCP and other provided
-tools) that hint extraction and BM25 search resolve for it. A call to any
-other registered tool is refused with "Tool '<name>' was not offered in this
-step." and does not run; earlier versions ran any registered tool the model
-named. The check holds within one step: the refused call stays in the
-conversation, so hint extraction can offer that tool on the next step. With
-`tool_exposure="all"`, every registered tool is offered on every step.
+built-in tool, sorted by name, then the other tools (MCP and other provided
+tools) that hint extraction and BM25 search resolve for it, also sorted by
+name. A call to any other registered tool is refused with "Tool '<name>' was
+not offered in this step." and does not run; earlier versions ran any
+registered tool the model named. The check holds within one step: the refused
+call stays in the conversation, so hint extraction can offer that tool on the
+next step. With `tool_exposure="all"`, every registered tool is offered on
+every step.
 
 This is still pre-alpha software. Review configuration and tool permissions
 before giving it access to important files, accounts, or long-running processes.

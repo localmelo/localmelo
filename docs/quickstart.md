@@ -239,7 +239,7 @@ with `--serve`, or without a query, they are a usage error.
 |---|---|---|
 | `--max-steps N` | `30` | Cap on planning calls for the whole run (`max_steps`), at least 1. |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection between them. `none`: one attempt of up to `--max-steps` steps and no reflection calls. |
-| `--tool-exposure retrieve\|all` | `retrieve` | `retrieve`: each step offers every registered built-in, sorted by name, then the other tools (MCP and other provided tools) that hint extraction and BM25 search resolve for it. `all`: every registered tool, sorted by name, on every step. |
+| `--tool-exposure retrieve\|all` | `retrieve` | `retrieve`: each step offers every registered built-in, sorted by name, then the other tools (MCP and other provided tools) that hint extraction and BM25 search resolve for it, also sorted by name. `all`: every registered tool, sorted by name, on every step. |
 | `--builtins all\|none\|NAME,...` | `all` | The built-in tools to register: all, none, or a comma-separated list out of `file_read`, `file_write`, `python_exec` and `shell_exec`. |
 | `--mcp-config PATH` | none | Add the tools of the MCP servers in this file (see below). |
 | `--mcp-only` | off | Only the MCP tools: the same as `--builtins none --tool-exposure all`. Requires `--mcp-config`, and cannot be combined with `--builtins` or `--tool-exposure`. |

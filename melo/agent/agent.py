@@ -838,7 +838,9 @@ class Agent:
             tools = sorted(self.hippo.list_tools(), key=lambda t: t.name)
         else:
             # Every registered built-in, sorted by name, on every step. Hints
-            # and BM25 choose among the other tools only, which follow.
+            # and BM25 choose among the other tools only, which follow,
+            # sorted by name too: the list stays byte-identical for as long
+            # as the chosen set does not change, whatever the hint order.
             builtins = builtin_names()
             # Include reflection context in tool hint extraction
             hint_sources = long_context + short_window + reflection_msgs
@@ -851,7 +853,10 @@ class Agent:
                 (t for t in self.hippo.list_tools() if t.name in builtins),
                 key=lambda t: t.name,
             )
-            tools += self.hippo.resolve_tools(query, hints=tool_hints, exclude=builtins)
+            tools += sorted(
+                self.hippo.resolve_tools(query, hints=tool_hints, exclude=builtins),
+                key=lambda t: t.name,
+            )
 
         resolution_check = self.checker.check_tool_resolution(
             ToolResolutionResult(

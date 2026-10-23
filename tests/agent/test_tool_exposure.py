@@ -330,7 +330,7 @@ class TestRetrieveExposure:
         assert _offered(llm.calls[0]) == ["weather"]
 
     @pytest.mark.asyncio
-    async def test_the_builtins_come_first_then_the_relevant_extra_tool(
+    async def test_the_builtins_come_first_then_the_extra_tools_by_name(
         self,
     ) -> None:
         llm = FakeLLM([_answer("done")])
@@ -339,8 +339,11 @@ class TestRetrieveExposure:
         assert await agent.run("What will the weather be in Paris tomorrow?") == "done"
         offered = _offered(llm.calls[0])
         assert offered[: len(BUILTINS)] == BUILTINS
-        assert offered[len(BUILTINS)] == "weather_forecast"
-        assert len(offered) <= len(BUILTINS) + TOOL_SEARCH_TOP_K
+        # BM25 ranks weather_forecast first; the offered list is by name.
+        extra = offered[len(BUILTINS) :]
+        assert "weather_forecast" in extra
+        assert extra == sorted(extra)
+        assert len(extra) <= TOOL_SEARCH_TOP_K
         assert len(set(offered)) == len(offered)
 
     @pytest.mark.asyncio
