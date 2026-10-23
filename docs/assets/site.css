@@ -644,14 +644,6 @@ caption {
   font-size: 0.9rem;
 }
 
-body.lang-en [data-lang="zh"] {
-  display: none;
-}
-
-body.lang-zh [data-lang="en"] {
-  display: none;
-}
-
 .diagram-scroll {
   overflow-x: auto;
   min-width: 0;
