@@ -140,7 +140,9 @@ as the tools of MCP servers (`McpToolProvider` from `localmelo.support.mcp`,
 named `mcp__<server>__<tool>`). The first run starts every provider and
 registers its tools next to the built-ins; a name that is already taken
 ends the run as `setup_error`. Provided tools pass the same executor checks
-as the built-ins, each call bounded by the timeout its provider gives.
+as the built-ins, each call bounded by the timeout its provider gives, with
+one exception: localmelo checks the JSON types of the built-ins' arguments
+only, since a provider's server checks its own.
 `Agent.close()` closes the providers.
 
 ## Run results

@@ -6,6 +6,7 @@ from collections.abc import Callable, Collection, Coroutine
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.checker.checker import Checker
+from localmelo.melo.executor.builtins import builtin_names
 from localmelo.melo.executor.models import (
     ArtifactMeta,
     ErrorCategory,
@@ -103,7 +104,21 @@ class Executor:
                 error_category=ErrorCategory.INVALID_ARGUMENTS,
             )
 
-        # 4. Pre-execution safety check
+        # 4. A built-in tool's arguments must have the JSON types its schema
+        #    declares. The checks below read them outside the guarded call,
+        #    and file_write would empty the file before failing on content
+        #    that is not text. Provided tools' servers check their own.
+        if request.tool_name in builtin_names():
+            problem = _wrong_type(request.arguments, tool_def.parameters)
+            if problem:
+                return ExecutionOutcome(
+                    tool_name=request.tool_name,
+                    status=ExecutionStatus.ERROR,
+                    error=f"Arguments for {request.tool_name}: {problem}",
+                    error_category=ErrorCategory.INVALID_ARGUMENTS,
+                )
+
+        # 5. Pre-execution safety check
         check = await self.checker.pre_execute(tool_call, tool_def)
         if not check.allowed:
             return ExecutionOutcome(
@@ -113,7 +128,7 @@ class Executor:
                 error_category=ErrorCategory.BLOCKED_BY_CHECKER,
             )
 
-        # 5. Resolve callable
+        # 6. Resolve callable
         fn = self._callables.get(request.tool_name)
         if fn is None:
             return ExecutionOutcome(
@@ -123,7 +138,7 @@ class Executor:
                 error_category=ErrorCategory.TOOL_NOT_FOUND,
             )
 
-        # 6. Workspace path policy for file tools
+        # 7. Workspace path policy for file tools
         if request.tool_name in ("file_read", "file_write"):
             effective_root = request.workspace_root or self._policy.root
             if effective_root:
@@ -137,7 +152,7 @@ class Executor:
                         error_category=ErrorCategory.PATH_POLICY_VIOLATION,
                     )
 
-        # 7. Execute with timeout
+        # 8. Execute with timeout
         timeout_ms = (
             request.timeout_ms
             or self._timeouts_ms.get(request.tool_name)
@@ -176,7 +191,7 @@ class Executor:
 
         duration = (time.perf_counter() - start) * 1000
 
-        # 8. Normalize rich output (text + images)
+        # 9. Normalize rich output (text + images)
         if isinstance(output, ToolOutput):
             if output.is_error:
                 return ExecutionOutcome(
@@ -191,7 +206,7 @@ class Executor:
         else:
             text, images = (output if isinstance(output, str) else str(output)), []
 
-        # 9. Build outcome with artifact metadata
+        # 10. Build outcome with artifact metadata
         artifacts = self._collect_artifacts(request, text)
 
         return ExecutionOutcome(
@@ -231,3 +246,45 @@ class Executor:
                 )
             )
         return artifacts
+
+
+def _json_type(value: Any) -> str:
+    """Name the JSON type of a value parsed from JSON."""
+    if value is None:
+        return "null"
+    # bool before int: True is an int in Python but not a JSON integer.
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
+
+
+def _wrong_type(arguments: dict[str, Any], parameters: dict[str, Any]) -> str:
+    """Name the first argument whose JSON type its schema does not declare.
+
+    Only top-level properties with a single ``type`` are checked; arguments
+    the schema does not declare are left to the tool. Returns ``""`` when
+    nothing is wrong.
+    """
+    properties = parameters.get("properties")
+    if not isinstance(properties, dict):
+        return ""
+    for name, value in arguments.items():
+        schema = properties.get(name)
+        expected = schema.get("type") if isinstance(schema, dict) else None
+        if not isinstance(expected, str):
+            continue
+        actual = _json_type(value)
+        if actual == expected or (expected == "number" and actual == "integer"):
+            continue
+        return f"'{name}' must be of type {expected}, not {actual}"
+    return ""
