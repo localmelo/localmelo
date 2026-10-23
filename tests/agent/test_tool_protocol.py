@@ -1494,7 +1494,7 @@ class TestStuckDetectionMultiCall:
                     role="assistant",
                     tool_calls=[_echo_call("a"), _echo_call("b")][:: (-1) ** i],
                 )
-                for i in range(6)
+                for i in range(3)
             ]
         )
         llm.responses.append(

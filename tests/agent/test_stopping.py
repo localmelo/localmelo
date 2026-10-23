@@ -12,7 +12,11 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._chat import FINAL_REFLECTION_NOTE, REFLECTION_PROMPT
+from localmelo.melo.agent._chat import (
+    FINAL_REFLECTION_NOTE,
+    REFLECTION_PROMPT,
+    REFLECTION_RETRY_NOTE,
+)
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.memory.short import WorkingMemory
 from localmelo.melo.schema import (
@@ -175,6 +179,9 @@ class TestDone:
         llm = FakeLLM(
             [
                 _echo_call("a", content="an earlier run's text"),
+                # The first run's reflection has no JSON, also when asked
+                # again, so that run stops with this text as its result.
+                _answer("first"),
                 _answer("first"),
                 _echo_call("b"),
                 _reflection("done"),
@@ -254,14 +261,19 @@ class TestGateStopped:
 
     @pytest.mark.asyncio
     async def test_an_unparsed_reflection_stops_with_its_text(self) -> None:
-        reply = _answer("I would rather not answer in JSON.")
-        agent = _agent(FakeLLM([_echo_call("a"), reply]), steps_per_attempt=1)
+        # The reflection is asked for once more (TestReflectionRetry), and
+        # the run keeps the text of the second reply.
+        first = _answer("I would rather not answer in JSON.")
+        second = _answer("Still no JSON, sorry.")
+        llm = FakeLLM([_echo_call("a"), first, second])
+        agent = _agent(llm, steps_per_attempt=1)
         result = await agent.run_task("echo the answer")
         assert (result.status, result.result, result.error) == (
             "gate_stopped",
-            "I would rather not answer in JSON.",
+            "Still no JSON, sorry.",
             "Could not parse reflection response",
         )
+        assert len(_reflection_requests(llm)) == 2
 
 
 # ── The reflection after which no attempt can start ─────────────────────────
@@ -333,6 +345,122 @@ class TestFinalReflection:
         first, last = _reflection_requests(llm)
         assert FINAL_REFLECTION_NOTE not in first
         assert last.endswith(FINAL_REFLECTION_NOTE)
+
+
+# ── A reflection reply without the JSON object ──────────────────────────────
+
+
+def _tool_call_reply() -> Message:
+    """A reflection reply that calls a tool instead, as Qwen3.8 did on oMLX."""
+    return Message(
+        role="assistant",
+        content="",
+        tool_call=ToolCall(tool_name="echo", arguments={"text": "done"}),
+    )
+
+
+class TestReflectionRetry:
+    @pytest.mark.asyncio
+    async def test_a_tool_call_is_asked_again_and_the_answer_used(self) -> None:
+        llm = FakeLLM(
+            [
+                _echo_call("a"),
+                _tool_call_reply(),
+                _reflection("done", best_effort_result="42"),
+            ]
+        )
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
+        result = await agent.run_task("echo the answer")
+        assert (result.status, result.result) == ("completed", "42")
+        # The retry is one more request without tools, and the reflection's
+        # tool call never runs.
+        assert (result.n_llm, result.n_main, result.n_aux) == (3, 1, 2)
+        assert result.n_tool == 1
+
+    @pytest.mark.asyncio
+    async def test_the_retry_repeats_the_request_and_adds_the_note(self) -> None:
+        llm = FakeLLM([_echo_call("a"), _tool_call_reply(), _reflection("stop")])
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
+        await agent.run_task("echo the answer")
+        calls = [call for call in llm.calls if _is_reflection(call)]
+        first, retry = (call["messages"] for call in calls)
+
+        def sent(m: Message) -> tuple[Any, ...]:
+            # What a provider sends; the creation timestamps differ.
+            return (m.role, m.content, m.tool_calls, m.tool_call_id, m.images)
+
+        # Only the closing request differs, so a server's prefix cache holds.
+        assert [sent(m) for m in retry[:-1]] == [sent(m) for m in first[:-1]]
+        assert retry[-1].role == "user"
+        assert retry[-1].content == f"{first[-1].content}\n\n{REFLECTION_RETRY_NOTE}"
+        assert REFLECTION_RETRY_NOTE not in first[-1].content
+        assert [call["tools"] for call in calls] == [None, None]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            _tool_call_reply(),
+            _answer("I would rather not answer in JSON."),
+            _answer("[1, 2]"),
+            _answer("```json\n```"),
+        ],
+        ids=["tool_call", "prose", "json_list", "empty_fence"],
+    )
+    async def test_replies_without_an_object_are_asked_again(
+        self, reply: Message
+    ) -> None:
+        llm = FakeLLM([_echo_call("a"), reply, _reflection("stop", rationale="r")])
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
+        result = await agent.run_task("echo the answer")
+        assert (result.status, result.error) == ("gate_stopped", "r")
+        assert len(_reflection_requests(llm)) == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "content",
+        [
+            json.dumps(_decision("stop", rationale="r")),
+            f"```json\n{json.dumps(_decision('stop', rationale='r'))}\n```",
+            f"Here it is: {json.dumps(_decision('stop', rationale='r'))} Done.",
+        ],
+        ids=["bare", "fenced", "in_text"],
+    )
+    async def test_a_reply_with_an_object_is_not_asked_again(
+        self, content: str
+    ) -> None:
+        llm = FakeLLM([_echo_call("a"), _answer(content)])
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
+        result = await agent.run_task("echo the answer")
+        assert (result.status, result.error) == ("gate_stopped", "r")
+        assert len(_reflection_requests(llm)) == 1
+
+    @pytest.mark.asyncio
+    async def test_asked_again_once_at_most(self) -> None:
+        llm = FakeLLM([_echo_call("a"), _tool_call_reply(), _tool_call_reply()])
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
+        result = await agent.run_task("echo the answer")
+        assert (result.status, result.error) == (
+            "gate_stopped",
+            "Could not parse reflection response",
+        )
+        assert len(_reflection_requests(llm)) == 2
+
+    @pytest.mark.asyncio
+    async def test_the_final_reflection_keeps_its_note_on_a_retry(self) -> None:
+        llm = FakeLLM(
+            [
+                _echo_call("a"),
+                _tool_call_reply(),
+                _reflection("stop", best_effort_result="partial"),
+            ]
+        )
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=1)
+        result = await agent.run_task("echo the answer")
+        first, retry = _reflection_requests(llm)
+        assert first.endswith(FINAL_REFLECTION_NOTE)
+        assert retry == f"{first}\n\n{REFLECTION_RETRY_NOTE}"
+        assert (result.status, result.result) == ("budget_exhausted", "partial")
 
 
 # ── Tolerant reflection parsing ─────────────────────────────────────────────

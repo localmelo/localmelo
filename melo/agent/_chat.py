@@ -88,6 +88,15 @@ FINAL_REFLECTION_NOTE = (
     "either way put your best answer in best_effort_result."
 )
 
+# Ends the request when a reflection is asked again because the first reply
+# held no JSON object. Such a reply is often a tool call: the window ends in
+# tool turns, and some models continue them although the request offers no
+# tools.
+REFLECTION_RETRY_NOTE = (
+    "Reply with only the JSON object described above. Do not call any tool: "
+    "tools are not available for this reply."
+)
+
 _MEMORY_PREFIX = "[memory] "
 
 # Most recent working-memory messages shown to the reflection call. The
@@ -306,12 +315,16 @@ class Chat:
         prior_reflections: list[ReflectionEntry] | None = None,
         *,
         final: bool = False,
+        retry: bool = False,
     ) -> Message:
         """Ask the LLM to reflect on the current attempt.
 
         The request is a user message after the newest turns of *short*.
         With *final*, no further attempt can start, and the request says
-        so: the reflection can only finalize the answer.
+        so: the reflection can only finalize the answer. With *retry*, the
+        request is asked again after a reply without the JSON object, and
+        ends with :data:`REFLECTION_RETRY_NOTE`; everything before that
+        note is the same as in the first request.
         """
         # Build system prompt with prior reflection context
         system_parts = [REFLECTION_PROMPT]
@@ -342,6 +355,8 @@ class Chat:
         )
         if final:
             request += f" {FINAL_REFLECTION_NOTE}"
+        if retry:
+            request += f"\n\n{REFLECTION_RETRY_NOTE}"
 
         tail = tail_turns(short, REFLECTION_WINDOW)
         if tail and tail[-1].role == "user":
