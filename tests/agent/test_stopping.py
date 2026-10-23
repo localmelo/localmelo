@@ -182,14 +182,17 @@ class TestDone:
             [
                 _echo_call("a", content="an earlier run's text"),
                 # The first run's reflection has no JSON, also when asked
-                # again, so that run stops with this text as its result.
+                # again, so under "utility" that run stops with this text
+                # as its result.
                 _answer("first"),
                 _answer("first"),
                 _echo_call("b"),
                 _reflection("done"),
             ]
         )
-        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
+        agent = _agent(
+            llm, steps_per_attempt=1, max_attempts=2, reflection_gate="utility"
+        )
         assert (await agent.run_task("echo one")).result == "first"
         result = await agent.run_task("echo two")
         assert (result.status, result.result) == ("completed", "")
@@ -263,18 +266,33 @@ class TestGateStopped:
 
     @pytest.mark.asyncio
     async def test_an_unparsed_reflection_stops_with_its_text(self) -> None:
-        # The reflection is asked for once more (TestReflectionRetry), and
-        # the run keeps the text of the second reply.
+        # Under "utility". The reflection is asked for once more
+        # (TestReflectionRetry), and the run keeps the text of the second
+        # reply.
         first = _answer("I would rather not answer in JSON.")
         second = _answer("Still no JSON, sorry.")
         llm = FakeLLM([_echo_call("a"), first, second])
-        agent = _agent(llm, steps_per_attempt=1)
+        agent = _agent(llm, steps_per_attempt=1, reflection_gate="utility")
         result = await agent.run_task("echo the answer")
         assert (result.status, result.result, result.error) == (
             "gate_stopped",
             "Still no JSON, sorry.",
             "Could not parse reflection response",
         )
+        assert len(_reflection_requests(llm)) == 2
+
+    @pytest.mark.asyncio
+    async def test_an_unparsed_reflection_does_not_stop_under_flags(self) -> None:
+        # Under "flags", the default, a reply that holds no reflection when
+        # asked again either gives no decision, and the next attempt starts
+        # (tests/agent/test_reflection_gate.py has the details).
+        first = _answer("I would rather not answer in JSON.")
+        second = _answer("Still no JSON, sorry.")
+        llm = FakeLLM([_echo_call("a"), first, second, _answer("42")])
+        agent = _agent(llm, steps_per_attempt=1)
+        result = await agent.run_task("echo the answer")
+        assert (result.status, result.result, result.error) == ("completed", "42", "")
+        assert result.attempts == 2
         assert len(_reflection_requests(llm)) == 2
 
 
@@ -451,12 +469,25 @@ class TestReflectionRetry:
     @pytest.mark.asyncio
     async def test_asked_again_once_at_most(self) -> None:
         llm = FakeLLM([_echo_call("a"), _tool_call_reply(), _tool_call_reply()])
-        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
+        agent = _agent(
+            llm, steps_per_attempt=1, max_attempts=2, reflection_gate="utility"
+        )
         result = await agent.run_task("echo the answer")
         assert (result.status, result.error) == (
             "gate_stopped",
             "Could not parse reflection response",
         )
+        assert len(_reflection_requests(llm)) == 2
+
+    @pytest.mark.asyncio
+    async def test_asked_again_once_at_most_under_flags(self) -> None:
+        # The boundary gives no reflection, and the next attempt starts.
+        llm = FakeLLM(
+            [_echo_call("a"), _tool_call_reply(), _tool_call_reply(), _answer("42")]
+        )
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
+        result = await agent.run_task("echo the answer")
+        assert (result.status, result.result, result.attempts) == ("completed", "42", 2)
         assert len(_reflection_requests(llm)) == 2
 
     @pytest.mark.asyncio
