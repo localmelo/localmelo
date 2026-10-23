@@ -516,7 +516,8 @@ class Agent:
     Either mode takes ``options=AgentOptions(...)`` to set step budgets,
     the attempt policy, tool exposure, the built-in tools, memory and a
     run timeout; the defaults keep the behavior from before options
-    existed, except that a step now runs only the tools it offered.
+    existed, except that every step now offers all registered built-ins
+    and runs only the tools it offered.
     ``tool_providers`` supply further tools, for example those of MCP
     servers: the first run starts them and registers their tools next to
     the built-ins (see :meth:`_ensure_tools`), and :meth:`close` closes
@@ -813,9 +814,10 @@ class Agent:
     ) -> tuple[list[Message], list[Message], list[ToolDef], str | None]:
         """Stage 1+2: retrieve context, resolve tools, run boundary checks.
 
-        With ``tool_exposure="retrieve"`` the tools come from hint
-        extraction plus BM25; with ``"all"`` they are every registered
-        tool, sorted by name.
+        With ``tool_exposure="retrieve"`` the tools are every registered
+        built-in, sorted by name, then the other tools that hint
+        extraction and BM25 resolve among themselves; with ``"all"`` they
+        are every registered tool, sorted by name.
 
         Before anything reads the working-memory window, its oldest units
         are dropped when the planning prompt would not fit
@@ -835,10 +837,21 @@ class Agent:
             # stays byte-stable for prefix caching.
             tools = sorted(self.hippo.list_tools(), key=lambda t: t.name)
         else:
+            # Every registered built-in, sorted by name, on every step. Hints
+            # and BM25 choose among the other tools only, which follow.
+            builtins = builtin_names()
             # Include reflection context in tool hint extraction
             hint_sources = long_context + short_window + reflection_msgs
-            tool_hints = self.hippo.extract_tool_hints(hint_sources)
-            tools = self.hippo.resolve_tools(query, hints=tool_hints)
+            tool_hints = [
+                name
+                for name in self.hippo.extract_tool_hints(hint_sources)
+                if name not in builtins
+            ]
+            tools = sorted(
+                (t for t in self.hippo.list_tools() if t.name in builtins),
+                key=lambda t: t.name,
+            )
+            tools += self.hippo.resolve_tools(query, hints=tool_hints, exclude=builtins)
 
         resolution_check = self.checker.check_tool_resolution(
             ToolResolutionResult(

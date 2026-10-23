@@ -561,7 +561,8 @@ def _build_parser() -> argparse.ArgumentParser:
     direct.add_argument(
         "--tool-exposure",
         choices=["retrieve", "all"],
-        help="Offer the tools retrieved for each step (default), or all tools",
+        help="Offer every built-in plus the extra tools retrieved for each step "
+        "(default), or all tools",
     )
     direct.add_argument(
         "--builtins",
