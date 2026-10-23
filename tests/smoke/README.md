@@ -18,7 +18,7 @@ The CLI smoke is the real-backend long-term retrieval evidence path for issue
 > separately under `docs/` (see issue #4 items 3–4). This README is scoped to
 > running the smoke.
 
-## Default pytest run (offline, dev-safe)
+## Default pytest run
 
 ```bash
 python -m pytest tests/smoke -q
@@ -26,13 +26,20 @@ python -m pytest tests/smoke -q
 
 Collects:
 
-- `test_backend_smoke.py` — chat round-trip for ollama and mlc. Skipped when
-  the backend's `health_url` does not respond on a 0.5 s TCP probe.
+- `test_backend_smoke.py` — chat round-trip for ollama and mlc. When the
+  file is collected, it opens a TCP connection to each backend's
+  `health_url` (`127.0.0.1:11434` and `127.0.0.1:8400`, 0.5 s timeout). A
+  test sends a real chat request to the server that answers, and is skipped
+  for the one that does not.
 - `test_thinking_split.py` — pure parsing tests, no network.
 - `test_smoke_normalized.py` — aggregation tests, no network.
 - `test_logging_llm_dispatch.py` — provider dispatch tests, no network.
 
-None of these touch online services. `core_loop_test.py` is not collected.
+None of these touch online services, but a server listening on either port
+gets a chat request. For a run that contacts no server, add
+`--ignore=tests/smoke/test_backend_smoke.py`; `-m 'not smoke_backend'`
+skips the chat requests but still opens the two TCP connections.
+`core_loop_test.py` is not collected.
 
 ## CLI smoke — `core_loop_test.py`
 
