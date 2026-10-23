@@ -406,6 +406,24 @@ class TestRetrieveExposure:
         assert _results(llm.calls[3]) == ["Paris, tomorrow", "42", "Paris"]
 
     @pytest.mark.asyncio
+    async def test_a_call_to_a_lower_ranked_extra_tool_reorders_nothing(
+        self,
+    ) -> None:
+        """The extra tools are sorted by name, not in hint or rank order.
+
+        BM25 ranks weather_forecast first for this query. A call to
+        map_route makes it a hint on the next step, which in hint order
+        would move it to the front of the same set of extra tools.
+        """
+        llm = FakeLLM([_call("map_route", "Paris"), _answer("done")])
+        agent = _with_providers(llm, AgentOptions(), TEN_TOOLS)
+
+        assert await agent.run("What will the weather be in Paris tomorrow?") == "done"
+        assert len(llm.calls) == 2
+        assert {"map_route", "weather_forecast"} <= set(_offered(llm.calls[0]))
+        assert _wire(llm.calls[1]) == _wire(llm.calls[0])
+
+    @pytest.mark.asyncio
     async def test_a_builtin_the_query_does_not_match_still_runs(
         self, tmp_path: Path
     ) -> None:
