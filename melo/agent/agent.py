@@ -250,7 +250,7 @@ def _shorten(text: str, width: int) -> str:
     if width < 1:
         return ""
     head = text[: width - 1]
-    if not text[len(head)].isspace():
+    if not text[len(head)].isspace() and not head[-1:].isspace():
         # The cut falls inside a word: leave that word out.
         words = head.rsplit(None, 1)
         if len(words) == 2:

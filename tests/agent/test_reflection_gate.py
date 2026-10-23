@@ -717,8 +717,13 @@ class TestFitReflection:
 
     @pytest.mark.parametrize(
         ("room", "summary"),
-        [(12, "the quick…"), (10, "the quick…"), (9, "the…")],
-        ids=["inside_a_word", "after_a_word", "inside_the_second_word"],
+        [(12, "the quick…"), (11, "the quick…"), (10, "the quick…"), (9, "the…")],
+        ids=[
+            "inside_a_word",
+            "after_a_space",
+            "after_a_word",
+            "inside_the_second_word",
+        ],
     )
     def test_then_the_summary_is_cut_at_a_word_boundary(
         self, room: int, summary: str
