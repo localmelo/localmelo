@@ -3,6 +3,10 @@
 This page explains what localmelo remembers, how to keep memory between runs,
 and how to inspect, reset and protect it.
 
+The maintainer's memory design, parts of which are not built yet, is on the
+website's [Memory design](https://localmelo.github.io/localmelo/en/memory-design.html)
+page.
+
 ## Quick reference
 
 | To | Do this |

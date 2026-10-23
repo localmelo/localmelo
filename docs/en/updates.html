@@ -73,6 +73,10 @@
           <li>a web console;</li>
           <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>).</li>
         </ul>
+        <p>
+          The maintainer's memory design, parts of which are not built yet, is
+          on the <a href="./memory-design.html">memory design</a> page.
+        </p>
       </section>
 
       <section class="section" id="updates">
@@ -124,6 +128,37 @@
             they were measured on the 2026-05-10 code. oMLX is an
             OpenAI-compatible server, tested through its endpoint; it is not a
             built-in backend.
+          </p>
+        </article>
+
+        <article class="update-entry" id="u-2026-05-03">
+          <h3>Track 2 memory-system design evolution</h3>
+          <p class="update-date">
+            <time datetime="2026-05-03">2026-05-03</time> ·
+            <a href="./memory-design.html">Memory design</a>
+          </p>
+          <p>
+            Track 2 now has a clearer memory-session shape. The online path
+            splits remembered candidates into a fast working-memory branch and
+            a Hippo branch that owns durable or specialized placement.
+          </p>
+          <ul>
+            <li>The agent keeps the v1 write decision lightweight: it only proposes that a candidate is worth remembering.</li>
+            <li><code>working</code> stores short-lived active task/session context with LRU-style refresh; the design direction separates <code>fresh</code> and <code>rehearsed</code> memories.</li>
+            <li>Long-term persistence waits until the related working memory is <code>rehearsed</code> or another strong write signal exists.</li>
+            <li><code>Hippo</code> routes durable writes with five explicit actions: <code>NEW</code>, <code>UPDATE</code>, <code>RELATED</code>, <code>CONFLICT</code>, and <code>IGNORE</code>.</li>
+            <li><code>long</code> and <code>profile</code> share one physical long-term store in v1, distinguished by metadata kinds such as semantic, episodic, profile, and reflection.</li>
+            <li><code>tools</code> remains the authoritative registry and grows procedural skill/template memory without bypassing checker or executor policy.</li>
+            <li><code>PersonalizedMemory</code> is a filtered sleep-sample staging area for Track 4, not a dump of raw history.</li>
+            <li><code>history</code> stays append-only or near-append-only for debugging, replay, auditability, and provenance lookup outside normal recall.</li>
+          </ul>
+          <p>
+            The v1 foundation now has persistent-memory docs, multi-session
+            SQLite stress coverage, real-backend long-term retrieval evidence,
+            and a frozen selected-sample schema for
+            <code>PersonalizedMemory</code>. Later Track 2 work moves into
+            working-memory stages, Hippo write routing, long/profile semantics,
+            procedural memory, and evaluation.
           </p>
         </article>
 

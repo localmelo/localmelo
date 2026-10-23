@@ -35,6 +35,9 @@ tools and memory on your own model server or a cloud API. The website is at
   and timeouts.
 - [Architecture](https://localmelo.github.io/localmelo/en/architecture.html)
   (website): how the parts fit together.
+- [Memory design](https://localmelo.github.io/localmelo/en/memory-design.html)
+  (website): the maintainer's memory design, parts of which are not built
+  yet.
 - [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap)
   (website): plans and dated updates.
 
@@ -60,10 +63,13 @@ docs/
 ```
 
 - The Markdown pages are in English only.
-- The website has four pages in each language: Home, Quickstart,
-  Architecture and Roadmap. Each English page has a Chinese twin with the
-  same element `id`s, the same sections in the same order, and identical code
-  blocks.
+- The website has five pages in each language: Home, Quickstart,
+  Architecture, Roadmap and Memory design. Each English page has a Chinese
+  twin with the same element `id`s, the same sections in the same order, and
+  identical code blocks.
+- Memory design keeps the maintainer's memory design word for word, in
+  English and in Chinese. Restyle it if you need to, but change its words
+  only with the maintainer.
 - The website's Quickstart mirrors `quickstart.md`. The other website pages
   link to the Markdown pages on GitHub.
 
@@ -88,7 +94,8 @@ Then open `http://127.0.0.1:8080/en/`.
 - Add a new Markdown page to this index and to the documentation table in
   `README.md` and `README.zh-CN.md`.
 - Add a new website page in both languages, and to the navigation of every
-  website page.
+  website page. Memory design is the exception: it is a design record, and
+  the Architecture and Roadmap pages link to it instead.
 - Check every command you document by running it.
 
 ### Translations
