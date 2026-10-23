@@ -308,15 +308,21 @@ class TestRetrieveExposure:
         options = AgentOptions(builtins=frozenset({"file_read", "shell_exec"}))
         agent, _ = _agent(llm, options, {})
 
-        assert await agent.run("Write the result to a file with python") == "done"
-        # file_write is neither registered nor offered, although the query
-        # and then the call name it.
+        # "hello" shares no word with the name, description or tags of
+        # either built-in; both are offered on every step all the same.
+        result = await agent.run_task("hello")
+        assert (result.status, result.result) == ("completed", "done")
+        # file_write is neither registered nor offered, although the call
+        # names it.
         assert [_offered(call) for call in llm.calls] == [
             ["file_read", "shell_exec"]
         ] * 2
         assert _results(llm.calls[1]) == [
             "Error: Tool not found in registry: file_write"
         ]
+        # Both planning calls offered tools, so both count as main requests,
+        # none as auxiliary ones.
+        assert (result.n_llm, result.n_main, result.n_aux) == (2, 2, 0)
 
     @pytest.mark.asyncio
     async def test_without_builtins_only_the_extra_tools_are_retrieved(
