@@ -326,7 +326,7 @@
         tags: ["planner", "model consumer"],
         body: `<h3>Loop stages</h3><ul>
           <li>读取 long-term context 和 working-memory window。</li>
-          <li>根据 hints 和 registry search 解析工具。</li>
+          <li>提供所有已注册的 built-in 工具，再根据 hints 和 BM25 search 从其余工具中解析（默认的 <code>retrieve</code>），或提供所有工具（<code>all</code>）。</li>
           <li>调用 chat provider 做 planning。</li>
           <li>通过 executor 和 checker boundaries 执行 tool calls。</li>
           <li>只做轻量 bool 判断：candidate 是否值得记忆。</li>
