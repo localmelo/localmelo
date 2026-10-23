@@ -3,143 +3,181 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>localmelo docs</title>
-  <meta name="description" content="Documentation for localmelo, a local-first agent runtime with explicit memory layers and safe tool use.">
+  <title>Overview · localmelo</title>
+  <meta name="description" content="localmelo is a local personal agent that runs tasks with tools and memory on your own model server or a cloud API.">
+  <link rel="alternate" hreflang="en" href="https://localmelo.github.io/localmelo/en/index.html">
+  <link rel="alternate" hreflang="zh-CN" href="https://localmelo.github.io/localmelo/zh-CN/index.html">
+  <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/index.html">
   <link rel="icon" href="../assets/icon_small.png">
   <link rel="stylesheet" href="../assets/site.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header">
     <div class="topbar">
-      <a class="brand" href="./index.html" aria-label="localmelo docs home">
-        <img src="../assets/icon_small.png" alt="">
+      <a class="brand" href="./index.html" aria-current="page">
+        <img src="../assets/icon_small.png" alt="" width="30" height="30">
         <strong><span>local</span>melo</strong>
       </a>
-      <nav class="site-nav" aria-label="Primary navigation">
-        <a class="active" href="./index.html">Docs</a>
+      <nav class="site-nav" aria-label="Main">
         <a href="./quickstart.html">Quickstart</a>
         <a href="./architecture.html">Architecture</a>
-        <a href="./updates.html">Updates</a>
-        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+        <a href="./updates.html">Roadmap</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">Reference <span aria-hidden="true">↗</span></a>
+        <a href="https://github.com/localmelo/localmelo">GitHub <span aria-hidden="true">↗</span></a>
       </nav>
-      <div class="lang-toggle" aria-label="Language">
-        <a class="active" href="./index.html">EN</a>
-        <a href="../zh-CN/index.html">中文</a>
-      </div>
+      <nav class="lang-toggle" aria-label="Language">
+        <a href="./index.html" hreflang="en" lang="en" aria-current="true">EN</a>
+        <a href="../zh-CN/index.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+      </nav>
     </div>
   </header>
 
-  <main class="page layout">
-    <aside class="sidebar" aria-label="Documentation sections">
-      <h2>Get started</h2>
-      <a class="active" href="#overview">Overview</a>
-      <a href="#setup">Set up</a>
-      <a href="./quickstart.html">Quickstart</a>
-      <a href="./updates.html">Updates</a>
-      <h2>Runtime</h2>
-      <a href="#runtime">Runtime model</a>
-      <a href="./architecture.html">Architecture</a>
-      <a href="./quickstart.html#backends">Backends</a>
-      <a href="./quickstart.html#tests">Validation</a>
-    </aside>
+  <main id="main" class="page layout">
+    <nav class="sidebar" aria-label="On this page">
+      <p class="sidebar-label">On this page</p>
+      <a href="#quickstart">Quick start</a>
+      <a href="#features">What you can do</a>
+      <a href="#roadmap">Roadmap</a>
+      <a href="#security">Security</a>
+    </nav>
 
     <article class="content">
       <header class="doc-hero" id="overview">
-        <p class="eyebrow">Get started</p>
-        <h1>localmelo documentation</h1>
+        <h1>localmelo</h1>
         <p class="lead">
-          localmelo is a pre-alpha local-first agent runtime with explicit memory
-          layers, checked tool execution, and connectors for user-managed local or
-          cloud model endpoints.
+          A local personal agent that runs tasks with tools and memory on your
+          own model server or a cloud API. It runs from the command line or as
+          a small HTTP service, and talks to Ollama, MLC LLM, vLLM, SGLang or a
+          cloud API.
         </p>
         <div class="doc-meta">
-          <span class="tag stable">online loop verified</span>
-          <span class="tag experimental">memory active</span>
-          <span class="tag planned">sleep planned</span>
+          <span class="tag experimental">pre-alpha</span>
         </div>
         <div class="masthead-visual doc-illustration">
-          <img src="../assets/melo.png" alt="Melo mascot">
+          <img src="../assets/melo.png" alt="Melo, the localmelo mascot" width="896" height="1195">
         </div>
       </header>
 
-      <section class="section" id="setup">
-        <h2>Set up</h2>
+      <section class="section" id="quickstart">
+        <h2>Quick start</h2>
         <p>
-          Install the package, configure a chat backend, then run a single direct
-          query. This is the smallest useful path through the runtime.
+          You need Python 3.11 or later, Git and
+          <a href="https://docs.astral.sh/uv/">uv</a>, on macOS (developed and
+          tested) or Linux (should work, untested). Windows is not supported.
+          Install it with uv (or
+          <a href="./quickstart.html#install-with-pip">with pip</a>):
         </p>
-        <div class="terminal" aria-label="First run commands">
-          <div class="terminal-title">minimum local run</div>
-          <pre><code>pip install -e ".[dev,gateway]"
-melo --reconfigure
-melo "What is 6*7?"</code></pre>
-        </div>
+        <figure class="terminal">
+          <figcaption class="terminal-title">Install</figcaption>
+          <pre><code>git clone https://github.com/localmelo/localmelo.git
+cd localmelo
+uv sync --extra gateway
+source .venv/bin/activate</code></pre>
+        </figure>
+        <p>
+          Keep the directory name <code>localmelo</code>: the package is built
+          from it.
+        </p>
+        <p>
+          Start a model server, for example <a href="https://ollama.com">Ollama</a>
+          with a model pulled by <code>ollama pull qwen3:8b</code>, and run a
+          task. The answer is printed on stdout.
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">Run a task</figcaption>
+          <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"</code></pre>
+        </figure>
         <div class="masthead-actions">
-          <a class="button primary" href="./quickstart.html">Open Quickstart</a>
-          <a class="button" href="./architecture.html">View Architecture</a>
+          <a class="button primary" href="./quickstart.html">Read the Quickstart</a>
         </div>
       </section>
 
-      <section class="section" id="runtime">
-        <h2>What localmelo provides</h2>
+      <section class="section" id="features">
+        <h2>What you can do</h2>
+        <p>Each card opens the matching reference page on GitHub.</p>
         <div class="link-grid">
-          <a class="link-card" href="./quickstart.html#direct-cli">
-            <strong>Direct CLI</strong>
-            <span>Run one agent query from the command line and exit.</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">
+            <strong>Run tasks</strong>
+            <span>Run one task per command, within a step budget, with reflection between attempts and an optional time limit.</span>
           </a>
-          <a class="link-card" href="./quickstart.html#gateway">
-            <strong>Gateway API</strong>
-            <span>Serve the same runtime over HTTP with session reuse.</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">
+            <strong>Tools and MCP</strong>
+            <span>Use four built-in tools and the tools of local MCP servers; each step runs only the tools it offered.</span>
           </a>
-          <a class="link-card" href="./architecture.html#boundaries">
-            <strong>Checked tool use</strong>
-            <span>Validate ingress, planning, execution, output, and memory writes.</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#backends">
+            <strong>Model servers</strong>
+            <span>Connect to Ollama, MLC LLM, vLLM or SGLang servers that you run, or to the OpenAI, Anthropic, Google Gemini or NVIDIA API.</span>
           </a>
-          <a class="link-card" href="./architecture.html#status">
-            <strong>Layered memory</strong>
-            <span>Keep working memory, Hippo-routed long/profile/tools/personalized memory, and raw history separate.</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md">
+            <strong>Gateway and web UI</strong>
+            <span>Serve the agent over HTTP with sessions, plus a small web page for trying models.</span>
           </a>
-          <a class="link-card" href="./quickstart.html#backends">
-            <strong>Backend connectors</strong>
-            <span>Connect to Ollama, MLC, vLLM, SGLang, or supported cloud providers.</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">
+            <strong>Memory</strong>
+            <span>Keep working memory, a history of tasks and steps, and long-term memory with an embedding server, saved to SQLite when you turn persistence on.</span>
           </a>
-          <a class="link-card" href="./updates.html">
-            <strong>Roadmap tracking</strong>
-            <span>Follow runtime, memory, backend, and release-quality progress.</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#use-melo-in-scripts">
+            <strong>Scripts and benchmarks</strong>
+            <span>Read one JSON line per run and a fixed exit code, so scripts can rely on the outcome.</span>
           </a>
         </div>
       </section>
 
-      <section class="section" id="state">
-        <h2>Current project state</h2>
-        <div class="status-grid">
-          <article class="status-card">
-            <span class="tag stable">Ready to verify</span>
-            <h3>Online core loop</h3>
-            <p>Direct CLI, gateway entry points, provider registry, tool execution, and checker boundaries have automated coverage.</p>
-          </article>
-          <article class="status-card">
-            <span class="tag experimental">Active</span>
-            <h3>Memory persistence</h3>
-            <p>SQLite-backed history and long-term memory are async and persistent. Track 2 v1 local-backend retrieval evidence is archived; retrieval policy is still evolving.</p>
-          </article>
-          <article class="status-card">
-            <span class="tag planned">Later track</span>
-            <h3>Sleep pipeline</h3>
-            <p>Sleep-time training and evaluation are scaffolded. The personalization workflow is not part of the current baseline.</p>
-          </article>
+      <section class="section" id="roadmap">
+        <h2>Roadmap</h2>
+        <p>The v0.1.0 milestone is due 2026-12-20.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Phase</th><th scope="col">Dates</th><th scope="col">Scope</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Phase 1</td><td>2026-10-19 to 2026-11-01</td><td>Core loop v2 and the command line</td></tr>
+              <tr><td>Phase 2</td><td>2026-11-02 to 2026-11-22</td><td>Memory: notes, retrieval and long-term promotion</td></tr>
+              <tr><td>Phase 3</td><td>2026-11-23 to 2026-12-06</td><td>Safety and privacy</td></tr>
+            </tbody>
+          </table>
         </div>
+        <p>Planned:</p>
+        <ul>
+          <li>an interactive CLI (running <code>melo</code> without a task will open it; today that starts the gateway);</li>
+          <li>a web console;</li>
+          <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>).</li>
+        </ul>
+        <p>See the <a href="./updates.html#roadmap">roadmap and updates</a> for the issues and dated changes.</p>
+      </section>
+
+      <section class="section" id="security">
+        <h2>Security</h2>
+        <div class="callout warning">
+          <p>
+            <strong>Tools run with your account's permissions, and there is no
+            sandbox.</strong> The model can run shell commands and Python code,
+            and read or write any file you can. The gateway has no
+            authentication, so keep it on <code>127.0.0.1</code> (the default).
+          </p>
+        </div>
+        <p>
+          Read the <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">security policy</a>
+          and <a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#what-the-checks-do">what the checks do</a>.
+        </p>
       </section>
     </article>
-
   </main>
 
   <footer class="site-footer">
     <div class="footer-inner">
-      <span>localmelo documentation</span>
-      <span>Pre-alpha. APIs and workflows may change.</span>
+      <p>Pre-alpha: commands and APIs may change before v0.1.0.</p>
+      <nav class="footer-links" aria-label="Project">
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">All documentation</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md">Contributing</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">Security policy</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/LICENSE">License</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
     </div>
   </footer>
-  <script src="../assets/site.js"></script>
 </body>
 </html>

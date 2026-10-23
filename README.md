@@ -1,226 +1,191 @@
 <p align="center">
-  <img src="docs/assets/melo.png" alt="Melo" width="240">
+  <img src="docs/assets/melo.png" alt="Melo, the localmelo mascot" width="200">
 </p>
 
 # localmelo
 
-[English](./README.md) | [简体中文](./README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-`localmelo` is a local-first agent runtime for explicit memory, checked tool use,
-and user-managed model backends. It is designed to keep the core agent loop
-separate from infrastructure so local and cloud backends can be configured
-without changing runtime behavior.
+A local personal agent that runs tasks with tools and memory on your own model server or a cloud API.
+Use it to run agent tasks from the shell, from scripts and benchmarks (each
+run gives one JSON line and a fixed exit code), or over HTTP.
 
-**Status:** pre-alpha. The online core loop is usable for development and smoke
-testing, but public APIs, memory policy, and personalization workflows are still
-evolving.
+[Website](https://localmelo.github.io/localmelo/) ·
+[Quickstart](docs/quickstart.md) ·
+[Documentation](docs/README.md) ·
+[Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap)
 
-**[Docs](https://localmelo.github.io/localmelo/en/index.html)** |
-**[Quickstart](https://localmelo.github.io/localmelo/en/quickstart.html)** |
-**[Architecture](https://localmelo.github.io/localmelo/en/architecture.html)** |
-**[Updates](https://localmelo.github.io/localmelo/en/updates.html)**
+**Status:** pre-alpha. Running tasks from the command line (direct mode) and
+the HTTP gateway work today. Commands, the HTTP API and the Python API may
+change before v0.1.0 (milestone due 2026-12-20).
 
-## What It Does
+## What it does
 
-localmelo provides:
+- **Runs one task per command.** `melo "<task>"` works within a step budget,
+  reflects between attempts, and can have a time limit.
+- **Uses tools.** Four built-in tools (`shell_exec`, `python_exec`,
+  `file_read`, `file_write`) and the tools of MCP servers (stdio servers, in
+  direct mode and the Python API).
+- **Reports every run** as text or as one JSON line, with fixed exit codes,
+  so scripts and benchmarks can rely on it.
+- **Connects to your models.** A model server you run (Ollama, MLC LLM, vLLM,
+  SGLang) or a cloud API (OpenAI, Anthropic, Google Gemini, NVIDIA).
+- **Remembers.** Working memory during a run, a history of tasks and steps,
+  and long-term memory when an embedding server is configured. History and
+  long-term memory are saved to SQLite when you turn persistence on.
+- **Serves the same agent over HTTP** with sessions, plus a small web page
+  for trying it out (the gateway).
 
-- an online agent loop with planning, tool execution, reflection, and memory writeback
-- explicit memory layers for working context, history, long-term retrieval, and tool lookup
-- checker boundaries for ingress, planning, execution, output size, and memory writes
-- backend connectors for local and cloud model providers
-- gateway mode for HTTP sessions around the same runtime
-- scaffolding for a later sleep-time personalization pipeline
+localmelo does not download, start or serve models: you run the model server
+yourself.
 
-It does not manage local model runtimes. Start Ollama, MLC, vLLM, SGLang, or other
-local services yourself, then point localmelo at the configured endpoint.
+## Requirements
 
-## Current Maturity
+- macOS (developed and tested) or Linux (should work, untested). Windows is
+  not supported.
+- Python 3.11 or later, and Git.
+- [uv](https://docs.astral.sh/uv/) (recommended) or pip.
+- A model server that you run, such as [Ollama](https://ollama.com), or an
+  API key for a cloud API.
 
-Ready to verify:
-
-- direct CLI mode
-- gateway mode
-- backend registry and provider construction
-- built-in tool execution with workspace policy
-- async SQLite history and long-term memory persistence
-- focused tests and smoke checks
-
-Still experimental:
-
-- long-memory retrieval and promotion policy
-- product-level deployment shell
-- sleep-time training, evaluation, and personalization
-- stable public API guarantees
-
-## Quickstart
-
-Requirements:
-
-- Python 3.11+
-- a configured chat backend such as Ollama, MLC, vLLM, SGLang, or a supported cloud provider
-
-Install from the repository root:
+## Install
 
 ```bash
-pip install -e ".[dev,gateway]"
+git clone https://github.com/localmelo/localmelo.git
+cd localmelo
+uv sync --extra gateway
+source .venv/bin/activate
 ```
 
-Configure providers:
+Keep the directory name `localmelo`: the package is built from it. A renamed
+folder or a ZIP download (`localmelo-main`) fails with
+`ModuleNotFoundError: No module named 'localmelo'`.
 
-```bash
-melo --reconfigure
-```
+Without uv, see [Install with pip](docs/quickstart.md#install-with-pip).
 
-Run one direct query:
+The examples call `melo` directly. Activation lasts for this terminal only:
+in a new terminal, run `source <clone>/.venv/bin/activate` again, where
+`<clone>` is your `localmelo` directory. With uv you can also run
+`uv run melo …` inside the clone, or `uv run --project <clone> melo …` from
+anywhere else.
 
-```bash
-melo "What is 6*7?"
-```
+To update or uninstall localmelo, see
+[Configuration](docs/configuration.md#update-localmelo).
 
-Run the gateway:
+## Quick start
 
-```bash
-melo --serve
-```
+1. Start a model server. This example uses [Ollama](https://ollama.com):
+   install it, start it, and pull a model with `ollama pull qwen3:8b`. Any
+   OpenAI-compatible server works with its `/v1` URL.
 
-Call the gateway:
+2. Run a task. The model can use tools with your account's permissions; see
+   [Security](#security).
 
-```bash
-curl http://127.0.0.1:8401/v1/health
+   ```bash
+   melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
+   ```
 
-curl -X POST http://127.0.0.1:8401/v1/agent/run \
-  -H "Content-Type: application/json" \
-  -d '{"query":"Say hello briefly"}'
-```
+   The answer is printed on stdout, and the exit code is 0 when the run
+   completed. Add `--output-format json` to get one JSON line with the run's
+   record instead. `--base-url` sends no API key; for a cloud API, skip to
+   step 3.
 
-See the [Quickstart](https://localmelo.github.io/localmelo/en/quickstart.html) for
-gateway smoke checks, session reuse, no-embedding mode, and backend-specific
-verification.
+3. Save a configuration and start the gateway. For a cloud API, first run
+   `export OPENAI_API_KEY="<your key>"` (or your vendor's variable) in the
+   same terminal: the wizard's test request uses that key.
 
-## Architecture
+   ```bash
+   melo --serve --reconfigure
+   ```
 
-The main design rule is:
+   The setup wizard asks for the chat backend, its URL and model, and an
+   embedding backend:
 
-> `melo/` owns runtime behavior and contracts. `support/` owns infrastructure.
-> Core runtime code should not import infrastructure implementations directly.
+   - For Ollama from step 1, choose `2`, then press Enter to accept the
+     suggested URL and model.
+   - For another OpenAI-compatible server, choose vLLM (`3`) and enter its
+     URL and model name.
+   - For a cloud API, choose the vendor.
+   - For the embedding backend, choose `5`, `None (no long-term memory)`, if
+     you have no embedding server.
 
-```text
-localmelo/
-  melo/       # agent, memory, checker, executor, sleep scaffolding
-  support/    # backends, providers, gateway, config, onboarding
-  tests/      # regression, integration, and smoke coverage
-  docs/       # static documentation site
-```
+   The wizard checks that the servers answer, saves
+   `~/.cache/localmelo/config.toml`, and then serves on
+   `http://127.0.0.1:8401`. In another terminal:
 
-Core modules:
+   ```bash
+   curl http://127.0.0.1:8401/v1/health
+   curl -X POST http://127.0.0.1:8401/v1/agent/run \
+     -H "Content-Type: application/json" \
+     -d '{"query": "What is 6*7?"}'
+   ```
 
-| Area | Responsibility |
+   Press Ctrl+C to stop the gateway. From then on, `melo "<task>"` uses the
+   saved configuration.
+
+Next, the [Quickstart](docs/quickstart.md) walks through each step in more
+detail.
+
+## Documentation
+
+| Page | What it covers |
 |---|---|
-| Agent | Retrieval, planning, tool calls, reflection, final answers |
-| Memory | Working memory, history, long-term storage, tool registry |
-| Checker | Structured validation across runtime boundaries |
-| Executor | Built-in tool execution with timeout and workspace policy |
-| Support | Backend registry, provider implementations, config, gateway |
+| [Quickstart](docs/quickstart.md) | Install, run a first task, save a configuration, start the gateway |
+| [Command-line reference](docs/cli.md) | `melo` modes, options, output, exit codes and signals |
+| [Run results](docs/run-results.md) | How a run can end, the run record, retries |
+| [Configuration](docs/configuration.md) | Setup wizard, config file, backends, timeouts, environment variables |
+| [Tools and MCP](docs/tools.md) | Built-in tools, MCP servers, which tools a step offers, the checks |
+| [Gateway and HTTP API](docs/gateway.md) | HTTP API, sessions, web UI, running at login on macOS |
+| [Memory](docs/memory.md) | What localmelo remembers, keeping, inspecting and resetting it |
+| [Python API](docs/python-api.md) | `Agent`, `AgentOptions` and `RunResult` (experimental) |
+| [How localmelo works](docs/how-it-works.md) | The run loop, reflection, memory and timeouts |
+| [Troubleshooting](docs/troubleshooting.md) | Error messages and how to fix them |
+| [Architecture](https://localmelo.github.io/localmelo/en/architecture.html) | How the parts fit together (website) |
+| [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap) | Plans and dated updates (website) |
 
-For the full runtime map, see the
-[Architecture docs](https://localmelo.github.io/localmelo/en/architecture.html).
+## Roadmap
 
-## Safety Boundaries
+The roadmap is tracked in [#2](https://github.com/localmelo/localmelo/issues/2).
+The v0.1.0 milestone is due 2026-12-20.
 
-localmelo treats checks as runtime control flow. Requests, plans, tool calls,
-executor results, and memory writes are validated before they cross major
-boundaries.
-
-Current safeguards include:
-
-- workspace policy for file operations
-- blocked shell command patterns
-- a `shell_exec` command is killed together with its process group (every
-  process it started) on timeout or cancellation
-- execution allowlist: a tool call runs only if its planning step offered
-  that tool to the model
-- output size limits
-- prompt and memory write size limits
-- provider probing during onboarding
-
-In the default `retrieve` tool exposure, each step offers every registered
-built-in tool, sorted by name, then the other tools (MCP and other provided
-tools) that hint extraction and BM25 search resolve for it, also sorted by
-name. A call to any other registered tool is refused with "Tool '<name>' was
-not offered in this step." and does not run; earlier versions ran any
-registered tool the model named. The check holds within one step: the refused
-call stays in the conversation, so hint extraction can offer that tool on the
-next step. With `tool_exposure="all"`, every registered tool is offered on
-every step.
-
-This is still pre-alpha software. Review configuration and tool permissions
-before giving it access to important files, accounts, or long-running processes.
-
-## Backends
-
-Supported backend families:
-
-| Backend | Type | Notes |
+| Phase | Dates | Scope |
 |---|---|---|
-| `ollama` | local | User-managed Ollama server |
-| `mlc` | local | User-managed MLC endpoint |
-| `vllm` | local | User-managed vLLM endpoint |
-| `sglang` | local | User-managed SGLang endpoint |
-| `openai` | cloud | OpenAI API |
-| `anthropic` | cloud | Anthropic API |
-| `gemini` | cloud | Google Gemini API |
-| `nvidia` | cloud | NVIDIA API |
+| Phase 1 | 2026-10-19 to 2026-11-01 | Core loop v2 and the command line ([#3](https://github.com/localmelo/localmelo/issues/3)) |
+| Phase 2 | 2026-11-02 to 2026-11-22 | Memory: notes, retrieval and long-term promotion |
+| Phase 3 | 2026-11-23 to 2026-12-06 | Safety and privacy ([#29](https://github.com/localmelo/localmelo/issues/29)) |
 
-Chat and embedding backends are configured separately. Set the embedding backend
-to `none` when you do not want to run embedding retrieval.
+Planned:
 
-Each chat request waits up to 120 s for data from the server (300 s with the
-`ollama` backend). The timeout restarts whenever data arrives, so it does not cut
-off a server that sends keep-alive bytes while it generates; `--timeout` bounds a
-whole direct run. For a slower model, such as a local thinking model, set
-`request_timeout_s` at the top of `~/.cache/localmelo/config.toml`, or pass
-`--request-timeout SECONDS` to a direct query; see
-[docs/quickstart.md](docs/quickstart.md#chat-request-timeout).
+- an interactive CLI (running `melo` without a task will open it; today that
+  starts the gateway);
+- a web console;
+- keeping the model's reasoning as memory notes, with switchable retrieval
+  (`bm25`, `llm`, `embedding`).
 
-## Development
+## Security
 
-Install development dependencies with [uv](https://docs.astral.sh/uv/). This
-creates `.venv/` from the committed `uv.lock`:
+> [!WARNING]
+> Tools run with your account's permissions, and there is no sandbox: the
+> model can run shell commands and Python code, and read or write any file
+> you can. The gateway has no authentication, so keep it on `127.0.0.1` (the
+> default). See [SECURITY.md](SECURITY.md) and
+> [What the checks do](docs/tools.md#what-the-checks-do).
 
-```bash
-uv sync --extra dev --extra gateway
-```
+## Getting help
 
-Run focused checks:
-
-```bash
-uv run pytest tests/agent tests/checker tests/executor \
-              tests/cli tests/memory tests/integration -q
-uv run pytest tests/gateway -q
-uv run ruff check .
-```
-
-Run the full suite before merging:
-
-```bash
-uv run pytest tests/ -q
-```
-
-Development priorities are tracked in
-[Updates](https://localmelo.github.io/localmelo/en/updates.html) and GitHub issues.
+Search the [issues](https://github.com/localmelo/localmelo/issues) or open a
+new one. Include the JSON line from `--output-format json` (it names the
+localmelo version), the exit code, the backend and model, your operating
+system and Python version, and the steps to reproduce. Remove API keys and
+personal paths first. Report security problems
+as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
 ## Contributing
 
-Issues and pull requests are welcome. Because the project is still pre-alpha,
-small focused changes are easier to review than broad feature drops.
-
-Please keep changes aligned with the runtime/infrastructure boundary:
-
-- put core agent behavior in `melo/`
-- put backend, gateway, config, and onboarding implementation in `support/`
-- preserve checker-based control flow for safety boundaries
-- add tests for behavior that changes public commands, storage, tool execution, or provider contracts
+Bug reports, documentation fixes and small, focused pull requests are
+welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the development setup and
+the checks to run.
 
 ## License
 
-localmelo is released under the [MIT License](LICENSE).
+MIT © The localmelo Authors. See [LICENSE](LICENSE).

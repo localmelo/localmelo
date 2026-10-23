@@ -3,63 +3,140 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Updates - localmelo docs</title>
-  <meta name="description" content="Development updates and roadmap progress for localmelo.">
+  <title>Roadmap and updates · localmelo</title>
+  <meta name="description" content="The localmelo roadmap to the v0.1.0 milestone, and dated updates on what has changed.">
+  <link rel="alternate" hreflang="en" href="https://localmelo.github.io/localmelo/en/updates.html">
+  <link rel="alternate" hreflang="zh-CN" href="https://localmelo.github.io/localmelo/zh-CN/updates.html">
+  <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/updates.html">
   <link rel="icon" href="../assets/icon_small.png">
   <link rel="stylesheet" href="../assets/site.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header">
     <div class="topbar">
-      <a class="brand" href="./index.html" aria-label="localmelo docs home">
-        <img src="../assets/icon_small.png" alt="">
+      <a class="brand" href="./index.html">
+        <img src="../assets/icon_small.png" alt="" width="30" height="30">
         <strong><span>local</span>melo</strong>
       </a>
-      <nav class="site-nav" aria-label="Primary navigation">
-        <a href="./index.html">Docs</a>
+      <nav class="site-nav" aria-label="Main">
         <a href="./quickstart.html">Quickstart</a>
         <a href="./architecture.html">Architecture</a>
-        <a class="active" href="./updates.html">Updates</a>
-        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+        <a href="./updates.html" aria-current="page">Roadmap</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">Reference <span aria-hidden="true">↗</span></a>
+        <a href="https://github.com/localmelo/localmelo">GitHub <span aria-hidden="true">↗</span></a>
       </nav>
-      <div class="lang-toggle" aria-label="Language">
-        <a class="active" href="./updates.html">EN</a>
-        <a href="../zh-CN/updates.html">中文</a>
-      </div>
+      <nav class="lang-toggle" aria-label="Language">
+        <a href="./updates.html" hreflang="en" lang="en" aria-current="true">EN</a>
+        <a href="../zh-CN/updates.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+      </nav>
     </div>
   </header>
 
-  <main class="page layout">
-    <aside class="sidebar" aria-label="Updates sections">
-      <h2>Updates</h2>
-      <a class="active" href="#track-two">Track 2</a>
-      <a href="#backend-evidence">Backend evidence</a>
-      <a href="#latest">Runtime hardening</a>
-      <a href="#track-one">Track 1</a>
-      <a href="#foundation">Foundation</a>
-      <a href="#status">Status</a>
-      <a href="#deliverables">Deliverables</a>
-    </aside>
+  <main id="main" class="page layout">
+    <nav class="sidebar" aria-label="On this page">
+      <p class="sidebar-label">On this page</p>
+      <a href="#roadmap">Roadmap</a>
+      <a href="#updates">Updates</a>
+    </nav>
 
     <article class="content">
       <header class="doc-hero">
-        <p class="eyebrow">Project updates</p>
-        <h1>Development changelog and roadmap progress.</h1>
+        <h1>Roadmap and updates</h1>
         <p class="lead">
-          The changelog focuses on review-relevant changes: runtime behavior,
-          public boundaries, verification coverage, and roadmap state.
+          What is planned before v0.1.0, and what has changed so far, newest
+          first.
         </p>
       </header>
 
-      <section class="section" id="track-two">
-        <article class="update-entry">
-          <div class="update-tags">
-            <span class="tag experimental">track 2</span>
-            <span class="tag stable">memory design</span>
-            <span class="tag planned">sleep-ready</span>
-          </div>
-          <h2>Track 2 memory-system design evolution</h2>
-          <p class="update-date">2026-05-03 - design notes <code>.melo/track2_plan.md</code></p>
+      <section class="section" id="roadmap">
+        <h2>Roadmap</h2>
+        <p>
+          The v0.1.0 milestone is due 2026-12-20. The roadmap is tracked in
+          <a href="https://github.com/localmelo/localmelo/issues/2">#2</a>.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Phase</th><th scope="col">Dates</th><th scope="col">Scope</th><th scope="col">Issue</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Phase 1</td><td>2026-10-19 to 2026-11-01</td><td>Core loop v2 and the command line</td><td><a href="https://github.com/localmelo/localmelo/issues/3">#3</a></td></tr>
+              <tr><td>Phase 2</td><td>2026-11-02 to 2026-11-22</td><td>Memory: notes, retrieval and long-term promotion</td><td><span aria-hidden="true">—</span><span class="visually-hidden">none</span></td></tr>
+              <tr><td>Phase 3</td><td>2026-11-23 to 2026-12-06</td><td>Safety and privacy</td><td><a href="https://github.com/localmelo/localmelo/issues/29">#29</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>Planned:</p>
+        <ul>
+          <li>an interactive CLI (running <code>melo</code> without a task will open it; today that starts the gateway);</li>
+          <li>a web console;</li>
+          <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>).</li>
+        </ul>
+        <p>
+          The maintainer's memory design, parts of which are not built yet, is
+          on the <a href="./memory-design.html">memory design</a> page.
+        </p>
+      </section>
+
+      <section class="section" id="updates">
+        <h2>Updates</h2>
+        <p>
+          The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
+          lists each change since 2026-10-22 in detail.
+        </p>
+
+        <article class="update-entry" id="u-2026-10-22">
+          <h3>Run options, run results and exit codes</h3>
+          <p class="update-date">
+            <time datetime="2026-10-22">2026-10-22</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/25">#25</a>,
+            <a href="https://github.com/localmelo/localmelo/pull/26">#26</a>,
+            <a href="https://github.com/localmelo/localmelo/pull/27">#27</a>,
+            <a href="https://github.com/localmelo/localmelo/pull/28">#28</a>,
+            <a href="https://github.com/localmelo/localmelo/pull/30">#30</a>,
+            <a href="https://github.com/localmelo/localmelo/pull/31">#31</a>,
+            <a href="https://github.com/localmelo/localmelo/pull/32">#32</a>
+          </p>
+          <p>A direct <code>melo "&lt;task&gt;"</code> run is now something a script or a benchmark can drive.</p>
+          <ul>
+            <li>Run options: <code>--max-steps</code>, <code>--attempt-policy</code>, <code>--tool-exposure</code>, <code>--builtins</code>, <code>--memory</code>, <code>--memory-dir</code> and <code>--timeout</code>; <code>--embedding-base-url</code> and <code>--embedding-model</code> for long-term memory in a <code>--base-url</code> run; and <code>AgentOptions</code> in the Python API (#30).</li>
+            <li>Every run ends with one of nine statuses. <code>--output-format json</code> prints the run record as one JSON line, and the exit code is 0 for <code>completed</code>, 1 for <code>crashed</code> and 2 for any other status or a usage error (#30).</li>
+            <li>Failed model requests are retried when a retry may succeed, and <code>--request-timeout</code> and <code>request_timeout_s</code> set the chat request timeout (#30).</li>
+            <li>SIGTERM and SIGHUP end a direct run within 8 seconds, with its task record saved (#30).</li>
+            <li>A step runs only the tools it offered, and a built-in tool call whose arguments have the wrong type is refused before it runs (#30).</li>
+            <li>Tools from local MCP servers, with <code>--mcp-config</code> and <code>--mcp-only</code>, and tools that return images (#27, #30).</li>
+            <li>Tool calls reach OpenAI-compatible models as real tool-call turns, every call of a step runs, and <code>extra_body</code> adds fields to chat requests (#26).</li>
+            <li>A reflection reply without a JSON object is asked for once more, without tools (#31).</li>
+            <li>#32: in retrieve mode, every step offers all registered built-in tools, then the extra tools found by hints and by BM25 with IDF, both sorted by name.</li>
+            <li>The MIT license (#28), and a uv development environment with a committed <code>uv.lock</code> (#25).</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-05-10">
+          <h3>Real-backend memory test archived</h3>
+          <p class="update-date">
+            <time datetime="2026-05-10">2026-05-10</time> ·
+            <a href="https://github.com/localmelo/localmelo/issues/4">#4</a>
+          </p>
+          <p>
+            Long-term memory that persists across sessions was tested with
+            three local servers, oMLX, Ollama and MLC LLM, all with the same
+            Qwen3 0.6B embedding model family. All three completed the four
+            scenarios. The scores and end-to-end times are in the
+            <a href="https://github.com/localmelo/localmelo/blob/main/tests_result/backend-smoke/2026-05-10-qwen3-embedding-0.6b/summary.md">archived summary</a>;
+            they were measured on the 2026-05-10 code. oMLX is an
+            OpenAI-compatible server, tested through its endpoint; it is not a
+            built-in backend.
+          </p>
+        </article>
+
+        <article class="update-entry" id="u-2026-05-03">
+          <h3>Track 2 memory-system design evolution</h3>
+          <p class="update-date">
+            <time datetime="2026-05-03">2026-05-03</time> ·
+            <a href="./memory-design.html">Memory design</a>
+          </p>
           <p>
             Track 2 now has a clearer memory-session shape. The online path
             splits remembered candidates into a fast working-memory branch and
@@ -84,156 +161,64 @@
             procedural memory, and evaluation.
           </p>
         </article>
-      </section>
 
-      <section class="section" id="backend-evidence">
-        <article class="update-entry">
-          <div class="update-tags">
-            <span class="tag stable">track 2 v1</span>
-            <span class="tag stable">backend smoke</span>
-            <span class="tag stable">qwen3 embedding</span>
-          </div>
-          <h2>Real-backend memory smoke archived</h2>
-          <p class="update-date">2026-05-10 - issue <a href="https://github.com/localmelo/localmelo/issues/4">#4</a></p>
-          <p>
-            OMLX, Ollama, and MLC-LLM were tested against the same Qwen3 0.6B
-            embedding family for persistent long-term retrieval. The durable
-            archive lives under
-            <code>tests_result/backend-smoke/2026-05-10-qwen3-embedding-0.6b/</code>;
-            transient runner output remains separate.
+        <article class="update-entry" id="u-2026-04-29">
+          <h3>Saved memory, bounded reflection and setup checks</h3>
+          <p class="update-date">
+            <time datetime="2026-04-29">2026-04-29</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/8">#8</a> to
+            <a href="https://github.com/localmelo/localmelo/pull/20">#20</a>
           </p>
-          <p>
-            The times below are end-to-end scenario wall-clock times. They
-            include chat generation, embedding calls, persistence/retrieval,
-            and agent-loop overhead; they are not embedding-only latency.
+          <ul>
+            <li>Saved memory (history and long-term memory in SQLite, when persistence is turned on) moved to asynchronous <code>aiosqlite</code>, with serialized writes.</li>
+            <li>Working memory keeps only the latest reflection, and a reflection over its size limit stops the run instead of growing the prompt.</li>
+            <li>The setup wizard sends a test request to each server before it saves the configuration.</li>
+            <li><code>Chat</code>, the agent's model wrapper, became internal: <code>Agent</code> is the public entry point.</li>
+            <li>The docs gained minimal check commands for each mode, and <code>tests/smoke/</code> gained pytest checks against real local backends.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-03-29">
+          <h3>Backend registry and an agent loop with attempts</h3>
+          <p class="update-date">
+            <time datetime="2026-03-29">2026-03-29</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/5">#5</a>
           </p>
-          <table>
-            <tr><th>Backend</th><th>Chat model</th><th>Embedding</th><th>Personal</th><th>Cross-session</th><th>Project</th><th>GitHub</th></tr>
-            <tr><td>OMLX</td><td><code>Qwen3-4B</code></td><td><code>Qwen3-Embedding-0.6B</code></td><td>92% / 193s</td><td>100% / 164s</td><td>65% / 298s</td><td>73% / 385s</td></tr>
-            <tr><td>Ollama</td><td><code>qwen3:4b</code></td><td><code>qwen3-embedding:0.6b</code></td><td>96% / 180s</td><td>100% / 120s</td><td>94% / 208s</td><td>97% / 298s</td></tr>
-            <tr><td>MLC-LLM</td><td><code>qwen3-4b</code></td><td><code>Qwen3-Embedding-0.6B-q0f16-MLC</code></td><td>100% / 94s</td><td>100% / 76s</td><td>94% / 138s</td><td>88% / 156s</td></tr>
-          </table>
-          <p>
-            MLC used a real compiled model artifact with no symlink or temporary
-            alias. OMLX is recorded through the local OpenAI-compatible wrapper
-            until it is wired into the shared smoke backend registry.
-          </p>
+          <ul>
+            <li>A backend registry with local adapters for Ollama, MLC LLM, vLLM and SGLang, and cloud adapters for OpenAI, Anthropic, Google Gemini and NVIDIA.</li>
+            <li>Chat and embedding backends chosen separately (<code>chat_backend</code> and <code>embedding_backend</code>).</li>
+            <li>An agent loop with attempts, a structured reflection between them, and a gate that decides whether to continue.</li>
+            <li>A chat provider for Ollama's own API that separates the model's thinking from its answer.</li>
+            <li>Benchmark scenarios and reports for comparing backends.</li>
+          </ul>
         </article>
-      </section>
 
-      <section class="section" id="latest">
-        <article class="update-entry">
-          <div class="update-tags">
-            <span class="tag experimental">maintenance</span>
-            <span class="tag stable">memory</span>
-            <span class="tag stable">smoke</span>
-          </div>
-          <h2>Runtime storage, reflection bounds, and smoke verification</h2>
-          <p class="update-date">2026-04-29 - PRs <a href="https://github.com/localmelo/localmelo/pull/8">#8</a> to <a href="https://github.com/localmelo/localmelo/pull/20">#20</a></p>
-
-          <div>
-            <p>
-              The current runtime baseline moved from "can run" to "can be verified".
-              The main changes tightened persistence, bounded reflection context,
-              validated onboarding, and documented the minimum smoke path.
-            </p>
-            <ul>
-              <li>SQLite history and long-term memory now use async <code>aiosqlite</code> persistence with lazy connection setup and write serialization.</li>
-              <li>Working memory keeps only the latest compressed reflection; oversized reflection state forces <code>decompose</code>.</li>
-              <li>Onboarding probes configured chat and embedding providers before saving config.</li>
-              <li>Executor boundary tests cover absolute paths and symlink escapes outside the workspace.</li>
-              <li><code>Chat</code> moved into the internal agent namespace.</li>
-              <li>Quickstart now documents direct CLI, gateway, session reuse, no-embedding, and backend smoke commands.</li>
-              <li>Pytest-discoverable local backend smoke checks were added under <code>tests/smoke/</code>.</li>
-            </ul>
-          </div>
-
+        <article class="update-entry" id="u-2026-03-25">
+          <h3>Initial code layout</h3>
+          <p class="update-date"><time datetime="2026-03-25">2026-03-25</time></p>
+          <ul>
+            <li>The agent moved into <code>melo/</code>, and configuration, providers, the gateway and the setup wizard into <code>support/</code>.</li>
+            <li>Provider interfaces in <code>melo/</code>, so the agent does not depend on any one backend.</li>
+            <li>Scaffolding for an offline <code>melo/sleep/</code> package, which the agent does not use.</li>
+            <li>Tests for the new layout.</li>
+          </ul>
         </article>
-      </section>
-
-      <section class="section" id="track-one">
-        <article class="update-entry">
-          <div class="update-tags">
-            <span class="tag stable">track 1</span>
-            <span class="tag experimental">agent</span>
-            <span class="tag planned">backend</span>
-          </div>
-          <h2>Online core loop foundation</h2>
-          <p class="update-date">2026-03-29 - issue <a href="https://github.com/localmelo/localmelo/issues/3">#3</a></p>
-
-          <div>
-            <p>
-              Track 1 established the first usable online agent loop: retrieval,
-              tool resolution, planning, execution, memory writeback, and response
-              delivery through direct CLI and gateway surfaces.
-            </p>
-            <ul>
-              <li>Backend registry with local adapters for Ollama, MLC, vLLM, and SGLang, plus cloud adapters for OpenAI, Anthropic, Gemini, and NVIDIA.</li>
-              <li>Split <code>chat_backend</code> and <code>embedding_backend</code> configuration.</li>
-              <li>Attempt-based agent loop with structured reflection and utility-gated continuation.</li>
-              <li>Ollama native chat provider with thinking/answer split.</li>
-              <li>Data-driven smoke benchmark reports for backend comparison.</li>
-            </ul>
-          </div>
-
-        </article>
-      </section>
-
-      <section class="section" id="foundation">
-        <article class="update-entry">
-          <div class="update-tags">
-            <span class="tag planned">foundation</span>
-            <span class="tag experimental">architecture</span>
-          </div>
-          <h2>Initial architecture split</h2>
-          <p class="update-date">2026-03-25</p>
-
-          <div>
-            <ul>
-              <li>Split the runtime into <code>melo/</code> and infrastructure into <code>support/</code>.</li>
-              <li>Introduced provider contracts to reduce coupling between core runtime and backend implementations.</li>
-              <li>Established memory and sleep package boundaries for later personalization work.</li>
-              <li>Expanded early regression coverage around the initial architecture.</li>
-            </ul>
-          </div>
-
-        </article>
-      </section>
-
-      <section class="section" id="status">
-        <h2>Current roadmap posture</h2>
-        <table>
-          <tr><th>Area</th><th>Status</th><th>Next useful work</th></tr>
-          <tr><td>Online core loop</td><td><span class="tag stable">verified baseline</span></td><td>Continue gateway lifecycle coverage and keep backend smoke evidence current.</td></tr>
-          <tr><td>Memory system</td><td><span class="tag experimental">active design</span></td><td>Implement working-memory stages, Hippo's five-action controller, and metadata-typed long/profile memory.</td></tr>
-          <tr><td>Deployment shell</td><td><span class="tag planned">planned</span></td><td>Define product shell responsibilities outside the core runtime.</td></tr>
-          <tr><td>Sleep pipeline</td><td><span class="tag planned">planned</span></td><td>Write the design issue before implementing training/evaluation.</td></tr>
-          <tr><td>Quality / release</td><td><span class="tag experimental">ongoing</span></td><td>Keep docs, tests, smoke, and issue hygiene aligned with each track.</td></tr>
-        </table>
-      </section>
-
-      <section class="section" id="deliverables">
-        <h2>Track 2 deliverables</h2>
-        <table>
-          <tr><th>Deliverable</th><th>Status</th></tr>
-          <tr><td>Document memory env vars, file layout, retention semantics, and reset workflow.</td><td><span class="tag stable">done in v1</span></td></tr>
-          <tr><td>Add multi-session SQLite stress coverage.</td><td><span class="tag stable">done in v1</span></td></tr>
-          <tr><td>Run and record real-backend long-term retrieval smoke for OMLX, Ollama, and MLC-LLM.</td><td><span class="tag stable">archived</span></td></tr>
-          <tr><td>Freeze and document the <code>PersonalizedMemory</code> selected-sample schema for v1.</td><td><span class="tag stable">done in v1</span></td></tr>
-          <tr><td>Implement working-memory <code>fresh</code> / <code>rehearsed</code> stages.</td><td><span class="tag planned">next</span></td></tr>
-          <tr><td>Implement Hippo five-action routing and metadata-typed long/profile memory.</td><td><span class="tag planned">next</span></td></tr>
-        </table>
       </section>
     </article>
-
   </main>
 
   <footer class="site-footer">
     <div class="footer-inner">
-      <span>localmelo updates</span>
-      <span><a href="https://github.com/localmelo/localmelo/issues">Issues</a> and <a href="https://github.com/localmelo/localmelo/pulls">pull requests</a></span>
+      <p>Pre-alpha: commands and APIs may change before v0.1.0.</p>
+      <nav class="footer-links" aria-label="Project">
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">All documentation</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md">Contributing</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">Security policy</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/LICENSE">License</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
     </div>
   </footer>
-  <script src="../assets/site.js"></script>
 </body>
 </html>

@@ -1,319 +1,208 @@
-# Memory persistence
+# Memory
 
-LocalMelo keeps four conceptual memory layers behind the `Hippo` coordinator:
-working memory (short-lived LRU), long-term memory (retrieved at planning
-time), history (raw record/debug layer), and `PersonalizedMemory` (selected
-sleep-input samples). This page documents the persistence options users can
-configure and inspect on disk. See [architecture.html](en/architecture.html) for
-the conceptual diagram.
+This page explains what localmelo remembers, how to keep memory between runs,
+and how to inspect, reset and protect it.
 
-Sections:
-
-- [Quick reference](#quick-reference)
-- [Environment variables](#environment-variables)
-- [File layout](#file-layout)
-- [Task records](#task-records)
-- [Retention semantics](#retention-semantics)
-- [No-embedding mode](#no-embedding-mode)
-- [Reset workflow](#reset-workflow)
-- [Inspection workflow](#inspection-workflow)
-- [Real-backend smoke commands](#real-backend-smoke-commands)
-- [PersonalizedSample v1 schema](#personalizedsample-v1-schema)
+The maintainer's memory design, parts of which are not built yet, is on the
+website's [Memory design](https://localmelo.github.io/localmelo/en/memory-design.html)
+page.
 
 ## Quick reference
 
-| Concern              | Knob / location                                                          |
-|----------------------|--------------------------------------------------------------------------|
-| Enable persistence   | `LOCALMELO_PERSIST_MEMORY=1`                                             |
-| Storage directory    | `LOCALMELO_MEMORY_DIR` (default `~/.cache/localmelo/memory`)             |
-| Direct query         | `melo --memory-dir DIR "<query>"` turns persistence on, in `DIR`         |
-| History DB           | `<dir>/history.db` (always when persistence is on)                       |
-| Long-term DB         | `<dir>/long_term.db` (only if an embedding provider is configured)       |
-| Reset                | stop the localmelo process → `rm` the chosen file(s) → restart           |
-| Schema version guard | `PERSONALIZED_SAMPLE_SCHEMA_VERSION = "v1"` (frozen)                     |
+| To | Do this |
+|---|---|
+| Keep memory between runs | `export LOCALMELO_PERSIST_MEMORY=1` |
+| Choose the directory | `export LOCALMELO_MEMORY_DIR=…` (default `~/.cache/localmelo/memory`) |
+| Keep the memory of one run in a directory | `melo --memory-dir ~/melo-memory "<task>"` |
+| Turn long-term memory off for one run | `melo --memory off "<task>"` |
+| See past runs | `sqlite3` queries; see [Inspect memory](#inspect-memory) |
+| Delete memory | Stop localmelo, then remove the files; see [Reset memory](#reset-memory) |
 
-## Environment variables
+## What localmelo remembers
 
-### `LOCALMELO_PERSIST_MEMORY`
+| Memory | What it holds | Where |
+|---|---|---|
+| Working memory | The conversation of a run, or of a gateway session: the last 20 messages. | RAM only. |
+| History | Every task with its status and result, and every step with its tool call and result. | RAM, or `history.db`. |
+| Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an embedding backend. | RAM, or `long_term.db`. |
 
-Set to a non-empty value to switch memory from in-memory backends to
-SQLite-backed persistence. Unset (or empty) means memory lives only in
-process RAM and is lost on exit.
+By default everything stays in RAM and is lost when the process ends. In RAM,
+long-term memory lasts as long as its agent: one direct run, or one gateway
+session.
 
-The flag is read in `localmelo/melo/agent/agent.py` with
-`os.environ.get("LOCALMELO_PERSIST_MEMORY")` and tested for truthiness — so
-**any non-empty string enables persistence**, including `0` and `false`.
-Use `1` for clarity, and `unset LOCALMELO_PERSIST_MEMORY` (or
-`export LOCALMELO_PERSIST_MEMORY=""`) to disable.
-
-```bash
-export LOCALMELO_PERSIST_MEMORY=1
-melo "what is 2+2"
-```
-
-### `LOCALMELO_MEMORY_DIR`
-
-Override the directory that holds the SQLite files. Default:
-`~/.cache/localmelo/memory`. The directory is created with
-`os.makedirs(..., exist_ok=True)` on first write, so any path you can write
-to works.
+## Keep memory between runs
 
 ```bash
 export LOCALMELO_PERSIST_MEMORY=1
-export LOCALMELO_MEMORY_DIR=/var/lib/localmelo/memory
-melo --serve
+melo "What is 6*7?"
 ```
 
-## File layout
+- `LOCALMELO_PERSIST_MEMORY` turns persistence on with any non-empty value,
+  even `0` or `false`. To turn it off, run `unset LOCALMELO_PERSIST_MEMORY`.
+- The files go to `~/.cache/localmelo/memory/`. `LOCALMELO_MEMORY_DIR`
+  chooses another directory. Its value is used as given: a `~` that the
+  shell does not expand, such as a quoted one, is not expanded either.
+- `--memory-dir DIR` turns persistence on for one direct run, in `DIR`,
+  whatever the variables say. `~` is expanded:
 
-When persistence is enabled with an embedding provider configured:
+  ```bash
+  melo --memory-dir ~/melo-memory "What is 6*7?"
+  ```
+
+- A gateway uses the variables it was started with. All its sessions save to
+  the same files.
+- Recalling long-term memory in a later run needs both persistence and an
+  embedding backend.
+
+## Turn long-term memory off
+
+`--memory off`, or `AgentOptions(memory=False)` in Python, turns long-term
+memory off for a run: nothing is recalled from it or written to it, and
+reflections are not promoted. Working memory and history work as usual.
+`embedding_backend = "none"` in the config file has the same effect for every
+run.
+
+## Files on disk
 
 ```text
-$LOCALMELO_MEMORY_DIR/
-  history.db          # raw task/step record layer
-  history.db-wal      # SQLite write-ahead log (auto, managed by SQLite)
-  history.db-shm      # SQLite shared-memory (auto, managed by SQLite)
-  long_term.db        # retrieved long-term memory (only if embedding present)
-  long_term.db-wal
-  long_term.db-shm
+~/.cache/localmelo/memory/
+  history.db      tasks and steps
+  long_term.db    long-term memory, with an embedding backend and memory on
 ```
 
-`-wal` and `-shm` are SQLite sidecars from `PRAGMA journal_mode=WAL` (set in
-`melo/memory/_sqlite.py`). They are owned by SQLite — do not remove them
-while a localmelo process is running.
+- SQLite may also create `history.db-wal` and `history.db-shm` (and the same
+  for `long_term.db`). They belong to the database; leave them in place.
+- The directory is created when an agent starts: at the start of a direct
+  run, or when a gateway session is created.
+- The gateway's web UI keeps its own files in
+  `~/.cache/localmelo/playground/`.
 
-In no-embedding mode the `long_term.db*` files are not created; only
-`history.db*` exist.
+## Inspect memory
+
+The files are SQLite databases. Read them with the `sqlite3` command-line
+tool, and use only `SELECT` queries:
+
+```bash
+cd ~/.cache/localmelo/memory
+
+# The tables
+sqlite3 history.db ".tables"
+
+# The 10 most recently saved tasks
+sqlite3 history.db "SELECT task_id, status, substr(query, 1, 60) FROM tasks ORDER BY rowid DESC LIMIT 10"
+
+# How runs ended
+sqlite3 history.db "SELECT status, COUNT(*) FROM tasks GROUP BY status"
+
+# The steps of one task
+sqlite3 history.db "SELECT seq, tool_call_json, substr(tool_result_json, 1, 200) FROM steps WHERE task_id = '<task_id>' ORDER BY seq"
+
+# Long-term memory: the number of entries, and a preview
+sqlite3 long_term.db "SELECT COUNT(*) FROM long_term"
+sqlite3 long_term.db "SELECT id, substr(text, 1, 80), metadata FROM long_term LIMIT 5"
+```
+
+Replace `<task_id>` with an id from the task list, or with the `task_id` of
+the JSON line.
 
 ## Task records
 
-Every run writes one row to the `tasks` table of `history.db` (or to the
-in-memory history when persistence is off):
+Every run saves one row in the `tasks` table of history:
 
-| Column    | Value                                                                    |
-|-----------|--------------------------------------------------------------------------|
-| `task_id` | the run's `RunResult.task_id`, 32 hex characters (a UUID4)               |
-| `query`   | the task as given                                                        |
-| `status`  | `running` while the run is in progress, then the run's status            |
-| `result`  | the run's result, or its error when the result is empty                  |
+| Column | Value |
+|---|---|
+| `task_id` | The run's `task_id`: 32 hex characters. |
+| `query` | The task as given. |
+| `status` | `running` during the run, then how it ended; see [Run results](run-results.md#statuses). |
+| `result` | The run's result, or its error when the result is empty. |
 
-The status values after a run are `completed`, `failed`, `gate_stopped`,
-`budget_exhausted`, `stuck`, `provider_error`, `setup_error`, `timeout` and
-`crashed`; see [quickstart.md → Run results](quickstart.md#run-results) for
-their meaning.
-The row is saved again when the run ends, whatever ended it, including an
-exception or a cancellation. A direct query (`melo "<query>"`) that
-SIGTERM or SIGHUP ends is saved as `crashed`, with `Cancelled by SIGTERM`
-or `Cancelled by SIGHUP` as its result (see
-[quickstart.md → SIGTERM and SIGHUP](quickstart.md#sigterm-and-sighup)).
-A row that still reads `running` belongs to a run in progress, or to a
-process that ended before its run could save the row: one killed with
-SIGKILL, or one stopped by SIGTERM or SIGHUP whose final save failed or
-had no time left before the exit (melo then logs a warning).
+- The row is saved again when the run ends, whatever ended it. A direct run
+  ended by SIGTERM or SIGHUP is saved as `crashed`, with the result
+  `Cancelled by SIGTERM` or `Cancelled by SIGHUP`.
+- A row that still reads `running` belongs to a run in progress, or to a
+  process that was killed (for example with SIGKILL) before it could save
+  the row.
+- Rows from earlier versions use only `running`, `completed` and `failed`.
+  There, `failed` also covers runs that now end as `gate_stopped`,
+  `budget_exhausted` or `stuck`, and a run that crashed kept `running`.
 
-Rows written before these statuses existed use only `running`,
-`completed` and `failed`; in them, `failed` also covers the runs that now
-end as `gate_stopped`, `budget_exhausted` or `stuck`, and an exception left
-the row `running`.
+The `steps` table holds one row per tool call: `step_id`, `task_id`,
+`thought` (the model's text), `tool_call_json`, `tool_result_json`,
+`timestamp` and `seq` (the order within the task).
 
-## Retention semantics
+## Reset memory
 
-LocalMelo deliberately separates "what happened" from "what to recall":
+localmelo has no reset command. To delete memory:
 
-- **History (`history.db`)** — append-only record of every task and step.
-  This is the raw debug / replay / audit layer. The agent and memory
-  subsystems do **not** read history during normal memory recall or write
-  placement. Images that tools return are recorded as references (MIME
-  type, SHA-256 digest, size in bytes), never as image data.
-- **Long-term (`long_term.db`)** — content extracted from agent runs and
-  indexed for retrieval. This is the layer `Hippo.retrieve_context` reads
-  at planning time, gated by the embedding provider.
-- **PersonalizedMemory** — filtered sleep-input samples for the Track 4
-  sleep pipeline. Not part of normal online recall. See
-  [PersonalizedSample v1 schema](#personalizedsample-v1-schema).
-- **Working memory** — short-lived per-session LRU cache. Lives in RAM,
-  not persisted, lost on process exit. Before each planning step, its
-  oldest whole turns are dropped when the prompt would otherwise pass the
-  100,000-character pre-plan cap. The task counts toward that cap even
-  once its own message is dropped, since the planning request puts it
-  back in front, so a task too long to fit beside the newest turn still
-  fails with `Prompt too large`. A tool result too long for working
-  memory is kept cut to the room its turn has left, ending with
-  `... [truncated: <n> more characters]`, where `<n>` counts every
-  character of the tool's output left out, those the executor's output
-  check had already cut included. A result left less than 200 characters
-  of room, as in a turn of several long results, is replaced instead by a
-  notice that keeps its first 200 characters. The tool calls take their
-  room first, and so does the model's text beside them when it has at
-  most 2,000 characters; a longer text that does not fit beside the
-  results is dropped from working memory. History keeps the text, and the
-  result as the executor's output check left it.
-
-In short: history is the raw event log, long-term is the queryable memory,
-and `PersonalizedMemory` is selected sleep input — not a dump of history.
-
-## No-embedding mode
-
-When `embedding_backend = "none"` (or no embedding provider is wired up):
-
-- History persistence still works — `history.db` is written normally.
-- Long-term recall is silently a no-op: `retrieve_context` returns `[]`.
-- Long-term store is silently a no-op: `memorize` writes only to working
-  memory, not to `long_term.db`.
-- `long_term.db` is not created on disk.
-
-The agent loop still runs end-to-end; only retrieval-augmented recall is
-disabled. See [quickstart.md → No-embedding mode](quickstart.md#no-embedding-mode)
-for the matching config and smoke command.
-
-## Reset workflow
-
-LocalMelo does not ship a built-in "reset" command. To wipe persistent
-memory, stop the process first and remove the files yourself:
-
-1. Stop any running localmelo process (CLI, `melo --serve`, or the
-   `--daemon` launchd service via `melo --daemon uninstall` / `kill`).
-2. Remove the file(s) you want to clear. Wildcards cover the SQLite
-   sidecars:
+1. Stop every localmelo process: direct runs, `melo --serve`, and the
+   background service. Stop the service with `melo --daemon uninstall`; a
+   plain `kill` is undone by launchd.
+2. Remove the files:
 
    ```bash
-   # Default location — wipe everything
+   # Everything
    rm -rf ~/.cache/localmelo/memory
 
-   # Or just the long-term recall, keeping history for replay
+   # Only long-term memory
    rm ~/.cache/localmelo/memory/long_term.db*
 
-   # Or just history, keeping long-term recall
+   # Only history
    rm ~/.cache/localmelo/memory/history.db*
+
+   # The web UI's memory
+   rm -rf ~/.cache/localmelo/playground
    ```
 
-3. Restart localmelo. The directory and SQLite files are recreated on the
-   first write.
+3. Start localmelo again. It creates new files when it needs them.
 
-> Removing the `.db-wal` / `.db-shm` sidecars while the process is still
-> running is unsafe and can corrupt the database. Always stop first.
+If you set `LOCALMELO_MEMORY_DIR` or used `--memory-dir`, remove the files in
+that directory instead.
 
-## Inspection workflow
+> [!WARNING]
+> Removing the files while localmelo runs can corrupt them. Stop localmelo
+> first.
 
-The SQLite files are plain database files. Open them read-only with
-the `sqlite3` CLI to inspect state:
+## Privacy
 
-```bash
-# List tables in history.db
-sqlite3 ~/.cache/localmelo/memory/history.db '.tables'
+- The files are not encrypted. `history.db` holds your tasks, the model's
+  text, every tool call with its arguments, and every tool result.
+  `long_term.db` holds step summaries and reflections, with their embedding
+  vectors.
+- Images that tools return are stored only as references: the MIME type, the
+  SHA-256 digest and the size, never the image itself.
+- The files are as private as your home directory. To remove them, see
+  [Reset memory](#reset-memory).
+- The gateway's web UI always saves its sessions, in
+  `~/.cache/localmelo/playground/`.
 
-# Recent tasks (rowid is monotonically increasing in insertion order)
-sqlite3 ~/.cache/localmelo/memory/history.db \
-  'SELECT task_id, status, substr(query, 1, 60) AS query
-     FROM tasks ORDER BY rowid DESC LIMIT 10'
+## How memory works
 
-# How runs ended (see "Task records" for the status values)
-sqlite3 ~/.cache/localmelo/memory/history.db \
-  'SELECT status, COUNT(*) FROM tasks GROUP BY status'
+**Working memory** holds the conversation:
 
-# Recent steps across all tasks
-sqlite3 ~/.cache/localmelo/memory/history.db \
-  'SELECT task_id, step_id, timestamp
-     FROM steps ORDER BY timestamp DESC LIMIT 10'
+- It keeps the last 20 messages and drops the oldest first. A tool call is
+  never separated from its results.
+- A planning prompt may hold up to 100,000 characters. When it would hold
+  more, the oldest turns are dropped first. The task always stays: when its
+  own message has been dropped, localmelo puts it back in front. A task too
+  long to fit ends the run as `failed`, with the error
+  `Plan check failed: Prompt too large: <n> chars`.
+- One turn of tool calls and results may use up to 50,000 characters. A
+  longer result is cut and ends with `... [truncated: <n> more characters]`;
+  a result left less than 200 characters is replaced by a short notice.
+  History keeps the result as the tool returned it, up to 50,000 characters.
 
-# Count long-term entries
-sqlite3 ~/.cache/localmelo/memory/long_term.db \
-  'SELECT COUNT(*) FROM long_term'
+**Long-term memory** needs an embedding backend:
 
-# Preview long-term entries (vector column is a float32 BLOB — skip it)
-sqlite3 ~/.cache/localmelo/memory/long_term.db \
-  'SELECT id, substr(text, 1, 80), metadata FROM long_term LIMIT 5'
-```
+- After each tool call, a summary of the step is written to it: the model's
+  text, the tool's name and the start of the tool's output.
+- When a run ends, its latest reflection is written to it, with the task's
+  id. This may take at most 10 seconds.
+- On each step, the 5 entries closest to the task are recalled into the
+  prompt.
 
-Treat these as read-only. Running `UPDATE` / `DELETE` while localmelo is
-attached can leave the database in an inconsistent state (writes may be
-buffered in WAL).
+**History** is a record. localmelo writes every task and step to it, but does
+not read it back during a run.
 
-## Real-backend smoke commands
-
-LocalMelo ships two real-backend smoke paths. The canonical runbook lives
-in [`tests/smoke/README.md`](../tests/smoke/README.md); the summary below
-points at the right command per question.
-
-### Chat round-trip (pytest, marker-gated)
-
-Marker-gated pytest cases exercise a single chat round-trip against a
-local backend with `embedding_backend = "none"`. Skipped automatically
-when the backend is not reachable, so collection is safe on any laptop.
-
-```bash
-# Both local backends — whichever is reachable runs, the other is skipped
-python -m pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q
-
-# Ollama only — needs an Ollama server at http://127.0.0.1:11434
-python -m pytest -m smoke_backend \
-  tests/smoke/test_backend_smoke.py::test_smoke_ollama_chat_round_trip -q
-
-# MLC-LLM only — needs an MLC serve at http://127.0.0.1:8400
-python -m pytest -m smoke_backend \
-  tests/smoke/test_backend_smoke.py::test_smoke_mlc_chat_round_trip -q
-
-# Globally skip the backend smoke (useful in CI on a machine without backends)
-python -m pytest -m 'not smoke_backend' -q
-```
-
-Backend URLs and model ids come from `tests/smoke/data/backends.json`.
-
-### Long-term retrieval (CLI script)
-
-`tests/smoke/core_loop_test.py` is the real-backend long-term-retrieval
-evidence path. It seeds memories, runs scenario queries against a real
-chat + embedding backend, persists into SQLite, and emits per-backend
-evidence JSON plus a cross-backend markdown report. The filename does
-**not** start with `test_`, so pytest never collects it — invoke it
-explicitly:
-
-```bash
-# From localmelo/
-python tests/smoke/core_loop_test.py --backends ollama
-python tests/smoke/core_loop_test.py --backends mlc
-```
-
-Per-backend scratch output lands in `tests/smoke/output/` and is ignored
-by git. Curated long-term evidence should be promoted into `tests_result/`
-with a summary, manifest, and raw artifacts. The 2026-05-10 Track 2 v1 run
-is archived in
-[`tests_result/backend-smoke/2026-05-10-qwen3-embedding-0.6b/`](../tests_result/backend-smoke/2026-05-10-qwen3-embedding-0.6b/).
-See [`tests/smoke/README.md`](../tests/smoke/README.md) for scenario
-selection and env-var overrides.
-
-## PersonalizedSample v1 schema
-
-`PersonalizedMemory` is a staging area for the Track 4 sleep pipeline. It
-stores **selected** runtime samples (e.g. user corrections, task-success
-signals), not raw history. The selection policy is still being designed,
-but the on-disk record shape is frozen as v1 so downstream Track 4 code
-can rely on it.
-
-Source: `localmelo/melo/memory/personalized/__init__.py`.
-
-| Field         | Type             | Default            | Purpose                                                                  |
-|---------------|------------------|--------------------|--------------------------------------------------------------------------|
-| `input_text`  | `str`            | — (required)       | The runtime input the sample was built from                              |
-| `target_text` | `str`            | `""`               | Desired completion or corrected response                                 |
-| `signal`      | `str`            | `""`               | Why the sample was selected (e.g. `"user_correction"`, `"task_success"`) |
-| `metadata`    | `dict[str, Any]` | `{}`               | Provenance: `task_id`, attempt, tool, source                             |
-| `timestamp`   | `float`          | `time.time()`      | Unix epoch at sample creation                                            |
-
-Schema version constant: `PERSONALIZED_SAMPLE_SCHEMA_VERSION = "v1"`.
-
-**Compatibility rule.** Any rename, reorder, type change, or field
-add/remove is a **breaking change**. Bump the version constant in the same
-commit so the Track 4 sleep pipeline can branch on schema version. The
-v1 contract is guarded by `tests/memory/test_personalized_schema.py` —
-that test will fail on any field-shape change, which is intentional.
-
-The public import path is:
-
-```python
-from localmelo.melo.memory.personalized import (
-    PERSONALIZED_SAMPLE_SCHEMA_VERSION,
-    PersonalizedMemory,
-    PersonalizedSample,
-)
-```
+**Reflections** are kept in working memory, one at a time: each new
+reflection replaces the last one. See
+[How localmelo works](how-it-works.md#reflection).

@@ -1,217 +1,136 @@
 <p align="center">
-  <img src="docs/assets/melo.png" alt="Melo" width="240">
+  <img src="docs/assets/melo.png" alt="Melo，localmelo 的吉祥物" width="200">
 </p>
 
 # localmelo
 
-[English](./README.md) | [简体中文](./README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-`localmelo` 是一个本地优先的 agent runtime，面向显式 memory、受检查的
-tool use，以及由用户自行管理的模型 backend。它把核心 agent loop 和基础设施
-分开，让本地和云端 backend 可以通过配置接入，而不是改变 runtime 本身。
+一个本地个人智能体：在你自己的模型服务器或云端 API 上，借助工具和记忆完成任务。你可以在命令行、脚本和基准测试中用它运行任务（每次运行输出一行 JSON 和固定的退出码），也可以通过 HTTP 调用它。
 
-**状态：** pre-alpha。当前 online core loop 已经可以用于开发和 smoke test，
-但公共 API、memory policy 和 personalization workflow 仍在演进。
+[网站](https://localmelo.github.io/localmelo/zh-CN/index.html) · [快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html) · [文档（英文）](docs/README.md) · [路线图](https://localmelo.github.io/localmelo/zh-CN/updates.html#roadmap)
 
-**[文档](https://localmelo.github.io/localmelo/zh-CN/index.html)** |
-**[快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html)** |
-**[架构](https://localmelo.github.io/localmelo/zh-CN/architecture.html)** |
-**[更新](https://localmelo.github.io/localmelo/zh-CN/updates.html)**
+**状态**：早期预览版（pre-alpha）。在命令行中运行任务（直接模式）和 HTTP 网关现在已经可以使用。在 v0.1.0（里程碑计划于 2026-12-20 完成）之前，命令、HTTP API 和 Python API 都可能变化。
 
-## 项目能力
+## 功能
 
-localmelo 提供：
+- **一条命令完成一个任务。** `melo "<task>"` 在步数上限内运行，两次尝试之间会进行反思，还可以设置运行时限。
+- **使用工具。** 四个内置工具（`shell_exec`、`python_exec`、`file_read`、`file_write`），以及 MCP 服务器提供的工具（stdio 服务器，可在直接模式和 Python API 中使用）。
+- **报告每一次运行**：输出文本或一行 JSON，并使用固定的退出码，脚本和基准测试可以放心依赖。
+- **连接你的模型。** 你自己运行的模型服务器（Ollama、MLC LLM、vLLM、SGLang），或云端 API（OpenAI、Anthropic、Google Gemini、NVIDIA）。
+- **有记忆。** 运行期间的工作记忆、任务和步骤的历史记录，以及配置了嵌入服务器时的长期记忆。开启持久化后，历史记录和长期记忆会保存到 SQLite。
+- **通过 HTTP 提供同一个智能体**（网关），支持会话，并附带一个用来试用的简单网页。
 
-- online agent loop：planning、tool execution、reflection、memory writeback
-- 显式 memory 分层：working context、history、long-term retrieval、tool lookup
-- checker 边界：ingress、planning、execution、output size、memory write
-- 本地和云端模型 provider 的 backend connector
-- 围绕同一个 runtime 的 HTTP gateway session 模式
-- 后续 sleep-time personalization pipeline 的基础骨架
+localmelo 不负责下载、启动或部署模型：模型服务器需要你自己运行。
 
-localmelo 不负责管理本地模型 runtime。Ollama、MLC、vLLM、SGLang 或其他本地
-服务需要用户自行启动，然后把 localmelo 指向对应 endpoint。
+## 环境要求
 
-## 当前成熟度
+- macOS（在 macOS 上开发和测试）或 Linux（应该也能运行，但尚未测试）。不支持 Windows。
+- Python 3.11 或更高版本，以及 Git。
+- [uv](https://docs.astral.sh/uv/)（推荐）或 pip。
+- 一个你自己运行的模型服务器，例如 [Ollama](https://ollama.com)；或者一个云端 API 的密钥。
 
-现在可以验证：
+## 安装
 
-- direct CLI 模式
-- gateway 模式
-- backend registry 和 provider 构建
-- 带 workspace policy 的内置 tool execution
-- async SQLite history 和 long-term memory 持久化
-- focused tests 和 smoke checks
+```bash
+git clone https://github.com/localmelo/localmelo.git
+cd localmelo
+uv sync --extra gateway
+source .venv/bin/activate
+```
 
-仍处于实验阶段：
+请保留目录名 `localmelo`：软件包就是从这个目录构建的。重命名后的目录或 ZIP 下载（`localmelo-main`）会报错 `ModuleNotFoundError: No module named 'localmelo'`。
 
-- long-memory retrieval 和 promotion policy
-- 产品级 deployment shell
-- sleep-time training、evaluation 和 personalization
-- 稳定公共 API 保证
+不使用 uv 时，请看快速开始中的[用 pip 安装](https://localmelo.github.io/localmelo/zh-CN/quickstart.html#install-with-pip)一节。
+
+下面的示例直接调用 `melo`。激活虚拟环境只对当前终端有效：打开新终端后，需要再次运行 `source <clone>/.venv/bin/activate`，其中 `<clone>` 是你的 `localmelo` 目录。使用 uv 时，也可以在克隆目录中运行 `uv run melo …`，或在其他任何位置运行 `uv run --project <clone> melo …`。
+
+更新或卸载 localmelo 的方法见[配置（英文）](docs/configuration.md#update-localmelo)。
 
 ## 快速开始
 
-环境要求：
+1. 启动模型服务器。下面以 [Ollama](https://ollama.com) 为例：安装并启动它，然后用 `ollama pull qwen3:8b` 下载一个模型。任何兼容 OpenAI 接口的服务器都可以，使用它的 `/v1` 地址即可。
 
-- Python 3.11+
-- 已配置的 chat backend，例如 Ollama、MLC、vLLM、SGLang，或支持的云端 provider
+2. 运行一个任务。模型可以用你的账户权限使用工具，详见[安全](#安全)。
 
-从仓库根目录安装：
+   ```bash
+   melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
+   ```
 
-```bash
-pip install -e ".[dev,gateway]"
-```
+   答案会输出到 stdout；运行完成时退出码为 0。加上 `--output-format json`，输出就会变成一行 JSON，记录这次运行的结果。`--base-url` 不会发送 API 密钥；使用云端 API 时，请直接跳到第 3 步。
 
-配置 provider：
+3. 保存配置并启动网关。使用云端 API 时，请先在同一个终端中运行 `export OPENAI_API_KEY="<your key>"`（或你所用服务商对应的变量）：向导的测试请求会用到这个密钥。
 
-```bash
-melo --reconfigure
-```
+   ```bash
+   melo --serve --reconfigure
+   ```
 
-运行一次 direct query：
+   配置向导会询问对话后端、它的地址和模型，以及嵌入后端：
 
-```bash
-melo "What is 6*7?"
-```
+   - 如果第 1 步启动的是 Ollama，请选择 `2`，然后按回车接受建议的地址和模型。
+   - 如果是其他兼容 OpenAI 接口的服务器，请选择 vLLM（`3`），然后输入它的地址和模型名。
+   - 使用云端 API 时，请选择对应的服务商。
+   - 如果没有嵌入服务器，嵌入后端请选择 `5`，即 `None (no long-term memory)`。
 
-启动 gateway：
+   向导会检查服务器能否连通，保存 `~/.cache/localmelo/config.toml`，然后在 `http://127.0.0.1:8401` 上提供服务。在另一个终端中运行：
 
-```bash
-melo --serve
-```
+   ```bash
+   curl http://127.0.0.1:8401/v1/health
+   curl -X POST http://127.0.0.1:8401/v1/agent/run \
+     -H "Content-Type: application/json" \
+     -d '{"query": "What is 6*7?"}'
+   ```
 
-调用 gateway：
+   按 Ctrl+C 停止网关。之后运行 `melo "<task>"` 时会使用保存的配置。
 
-```bash
-curl http://127.0.0.1:8401/v1/health
+接下来，[快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html)会更详细地介绍每一步。
 
-curl -X POST http://127.0.0.1:8401/v1/agent/run \
-  -H "Content-Type: application/json" \
-  -d '{"query":"Say hello briefly"}'
-```
+## 文档
 
-Gateway smoke checks、session 复用、no-embedding mode 和 backend-specific 验证
-见 [快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html)。
-
-## 架构
-
-核心设计规则：
-
-> `melo/` 负责 runtime behavior 和 contracts。`support/` 负责基础设施。
-> Core runtime code 不应直接 import infrastructure implementations。
-
-```text
-localmelo/
-  melo/       # agent, memory, checker, executor, sleep scaffolding
-  support/    # backends, providers, gateway, config, onboarding
-  tests/      # regression, integration, smoke coverage
-  docs/       # static documentation site
-```
-
-核心模块：
-
-| 区域 | 职责 |
+| 页面 | 内容 |
 |---|---|
-| Agent | Retrieval、planning、tool calls、reflection、final answers |
-| Memory | Working memory、history、long-term storage、tool registry |
-| Checker | Runtime boundary 的结构化校验 |
-| Executor | 带 timeout 和 workspace policy 的内置工具执行 |
-| Support | Backend registry、provider implementations、config、gateway |
+| [快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html) | 安装、运行第一个任务、保存配置、启动网关 |
+| [命令行参考（英文）](docs/cli.md) | `melo` 的模式、选项、输出、退出码和信号 |
+| [运行结果（英文）](docs/run-results.md) | 一次运行有哪些结束方式、运行记录、重试 |
+| [配置（英文）](docs/configuration.md) | 配置向导、配置文件、后端、超时、环境变量 |
+| [工具和 MCP（英文）](docs/tools.md) | 内置工具、MCP 服务器、每一步提供哪些工具、检查 |
+| [网关和 HTTP API（英文）](docs/gateway.md) | HTTP API、会话、网页界面、在 macOS 登录时自动运行 |
+| [记忆（英文）](docs/memory.md) | localmelo 记住什么，以及如何保留、查看和重置记忆 |
+| [Python API（英文）](docs/python-api.md) | `Agent`、`AgentOptions` 和 `RunResult`（实验性） |
+| [localmelo 的工作原理（英文）](docs/how-it-works.md) | 运行循环、反思、记忆和超时 |
+| [故障排查（英文）](docs/troubleshooting.md) | 常见错误信息及解决方法 |
+| [架构](https://localmelo.github.io/localmelo/zh-CN/architecture.html) | 各部分如何协同工作（网站） |
+| [路线图](https://localmelo.github.io/localmelo/zh-CN/updates.html#roadmap) | 计划和更新记录（网站） |
 
-完整 runtime map 见
-[架构文档](https://localmelo.github.io/localmelo/zh-CN/architecture.html)。
+## 路线图
 
-## 安全边界
+路线图记录在 [#2](https://github.com/localmelo/localmelo/issues/2) 中。v0.1.0 里程碑计划于 2026-12-20 完成。
 
-localmelo 把 checks 作为 runtime control flow。Request、plan、tool call、
-executor result 和 memory write 在跨越主要边界前都会被校验。
-
-当前 safeguards 包括：
-
-- 文件操作的 workspace policy
-- blocked shell command patterns
-- `shell_exec` 命令在 timeout 或 cancellation 时会连同其 process group（它启动的所有 process）一起被 kill
-- execution allowlist：tool call 只有在其所在 planning step 向模型提供了该工具时才会执行
-- output size limits
-- prompt 和 memory write size limits
-- onboarding 阶段的 provider probing
-
-在默认的 `retrieve` tool exposure 下，每个 step 提供所有已注册的 built-in 工具（按名称
-排序），以及 hint extraction 和 BM25 search 从其余工具（MCP 和其他 provided tools）中
-为它解析出的工具（同样按名称排序）。调用其他已注册的工具会被拒绝，返回
-"Tool '<name>' was not offered in this step."，工具不会执行；之前的版本会执行模型
-指名的任何已注册工具。这个检查只在单个 step 内有效：被拒绝的调用会留在对话中，
-所以 hint extraction 可能在下一个 step 提供该工具。使用 `tool_exposure="all"` 时，
-每个 step 都提供所有已注册的工具。
-
-这仍然是 pre-alpha software。在让它访问重要文件、账号或长期运行的 process
-之前，请先 review 配置和 tool permissions。
-
-## Backends
-
-支持的 backend families：
-
-| Backend | 类型 | 说明 |
+| 阶段 | 日期 | 范围 |
 |---|---|---|
-| `ollama` | 本地 | 用户自行管理的 Ollama server |
-| `mlc` | 本地 | 用户自行管理的 MLC endpoint |
-| `vllm` | 本地 | 用户自行管理的 vLLM endpoint |
-| `sglang` | 本地 | 用户自行管理的 SGLang endpoint |
-| `openai` | 云端 | OpenAI API |
-| `anthropic` | 云端 | Anthropic API |
-| `gemini` | 云端 | Google Gemini API |
-| `nvidia` | 云端 | NVIDIA API |
+| 第 1 阶段 | 2026-10-19 至 2026-11-01 | 核心循环 v2 和命令行（[#3](https://github.com/localmelo/localmelo/issues/3)） |
+| 第 2 阶段 | 2026-11-02 至 2026-11-22 | 记忆：笔记、检索，以及提升为长期记忆 |
+| 第 3 阶段 | 2026-11-23 至 2026-12-06 | 安全和隐私（[#29](https://github.com/localmelo/localmelo/issues/29)） |
 
-Chat backend 和 embedding backend 独立配置。如果不想运行 embedding retrieval，
-可以把 embedding backend 设为 `none`。
+计划中：
 
-每个 chat request 最多等 server 的数据 120 s（`ollama` backend 为 300 s）。每收到
-数据就重新计时，所以 server 在生成时发送 keep-alive 字节的话不会 timeout；要限制
-整个 direct run 的时长，用 `--timeout`。模型较慢时（例如本地 thinking model），可在
-`~/.cache/localmelo/config.toml` 顶层设置 `request_timeout_s`，或给 direct query 加
-`--request-timeout SECONDS`；详见
-[docs/quickstart.md](docs/quickstart.md#chat-request-timeout)。
+- 交互式命令行（不带任务运行 `melo` 时会打开它；目前这样做会启动网关）；
+- 网页控制台；
+- 把模型的推理过程保存为记忆笔记，并可切换检索方式（`bm25`、`llm`、`embedding`）。
 
-## 开发
+## 安全
 
-用 [uv](https://docs.astral.sh/uv/) 安装开发依赖，会按仓库里的 `uv.lock`
-创建 `.venv/`：
+> [!WARNING]
+> 工具以你的账户权限运行，并且没有沙箱：模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 `127.0.0.1`（默认值）。详见 [SECURITY.md（英文）](SECURITY.md)和[检查能做什么（英文）](docs/tools.md#what-the-checks-do)。
 
-```bash
-uv sync --extra dev --extra gateway
-```
+## 获取帮助
 
-运行 focused checks：
+先在 [GitHub issues](https://github.com/localmelo/localmelo/issues) 中搜索，找不到再新建一个。请附上 `--output-format json` 输出的那一行 JSON（其中包含 localmelo 的版本）、退出码、后端和模型、你的操作系统和 Python 版本，以及复现步骤。提交前请删除 API 密钥和个人路径。安全问题请按 [SECURITY.md（英文）](SECURITY.md)中的方式报告，不要公开提交 issue。
 
-```bash
-uv run pytest tests/agent tests/checker tests/executor \
-              tests/cli tests/memory tests/integration -q
-uv run pytest tests/gateway -q
-uv run ruff check .
-```
+## 参与贡献
 
-合并前运行完整测试：
-
-```bash
-uv run pytest tests/ -q
-```
-
-开发进度见 [更新](https://localmelo.github.io/localmelo/zh-CN/updates.html)
-和 GitHub issues。
-
-## 贡献
-
-欢迎提交 issue 和 pull request。由于项目仍处于 pre-alpha，小而聚焦的改动会比
-大范围 feature drop 更容易 review。
-
-请保持 runtime/infrastructure 边界清晰：
-
-- core agent behavior 放在 `melo/`
-- backend、gateway、config、onboarding implementation 放在 `support/`
-- 安全边界保持 checker-based control flow
-- 修改 public command、storage、tool execution 或 provider contracts 时补测试
+欢迎提交问题报告、文档修正，以及小而聚焦的 pull request。开发环境的搭建和需要运行的检查，请看 [CONTRIBUTING.md（英文）](CONTRIBUTING.md)。
 
 ## 许可证
 
-localmelo 以 [MIT License](LICENSE) 发布。
+MIT © The localmelo Authors。详见 [LICENSE](LICENSE)。

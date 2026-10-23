@@ -3,142 +3,155 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>localmelo 文档</title>
-  <meta name="description" content="localmelo 文档：本地优先 agent runtime、显式 memory 分层和安全 tool use。">
+  <title>概览 · localmelo</title>
+  <meta name="description" content="localmelo 是一个本地个人智能体：在你自己的模型服务器或云端 API 上，借助工具和记忆完成任务。">
+  <link rel="alternate" hreflang="en" href="https://localmelo.github.io/localmelo/en/index.html">
+  <link rel="alternate" hreflang="zh-CN" href="https://localmelo.github.io/localmelo/zh-CN/index.html">
+  <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/index.html">
   <link rel="icon" href="../assets/icon_small.png">
   <link rel="stylesheet" href="../assets/site.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">跳到正文</a>
   <header class="site-header">
     <div class="topbar">
-      <a class="brand" href="./index.html" aria-label="localmelo 中文文档首页">
-        <img src="../assets/icon_small.png" alt="">
+      <a class="brand" href="./index.html" aria-current="page">
+        <img src="../assets/icon_small.png" alt="" width="30" height="30">
         <strong><span>local</span>melo</strong>
       </a>
       <nav class="site-nav" aria-label="主导航">
-        <a class="active" href="./index.html">文档</a>
         <a href="./quickstart.html">快速开始</a>
         <a href="./architecture.html">架构</a>
-        <a href="./updates.html">更新</a>
-        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+        <a href="./updates.html">路线图</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">参考文档（英文）<span aria-hidden="true">↗</span></a>
+        <a href="https://github.com/localmelo/localmelo">GitHub <span aria-hidden="true">↗</span></a>
       </nav>
-      <div class="lang-toggle" aria-label="语言">
-        <a href="../en/index.html">EN</a>
-        <a class="active" href="./index.html">中文</a>
-      </div>
+      <nav class="lang-toggle" aria-label="语言">
+        <a href="../en/index.html" hreflang="en" lang="en">EN</a>
+        <a href="./index.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">中文</a>
+      </nav>
     </div>
   </header>
 
-  <main class="page layout">
-    <aside class="sidebar" aria-label="文档章节">
-      <h2>开始</h2>
-      <a class="active" href="#overview">概览</a>
-      <a href="#setup">安装配置</a>
-      <a href="./quickstart.html">快速开始</a>
-      <a href="./updates.html">更新</a>
-      <h2>运行时</h2>
-      <a href="#runtime">运行模型</a>
-      <a href="./architecture.html">架构</a>
-      <a href="./quickstart.html#backends">后端</a>
-      <a href="./quickstart.html#tests">验证</a>
-    </aside>
+  <main id="main" class="page layout">
+    <nav class="sidebar" aria-label="本页内容">
+      <p class="sidebar-label">本页内容</p>
+      <a href="#quickstart">快速开始</a>
+      <a href="#features">能做什么</a>
+      <a href="#roadmap">路线图</a>
+      <a href="#security">安全</a>
+    </nav>
 
     <article class="content">
       <header class="doc-hero" id="overview">
-        <p class="eyebrow">Get started</p>
-        <h1>localmelo 文档</h1>
-        <p class="lead">
-          localmelo 是一个 pre-alpha、本地优先的 agent runtime，核心能力是显式
-          memory 分层、受检查的 tool execution，以及连接用户自己管理的本地或云端模型 endpoint。
-        </p>
+        <h1>localmelo</h1>
+        <p class="lead">一个本地个人智能体：在你自己的模型服务器或云端 API 上，借助工具和记忆完成任务。它可以在命令行中运行，也可以作为一个小型 HTTP 服务运行，支持 Ollama、MLC LLM、vLLM、SGLang 和云端 API。</p>
         <div class="doc-meta">
-          <span class="tag stable">online loop 可验证</span>
-          <span class="tag experimental">memory 进行中</span>
-          <span class="tag planned">sleep 后续计划</span>
+          <span class="tag experimental">早期预览版（pre-alpha）</span>
         </div>
         <div class="masthead-visual doc-illustration">
-          <img src="../assets/melo.png" alt="Melo mascot">
+          <img src="../assets/melo.png" alt="Melo，localmelo 的吉祥物" width="896" height="1195">
         </div>
       </header>
 
-      <section class="section" id="setup">
-        <h2>安装配置</h2>
-        <p>
-          先安装 package，配置 chat backend，然后运行一次 direct query。这是穿过当前
-          runtime 的最小可用路径。
-        </p>
-        <div class="terminal" aria-label="最小本地运行命令">
-          <div class="terminal-title">minimum local run</div>
-          <pre><code>pip install -e ".[dev,gateway]"
-melo --reconfigure
-melo "What is 6*7?"</code></pre>
-        </div>
+      <section class="section" id="quickstart">
+        <h2>快速开始</h2>
+        <p>你需要 macOS（在 macOS 上开发和测试）或 Linux（应该也能运行，但尚未测试），以及 Python 3.11 或更高版本、Git 和 <a href="https://docs.astral.sh/uv/">uv</a>。不支持 Windows。用 uv 安装（也可以<a href="./quickstart.html#install-with-pip">用 pip 安装</a>）：</p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">安装</figcaption>
+          <pre><code>git clone https://github.com/localmelo/localmelo.git
+cd localmelo
+uv sync --extra gateway
+source .venv/bin/activate</code></pre>
+        </figure>
+        <p>请保留目录名 <code>localmelo</code>：软件包就是从这个目录构建的。</p>
+        <p>启动一个模型服务器，例如 <a href="https://ollama.com">Ollama</a>，并用 <code>ollama pull qwen3:8b</code> 下载一个模型，然后运行一个任务。答案会输出到 stdout。</p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">运行任务</figcaption>
+          <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"</code></pre>
+        </figure>
         <div class="masthead-actions">
-          <a class="button primary" href="./quickstart.html">打开快速开始</a>
-          <a class="button" href="./architecture.html">查看架构</a>
+          <a class="button primary" href="./quickstart.html">阅读快速开始</a>
         </div>
       </section>
 
-      <section class="section" id="runtime">
-        <h2>localmelo 提供什么</h2>
+      <section class="section" id="features">
+        <h2>能做什么</h2>
+        <p>每张卡片都会打开 GitHub 上对应的英文参考页面。</p>
         <div class="link-grid">
-          <a class="link-card" href="./quickstart.html#direct-cli">
-            <strong>Direct CLI</strong>
-            <span>从命令行执行一次 agent query，然后退出。</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">
+            <strong>运行任务</strong>
+            <span>一条命令完成一个任务：在步数上限内运行，两次尝试之间会进行反思，还可以设置运行时限。</span>
           </a>
-          <a class="link-card" href="./quickstart.html#gateway">
-            <strong>Gateway API</strong>
-            <span>用 HTTP 暴露同一个 runtime，并支持 session 复用。</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">
+            <strong>工具和 MCP</strong>
+            <span>使用四个内置工具和本地 MCP 服务器提供的工具；每一步只能运行本步提供的工具。</span>
           </a>
-          <a class="link-card" href="./architecture.html#boundaries">
-            <strong>受检查的工具执行</strong>
-            <span>校验 ingress、planning、execution、output 和 memory write。</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#backends">
+            <strong>模型服务器</strong>
+            <span>连接你自己运行的 Ollama、MLC LLM、vLLM 或 SGLang 服务器，或者 OpenAI、Anthropic、Google Gemini、NVIDIA 的 API。</span>
           </a>
-          <a class="link-card" href="./architecture.html#status">
-            <strong>分层 Memory</strong>
-            <span>把 working memory、Hippo 路由的 long/profile/tools/personalized memory，以及 raw history 拆开维护。</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md">
+            <strong>网关和网页界面</strong>
+            <span>通过 HTTP 提供智能体服务，支持会话，并附带一个用来试用模型的简单网页。</span>
           </a>
-          <a class="link-card" href="./quickstart.html#backends">
-            <strong>后端连接器</strong>
-            <span>连接 Ollama、MLC、vLLM、SGLang 或支持的云端 provider。</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">
+            <strong>记忆</strong>
+            <span>工作记忆、任务和步骤的历史记录，以及配置了嵌入服务器时的长期记忆；开启持久化后会保存到 SQLite。</span>
           </a>
-          <a class="link-card" href="./updates.html">
-            <strong>路线图跟踪</strong>
-            <span>跟踪 runtime、memory、backend 和 release quality 的进展。</span>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#use-melo-in-scripts">
+            <strong>脚本和基准测试</strong>
+            <span>每次运行输出一行 JSON 和固定的退出码，脚本可以放心依赖运行结果。</span>
           </a>
         </div>
       </section>
 
-      <section class="section" id="state">
-        <h2>当前项目状态</h2>
-        <div class="status-grid">
-          <article class="status-card">
-            <span class="tag stable">可以验证</span>
-            <h3>Online core loop</h3>
-            <p>Direct CLI、gateway、provider registry、tool execution 和 checker boundary 已经有自动化覆盖。</p>
-          </article>
-          <article class="status-card">
-            <span class="tag experimental">进行中</span>
-            <h3>Memory persistence</h3>
-            <p>SQLite history 和 long-term memory 已经异步持久化；Track 2 v1 本地后端 retrieval evidence 已归档，retrieval policy 仍在演进。</p>
-          </article>
-          <article class="status-card">
-            <span class="tag planned">后续 track</span>
-            <h3>Sleep pipeline</h3>
-            <p>Sleep-time training 和 evaluation 仍是 scaffold，personalization workflow 不属于当前 baseline。</p>
-          </article>
+      <section class="section" id="roadmap">
+        <h2>路线图</h2>
+        <p>v0.1.0 里程碑计划于 2026-12-20 完成。</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">阶段</th><th scope="col">日期</th><th scope="col">范围</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>第 1 阶段</td><td>2026-10-19 至 2026-11-01</td><td>核心循环 v2 和命令行</td></tr>
+              <tr><td>第 2 阶段</td><td>2026-11-02 至 2026-11-22</td><td>记忆：笔记、检索，以及提升为长期记忆</td></tr>
+              <tr><td>第 3 阶段</td><td>2026-11-23 至 2026-12-06</td><td>安全和隐私</td></tr>
+            </tbody>
+          </table>
         </div>
+        <p>计划中：</p>
+        <ul>
+          <li>交互式命令行（不带任务运行 <code>melo</code> 时会打开它；目前这样做会启动网关）；</li>
+          <li>网页控制台；</li>
+          <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）。</li>
+        </ul>
+        <p>相关议题和更新记录见<a href="./updates.html#roadmap">路线图和更新</a>。</p>
+      </section>
+
+      <section class="section" id="security">
+        <h2>安全</h2>
+        <div class="callout warning">
+          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 <code>127.0.0.1</code>（默认值）。</p>
+        </div>
+        <p>请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#what-the-checks-do">检查能做什么（英文）</a>。</p>
       </section>
     </article>
-
   </main>
 
   <footer class="site-footer">
     <div class="footer-inner">
-      <span>localmelo 中文文档</span>
-      <span>Pre-alpha. API 和 workflow 仍可能变化。</span>
+      <p>早期预览版（pre-alpha）：在 v0.1.0 之前，命令和 API 都可能变化。</p>
+      <nav class="footer-links" aria-label="项目">
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">全部文档（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md">贡献指南（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/LICENSE">许可证（英文）</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
     </div>
   </footer>
-  <script src="../assets/site.js"></script>
 </body>
 </html>
