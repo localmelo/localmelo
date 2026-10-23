@@ -3,164 +3,168 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>快速开始 - localmelo 中文文档</title>
-  <meta name="description" content="安装 localmelo，运行 direct CLI，验证 gateway，配置 backend，并运行测试。">
+  <title>快速开始 · localmelo</title>
+  <meta name="description" content="安装 localmelo，在本地模型服务器上运行第一个任务，然后保存配置并启动网关。">
+  <link rel="alternate" hreflang="en" href="https://localmelo.github.io/localmelo/en/quickstart.html">
+  <link rel="alternate" hreflang="zh-CN" href="https://localmelo.github.io/localmelo/zh-CN/quickstart.html">
+  <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/quickstart.html">
   <link rel="icon" href="../assets/icon_small.png">
   <link rel="stylesheet" href="../assets/site.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">跳到正文</a>
   <header class="site-header">
     <div class="topbar">
-      <a class="brand" href="./index.html" aria-label="localmelo 中文文档首页">
-        <img src="../assets/icon_small.png" alt="">
+      <a class="brand" href="./index.html">
+        <img src="../assets/icon_small.png" alt="" width="30" height="30">
         <strong><span>local</span>melo</strong>
       </a>
       <nav class="site-nav" aria-label="主导航">
-        <a href="./index.html">文档</a>
-        <a class="active" href="./quickstart.html">快速开始</a>
+        <a href="./quickstart.html" aria-current="page">快速开始</a>
         <a href="./architecture.html">架构</a>
-        <a href="./updates.html">更新</a>
-        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+        <a href="./updates.html">路线图</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">参考文档（英文）<span aria-hidden="true">↗</span></a>
+        <a href="https://github.com/localmelo/localmelo">GitHub <span aria-hidden="true">↗</span></a>
       </nav>
-      <div class="lang-toggle" aria-label="语言">
-        <a href="../en/quickstart.html">EN</a>
-        <a class="active" href="./quickstart.html">中文</a>
-      </div>
+      <nav class="lang-toggle" aria-label="语言">
+        <a href="../en/quickstart.html" hreflang="en" lang="en">EN</a>
+        <a href="./quickstart.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">中文</a>
+      </nav>
     </div>
   </header>
 
-  <main class="page layout">
-    <aside class="sidebar" aria-label="Quickstart 章节">
-      <h2>快速开始</h2>
-      <a class="active" href="#install">安装</a>
-      <a href="#direct-cli">Direct CLI</a>
-      <a href="#gateway">Gateway</a>
-      <a href="#sessions">Sessions</a>
-      <a href="#backends">后端</a>
-      <a href="#no-embedding">No embedding</a>
-      <a href="#tests">Tests</a>
-    </aside>
+  <main id="main" class="page layout">
+    <nav class="sidebar" aria-label="本页内容">
+      <p class="sidebar-label">本页内容</p>
+      <a href="#before-you-begin">开始之前</a>
+      <a href="#install">安装</a>
+      <a href="#run-your-first-task">运行第一个任务</a>
+      <a href="#json-output">以 JSON 格式获取结果</a>
+      <a href="#save-a-configuration">保存配置</a>
+      <a href="#start-the-gateway">启动网关</a>
+      <a href="#next-steps">下一步</a>
+    </nav>
 
     <article class="content">
       <header class="doc-hero">
-        <p class="eyebrow">快速开始</p>
-        <h1>安装、配置并 smoke-test localmelo。</h1>
-        <p class="lead">
-          这页是从 checkout 到验证本地 agent loop 的最短路径，覆盖 direct CLI、gateway、
-          session 复用、backend setup 和 focused test suites。
-        </p>
+        <h1>快速开始</h1>
+        <p class="lead">本教程会安装 localmelo，在本地模型服务器上运行第一个任务，然后保存配置并启动网关。</p>
       </header>
+
+      <section class="section" id="before-you-begin">
+        <h2>开始之前</h2>
+        <p>你需要：</p>
+        <ul>
+          <li>macOS。localmelo 在 macOS 上开发和测试，在 Linux 上应该也能运行，不支持 Windows。</li>
+          <li>Python 3.11 或更高版本、Git，以及 <a href="https://docs.astral.sh/uv/">uv</a>（也可以用 pip，见<a href="#install-with-pip">用 pip 安装</a>）。</li>
+          <li>一个模型服务器。本教程使用 <a href="https://ollama.com">Ollama</a>：安装并启动它，然后用 <code>ollama pull qwen3:8b</code> 下载一个模型。任何兼容 OpenAI API 的服务器也都可以：在下面的命令中换成它的 <code>/v1</code> 地址和模型名即可。</li>
+        </ul>
+      </section>
 
       <section class="section" id="install">
         <h2>安装</h2>
-        <p>从仓库根目录以 editable mode 安装。</p>
-        <pre><code># Core + dev dependencies
-pip install -e ".[dev]"
+        <pre><code>git clone https://github.com/localmelo/localmelo.git
+cd localmelo
+uv sync --extra gateway
+source .venv/bin/activate</code></pre>
+        <p>uv 会创建虚拟环境 <code>.venv/</code>（如果你没有 Python 3.13，它会自动安装），并安装 localmelo 及网关所需的依赖。</p>
+        <p>请保留目录名 <code>localmelo</code>：软件包就是从这个目录构建的。重命名后的目录或 ZIP 下载（<code>localmelo-main</code>）会报错 <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>。</p>
+        <p>本教程后面的命令直接调用 <code>melo</code>。如果没有激活虚拟环境，请在每条命令前加上 <code>uv run</code>。</p>
 
-# Core + dev + gateway dependencies
-pip install -e ".[dev,gateway]"</code></pre>
+        <h3 id="install-with-pip">用 pip 安装</h3>
+        <pre><code>git clone https://github.com/localmelo/localmelo.git
+cd localmelo
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[gateway]"</code></pre>
+        <p><code>python3</code> 必须是 Python 3.11 或更高版本。请保留 <code>-e</code>（可编辑安装）：普通安装会漏掉网关需要的一个数据文件，之后运行 <code>melo --serve</code> 会报错 <code>FileNotFoundError</code>。</p>
       </section>
 
-      <section class="section" id="direct-cli">
-        <h2>Direct CLI smoke</h2>
-        <p>Direct mode 执行一次 query 后退出，是确认 chat backend 可用的最快路径。</p>
-        <pre><code>melo "What is 6*7?"</code></pre>
-        <div class="callout">
-          <strong>通过标准：</strong>命令以 status 0 退出，答案提到 42，并且没有 traceback。
+      <section class="section" id="run-your-first-task">
+        <h2>运行第一个任务</h2>
+        <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"</code></pre>
+        <p>答案会输出到 stdout，命令的退出码为 0（<code>echo $?</code> 会输出 <code>0</code>）。<code>--base-url</code> 让 localmelo 在这一次运行中直接连接一个兼容 OpenAI 接口的服务器，不需要配置文件。它不会发送 API 密钥，所以适合本地服务器；使用云端 API 时，请先保存配置（见下文）。</p>
+        <p>所有选项见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">命令行参考（英文）</a>。</p>
+      </section>
+
+      <section class="section" id="json-output">
+        <h2>以 JSON 格式获取结果</h2>
+        <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --output-format json "What is 6*7?"</code></pre>
+        <p>示例输出（具体数值会不同）：</p>
+        <pre><code>{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "tool_exposure": "retrieve", "builtins": ["file_read", "file_write", "python_exec", "shell_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec", "shell_exec"]}, "localmelo_version": "603f40d"}</code></pre>
+        <p>stdout 上只有这一行。只有当 <code>status</code> 为 <code>completed</code> 时，退出码才是 0。</p>
+
+        <h3 id="run-results">运行结果</h3>
+        <p><code>status</code> 表示运行是如何结束的，例如 <code>completed</code>、<code>budget_exhausted</code> 或 <code>provider_error</code>。各个计数字段记录这次运行用了多少步、多少次模型请求和多少次工具调用，<code>config</code> 记录运行时使用的选项。所有状态和字段的说明见<a href="https://github.com/localmelo/localmelo/blob/main/docs/run-results.md">运行结果（英文）</a>。</p>
+      </section>
+
+      <section class="section" id="save-a-configuration">
+        <h2>保存配置</h2>
+        <p>配置文件会保存后端设置，这样 <code>melo "&lt;task&gt;"</code> 和网关都不再需要 <code>--base-url</code>。配置文件由配置向导生成：</p>
+        <pre><code>melo --serve --reconfigure</code></pre>
+        <p>向导会依次询问：</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">提示</th><th scope="col">填写内容</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>Chat backend</code></td><td>你的服务器类型对应的编号，例如 Ollama 是 <code>2</code>。默认值 <code>[1]</code> 是 MLC。</td></tr>
+              <tr><td><code>Base URL</code></td><td>服务器地址。按回车接受方括号中显示的默认值。</td></tr>
+              <tr><td><code>Chat model name</code></td><td>模型名，例如 <code>qwen3:8b</code>。</td></tr>
+              <tr><td><code>Start?</code></td><td>按回车（表示“是”）继续。</td></tr>
+              <tr><td><code>Embedding backend</code></td><td>如果没有嵌入服务器，输入 <code>5</code>，即 <code>None (no long-term memory)</code>。</td></tr>
+              <tr><td><code>Embedding endpoint URL</code>、<code>Embedding model name</code></td><td>只有选择了嵌入后端时才会询问。</td></tr>
+            </tbody>
+          </table>
         </div>
-        <p>也可以临时覆盖 endpoint 和 model：</p>
-        <pre><code>melo --base-url http://localhost:11434/v1 \
-     --chat-model qwen3:8b \
-     "What is 6*7?"</code></pre>
+        <p>使用云端 API 时，向导会询问 <code>API key env var</code> 和 <code>Chat model</code>，而不是 <code>Base URL</code> 和 <code>Chat model name</code>。</p>
+        <p>Ollama 的默认地址 <code>http://localhost:11434</code> 没有 <code>/v1</code>，这是正确的：<code>ollama</code> 后端使用 Ollama 自己的 API，而不是兼容 OpenAI 的 API。</p>
+        <p>接着，向导会向每个服务器发送一个简短的测试请求（<code>Probing backends ...</code>）。如果某个服务器没有响应，它会输出 <code>Probe failed: …</code> 并询问 <code>Save config anyway? [N]</code>；直接按回车则什么也不保存。成功时，它会输出 <code>Config saved to …</code>（后面是 <code>~/.cache/localmelo/config.toml</code> 的路径），然后<strong>启动网关</strong>，地址为 <code>http://127.0.0.1:8401</code>。网关会一直在这个终端中运行。</p>
       </section>
 
-      <section class="section" id="gateway">
-        <h2>Gateway smoke</h2>
-        <p>Gateway mode 在同一个 agent runtime 外面启动 HTTP API。一个 shell 启动服务，另一个 shell 调用。</p>
-        <pre><code>melo --serve</code></pre>
+      <section class="section" id="start-the-gateway">
+        <h2>启动网关</h2>
+        <p>在第二个终端中检查网关，并通过它运行一个任务：</p>
         <pre><code>curl http://127.0.0.1:8401/v1/health
-
 curl -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
-  -d '{"query":"Say hello briefly"}'</code></pre>
+  -d '{"query": "What is 6*7?"}'</code></pre>
+        <p>示例输出（具体数值会不同）：</p>
+        <pre><code>{"status":"ok","uptime":12.3,"sessions":{"active":0,"busy":0,"max":50},"chat_backend":"ollama","embedding_backend":"none"}
+{"result":"42","session_id":"a7e8f646ca2e"}</code></pre>
+        <p>健康检查不会连接模型服务器，运行任务时才会。在浏览器中打开 <code>http://127.0.0.1:8401/</code> 即可使用网页界面（playground）。</p>
+        <p>在第一个终端中按 Ctrl+C 停止网关。之后运行任务会使用保存的配置：</p>
+        <pre><code>melo "What is 6*7?"</code></pre>
+        <p>以后想跳过向导、直接启动网关时，运行 <code>melo --serve</code>。</p>
       </section>
 
-      <section class="section" id="sessions">
-        <h2>Session 复用</h2>
-        <p>传入稳定的 <code>session_id</code> 可以在多次 gateway 调用之间复用同一个 session。</p>
-        <pre><code>curl -X POST http://127.0.0.1:8401/v1/agent/run \
-  -H "Content-Type: application/json" \
-  -d '{"query":"remember this is session test","session_id":"demo123"}'
-
-curl -X POST http://127.0.0.1:8401/v1/agent/run \
-  -H "Content-Type: application/json" \
-  -d '{"query":"continue","session_id":"demo123"}'
-
-curl http://127.0.0.1:8401/v1/sessions
-curl -X DELETE http://127.0.0.1:8401/v1/sessions/demo123</code></pre>
-      </section>
-
-      <section class="section" id="backends">
-        <h2>Backend setup</h2>
-        <p>
-          localmelo 使用 split backend model：<code>chat_backend</code> 和
-          <code>embedding_backend</code> 通过 <code>melo --reconfigure</code> 独立配置。
-        </p>
-        <table>
-          <tr><th>模式</th><th>Chat backend</th><th>Embedding backend</th><th>说明</th></tr>
-          <tr><td>Ollama local</td><td><code>ollama</code></td><td><code>ollama</code> 或 <code>none</code></td><td>连接用户自己管理的 Ollama server。</td></tr>
-          <tr><td>MLC local</td><td><code>mlc</code></td><td><code>mlc</code> 或 <code>none</code></td><td>连接用户自己管理的 OpenAI-compatible MLC endpoint。</td></tr>
-          <tr><td>Other local</td><td><code>vllm</code> 或 <code>sglang</code></td><td>同一个 local backend 或 <code>none</code></td><td>runtime lifecycle 仍在 localmelo 外部。</td></tr>
-          <tr><td>Cloud chat</td><td><code>openai</code>、<code>anthropic</code>、<code>gemini</code> 或 <code>nvidia</code></td><td>local backend 或 <code>none</code></td><td>运行前设置对应 API key env var。</td></tr>
-        </table>
-        <p>
-          每个 chat request 最多等 server 的数据 120 s（<code>ollama</code> backend
-          为 300 s）。每收到数据就重新计时，所以 server 在生成时发送 keep-alive
-          字节的话不会 timeout；要限制整个 direct run 的时长，用
-          <code>--timeout</code>。模型较慢时（例如本地 thinking model），可在
-          <code>~/.cache/localmelo/config.toml</code> 顶层设置
-          <code>request_timeout_s</code>，或给 direct query 加
-          <code>--request-timeout SECONDS</code>。Timeout 的 request 会重试两次，
-          每次都使用完整的 timeout。
-        </p>
-      </section>
-
-      <section class="section" id="no-embedding">
-        <h2>No-embedding mode</h2>
-        <p>
-          当不想运行 embedding server 时，把 <code>embedding_backend</code> 设为
-          <code>"none"</code>。Agent 仍支持 direct answer、tool use 和 history recording；
-          只有 long-term embedding retrieval 会被关闭。
-        </p>
-        <pre><code>melo --reconfigure
-melo "What is 6*7?"</code></pre>
-      </section>
-
-      <section class="section" id="tests">
-        <h2>Tests</h2>
-        <pre><code># Dev-safe core suites
-python -m pytest tests/agent tests/checker tests/executor \
-                 tests/cli tests/memory tests/integration -q
-
-# Gateway suite
-python -m pytest tests/gateway -q
-
-# Full suite
-python -m pytest tests/ -q
-
-# Lint
-python -m ruff check .</code></pre>
+      <section class="section" id="next-steps">
+        <h2>下一步</h2>
+        <ul>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md">配置（英文）</a>：后端、云端 API 密钥、超时。</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">工具和 MCP（英文）</a>：选择内置工具，添加 MCP 服务器。</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md">网关和 HTTP API（英文）</a>：会话、网页界面、登录时自动运行。</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">记忆（英文）</a>：在多次运行之间保留记忆，查看和重置记忆。</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">命令行参考（英文）</a>：所有选项、退出码、在脚本中使用。</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/troubleshooting.md">故障排查（英文）</a>：错误信息及解决方法。</li>
+        </ul>
       </section>
     </article>
-
   </main>
 
   <footer class="site-footer">
     <div class="footer-inner">
-      <span>localmelo 中文文档</span>
-      <span><a href="https://github.com/localmelo/localmelo/blob/main/docs/quickstart.md">Markdown quickstart</a></span>
+      <p>早期预览版（pre-alpha）：在 v0.1.0 之前，命令和 API 都可能变化。</p>
+      <nav class="footer-links" aria-label="项目">
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">全部文档（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md">贡献指南（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/LICENSE">许可证（英文）</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
     </div>
   </footer>
-  <script src="../assets/site.js"></script>
 </body>
 </html>

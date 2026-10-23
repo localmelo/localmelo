@@ -3,185 +3,242 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Quickstart - localmelo docs</title>
-  <meta name="description" content="Install localmelo, run the direct CLI, verify gateway mode, configure backends, and run tests.">
+  <title>Quickstart · localmelo</title>
+  <meta name="description" content="Install localmelo, run a first task against a local model server, save a configuration and start the gateway.">
+  <link rel="alternate" hreflang="en" href="https://localmelo.github.io/localmelo/en/quickstart.html">
+  <link rel="alternate" hreflang="zh-CN" href="https://localmelo.github.io/localmelo/zh-CN/quickstart.html">
+  <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/quickstart.html">
   <link rel="icon" href="../assets/icon_small.png">
   <link rel="stylesheet" href="../assets/site.css">
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header">
     <div class="topbar">
-      <a class="brand" href="./index.html" aria-label="localmelo docs home">
-        <img src="../assets/icon_small.png" alt="">
+      <a class="brand" href="./index.html">
+        <img src="../assets/icon_small.png" alt="" width="30" height="30">
         <strong><span>local</span>melo</strong>
       </a>
-      <nav class="site-nav" aria-label="Primary navigation">
-        <a href="./index.html">Docs</a>
-        <a class="active" href="./quickstart.html">Quickstart</a>
+      <nav class="site-nav" aria-label="Main">
+        <a href="./quickstart.html" aria-current="page">Quickstart</a>
         <a href="./architecture.html">Architecture</a>
-        <a href="./updates.html">Updates</a>
-        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+        <a href="./updates.html">Roadmap</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">Reference <span aria-hidden="true">↗</span></a>
+        <a href="https://github.com/localmelo/localmelo">GitHub <span aria-hidden="true">↗</span></a>
       </nav>
-      <div class="lang-toggle" aria-label="Language">
-        <a class="active" href="./quickstart.html">EN</a>
-        <a href="../zh-CN/quickstart.html">中文</a>
-      </div>
+      <nav class="lang-toggle" aria-label="Language">
+        <a href="./quickstart.html" hreflang="en" lang="en" aria-current="true">EN</a>
+        <a href="../zh-CN/quickstart.html" hreflang="zh-CN" lang="zh-CN">中文</a>
+      </nav>
     </div>
   </header>
 
-  <main class="page layout">
-    <aside class="sidebar" aria-label="Quickstart sections">
-      <h2>Quickstart</h2>
-      <a class="active" href="#install">Install</a>
-      <a href="#direct-cli">Direct CLI</a>
-      <a href="#gateway">Gateway</a>
-      <a href="#sessions">Sessions</a>
-      <a href="#backends">Backends</a>
-      <a href="#no-embedding">No embedding</a>
-      <a href="#tests">Tests</a>
-    </aside>
+  <main id="main" class="page layout">
+    <nav class="sidebar" aria-label="On this page">
+      <p class="sidebar-label">On this page</p>
+      <a href="#before-you-begin">Before you begin</a>
+      <a href="#install">Install</a>
+      <a href="#run-your-first-task">Run your first task</a>
+      <a href="#json-output">Get the result as JSON</a>
+      <a href="#save-a-configuration">Save a configuration</a>
+      <a href="#start-the-gateway">Start the gateway</a>
+      <a href="#next-steps">Next steps</a>
+    </nav>
 
     <article class="content">
       <header class="doc-hero">
-        <p class="eyebrow">Quickstart</p>
-        <h1>Install, configure, and smoke-test localmelo.</h1>
+        <h1>Quickstart</h1>
         <p class="lead">
-          This page is the minimum path from checkout to a verified local agent loop.
-          It covers direct CLI mode, gateway mode, session reuse, backend setup, and
-          the focused test suites.
+          This tutorial installs localmelo, runs a first task against a local
+          model server, saves a configuration and starts the gateway.
         </p>
       </header>
 
+      <section class="section" id="before-you-begin">
+        <h2>Before you begin</h2>
+        <p>You need:</p>
+        <ul>
+          <li>macOS. localmelo is developed and tested on macOS. It should also work on Linux. Windows is not supported.</li>
+          <li>Python 3.11 or later, Git, and <a href="https://docs.astral.sh/uv/">uv</a> (or pip, see <a href="#install-with-pip">Install with pip</a>).</li>
+          <li>
+            A model server. This tutorial uses <a href="https://ollama.com">Ollama</a>:
+            install it, start it, and pull a model with <code>ollama pull qwen3:8b</code>.
+            Any server with an OpenAI-compatible API works too: use its
+            <code>/v1</code> URL and its model name in the commands below.
+          </li>
+        </ul>
+      </section>
+
       <section class="section" id="install">
         <h2>Install</h2>
-        <p>Install the package in editable mode from the repository root.</p>
-        <pre><code># Core + dev dependencies
-pip install -e ".[dev]"
+        <pre><code>git clone https://github.com/localmelo/localmelo.git
+cd localmelo
+uv sync --extra gateway
+source .venv/bin/activate</code></pre>
+        <p>
+          uv creates the virtual environment <code>.venv/</code> (installing
+          Python 3.13 if you do not have it) and installs localmelo with the
+          gateway's dependencies.
+        </p>
+        <p>
+          Keep the directory name <code>localmelo</code>: the package is built
+          from it. A renamed folder or a ZIP download (<code>localmelo-main</code>)
+          fails with <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>.
+        </p>
+        <p>
+          The rest of this guide calls <code>melo</code> directly. If you did
+          not activate the environment, put <code>uv run</code> in front of
+          each command.
+        </p>
 
-# Core + dev + gateway dependencies
-pip install -e ".[dev,gateway]"</code></pre>
+        <h3 id="install-with-pip">Install with pip</h3>
+        <pre><code>git clone https://github.com/localmelo/localmelo.git
+cd localmelo
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[gateway]"</code></pre>
+        <p>
+          <code>python3</code> must be Python 3.11 or later. Keep the
+          <code>-e</code> (editable install): a regular install leaves out a
+          data file that the gateway needs, and <code>melo --serve</code> then
+          fails with <code>FileNotFoundError</code>.
+        </p>
       </section>
 
-      <section class="section" id="direct-cli">
-        <h2>Direct CLI smoke</h2>
+      <section class="section" id="run-your-first-task">
+        <h2>Run your first task</h2>
+        <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"</code></pre>
         <p>
-          Direct mode runs one query and exits. It is the fastest way to confirm the
-          configured chat backend can complete a normal request.
+          The answer is printed on stdout, and the command exits with code 0
+          (<code>echo $?</code> prints <code>0</code>). <code>--base-url</code>
+          points localmelo at an OpenAI-compatible server for this one run,
+          without a configuration file. It sends no API key, so use it for
+          local servers; for a cloud API, save a configuration (below).
+        </p>
+        <p>
+          For every option, see the
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">command-line reference</a>.
+        </p>
+      </section>
+
+      <section class="section" id="json-output">
+        <h2>Get the result as JSON</h2>
+        <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --output-format json "What is 6*7?"</code></pre>
+        <p>Example output (values vary):</p>
+        <pre><code>{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "tool_exposure": "retrieve", "builtins": ["file_read", "file_write", "python_exec", "shell_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec", "shell_exec"]}, "localmelo_version": "603f40d"}</code></pre>
+        <p>
+          stdout holds exactly this one line. The exit code is 0 only when
+          <code>status</code> is <code>completed</code>.
+        </p>
+
+        <h3 id="run-results">Run results</h3>
+        <p>
+          <code>status</code> says how the run ended, for example
+          <code>completed</code>, <code>budget_exhausted</code> or
+          <code>provider_error</code>. The counters say how many steps, model
+          requests and tool calls the run took, and <code>config</code>
+          records the options it ran with. See
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/run-results.md">Run results</a>
+          for every status and field.
+        </p>
+      </section>
+
+      <section class="section" id="save-a-configuration">
+        <h2>Save a configuration</h2>
+        <p>
+          A configuration file saves the backends, so that
+          <code>melo "&lt;task&gt;"</code> and the gateway work without
+          <code>--base-url</code>. The setup wizard writes it:
+        </p>
+        <pre><code>melo --serve --reconfigure</code></pre>
+        <p>The wizard asks:</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th scope="col">Prompt</th><th scope="col">What to enter</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>Chat backend</code></td><td>The number of your server type, such as <code>2</code> for Ollama. The default, <code>[1]</code>, is MLC.</td></tr>
+              <tr><td><code>Base URL</code></td><td>Your server's URL. Press Enter to accept the default shown in brackets.</td></tr>
+              <tr><td><code>Chat model name</code></td><td>The model, such as <code>qwen3:8b</code>.</td></tr>
+              <tr><td><code>Start?</code></td><td>Press Enter (yes) to continue.</td></tr>
+              <tr><td><code>Embedding backend</code></td><td><code>5</code> for <code>None (no long-term memory)</code> if you have no embedding server.</td></tr>
+              <tr><td><code>Embedding endpoint URL</code>, <code>Embedding model name</code></td><td>Only asked when you chose an embedding backend.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          For a cloud API, the wizard asks for <code>API key env var</code> and
+          <code>Chat model</code> instead of <code>Base URL</code> and
+          <code>Chat model name</code>.
+        </p>
+        <p>
+          For Ollama, the default URL <code>http://localhost:11434</code> has
+          no <code>/v1</code>. That is correct: the <code>ollama</code> backend
+          uses Ollama's own API, not the OpenAI-compatible one.
+        </p>
+        <p>
+          Next, the wizard sends a short test request to each server
+          (<code>Probing backends ...</code>). If a server does not answer, it
+          prints <code>Probe failed: …</code> and asks
+          <code>Save config anyway? [N]</code>; pressing Enter saves nothing.
+          On success it prints <code>Config saved to …</code>, the path of
+          <code>~/.cache/localmelo/config.toml</code>, and then
+          <strong>starts the gateway</strong> on
+          <code>http://127.0.0.1:8401</code>. The gateway keeps running in this
+          terminal.
+        </p>
+      </section>
+
+      <section class="section" id="start-the-gateway">
+        <h2>Start the gateway</h2>
+        <p>From a second terminal, check the gateway and run a task through it:</p>
+        <pre><code>curl http://127.0.0.1:8401/v1/health
+curl -X POST http://127.0.0.1:8401/v1/agent/run \
+  -H "Content-Type: application/json" \
+  -d '{"query": "What is 6*7?"}'</code></pre>
+        <p>Example output (values vary):</p>
+        <pre><code>{"status":"ok","uptime":12.3,"sessions":{"active":0,"busy":0,"max":50},"chat_backend":"ollama","embedding_backend":"none"}
+{"result":"42","session_id":"a7e8f646ca2e"}</code></pre>
+        <p>
+          The health check does not contact the model server; a task does.
+          Open <code>http://127.0.0.1:8401/</code> in a browser for the web UI
+          (playground).
+        </p>
+        <p>
+          Press Ctrl+C in the first terminal to stop the gateway. Tasks now use
+          the saved configuration:
         </p>
         <pre><code>melo "What is 6*7?"</code></pre>
-        <div class="callout">
-          <strong>Pass criteria:</strong> the command exits with status 0, returns an
-          answer that mentions 42, and prints no traceback.
-        </div>
-        <p>You can override the endpoint and model for an ad-hoc run:</p>
-        <pre><code>melo --base-url http://localhost:11434/v1 \
-     --chat-model qwen3:8b \
-     "What is 6*7?"</code></pre>
+        <p>To start the gateway again without the wizard, run <code>melo --serve</code>.</p>
       </section>
 
-      <section class="section" id="gateway">
-        <h2>Gateway smoke</h2>
-        <p>
-          Gateway mode starts an HTTP API around the same agent runtime. Run the
-          server in one shell and call it from another.
-        </p>
-        <pre><code>melo --serve</code></pre>
-        <pre><code>curl http://127.0.0.1:8401/v1/health
-
-curl -X POST http://127.0.0.1:8401/v1/agent/run \
-  -H "Content-Type: application/json" \
-  -d '{"query":"Say hello briefly"}'</code></pre>
-        <div class="callout">
-          <strong>Pass criteria:</strong> health returns JSON with <code>status: ok</code>,
-          and <code>/v1/agent/run</code> returns both <code>result</code> and
-          <code>session_id</code>.
-        </div>
-      </section>
-
-      <section class="section" id="sessions">
-        <h2>Session reuse</h2>
-        <p>Pass a stable <code>session_id</code> to reuse one gateway session across calls.</p>
-        <pre><code>curl -X POST http://127.0.0.1:8401/v1/agent/run \
-  -H "Content-Type: application/json" \
-  -d '{"query":"remember this is session test","session_id":"demo123"}'
-
-curl -X POST http://127.0.0.1:8401/v1/agent/run \
-  -H "Content-Type: application/json" \
-  -d '{"query":"continue","session_id":"demo123"}'
-
-curl http://127.0.0.1:8401/v1/sessions
-curl -X DELETE http://127.0.0.1:8401/v1/sessions/demo123</code></pre>
-      </section>
-
-      <section class="section" id="backends">
-        <h2>Backend setup</h2>
-        <p>
-          localmelo uses a split backend model: <code>chat_backend</code> and
-          <code>embedding_backend</code> are configured independently through
-          <code>melo --reconfigure</code>.
-        </p>
-        <table>
-          <tr><th>Mode</th><th>Chat backend</th><th>Embedding backend</th><th>Notes</th></tr>
-          <tr><td>Ollama local</td><td><code>ollama</code></td><td><code>ollama</code> or <code>none</code></td><td>Connects to a user-managed Ollama server.</td></tr>
-          <tr><td>MLC local</td><td><code>mlc</code></td><td><code>mlc</code> or <code>none</code></td><td>Connects to a user-managed OpenAI-compatible MLC endpoint.</td></tr>
-          <tr><td>Other local</td><td><code>vllm</code> or <code>sglang</code></td><td>same local backend or <code>none</code></td><td>Runtime lifecycle remains outside localmelo.</td></tr>
-          <tr><td>Cloud chat</td><td><code>openai</code>, <code>anthropic</code>, <code>gemini</code>, or <code>nvidia</code></td><td>local backend or <code>none</code></td><td>Set the configured API key environment variable before running.</td></tr>
-        </table>
-        <p>
-          Each chat request waits up to 120 s for data from the server (300 s
-          with the <code>ollama</code> backend). The timeout restarts whenever
-          data arrives, so it does not cut off a server that sends keep-alive
-          bytes while it generates; <code>--timeout</code> bounds a whole direct
-          run. For a slower model, such as a local thinking model, set
-          <code>request_timeout_s</code> at the top of
-          <code>~/.cache/localmelo/config.toml</code>, or pass
-          <code>--request-timeout SECONDS</code> to a direct query. A request
-          that times out is retried twice, each time with the full timeout.
-        </p>
-        <div class="callout warning">
-          <strong>Local backend rule:</strong> localmelo does not host, compile, or
-          start model runtimes. Start your local server separately, then point
-          localmelo at its URL.
-        </div>
-      </section>
-
-      <section class="section" id="no-embedding">
-        <h2>No-embedding mode</h2>
-        <p>
-          Set <code>embedding_backend = "none"</code> when you do not want to run an
-          embedding server. The agent still supports direct answers, tool use, and
-          history recording; only long-term embedding retrieval is disabled.
-        </p>
-        <pre><code>melo --reconfigure
-melo "What is 6*7?"</code></pre>
-      </section>
-
-      <section class="section" id="tests">
-        <h2>Tests</h2>
-        <p>Use the focused suites while developing, then run the full suite before merging.</p>
-        <pre><code># Dev-safe core suites
-python -m pytest tests/agent tests/checker tests/executor \
-                 tests/cli tests/memory tests/integration -q
-
-# Gateway suite
-python -m pytest tests/gateway -q
-
-# Full suite
-python -m pytest tests/ -q
-
-# Lint
-python -m ruff check .</code></pre>
+      <section class="section" id="next-steps">
+        <h2>Next steps</h2>
+        <ul>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md">Configuration</a>: backends, cloud API keys, timeouts.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">Tools and MCP</a>: choose built-in tools and add MCP servers.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md">Gateway and HTTP API</a>: sessions, the web UI, running at login.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">Memory</a>: keep memory between runs, inspect and reset it.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">Command-line reference</a>: every option, exit codes, scripting.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/troubleshooting.md">Troubleshooting</a>: error messages and fixes.</li>
+        </ul>
       </section>
     </article>
-
   </main>
 
   <footer class="site-footer">
     <div class="footer-inner">
-      <span>localmelo documentation</span>
-      <span><a href="https://github.com/localmelo/localmelo/blob/main/docs/quickstart.md">Markdown quickstart</a></span>
+      <p>Pre-alpha: commands and APIs may change before v0.1.0.</p>
+      <nav class="footer-links" aria-label="Project">
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">All documentation</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md">Contributing</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">Security policy</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">Changelog</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/LICENSE">License</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
     </div>
   </footer>
-  <script src="../assets/site.js"></script>
 </body>
 </html>
