@@ -143,6 +143,14 @@ def _decode_reflection(text: str) -> object:
     raise ValueError("No JSON object in the reflection response")
 
 
+def _holds_reflection_object(text: str) -> bool:
+    """Whether a reflection reply holds a JSON object (see :func:`_decode_reflection`)."""
+    try:
+        return isinstance(_decode_reflection(_coerce_str(text)), dict)
+    except ValueError:
+        return False
+
+
 def _as_planned(window: list[Message], query: str) -> list[Message]:
     """*window* as a planning request carries it, for size checks.
 
@@ -1198,6 +1206,12 @@ class Agent:
         *final* says that no further attempt can start; the request then
         tells the model so (see :meth:`Chat.reflect`).
 
+        A reply that holds no JSON object, such as a tool call, is asked
+        for once more, with the window's turns written out as text and
+        :data:`REFLECTION_RETRY_NOTE` at the end (see :meth:`Chat.reflect`).
+        The second reply is parsed whatever it holds, so one that still has
+        no object falls back to ``stop`` (see :meth:`_parse_reflection`).
+
         After parsing, enforce :data:`MAX_REFLECTION_CHARS`: if the
         serialized form of the new reflection exceeds the budget, force
         ``decision.recommended_action = "decompose"`` so the next attempt
@@ -1216,6 +1230,19 @@ class Agent:
             prior_reflections=prior_reflections or None,
             final=final,
         )
+        if not _holds_reflection_object(response.content):
+            # Often a tool call: the window ends in tool turns, and some
+            # models continue them although the request offers no tools.
+            # Ask once more, with those turns written out as text.
+            response = await self.chat.reflect(
+                short=short_window,
+                query=task.query,
+                attempt_id=attempt_id,
+                failure_type=failure_type,
+                prior_reflections=prior_reflections or None,
+                final=final,
+                retry=True,
+            )
         entry, decision = self._parse_reflection(
             response.content, attempt_id, failure_type
         )

@@ -291,7 +291,7 @@ class TestStuckDetection:
 
         llm = FakeLLM()
         # Same tool+args 3 times → stuck
-        for _ in range(4):
+        for _ in range(3):
             llm.enqueue(
                 Message(
                     role="assistant",
@@ -779,7 +779,7 @@ class TestReflectionFailureTypeInPrompt:
 
         llm = FakeLLM()
         # Same tool+args 3 times → stuck detection
-        for _ in range(4):
+        for _ in range(3):
             llm.enqueue(
                 Message(
                     role="assistant",
