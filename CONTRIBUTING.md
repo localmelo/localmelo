@@ -59,7 +59,7 @@ uv run pytest tests/agent -q
 | `tests/mcp` | The MCP client and tool provider | `dev` |
 | `tests/gateway` | Sessions and the HTTP API | `dev` and `gateway` |
 | `tests/integration` | Several parts together | `dev` and `gateway` |
-| `tests/smoke` | Checks against real model servers | `dev` and a model server |
+| `tests/smoke` | Offline tests of the smoke tools (parsing, metrics, logging), plus `test_backend_smoke.py`, which talks to a real model server | `dev` (and a model server for that file) |
 
 ### Real-backend smoke tests
 
@@ -72,8 +72,10 @@ uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q
 They send a chat request to Ollama on `127.0.0.1:11434` and to MLC LLM on
 `127.0.0.1:8400`, and skip the server that does not answer.
 `tests/smoke/core_loop_test.py` runs longer memory scenarios against real
-servers; see [tests/smoke/README.md](tests/smoke/README.md). Results worth
-keeping go to [tests_result/](tests_result/README.md).
+servers; see [tests/smoke/README.md](tests/smoke/README.md). That README's
+default `pytest` command also collects `test_backend_smoke.py`; for an
+offline run, use the `--ignore` command above. Results worth keeping go to
+[tests_result/](tests_result/README.md).
 
 ## Project layout
 

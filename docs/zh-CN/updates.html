@@ -81,7 +81,7 @@
           </p>
           <p>现在，直接模式下的一次 <code>melo "&lt;task&gt;"</code> 运行可以交给脚本或基准测试来驱动。</p>
           <ul>
-            <li>运行选项：<code>--max-steps</code>、<code>--attempt-policy</code>、<code>--tool-exposure</code>、<code>--builtins</code>、<code>--memory</code>、<code>--memory-dir</code> 和 <code>--timeout</code>，以及 Python API 中的 <code>AgentOptions</code>（#30）。</li>
+            <li>运行选项：<code>--max-steps</code>、<code>--attempt-policy</code>、<code>--tool-exposure</code>、<code>--builtins</code>、<code>--memory</code>、<code>--memory-dir</code> 和 <code>--timeout</code>；在 <code>--base-url</code> 运行中启用长期记忆的 <code>--embedding-base-url</code> 和 <code>--embedding-model</code>；以及 Python API 中的 <code>AgentOptions</code>（#30）。</li>
             <li>每次运行都以九种状态之一结束。<code>--output-format json</code> 会把运行记录输出为一行 JSON；退出码在 <code>completed</code> 时为 0，<code>crashed</code> 时为 1，其他状态或用法错误时为 2（#30）。</li>
             <li>失败的模型请求在重试可能成功时会自动重试；<code>--request-timeout</code> 和 <code>request_timeout_s</code> 用来设置对话请求超时（#30）。</li>
             <li>SIGTERM 和 SIGHUP 会在 8 秒内结束一次直接模式的运行，并保存它的任务记录（#30）。</li>

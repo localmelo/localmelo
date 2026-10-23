@@ -96,7 +96,7 @@
           </p>
           <p>A direct <code>melo "&lt;task&gt;"</code> run is now something a script or a benchmark can drive.</p>
           <ul>
-            <li>Run options: <code>--max-steps</code>, <code>--attempt-policy</code>, <code>--tool-exposure</code>, <code>--builtins</code>, <code>--memory</code>, <code>--memory-dir</code> and <code>--timeout</code>, and <code>AgentOptions</code> in the Python API (#30).</li>
+            <li>Run options: <code>--max-steps</code>, <code>--attempt-policy</code>, <code>--tool-exposure</code>, <code>--builtins</code>, <code>--memory</code>, <code>--memory-dir</code> and <code>--timeout</code>; <code>--embedding-base-url</code> and <code>--embedding-model</code> for long-term memory in a <code>--base-url</code> run; and <code>AgentOptions</code> in the Python API (#30).</li>
             <li>Every run ends with one of nine statuses. <code>--output-format json</code> prints the run record as one JSON line, and the exit code is 0 for <code>completed</code>, 1 for <code>crashed</code> and 2 for any other status or a usage error (#30).</li>
             <li>Failed model requests are retried when a retry may succeed, and <code>--request-timeout</code> and <code>request_timeout_s</code> set the chat request timeout (#30).</li>
             <li>SIGTERM and SIGHUP end a direct run within 8 seconds, with its task record saved (#30).</li>
