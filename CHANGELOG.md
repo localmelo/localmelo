@@ -29,6 +29,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   saved ([#30]).
 - `extra_body` in each backend's config table, for extra chat request fields
   ([#26]).
+- `--reflection-gate flags|utility` and `AgentOptions.reflection_gate`. The
+  JSON line's `config` gains `reflection_gate` ([#34]).
 - The MIT license ([#28]).
 - A uv development environment with a committed `uv.lock` ([#25]).
 
@@ -43,6 +45,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - In `retrieve` tool exposure, every step offers all registered built-in
   tools, then the extra tools found by hints and by Okapi BM25 with IDF, both
   sorted by name ([#32]).
+- After a reflection, the next attempt starts when the reflection chooses
+  `continue` and its three checks hold; its utility score no longer has to
+  reach 0.1. A reply that still holds no reflection after the retry no longer
+  ends a run that has attempts and steps left, and a reflection over 2,000
+  characters is trimmed instead of ending the run. A reply whose only JSON is
+  not a reflection, such as a tool call written out as text, is asked for
+  again too. `--reflection-gate utility` keeps the previous behavior
+  ([#34]).
 
 ### Fixed
 
@@ -65,3 +75,4 @@ earlier milestones.
 [#30]: https://github.com/localmelo/localmelo/pull/30
 [#31]: https://github.com/localmelo/localmelo/pull/31
 [#32]: https://github.com/localmelo/localmelo/pull/32
+[#34]: https://github.com/localmelo/localmelo/pull/34

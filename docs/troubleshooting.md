@@ -213,12 +213,15 @@ melo: run ended with status stuck: Stuck: the same tool calls or errors repeated
 ### gate_stopped
 
 ```text
-melo: run ended with status gate_stopped: Could not parse reflection response
+melo: run ended with status gate_stopped: Stopped after attempt 1
 ```
 
-- **Cause:** after an attempt, the reflection decided to stop. The error is
-  the model's reason, or `Could not parse reflection response` when the model
-  twice replied without the JSON object that a reflection asks for.
+- **Cause:** after an attempt, the reflection decided to stop, or its
+  decision to continue did not pass the continuation gate. The error is the
+  model's reason, or `Stopped after attempt <n>` when it gave none. With
+  `--reflection-gate utility`, it can also be
+  `Could not parse reflection response`: the model twice replied without the
+  JSON object that a reflection asks for.
 - **Fix:** read the reason. If the model cannot write reflections, try
   another model or `--attempt-policy none`.
 

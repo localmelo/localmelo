@@ -46,19 +46,26 @@ with a JSON object: a summary, what failed, what helped, and one action.
 | `decompose` | The task should be split up. localmelo does not split tasks, so the run ends as `gate_stopped`. |
 
 The continuation gate lets a run continue only when the reflection says the
-task is still feasible, names a concrete and new next step, and estimates
-that the gain of another attempt outweighs its cost and the risk of
-repeating itself. Otherwise the run ends as `gate_stopped`.
+task is still feasible and names a concrete and new next step. Otherwise the
+run ends as `gate_stopped`. With `--reflection-gate utility`, the behavior
+before that option, the reflection must also estimate that the gain of
+another attempt outweighs its cost and the risk of repeating itself: a
+utility score computed from its own estimates must reach 0.1.
 
 More about reflections:
 
 - Only the latest reflection is kept: each one replaces the one before, so
-  the prompt stays small. A reflection longer than about 2,000 characters
-  cannot continue the run.
+  the prompt stays small. A reflection longer than about 2,000 characters is
+  trimmed to fit, and its decision stands: the last items of its lists go
+  first, then the end of its summary. With `--reflection-gate utility`, such
+  a reflection ends the run instead, unless it chose `done`.
 - When no attempt can follow, because the steps or attempts are used up, the
   reflection is told so. It can still choose `done`; otherwise the run ends
   as `budget_exhausted` with the reflection's best answer as its result.
-- A reply without a JSON object is asked for once more; see
+- A reply that holds no reflection, that is no JSON object with one of the
+  four actions, is asked for once more. If the second reply holds none
+  either, the next attempt starts without a new reflection, or the run ends
+  as `budget_exhausted` when none can start; see
   [Run results](run-results.md#statuses).
 
 ## Tools in each step

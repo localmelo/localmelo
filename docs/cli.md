@@ -55,6 +55,7 @@ These options apply to a task run without `--serve`.
 |---|---|---|
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
+| `--reflection-gate flags\|utility` | `flags` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option). |
 | `--tool-exposure retrieve\|all` | `retrieve` | Which tools each step offers the model. |
 | `--builtins all\|none\|NAME,...` | `all` | The built-in tools to register. |
 | `--mcp-config PATH` | not set | Add the tools of the MCP servers listed in this JSON file. |
@@ -70,6 +71,8 @@ These options apply to a task run without `--serve`.
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
   [How localmelo works](how-it-works.md#the-run-loop).
+- `--reflection-gate`: see [Reflection](how-it-works.md#reflection). It has
+  no effect with `--attempt-policy none`.
 - `--tool-exposure`: see [How tools are offered](tools.md#how-tools-are-offered).
 - `--builtins`: `all`, `none`, or a comma-separated list of `file_read`,
   `file_write`, `python_exec` and `shell_exec`.
