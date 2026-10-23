@@ -397,7 +397,8 @@ class TestReflectionRetry:
         assert retry[0].content == first[0].content
         assert not retry[1].tool_calls
         turns = render_transcript(first[1:-1])
-        assert 'Assistant called echo({"text": "a"})' in turns
+        # The result names the tool that produced it.
+        assert 'Assistant called echo({"text": "a"})\n\nResult of echo: a' in turns
         assert retry[1].content == "\n\n".join(
             [
                 f"{REFLECTION_TRANSCRIPT_INTRO}\n\n{turns}",
