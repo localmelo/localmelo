@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -97,11 +98,44 @@ REFLECTION_RETRY_NOTE = (
     "tools are not available for this reply."
 )
 
+# Opens the retry's transcript: the window's turns written out as text, so
+# the retry has no tool turns for the model to continue.
+REFLECTION_TRANSCRIPT_INTRO = "The end of this attempt, written out as text:"
+
 _MEMORY_PREFIX = "[memory] "
 
 # Most recent working-memory messages shown to the reflection call. The
 # window is cut on turn boundaries, so a tool call keeps its results.
 REFLECTION_WINDOW = 10
+
+
+def render_transcript(messages: Sequence[Message]) -> str:
+    """*messages* written out as plain text, one paragraph per entry.
+
+    Tool calls read ``Assistant called <tool>(<JSON arguments>)`` and tool
+    results ``Result of <tool>: <content>``. Images are not shown: a tool
+    result's content already names its images, and a line counts the
+    images of any other message. Thinking is left out, as in every other
+    request.
+    """
+    paragraphs: list[str] = []
+    for message in messages:
+        if message.role == "assistant":
+            if message.content.strip():
+                paragraphs.append(f"Assistant: {message.content}")
+            for call in message.tool_calls:
+                arguments = json.dumps(
+                    call.arguments, ensure_ascii=False, sort_keys=True, default=str
+                )
+                paragraphs.append(f"Assistant called {call.tool_name}({arguments})")
+        elif message.role == "tool":
+            name = message.tool_result.tool_name if message.tool_result else "a tool"
+            paragraphs.append(f"Result of {name}: {message.content}")
+        else:
+            paragraphs.append(f"{message.role.capitalize()}: {message.content}")
+        if message.images and message.role != "tool":
+            paragraphs.append(f"({len(message.images)} image(s) not shown)")
+    return "\n\n".join(paragraphs)
 
 
 def lacks_task_query(short: Sequence[Message], query: str) -> bool:
@@ -322,9 +356,11 @@ class Chat:
         The request is a user message after the newest turns of *short*.
         With *final*, no further attempt can start, and the request says
         so: the reflection can only finalize the answer. With *retry*, the
-        request is asked again after a reply without the JSON object, and
-        ends with :data:`REFLECTION_RETRY_NOTE`; everything before that
-        note is the same as in the first request.
+        reflection is asked again after a reply without the JSON object:
+        the same system message, then one user message that holds the
+        window's turns written out as text (:func:`render_transcript`),
+        the same request and :data:`REFLECTION_RETRY_NOTE`. With no tool
+        turns left, a model has no tool call to continue.
         """
         # Build system prompt with prior reflection context
         system_parts = [REFLECTION_PROMPT]
@@ -355,8 +391,6 @@ class Chat:
         )
         if final:
             request += f" {FINAL_REFLECTION_NOTE}"
-        if retry:
-            request += f"\n\n{REFLECTION_RETRY_NOTE}"
 
         tail = tail_turns(short, REFLECTION_WINDOW)
         if tail and tail[-1].role == "user":
@@ -366,6 +400,13 @@ class Chat:
             # label, an assistant message, ends the turns instead.
             tail.pop()
         messages = [Message(role="system", content="\n\n".join(system_parts))]
-        messages.extend(tail)
-        messages.append(Message(role="user", content=request))
+        if retry:
+            transcript = render_transcript(tail)
+            parts = [request, REFLECTION_RETRY_NOTE]
+            if transcript:
+                parts.insert(0, f"{REFLECTION_TRANSCRIPT_INTRO}\n\n{transcript}")
+            messages.append(Message(role="user", content="\n\n".join(parts)))
+        else:
+            messages.extend(tail)
+            messages.append(Message(role="user", content=request))
         return await self._request(messages, tools=None)

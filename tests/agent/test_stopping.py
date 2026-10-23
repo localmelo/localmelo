@@ -16,6 +16,8 @@ from localmelo.melo.agent._chat import (
     FINAL_REFLECTION_NOTE,
     REFLECTION_PROMPT,
     REFLECTION_RETRY_NOTE,
+    REFLECTION_TRANSCRIPT_INTRO,
+    render_transcript,
 )
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.memory.short import WorkingMemory
@@ -378,21 +380,31 @@ class TestReflectionRetry:
         assert result.n_tool == 1
 
     @pytest.mark.asyncio
-    async def test_the_retry_repeats_the_request_and_adds_the_note(self) -> None:
+    async def test_the_retry_writes_the_turns_out_as_text(self) -> None:
         llm = FakeLLM([_echo_call("a"), _tool_call_reply(), _reflection("stop")])
         agent = _agent(llm, steps_per_attempt=1, max_attempts=2)
         await agent.run_task("echo the answer")
         calls = [call for call in llm.calls if _is_reflection(call)]
         first, retry = (call["messages"] for call in calls)
-
-        def sent(m: Message) -> tuple[Any, ...]:
-            # What a provider sends; the creation timestamps differ.
-            return (m.role, m.content, m.tool_calls, m.tool_call_id, m.images)
-
-        # Only the closing request differs, so a server's prefix cache holds.
-        assert [sent(m) for m in retry[:-1]] == [sent(m) for m in first[:-1]]
-        assert retry[-1].role == "user"
-        assert retry[-1].content == f"{first[-1].content}\n\n{REFLECTION_RETRY_NOTE}"
+        # The first request carries the turns as they are: a tool call and
+        # its result.
+        assert any(m.tool_calls for m in first)
+        assert any(m.role == "tool" for m in first)
+        # The retry keeps the system message and sends one user message: the
+        # same turns as text, the same request, then the note. No tool turn
+        # is left for the model to continue.
+        assert [m.role for m in retry] == ["system", "user"]
+        assert retry[0].content == first[0].content
+        assert not retry[1].tool_calls
+        turns = render_transcript(first[1:-1])
+        assert 'Assistant called echo({"text": "a"})' in turns
+        assert retry[1].content == "\n\n".join(
+            [
+                f"{REFLECTION_TRANSCRIPT_INTRO}\n\n{turns}",
+                first[-1].content,
+                REFLECTION_RETRY_NOTE,
+            ]
+        )
         assert REFLECTION_RETRY_NOTE not in first[-1].content
         assert [call["tools"] for call in calls] == [None, None]
 
@@ -459,8 +471,52 @@ class TestReflectionRetry:
         result = await agent.run_task("echo the answer")
         first, retry = _reflection_requests(llm)
         assert first.endswith(FINAL_REFLECTION_NOTE)
-        assert retry == f"{first}\n\n{REFLECTION_RETRY_NOTE}"
+        assert retry.endswith(f"\n\n{first}\n\n{REFLECTION_RETRY_NOTE}")
         assert (result.status, result.result) == ("budget_exhausted", "partial")
+
+
+class TestRenderTranscript:
+    def test_turns_as_text(self) -> None:
+        ls = ToolCall(tool_name="shell_exec", arguments={"command": "ls"})
+        read = ToolCall(tool_name="file_read", arguments={"path": "a.txt"})
+        messages = [
+            Message(role="user", content="list the files"),
+            Message(role="assistant", content="Let me look.", tool_call=ls),
+            Message(
+                role="tool",
+                content="a.txt",
+                tool_result=ToolResult(tool_name="shell_exec", output="a.txt"),
+            ),
+            # A call without text, and thinking, which is never shown.
+            Message(role="assistant", tool_call=read, thinking="hidden"),
+            Message(role="assistant", content="Done."),
+        ]
+        assert render_transcript(messages) == (
+            "User: list the files\n\n"
+            "Assistant: Let me look.\n\n"
+            'Assistant called shell_exec({"command": "ls"})\n\n'
+            "Result of shell_exec: a.txt\n\n"
+            'Assistant called file_read({"path": "a.txt"})\n\n'
+            "Assistant: Done."
+        )
+
+    def test_images_are_counted_but_not_shown(self) -> None:
+        image = ImagePart(mime_type="image/png", data="aGVsbG8=")
+        with_image = Message(role="user", content="see this", images=[image])
+        # A tool result's content already names its images.
+        tool = Message(
+            role="tool",
+            content="[1 image: image/png]",
+            tool_result=ToolResult(tool_name="screenshot"),
+            images=[image],
+        )
+        assert render_transcript([with_image, tool]) == (
+            "User: see this\n\n(1 image(s) not shown)\n\n"
+            "Result of screenshot: [1 image: image/png]"
+        )
+
+    def test_nothing_gives_an_empty_text(self) -> None:
+        assert render_transcript([]) == ""
 
 
 # ── Tolerant reflection parsing ─────────────────────────────────────────────

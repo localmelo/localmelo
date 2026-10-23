@@ -1207,10 +1207,10 @@ class Agent:
         tells the model so (see :meth:`Chat.reflect`).
 
         A reply that holds no JSON object, such as a tool call, is asked
-        for once more, with :data:`REFLECTION_RETRY_NOTE` at the end of the
-        request. The second reply is parsed whatever it holds, so one that
-        still has no object falls back to ``stop`` (see
-        :meth:`_parse_reflection`).
+        for once more, with the window's turns written out as text and
+        :data:`REFLECTION_RETRY_NOTE` at the end (see :meth:`Chat.reflect`).
+        The second reply is parsed whatever it holds, so one that still has
+        no object falls back to ``stop`` (see :meth:`_parse_reflection`).
 
         After parsing, enforce :data:`MAX_REFLECTION_CHARS`: if the
         serialized form of the new reflection exceeds the budget, force
@@ -1233,7 +1233,7 @@ class Agent:
         if not _holds_reflection_object(response.content):
             # Often a tool call: the window ends in tool turns, and some
             # models continue them although the request offers no tools.
-            # Ask once more, with the instruction repeated at the end.
+            # Ask once more, with those turns written out as text.
             response = await self.chat.reflect(
                 short=short_window,
                 query=task.query,
