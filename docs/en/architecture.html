@@ -330,7 +330,7 @@
         tags: ["planner", "model consumer"],
         body: `<h3>Loop stages</h3><ul>
           <li>Retrieve long-term context and working-memory window.</li>
-          <li>Resolve tools from hints and registry search.</li>
+          <li>Offer every registered built-in tool, then other tools from hints and BM25 search (<code>retrieve</code>, the default), or every tool (<code>all</code>).</li>
           <li>Plan with the chat provider.</li>
           <li>Execute tool calls through executor and checker boundaries.</li>
           <li>Make only a lightweight bool decision that a candidate is worth remembering.</li>

@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -12,9 +13,10 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker.payloads import ToolResolutionResult, ValidationResult
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor import builtin_names
 from localmelo.melo.executor.executor import ToolCallable
-from localmelo.melo.schema import Message, ToolCall, ToolDef
+from localmelo.melo.schema import TOOL_SEARCH_TOP_K, Message, ToolCall, ToolDef
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
 
@@ -41,6 +43,36 @@ class FakeLLM(BaseLLMProvider):
 class FakeEmbedding(BaseEmbeddingProvider):
     async def embed(self, texts: list[str]) -> list[list[float]]:
         return [[1.0, 0.0, 0.0, 0.0] for _ in texts]
+
+    async def close(self) -> None:
+        pass
+
+
+async def _echo(text: str = "") -> str:
+    return text
+
+
+class FakeToolProvider(BaseToolProvider):
+    """Provides one tool per ``name -> description``; each echoes its text."""
+
+    def __init__(self, tools: dict[str, str]) -> None:
+        self.tools = tools
+
+    async def start(self) -> list[ProvidedTool]:
+        return [
+            ProvidedTool(
+                definition=ToolDef(
+                    name=name,
+                    description=description,
+                    parameters={
+                        "type": "object",
+                        "properties": {"text": {"type": "string"}},
+                    },
+                ),
+                function=_echo,
+            )
+            for name, description in self.tools.items()
+        ]
 
     async def close(self) -> None:
         pass
@@ -221,6 +253,214 @@ class TestAllExposure:
         assert llm.calls == []
 
 
+# ── tool_exposure="retrieve": the built-ins and the extra tools ─────────────
+
+# Shaped like the Aider exercises whose runs never got file_write before
+# the built-ins were always offered.
+AIDER_QUERIES = [
+    "Implement the transpose function in transpose.py so that the tests in "
+    "transpose_test.py pass",
+    "Implement the list operations in list_ops.py so that the tests in "
+    "list_ops_test.py pass",
+    "Implement the scale generator in scale_generator.py so that the tests in "
+    "scale_generator_test.py pass",
+]
+
+# Ten provided tools, several of whose descriptions share common words.
+TEN_TOOLS = {
+    "calendar_add": "Add an event to the calendar",
+    "email_send": "Send an email to a contact",
+    "map_route": "Find the route between two places",
+    "music_play": "Play a song or a playlist",
+    "notes_search": "Search the notes for a phrase",
+    "stock_price": "Look up the price of a stock",
+    "timer_start": "Start a timer for a number of minutes",
+    "translate_text": "Translate text into another language",
+    "weather_forecast": "Get the weather forecast for a city",
+    "web_fetch": "Fetch the text of a web page",
+}
+
+BUILTINS = sorted(builtin_names())
+
+
+def _with_providers(
+    llm: FakeLLM, options: AgentOptions, tools: dict[str, str]
+) -> Agent:
+    """An agent whose provider supplies *tools* (name -> description)."""
+    return Agent(llm=llm, options=options, tool_providers=[FakeToolProvider(tools)])
+
+
+class TestRetrieveExposure:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("query", AIDER_QUERIES)
+    async def test_an_aider_shaped_query_offers_file_write(self, query: str) -> None:
+        llm = FakeLLM([_answer("done")])
+        agent, _ = _agent(llm, AgentOptions(), {})
+
+        assert await agent.run(query) == "done"
+        assert "file_write" in _offered(llm.calls[0])
+        # With no other tool registered, every built-in, sorted by name.
+        assert _offered(llm.calls[0]) == BUILTINS
+
+    @pytest.mark.asyncio
+    async def test_only_the_selected_builtins_are_always_offered(self) -> None:
+        llm = FakeLLM([_call("file_write", "x"), _answer("done")])
+        options = AgentOptions(builtins=frozenset({"file_read", "shell_exec"}))
+        agent, _ = _agent(llm, options, {})
+
+        # "hello" shares no word with the name, description or tags of
+        # either built-in; both are offered on every step all the same.
+        result = await agent.run_task("hello")
+        assert (result.status, result.result) == ("completed", "done")
+        # file_write is neither registered nor offered, although the call
+        # names it.
+        assert [_offered(call) for call in llm.calls] == [
+            ["file_read", "shell_exec"]
+        ] * 2
+        assert _results(llm.calls[1]) == [
+            "Error: Tool not found in registry: file_write"
+        ]
+        # Both planning calls offered tools, so both count as main requests,
+        # none as auxiliary ones.
+        assert (result.n_llm, result.n_main, result.n_aux) == (2, 2, 0)
+
+    @pytest.mark.asyncio
+    async def test_without_builtins_only_the_extra_tools_are_retrieved(
+        self,
+    ) -> None:
+        llm = FakeLLM([_answer("done")])
+        tools = {"weather": "Weather forecast for a city", "calendar": "Calendar"}
+        agent = _with_providers(llm, AgentOptions(builtins=frozenset()), tools)
+
+        assert await agent.run("What will the weather be in Paris?") == "done"
+        assert _offered(llm.calls[0]) == ["weather"]
+
+    @pytest.mark.asyncio
+    async def test_the_builtins_come_first_then_the_extra_tools_by_name(
+        self,
+    ) -> None:
+        llm = FakeLLM([_answer("done")])
+        agent = _with_providers(llm, AgentOptions(), TEN_TOOLS)
+
+        assert await agent.run("What will the weather be in Paris tomorrow?") == "done"
+        offered = _offered(llm.calls[0])
+        assert offered[: len(BUILTINS)] == BUILTINS
+        # BM25 ranks weather_forecast first; the offered list is by name.
+        extra = offered[len(BUILTINS) :]
+        assert "weather_forecast" in extra
+        assert extra == sorted(extra)
+        assert len(extra) <= TOOL_SEARCH_TOP_K
+        assert len(set(offered)) == len(offered)
+
+    @pytest.mark.asyncio
+    async def test_a_chinese_query_reaches_a_tool_with_a_chinese_description(
+        self,
+    ) -> None:
+        llm = FakeLLM([_answer("done")])
+        tools = {
+            "translate_cn": "把文本翻译成英文",
+            "weather_cn": "查询城市的天气预报",
+            "web_fetch": "Fetch the text of a web page",
+        }
+        agent = _with_providers(llm, AgentOptions(), tools)
+
+        assert await agent.run("北京明天的天气怎么样？") == "done"
+        assert _offered(llm.calls[0]) == [*BUILTINS, "weather_cn"]
+
+    @pytest.mark.asyncio
+    async def test_the_tools_stay_byte_identical_while_the_extra_tools_do(
+        self, tmp_path: Path
+    ) -> None:
+        """Calls to built-ins and to an offered extra tool reorder nothing.
+
+        Hint extraction used to move each tool the model had called to the
+        front, so the tools part of the request changed from step to step.
+        """
+        notes = tmp_path / "notes.txt"
+        notes.write_text("Paris, tomorrow", encoding="utf-8")
+        llm = FakeLLM(
+            [
+                Message(
+                    role="assistant",
+                    content="",
+                    tool_call=ToolCall(
+                        tool_name="file_read", arguments={"path": str(notes)}
+                    ),
+                ),
+                Message(
+                    role="assistant",
+                    content="",
+                    tool_call=ToolCall(
+                        tool_name="python_exec", arguments={"code": "print(6 * 7)"}
+                    ),
+                ),
+                _call("weather_forecast", "Paris"),
+                _answer("done"),
+            ]
+        )
+        agent = _with_providers(llm, AgentOptions(), TEN_TOOLS)
+
+        assert await agent.run("What will the weather be in Paris tomorrow?") == "done"
+        assert len(llm.calls) == 4
+        assert len({_wire(call) for call in llm.calls}) == 1
+        assert _results(llm.calls[3]) == ["Paris, tomorrow", "42", "Paris"]
+
+    @pytest.mark.asyncio
+    async def test_a_call_to_a_lower_ranked_extra_tool_reorders_nothing(
+        self,
+    ) -> None:
+        """The extra tools are sorted by name, not in hint or rank order.
+
+        BM25 ranks weather_forecast first for this query. A call to
+        map_route makes it a hint on the next step, which in hint order
+        would move it to the front of the same set of extra tools.
+        """
+        llm = FakeLLM([_call("map_route", "Paris"), _answer("done")])
+        agent = _with_providers(llm, AgentOptions(), TEN_TOOLS)
+
+        assert await agent.run("What will the weather be in Paris tomorrow?") == "done"
+        assert len(llm.calls) == 2
+        assert {"map_route", "weather_forecast"} <= set(_offered(llm.calls[0]))
+        assert _wire(llm.calls[1]) == _wire(llm.calls[0])
+
+    @pytest.mark.asyncio
+    async def test_a_builtin_the_query_does_not_match_still_runs(
+        self, tmp_path: Path
+    ) -> None:
+        """The allowlist follows the offered list: every built-in may run.
+
+        A registered extra tool that the step did not offer is still refused.
+        """
+        target = tmp_path / "transpose.py"
+        content = "def transpose(lines):\n    return lines\n"
+        llm = FakeLLM(
+            [
+                Message(
+                    role="assistant",
+                    content="",
+                    tool_calls=[
+                        ToolCall(
+                            tool_name="file_write",
+                            arguments={"path": str(target), "content": content},
+                        ),
+                        ToolCall(tool_name="zeta", arguments={"text": "1"}),
+                    ],
+                ),
+                _answer("done"),
+            ]
+        )
+        agent, ran = _agent(llm, AgentOptions(), {"zeta": "last letter"})
+
+        assert await agent.run(AIDER_QUERIES[0]) == "done"
+        assert _offered(llm.calls[0]) == BUILTINS
+        assert target.read_text(encoding="utf-8") == content
+        assert _results(llm.calls[1]) == [
+            f"Written {len(content)} bytes to {target}",
+            _refused("zeta"),
+        ]
+        assert ran == []
+
+
 # ── tool_exposure="retrieve": the execution allowlist ───────────────────────
 
 # "echo" matches the query "echo one" by name (hint and BM25); "zeta" shares
@@ -259,8 +499,9 @@ class TestRetrieveAllowlist:
 
         The refused call and its error put the tool's name into working
         memory, so hint extraction offers it on the next step and the same
-        call then runs. Revisit this test with the hints rework (review
-        finding C1).
+        call then runs. Since C1 this concerns only the tools other than
+        the built-ins, which every step offers; hint extraction stays as
+        it was for those tools. Revisit this test with the hints rework.
         """
         llm = FakeLLM([_call("zeta", "1"), _call("zeta", "2"), _answer("done")])
         agent, ran = _agent(llm, AgentOptions(builtins=frozenset()), ECHO_AND_ZETA)

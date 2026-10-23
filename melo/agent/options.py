@@ -36,9 +36,9 @@ class AgentOptions:
     """How an :class:`Agent` runs its tasks.
 
     The defaults match the agent's behavior from before these options
-    existed, except that a step now runs only the tools it offered (see
-    ``tool_exposure``). An invalid value raises ``ValueError`` naming the
-    field.
+    existed, except that every step now offers all registered built-ins
+    and runs only the tools it offered (see ``tool_exposure``). An
+    invalid value raises ``ValueError`` naming the field.
 
     - ``max_steps``: cap on planning calls for the whole run.
     - ``attempt_policy``: ``"reflect"`` runs attempts of at most
@@ -46,11 +46,14 @@ class AgentOptions:
       reflection after each attempt that runs out of steps or gets stuck;
       ``"none"`` runs one attempt with budget ``max_steps`` and makes no
       reflection calls.
-    - ``tool_exposure``: ``"retrieve"`` offers the tools that hint
-      extraction and BM25 resolve for each step; ``"all"`` offers every
-      registered tool, sorted by name, on every step. In both modes the
-      executor refuses a call to a tool that its step did not offer
-      (``TOOL_NOT_OFFERED``), and that tool does not run.
+    - ``tool_exposure``: ``"retrieve"`` offers, on every step, each
+      registered built-in, sorted by name, then the other tools (provided
+      tools, such as MCP tools) that hint extraction and BM25 resolve for
+      the step, ranked among those tools only and also sorted by name;
+      ``"all"`` offers every registered tool, sorted by name, on every
+      step. In both modes the executor refuses a call to a tool that its
+      step did not offer (``TOOL_NOT_OFFERED``), and that tool does not
+      run.
     - ``builtins``: names of the built-in tools to register. ``None``
       registers all of them, an empty set none. Any iterable of names
       except a bare ``str`` is accepted and stored as a ``frozenset``.

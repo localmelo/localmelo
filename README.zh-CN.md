@@ -137,8 +137,9 @@ executor result 和 memory write 在跨越主要边界前都会被校验。
 - prompt 和 memory write size limits
 - onboarding 阶段的 provider probing
 
-在默认的 `retrieve` tool exposure 下，每个 step 只提供 hint extraction 和 BM25
-search 为它解析出的工具。调用其他已注册的工具会被拒绝，返回
+在默认的 `retrieve` tool exposure 下，每个 step 提供所有已注册的 built-in 工具（按名称
+排序），以及 hint extraction 和 BM25 search 从其余工具（MCP 和其他 provided tools）中
+为它解析出的工具（同样按名称排序）。调用其他已注册的工具会被拒绝，返回
 "Tool '<name>' was not offered in this step."，工具不会执行；之前的版本会执行模型
 指名的任何已注册工具。这个检查只在单个 step 内有效：被拒绝的调用会留在对话中，
 所以 hint extraction 可能在下一个 step 提供该工具。使用 `tool_exposure="all"` 时，

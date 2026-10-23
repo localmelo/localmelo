@@ -1,34 +1,22 @@
 from __future__ import annotations
 
-import re
-from collections import Counter
+from collections.abc import Collection
 
+from localmelo.melo.memory.bm25 import BM25Index
 from localmelo.melo.schema import ToolDef
 
 
-def _tokenize(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", text.lower())
+def _document(tool: ToolDef) -> str:
+    """The text a tool is found by: its name, description and semantic tags.
 
-
-def _bm25_score(query_tokens: list[str], doc_tokens: list[str]) -> float:
-    if not doc_tokens:
-        return 0.0
-    tf = Counter(doc_tokens)
-    doc_len = len(doc_tokens)
-    k1, b, avg_dl = 1.5, 0.75, 20.0
-    score = 0.0
-    for qt in query_tokens:
-        f = tf.get(qt, 0)
-        if f == 0:
-            continue
-        num = f * (k1 + 1)
-        den = f + k1 * (1 - b + b * doc_len / avg_dl)
-        score += num / den
-    return score
+    The tokenizer splits the name into words, so ``file_write`` also gives
+    ``file`` and ``write``.
+    """
+    return f"{tool.name} {tool.description} {' '.join(tool.semantic_tags)}"
 
 
 class ToolIndex:
-    """Searchable semantic index over tool definitions (BM25).
+    """Searchable semantic index over tool definitions (Okapi BM25).
 
     This is the search-only component.  It does *not* serve as the
     authoritative source of executable tool definitions — that role
@@ -37,25 +25,29 @@ class ToolIndex:
 
     def __init__(self) -> None:
         self._docs: dict[str, ToolDef] = {}
+        self._bm25 = BM25Index()
 
     def index(self, tool: ToolDef) -> None:
         self._docs[tool.name] = tool
+        self._bm25.add(tool.name, _document(tool))
 
     def remove(self, name: str) -> None:
         self._docs.pop(name, None)
+        self._bm25.remove(name)
 
-    def search(self, query: str, top_k: int = 3) -> list[ToolDef]:
-        if not self._docs:
-            return []
-        q_tokens = _tokenize(query)
-        scored: list[tuple[str, float]] = []
-        for name, td in self._docs.items():
-            doc = f"{td.name} {td.description} {' '.join(td.semantic_tags)}"
-            score = _bm25_score(q_tokens, _tokenize(doc))
-            if score > 0:
-                scored.append((name, score))
-        scored.sort(key=lambda x: x[1], reverse=True)
-        return [self._docs[name] for name, _ in scored[:top_k]]
+    def search(
+        self, query: str, top_k: int = 3, *, exclude: Collection[str] = ()
+    ) -> list[ToolDef]:
+        """Return up to *top_k* tools that match *query*, best first.
+
+        A tool that matches no term of the query is never returned. The
+        tools named in *exclude* take no part: the others are ranked among
+        themselves (see :class:`~localmelo.melo.memory.bm25.BM25Index`).
+        """
+        return [
+            self._docs[name]
+            for name, _score in self._bm25.search(query, top_k, exclude=exclude)
+        ]
 
 
 class ToolRegistry:
@@ -83,8 +75,10 @@ class ToolRegistry:
 
     # ── Index (semantic search, delegates to ToolIndex) ──
 
-    def search(self, query: str, top_k: int = 3) -> list[ToolDef]:
-        return self._index.search(query, top_k=top_k)
+    def search(
+        self, query: str, top_k: int = 3, *, exclude: Collection[str] = ()
+    ) -> list[ToolDef]:
+        return self._index.search(query, top_k=top_k, exclude=exclude)
 
     @property
     def index(self) -> ToolIndex:

@@ -684,14 +684,14 @@ class TestReflectionInfluencesRetrieval:
                 tool_call=ToolCall(tool_name="echo", arguments={"text": "a"}),
             )
         )
-        # Reflection: continue, mention "shell_exec" in directions
+        # Reflection: continue, mention "web_fetch" in directions
         llm.enqueue(
             Message(
                 role="assistant",
                 content=_reflection_json(
                     "continue",
                     summary="echo didn't help",
-                    directions=["try shell_exec instead"],
+                    directions=["try web_fetch instead"],
                 ),
             )
         )
@@ -699,23 +699,24 @@ class TestReflectionInfluencesRetrieval:
         llm.enqueue(Message(role="assistant", content="done"))
 
         agent = _make_echo_agent(llm, options=options)
-        # Also register shell_exec so it can be found
+        # Also register web_fetch so it can be found. It is not a built-in:
+        # every step offers the built-ins, hinted or not.
         agent.hippo.register_tool(
             ToolDef(
-                name="shell_exec",
-                description="run shell commands",
+                name="web_fetch",
+                description="fetch a web page",
                 parameters={"type": "object", "properties": {}},
             )
         )
         await agent.run("echo test")
 
         # The planning call for attempt 1 should have tools that include
-        # shell_exec (found via reflection hint) — verify it was offered
+        # web_fetch (found via reflection hint) — verify it was offered
         plan_call_2 = llm.calls[2]  # 0=plan, 1=reflect, 2=plan
         tools_offered = plan_call_2.get("tools")
         if tools_offered:
             tool_names = [t.name for t in tools_offered]
-            assert "shell_exec" in tool_names
+            assert "web_fetch" in tool_names
 
 
 class TestPrePlanIncludesReflections:
