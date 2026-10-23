@@ -78,7 +78,7 @@
           <h3>运行选项、运行结果和退出码</h3>
           <p class="update-date">
             <time datetime="2026-10-22">2026-10-22</time> ·
-            <a href="https://github.com/localmelo/localmelo/pull/25">#25</a>、<a href="https://github.com/localmelo/localmelo/pull/26">#26</a>、<a href="https://github.com/localmelo/localmelo/pull/27">#27</a>、<a href="https://github.com/localmelo/localmelo/pull/28">#28</a>、<a href="https://github.com/localmelo/localmelo/pull/30">#30</a>、<a href="https://github.com/localmelo/localmelo/pull/31">#31</a>、<a href="https://github.com/localmelo/localmelo/pull/32">#32</a>（审核中）
+            <a href="https://github.com/localmelo/localmelo/pull/25">#25</a>、<a href="https://github.com/localmelo/localmelo/pull/26">#26</a>、<a href="https://github.com/localmelo/localmelo/pull/27">#27</a>、<a href="https://github.com/localmelo/localmelo/pull/28">#28</a>、<a href="https://github.com/localmelo/localmelo/pull/30">#30</a>、<a href="https://github.com/localmelo/localmelo/pull/31">#31</a>、<a href="https://github.com/localmelo/localmelo/pull/32">#32</a>
           </p>
           <p>现在，直接模式下的一次 <code>melo "&lt;task&gt;"</code> 运行可以交给脚本或基准测试来驱动。</p>
           <ul>
@@ -90,7 +90,7 @@
             <li>支持本地 MCP 服务器提供的工具（<code>--mcp-config</code> 和 <code>--mcp-only</code>），工具也可以返回图片（#27、#30）。</li>
             <li>工具调用会以真正的工具调用轮次发给兼容 OpenAI 接口的模型，一步中的每个调用都会执行；<code>extra_body</code> 可以为对话请求添加字段（#26）。</li>
             <li>反思的回复中没有 JSON 对象时，会不带工具再请求一次（#31）。</li>
-            <li>#32（审核中）：在检索模式下，每一步先提供所有已注册的内置工具，再提供对话中提到的工具和用带 IDF 的 BM25 检索到的工具，两部分都按名称排序。</li>
+            <li>#32：在检索模式下，每一步先提供所有已注册的内置工具，再提供对话中提到的工具和用带 IDF 的 BM25 检索到的工具，两部分都按名称排序。</li>
             <li>采用 MIT 许可证（#28），开发环境改用 uv，并把 <code>uv.lock</code> 提交到仓库（#25）。</li>
           </ul>
         </article>

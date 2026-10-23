@@ -7,8 +7,8 @@ server, saves a configuration and starts the gateway.
 
 You need:
 
-- macOS. localmelo is developed and tested on macOS. It should also work on
-  Linux. Windows is not supported.
+- macOS (developed and tested) or Linux (should work, untested). Windows is
+  not supported.
 - Python 3.11 or later, Git, and [uv](https://docs.astral.sh/uv/) (or pip,
   see [Install with pip](#install-with-pip)).
 - A model server. This tutorial uses [Ollama](https://ollama.com): install
