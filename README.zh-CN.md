@@ -165,9 +165,11 @@ search 为它解析出的工具。调用其他已注册的工具会被拒绝，�
 Chat backend 和 embedding backend 独立配置。如果不想运行 embedding retrieval，
 可以把 embedding backend 设为 `none`。
 
-每个 chat request 默认 120 s 后 timeout（`ollama` backend 为 300 s）。模型较慢时
-（例如本地 thinking model），可在 `~/.cache/localmelo/config.toml` 顶层设置
-`request_timeout_s`，或给 direct query 加 `--request-timeout SECONDS`；详见
+每个 chat request 最多等 server 的数据 120 s（`ollama` backend 为 300 s）。每收到
+数据就重新计时，所以 server 在生成时发送 keep-alive 字节的话不会 timeout；要限制
+整个 direct run 的时长，用 `--timeout`。模型较慢时（例如本地 thinking model），可在
+`~/.cache/localmelo/config.toml` 顶层设置 `request_timeout_s`，或给 direct query 加
+`--request-timeout SECONDS`；详见
 [docs/quickstart.md](docs/quickstart.md#chat-request-timeout)。
 
 ## 开发

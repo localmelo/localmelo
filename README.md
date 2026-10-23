@@ -172,10 +172,13 @@ Supported backend families:
 Chat and embedding backends are configured separately. Set the embedding backend
 to `none` when you do not want to run embedding retrieval.
 
-Each chat request times out after 120 s (300 s with the `ollama` backend). For a
-slower model, such as a local thinking model, set `request_timeout_s` at the top
-of `~/.cache/localmelo/config.toml`, or pass `--request-timeout SECONDS` to a
-direct query; see [docs/quickstart.md](docs/quickstart.md#chat-request-timeout).
+Each chat request waits up to 120 s for data from the server (300 s with the
+`ollama` backend). The timeout restarts whenever data arrives, so it does not cut
+off a server that sends keep-alive bytes while it generates; `--timeout` bounds a
+whole direct run. For a slower model, such as a local thinking model, set
+`request_timeout_s` at the top of `~/.cache/localmelo/config.toml`, or pass
+`--request-timeout SECONDS` to a direct query; see
+[docs/quickstart.md](docs/quickstart.md#chat-request-timeout).
 
 ## Development
 

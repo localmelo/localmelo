@@ -128,9 +128,12 @@ curl -X DELETE http://127.0.0.1:8401/v1/sessions/demo123</code></pre>
           <tr><td>Cloud chat</td><td><code>openai</code>, <code>anthropic</code>, <code>gemini</code>, or <code>nvidia</code></td><td>local backend or <code>none</code></td><td>Set the configured API key environment variable before running.</td></tr>
         </table>
         <p>
-          Each chat request times out after 120 s (300 s with the
-          <code>ollama</code> backend). For a slower model, such as a local
-          thinking model, set <code>request_timeout_s</code> at the top of
+          Each chat request waits up to 120 s for data from the server (300 s
+          with the <code>ollama</code> backend). The timeout restarts whenever
+          data arrives, so it does not cut off a server that sends keep-alive
+          bytes while it generates; <code>--timeout</code> bounds a whole direct
+          run. For a slower model, such as a local thinking model, set
+          <code>request_timeout_s</code> at the top of
           <code>~/.cache/localmelo/config.toml</code>, or pass
           <code>--request-timeout SECONDS</code> to a direct query. A request
           that times out is retried twice, each time with the full timeout.
