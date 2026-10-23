@@ -14,6 +14,7 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import (
+    FINAL_REFLECTION_NOTE,
     REFLECTION_PROMPT,
     REFLECTION_RETRY_NOTE,
     REFLECTION_TRANSCRIPT_INTRO,
@@ -831,3 +832,117 @@ class TestOverBudget:
             t.startswith(f"Attempt 0: {data['summary']}") for t in embedding.texts
         )
         assert _never_embedded(embedding, *dropped)
+
+
+# ── Request bodies ──────────────────────────────────────────────────────────
+
+
+def _sent(messages: list[Message]) -> list[tuple[Any, ...]]:
+    """What a request sends of each message: role, content, tool calls and
+    the call a tool message answers. Tool-call ids are random, so they are
+    numbered in order of appearance."""
+    numbers: dict[str, int] = {}
+
+    def number(call_id: str) -> int:
+        return numbers.setdefault(call_id, len(numbers))
+
+    return [
+        (
+            m.role,
+            m.content,
+            [(c.tool_name, c.arguments, number(c.id)) for c in m.tool_calls],
+            number(m.tool_call_id) if m.tool_call_id else None,
+            [image.ref for image in m.images],
+        )
+        for m in messages
+    ]
+
+
+class TestRequestBodies:
+    """For a script that runs alike under both settings, every reflection
+    request equals the one 382cb58 sends: built here from the prompt
+    constants and the request format of #31, which this change leaves as
+    they are."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("gate", GATES)
+    async def test_reflection_requests_are_as_before(
+        self, gate: ReflectionGate
+    ) -> None:
+        tool_call = Message(
+            role="assistant",
+            tool_call=ToolCall(tool_name="echo", arguments={"text": "done"}),
+        )
+        carried = _reflection(
+            "continue",
+            summary="echo a was not it",
+            failed_hypotheses=["a is the answer"],
+            useful_evidence=["echo returns its input"],
+            recommended_avoids=["echo a"],
+            next_promising_directions=["echo b"],
+        )
+        llm = FakeLLM(
+            [
+                _echo_call("a", content="look"),
+                tool_call,  # no reflection, so it is asked for again
+                carried,
+                _echo_call("b"),
+                _answer(DONE),
+            ]
+        )
+        agent = _agent(llm, steps_per_attempt=1, max_attempts=2, reflection_gate=gate)
+        result = await agent.run_task("echo the answer")
+        assert (result.status, result.result) == ("completed", "42")
+
+        first = (
+            "Original task: echo the answer\n"
+            "This was attempt 0. The step budget for this attempt was exhausted. "
+            "Reflect and decide."
+        )
+        last = (
+            "Original task: echo the answer\n"
+            "This was attempt 1. The step budget for this attempt was exhausted. "
+            f"Reflect and decide. {FINAL_REFLECTION_NOTE}"
+        )
+        turns_a: list[tuple[Any, ...]] = [
+            ("user", "echo the answer", [], None, []),
+            ("assistant", "look", [("echo", {"text": "a"}, 0)], None, []),
+            ("tool", "a", [], 0, []),
+        ]
+        transcript = (
+            "User: echo the answer\n\n"
+            "Assistant: look\n\n"
+            'Assistant called echo({"text": "a"})\n\n'
+            "Result of echo: a"
+        )
+        prior = (
+            "Prior reflections:\n"
+            "  Attempt 0: echo a was not it\n"
+            "    Avoid: echo a\n"
+            "    Evidence: echo returns its input\n"
+            "    Failed: a is the answer"
+        )
+        expected = [
+            [("system", REFLECTION_PROMPT, [], None, []), *turns_a]
+            + [("user", first, [], None, [])],
+            [
+                ("system", REFLECTION_PROMPT, [], None, []),
+                (
+                    "user",
+                    f"{REFLECTION_TRANSCRIPT_INTRO}\n\n{transcript}\n\n{first}"
+                    f"\n\n{REFLECTION_RETRY_NOTE}",
+                    [],
+                    None,
+                    [],
+                ),
+            ],
+            [("system", f"{REFLECTION_PROMPT}\n\n{prior}", [], None, []), *turns_a]
+            + [
+                ("assistant", "", [("echo", {"text": "b"}, 1)], None, []),
+                ("tool", "b", [], 1, []),
+                ("user", last, [], None, []),
+            ],
+        ]
+        reflections = [call for call in llm.calls if _is_reflection(call)]
+        assert [_sent(call["messages"]) for call in reflections] == expected
+        assert [call["tools"] for call in reflections] == [None, None, None]
