@@ -816,8 +816,8 @@ class Agent:
 
         With ``tool_exposure="retrieve"`` the tools are every registered
         built-in, sorted by name, then the other tools that hint
-        extraction and BM25 resolve among themselves; with ``"all"`` they
-        are every registered tool, sorted by name.
+        extraction and BM25 resolve among themselves, also sorted by name;
+        with ``"all"`` they are every registered tool, sorted by name.
 
         Before anything reads the working-memory window, its oldest units
         are dropped when the planning prompt would not fit

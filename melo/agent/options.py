@@ -49,10 +49,11 @@ class AgentOptions:
     - ``tool_exposure``: ``"retrieve"`` offers, on every step, each
       registered built-in, sorted by name, then the other tools (provided
       tools, such as MCP tools) that hint extraction and BM25 resolve for
-      the step, ranked among those tools only; ``"all"`` offers every
-      registered tool, sorted by name, on every step. In both modes the
-      executor refuses a call to a tool that its step did not offer
-      (``TOOL_NOT_OFFERED``), and that tool does not run.
+      the step, ranked among those tools only and also sorted by name;
+      ``"all"`` offers every registered tool, sorted by name, on every
+      step. In both modes the executor refuses a call to a tool that its
+      step did not offer (``TOOL_NOT_OFFERED``), and that tool does not
+      run.
     - ``builtins``: names of the built-in tools to register. ``None``
       registers all of them, an empty set none. Any iterable of names
       except a bare ``str`` is accepted and stored as a ``frozenset``.
