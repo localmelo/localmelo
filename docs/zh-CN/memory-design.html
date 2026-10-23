@@ -249,6 +249,19 @@
     .content .md-cards p {
       margin: 0;
     }
+
+    /* Phones: let long words in the boundaries table break so all three columns fit. */
+    @media (max-width: 500px) {
+      .content #boundaries th:first-child {
+        width: 6rem;
+      }
+
+      .content #boundaries td,
+      .content #boundaries td code {
+        overflow-wrap: anywhere;
+        white-space: normal;
+      }
+    }
   </style>
 </head>
 <body>
