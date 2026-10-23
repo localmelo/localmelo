@@ -595,7 +595,8 @@ class _RunState:
     attempts: int = 0
     n_tool: int = 0
     # The latest non-blank text of a planning reply in this run: the
-    # answer of a reflection's "done" that gives none.
+    # answer of a reflection's "done" that gives none, and the result of a
+    # final boundary whose reflection is unreadable (reflection_gate="flags").
     last_text: str = ""
     # Planning replies in a row with neither a tool call nor text.
     empty_replies: int = 0
@@ -1935,15 +1936,17 @@ class Agent:
         reflection: the previous one, if any, stays in working memory, and
         nothing of the reply reaches long-term memory. The next attempt
         starts; when none can start, the run ends as ``budget_exhausted``
-        with the error above and the latest non-blank text of a planning
+        with the boundary's usual error, ``Max attempts reached`` or
+        ``Max steps reached``, and the latest non-blank text of a planning
         reply in this run as the result. One INFO line names the attempt.
         With ``"utility"`` such a reply reads ``stop`` (see
         :meth:`_parse_reflection`) and is kept as the reflection.
 
         A reflection over :data:`MAX_REFLECTION_CHARS` keeps its decision
         with ``"flags"`` and is trimmed to fit before it is kept; with
-        ``"utility"`` its decision becomes ``decompose``, which the gate
-        stops (see :meth:`_do_reflect`).
+        ``"utility"`` any decision but ``done`` becomes ``decompose``,
+        which the gate stops, and ``done`` ends the run as it is (see
+        :meth:`_do_reflect`).
         """
         opts = self.options
         total_steps = 0

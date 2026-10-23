@@ -60,7 +60,8 @@ class AgentOptions:
       ``"utility"``, the behavior from before this option, also requires
       the utility score computed from the reflection's own estimates to
       reach 0.1; a reply without a reflection reads as ``stop``, and a
-      reflection over the budget as ``decompose``.
+      reflection over the budget as ``decompose``, unless it chooses
+      ``done``, which ends the run as it is.
     - ``tool_exposure``: ``"retrieve"`` offers, on every step, each
       registered built-in, sorted by name, then the other tools (provided
       tools, such as MCP tools) that hint extraction and BM25 resolve for
