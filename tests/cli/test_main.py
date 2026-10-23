@@ -2,7 +2,7 @@
 
 Covers:
 - --host / --port override logic (original tests)
-- Direct mode: `melo "hello"` calls Agent().run(), prints result
+- Direct mode: `melo "hello"` calls Agent().run_task(), prints the result
 - Gateway mode: `melo --serve` loads config, validates, calls start_gateway
 - Config validation failure: bad config -> error on stderr, exit 1
 - Reconfigure: `melo --reconfigure` -> runs backend setup
@@ -22,6 +22,7 @@ from unittest import mock
 
 import pytest
 
+from localmelo.melo.schema import RunResult
 from localmelo.support.config import Config, GatewayConfig, LocalBackendConfig
 
 # ---------------------------------------------------------------------------
@@ -262,9 +263,11 @@ class TestDaemonInstallPortHandling:
 
 
 def _mock_agent(result: str = "Hello back!") -> mock.MagicMock:
-    """Build a MagicMock Agent whose run/close are AsyncMock."""
+    """Build a MagicMock Agent whose run_task/close are AsyncMock."""
     agent = mock.MagicMock()
-    agent.run = mock.AsyncMock(return_value=result)
+    agent.run_task = mock.AsyncMock(
+        return_value=RunResult(task_id="t1", status="completed", result=result)
+    )
     agent.close = mock.AsyncMock()
     return agent
 
@@ -273,7 +276,7 @@ class TestDirectMode:
     """Direct mode: `melo "hello"` builds an agent and runs."""
 
     def test_direct_mode_calls_agent_run(self) -> None:
-        """melo "hello" -> _build_direct_mode_agent, run(), print."""
+        """melo "hello" -> _build_direct_mode_agent, run_task(), print."""
         agent = _mock_agent("Hello back!")
 
         with (
@@ -288,11 +291,12 @@ class TestDirectMode:
 
             main()
 
-        agent.run.assert_called_once_with("hello")
-        mock_print.assert_any_call("Hello back!")
+        agent.run_task.assert_called_once_with("hello")
+        # Printed to the stream that stdout keeps for the report.
+        assert ("Hello back!",) in [c.args for c in mock_print.call_args_list]
 
     def test_direct_mode_multi_word_query(self) -> None:
-        """melo "do the thing" passes joined words to Agent.run()."""
+        """melo "do the thing" passes joined words to Agent.run_task()."""
         agent = _mock_agent("done")
 
         with (
@@ -307,7 +311,7 @@ class TestDirectMode:
 
             main()
 
-        agent.run.assert_called_once_with("do the thing")
+        agent.run_task.assert_called_once_with("do the thing")
 
 
 class TestBuildDirectModeAgent:

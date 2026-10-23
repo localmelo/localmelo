@@ -7,8 +7,9 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.agent import Agent
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import Chat
+from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import (
@@ -222,7 +223,7 @@ class TestBlockedToolCall:
         llm.enqueue(Message(role="assistant", content="aborted"))
 
         agent = Agent(llm=llm, embedding=FakeEmbedding())
-        result = await agent.run("delete everything")
+        result = await agent.run("delete everything with shell_exec")
 
         # The built-in shell_exec is registered, but rm -rf / is blocked.
         # The agent should still produce a result (the second LLM turn).
@@ -321,7 +322,7 @@ class TestCheckedMemoryWrite:
         )
         agent.executor.register("echo", _echo_tool)
 
-        result = await agent.run("test")
+        result = await agent.run("echo test")
         assert result == "done"
 
         # The huge summary should have been blocked by check_memory_write,
@@ -375,13 +376,9 @@ class TestMaxStepsTermination:
     """Loop terminates cleanly when step/attempt budget is exhausted."""
 
     @pytest.mark.asyncio
-    async def test_max_steps_sets_failed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    async def test_max_steps_ends_as_budget_exhausted(self) -> None:
         """Agent that always requests tool calls must hit the step limit."""
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 3)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 3)
+        options = AgentOptions(steps_per_attempt=3, max_attempts=1, max_steps=3)
 
         llm = FakeLLM()
         # 5 tool-call responses (more than 3-step budget)
@@ -401,7 +398,7 @@ class TestMaxStepsTermination:
             )
         )
 
-        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        agent = Agent(llm=llm, embedding=FakeEmbedding(), options=options)
         agent.hippo.register_tool(
             ToolDef(
                 name="echo",
@@ -415,9 +412,9 @@ class TestMaxStepsTermination:
         )
         agent.executor.register("echo", _echo_tool)
 
-        await agent.run("loop forever")
+        await agent.run("echo loop forever")
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "failed"
+        assert tasks[0].status == "budget_exhausted"
 
 
 class TestNoEmbeddingToolLoop:
@@ -476,10 +473,9 @@ class TestPrePlanCheckFailure:
 
         agent = Agent(llm=llm, embedding=FakeEmbedding())
 
-        # Inject a huge message into short-term to trigger pre_plan block.
-        agent.hippo.short.append(Message(role="system", content="x" * 110_000))
-
-        result = await agent.run("test")
+        # A query too large on its own triggers the pre_plan block: it is
+        # the newest message, so dropping older ones cannot make room.
+        result = await agent.run("x" * 110_000)
         assert "Plan check failed" in result
         tasks = list(agent.hippo.history._tasks.values())
         assert tasks[0].status == "failed"
@@ -519,7 +515,7 @@ class TestSanitizedOutputInMemory:
         )
         agent.executor.register("echo", _echo_tool)
 
-        result = await agent.run("big output")
+        result = await agent.run("echo big output")
         assert result == "done"
 
         # The step record must contain the truncated output, not the raw 60k.
@@ -534,7 +530,7 @@ class TestSanitizedOutputInMemory:
         assert len(tool_result.output) < 60_000
 
     @pytest.mark.asyncio
-    async def test_truncated_tool_msg_blocked_from_short_memory(self) -> None:
+    async def test_truncated_tool_msg_is_cut_in_short_memory(self) -> None:
         """When the call's arguments and its truncated output are both too
         long for memory, nothing oversized reaches short-term memory, but
         the next planning prompt still holds the call and its result."""
@@ -557,22 +553,23 @@ class TestSanitizedOutputInMemory:
         )
         agent.executor.register("echo", _echo_tool)
 
-        result = await agent.run("huge output test")
+        result = await agent.run("echo huge output test")
         assert result == "ok"
 
         # The call already ran, so its turn stays: the same id with the
-        # 60k-char arguments replaced by a placeholder, answered by a
-        # notice that stands in for the truncated output.
+        # 60k-char arguments replaced by a placeholder, answered by the
+        # start of the truncated output, cut to the room the turn has left.
         second_call_msgs = llm.calls[1]["messages"]
         sent_calls = [tc for m in second_call_msgs for tc in m.tool_calls]
         assert [tc.id for tc in sent_calls] == [call.id]
         assert sent_calls[0].arguments == {"_elided": "60012 chars withheld"}
         tool_msgs = [m for m in second_call_msgs if m.role == "tool"]
         assert [m.tool_call_id for m in tool_msgs] == [call.id]
-        assert tool_msgs[0].content.startswith("[Tool result withheld")
+        assert tool_msgs[0].content.startswith("b" * 49_000)
+        assert tool_msgs[0].content.endswith(" more characters]")
 
         window = agent.hippo.short.get_window()
-        assert all(len(m.content) < 1_000 for m in window)
+        assert all(len(m.content) < MAX_MEMORY_TEXT_LEN for m in window)
 
         # History keeps the real call, which the executor ran as sent.
         tasks = list(agent.hippo.history._tasks.values())
@@ -583,10 +580,10 @@ class TestSanitizedOutputInMemory:
         assert steps[0].tool_result.output.startswith("b" * 50_000)
 
     @pytest.mark.asyncio
-    async def test_truncated_result_blocked_with_small_arguments(self) -> None:
+    async def test_truncated_result_is_cut_with_small_arguments(self) -> None:
         """When both executor truncation and memory-write check apply to
         a result, nothing oversized reaches short-term memory: the call
-        keeps its arguments and is answered by a short notice."""
+        keeps its arguments and is answered by the result's start."""
         llm = FakeLLM()
         call = ToolCall(tool_name="big_read", arguments={"path": "big.txt"})
         llm.enqueue(Message(role="assistant", content="big read", tool_call=call))
@@ -610,7 +607,7 @@ class TestSanitizedOutputInMemory:
 
         agent.executor.register("big_read", _big_read)
 
-        result = await agent.run("huge output test")
+        result = await agent.run("huge output test with big_read")
         assert result == "ok"
 
         tasks = list(agent.hippo.history._tasks.values())
@@ -625,19 +622,21 @@ class TestSanitizedOutputInMemory:
         ]
         tool_msgs = [m for m in second_call_msgs if m.role == "tool"]
         assert [m.tool_call_id for m in tool_msgs] == [call.id]
-        assert tool_msgs[0].content.startswith("[Tool result withheld")
+        assert tool_msgs[0].content.startswith("b" * 49_000)
+        assert tool_msgs[0].content.endswith(" more characters]")
 
         window = agent.hippo.short.get_window()
-        assert all(len(m.content) < 1_000 for m in window)
+        assert all(len(m.content) < MAX_MEMORY_TEXT_LEN for m in window)
 
 
 class TestToolResultMemoryWriteBlocked:
     """Tool result memory write is checked and can be blocked."""
 
     @pytest.mark.asyncio
-    async def test_huge_tool_error_blocked(self) -> None:
-        """A tool returning a huge error string must not be written to
-        short-term memory if the memory-write check blocks it."""
+    async def test_huge_tool_error_is_cut(self) -> None:
+        """A tool returning a huge error string must not be written whole
+        to short-term memory: it is too long for one memory write, so it
+        is cut."""
         llm = FakeLLM()
         llm.enqueue(
             Message(
@@ -665,32 +664,36 @@ class TestToolResultMemoryWriteBlocked:
         result = await agent.run("do fail")
         assert result == "handled"
 
-        # The huge error is blocked from short-term memory by the
-        # memory-write checker (text > 50k chars). The call still gets an
-        # answer: a short notice bound to the same tool_call_id.
+        # The huge error is too long for one memory write (text > 50k
+        # chars). The memory-write check passes it cut to that length, and
+        # the turn budget cuts it to the room the turn has left, so
+        # short-term memory keeps its start, bound to the same tool_call_id.
         window = agent.hippo.short.get_window()
         calls = [tc for m in window for tc in m.tool_calls]
         tool_msgs = [m for m in window if m.role == "tool"]
         assert len(calls) == 1 and len(tool_msgs) == 1
         assert tool_msgs[0].tool_call_id == calls[0].id
-        assert tool_msgs[0].content.startswith("[Tool result withheld")
-        assert len(tool_msgs[0].content) < 1_000
+        assert tool_msgs[0].content.startswith("Error: " + "E" * 49_000)
+        assert tool_msgs[0].content.endswith(" more characters]")
+        assert len(tool_msgs[0].content) < MAX_MEMORY_TEXT_LEN
 
 
 class TestDirectAnswerEdgeCases:
     """Edge cases for the direct-answer (no tool_call) path."""
 
     @pytest.mark.asyncio
-    async def test_empty_content_direct_answer(self) -> None:
-        """Direct answer with empty content still completes the task."""
+    async def test_empty_content_is_not_a_final_answer(self) -> None:
+        """A reply with neither a tool call nor text is no answer: after
+        two in a row the task fails."""
         agent = _make_agent(
-            [Message(role="assistant", content="")],
+            [Message(role="assistant", content="")] * 2,
             embedding=FakeEmbedding(),
         )
         result = await agent.run("hello")
-        assert result == ""
+        # run() shows "[<status>] <error>" whenever the result is empty.
+        assert result == "[failed] empty replies"
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "completed"
+        assert tasks[0].status == "failed"
 
     @pytest.mark.asyncio
     async def test_task_saved_on_direct_answer(self) -> None:
@@ -747,7 +750,7 @@ class TestMultiStepToolCalls:
         )
         agent.executor.register("echo", _echo_tool)
 
-        result = await agent.run("multi step")
+        result = await agent.run("echo multi step")
         assert result == "all done"
 
         # Should have 3 LLM calls total
@@ -836,15 +839,9 @@ class TestStepEstimation:
         assert result == MAX_AGENT_STEPS
 
     @pytest.mark.asyncio
-    async def test_estimated_budget_limits_loop(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    async def test_estimated_budget_limits_loop(self) -> None:
         """Attempt budget limits the agent loop iterations."""
-        import localmelo.melo.agent.agent as _agent_mod
-
-        monkeypatch.setattr(_agent_mod, "STEPS_PER_ATTEMPT", 3)
-        monkeypatch.setattr(_agent_mod, "MAX_ATTEMPTS", 1)
-        monkeypatch.setattr(_agent_mod, "MAX_AGENT_STEPS", 3)
+        options = AgentOptions(steps_per_attempt=3, max_attempts=1, max_steps=3)
 
         llm = FakeLLM()
         for _ in range(5):
@@ -863,7 +860,7 @@ class TestStepEstimation:
             )
         )
 
-        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        agent = Agent(llm=llm, embedding=FakeEmbedding(), options=options)
         agent.hippo.register_tool(
             ToolDef(
                 name="echo",
@@ -877,9 +874,9 @@ class TestStepEstimation:
         )
         agent.executor.register("echo", _echo_tool)
 
-        await agent.run("loop task")
+        await agent.run("echo loop task")
         tasks = list(agent.hippo.history._tasks.values())
-        assert tasks[0].status == "failed"
+        assert tasks[0].status == "budget_exhausted"
 
 
 class TestBuildSystemPrompt:

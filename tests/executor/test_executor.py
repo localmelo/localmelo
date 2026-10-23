@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import sys
 import tempfile
 import unittest
 
@@ -55,6 +56,29 @@ class TestBuiltinExecution(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.output, "2")
         self.assertEqual(outcome.error, "")
         self.assertGreater(outcome.duration_ms, 0)
+
+    async def test_python_exec_sys_exit_fails_the_call(self) -> None:
+        # SystemExit would end the agent's own process: the call fails
+        # instead, like code that raises any other exception.
+        cases = [
+            ("import sys\nprint('hi')\nsys.exit(0)", "0"),
+            ("import sys\nsys.exit(3)", "3"),
+            ("exit()", "None"),
+            ("raise SystemExit('bye')", "'bye'"),
+        ]
+        stdout = sys.stdout
+        for code, shown in cases:
+            with self.subTest(code=code):
+                outcome = await self.executor.execute_structured(
+                    ExecutionRequest(tool_name="python_exec", arguments={"code": code})
+                )
+                self.assertEqual(outcome.status, ExecutionStatus.ERROR)
+                self.assertEqual(outcome.error_category, ErrorCategory.RUNTIME_ERROR)
+                self.assertEqual(
+                    outcome.error,
+                    f"Code called sys.exit({shown}), which python_exec does not allow",
+                )
+                self.assertIs(sys.stdout, stdout)  # the redirection was undone
 
     async def test_shell_exec(self) -> None:
         outcome = await self.executor.execute_structured(
@@ -169,6 +193,44 @@ class TestTimeout(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.error_category, ErrorCategory.TIMEOUT)
         self.assertGreater(outcome.duration_ms, 0)
         self.assertIn("timed out", outcome.error.lower())
+
+    async def test_its_own_timeout_names_the_executor_limit(self) -> None:
+        outcome = await self.executor.execute_structured(
+            ExecutionRequest(tool_name="slow_tool")
+        )
+        self.assertEqual(outcome.error, "Execution timed out after 0.1s")
+
+    def _register_raising(self, name: str, exc: TimeoutError) -> None:
+        self.hippo.register_tool(
+            ToolDef(
+                name=name,
+                description="Raises TimeoutError",
+                parameters={"type": "object", "properties": {}},
+            )
+        )
+
+        async def _raise() -> str:
+            raise exc
+
+        self.executor.register(name, _raise)
+
+    async def test_a_timeout_raised_by_the_tool_keeps_its_message(self) -> None:
+        # Not the executor's own timeout: the tool's message names the limit.
+        self._register_raising("limited", TimeoutError("Command timed out after 30 s"))
+        outcome = await self.executor.execute_structured(
+            ExecutionRequest(tool_name="limited")
+        )
+        self.assertEqual(outcome.status, ExecutionStatus.TIMEOUT)
+        self.assertEqual(outcome.error_category, ErrorCategory.TIMEOUT)
+        self.assertEqual(outcome.error, "Command timed out after 30 s")
+
+    async def test_a_timeout_raised_by_the_tool_without_a_message(self) -> None:
+        self._register_raising("bare", TimeoutError())
+        outcome = await self.executor.execute_structured(
+            ExecutionRequest(tool_name="bare")
+        )
+        self.assertEqual(outcome.status, ExecutionStatus.TIMEOUT)
+        self.assertEqual(outcome.error, "bare timed out")
 
     async def test_per_request_timeout_override(self) -> None:
         """A generous per-request timeout lets a fast tool succeed."""

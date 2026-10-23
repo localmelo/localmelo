@@ -5,6 +5,7 @@ from typing import Any
 import httpx
 
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
+from localmelo.support.providers._http import malformed_body, post_json
 
 
 class OpenAICompatEmbedding(BaseEmbeddingProvider):
@@ -16,6 +17,10 @@ class OpenAICompatEmbedding(BaseEmbeddingProvider):
     - **Local**: MLC LLM, Ollama, vLLM, LMStudio
     - **Cloud**: OpenAI, Together AI, Voyage AI, etc.
 
+    A failed request raises
+    :class:`~localmelo.melo.contracts.providers.ProviderError`, mapped the
+    same way as for the chat providers.
+
     Parameters
     ----------
     base_url : str
@@ -26,6 +31,8 @@ class OpenAICompatEmbedding(BaseEmbeddingProvider):
         Bearer token for authenticated endpoints.
     timeout : float
         HTTP timeout in seconds (default 120).
+    transport : httpx.AsyncBaseTransport | None
+        Optional HTTP transport, e.g. ``httpx.MockTransport`` in tests.
     """
 
     def __init__(
@@ -34,6 +41,8 @@ class OpenAICompatEmbedding(BaseEmbeddingProvider):
         model: str,
         api_key: str | None = None,
         timeout: float = 120.0,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
         **kwargs: Any,
     ) -> None:
         self.model = model
@@ -44,14 +53,19 @@ class OpenAICompatEmbedding(BaseEmbeddingProvider):
             base_url=base_url.rstrip("/"),
             timeout=timeout,
             headers=headers,
+            transport=transport,
         )
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
         payload = {"model": self.model, "input": texts}
-        resp = await self._http.post("/embeddings", json=payload)
-        resp.raise_for_status()
-        data = resp.json()
-        return [item["embedding"] for item in data["data"]]
+        path = "/embeddings"
+        resp, data = await post_json(self._http, path, payload)
+        items = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(items, list) or not all(
+            isinstance(item, dict) and "embedding" in item for item in items
+        ):
+            raise malformed_body(resp, path, "no data[].embedding list")
+        return [item["embedding"] for item in items]
 
     async def close(self) -> None:
         await self._http.aclose()

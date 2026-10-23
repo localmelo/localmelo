@@ -140,6 +140,11 @@ class StdioMcpClient:
         # later calls do nothing. A close() before there is a process only
         # sets _closing.
         self._closed = False
+        # close() has sent SIGTERM to the server's process group. A wrapper
+        # that died of it can leave the server running in the group, so
+        # kill() still signals the group once the process started has
+        # exited (see kill()).
+        self._signalled = False
         self.stderr_tail: deque[str] = deque(maxlen=STDERR_TAIL_LINES)
         self.protocol_version = ""
         self.server_info: dict[str, Any] = {}
@@ -161,7 +166,10 @@ class StdioMcpClient:
         Once close() has begun, start() raises McpError instead. A close()
         that comes while the process is being spawned finds no process to
         stop, so start() stops the new process itself, without the
-        handshake, and raises McpError.
+        handshake, and raises McpError. So does a close() that comes after
+        the server's reply to ``initialize`` but before start() returns:
+        start() then stops the server as well and raises McpError, rather
+        than return a closed client.
         """
         if self._closing:
             raise McpError(
@@ -239,6 +247,14 @@ class StdioMcpClient:
         except BaseException:
             await self.close()
             raise
+        if self._closing:
+            # close() began after the server's reply arrived. It may still be
+            # stopping the server; stopping it here too is harmless.
+            await self.close()
+            raise McpError(
+                f"Cannot start MCP server {self.name!r}: the client was closed "
+                "during start-up"
+            )
 
     async def close(self) -> None:
         """Shut the server down: close stdin, then terminate, then kill.
@@ -273,6 +289,7 @@ class StdioMcpClient:
                 with contextlib.suppress(Exception):
                     proc.stdin.close()
             if not await self._wait_exit(proc):
+                self._signalled = True
                 refused = _signal_server(proc, kill=False)
                 if not await self._wait_stopped(proc):
                     refused = _signal_server(proc, kill=True)
@@ -295,6 +312,35 @@ class StdioMcpClient:
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._fail_pending(McpError(f"MCP client for {self.name!r} is closed"))
         self._closed = True
+
+    def kill(self) -> None:
+        """Send SIGKILL to the server's process group now, without waiting.
+
+        For a shutdown that has no time left for close()'s grace periods,
+        such as when localmelo itself must exit. On Windows only the
+        process is killed. kill() signals nothing before there is a
+        process, once close() has finished, or once the server has exited
+        by itself (close() does not signal a server that exits in time
+        either). Once close() has sent SIGTERM, though, kill() signals the
+        group even after the process started has exited: a wrapper
+        (``sh -c``) that died of the SIGTERM can leave a server that
+        ignores it running in the group, and close() would only send its
+        SIGKILL a grace period later. kill() neither waits for the server
+        to exit nor stops the readers: a close() under way sees the server
+        exit and finishes the shutdown, and so does a later close().
+        """
+        proc = self._proc
+        if proc is None or self._closed:
+            return
+        if proc.returncode is not None and not self._signalled:
+            return  # exited by itself, with nothing signalled to its group
+        if _signal_server(proc, kill=True):
+            logger.warning(
+                "Cannot kill MCP server %r: process %d could not be signalled "
+                "(permission denied)",
+                self.name,
+                proc.pid,
+            )
 
     async def _wait_exit(self, proc: asyncio.subprocess.Process) -> bool:
         try:
@@ -462,13 +508,20 @@ class StdioMcpClient:
                     break
                 try:
                     self._dispatch(line)
-                except Exception:
+                except Exception as exc:
                     # One message the client cannot handle must not end the
-                    # reader: the server is still there.
+                    # reader: the server is still there. One line at WARNING
+                    # (a traceback on stderr would read as a crash); the
+                    # traceback goes to the debug log.
                     logger.warning(
-                        "MCP server %r: a message could not be handled; skipped",
+                        "MCP server %r: a message could not be handled (%s: %s); "
+                        "skipped",
                         self.name,
-                        exc_info=True,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    logger.debug(
+                        "MCP server %r: skipped message", self.name, exc_info=True
                     )
         finally:
             if error is None:

@@ -135,9 +135,21 @@ Current safeguards include:
 
 - workspace policy for file operations
 - blocked shell command patterns
+- a `shell_exec` command is killed together with its process group (every
+  process it started) on timeout or cancellation
+- execution allowlist: a tool call runs only if its planning step offered
+  that tool to the model
 - output size limits
 - prompt and memory write size limits
 - provider probing during onboarding
+
+In the default `retrieve` tool exposure, each step offers only the tools that
+hint extraction and BM25 search resolve for it. A call to any other registered
+tool is refused with "Tool '<name>' was not offered in this step." and does not
+run; earlier versions ran any registered tool the model named. The check holds
+within one step: the refused call stays in the conversation, so hint
+extraction can offer that tool on the next step. With `tool_exposure="all"`,
+every registered tool is offered on every step.
 
 This is still pre-alpha software. Review configuration and tool permissions
 before giving it access to important files, accounts, or long-running processes.
@@ -159,6 +171,14 @@ Supported backend families:
 
 Chat and embedding backends are configured separately. Set the embedding backend
 to `none` when you do not want to run embedding retrieval.
+
+Each chat request waits up to 120 s for data from the server (300 s with the
+`ollama` backend). The timeout restarts whenever data arrives, so it does not cut
+off a server that sends keep-alive bytes while it generates; `--timeout` bounds a
+whole direct run. For a slower model, such as a local thinking model, set
+`request_timeout_s` at the top of `~/.cache/localmelo/config.toml`, or pass
+`--request-timeout SECONDS` to a direct query; see
+[docs/quickstart.md](docs/quickstart.md#chat-request-timeout).
 
 ## Development
 

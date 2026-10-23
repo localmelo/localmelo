@@ -24,6 +24,8 @@ FAKE_MCP_PIDFILE, if set. FAKE_MCP_MODE selects misbehaviour:
 - ``stubborn_helper``: as ``stubborn``, and first start a helper process
   that holds stdout and stderr open from a session of its own; its pid
   goes to the file named by FAKE_MCP_HELPER_PIDFILE
+- ``stubborn_hang_initialize``: as ``stubborn``, and never answer
+  ``initialize``
 """
 
 from __future__ import annotations
@@ -49,7 +51,8 @@ MODE = os.environ.get("FAKE_MCP_MODE", "")
 LOG_PATH = os.environ.get("FAKE_MCP_LOG", "")
 PID_PATH = os.environ.get("FAKE_MCP_PIDFILE", "")
 HELPER_PID_PATH = os.environ.get("FAKE_MCP_HELPER_PIDFILE", "")
-STUBBORN_MODES = ("stubborn", "stubborn_helper")
+STUBBORN_MODES = ("stubborn", "stubborn_helper", "stubborn_hang_initialize")
+HANG_INITIALIZE_MODES = ("hang_initialize", "stubborn_hang_initialize")
 
 _write_lock = threading.Lock()
 _log_lock = threading.Lock()
@@ -230,7 +233,7 @@ def handle(message: dict[str, Any]) -> None:
         return
     params = message.get("params") or {}
     if method == "initialize":
-        if MODE == "hang_initialize":
+        if MODE in HANG_INITIALIZE_MODES:
             return
         capabilities: dict[str, Any] = (
             {"prompts": {}} if MODE == "prompts_only" else {"tools": {}}

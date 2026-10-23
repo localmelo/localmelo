@@ -12,6 +12,7 @@ Sections:
 - [Quick reference](#quick-reference)
 - [Environment variables](#environment-variables)
 - [File layout](#file-layout)
+- [Task records](#task-records)
 - [Retention semantics](#retention-semantics)
 - [No-embedding mode](#no-embedding-mode)
 - [Reset workflow](#reset-workflow)
@@ -25,6 +26,7 @@ Sections:
 |----------------------|--------------------------------------------------------------------------|
 | Enable persistence   | `LOCALMELO_PERSIST_MEMORY=1`                                             |
 | Storage directory    | `LOCALMELO_MEMORY_DIR` (default `~/.cache/localmelo/memory`)             |
+| Direct query         | `melo --memory-dir DIR "<query>"` turns persistence on, in `DIR`         |
 | History DB           | `<dir>/history.db` (always when persistence is on)                       |
 | Long-term DB         | `<dir>/long_term.db` (only if an embedding provider is configured)       |
 | Reset                | stop the localmelo process → `rm` the chosen file(s) → restart           |
@@ -83,6 +85,37 @@ while a localmelo process is running.
 In no-embedding mode the `long_term.db*` files are not created; only
 `history.db*` exist.
 
+## Task records
+
+Every run writes one row to the `tasks` table of `history.db` (or to the
+in-memory history when persistence is off):
+
+| Column    | Value                                                                    |
+|-----------|--------------------------------------------------------------------------|
+| `task_id` | the run's `RunResult.task_id`, 32 hex characters (a UUID4)               |
+| `query`   | the task as given                                                        |
+| `status`  | `running` while the run is in progress, then the run's status            |
+| `result`  | the run's result, or its error when the result is empty                  |
+
+The status values after a run are `completed`, `failed`, `gate_stopped`,
+`budget_exhausted`, `stuck`, `provider_error`, `setup_error`, `timeout` and
+`crashed`; see [quickstart.md → Run results](quickstart.md#run-results) for
+their meaning.
+The row is saved again when the run ends, whatever ended it, including an
+exception or a cancellation. A direct query (`melo "<query>"`) that
+SIGTERM or SIGHUP ends is saved as `crashed`, with `Cancelled by SIGTERM`
+or `Cancelled by SIGHUP` as its result (see
+[quickstart.md → SIGTERM and SIGHUP](quickstart.md#sigterm-and-sighup)).
+A row that still reads `running` belongs to a run in progress, or to a
+process that ended before its run could save the row: one killed with
+SIGKILL, or one stopped by SIGTERM or SIGHUP whose final save failed or
+had no time left before the exit (melo then logs a warning).
+
+Rows written before these statuses existed use only `running`,
+`completed` and `failed`; in them, `failed` also covers the runs that now
+end as `gate_stopped`, `budget_exhausted` or `stuck`, and an exception left
+the row `running`.
+
 ## Retention semantics
 
 LocalMelo deliberately separates "what happened" from "what to recall":
@@ -99,7 +132,22 @@ LocalMelo deliberately separates "what happened" from "what to recall":
   sleep pipeline. Not part of normal online recall. See
   [PersonalizedSample v1 schema](#personalizedsample-v1-schema).
 - **Working memory** — short-lived per-session LRU cache. Lives in RAM,
-  not persisted, lost on process exit.
+  not persisted, lost on process exit. Before each planning step, its
+  oldest whole turns are dropped when the prompt would otherwise pass the
+  100,000-character pre-plan cap. The task counts toward that cap even
+  once its own message is dropped, since the planning request puts it
+  back in front, so a task too long to fit beside the newest turn still
+  fails with `Prompt too large`. A tool result too long for working
+  memory is kept cut to the room its turn has left, ending with
+  `... [truncated: <n> more characters]`, where `<n>` counts every
+  character of the tool's output left out, those the executor's output
+  check had already cut included. A result left less than 200 characters
+  of room, as in a turn of several long results, is replaced instead by a
+  notice that keeps its first 200 characters. The tool calls take their
+  room first, and so does the model's text beside them when it has at
+  most 2,000 characters; a longer text that does not fit beside the
+  results is dropped from working memory. History keeps the text, and the
+  result as the executor's output check left it.
 
 In short: history is the raw event log, long-term is the queryable memory,
 and `PersonalizedMemory` is selected sleep input — not a dump of history.
@@ -158,6 +206,10 @@ sqlite3 ~/.cache/localmelo/memory/history.db '.tables'
 sqlite3 ~/.cache/localmelo/memory/history.db \
   'SELECT task_id, status, substr(query, 1, 60) AS query
      FROM tasks ORDER BY rowid DESC LIMIT 10'
+
+# How runs ended (see "Task records" for the status values)
+sqlite3 ~/.cache/localmelo/memory/history.db \
+  'SELECT status, COUNT(*) FROM tasks GROUP BY status'
 
 # Recent steps across all tasks
 sqlite3 ~/.cache/localmelo/memory/history.db \

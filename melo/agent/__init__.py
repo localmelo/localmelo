@@ -7,5 +7,6 @@ own provider via ``localmelo.melo.contracts.providers``.
 """
 
 from localmelo.melo.agent.agent import Agent
+from localmelo.melo.agent.options import AgentOptions
 
-__all__ = ["Agent"]
+__all__ = ["Agent", "AgentOptions"]

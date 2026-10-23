@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import logging
+import signal
 import sys
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
@@ -387,6 +389,82 @@ class TestClose:
         assert client.returncode is not None
         assert provider.clients == []
         assert readers and all(task.done() for task in readers)
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+    async def test_a_server_that_cannot_be_stopped_is_logged_without_a_traceback(
+        self,
+        log_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        created: list[StdioMcpClient] = []
+
+        def make(server: McpServerConfig) -> StdioMcpClient:
+            created.append(StdioMcpClient(server, shutdown_grace_s=0.1))
+            return created[-1]
+
+        provider = McpToolProvider(
+            [fake_server_config(log_path, env={"FAKE_MCP_MODE": "stubborn"})],
+            client_factory=make,
+        )
+        await provider.start()
+        (client,) = created
+
+        def killpg(pgid: int, sig: int) -> None:
+            # Every signal is refused, as for a server started through sudo.
+            raise PermissionError("Operation not permitted")
+
+        monkeypatch.setattr("localmelo.support.mcp.client.os.killpg", killpg)
+        try:
+            with caplog.at_level(logging.DEBUG):
+                await asyncio.wait_for(provider.close(), 5)
+        finally:
+            monkeypatch.undo()
+            await asyncio.wait_for(client.close(), 5)
+        assert client.returncode is not None
+        # The server outlived close(): one warning that says so, and no
+        # traceback, since no run crashed.
+        [record] = [
+            r for r in caplog.records if r.getMessage().startswith("Cannot stop")
+        ]
+        assert record.levelno == logging.WARNING
+        assert "Cannot stop MCP server 'fake': process" in record.getMessage()
+        assert [r for r in caplog.records if r.exc_info] == []
+
+
+class TestKill:
+    async def test_kill_stops_every_server_at_once(self, tmp_path: Path) -> None:
+        created: list[StdioMcpClient] = []
+
+        def make(server: McpServerConfig) -> StdioMcpClient:
+            # A grace period this long would make close() alone take 10 s.
+            created.append(StdioMcpClient(server, shutdown_grace_s=5))
+            return created[-1]
+
+        provider = McpToolProvider(
+            [
+                fake_server_config(
+                    tmp_path / f"{name}.log",
+                    name=name,
+                    env={"FAKE_MCP_MODE": "stubborn"},
+                )
+                for name in ("a", "b")
+            ],
+            client_factory=make,
+        )
+        await provider.start()
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        provider.kill()
+        await asyncio.wait_for(provider.close(), 5)
+        assert loop.time() - started < 2.5
+        assert [client.returncode for client in created] == [-signal.SIGKILL] * 2
+        assert provider.clients == []
+
+    def test_kill_before_start_does_nothing(self, log_path: Path) -> None:
+        provider = McpToolProvider([fake_server_config(log_path)])
+        provider.kill()
+        assert provider.clients == []
 
 
 class TestCloseDuringStart:

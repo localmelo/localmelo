@@ -6,7 +6,7 @@ import hashlib
 import time
 import uuid
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 # ── Config ──
@@ -25,6 +25,19 @@ MAX_ATTEMPTS = 5
 # decompose action instead of continuing.
 MAX_REFLECTIONS_IN_PROMPT = 1
 MAX_REFLECTION_CHARS = 2000
+
+# ── Empty replies ──
+
+# A planning reply with neither a tool call nor text is no answer. Working
+# memory records it as EMPTY_REPLY_LABEL, an assistant message, followed by
+# EMPTY_REPLY_NUDGE, a user message, and the agent plans again. The two
+# form one unit of the window (see melo.memory.short.group_turns), so the
+# nudge never follows another user message.
+EMPTY_REPLY_LABEL = "[empty reply]"
+EMPTY_REPLY_NUDGE = (
+    "Your last reply was empty. Continue the task: call a tool or give your "
+    "final answer."
+)
 
 
 # ── Data types ──
@@ -205,23 +218,87 @@ class ToolResult:
     images: list[ImagePart] = field(default_factory=list)
 
 
+def new_record_id() -> str:
+    """Return a fresh task or step id: a full UUID4 as 32 hex characters.
+
+    History keeps every task and step under its id for good, so ids must
+    not collide in a long-lived ``history.db``. A repeated task id would
+    make ``save_task`` (an ``INSERT OR REPLACE``) overwrite the older
+    task, and a repeated step id would fail the newer step's insert.
+    """
+    return uuid.uuid4().hex
+
+
 @dataclass
 class StepRecord:
     thought: str = ""
     tool_call: ToolCall | None = None
     tool_result: ToolResult | None = None
-    step_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+    step_id: str = field(default_factory=new_record_id)
     timestamp: float = field(default_factory=time.time)
 
 
 @dataclass
 class TaskRecord:
     query: str
-    task_id: str = field(default_factory=lambda: uuid.uuid4().hex[:8])
+    task_id: str = field(default_factory=new_record_id)
     steps: list[StepRecord] = field(default_factory=list)
-    status: str = "running"  # running, completed, failed
+    # "running" until the run ends, then the run's status: one of the
+    # RunResult statuses documented in docs/quickstart.md ("Run results").
+    status: str = "running"
+    # The run's result, or its error when the result is empty.
     result: str = ""
     attempts_completed: int = 0
+
+
+@dataclass
+class RunResult:
+    """How one run of :meth:`Agent.run_task` ended.
+
+    ``status`` is one of the statuses documented in ``docs/quickstart.md``
+    ("Run results"). ``result`` is the final answer or a best effort, and
+    may be empty; ``error`` is empty unless something failed. The counters
+    cover this run only:
+
+    - ``steps``: planning calls made, counted when each is sent;
+    - ``attempts``: attempts started (1 for an answer on the first try);
+    - ``n_llm``: LLM requests that returned a response, split into
+      ``n_main`` (requests that offered tools) and ``n_aux`` (requests
+      without tools, such as a reflection, or a planning call in a step
+      that offered no tool);
+    - ``n_tool``: tool calls handed to the executor, including calls it
+      refused (an unknown tool, or one that step did not offer);
+    - ``llm_errors``: LLM requests that raised instead of responding,
+      counting each failed attempt of a retried request and a request
+      cut short by a cancellation, so ``n_llm + llm_errors`` is the
+      number of requests sent;
+    - ``usage``: the integer usage fields of every response, summed by
+      name (for example ``prompt_tokens``, ``completion_tokens``,
+      ``total_tokens``).
+
+    ``duration_s`` is the run's wall-clock time in seconds, and
+    ``config`` is the effective run configuration (see
+    :meth:`Agent.run_task`), so every record says which mode it ran in.
+    """
+
+    task_id: str
+    status: str
+    result: str = ""
+    error: str = ""
+    steps: int = 0
+    attempts: int = 0
+    n_llm: int = 0
+    n_main: int = 0
+    n_aux: int = 0
+    n_tool: int = 0
+    llm_errors: int = 0
+    usage: dict[str, int] = field(default_factory=dict)
+    duration_s: float = 0.0
+    config: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """A deep copy as a plain dict, with keys in field order."""
+        return asdict(self)
 
 
 @dataclass
@@ -260,7 +337,7 @@ class ReflectionDecision:
     new_information_gained: bool = False
     next_step_is_concrete: bool = False
     next_step_is_novel: bool = False
-    recommended_action: str = "stop"  # "continue" | "stop" | "decompose"
+    recommended_action: str = "stop"  # "continue" | "stop" | "decompose" | "done"
     rationale: str = ""
     handoff_summary: str = ""
     tried_memory: ReflectionEntry | None = None

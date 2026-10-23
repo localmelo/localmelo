@@ -65,6 +65,7 @@ class SglangBackend(BaseBackend):
             base_url=normalize_url(cfg.sglang.chat_url),
             model=cfg.sglang.chat_model,
             extra_body=cfg.sglang.extra_body,
+            timeout=cfg.request_timeout_s,
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

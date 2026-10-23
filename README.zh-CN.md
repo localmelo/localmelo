@@ -131,9 +131,18 @@ executor result 和 memory write 在跨越主要边界前都会被校验。
 
 - 文件操作的 workspace policy
 - blocked shell command patterns
+- `shell_exec` 命令在 timeout 或 cancellation 时会连同其 process group（它启动的所有 process）一起被 kill
+- execution allowlist：tool call 只有在其所在 planning step 向模型提供了该工具时才会执行
 - output size limits
 - prompt 和 memory write size limits
 - onboarding 阶段的 provider probing
+
+在默认的 `retrieve` tool exposure 下，每个 step 只提供 hint extraction 和 BM25
+search 为它解析出的工具。调用其他已注册的工具会被拒绝，返回
+"Tool '<name>' was not offered in this step."，工具不会执行；之前的版本会执行模型
+指名的任何已注册工具。这个检查只在单个 step 内有效：被拒绝的调用会留在对话中，
+所以 hint extraction 可能在下一个 step 提供该工具。使用 `tool_exposure="all"` 时，
+每个 step 都提供所有已注册的工具。
 
 这仍然是 pre-alpha software。在让它访问重要文件、账号或长期运行的 process
 之前，请先 review 配置和 tool permissions。
@@ -155,6 +164,13 @@ executor result 和 memory write 在跨越主要边界前都会被校验。
 
 Chat backend 和 embedding backend 独立配置。如果不想运行 embedding retrieval，
 可以把 embedding backend 设为 `none`。
+
+每个 chat request 最多等 server 的数据 120 s（`ollama` backend 为 300 s）。每收到
+数据就重新计时，所以 server 在生成时发送 keep-alive 字节的话不会 timeout；要限制
+整个 direct run 的时长，用 `--timeout`。模型较慢时（例如本地 thinking model），可在
+`~/.cache/localmelo/config.toml` 顶层设置 `request_timeout_s`，或给 direct query 加
+`--request-timeout SECONDS`；详见
+[docs/quickstart.md](docs/quickstart.md#chat-request-timeout)。
 
 ## 开发
 

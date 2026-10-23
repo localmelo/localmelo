@@ -113,6 +113,16 @@ curl -X DELETE http://127.0.0.1:8401/v1/sessions/demo123</code></pre>
           <tr><td>Other local</td><td><code>vllm</code> 或 <code>sglang</code></td><td>同一个 local backend 或 <code>none</code></td><td>runtime lifecycle 仍在 localmelo 外部。</td></tr>
           <tr><td>Cloud chat</td><td><code>openai</code>、<code>anthropic</code>、<code>gemini</code> 或 <code>nvidia</code></td><td>local backend 或 <code>none</code></td><td>运行前设置对应 API key env var。</td></tr>
         </table>
+        <p>
+          每个 chat request 最多等 server 的数据 120 s（<code>ollama</code> backend
+          为 300 s）。每收到数据就重新计时，所以 server 在生成时发送 keep-alive
+          字节的话不会 timeout；要限制整个 direct run 的时长，用
+          <code>--timeout</code>。模型较慢时（例如本地 thinking model），可在
+          <code>~/.cache/localmelo/config.toml</code> 顶层设置
+          <code>request_timeout_s</code>，或给 direct query 加
+          <code>--request-timeout SECONDS</code>。Timeout 的 request 会重试两次，
+          每次都使用完整的 timeout。
+        </p>
       </section>
 
       <section class="section" id="no-embedding">

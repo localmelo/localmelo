@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import hashlib
 import logging
 from collections.abc import Callable, Iterable, Sequence
@@ -155,7 +154,7 @@ class McpToolProvider(BaseToolProvider):
         return tools
 
     async def close(self) -> None:
-        """Close every server's client; errors are ignored.
+        """Close every server's client; errors are logged, not raised.
 
         From the moment close() begins, start() starts no further server.
         A client is dropped only once its close() has finished, so if this
@@ -163,6 +162,17 @@ class McpToolProvider(BaseToolProvider):
         """
         self._closing = True
         await self._close_clients(self._clients)
+
+    def kill(self) -> None:
+        """Kill every server whose client has not finished closing.
+
+        See :meth:`StdioMcpClient.kill`: each server's process group gets
+        SIGKILL at once, and close() finishes the shutdown. A client that
+        close() dropped before it had a process is out of reach; its own
+        start() stops the process it gets.
+        """
+        for client in list(self._clients):
+            client.kill()
 
     def _check_open(self) -> None:
         if self._closing:
@@ -178,8 +188,19 @@ class McpToolProvider(BaseToolProvider):
         )
 
     async def _close_client(self, client: StdioMcpClient) -> None:
-        with contextlib.suppress(Exception):
+        try:
             await client.close()
+        except McpError as exc:
+            # A server that close() could not stop: worth a line on stderr,
+            # not a traceback (the run did not crash because of it).
+            logger.warning("%s", exc)
+        except Exception as exc:
+            logger.warning(
+                "Could not close MCP server %r: %s: %s",
+                client.name,
+                type(exc).__name__,
+                exc,
+            )
         # Not reached when close() is cancelled: the client stays listed.
         if client in self._clients:
             self._clients.remove(client)

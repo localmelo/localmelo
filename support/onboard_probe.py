@@ -25,8 +25,15 @@ async def probe_chat(cfg: _config_mod.Config) -> None:
     """Send a one-message ping through the configured chat backend.
 
     A provider that cannot be built, e.g. because ``extra_body`` sets a
-    field localmelo manages, fails the probe too.
+    field localmelo manages, fails the probe too. So does a
+    ``request_timeout_s`` that is not valid, before any provider is built:
+    ``load()`` keeps such a value for ``Config.validate`` to report, and as
+    the provider's HTTP timeout it would fail the ping (or, as ``true``,
+    pass it) with an error that does not name the key.
     """
+    timeout_errors = cfg._validate_request_timeout()
+    if timeout_errors:
+        raise ProbeError(f"chat probe failed: {'; '.join(timeout_errors)}")
     backend = get_backend(cfg.chat_backend)
     try:
         provider: BaseLLMProvider = backend.build_chat_provider(cfg)

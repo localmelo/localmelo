@@ -62,6 +62,7 @@ class OpenAIBackend(BaseBackend):
             model=cfg.openai.chat_model,
             api_key=api_key,
             extra_body=cfg.openai.extra_body,
+            timeout=cfg.request_timeout_s,
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -307,6 +308,30 @@ class TestSqliteHistory:
         assert got.status == "completed"
         assert got.result == "done"
         await h.aclose()
+
+    @pytest.mark.asyncio
+    async def test_default_ids_are_full_uuids_and_round_trip(
+        self, tmp_path: Path
+    ) -> None:
+        # 8 hex characters collided in a long-lived history.db: save_task's
+        # INSERT OR REPLACE then overwrote an older task.
+        task = TaskRecord(query="q")
+        step = StepRecord(thought="t")
+        for record_id in (task.task_id, step.step_id):
+            assert re.fullmatch(r"[0-9a-f]{32}", record_id)
+        assert task.task_id != TaskRecord(query="q").task_id
+        assert step.step_id != StepRecord().step_id
+
+        h = SqliteHistory(tmp_path / "history.db")
+        try:
+            await h.save_task(task)
+            await h.add_step(task.task_id, step)
+            got = await h.get_task(task.task_id)
+        finally:
+            await h.aclose()
+        assert got is not None
+        assert got.task_id == task.task_id
+        assert [s.step_id for s in got.steps] == [step.step_id]
 
     @pytest.mark.asyncio
     async def test_get_nonexistent_task(self, tmp_path: Path) -> None:

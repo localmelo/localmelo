@@ -27,6 +27,7 @@ from localmelo.melo.checker.validators import (
 from localmelo.support.mcp import McpError, StdioMcpClient, tool_result_to_output
 from localmelo.support.mcp.client import STDERR_LINE_CHARS, STREAM_LIMIT
 from localmelo.tests.mcp.conftest import (
+    Gate,
     SpawnGate,
     fake_server_config,
     read_log,
@@ -449,6 +450,31 @@ class TestFailures:
         assert tool_result_to_output(second).text == "two"
         assert "handler failed" in caplog.text
 
+    async def test_a_skipped_message_is_logged_without_a_traceback(
+        self,
+        client: StdioMcpClient,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        handle = client._dispatch_one  # private: handles one parsed message
+
+        def handle_then_fail(message: dict[str, Any]) -> None:
+            handle(message)
+            raise RuntimeError("handler failed")
+
+        monkeypatch.setattr(client, "_dispatch_one", handle_then_fail)
+        with caplog.at_level(logging.DEBUG, logger="localmelo.support.mcp.client"):
+            await client.call_tool("echo", {"text": "one"})
+        [warning] = [r for r in caplog.records if r.levelno == logging.WARNING]
+        assert warning.getMessage() == (
+            "MCP server 'fake': a message could not be handled "
+            "(RuntimeError: handler failed); skipped"
+        )
+        # A traceback on stderr would read as a crash; the debug log has it.
+        assert warning.exc_info is None
+        [debug] = [r for r in caplog.records if r.exc_info]
+        assert debug.levelno == logging.DEBUG
+
     async def test_closed_stdout_is_not_reported_as_an_exit(
         self, client: StdioMcpClient, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -633,6 +659,120 @@ class TestShutdown:
         assert readers and all(task.done() for task in readers)
 
 
+class TestKill:
+    async def test_kill_stops_a_stubborn_server_at_once(self, log_path: Path) -> None:
+        # A grace period this long would make close() alone take 10 s.
+        mcp = StdioMcpClient(
+            fake_server_config(log_path, env={"FAKE_MCP_MODE": "stubborn"}),
+            shutdown_grace_s=5,
+        )
+        await mcp.start()
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        mcp.kill()
+        # close() finds the server gone and only finishes the shutdown.
+        await asyncio.wait_for(mcp.close(), 5)
+        assert loop.time() - started < 2.5
+        assert mcp.returncode == -signal.SIGKILL
+
+    async def test_kill_ends_a_close_that_is_waiting(self, log_path: Path) -> None:
+        mcp = StdioMcpClient(
+            fake_server_config(log_path, env={"FAKE_MCP_MODE": "stubborn"}),
+            shutdown_grace_s=5,
+        )
+        await mcp.start()
+        closing = asyncio.create_task(mcp.close())
+        await asyncio.sleep(0.1)  # close() waits for the server to exit
+        assert not closing.done()
+        mcp.kill()
+        await asyncio.wait_for(closing, 2.5)
+        assert mcp.returncode == -signal.SIGKILL
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+    async def test_kill_reaches_a_server_behind_a_wrapper(
+        self, log_path: Path, tmp_path: Path
+    ) -> None:
+        pid_file = tmp_path / "server.pid"
+        server = fake_server_config(
+            log_path,
+            env={"FAKE_MCP_MODE": "stubborn", "FAKE_MCP_PIDFILE": str(pid_file)},
+        )
+        # "; true" keeps sh from replacing itself with the server.
+        wrapped = dataclasses.replace(
+            server,
+            command="/bin/sh",
+            args=["-c", shlex.join([server.command, *server.args]) + "; true"],
+        )
+        mcp = StdioMcpClient(wrapped, shutdown_grace_s=5)
+        await mcp.start()
+        pid = int(pid_file.read_text())
+        gone = False
+        try:
+            mcp.kill()
+            gone = await process_gone(pid)
+        finally:
+            if not gone:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+            await asyncio.wait_for(mcp.close(), 5)
+        assert gone
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+    async def test_kill_reaches_a_server_whose_wrapper_died_of_close(
+        self, log_path: Path, tmp_path: Path
+    ) -> None:
+        pid_file = tmp_path / "server.pid"
+        server = fake_server_config(
+            log_path,
+            env={"FAKE_MCP_MODE": "stubborn", "FAKE_MCP_PIDFILE": str(pid_file)},
+        )
+        # "; true" keeps sh from replacing itself with the server.
+        wrapped = dataclasses.replace(
+            server,
+            command="/bin/sh",
+            args=["-c", shlex.join([server.command, *server.args]) + "; true"],
+        )
+        mcp = StdioMcpClient(wrapped, shutdown_grace_s=1.0)
+        await mcp.start()
+        pid = int(pid_file.read_text())
+        closing = asyncio.create_task(mcp.close())
+        gone = False
+        try:
+            # close() sends SIGTERM a grace period after closing stdin. That
+            # ends sh, while the server ignores it and runs on in the group
+            # until close() sends SIGKILL, another grace period later.
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + 5
+            while mcp.returncode is None and loop.time() < deadline:
+                await asyncio.sleep(0.02)
+            assert mcp.returncode == -signal.SIGTERM
+            assert not closing.done()
+            # An exit that cannot wait for that kills the server at once,
+            # even though the process started (sh) has exited, and then
+            # abandons close() (asyncio.run cancels it on the way out).
+            mcp.kill()
+            closing.cancel()
+            gone = await process_gone(pid)
+        finally:
+            if not gone:
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)
+            with contextlib.suppress(asyncio.CancelledError):
+                await closing
+            await asyncio.wait_for(mcp.close(), 5)
+        assert gone
+
+    async def test_kill_without_a_running_server_does_nothing(
+        self, log_path: Path
+    ) -> None:
+        mcp = StdioMcpClient(fake_server_config(log_path), shutdown_grace_s=0.5)
+        mcp.kill()  # no process yet
+        await mcp.start()
+        await mcp.close()
+        mcp.kill()  # the server has exited
+        assert mcp.returncode == 0
+
+
 class TestCloseDuringStart:
     async def test_close_during_the_spawn_stops_the_new_process(
         self, log_path: Path, spawn_gate: SpawnGate
@@ -663,6 +803,39 @@ class TestCloseDuringStart:
         with pytest.raises(McpError, match="the client is closed"):
             await mcp.start()
         assert len(spawn_gate.processes) == 1
+
+    async def test_close_after_the_handshake_fails_start(
+        self, log_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        gate = Gate()
+        mcp = StdioMcpClient(fake_server_config(log_path), shutdown_grace_s=0.5)
+        notify = mcp._notify  # private: sends one notification
+
+        async def notify_then_hold(
+            method: str, params: dict[str, Any] | None = None
+        ) -> None:
+            await notify(method, params)
+            if method == "notifications/initialized":
+                await gate.hold()
+
+        monkeypatch.setattr(mcp, "_notify", notify_then_hold)
+        starting = asyncio.create_task(mcp.start())
+        # The handshake is done, but start() has not returned yet: a close()
+        # now stops the server ...
+        await wait_held(gate, starting)
+        await mcp.close()
+        assert mcp.returncode is not None
+        gate.release()
+        # ... and start() fails instead of returning a closed client.
+        with pytest.raises(
+            McpError, match="Cannot start MCP server 'fake': the client was closed"
+        ):
+            await starting
+        assert not mcp._tasks  # private: no reader task is running
+        assert [m.get("method") for m in read_log(log_path)] == [
+            "initialize",
+            "notifications/initialized",
+        ]
 
     async def test_start_after_close_is_refused(
         self, log_path: Path, spawn_gate: SpawnGate

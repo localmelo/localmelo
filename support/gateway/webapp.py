@@ -8,6 +8,7 @@ import httpx
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from localmelo.melo.contracts.providers import ProviderError
 from localmelo.support.gateway.playground import SmokePlayground
 
 _HTML = r"""<!DOCTYPE html>
@@ -616,7 +617,9 @@ def mount(app: FastAPI) -> None:
             return JSONResponse(content=payload)
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": str(e)})
-        except httpx.HTTPError as e:
+        # Seeding a scenario embeds its memories, and the embedding
+        # provider reports a failed request as ProviderError.
+        except (httpx.HTTPError, ProviderError) as e:
             return JSONResponse(status_code=502, content={"error": str(e)})
 
     @app.post("/v1/playground/session/{session_id}/run")

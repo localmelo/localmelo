@@ -6,10 +6,14 @@ Top-level re-exports for convenience. The canonical implementations live in:
 """
 
 from localmelo.melo import Agent, Message, ToolCall, ToolDef, ToolResult
+from localmelo.melo.agent import AgentOptions
+from localmelo.melo.schema import RunResult
 
 __all__ = [
     "Agent",
+    "AgentOptions",
     "Message",
+    "RunResult",
     "ToolCall",
     "ToolDef",
     "ToolResult",
