@@ -80,6 +80,8 @@ Top-level keys must come before the first `[table]` line. How URLs are used:
 
 The wizard suggests the local URLs; use your server's address and port.
 localmelo only connects to a local server: you start and stop it yourself.
+`mlc`, `vllm` and `sglang` use the plain OpenAI-compatible API, so another
+OpenAI-compatible server works with any of them.
 
 ### Ollama with embeddings
 
@@ -270,6 +272,18 @@ See [Keep memory between runs](memory.md#keep-memory-between-runs).
 | `~/.localmelo/logs/` | The background service's logs. | By `melo --daemon install`. |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | The background service's definition. | By `melo --daemon install`. |
 
+## Update localmelo
+
+In your clone, pull the latest code and update the environment:
+
+```bash
+git pull
+uv sync --extra gateway
+```
+
+If you installed with pip, repeat the last command of
+[Install with pip](quickstart.md#install-with-pip) instead of `uv sync`.
+
 ## Upgrading from an older config
 
 Older config files still load. localmelo reads:
@@ -282,13 +296,10 @@ Older config files still load. localmelo reads:
 
 Running the wizard again writes the file in the current format.
 
-To update localmelo, run these commands in your clone:
+## Uninstall localmelo
 
-```bash
-git pull
-uv sync --extra gateway
-```
-
-To remove localmelo, run `melo --daemon uninstall` first if you installed
-the background service. Then delete the clone, `~/.cache/localmelo` (your
-configuration and saved memory) and `~/.localmelo`.
+1. If you installed the background service, run `melo --daemon uninstall`.
+2. Delete the clone.
+3. Delete `~/.cache/localmelo` (your configuration and saved memory),
+   `~/.localmelo` (the background service's logs), and any directory you
+   used with `LOCALMELO_MEMORY_DIR` or `--memory-dir`.

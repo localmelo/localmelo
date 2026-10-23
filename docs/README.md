@@ -12,7 +12,8 @@ tools and memory on your own model server or a cloud API. The website is at
 ## Guides
 
 - [Configuration](configuration.md): the setup wizard, the config file,
-  backends, API keys, timeouts and environment variables.
+  backends, API keys, timeouts and environment variables, and how to update
+  or uninstall localmelo.
 - [Tools and MCP](tools.md): the built-in tools, MCP servers, which tools a
   step offers, and what the checks do.
 - [Gateway and HTTP API](gateway.md): the HTTP API, sessions, the web UI, and

@@ -7,6 +7,26 @@ the JSON line.
 
 ## Install
 
+### command not found: melo
+
+```text
+zsh: command not found: melo
+```
+
+(bash prints `bash: melo: command not found`.) Or, with `uv run`:
+
+```text
+error: Failed to spawn: `melo`
+  cause: No such file or directory (os error 2)
+```
+
+- **Cause:** the virtual environment is not active in this terminal
+  (activation lasts for one terminal only), or `uv run` ran outside the
+  clone, where uv cannot find localmelo.
+- **Fix:** run `source <clone>/.venv/bin/activate` again, where `<clone>` is
+  your `localmelo` directory. With uv, run `uv run melo …` inside the clone,
+  or `uv run --project <clone> melo …` from anywhere else.
+
 ### No module named 'localmelo'
 
 ```text
@@ -297,7 +317,7 @@ melo: error: mcp.json: server 'docs': 'command' must be a non-empty string (HTTP
 ## Getting help
 
 If none of this helps, search the
-[issues](https://github.com/localmelo/localmelo/issues) or open a new one.
-Include the JSON line from `--output-format json`, the exit code, the backend
-and model, your operating system and Python version, and the steps to
-reproduce. Remove API keys and personal paths first.
+[issues](https://github.com/localmelo/localmelo/issues) or open a new one
+with the details that
+[Report a bug](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md#report-a-bug)
+lists. Remove API keys and personal paths first.

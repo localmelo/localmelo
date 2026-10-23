@@ -7,15 +7,17 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
 A local personal agent that runs tasks with tools and memory on your own model server or a cloud API.
+Use it to run agent tasks from the shell, from scripts and benchmarks (each
+run gives one JSON line and a fixed exit code), or over HTTP.
 
 [Website](https://localmelo.github.io/localmelo/) ·
 [Quickstart](docs/quickstart.md) ·
 [Documentation](docs/README.md) ·
 [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap)
 
-**Status:** pre-alpha. Direct mode and the gateway work today. Commands, the
-HTTP API and the Python API may change before v0.1.0 (milestone due
-2026-12-20).
+**Status:** pre-alpha. Running tasks from the command line (direct mode) and
+the HTTP gateway work today. Commands, the HTTP API and the Python API may
+change before v0.1.0 (milestone due 2026-12-20).
 
 ## What it does
 
@@ -39,8 +41,8 @@ yourself.
 
 ## Requirements
 
-- macOS. localmelo is developed and tested on macOS. It should also work on
-  Linux. Windows is not supported.
+- macOS (developed and tested) or Linux (should work, untested). Windows is
+  not supported.
 - Python 3.11 or later, and Git.
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip.
 - A model server that you run, such as [Ollama](https://ollama.com), or an
@@ -59,9 +61,16 @@ Keep the directory name `localmelo`: the package is built from it. A renamed
 folder or a ZIP download (`localmelo-main`) fails with
 `ModuleNotFoundError: No module named 'localmelo'`.
 
-Without uv, see [Install with pip](docs/quickstart.md#install-with-pip). The
-examples call `melo` directly; if you did not activate the environment, put
-`uv run` in front of them.
+Without uv, see [Install with pip](docs/quickstart.md#install-with-pip).
+
+The examples call `melo` directly. Activation lasts for this terminal only:
+in a new terminal, run `source <clone>/.venv/bin/activate` again, where
+`<clone>` is your `localmelo` directory. With uv you can also run
+`uv run melo …` inside the clone, or `uv run --project <clone> melo …` from
+anywhere else.
+
+To update or uninstall localmelo, see
+[Configuration](docs/configuration.md#update-localmelo).
 
 ## Quick start
 
@@ -69,7 +78,8 @@ examples call `melo` directly; if you did not activate the environment, put
    install it, start it, and pull a model with `ollama pull qwen3:8b`. Any
    OpenAI-compatible server works with its `/v1` URL.
 
-2. Run a task:
+2. Run a task. The model can use tools with your account's permissions; see
+   [Security](#security).
 
    ```bash
    melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
@@ -77,17 +87,29 @@ examples call `melo` directly; if you did not activate the environment, put
 
    The answer is printed on stdout, and the exit code is 0 when the run
    completed. Add `--output-format json` to get one JSON line with the run's
-   record instead.
+   record instead. `--base-url` sends no API key; for a cloud API, skip to
+   step 3.
 
-3. Save a configuration and start the gateway:
+3. Save a configuration and start the gateway. For a cloud API, first run
+   `export OPENAI_API_KEY="<your key>"` (or your vendor's variable) in the
+   same terminal: the wizard's test request uses that key.
 
    ```bash
    melo --serve --reconfigure
    ```
 
    The setup wizard asks for the chat backend, its URL and model, and an
-   embedding backend; choose `None (no long-term memory)` if you have no
-   embedding server. It checks that the servers answer, saves
+   embedding backend:
+
+   - For Ollama from step 1, choose `2`, then press Enter to accept the
+     suggested URL and model.
+   - For another OpenAI-compatible server, choose vLLM (`3`) and enter its
+     URL and model name.
+   - For a cloud API, choose the vendor.
+   - For the embedding backend, choose `5`, `None (no long-term memory)`, if
+     you have no embedding server.
+
+   The wizard checks that the servers answer, saves
    `~/.cache/localmelo/config.toml`, and then serves on
    `http://127.0.0.1:8401`. In another terminal:
 
@@ -153,8 +175,9 @@ Planned:
 
 Search the [issues](https://github.com/localmelo/localmelo/issues) or open a
 new one. Include the JSON line from `--output-format json` (it names the
-localmelo version), the exit code, the backend and model, and the steps to
-reproduce. Remove API keys and personal paths first. Report security problems
+localmelo version), the exit code, the backend and model, your operating
+system and Python version, and the steps to reproduce. Remove API keys and
+personal paths first. Report security problems
 as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
 ## Contributing

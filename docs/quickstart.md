@@ -32,8 +32,11 @@ Keep the directory name `localmelo`: the package is built from it. A renamed
 folder or a ZIP download (`localmelo-main`) fails with
 `ModuleNotFoundError: No module named 'localmelo'`.
 
-The rest of this guide calls `melo` directly. If you did not activate the
-environment, put `uv run` in front of each command.
+The rest of this guide calls `melo` directly. Activation lasts for this
+terminal only: in a new terminal, run `source <clone>/.venv/bin/activate`
+again, where `<clone>` is your `localmelo` directory. With uv you can also
+run `uv run melo …` inside the clone, or `uv run --project <clone> melo …`
+from anywhere else.
 
 ### Install with pip
 
@@ -50,6 +53,13 @@ regular install leaves out a data file that the gateway needs, and
 `melo --serve` then fails with `FileNotFoundError`.
 
 ## Run your first task
+
+> [!WARNING]
+> The model can run shell commands and Python code, and read or write any
+> file you can: there is no sandbox. To run a task without tools, add
+> `--builtins none`. See the
+> [security policy](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)
+> and [What the checks do](tools.md#what-the-checks-do).
 
 ```bash
 melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
@@ -87,7 +97,9 @@ calls the run took, and `config` records the options it ran with. See
 ## Save a configuration
 
 A configuration file saves the backends, so that `melo "<task>"` and the
-gateway work without `--base-url`. The setup wizard writes it:
+gateway work without `--base-url`. The setup wizard writes it. For a cloud
+API, first run `export OPENAI_API_KEY="<your key>"` (or your vendor's
+variable) in this terminal: the wizard's test request uses that key.
 
 ```bash
 melo --serve --reconfigure
@@ -97,14 +109,15 @@ The wizard asks:
 
 | Prompt | What to enter |
 |---|---|
-| `Chat backend` | The number of your server type, such as `2` for Ollama. The default, `[1]`, is MLC. |
+| `Chat backend` | The number of your server type, such as `2` for Ollama. The default, `[1]`, is MLC. For another OpenAI-compatible server, choose vLLM (`3`). |
 | `Base URL` | Your server's URL. Press Enter to accept the default shown in brackets. |
 | `Chat model name` | The model, such as `qwen3:8b`. |
 | `Start?` | Press Enter (yes) to continue. |
 | `Embedding backend` | `5` for `None (no long-term memory)` if you have no embedding server. |
 | `Embedding endpoint URL`, `Embedding model name` | Only asked when you chose an embedding backend. |
 
-For a cloud API, the wizard asks for `API key env var` and `Chat model`
+For a cloud API, choose the vendor. The wizard then asks for
+`API key env var`, the name of the variable you exported, and `Chat model`
 instead of `Base URL` and `Chat model name`.
 
 For Ollama, the default URL `http://localhost:11434` has no `/v1`. That is

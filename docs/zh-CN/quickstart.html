@@ -69,7 +69,7 @@ uv sync --extra gateway
 source .venv/bin/activate</code></pre>
         <p>uv 会创建虚拟环境 <code>.venv/</code>（如果你没有 Python 3.13，它会自动安装），并安装 localmelo 及网关所需的依赖。</p>
         <p>请保留目录名 <code>localmelo</code>：软件包就是从这个目录构建的。重命名后的目录或 ZIP 下载（<code>localmelo-main</code>）会报错 <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>。</p>
-        <p>本教程后面的命令直接调用 <code>melo</code>。如果没有激活虚拟环境，请在每条命令前加上 <code>uv run</code>。</p>
+        <p>本教程后面的命令直接调用 <code>melo</code>。激活虚拟环境只对当前终端有效：打开新终端后，需要再次运行 <code>source &lt;clone&gt;/.venv/bin/activate</code>，其中 <code>&lt;clone&gt;</code> 是你的 <code>localmelo</code> 目录。使用 uv 时，也可以在克隆目录中运行 <code>uv run melo …</code>，或在其他任何位置运行 <code>uv run --project &lt;clone&gt; melo …</code>。</p>
 
         <h3 id="install-with-pip">用 pip 安装</h3>
         <pre><code>git clone https://github.com/localmelo/localmelo.git
@@ -82,6 +82,9 @@ pip install -e ".[gateway]"</code></pre>
 
       <section class="section" id="run-your-first-task">
         <h2>运行第一个任务</h2>
+        <div class="callout warning">
+          <p><strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件：没有沙箱。</strong>如果想让任务不使用任何工具，请加上 <code>--builtins none</code>。详见<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#what-the-checks-do">检查能做什么（英文）</a>。</p>
+        </div>
         <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"</code></pre>
         <p>答案会输出到 stdout，命令的退出码为 0（<code>echo $?</code> 会输出 <code>0</code>）。<code>--base-url</code> 让 localmelo 在这一次运行中直接连接一个兼容 OpenAI 接口的服务器，不需要配置文件。它不会发送 API 密钥，所以适合本地服务器；使用云端 API 时，请先保存配置（见下文）。</p>
         <p>所有选项见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">命令行参考（英文）</a>。</p>
@@ -100,7 +103,7 @@ pip install -e ".[gateway]"</code></pre>
 
       <section class="section" id="save-a-configuration">
         <h2>保存配置</h2>
-        <p>配置文件会保存后端设置，这样 <code>melo "&lt;task&gt;"</code> 和网关都不再需要 <code>--base-url</code>。配置文件由配置向导生成：</p>
+        <p>配置文件会保存后端设置，这样 <code>melo "&lt;task&gt;"</code> 和网关都不再需要 <code>--base-url</code>。配置文件由配置向导生成。使用云端 API 时，请先在这个终端中运行 <code>export OPENAI_API_KEY="&lt;your key&gt;"</code>（或你所用服务商对应的变量）：向导的测试请求会用到这个密钥。</p>
         <pre><code>melo --serve --reconfigure</code></pre>
         <p>向导会依次询问：</p>
         <div class="table-wrap">
@@ -109,7 +112,7 @@ pip install -e ".[gateway]"</code></pre>
               <tr><th scope="col">提示</th><th scope="col">填写内容</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>Chat backend</code></td><td>你的服务器类型对应的编号，例如 Ollama 是 <code>2</code>。默认值 <code>[1]</code> 是 MLC。</td></tr>
+              <tr><td><code>Chat backend</code></td><td>你的服务器类型对应的编号，例如 Ollama 是 <code>2</code>。默认值 <code>[1]</code> 是 MLC。其他兼容 OpenAI 接口的服务器请选择 vLLM（<code>3</code>）。</td></tr>
               <tr><td><code>Base URL</code></td><td>服务器地址。按回车接受方括号中显示的默认值。</td></tr>
               <tr><td><code>Chat model name</code></td><td>模型名，例如 <code>qwen3:8b</code>。</td></tr>
               <tr><td><code>Start?</code></td><td>按回车（表示“是”）继续。</td></tr>
@@ -118,7 +121,7 @@ pip install -e ".[gateway]"</code></pre>
             </tbody>
           </table>
         </div>
-        <p>使用云端 API 时，向导会询问 <code>API key env var</code> 和 <code>Chat model</code>，而不是 <code>Base URL</code> 和 <code>Chat model name</code>。</p>
+        <p>使用云端 API 时，请选择对应的服务商。向导接着会询问 <code>API key env var</code>（即你导出的那个变量的名字）和 <code>Chat model</code>，而不是 <code>Base URL</code> 和 <code>Chat model name</code>。</p>
         <p>Ollama 的默认地址 <code>http://localhost:11434</code> 没有 <code>/v1</code>，这是正确的：<code>ollama</code> 后端使用 Ollama 自己的 API，而不是兼容 OpenAI 的 API。</p>
         <p>接着，向导会向每个服务器发送一个简短的测试请求（<code>Probing backends ...</code>）。如果某个服务器没有响应，它会输出 <code>Probe failed: …</code> 并询问 <code>Save config anyway? [N]</code>；直接按回车则什么也不保存。成功时，它会输出 <code>Config saved to …</code>（后面是 <code>~/.cache/localmelo/config.toml</code> 的路径），然后<strong>启动网关</strong>，地址为 <code>http://127.0.0.1:8401</code>。网关会一直在这个终端中运行。</p>
       </section>

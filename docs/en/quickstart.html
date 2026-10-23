@@ -86,9 +86,13 @@ source .venv/bin/activate</code></pre>
           fails with <code class="wrap">ModuleNotFoundError: No module named 'localmelo'</code>.
         </p>
         <p>
-          The rest of this guide calls <code>melo</code> directly. If you did
-          not activate the environment, put <code>uv run</code> in front of
-          each command.
+          The rest of this guide calls <code>melo</code> directly. Activation
+          lasts for this terminal only: in a new terminal, run
+          <code>source &lt;clone&gt;/.venv/bin/activate</code> again, where
+          <code>&lt;clone&gt;</code> is your <code>localmelo</code> directory.
+          With uv you can also run <code>uv run melo …</code> inside the
+          clone, or <code>uv run --project &lt;clone&gt; melo …</code> from
+          anywhere else.
         </p>
 
         <h3 id="install-with-pip">Install with pip</h3>
@@ -107,6 +111,15 @@ pip install -e ".[gateway]"</code></pre>
 
       <section class="section" id="run-your-first-task">
         <h2>Run your first task</h2>
+        <div class="callout warning">
+          <p>
+            <strong>The model can run shell commands and Python code, and read
+            or write any file you can: there is no sandbox.</strong> To run a
+            task without tools, add <code>--builtins none</code>. See the
+            <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">security policy</a>
+            and <a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#what-the-checks-do">what the checks do</a>.
+          </p>
+        </div>
         <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"</code></pre>
         <p>
           The answer is printed on stdout, and the command exits with code 0
@@ -148,7 +161,10 @@ pip install -e ".[gateway]"</code></pre>
         <p>
           A configuration file saves the backends, so that
           <code>melo "&lt;task&gt;"</code> and the gateway work without
-          <code>--base-url</code>. The setup wizard writes it:
+          <code>--base-url</code>. The setup wizard writes it. For a cloud
+          API, first run <code>export OPENAI_API_KEY="&lt;your key&gt;"</code>
+          (or your vendor's variable) in this terminal: the wizard's test
+          request uses that key.
         </p>
         <pre><code>melo --serve --reconfigure</code></pre>
         <p>The wizard asks:</p>
@@ -158,7 +174,7 @@ pip install -e ".[gateway]"</code></pre>
               <tr><th scope="col">Prompt</th><th scope="col">What to enter</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>Chat backend</code></td><td>The number of your server type, such as <code>2</code> for Ollama. The default, <code>[1]</code>, is MLC.</td></tr>
+              <tr><td><code>Chat backend</code></td><td>The number of your server type, such as <code>2</code> for Ollama. The default, <code>[1]</code>, is MLC. For another OpenAI-compatible server, choose vLLM (<code>3</code>).</td></tr>
               <tr><td><code>Base URL</code></td><td>Your server's URL. Press Enter to accept the default shown in brackets.</td></tr>
               <tr><td><code>Chat model name</code></td><td>The model, such as <code>qwen3:8b</code>.</td></tr>
               <tr><td><code>Start?</code></td><td>Press Enter (yes) to continue.</td></tr>
@@ -168,8 +184,9 @@ pip install -e ".[gateway]"</code></pre>
           </table>
         </div>
         <p>
-          For a cloud API, the wizard asks for <code>API key env var</code> and
-          <code>Chat model</code> instead of <code>Base URL</code> and
+          For a cloud API, choose the vendor. The wizard then asks for
+          <code>API key env var</code>, the name of the variable you exported,
+          and <code>Chat model</code> instead of <code>Base URL</code> and
           <code>Chat model name</code>.
         </p>
         <p>

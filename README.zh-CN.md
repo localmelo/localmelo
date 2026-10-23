@@ -6,11 +6,11 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-一个本地个人智能体：在你自己的模型服务器或云端 API 上，借助工具和记忆完成任务。
+一个本地个人智能体：在你自己的模型服务器或云端 API 上，借助工具和记忆完成任务。你可以在命令行、脚本和基准测试中用它运行任务（每次运行输出一行 JSON 和固定的退出码），也可以通过 HTTP 调用它。
 
 [网站](https://localmelo.github.io/localmelo/zh-CN/index.html) · [快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html) · [文档（英文）](docs/README.md) · [路线图](https://localmelo.github.io/localmelo/zh-CN/updates.html#roadmap)
 
-**状态**：早期预览版（pre-alpha）。直接模式和网关现在已经可以使用。在 v0.1.0（里程碑计划于 2026-12-20 完成）之前，命令、HTTP API 和 Python API 都可能变化。
+**状态**：早期预览版（pre-alpha）。在命令行中运行任务（直接模式）和 HTTP 网关现在已经可以使用。在 v0.1.0（里程碑计划于 2026-12-20 完成）之前，命令、HTTP API 和 Python API 都可能变化。
 
 ## 功能
 
@@ -25,7 +25,7 @@ localmelo 不负责下载、启动或部署模型：模型服务器需要你自�
 
 ## 环境要求
 
-- macOS。localmelo 在 macOS 上开发和测试，在 Linux 上应该也能运行，不支持 Windows。
+- macOS（在 macOS 上开发和测试）或 Linux（应该也能运行，但尚未测试）。不支持 Windows。
 - Python 3.11 或更高版本，以及 Git。
 - [uv](https://docs.astral.sh/uv/)（推荐）或 pip。
 - 一个你自己运行的模型服务器，例如 [Ollama](https://ollama.com)；或者一个云端 API 的密钥。
@@ -41,27 +41,38 @@ source .venv/bin/activate
 
 请保留目录名 `localmelo`：软件包就是从这个目录构建的。重命名后的目录或 ZIP 下载（`localmelo-main`）会报错 `ModuleNotFoundError: No module named 'localmelo'`。
 
-不使用 uv 时，请看快速开始中的[安装](https://localmelo.github.io/localmelo/zh-CN/quickstart.html#install)一节，那里有用 pip 安装的步骤。下面的示例直接调用 `melo`；如果没有激活虚拟环境，请在命令前加上 `uv run`。
+不使用 uv 时，请看快速开始中的[用 pip 安装](https://localmelo.github.io/localmelo/zh-CN/quickstart.html#install-with-pip)一节。
+
+下面的示例直接调用 `melo`。激活虚拟环境只对当前终端有效：打开新终端后，需要再次运行 `source <clone>/.venv/bin/activate`，其中 `<clone>` 是你的 `localmelo` 目录。使用 uv 时，也可以在克隆目录中运行 `uv run melo …`，或在其他任何位置运行 `uv run --project <clone> melo …`。
+
+更新或卸载 localmelo 的方法见[配置（英文）](docs/configuration.md#update-localmelo)。
 
 ## 快速开始
 
 1. 启动模型服务器。下面以 [Ollama](https://ollama.com) 为例：安装并启动它，然后用 `ollama pull qwen3:8b` 下载一个模型。任何兼容 OpenAI 接口的服务器都可以，使用它的 `/v1` 地址即可。
 
-2. 运行一个任务：
+2. 运行一个任务。模型可以用你的账户权限使用工具，详见[安全](#安全)。
 
    ```bash
    melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
    ```
 
-   答案会输出到 stdout；运行完成时退出码为 0。加上 `--output-format json`，输出就会变成一行 JSON，记录这次运行的结果。
+   答案会输出到 stdout；运行完成时退出码为 0。加上 `--output-format json`，输出就会变成一行 JSON，记录这次运行的结果。`--base-url` 不会发送 API 密钥；使用云端 API 时，请直接跳到第 3 步。
 
-3. 保存配置并启动网关：
+3. 保存配置并启动网关。使用云端 API 时，请先在同一个终端中运行 `export OPENAI_API_KEY="<your key>"`（或你所用服务商对应的变量）：向导的测试请求会用到这个密钥。
 
    ```bash
    melo --serve --reconfigure
    ```
 
-   配置向导会询问对话后端、它的地址和模型，以及嵌入后端；如果没有嵌入服务器，请选择 `None (no long-term memory)`。向导会检查服务器能否连通，保存 `~/.cache/localmelo/config.toml`，然后在 `http://127.0.0.1:8401` 上提供服务。在另一个终端中运行：
+   配置向导会询问对话后端、它的地址和模型，以及嵌入后端：
+
+   - 如果第 1 步启动的是 Ollama，请选择 `2`，然后按回车接受建议的地址和模型。
+   - 如果是其他兼容 OpenAI 接口的服务器，请选择 vLLM（`3`），然后输入它的地址和模型名。
+   - 使用云端 API 时，请选择对应的服务商。
+   - 如果没有嵌入服务器，嵌入后端请选择 `5`，即 `None (no long-term memory)`。
+
+   向导会检查服务器能否连通，保存 `~/.cache/localmelo/config.toml`，然后在 `http://127.0.0.1:8401` 上提供服务。在另一个终端中运行：
 
    ```bash
    curl http://127.0.0.1:8401/v1/health
@@ -114,7 +125,7 @@ source .venv/bin/activate
 
 ## 获取帮助
 
-先在 [GitHub issues](https://github.com/localmelo/localmelo/issues) 中搜索，找不到再新建一个。请附上 `--output-format json` 输出的那一行 JSON（其中包含 localmelo 的版本）、退出码、后端和模型，以及复现步骤。提交前请删除 API 密钥和个人路径。安全问题请按 [SECURITY.md（英文）](SECURITY.md)中的方式报告，不要公开提交 issue。
+先在 [GitHub issues](https://github.com/localmelo/localmelo/issues) 中搜索，找不到再新建一个。请附上 `--output-format json` 输出的那一行 JSON（其中包含 localmelo 的版本）、退出码、后端和模型、你的操作系统和 Python 版本，以及复现步骤。提交前请删除 API 密钥和个人路径。安全问题请按 [SECURITY.md（英文）](SECURITY.md)中的方式报告，不要公开提交 issue。
 
 ## 参与贡献
 
