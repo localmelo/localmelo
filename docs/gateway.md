@@ -150,26 +150,49 @@ earlier tasks of its session.
 
 ## Web UI (playground)
 
-Open `http://127.0.0.1:8401/` in a browser for a small chat page headed
-"localmelo playground":
+Open `http://127.0.0.1:8401/` in a browser for the localmelo workspace:
 
 1. Enter the URL of a chat server, and optionally of an embedding server.
-2. Pick one of the models the server lists, and optionally a sample memory
-   set.
-3. Chat.
+2. Discover models, pick a chat model, and optionally select an embedding model
+   or seed memory set. Embeddings and seed memories are disabled by default.
+3. Create a chat, then send a message. Creating a chat never sends your draft.
+
+The sidebar supports chat search and switching. Drafts stay with each chat in
+the current browser tab. The workspace restores live chats after a page reload
+and polls for changes from other browser clients every 2.5 seconds while visible.
+Chats remain in memory and are not restored after a gateway restart.
+
+Stop cancels the harness task and its current provider/tool request. Shell
+process groups are killed; already dispatched model computation can still finish
+inside a backend. In-process `python_exec` remains non-interruptible while Python
+code blocks the event loop. See [Tools and MCP](tools.md) for execution limits.
 
 The web UI works apart from the HTTP API above:
 
 - It does not use the config file. It talks to the URL you enter, so
   `extra_body` and `request_timeout_s` do not apply. Chat requests wait up to
   300 seconds, and a task is stopped after 600 seconds.
-- It keeps up to 12 sessions and closes those idle for 2 hours.
+- It keeps up to 12 sessions and closes those idle for 2 hours when creating a
+  chat. At capacity, an idle chat is replaced only after preparation succeeds;
+  if all chats are busy, creation fails with HTTP 409.
 - All its sessions share one memory store in
   `~/.cache/localmelo/playground/`, which is always on.
 - Its routes under `/v1/playground/` are internal and may change.
 
-The web UI is a test page. It is not the web console on the
-[Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap).
+The workspace routes include `GET /v1/playground/sessions` for summaries,
+`GET /v1/playground/session/{id}` for a transcript, and
+`POST /v1/playground/session/{id}/cancel` for cancellation. Running or deleting
+a busy chat returns HTTP 409. The ordinary `/v1/agent/` API remains separate.
+
+To start only the workspace without the configuration wizard:
+
+```bash
+uv run python -m localmelo.support.gateway._test_webapp
+```
+
+This remains a local development service without authentication. See
+[Apple client direction](mobile-client-direction.md) for the proposed durable,
+authenticated control layer for iPhone and Mac clients.
 
 ## Run the gateway at login (macOS)
 

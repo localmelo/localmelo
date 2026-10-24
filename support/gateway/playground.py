@@ -29,6 +29,10 @@ _SCENARIOS_PATH = (
 )
 
 
+class SessionBusyError(RuntimeError):
+    """The requested action would interrupt an active session."""
+
+
 def _normalize_input_url(url: str) -> str:
     url = (url or "").strip()
     if not url:
@@ -47,6 +51,8 @@ def _strip_v1(url: str) -> str:
 
 def _detect_adapter(chat_url: str, hint: str | None) -> str:
     if hint and hint not in {"", "auto"}:
+        if hint not in {"mlc", "omlx", "ollama", "vllm", "sglang"}:
+            raise ValueError(f"Unsupported adapter: {hint}")
         return hint
     lowered = _normalize_input_url(chat_url).lower()
     if "11434" in lowered or "ollama" in lowered:
@@ -119,11 +125,14 @@ class PlaygroundSession:
     embedding_url: str = ""
     embedding_model: str = ""
     scenario_id: str = ""
+    scenario: dict[str, Any] | None = None
     session_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     created_at: float = field(default_factory=time.time)
     last_active: float = field(default_factory=time.time)
     messages: list[dict[str, str]] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    task: asyncio.Task[str] | None = field(default=None, repr=False)
+    cancel_requested: bool = False
 
     def touch(self) -> None:
         self.last_active = time.time()
@@ -141,12 +150,14 @@ class SmokePlayground:
         self._idle_ttl = idle_ttl
         self._scenarios = _load_scenarios()
         self._scenario_map = {sc["id"]: sc for sc in self._scenarios}
+        self._creation_lock = asyncio.Lock()
 
-        # Shared SQLite memory backends — all sessions read/write the same store
+        # Share persisted memories, but let each agent own its connections.
+        # Closing one session must not close resources used by another run.
         mem_dir = Path(memory_dir) if memory_dir else _DEFAULT_MEMORY_DIR
         mem_dir.mkdir(parents=True, exist_ok=True)
-        self._shared_history = SqliteHistory(str(mem_dir / "history.db"))
-        self._shared_long_term = SqliteLongTerm(str(mem_dir / "long_term.db"))
+        self._history_path = mem_dir / "history.db"
+        self._long_term_path = mem_dir / "long_term.db"
 
     def scenarios_payload(self) -> list[dict[str, Any]]:
         payload: list[dict[str, Any]] = []
@@ -179,7 +190,7 @@ class SmokePlayground:
         chat_models = await self._fetch_models(chat_url)
         embedding_models = (
             await self._fetch_models(embedding_url)
-            if embedding_url
+            if embedding_url != chat_url
             else list(chat_models)
         )
 
@@ -201,49 +212,82 @@ class SmokePlayground:
         adapter: str | None = None,
         scenario_id: str = "",
     ) -> dict[str, Any]:
-        await self._evict_idle()
-        if len(self._sessions) >= self._max:
-            await self._evict_oldest()
-
         chat_url = _normalize_input_url(chat_url)
-        embedding_url = _normalize_input_url(embedding_url or "")
+        embedding_url = _normalize_input_url(
+            embedding_url or (chat_url if embedding_model else "")
+        )
+        chat_model = chat_model.strip()
         if not chat_url:
             raise ValueError("chat_url is required")
         if not chat_model:
             raise ValueError("chat_model is required")
+        if (
+            scenario_id
+            and scenario_id != "__all__"
+            and scenario_id not in self._scenario_map
+        ):
+            raise ValueError("Unknown seed memory set")
 
         detected = _detect_adapter(chat_url, adapter)
+        # Seeding may await embedding requests. Reserve capacity across the
+        # complete creation operation instead of racing other creations.
+        async with self._creation_lock:
+            if len(self._sessions) >= self._max and all(
+                session.lock.locked() for session in self._sessions.values()
+            ):
+                raise SessionBusyError(
+                    "All sessions are busy. Stop a response before creating a chat."
+                )
+            session = await self._create_session(
+                detected,
+                chat_url,
+                chat_model,
+                embedding_url,
+                embedding_model,
+                scenario_id,
+            )
+            try:
+                # Do not discard a conversation until its replacement is ready.
+                # A previously idle chat may also have started a run while the
+                # new agent was waiting for seed embeddings.
+                await self._evict_idle()
+                if len(self._sessions) >= self._max:
+                    await self._evict_oldest()
+                if len(self._sessions) >= self._max:
+                    raise SessionBusyError(
+                        "All sessions are busy. Stop a response before creating a chat."
+                    )
+            except BaseException:
+                await session.agent.close()
+                raise
+            self._sessions[session.session_id] = session
+            return self.get_session(session.session_id)
+
+    async def _create_session(
+        self,
+        detected: str,
+        chat_url: str,
+        chat_model: str,
+        embedding_url: str,
+        embedding_model: str,
+        scenario_id: str,
+    ) -> PlaygroundSession:
         llm = self._build_llm_provider(detected, chat_url, chat_model)
         embedding = self._build_embedding_provider(embedding_url, embedding_model)
         agent = Agent(llm=llm, embedding=embedding)
 
-        # Inject shared SQLite backends so all sessions share one memory store
-        agent.hippo.history = self._shared_history
+        await agent.hippo.aclose()
+        agent.hippo.history = SqliteHistory(self._history_path)
         if embedding:
-            agent.hippo.long = self._shared_long_term
+            agent.hippo.long = SqliteLongTerm(self._long_term_path)
 
-        scenario_summary = None
-        if scenario_id == "__all__":
-            total = 0
-            for sc in self._scenarios:
-                for fact in sc["seed_memories"]:
-                    await agent.hippo.memorize(fact)
-                    total += 1
-            scenario_summary = {
-                "id": "__all__",
-                "name": "All Memories",
-                "description": f"Loaded {total} seed memories from all sets",
-                "seed_count": total,
-                "queries": [q for sc in self._scenarios for q in sc.get("queries", [])],
-            }
-        else:
-            scenario = self._scenario_map.get(scenario_id) if scenario_id else None
-            if scenario:
-                for fact in scenario["seed_memories"]:
-                    await agent.hippo.memorize(fact)
-                scenario_summary = self._scenario_summary(scenario)
+        try:
+            scenario_summary = await self._seed_memories(agent, scenario_id)
+        except BaseException:
+            await agent.close()
+            raise
 
-        session = PlaygroundSession(
+        return PlaygroundSession(
             agent=agent,
             adapter=detected,
             chat_url=chat_url,
@@ -251,17 +295,60 @@ class SmokePlayground:
             embedding_url=embedding_url,
             embedding_model=embedding_model,
             scenario_id=scenario_id,
+            scenario=scenario_summary,
         )
-        self._sessions[session.session_id] = session
 
+    async def _seed_memories(
+        self, agent: Agent, scenario_id: str
+    ) -> dict[str, Any] | None:
+        if scenario_id == "__all__":
+            total = 0
+            for sc in self._scenarios:
+                for fact in sc["seed_memories"]:
+                    await agent.hippo.memorize(fact)
+                    total += 1
+            return {
+                "id": "__all__",
+                "name": "All Memories",
+                "description": f"Loaded {total} seed memories from all sets",
+                "seed_count": total,
+                "queries": [q for sc in self._scenarios for q in sc.get("queries", [])],
+            }
+        scenario = self._scenario_map.get(scenario_id)
+        if scenario:
+            for fact in scenario["seed_memories"]:
+                await agent.hippo.memorize(fact)
+        return self._scenario_summary(scenario)
+
+    def list_sessions(self) -> list[dict[str, Any]]:
+        return [self._session_payload(s) for s in self._sessions.values()]
+
+    def get_session(self, session_id: str) -> dict[str, Any]:
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise KeyError("session not found")
+        return {
+            **self._session_payload(session),
+            "messages": [dict(m) for m in session.messages],
+        }
+
+    def _session_payload(self, session: PlaygroundSession) -> dict[str, Any]:
+        title = next(
+            (m["content"] for m in session.messages if m["role"] == "user"), "New chat"
+        )
         return {
             "session_id": session.session_id,
-            "adapter": detected,
-            "chat_url": chat_url,
-            "chat_model": chat_model,
-            "embedding_url": embedding_url,
-            "embedding_model": embedding_model,
-            "scenario": scenario_summary,
+            "adapter": session.adapter,
+            "chat_url": session.chat_url,
+            "chat_model": session.chat_model,
+            "embedding_url": session.embedding_url,
+            "embedding_model": session.embedding_model,
+            "scenario_id": session.scenario_id,
+            "scenario": session.scenario,
+            "created_at": session.created_at,
+            "last_active": session.last_active,
+            "title": " ".join(title.split())[:80],
+            "is_busy": session.lock.locked(),
         }
 
     async def run(
@@ -272,14 +359,43 @@ class SmokePlayground:
             raise KeyError("session not found")
         if not query.strip():
             raise ValueError("query is required")
+        if session.lock.locked():
+            raise SessionBusyError(
+                "This chat is already responding. Stop it or wait for it to finish."
+            )
 
         async with session.lock:
             session.touch()
-            result = await asyncio.wait_for(
-                session.agent.run(query.strip()), timeout=timeout
-            )
-            thinking, answer = split_thinking_and_answer(result)
+            session.cancel_requested = False
             session.messages.append({"role": "user", "content": query.strip()})
+            session.task = asyncio.create_task(session.agent.run(query.strip()))
+            try:
+                result = await asyncio.wait_for(session.task, timeout=timeout)
+            except asyncio.CancelledError:
+                session.messages.append(
+                    {"role": "note", "content": "Response stopped."}
+                )
+                if not session.cancel_requested:
+                    raise
+                return {
+                    "session_id": session_id,
+                    "cancelled": True,
+                    "result": "",
+                    "thinking": "",
+                    "answer": "",
+                }
+            except Exception as exc:
+                message = (
+                    "Response timed out."
+                    if isinstance(exc, TimeoutError)
+                    else f"Error: {exc}"
+                )
+                session.messages.append({"role": "note", "content": message})
+                raise
+            finally:
+                session.task = None
+                session.touch()
+            thinking, answer = split_thinking_and_answer(result)
             session.messages.append(
                 {
                     "role": "assistant",
@@ -295,16 +411,34 @@ class SmokePlayground:
                 "answer": answer or result,
             }
 
+    async def cancel(self, session_id: str) -> bool:
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise KeyError("session not found")
+        if session.task is None or session.task.done():
+            return False
+        session.cancel_requested = True
+        session.task.cancel()
+        # Wait until run() has recorded the note and released its session lock.
+        async with session.lock:
+            return True
+
     async def close(self, session_id: str) -> bool:
-        session = self._sessions.pop(session_id, None)
+        session = self._sessions.get(session_id)
         if session is None:
             return False
+        if session.lock.locked():
+            raise SessionBusyError(
+                "This chat is still responding. Stop it before closing it."
+            )
+        self._sessions.pop(session_id, None)
         await session.agent.close()
         return True
 
     async def close_all(self) -> None:
         for session in list(self._sessions.values()):
             with contextlib.suppress(Exception):
+                await self.cancel(session.session_id)
                 await session.agent.close()
         self._sessions.clear()
 

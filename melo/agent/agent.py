@@ -1584,6 +1584,8 @@ class Agent:
             if not response.tool_calls:
                 if response.content.strip():
                     # No tool call → direct answer
+                    if self._memory_write_allowed(response.content, "assistant"):
+                        self.hippo.working.append(response)
                     run.end("completed", result=response.content)
                     return step + 1, ""
                 # An empty reply is no answer: ask for one and plan again.

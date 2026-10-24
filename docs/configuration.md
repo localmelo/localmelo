@@ -15,7 +15,7 @@ backend; [Save a configuration](quickstart.md#save-a-configuration) lists the
 prompts. It sends a short test request to each server, saves the config
 file, and then starts the gateway. Press Ctrl+C to stop the gateway.
 
-- `melo --reconfigure` does the same.
+- `melo --reconfigure` saves the configuration without starting the gateway.
 - `melo --serve` runs the wizard by itself when there is no config file.
 - Run the wizard again to change backends. It keeps the other settings it
   knows, such as `request_timeout_s` and `extra_body`, and rewrites the file

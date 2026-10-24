@@ -64,22 +64,24 @@ error: externally-managed-environment
 FileNotFoundError: [Errno 2] No such file or directory: '…/localmelo/tests/smoke/data/scenarios.json'
 ```
 
-- **Cause:** localmelo was installed with pip but without `-e`, which leaves
-  out this data file of the web UI.
-- **Fix:** install again with `pip install -e ".[gateway]"`.
+- **Cause:** an older build omitted this required data file from its wheel.
+  Current builds package it along with the web workspace's assets.
+- **Fix:** update and reinstall localmelo as described in
+  [Update localmelo](configuration.md#update-localmelo). An editable source
+  install with `pip install -e ".[gateway]"` also includes the file.
 
 ## Setup and configuration
 
 ### No backend configured
 
 ```text
-No backend configured. Run 'melo --serve --reconfigure' to set up,
+No backend configured. Run 'melo --reconfigure' to set up,
 or use --base-url to connect to an OpenAI-compatible endpoint.
 ```
 
 - **Cause:** there is no config file, and the command has no `--base-url`.
   `melo` exits with code 1.
-- **Fix:** save a configuration with `melo --serve --reconfigure`, or add
+- **Fix:** save a configuration with `melo --reconfigure`, or add
   `--base-url` and `--chat-model`.
 
 ### Configuration errors
@@ -122,9 +124,10 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
   `Setup cancelled — config not saved.`), correct the problem, and run the
   wizard again.
 
-### `melo --reconfigure` does not return
+### `melo --serve --reconfigure` does not return
 
-- **Cause:** after saving, the wizard starts the gateway, which keeps running.
+- **Cause:** `--serve` starts the gateway after saving, and the gateway keeps
+  running. Standalone `melo --reconfigure` saves the configuration and returns.
 - **Fix:** nothing is wrong. Press Ctrl+C to stop the gateway;
   `melo "<task>"` then uses the saved configuration.
 

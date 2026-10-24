@@ -53,9 +53,16 @@ class GatewayServer:
     async def _lifespan(self, app: FastAPI) -> AsyncIterator[None]:  # type: ignore[type-arg]
         self._started_at = time.time()
         logger.info("gateway ready on %s:%d", self.host, self.port)
-        yield
-        logger.info("gateway shutting down")
-        await self.sessions.close_all()
+        try:
+            yield
+        finally:
+            logger.info("gateway shutting down")
+            await self.sessions.close_all()
+            # FastAPI does not run on_event handlers when an explicit lifespan
+            # is installed. Close the web workspace's providers here as well.
+            playground = getattr(app.state, "smoke_playground", None)
+            if playground is not None:
+                await playground.close_all()
 
     # ── Routes ──
 
@@ -134,6 +141,11 @@ class GatewayServer:
                             "session_id": session.session_id,
                         },
                     )
+                finally:
+                    # Cancellation is a BaseException, so an except Exception
+                    # alone leaves a disconnected request permanently running.
+                    session.status = "idle"
+                    session.touch()
 
         @app.get("/v1/sessions")
         async def list_sessions() -> JSONResponse:

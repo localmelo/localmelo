@@ -42,6 +42,7 @@
       <a href="#json-output">Get the result as JSON</a>
       <a href="#save-a-configuration">Save a configuration</a>
       <a href="#start-the-gateway">Start the gateway</a>
+      <a href="#interactive-conversations">Interactive conversations</a>
       <a href="#next-steps">Next steps</a>
     </nav>
 
@@ -102,10 +103,9 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[gateway]"</code></pre>
         <p>
-          <code>python3</code> must be Python 3.11 or later. Keep the
-          <code>-e</code> (editable install): a regular install leaves out a
-          data file that the gateway needs, and <code>melo --serve</code> then
-          fails with <code>FileNotFoundError</code>.
+          <code>python3</code> must be Python 3.11 or later. The
+          <code>-e</code> flag keeps the installation linked to this checkout,
+          so source changes apply without reinstalling.
         </p>
       </section>
 
@@ -228,6 +228,26 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
         </p>
         <pre><code>melo "What is 6*7?"</code></pre>
         <p>To start the gateway again without the wizard, run <code>melo --serve</code>.</p>
+      </section>
+
+      <section class="section" id="interactive-conversations">
+        <h2>Interactive conversations</h2>
+        <p>Omit the task to enter a terminal conversation using the same agent across turns:</p>
+        <pre><code>melo
+# Or use the exact model ID from an OpenAI-compatible server:
+melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID</code></pre>
+        <p>
+          Use <code>/help</code> for commands and <code>/exit</code> or Ctrl-D
+          to leave. <code>melo --reconfigure</code> configures the backend;
+          add <code>--serve</code> to start the gateway after configuration.
+        </p>
+        <p>
+          The web workspace at <code>http://127.0.0.1:8401/</code> supports
+          model discovery, separate chat drafts, code formatting, cancellation,
+          and responsive navigation. Connected browser clients synchronize
+          conversation state, and reloads recover live chats. Sessions do not
+          survive gateway restarts, and direct CLI chats are independent.
+        </p>
       </section>
 
       <section class="section" id="next-steps">

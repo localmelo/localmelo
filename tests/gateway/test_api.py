@@ -354,3 +354,49 @@ class TestNoEmbeddedInference:
     def test_no_start_llm_server_method(self) -> None:
         """GatewayServer must not have _start_llm_server."""
         assert not hasattr(GatewayServer, "_start_llm_server")
+
+
+@pytest.mark.asyncio
+async def test_cancelled_request_returns_session_to_idle() -> None:
+    import asyncio
+
+    import httpx
+
+    sessions = FakeSessionManager()
+    server = _build_server(sessions)
+    session = await sessions.create("cancelled")
+    started = asyncio.Event()
+
+    async def blocked(query: str) -> str:
+        started.set()
+        await asyncio.Event().wait()
+        return "unreachable"
+
+    session.agent.run = blocked  # type: ignore[method-assign]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=server.app), base_url="http://test"
+    ) as client:
+        request = asyncio.create_task(
+            client.post(
+                "/v1/agent/run", json={"session_id": "cancelled", "query": "wait"}
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert session.status == "running"
+        request.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await request
+        assert session.status == "idle"
+        assert not session.is_busy
+
+
+def test_gateway_lifespan_closes_playground() -> None:
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    server = _build_server()
+    close = AsyncMock()
+    server.app.state.smoke_playground = SimpleNamespace(close_all=close)
+    with TestClient(server.app):
+        close.assert_not_awaited()
+    close.assert_awaited_once()

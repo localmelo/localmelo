@@ -126,6 +126,33 @@ To update or uninstall localmelo, see
 Next, the [Quickstart](docs/quickstart.md) walks through each step in more
 detail.
 
+## Interactive workspace
+
+Run `melo` without a task to start an interactive terminal conversation using
+your configured backend. Use `/help` for commands and `/exit` to leave. To
+connect directly to oMLX or another OpenAI-compatible server:
+
+```bash
+melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID
+```
+
+Run `melo --serve` and open `http://127.0.0.1:8401/` for the web workspace.
+Discover your server's models, select one, and create a chat. Embeddings and
+seed memories are optional. Chats support search, separate drafts, code
+formatting, cancellation, and responsive navigation with Melo's existing artwork.
+Browser clients on one gateway synchronize their chat state; page reloads
+recover chats while that gateway process remains alive. Direct CLI conversations
+remain separate from web chats.
+
+To try the web workspace without configuring the main gateway:
+
+```bash
+uv run python -m localmelo.support.gateway._test_webapp
+```
+
+See [Apple client direction](docs/mobile-client-direction.md) for the proposed
+iPhone/Mac architecture and the work required before authenticated remote access.
+
 ## Documentation
 
 | Page | What it covers |
@@ -136,6 +163,8 @@ detail.
 | [Configuration](docs/configuration.md) | Setup wizard, config file, backends, timeouts, environment variables |
 | [Tools and MCP](docs/tools.md) | Built-in tools, MCP servers, which tools a step offers, the checks |
 | [Gateway and HTTP API](docs/gateway.md) | HTTP API, sessions, web UI, running at login on macOS |
+| [Apple client direction](docs/mobile-client-direction.md) | Proposed iPhone/Mac clients, shared state, authenticated remote access |
+| [Workspace review](docs/ui-review-2026-10-24.md) | UI and harness changes, validation, current limits |
 | [Memory](docs/memory.md) | What localmelo remembers, keeping, inspecting and resetting it |
 | [Python API](docs/python-api.md) | `Agent`, `AgentOptions` and `RunResult` (experimental) |
 | [How localmelo works](docs/how-it-works.md) | The run loop, reflection, memory and timeouts |
@@ -156,9 +185,7 @@ The v0.1.0 milestone is due 2026-12-20.
 
 Planned:
 
-- an interactive CLI (running `melo` without a task will open it; today that
-  starts the gateway);
-- a web console;
+- durable conversations shared by the CLI, web console, and future mobile clients;
 - keeping the model's reasoning as memory notes, with switchable retrieval
   (`bm25`, `llm`, `embedding`).
 
