@@ -369,38 +369,26 @@ class TestUsageErrors:
                 "--embedding-base-url requires --base-url",
             ),
             (
-                ["--max-steps", "3"],
-                "only for direct mode (a query without --serve): --max-steps",
-            ),
-            (
                 # An empty query runs no task, so there is no run to report.
                 ["--output-format", "json", ""],
-                "only for direct mode (a query without --serve): --output-format",
+                "--output-format json requires a query",
             ),
             (
                 ["--serve", "--timeout", "5", "--output-format", "json", "q"],
-                "only for direct mode (a query without --serve): --timeout, "
+                "only for terminal mode (without --serve, --daemon or --reconfigure): --timeout, "
                 "--output-format",
             ),
             (
-                ["--request-timeout", "600"],
-                "only for direct mode (a query without --serve): --request-timeout",
-            ),
-            (
                 ["--serve", "--request-timeout", "600", "q"],
-                "only for direct mode (a query without --serve): --request-timeout",
-            ),
-            (
-                ["--reflection-gate", "utility"],
-                "only for direct mode (a query without --serve): --reflection-gate",
+                "only for terminal mode (without --serve, --daemon or --reconfigure): --request-timeout",
             ),
             (
                 ["--serve", "--reflection-gate", "flags", "q"],
-                "only for direct mode (a query without --serve): --reflection-gate",
+                "only for terminal mode (without --serve, --daemon or --reconfigure): --reflection-gate",
             ),
             (
                 ["--serve", "--attempt-policy", "none", "--reflection-gate", "flags"],
-                "only for direct mode (a query without --serve): --attempt-policy, "
+                "only for terminal mode (without --serve, --daemon or --reconfigure): --attempt-policy, "
                 "--reflection-gate",
             ),
         ],
@@ -828,7 +816,11 @@ class TestInteractive:
             ("second task",),
         ]
         out, err = capsys.readouterr()
-        assert out == "melo agent (type 'exit' to quit)\n\nsecond answer\n"
+        assert out == (
+            "localmelo · local agent\n"
+            "Enter a task to begin. Type /help for commands or /exit to quit.\n"
+            "\nsecond answer\n"
+        )
         assert err == "melo: run ended with status provider_error: HTTP 500\n"
         agent.close.assert_awaited_once()
 

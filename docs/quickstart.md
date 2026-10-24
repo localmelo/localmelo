@@ -48,9 +48,8 @@ source .venv/bin/activate
 pip install -e ".[gateway]"
 ```
 
-`python3` must be Python 3.11 or later. Keep the `-e` (editable install): a
-regular install leaves out a data file that the gateway needs, and
-`melo --serve` then fails with `FileNotFoundError`.
+`python3` must be Python 3.11 or later. The `-e` flag keeps the installation
+linked to this checkout, so source changes apply without reinstalling.
 
 ## Run your first task
 
@@ -160,6 +159,24 @@ melo "What is 6*7?"
 ```
 
 To start the gateway again without the wizard, run `melo --serve`.
+
+## Interactive conversations
+
+Omit the task to enter a terminal conversation using the same agent across turns:
+
+```bash
+melo
+# Or use the exact model ID from an OpenAI-compatible server:
+melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID
+```
+
+Use `/help` for commands and `/exit` or Ctrl-D to leave. `melo --reconfigure`
+configures the backend; add `--serve` to start the gateway after configuration.
+
+The web workspace at `http://127.0.0.1:8401/` supports model discovery, separate
+chat drafts, code formatting, cancellation, and responsive navigation. Connected
+browser clients synchronize conversation state, and reloads recover live chats.
+Sessions do not survive gateway restarts, and direct CLI chats are independent.
 
 ## Next steps
 

@@ -85,6 +85,24 @@ source .venv/bin/activate
 
 接下来，[快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html)会更详细地介绍每一步。
 
+## 交互式工作区
+
+不带任务运行 `melo`，即可使用已配置的后端开始终端对话。用 `/help` 查看命令，或用 `/exit` 退出。也可以直接连接 oMLX 或其他兼容 OpenAI 接口的服务器：
+
+```bash
+melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID
+```
+
+运行 `melo --serve`，然后打开 `http://127.0.0.1:8401/`，即可使用网页工作区。发现服务器上的模型，选择模型，再创建对话。嵌入和初始记忆都是可选项。对话支持搜索、独立草稿、代码格式化、取消运行和响应式导航，并使用 Melo 现有的图像。同一网关上的浏览器客户端会同步对话状态；只要网关进程仍在运行，刷新页面就能恢复对话。直接运行的命令行对话与网页对话相互独立。
+
+如果想先试用网页工作区，而不配置主网关：
+
+```bash
+uv run python -m localmelo.support.gateway._test_webapp
+```
+
+拟议的 iPhone/Mac 架构，以及经过身份验证的远程访问还需要哪些工作，见 [Apple 客户端方向（英文）](docs/mobile-client-direction.md)。
+
 ## 文档
 
 | 页面 | 内容 |
@@ -95,6 +113,8 @@ source .venv/bin/activate
 | [配置（英文）](docs/configuration.md) | 配置向导、配置文件、后端、超时、环境变量 |
 | [工具和 MCP（英文）](docs/tools.md) | 内置工具、MCP 服务器、每一步提供哪些工具、检查 |
 | [网关和 HTTP API（英文）](docs/gateway.md) | HTTP API、会话、网页界面、在 macOS 登录时自动运行 |
+| [Apple 客户端方向（英文）](docs/mobile-client-direction.md) | 拟议的 iPhone/Mac 客户端、共享状态、经过身份验证的远程访问 |
+| [工作区评审（英文）](docs/ui-review-2026-10-24.md) | 界面与智能体运行框架的修改、验证结果、当前限制 |
 | [记忆（英文）](docs/memory.md) | localmelo 记住什么，以及如何保留、查看和重置记忆 |
 | [Python API（英文）](docs/python-api.md) | `Agent`、`AgentOptions` 和 `RunResult`（实验性） |
 | [事件（英文）](docs/events.md) | 一次运行向 Python 代码报告的事件，以及它们的顺序和字段 |
@@ -115,8 +135,7 @@ source .venv/bin/activate
 
 计划中：
 
-- 交互式命令行（不带任务运行 `melo` 时会打开它；目前这样做会启动网关）；
-- 网页控制台；
+- 由命令行、网页控制台和未来的移动客户端共享的持久化对话；
 - 把模型的推理过程保存为记忆笔记，并可切换检索方式（`bm25`、`llm`、`embedding`）。
 
 ## 安全

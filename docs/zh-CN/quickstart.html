@@ -42,6 +42,7 @@
       <a href="#json-output">以 JSON 格式获取结果</a>
       <a href="#save-a-configuration">保存配置</a>
       <a href="#start-the-gateway">启动网关</a>
+      <a href="#interactive-conversations">交互式对话</a>
       <a href="#next-steps">下一步</a>
     </nav>
 
@@ -77,7 +78,7 @@ cd localmelo
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[gateway]"</code></pre>
-        <p><code>python3</code> 必须是 Python 3.11 或更高版本。请保留 <code>-e</code>（可编辑安装）：普通安装会漏掉网关需要的一个数据文件，之后运行 <code>melo --serve</code> 会报错 <code>FileNotFoundError</code>。</p>
+        <p><code>python3</code> 必须是 Python 3.11 或更高版本。<code>-e</code> 会让安装保持与当前源码目录的关联，修改源码后不必重新安装。</p>
       </section>
 
       <section class="section" id="run-your-first-task">
@@ -140,6 +141,16 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
         <p>在第一个终端中按 Ctrl+C 停止网关。之后运行任务会使用保存的配置：</p>
         <pre><code>melo "What is 6*7?"</code></pre>
         <p>以后想跳过向导、直接启动网关时，运行 <code>melo --serve</code>。</p>
+      </section>
+
+      <section class="section" id="interactive-conversations">
+        <h2>交互式对话</h2>
+        <p>不带任务运行命令，即可开始终端对话，并在多轮对话中使用同一个智能体：</p>
+        <pre><code>melo
+# Or use the exact model ID from an OpenAI-compatible server:
+melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID</code></pre>
+        <p>用 <code>/help</code> 查看命令，用 <code>/exit</code> 或 Ctrl-D 退出。<code>melo --reconfigure</code> 用来配置后端；加上 <code>--serve</code> 则会在配置完成后启动网关。</p>
+        <p><code>http://127.0.0.1:8401/</code> 上的网页工作区支持模型发现、独立的对话草稿、代码格式化、取消运行和响应式导航。连接到同一网关的浏览器客户端会同步对话状态，刷新页面也能恢复仍然有效的对话。会话不会在网关重启后保留，直接运行的命令行对话与网页对话相互独立。</p>
       </section>
 
       <section class="section" id="next-steps">

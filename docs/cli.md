@@ -7,6 +7,7 @@ codes and signals, and how to use it from scripts.
 
 ```text
 melo [options] "<task>"                      # run one task (direct mode)
+melo [options]                               # interactive terminal conversation
 melo --serve [--host HOST] [--port PORT]     # start the gateway
 melo --serve --reconfigure                   # run setup, then start the gateway
 melo --daemon install|uninstall|status       # macOS background service
@@ -20,14 +21,13 @@ Quote the task. Several words without quotes are joined with spaces.
 |---|---|
 | `melo "<task>"` | Direct mode: runs one task, prints the result and exits. |
 | `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration. |
-| `melo` (no task) | The same as `melo --serve`. |
-| `melo --reconfigure` | Runs the setup wizard, then starts the gateway (the same as `melo --serve --reconfigure`). |
+| `melo` (no task) | Opens an interactive terminal conversation. `/help` lists commands; `/exit` or Ctrl-D exits. |
+| `melo --reconfigure` | Runs and saves the setup wizard without starting the gateway. Add `--serve` to start it afterward. |
 | `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](gateway.md#run-the-gateway-at-login-macos). |
 
-> [!NOTE]
-> This will change: a planned interactive CLI will open when you run `melo`
-> without a task (see the
-> [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap)).
+Interactive turns share one agent and its working memory. A failed run reports
+its status and returns to the prompt. Direct CLI sessions remain separate from
+the web workspace's conversations.
 
 ## Options
 
@@ -38,18 +38,19 @@ Quote the task. Several words without quotes are joined with spaces.
 | `query` (positional) | not set | The task to run. Giving one selects direct mode. |
 | `-h`, `--help` | | Show the help and exit. |
 | `--base-url URL` | not set | Send chat requests to this OpenAI-compatible server instead of the configured backend. |
-| `--chat-model NAME` | `default` | The model to request from the `--base-url` server. |
+| `--chat-model NAME` | `default` for `--base-url` | Override the model for this invocation, including a configured backend. |
 
 - `--base-url` is used exactly as given, so include `/v1`, as in
   `http://127.0.0.1:11434/v1`.
 - `--base-url` sends no API key, and it does not read the config file, so
   `extra_body` and `request_timeout_s` do not apply.
-- Without `--base-url`, `--chat-model` is ignored and the configured model is
-  used. With `--serve`, both are ignored.
+- Without `--base-url`, `--chat-model` overrides the configured model without
+  saving the change. With `--serve`, both are ignored.
 
 ### Direct mode
 
-These options apply to a task run without `--serve`.
+These options apply to task runs and interactive sessions without `--serve`.
+JSON output requires an explicit task; interactive sessions use text output.
 
 | Option | Default | Description |
 |---|---|---|
@@ -99,7 +100,7 @@ These options apply to a task run without `--serve`.
 | `--serve` | off | Start the gateway: the HTTP API and the web UI. |
 | `--host HOST` | `127.0.0.1` | The address the gateway listens on. |
 | `--port PORT` | `8401` | The port the gateway listens on. |
-| `--reconfigure` | off | Run the setup wizard, then start the gateway. |
+| `--reconfigure` | off | Run and save the setup wizard; add `--serve` to start the gateway. |
 | `--daemon install\|uninstall\|status` | not set | Manage the macOS background service; `install` also takes `--port`. |
 
 - The defaults of `--host` and `--port` come from the `[gateway]` table of
@@ -126,8 +127,8 @@ These are usage errors:
   `--mcp-only` with `--builtins` or `--tool-exposure`, `--embedding-model`
   without `--embedding-base-url`, `--embedding-base-url` without
   `--base-url`;
-- a direct-mode option with `--serve` or without a task, reported as
-  `only for direct mode (a query without --serve): --max-steps`;
+- a direct-mode option with `--serve` or standalone configuration;
+- `--output-format json` without a task;
 - an MCP config file that cannot be read or is not valid.
 
 ## Output

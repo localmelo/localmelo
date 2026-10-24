@@ -10,6 +10,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, TextIO
@@ -46,7 +47,7 @@ EXIT_SIGNALS = tuple(
 # Characters of the error that the text-mode status line shows at most.
 STATUS_LINE_ERROR_CHARS = 500
 
-# Flags that apply to direct mode only (a query without --serve), by dest.
+# Flags that apply to direct and interactive terminal modes, by dest.
 _DIRECT_FLAGS = {
     "max_steps": "--max-steps",
     "attempt_policy": "--attempt-policy",
@@ -309,6 +310,36 @@ class _ExitSignals:
 # ── Direct mode: run ──
 
 
+async def _prompt() -> str:
+    """Read a terminal line without blocking signal handling in the event loop.
+
+    A daemon reader does not hold up process exit if a signal arrives while
+    stdin is idle. The default asyncio executor would wait for a blocked
+    input() thread during shutdown.
+    """
+    loop = asyncio.get_running_loop()
+    line: asyncio.Future[str] = loop.create_future()
+
+    def deliver(value: str | BaseException) -> None:
+        if line.done():
+            return
+        if isinstance(value, BaseException):
+            line.set_exception(value)
+        else:
+            line.set_result(value)
+
+    def read() -> None:
+        try:
+            value: str | BaseException = input("\n❯ ")
+        except BaseException as exc:
+            value = exc
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(deliver, value)
+
+    threading.Thread(target=read, daemon=True).start()
+    return await line
+
+
 async def _run(
     agent: Agent,
     query: str | None,
@@ -337,17 +368,27 @@ async def _run(
                 return EXIT_CRASHED  # not used: the process exits by the signal
             _report(outcome, output_format, version, out)
             return _exit_code(outcome.status)
-        print("melo agent (type 'exit' to quit)")
+        print("localmelo · local agent")
+        print("Enter a task to begin. Type /help for commands or /exit to quit.")
         while True:
             try:
-                q = input("\n> ")
+                q = await _prompt()
             except (EOFError, KeyboardInterrupt):
                 break
-            if q.strip().lower() in ("exit", "quit"):
+            command = q.strip().lower()
+            if command in ("exit", "quit", "/exit", "/quit"):
                 break
-            if not q.strip():
+            if command == "/help":
+                print(
+                    "Send a task to the configured model. /exit quits. Ctrl-D also exits."
+                )
+                print("Start the web interface separately with melo --serve.")
+                continue
+            if not command:
                 continue
             outcome = await agent.run_task(q)
+            if exit_signals is not None and exit_signals.received is not None:
+                return EXIT_CRASHED  # the process exits by the signal
             if outcome.result:
                 print(f"\n{outcome.result}")
             if outcome.status != "completed":
@@ -363,11 +404,11 @@ async def _run(
 
 def _run_direct(
     agent: Agent,
-    query: str,
+    query: str | None,
     output_format: str,
     tool_providers: Sequence[BaseToolProvider] = (),
 ) -> int:
-    """Run *query* in direct mode and return the exit code.
+    """Run *query*, or start an interactive terminal, and return the exit code.
 
     Stdout carries the report alone: what tools write to it during the
     run goes to stderr (see :func:`_stdout_for_the_report`).
@@ -380,7 +421,10 @@ def _run_direct(
     version = _localmelo_version() if output_format == "json" else ""
     exit_signals = _ExitSignals(agent, tool_providers)
     try:
-        with _stdout_for_the_report() as out:
+        output = (
+            _stdout_for_the_report() if query else contextlib.nullcontext(sys.stdout)
+        )
+        with output as out:
             code = asyncio.run(
                 _run(
                     agent,
@@ -393,6 +437,8 @@ def _run_direct(
             )
     except BaseException as exc:
         if exit_signals.received is None:
+            if not query and isinstance(exc, KeyboardInterrupt):
+                _exit_by_signal(signal.SIGINT)
             raise
         if not isinstance(exc, asyncio.CancelledError):
             text = _exception_text(exc)
@@ -470,9 +516,11 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         parser.error("--embedding-model requires --embedding-base-url")
     if args.embedding_base_url is not None and not args.base_url:
         parser.error("--embedding-base-url requires --base-url")
-    # main() joins the words into the query, and an empty one (`melo ""`)
-    # runs no task, so the direct-mode flags would have nothing to apply to.
-    direct = bool(" ".join(args.query)) and not args.serve
+    direct = (
+        not args.serve
+        and not args.daemon
+        and (bool(args.query) or not args.reconfigure)
+    )
     if not direct:
         given = [
             flag
@@ -481,8 +529,11 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         ]
         if given:
             parser.error(
-                "only for direct mode (a query without --serve): " + ", ".join(given)
+                "only for terminal mode (without --serve, --daemon or --reconfigure): "
+                + ", ".join(given)
             )
+    if direct and args.output_format == "json" and not " ".join(args.query):
+        parser.error("--output-format json requires a query")
 
 
 def _direct_options(
@@ -543,12 +594,14 @@ def _direct_tool_providers(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="melo", description="localmelo agent")
-    parser.add_argument("query", nargs="*", help="Task to execute (direct mode)")
+    parser.add_argument(
+        "query", nargs="*", help="Task to execute; omit for an interactive terminal"
+    )
     parser.add_argument("--base-url", default=None, help="LLM API base URL")
     parser.add_argument("--chat-model", default=None, help="Chat model name")
 
     direct = parser.add_argument_group(
-        "direct mode", "Options for a query run without --serve."
+        "terminal mode", "Options for direct or interactive runs without --serve."
     )
     direct.add_argument(
         "--max-steps",
@@ -674,8 +727,8 @@ def main() -> None:
         return
 
     # direct mode (no gateway): exit code 0 completed, 1 crashed, 2 otherwise
-    if args.query and not args.serve:
-        query = " ".join(args.query)
+    if not args.serve and (args.query or not args.reconfigure):
+        query = " ".join(args.query) or None
         options = _direct_options(parser, args)
         tool_providers = _direct_tool_providers(parser, args)
         agent = _build_direct_mode_agent(
@@ -713,8 +766,8 @@ def main() -> None:
         print(f"\n  {e}\n", file=sys.stderr)
         raise SystemExit(1) from e
 
-    # start gateway
-    _start_gateway(cfg)
+    if args.serve:
+        _start_gateway(cfg)
 
 
 def _make_memory_dir(memory_dir: str) -> None:
@@ -807,7 +860,7 @@ def _build_direct_mode_agent(
     cfg = config.load()
     if not cfg.is_configured:
         print(
-            "No backend configured. Run 'melo --serve --reconfigure' to set up,\n"
+            "No backend configured. Run 'melo --reconfigure' to set up,\n"
             "or use --base-url to connect to an OpenAI-compatible endpoint.",
             file=sys.stderr,
         )
@@ -817,6 +870,11 @@ def _build_direct_mode_agent(
         # For this run only, like the gateway's --host and --port: the
         # loaded config is changed in memory and never saved.
         cfg.request_timeout_s = request_timeout
+
+    if args.chat_model:
+        section = getattr(cfg, cfg.chat_backend, None)
+        if section is not None:
+            section.chat_model = args.chat_model
 
     try:
         cfg.validate_or_raise()

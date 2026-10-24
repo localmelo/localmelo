@@ -9,6 +9,10 @@ localmelo = "."
 where = [".."]
 include = ["localmelo", "localmelo.*"]
 
+[tool.setuptools.package-data]
+"localmelo" = ["tests/smoke/data/scenarios.json"]
+"localmelo.support.gateway" = ["static/*.html", "static/*.css", "static/*.js", "static/*.mjs", "static/*.png"]
+
 [project]
 name = "localmelo"
 version = "0.1.0"
