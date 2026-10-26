@@ -311,6 +311,17 @@ def _check_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> N
             parser.error(f"{flag} applies only to --retriever llm or --interleave")
     if args.interleave is not None and args.base_url is None:
         parser.error("--interleave needs --base-url")
+    for flag, url in (
+        ("--base-url", args.base_url),
+        ("--embedding-base-url", args.embedding_base_url),
+    ):
+        if url is None:
+            continue
+        try:
+            # The URL as the providers and the interleave client parse it.
+            httpx.URL(url.rstrip("/"))
+        except httpx.InvalidURL as exc:
+            parser.error(f"{flag} is not a valid URL: {exc}")
 
 
 def _exit_code(exc: SystemExit) -> int:

@@ -299,6 +299,32 @@ def _lines(out: str) -> list[dict[str, Any]]:
             "--interleave needs --base-url",
         ),
         (
+            ["--retriever", "llm", *FILES, "--base-url", "http://127.0.0.1:80o0/v1"],
+            "--base-url is not a valid URL: Invalid port: '80o0'",
+        ),
+        (
+            [
+                "--retriever",
+                "embedding",
+                *FILES,
+                "--embedding-base-url",
+                "http://127.0.0.1:80o0/v1",
+            ],
+            "--embedding-base-url is not a valid URL: Invalid port: '80o0'",
+        ),
+        (
+            [
+                "--retriever",
+                "bm25",
+                *FILES,
+                "--interleave",
+                INTERLEAVE,
+                "--base-url",
+                "http://[::1",
+            ],
+            "--base-url is not a valid URL: Invalid port: ':1'",
+        ),
+        (
             ["--retriever", "bm25", *FILES, "--k", "0"],
             "argument --k: must be at least 1, got 0",
         ),
