@@ -56,12 +56,31 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `--host '[::1]'` starts the gateway, and the startup lines show an IPv6
+  address in brackets, as in `http://[::1]:8401/` ([#36]).
 - Tool calls are sent to OpenAI-compatible models as real tool-call turns,
   and every call of a step runs ([#26]).
 - Empty replies, oversized prompts and long tool results no longer end a run
   early or silently ([#30]).
 - A reflection reply without a JSON object is asked for once more, without
   tools ([#31]).
+
+### Security
+
+- On `localhost` or a loopback IP address, the gateway refuses requests that
+  are not addressed to it, before any route runs. A `Host` other than
+  `127.0.0.1`, `localhost` or `[::1]` with the gateway's port gets HTTP 421
+  `misdirected_request`. A `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS`
+  request from a web page at another origin, and a `/v1/` request that the
+  browser marks as cross-site or same-site, get HTTP 403 `foreign_origin`.
+  Web pages could otherwise reach the gateway through DNS rebinding or
+  cross-site requests and run tasks with its tools. The standalone
+  playground server applies the same checks ([#36]).
+- No web page can show the gateway's pages in a frame: every response
+  carries `X-Frame-Options: DENY` and
+  `Content-Security-Policy: frame-ancestors 'none'` ([#36]).
+- On any other host, such as `0.0.0.0`, the gateway makes none of these
+  checks and logs a warning when it starts ([#36]).
 
 Changes before these are not listed here. See the
 [updates page](https://localmelo.github.io/localmelo/en/updates.html) for
@@ -76,3 +95,4 @@ earlier milestones.
 [#31]: https://github.com/localmelo/localmelo/pull/31
 [#32]: https://github.com/localmelo/localmelo/pull/32
 [#34]: https://github.com/localmelo/localmelo/pull/34
+[#36]: https://github.com/localmelo/localmelo/pull/36
