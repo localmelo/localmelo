@@ -363,6 +363,17 @@ def test_split_sentences_drops_empty_pieces_and_bare_numbers() -> None:
     assert split_sentences("Done. 2. Next.") == [(0, "Done."), (9, "Next.")]
 
 
+def test_split_sentences_after_any_whitespace() -> None:
+    # U+3000 (ideographic space) and U+00A0 (no-break space) are whitespace.
+    text = "Done?　Next. Then go. 例如e.g. 这个"
+    assert split_sentences(text) == [
+        (0, "Done?"),
+        (6, "Next."),
+        (12, "Then go."),
+        (21, "例如e.g. 这个"),
+    ]
+
+
 def test_split_sentences_chinese() -> None:
     assert split_sentences("我先读取文件。然后运行测试！好吗？\n下一步") == [
         (0, "我先读取文件。"),
@@ -467,6 +478,22 @@ def test_markers_are_whole_words_and_accept_a_curly_apostrophe() -> None:
     assert note_from_reply("", "I’ll go.")[0].plan == "I’ll go."
     # ASCII word boundaries: an English marker next to CJK still counts.
     assert note_from_reply("", "我们now开始。")[0].plan == "我们now开始。"
+
+
+def test_markers_and_sentences_take_any_whitespace() -> None:
+    # The words of a marker may be apart by U+00A0 or U+3000.
+    assert note_from_reply("", "Let me think.")[0].plan == "Let me think."
+    note = note_from_reply("", "I　need　to go. Not sure about it.")[0]
+    assert (note.plan, note.open_questions) == (
+        "I　need　to go.",
+        ["Not sure about it."],
+    )
+    # A question ends at U+3000, so it is an open question, not the plan's.
+    note = note_from_reply("", "这个函数会返回None吗?　接下来读取 list_ops.py。")[0]
+    assert (note.plan, note.open_questions) == (
+        "接下来读取 list_ops.py。",
+        ["这个函数会返回None吗?"],
+    )
 
 
 def test_plan_with_calls_and_without_sentences() -> None:

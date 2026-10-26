@@ -403,9 +403,11 @@ def _without_fences(text: str) -> str:
 # ── Sentences and paths ──
 
 # Ends a sentence: CJK end punctuation, or "!", "?" or "." before
-# whitespace, but not the "." that ends "e.g." or "i.e.".
+# whitespace (any, U+3000 and U+00A0 included), but not the "." that ends
+# "e.g." or "i.e.". Their word boundary is an ASCII one, so "例如e.g. "
+# holds the abbreviation too.
 _SENTENCE_END_RE = re.compile(
-    r"[。！？]|[!?](?=\s)|(?<!\be\.g)(?<!\bi\.e)\.(?=\s)", re.IGNORECASE | re.ASCII
+    r"[。！？]|[!?](?=\s)|(?a:(?<!\be\.g)(?<!\bi\.e))\.(?=\s)", re.IGNORECASE
 )
 _LIST_MARKER_RE = re.compile(r"(?:[-*•]|\d+[.)])(?:\s+|$)")
 
@@ -537,9 +539,10 @@ def _english(*words: str) -> re.Pattern[str]:
     """A whole-word, case-insensitive pattern for English marker words.
 
     Word boundaries are ASCII ones, so a marker next to CJK text, as in
-    ``然后run测试``, is still a whole word.
+    ``然后run测试``, is still a whole word. The words of a marker may be
+    apart by any whitespace, U+00A0 and U+3000 included.
     """
-    return re.compile(r"\b(?:" + "|".join(words) + r")\b", re.IGNORECASE | re.ASCII)
+    return re.compile(r"(?a:\b)(?:" + "|".join(words) + r")(?a:\b)", re.IGNORECASE)
 
 
 _INTENT_EN = _english(r"let\s+me", r"I['’]ll", r"I\s+need\s+to", "next", "now", "then")
