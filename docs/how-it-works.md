@@ -51,6 +51,8 @@ run ends as `gate_stopped`. With `--reflection-gate utility`, the behavior
 before that option, the reflection must also estimate that the gain of
 another attempt outweighs its cost and the risk of repeating itself: a
 utility score computed from its own estimates must reach 0.1.
+[Evaluations](evaluations.md#reflection-gate) compares the two gates and runs
+without reflection on coding exercises.
 
 More about reflections:
 

@@ -43,9 +43,7 @@ source .venv/bin/activate
 
 不使用 uv 时，请看快速开始中的[用 pip 安装](https://localmelo.github.io/localmelo/zh-CN/quickstart.html#install-with-pip)一节。
 
-下面的示例直接调用 `melo`。激活虚拟环境只对当前终端有效：打开新终端后，需要再次运行 `source <clone>/.venv/bin/activate`，其中 `<clone>` 是你的 `localmelo` 目录。使用 uv 时，也可以在克隆目录中运行 `uv run melo …`，或在其他任何位置运行 `uv run --project <clone> melo …`。
-
-更新或卸载 localmelo 的方法见[配置（英文）](docs/configuration.md#update-localmelo)。
+下面的示例直接调用 `melo`。激活虚拟环境只对当前终端有效：打开新终端后，需要再次运行 `source <clone>/.venv/bin/activate`（`<clone>` 是你的 `localmelo` 目录），或者在克隆目录中运行 `uv run melo …`。更新或卸载 localmelo 的方法见[配置（英文）](docs/configuration.md#update-localmelo)。
 
 ## 快速开始
 
@@ -65,45 +63,25 @@ source .venv/bin/activate
    melo --serve --reconfigure
    ```
 
-   配置向导会询问对话后端、它的地址和模型，以及嵌入后端：
+   配置向导会询问对话后端、它的地址和模型，以及嵌入后端（没有嵌入服务器时选择 `None`）。向导会检查服务器能否连通，保存 `~/.cache/localmelo/config.toml`，然后在 `http://127.0.0.1:8401` 上提供 HTTP API 和网页工作区。按 Ctrl+C 停止网关。之后运行 `melo "<task>"` 时会使用保存的配置。
 
-   - 如果第 1 步启动的是 Ollama，请选择 `2`，然后按回车接受建议的地址和模型。
-   - 如果是其他兼容 OpenAI 接口的服务器，请选择 vLLM（`3`），然后输入它的地址和模型名。
-   - 使用云端 API 时，请选择对应的服务商。
-   - 如果没有嵌入服务器，嵌入后端请选择 `5`，即 `None (no long-term memory)`。
+[快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html)会更详细地介绍每一步，包括向导的选项和第一个 HTTP API 请求。
 
-   向导会检查服务器能否连通，保存 `~/.cache/localmelo/config.toml`，然后在 `http://127.0.0.1:8401` 上提供服务。在另一个终端中运行：
+## 三种运行方式
 
-   ```bash
-   curl http://127.0.0.1:8401/v1/health
-   curl -X POST http://127.0.0.1:8401/v1/agent/run \
-     -H "Content-Type: application/json" \
-     -d '{"query": "What is 6*7?"}'
-   ```
+| 命令 | 作用 |
+|---|---|
+| `melo "<task>"` | 运行一个任务，输出结果后退出。 |
+| `melo ""`（任务为空字符串） | 在终端中打开对话循环。输入 `/help` 查看命令，输入 `/exit` 退出。 |
+| `melo --serve`，或者只运行 `melo` | 启动网关：在 `http://127.0.0.1:8401/` 上提供 HTTP API 和网页工作区。 |
 
-   按 Ctrl+C 停止网关。之后运行 `melo "<task>"` 时会使用保存的配置。
-
-接下来，[快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html)会更详细地介绍每一步。
-
-## 交互式工作区
-
-运行 `melo ""`（任务为空字符串），即可用已配置的后端在终端中打开对话循环。输入 `/help` 查看命令，输入 `/exit` 退出。也可以直接连接 oMLX 或其他兼容 OpenAI 接口的服务器：
+不保存配置，直接和 oMLX 或其他兼容 OpenAI 接口的服务器对话：
 
 ```bash
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""
 ```
 
-不加 `""` 时，`melo` 会启动网关，见[命令行参考（英文）](docs/cli.md#modes)。
-
-运行 `melo --serve`，然后打开 `http://127.0.0.1:8401/`，即可使用网页工作区。输入服务器地址，选择它的一个模型，再创建对话；嵌入模型和初始记忆都是可选项。你可以同时保留多个对话，每个对话有自己的草稿；可以搜索对话，回答会按 Markdown 渲染（包括代码、表格和链接），也可以停止运行；页面也适合窄屏。同一网关上的其他浏览器标签页会看到相同的对话，只要网关仍在运行，刷新页面就能恢复对话。终端对话循环与网页对话相互独立。
-
-如果想先试用网页工作区，而不配置主网关：
-
-```bash
-uv run python -m localmelo.support.gateway._test_webapp
-```
-
-对话只在网关进程运行期间保留，工作区也只供你自己的电脑使用，见[网页工作区（英文）](docs/gateway.md#web-workspace)。
+在网页工作区中，输入服务器地址，选择它的一个模型，再创建对话。你可以保留多个对话、搜索对话、阅读按 Markdown 渲染的回答，也可以停止运行。对话只在网关进程运行期间保留，工作区也只供你自己的电脑使用，见[网页工作区（英文）](docs/gateway.md#web-workspace)。终端对话循环与网页对话相互独立。
 
 ## 文档
 
@@ -111,36 +89,24 @@ uv run python -m localmelo.support.gateway._test_webapp
 |---|---|
 | [快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html) | 安装、运行第一个任务、保存配置、启动网关 |
 | [命令行参考（英文）](docs/cli.md) | `melo` 的模式、选项、输出、退出码和信号 |
-| [运行结果（英文）](docs/run-results.md) | 一次运行有哪些结束方式、运行记录、重试 |
 | [配置（英文）](docs/configuration.md) | 配置向导、配置文件、后端、超时、环境变量 |
 | [工具和 MCP（英文）](docs/tools.md) | 内置工具、MCP 服务器、每一步提供哪些工具、检查 |
 | [网关和 HTTP API（英文）](docs/gateway.md) | HTTP API、会话、网页工作区、在 macOS 登录时自动运行 |
 | [记忆（英文）](docs/memory.md) | localmelo 记住什么，以及如何保留、查看和重置记忆 |
-| [离线检索（英文）](docs/retrieval.md) | `melo-retrieve`：离线比较记忆检索器，把一次运行导出为语料 |
-| [Python API（英文）](docs/python-api.md) | `Agent`、`AgentOptions` 和 `RunResult`（实验性） |
-| [事件（英文）](docs/events.md) | 一次运行向 Python 代码报告的事件，以及它们的顺序和字段 |
-| [会话（英文）](docs/sessions.md) | 保存在 SQLite 中的对话：轮次、消息 ID、重启和恢复（实验性） |
-| [localmelo 的工作原理（英文）](docs/how-it-works.md) | 运行循环、反思、记忆和超时 |
-| [调度器（英文）](docs/scheduler.md) | 调度策略和模拟器，面向维护者（运行时尚未使用） |
+| [Python API（英文）](docs/python-api.md) | 在 Python 代码中运行任务，支持事件和审批（实验性） |
 | [故障排查（英文）](docs/troubleshooting.md) | 常见错误信息及解决方法 |
-| [架构](https://localmelo.github.io/localmelo/zh-CN/architecture.html) | 各部分如何协同工作（网站） |
-| [路线图](https://localmelo.github.io/localmelo/zh-CN/updates.html#roadmap) | 计划和更新记录（网站） |
+
+[全部文档（英文）](docs/README.md)列出了所有页面，包括事件、会话和离线检索的参考文档。[评测（英文）](docs/evaluations.md)报告了各项默认设置背后的对比实验，例如反思的继续判定。
 
 AI 智能体和 LLM 工具请读 [localmelo for agents（英文）](docs/for-agents.md)，它用一页写清使用 localmelo 所需的内容；文档索引见 [llms.txt](https://localmelo.github.io/localmelo/llms.txt)。
 
 ## 路线图
 
-路线图记录在 [#2](https://github.com/localmelo/localmelo/issues/2) 中。v0.1.0 里程碑计划于 2026-12-20 完成。
-
-| 阶段 | 日期 | 范围 |
-|---|---|---|
-| 第 1 阶段 | 2026-10-19 至 2026-11-01 | 核心循环 v2 和命令行（[#3](https://github.com/localmelo/localmelo/issues/3)） |
-| 第 2 阶段 | 2026-11-02 至 2026-11-22 | 记忆：笔记、检索，以及提升为长期记忆 |
-| 第 3 阶段 | 2026-11-23 至 2026-12-06 | 安全和隐私（[#29](https://github.com/localmelo/localmelo/issues/29)） |
+路线图记录在 [#2](https://github.com/localmelo/localmelo/issues/2) 中，v0.1.0 里程碑计划于 2026-12-20 完成。各阶段和按日期排列的更新见[网站](https://localmelo.github.io/localmelo/zh-CN/updates.html#roadmap)。
 
 计划中：
 
-- 交互式命令行：不带任务运行 `melo` 时打开，并实时显示智能体的工具调用（目前 `melo` 会启动网关，`melo ""` 打开一个简单的对话循环）；
+- 交互式命令行：不带任务运行 `melo` 时打开，并实时显示智能体的工具调用；
 - 网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；
 - 把模型的推理过程保存为记忆笔记，并可切换检索方式（`bm25`、`llm`、`embedding`）；
 - 在一个本地模型服务器上同时运行多个任务，并优先回答你的对话。
@@ -150,12 +116,7 @@ AI 智能体和 LLM 工具请读 [localmelo for agents（英文）](docs/for-age
 > [!WARNING]
 > 工具以你的账户权限运行，并且没有沙箱：模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 `127.0.0.1`（默认值）：在这个地址上，它会拒绝其他网站的网页通过浏览器向它的 API 发来的请求。详见 [SECURITY.md（英文）](SECURITY.md)和[检查能做什么（英文）](docs/tools.md#what-the-checks-do)。
 
-在 [Python API（英文）](docs/python-api.md)中，有两个选项可以缩小工具能做的事：
-
-- **审批。** 审批策略（approval policy，`run_task(..., approval=policy)`）决定 `shell_exec`、`python_exec`、`file_write` 以及其他标记为需要审批的工具的每次调用能否运行。只有带审批策略的运行才会审批：直接模式和网关都没有审批策略。
-- **工作区根目录。** `AgentOptions(workspace_root=DIR)` 把 `file_read` 和 `file_write` 限制在这个目录内。只有设置了工作区根目录，这个限制才生效；`shell_exec` 和 `python_exec` 不受这个限制：它们在根目录中启动，但仍然可以访问任何路径。
-
-[会话（英文）](docs/sessions.md)把对话记录和工具输出以明文保存在 `sessions.db` 中，窗口检查点（window checkpoint）也一样，这些文件的权限是 `0600`，所在目录的权限是 `0700`。保存的回答和检查点只会脱敏常见的密钥格式、Bearer 令牌和一次性验证码。浏览器里的草稿、排队的消息和尚未确认的消息发件箱都只留在浏览器中。
+实验性的 [Python API（英文）](docs/python-api.md)可以在工具运行前请求审批，并把文件工具限制在一个目录内；直接模式和网关都没有这两项。记忆文件和会话文件都没有加密，详见[隐私（英文）](docs/memory.md#privacy)。
 
 ## 获取帮助
 
