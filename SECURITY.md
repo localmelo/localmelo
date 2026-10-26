@@ -73,6 +73,14 @@ those tools can do.
 - **Secrets.** The config file stores the *name* of the API-key variable,
   not the key. `history.db` stores tasks, the model's text, tool calls and
   their results as plain text.
+- **Sessions.** The session store of the Python API
+  ([Sessions](docs/sessions.md)) keeps transcripts and tool output in
+  `sessions.db` as plain text, its window checkpoints included, in `0600`
+  files inside `0700` directories. The stored answers and checkpoints pass
+  only the minimal redaction of events: well-known key shapes, bearer tokens
+  and one-time codes; anything else stays as written. A withdrawn message
+  keeps only the SHA-256 digest of its text. A browser's drafts, a queued
+  message and its outbox of messages not yet confirmed stay in the browser.
 
 [What the checks do](docs/tools.md#what-the-checks-do) describes the checks
 in more detail.

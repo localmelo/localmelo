@@ -14,6 +14,7 @@
 - [Run results](https://localmelo.github.io/localmelo/run-results.md): run statuses, the fields of the JSON line and `RunResult`, and retries.
 - [Python API](https://localmelo.github.io/localmelo/python-api.md): `Agent`, `AgentOptions`, `RunResult`, stopping a run, approval policies and the workspace root.
 - [Events](https://localmelo.github.io/localmelo/events.md): the events a Python run reports, their order, fields and rules.
+- [Sessions](https://localmelo.github.io/localmelo/sessions.md): conversations kept in SQLite (experimental Python API): turns, statuses, message ids, resume, approvals for a person and the event stream.
 - [Gateway and HTTP API](https://localmelo.github.io/localmelo/gateway.md): HTTP routes, sessions, the loopback guard, the web workspace and the macOS background service.
 - [Tools and MCP](https://localmelo.github.io/localmelo/tools.md): the built-in tools, the MCP config file, which tools each step offers, and what the checks do.
 - [Memory](https://localmelo.github.io/localmelo/memory.md): working memory, history and long-term memory, and how to keep, inspect and reset them.

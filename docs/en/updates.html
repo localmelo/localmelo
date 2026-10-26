@@ -87,6 +87,19 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-26-sessions">
+          <h3>Conversations that survive a restart, in the Python API</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/41">#41</a>
+          </p>
+          <ul>
+            <li>A session keeps a conversation in SQLite. Each turn begins with a stored row and ends exactly once with a status and a cause, also when the process that ran it stops or dies, and a fresh agent can resume the conversation.</li>
+            <li>A message sent twice with the same request id runs once, the last turn can be undone, and a person can answer a tool's approval request from another page. An event stream replays to a client that reconnects every event it missed.</li>
+            <li>Sessions are part of the experimental Python API. <code>melo</code> and the gateway do not use them yet: the planned interactive CLI and web console will keep their conversations there.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-26-scheduler">
           <h3>Groundwork for running several tasks at once</h3>
           <p class="update-date">

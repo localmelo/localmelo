@@ -33,6 +33,8 @@ tools and memory on your own model server or a cloud API. The website is at
   stopping a run, approval policies and the workspace root.
 - [Events](events.md): the events a run reports to Python code, their order,
   fields and rules.
+- [Sessions](sessions.md): conversations kept in SQLite, their turns, message
+  ids, restarts and resume.
 - [Offline retrieval](retrieval.md): `melo-retrieve`, which compares memory
   retrievers and exports a run as a corpus: its options, formats, output and
   exit codes.

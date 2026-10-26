@@ -83,6 +83,7 @@ asyncio.run(main())
 - `workspace_root=DIR`: `file_read` and `file_write` stay inside DIR; `shell_exec` and `python_exec` start in DIR as child processes but can reach any path.
 - Stop a run: cancel the task awaiting `run_task` (it re-raises `CancelledError`). With `on_event` or `approval` the run ends `cancelled`, its result only in `run.finished`; with neither it ends `crashed`, no result.
 - MCP: `tool_providers=[McpToolProvider(load_mcp_config("mcp.json"))]` (`localmelo.support.mcp`).
+- Sessions (experimental, `localmelo.support.sessions`): conversations in SQLite that survive a restart. The agent needs `record_answers=True` and a `workspace_root`, and `await agent.start()` first. `store = SessionStore(PATH, writer="cli")` (or `"gateway"`; a file belongs to one writer); `runner = SessionRunner(agent, store, None, new_session=NewSession(workspace=agent.workspace_root))`; `await runner.run_turn(text)` returns a `RunResult`; keep `runner.session_id`. Later, with a fresh agent: `SessionRunner(agent, store, session_id)`, `await runner.resume()`. Close the runner, then the agent, then `await store.aclose()`. See [sessions.md](sessions.md).
 
 ### HTTP gateway
 
@@ -163,6 +164,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 - Persistence: `--memory-dir DIR` or `AgentOptions(memory_dir=DIR)` wins, else `LOCALMELO_PERSIST_MEMORY`. Files: `history.db` always, `long_term.db` only with an embedding provider and memory on.
 - Long-term memory needs an embedding backend; without one it is inert although `config.memory` is `true`. A new `Agent` or `melo` process recalls earlier runs only through it; history is written but never read back into a run.
 - Multi-turn chat: one `Agent` with `record_answers=True` (without it, later runs see earlier queries but not answers), or one gateway `session_id`.
+- Sessions (Python API only): `sessions.db`, by default `~/.cache/localmelo/cli/` or `~/.cache/localmelo/gateway/`; plain text, files `0600`.
 - No reset command: stop localmelo, delete the files (the web workspace's: `~/.cache/localmelo/playground/`). Not encrypted. One gateway's sessions share one set of files.
 
 ## Gotchas
@@ -181,7 +183,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 ## Status of features
 
 - Available: direct mode, the gateway, the `melo ""` loop, MCP stdio servers, the macOS background service.
-- Experimental: the Python API. Offline only (runs do not use them): `melo-retrieve` and its `bm25`, `llm`, `embedding` retrievers; the scheduler core in `support/scheduler/`.
+- Experimental: the Python API. Offline only (runs do not use them): `melo-retrieve` and its `bm25`, `llm`, `embedding` retrievers; the scheduler core in `support/scheduler/`. Python only, not used by `melo` or the gateway yet: sessions (`support/sessions/`).
 - Planned, not on main: an interactive CLI for bare `melo`; gateway sessions that survive a restart; the model's reasoning kept as memory notes and retrieved during runs; several tasks on one model server, the user's conversation first.
 
 ## Working on the code
@@ -194,6 +196,6 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 
 ## Where to read more
 
-- Use: [quickstart.md](quickstart.md), [cli.md](cli.md) ([exit codes](cli.md#exit-codes), [signals](cli.md#signals)), [run-results.md](run-results.md) ([retries](run-results.md#provider-errors-and-retries)), [python-api.md](python-api.md), [events.md](events.md), [gateway.md](gateway.md) ([keep it private](gateway.md#keep-the-gateway-private)).
+- Use: [quickstart.md](quickstart.md), [cli.md](cli.md) ([exit codes](cli.md#exit-codes), [signals](cli.md#signals)), [run-results.md](run-results.md) ([retries](run-results.md#provider-errors-and-retries)), [python-api.md](python-api.md), [events.md](events.md), [sessions.md](sessions.md), [gateway.md](gateway.md) ([keep it private](gateway.md#keep-the-gateway-private)).
 - Setup: [configuration.md](configuration.md), [tools.md](tools.md) ([MCP config file](tools.md#mcp-config-file), [what the checks do](tools.md#what-the-checks-do)), [memory.md](memory.md), [troubleshooting.md](troubleshooting.md).
 - Background: [how-it-works.md](how-it-works.md), [retrieval.md](retrieval.md), [scheduler.md](scheduler.md), [SECURITY.md](https://github.com/localmelo/localmelo/blob/main/SECURITY.md), [CHANGELOG.md](https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md).

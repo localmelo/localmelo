@@ -75,6 +75,19 @@
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
 
+        <article class="update-entry" id="u-2026-10-26-sessions">
+          <h3>重启后仍在的对话（Python API）</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/41">#41</a>
+          </p>
+          <ul>
+            <li>会话把对话保存在 SQLite 中。每一轮都从一行已保存的记录开始，并且只结束一次，带有状态和原因；即使运行它的进程停止或崩溃也是如此。新的智能体可以恢复这段对话。</li>
+            <li>用同一个请求 ID 发送两次的消息只运行一次，最后一轮可以撤销，工具的审批请求也可以由人在另一个页面上回答。事件流会给重新连接的客户端补发它漏掉的每一个事件。</li>
+            <li>会话属于实验性的 Python API。<code>melo</code> 和网关目前还没有使用会话：计划中的交互式命令行和网页控制台会把对话保存在这里。</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-26-scheduler">
           <h3>同时运行多个任务的基础</h3>
           <p class="update-date">
