@@ -78,11 +78,9 @@ class HistorySchemaError(RuntimeError):
 # The tags of an inline reasoning block, in any letter case.
 _OPEN_TAG = "<[Tt][Hh][Ii][Nn][Kk]>"
 _CLOSE_TAG = "</[Tt][Hh][Ii][Nn][Kk]>"
-# After leading whitespace, a block up to its first closing tag and the
-# whitespace after it.
-_LEADING_BLOCK = re.compile(rf"\s*{_OPEN_TAG}.*?{_CLOSE_TAG}\s*", re.DOTALL)
-# After leading whitespace, an opening tag.
-_LEADING_OPENING = re.compile(rf"\s*(?={_OPEN_TAG})")
+_SPACE = re.compile(r"\s*")
+# A block up to its first closing tag, and the whitespace after it.
+_BLOCK = re.compile(rf"{_OPEN_TAG}.*?{_CLOSE_TAG}\s*", re.DOTALL)
 _OPENING = re.compile(_OPEN_TAG)
 # A closing tag and the whitespace after it.
 _CLOSING = re.compile(rf"{_CLOSE_TAG}\s*")
@@ -108,22 +106,26 @@ def _without_inline_blocks(text: str) -> str:
        including it and the whitespace after it (a chat template that
        opens the block in the prompt).
 
-    Any other text is left as it is, a tag in its middle too.
+    Any other text is left as it is, a tag in its middle too, and so is
+    the leading whitespace before a block of forms 1 and 2.
     """
-    start = 0
+    # The text so far is lead + text[start:]: the leading whitespace kept,
+    # then what follows the parts removed.
+    lead, start = "", 0
     while True:
-        block = _LEADING_BLOCK.match(text, start)
+        space = _SPACE.match(text, start)  # always matches, maybe empty
+        at = start if space is None else space.end()
+        block = _BLOCK.match(text, at)
         if block is not None:
-            start = block.end()
+            lead, start = lead + text[start:at], block.end()
             continue
-        opening = _LEADING_OPENING.match(text, start)
-        if opening is not None:
-            return text[start : opening.end()]
+        if _OPENING.match(text, at) is not None:
+            return lead + text[start:at]
         closing = _CLOSING.search(text, start)
         if closing is not None and not _OPENING.search(text, start, closing.start()):
-            start = closing.end()
+            lead, start = "", closing.end()
             continue
-        return text[start:]
+        return lead + text[start:]
 
 
 def _content_without_reasoning(reasoning_key: str, thinking: str, content: str) -> str:

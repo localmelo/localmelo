@@ -19,6 +19,7 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
+import aiosqlite
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
@@ -294,6 +295,29 @@ async def test_a_newer_file_is_refused_at_every_call(tmp_path: Path) -> None:
     assert "llm_calls" not in _tables(path)
 
 
+async def test_a_failed_open_closes_its_connection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "history.db"
+    _write_v2(path)
+    opened: list[aiosqlite.Connection] = []
+    connect = aiosqlite.connect
+
+    def recording_connect(*args: Any, **kwargs: Any) -> aiosqlite.Connection:
+        conn = connect(*args, **kwargs)
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(aiosqlite, "connect", recording_connect)
+    history = SqliteHistory(path)
+    with pytest.raises(HistorySchemaError):
+        await history.count_tasks()
+    [conn] = opened
+    # Closed: no connection, and no aiosqlite thread left running.
+    assert conn._connection is None
+    assert history._conn is None
+
+
 class _FakeLLM(BaseLLMProvider):
     def __init__(self, responses: list[Message]) -> None:
         self.responses: deque[Message] = deque(responses)
@@ -474,6 +498,16 @@ RETENTION_CASES = [
     ("", "r", "plain text", "plain text"),
     ("reasoning_content", "r", "x</think>y", "x</think>y"),
     ("reasoning_content", "r", "<think>plain text", "<think>plain text"),
+    # Each key's own rule, not the rule of "": content that only the ""
+    # forms would change stays.
+    ("thinking", "x", "<think>\ny\n</think>\n\nA", "<think>\ny\n</think>\n\nA"),
+    ("thinking", "x", "x</think>y", "x</think>y"),
+    ("reasoning", "r", "x</think>y", "x</think>y"),
+    ("reasoning", "r", "<think>a</think>b", "<think>a</think>b"),
+    # Tags in any letter case; whitespace before a block of forms 1 and 2
+    # stays, as the text before the tag.
+    ("", "r", "  <THINK>a</Think>\n b", "  b"),
+    ("", "r", " <Think>abc", " "),
 ]
 
 
@@ -585,6 +619,46 @@ async def test_retention_runs_once_per_instance(tmp_path: Path) -> None:
     assert _update_count(path) == 0
 
     await _open_at(path, 30.0)
+    assert _update_count(path) == len(RETENTION_CASES)
+
+
+async def test_retention_counts_as_run_only_once_committed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "history.db"
+    await _open_at(path, 30.0, now=0.0)
+    _write_retention_rows(path)
+    history = SqliteHistory(path, clock=lambda: NOW)
+    passed = False
+    failed = False
+    clear = history._clear_old_reasoning
+
+    async def clear_and_tell(conn: aiosqlite.Connection) -> None:
+        nonlocal passed
+        await clear(conn)
+        passed = True
+
+    commit = aiosqlite.Connection.commit
+
+    async def commit_or_fail(self: aiosqlite.Connection) -> None:
+        nonlocal failed
+        if passed and not failed:
+            failed = True
+            raise sqlite3.OperationalError("disk I/O error")
+        await commit(self)
+
+    monkeypatch.setattr(history, "_clear_old_reasoning", clear_and_tell)
+    monkeypatch.setattr(aiosqlite.Connection, "commit", commit_or_fail)
+    try:
+        # The pass ran, but its transaction was not committed ...
+        with pytest.raises(sqlite3.OperationalError):
+            await history.count_tasks()
+        assert _update_count(path) == 0
+        # ... so the next call on the same instance runs it again.
+        await history.count_tasks()
+    finally:
+        await history.aclose()
+    assert failed
     assert _update_count(path) == len(RETENTION_CASES)
 
 

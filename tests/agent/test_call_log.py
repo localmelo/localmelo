@@ -388,7 +388,11 @@ async def test_chat_hands_each_response_to_the_recorder() -> None:
 async def test_a_retried_request_is_recorded_once() -> None:
     busy = ProviderError("HTTP 503: busy", status_code=503, retryable=True)
     llm = KeyedLLM([(busy, "", None), (_reply("a"), "", None)])
-    chat = Chat(llm, sleep=_no_sleep)
+
+    async def slow_sleep(delay: float) -> None:
+        await asyncio.sleep(0.3)
+
+    chat = Chat(llm, sleep=slow_sleep)
     recorder = ListRecorder()
     token = CALL_RECORDER.set(recorder)
     try:
@@ -399,6 +403,9 @@ async def test_a_retried_request_is_recorded_once() -> None:
         CALL_RECORDER.reset(token)
     assert [call["kind"] for call in recorder.calls] == ["plan"]
     assert (chat.stats.n_llm, chat.stats.llm_errors) == (1, 1)
+    # The duration of the attempt that answered, without the failed one and
+    # the wait before the retry.
+    assert recorder.calls[0]["duration_s"] < 0.3
 
 
 async def test_no_recorder_records_nothing() -> None:

@@ -616,12 +616,13 @@ def load_history_calls(path: str | os.PathLike[str]) -> tuple[list[RawCall], int
     Each ``llm_calls`` row becomes a :class:`RawCall` under the raw-call
     rules (see :func:`load_raw_calls`); a ``NULL`` ``step`` or ``attempt``
     reads as 0 and 1, and a ``content`` that starts with the ``<think>``
-    copy of ``thinking`` that Ollama's provider adds is read without it. The calls come from ``tool_calls_json`` (``NULL``:
-    none), and the results from the ``steps`` rows that ``step_ids_json``
-    names: each call takes the first of them, not yet taken, whose
-    ``tool_call_json`` has the call's ``id``. The agent writes those rows
-    in call order, so the results run in call order up to the first call
-    without one, as the calls' pairing by index needs.
+    copy of ``thinking`` that Ollama's provider adds is read without it.
+    The calls come from ``tool_calls_json`` (``NULL``: none), and the
+    results from the ``steps`` rows that ``step_ids_json`` names: each
+    call takes the first of them, not yet taken, whose ``tool_call_json``
+    has the call's ``id``. The agent writes those rows in call order, so
+    the results run in call order up to the first call without one, as the
+    calls' pairing by index needs.
 
     Raises :class:`NoCallsTableError` without an ``llm_calls`` table, and
     :class:`CorpusError` for a missing column, a row that breaks the

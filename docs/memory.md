@@ -205,8 +205,11 @@ planning and reflection requests alike. The history in RAM keeps none.
   and a code of 4 to 8 digits within 20 characters of `verification code`,
   `passcode`, `OTP` or `验证码`, on the same line, each become `[redacted]`.
   It is minimal: tool-call arguments are not redacted, in
-  `tool_calls_json` or in `steps`, and a key right after a letter, a digit,
-  `_` or `-` stays. `tasks` and `steps` keep every text as it was.
+  `tool_calls_json` or in `steps`, and a key glued to the text before it
+  stays: an `sk-` key right after a letter, a digit, `_` or `-`, a GitHub
+  token right after a letter, a digit or `_`, and an AWS access key id
+  right after a letter or a digit. `tasks` and `steps` keep every text as
+  it was.
 - **Retention.** Reasoning older than 30 days, or than
   `LOCALMELO_THINKING_RETENTION_DAYS`, is cleared: `thinking` becomes `""`,
   and the reasoning that `content` holds goes too, by the row's
@@ -262,18 +265,20 @@ localmelo has no reset command. To delete memory:
 
 3. Start localmelo again. It creates new files when it needs them.
 
-To clear only the model's stored reasoning, with localmelo stopped:
+To clear the model's stored reasoning, with localmelo stopped:
 
 ```bash
-# The reasoning, keeping the records of the calls
-sqlite3 ~/.cache/localmelo/memory/history.db "UPDATE llm_calls SET thinking = ''"
-
-# The records of the calls
+# The records of the calls, with all their reasoning
 sqlite3 ~/.cache/localmelo/memory/history.db "DELETE FROM llm_calls"
+
+# Only the thinking column, keeping the records of the calls
+sqlite3 ~/.cache/localmelo/memory/history.db "UPDATE llm_calls SET thinking = ''"
 ```
 
-The second also removes the reasoning that an Ollama reply's `content`
-starts with.
+The second leaves the reasoning that `content` holds: the `<think>` copy at
+the start of an Ollama reply, which retention then no longer removes, and
+the inline block of a reply from a server without a reasoning parser. To
+remove all the stored reasoning, use the first.
 
 If you set `LOCALMELO_MEMORY_DIR` or used `--memory-dir`, remove the files in
 that directory instead.
