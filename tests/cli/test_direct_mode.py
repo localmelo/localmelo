@@ -369,26 +369,38 @@ class TestUsageErrors:
                 "--embedding-base-url requires --base-url",
             ),
             (
+                ["--max-steps", "3"],
+                "only for direct mode (a query without --serve): --max-steps",
+            ),
+            (
                 # An empty query runs no task, so there is no run to report.
                 ["--output-format", "json", ""],
-                "--output-format json requires a query",
+                "only for direct mode (a query without --serve): --output-format",
             ),
             (
                 ["--serve", "--timeout", "5", "--output-format", "json", "q"],
-                "only for terminal mode (without --serve, --daemon or --reconfigure): --timeout, "
+                "only for direct mode (a query without --serve): --timeout, "
                 "--output-format",
             ),
             (
+                ["--request-timeout", "600"],
+                "only for direct mode (a query without --serve): --request-timeout",
+            ),
+            (
                 ["--serve", "--request-timeout", "600", "q"],
-                "only for terminal mode (without --serve, --daemon or --reconfigure): --request-timeout",
+                "only for direct mode (a query without --serve): --request-timeout",
+            ),
+            (
+                ["--reflection-gate", "utility"],
+                "only for direct mode (a query without --serve): --reflection-gate",
             ),
             (
                 ["--serve", "--reflection-gate", "flags", "q"],
-                "only for terminal mode (without --serve, --daemon or --reconfigure): --reflection-gate",
+                "only for direct mode (a query without --serve): --reflection-gate",
             ),
             (
                 ["--serve", "--attempt-policy", "none", "--reflection-gate", "flags"],
-                "only for terminal mode (without --serve, --daemon or --reconfigure): --attempt-policy, "
+                "only for direct mode (a query without --serve): --attempt-policy, "
                 "--reflection-gate",
             ),
         ],

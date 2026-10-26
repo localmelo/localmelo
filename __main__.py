@@ -47,7 +47,7 @@ EXIT_SIGNALS = tuple(
 # Characters of the error that the text-mode status line shows at most.
 STATUS_LINE_ERROR_CHARS = 500
 
-# Flags that apply to direct and interactive terminal modes, by dest.
+# Flags that apply to direct mode only (a query without --serve), by dest.
 _DIRECT_FLAGS = {
     "max_steps": "--max-steps",
     "attempt_policy": "--attempt-policy",
@@ -404,11 +404,11 @@ async def _run(
 
 def _run_direct(
     agent: Agent,
-    query: str | None,
+    query: str,
     output_format: str,
     tool_providers: Sequence[BaseToolProvider] = (),
 ) -> int:
-    """Run *query*, or start an interactive terminal, and return the exit code.
+    """Run *query*, or for an empty one the interactive loop; return the exit code.
 
     Stdout carries the report alone: what tools write to it during the
     run goes to stderr (see :func:`_stdout_for_the_report`).
@@ -516,11 +516,9 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         parser.error("--embedding-model requires --embedding-base-url")
     if args.embedding_base_url is not None and not args.base_url:
         parser.error("--embedding-base-url requires --base-url")
-    direct = (
-        not args.serve
-        and not args.daemon
-        and (bool(args.query) or not args.reconfigure)
-    )
+    # main() joins the words into the query, and an empty one (`melo ""`)
+    # runs no task, so the direct-mode flags would have nothing to apply to.
+    direct = bool(" ".join(args.query)) and not args.serve
     if not direct:
         given = [
             flag
@@ -529,11 +527,8 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         ]
         if given:
             parser.error(
-                "only for terminal mode (without --serve, --daemon or --reconfigure): "
-                + ", ".join(given)
+                "only for direct mode (a query without --serve): " + ", ".join(given)
             )
-    if direct and args.output_format == "json" and not " ".join(args.query):
-        parser.error("--output-format json requires a query")
 
 
 def _direct_options(
@@ -594,14 +589,12 @@ def _direct_tool_providers(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="melo", description="localmelo agent")
-    parser.add_argument(
-        "query", nargs="*", help="Task to execute; omit for an interactive terminal"
-    )
+    parser.add_argument("query", nargs="*", help="Task to execute (direct mode)")
     parser.add_argument("--base-url", default=None, help="LLM API base URL")
     parser.add_argument("--chat-model", default=None, help="Chat model name")
 
     direct = parser.add_argument_group(
-        "terminal mode", "Options for direct or interactive runs without --serve."
+        "direct mode", "Options for a query run without --serve."
     )
     direct.add_argument(
         "--max-steps",
@@ -727,8 +720,8 @@ def main() -> None:
         return
 
     # direct mode (no gateway): exit code 0 completed, 1 crashed, 2 otherwise
-    if not args.serve and (args.query or not args.reconfigure):
-        query = " ".join(args.query) or None
+    if args.query and not args.serve:
+        query = " ".join(args.query)
         options = _direct_options(parser, args)
         tool_providers = _direct_tool_providers(parser, args)
         agent = _build_direct_mode_agent(
@@ -766,8 +759,8 @@ def main() -> None:
         print(f"\n  {e}\n", file=sys.stderr)
         raise SystemExit(1) from e
 
-    if args.serve:
-        _start_gateway(cfg)
+    # start gateway
+    _start_gateway(cfg)
 
 
 def _make_memory_dir(memory_dir: str) -> None:
@@ -825,7 +818,8 @@ def _build_direct_mode_agent(
        config is validated first, as for gateway startup, so a bad value
        (e.g. an invalid extra_body) is reported instead of a traceback.
        --request-timeout, when given, replaces the configured
-       request_timeout_s for this run; the file is not written.
+       request_timeout_s for this run, and --chat-model the configured
+       chat model; the file is not written.
 
     *options* and *tool_providers* go to the Agent in both cases. The
     memory directory that *options* name is created first (see
@@ -860,7 +854,7 @@ def _build_direct_mode_agent(
     cfg = config.load()
     if not cfg.is_configured:
         print(
-            "No backend configured. Run 'melo --reconfigure' to set up,\n"
+            "No backend configured. Run 'melo --serve --reconfigure' to set up,\n"
             "or use --base-url to connect to an OpenAI-compatible endpoint.",
             file=sys.stderr,
         )
