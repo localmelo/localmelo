@@ -349,7 +349,8 @@ class TaskRecord:
     task_id: str = field(default_factory=new_record_id)
     steps: list[StepRecord] = field(default_factory=list)
     # "running" until the run ends, then the run's status: one of the
-    # RunResult statuses documented in docs/quickstart.md ("Run results").
+    # RunResult statuses documented in docs/run-results.md ("Statuses"),
+    # "cancelled" (an interactive run that was cancelled) included.
     status: str = "running"
     # The run's result, or its error when the result is empty.
     result: str = ""
@@ -360,10 +361,14 @@ class TaskRecord:
 class RunResult:
     """How one run of :meth:`Agent.run_task` ended.
 
-    ``status`` is one of the statuses documented in ``docs/quickstart.md``
-    ("Run results"). ``result`` is the final answer or a best effort, and
-    may be empty; ``error`` is empty unless something failed. The counters
-    cover this run only:
+    ``status`` is one of the statuses documented in ``docs/run-results.md``
+    ("Statuses"). ``cancelled`` is only for an interactive run, one with an
+    event sink or an approval policy, whose task was cancelled: its result
+    is empty and its error the reason, which is the exit's reason after
+    :meth:`Agent.begin_exit`; any other cancelled run ends ``crashed``
+    (see :meth:`Agent.run_task`). ``result`` is the final answer or a best
+    effort, and may be empty; ``error`` is empty unless something failed.
+    The counters cover this run only:
 
     - ``steps``: planning calls made, counted when each is sent;
     - ``attempts``: attempts started (1 for an answer on the first try);

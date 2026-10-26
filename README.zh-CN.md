@@ -97,6 +97,7 @@ source .venv/bin/activate
 | [网关和 HTTP API（英文）](docs/gateway.md) | HTTP API、会话、网页界面、在 macOS 登录时自动运行 |
 | [记忆（英文）](docs/memory.md) | localmelo 记住什么，以及如何保留、查看和重置记忆 |
 | [Python API（英文）](docs/python-api.md) | `Agent`、`AgentOptions` 和 `RunResult`（实验性） |
+| [事件（英文）](docs/events.md) | 一次运行向 Python 代码报告的事件，以及它们的顺序和字段 |
 | [localmelo 的工作原理（英文）](docs/how-it-works.md) | 运行循环、反思、记忆和超时 |
 | [故障排查（英文）](docs/troubleshooting.md) | 常见错误信息及解决方法 |
 | [架构](https://localmelo.github.io/localmelo/zh-CN/architecture.html) | 各部分如何协同工作（网站） |
@@ -122,6 +123,11 @@ source .venv/bin/activate
 
 > [!WARNING]
 > 工具以你的账户权限运行，并且没有沙箱：模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 `127.0.0.1`（默认值）。详见 [SECURITY.md（英文）](SECURITY.md)和[检查能做什么（英文）](docs/tools.md#what-the-checks-do)。
+
+在 [Python API（英文）](docs/python-api.md)中，有两个选项可以缩小工具能做的事：
+
+- **审批。** 审批策略（approval policy，`run_task(..., approval=policy)`）决定 `shell_exec`、`python_exec`、`file_write` 以及其他标记为需要审批的工具的每次调用能否运行。只有带审批策略的运行才会审批：直接模式和网关都没有审批策略。
+- **工作区根目录。** `AgentOptions(workspace_root=DIR)` 把 `file_read` 和 `file_write` 限制在这个目录内。只有设置了工作区根目录，这个限制才生效；`shell_exec` 和 `python_exec` 不受这个限制：它们在根目录中启动，但仍然可以访问任何路径。
 
 ## 获取帮助
 

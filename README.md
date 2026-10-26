@@ -138,6 +138,7 @@ detail.
 | [Gateway and HTTP API](docs/gateway.md) | HTTP API, sessions, web UI, running at login on macOS |
 | [Memory](docs/memory.md) | What localmelo remembers, keeping, inspecting and resetting it |
 | [Python API](docs/python-api.md) | `Agent`, `AgentOptions` and `RunResult` (experimental) |
+| [Events](docs/events.md) | The events a run reports to Python code, their order and fields |
 | [How localmelo works](docs/how-it-works.md) | The run loop, reflection, memory and timeouts |
 | [Troubleshooting](docs/troubleshooting.md) | Error messages and how to fix them |
 | [Architecture](https://localmelo.github.io/localmelo/en/architecture.html) | How the parts fit together (website) |
@@ -170,6 +171,18 @@ Planned:
 > you can. The gateway has no authentication, so keep it on `127.0.0.1` (the
 > default). See [SECURITY.md](SECURITY.md) and
 > [What the checks do](docs/tools.md#what-the-checks-do).
+
+In the [Python API](docs/python-api.md), two options narrow what tools can
+do:
+
+- **Approvals.** An approval policy (`run_task(..., approval=policy)`)
+  decides whether each call of `shell_exec`, `python_exec`, `file_write` and
+  other tools marked as requiring approval may run. Approvals apply only to
+  a run with a policy: direct mode and the gateway have none.
+- **A workspace root.** `AgentOptions(workspace_root=DIR)` keeps `file_read`
+  and `file_write` inside that directory. The fence applies only with a
+  workspace root, and `shell_exec` and `python_exec` are not fenced: they
+  start in the root, but can reach any path.
 
 ## Getting help
 

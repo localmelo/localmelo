@@ -25,7 +25,22 @@ those tools can do.
 - **Tools run with your account's permissions.** `shell_exec` runs shell
   commands, and `python_exec` runs Python code inside the localmelo process.
   `file_read` and `file_write` reach any file you can: no directory
-  restriction is active.
+  restriction is active. This holds in direct mode and the gateway, and in
+  the Python API unless an agent sets the options below.
+- **Approvals apply only with a policy.** In the Python API, an approval
+  policy passed to `Agent.run_task` decides whether each call of
+  `shell_exec`, `python_exec`, `file_write` and other tools marked as
+  requiring approval may run. It is asked after every other check, and a
+  policy that fails denies the call. Without a policy, as in direct mode and
+  the gateway, these tools run without asking.
+- **The fence applies only with a workspace root.**
+  `AgentOptions(workspace_root=DIR)` keeps `file_read` and `file_write`
+  inside that directory: paths are resolved before the check, a symlink
+  that points out is refused, and so is anything but a regular file.
+  Without a workspace root there is no fence.
+- **`shell_exec` and `python_exec` are not fenced.** With a workspace root
+  they start in it, and `python_exec` runs in a child process, but both can
+  reach any path you can. An approval policy is their only control.
 - **The checks are guardrails, not a sandbox:**
   - a step runs only the tools it offered;
   - the arguments of built-in tools must have the declared types;

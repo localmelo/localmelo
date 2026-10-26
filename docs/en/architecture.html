@@ -190,9 +190,10 @@
           answer, and the run ends as <code>completed</code>. With the default
           <code>reflect</code> policy, steps come in attempts of up to 10; after
           an attempt that ends without an answer, a reflection decides whether
-          another attempt starts. Every run ends with one of nine statuses and
-          returns a <code>RunResult</code>. A failed model request is retried up
-          to twice when a retry may succeed.
+          another attempt starts. Every run ends with one of nine statuses, or
+          as <code>cancelled</code> when an interactive run in the Python API is
+          stopped, and returns a <code>RunResult</code>. A failed model request
+          is retried up to twice when a retry may succeed.
         </p>
         <p>
           Key files: <code>melo/agent/agent.py</code>,
@@ -227,23 +228,34 @@
           Runs the tool calls of a step, in order. A call is refused when the
           step did not offer the tool, when its arguments are not a JSON
           object, or when an argument of a built-in tool has the wrong type;
-          the checker then sees every call that is left. Each tool runs with a
-          time limit: <code>shell_exec</code> 30 seconds, <code>file_read</code>
-          and <code>file_write</code> 60 seconds, an MCP tool its server's
-          <code>timeout</code>. <code>python_exec</code> code runs inside
-          localmelo and cannot be interrupted. A refusal, a time-out or an
-          error comes back as the tool's error.
+          the checker then sees every call that is left. With a workspace
+          root, the workspace policy then resolves the path of a file tool
+          and refuses one outside the root. With an approval policy, a call of
+          a tool that requires approval then waits for the policy's decision,
+          and once it is allowed, a file path is resolved again and refused if
+          it changed in the meantime. Each tool runs with a time limit, which
+          starts after the approval: <code>shell_exec</code> 30 seconds,
+          <code>file_read</code> and <code>file_write</code> 60 seconds, an
+          MCP tool its server's <code>timeout</code>. Without a workspace root,
+          <code>python_exec</code> code runs inside localmelo and cannot be
+          interrupted. A refusal, a denial, a time-out or an error comes back
+          as the tool's error.
         </p>
         <p>
           The four built-in tools are <code>shell_exec</code>,
           <code>python_exec</code>, <code>file_read</code> and
-          <code>file_write</code>. <code>policy.py</code> can limit the file
-          tools to one directory, but the agent does not turn it on: file tools
-          reach any file you can.
+          <code>file_write</code>. Direct mode and the gateway give them no
+          workspace root, so file tools reach any file you can. In the Python
+          API, <code>AgentOptions(workspace_root=…)</code> turns
+          <code>policy.py</code> on: the file tools then reach only files
+          inside the root, and <code>shell_exec</code> and
+          <code>python_exec</code> run there in a child process, without that
+          limit. Approvals apply only to a run with an approval policy.
         </p>
         <p>
           Key files: <code>melo/executor/executor.py</code>,
-          <code>builtins.py</code>, <code>policy.py</code>.
+          <code>builtins.py</code>, <code>policy.py</code>,
+          <code>melo/contracts/approvals.py</code>.
         </p>
 
         <h3 id="c-memory">Memory</h3>

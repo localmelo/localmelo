@@ -113,12 +113,17 @@ Every run saves one row in the `tasks` table of history:
 |---|---|
 | `task_id` | The run's `task_id`: 32 hex characters. |
 | `query` | The task as given. |
-| `status` | `running` during the run, then how it ended; see [Run results](run-results.md#statuses). |
+| `status` | `running` during the run, then how it ended; see [Run results](run-results.md#statuses). `cancelled` appears only for interactive runs in the Python API. |
 | `result` | The run's result, or its error when the result is empty. |
 
 - The row is saved again when the run ends, whatever ended it. A direct run
   ended by SIGTERM or SIGHUP is saved as `crashed`, with the result
   `Cancelled by SIGTERM` or `Cancelled by SIGHUP`.
+- An interactive run, one started in the Python API with `on_event` or
+  `approval`, that is cancelled is saved as `cancelled`, with the reason as
+  its result. Its interrupted step gets one row per tool call in `steps`
+  (see [Stop a run](python-api.md#stop-a-run)). Other cancelled runs are
+  saved as `crashed`.
 - A row that still reads `running` belongs to a run in progress, or to a
   process that was killed (for example with SIGKILL) before it could save
   the row.
