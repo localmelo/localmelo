@@ -7,6 +7,11 @@ sketch (``.melo/reasoning_memory_plan.md``, lines 258-271) and writes its
 rows itself. R1's migration replaces this copy of the DDL, and whichever of
 R1 and R3 merges second replaces the rows with ones R1's writer records
 (R3 spec, Requirement 15).
+
+With ``llm_calls=False`` the file is one written before R1: since R1,
+``SqliteHistory`` creates ``llm_calls`` and sets ``user_version`` 1, so the
+helper drops that table and sets ``user_version`` back to 0 once the
+history is closed.
 """
 
 from __future__ import annotations
@@ -86,6 +91,15 @@ async def write_history(
     finally:
         await history.aclose()
 
+    if not llm_calls:
+        # A file written before R1: no llm_calls table, user_version 0.
+        connection = sqlite3.connect(path)
+        try:
+            connection.execute("DROP TABLE llm_calls")
+            connection.execute("PRAGMA user_version = 0")
+            connection.commit()
+        finally:
+            connection.close()
     if llm_calls:
         connection = sqlite3.connect(path)
         try:

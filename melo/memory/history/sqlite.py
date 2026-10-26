@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import aiosqlite
 
@@ -36,6 +37,33 @@ CREATE TABLE IF NOT EXISTS steps (
 );
 """
 
+logger = logging.getLogger(__name__)
+
+# The history schema this code reads and writes, kept in the file's
+# ``PRAGMA user_version``. Version 0 is a file written before llm_calls.
+HISTORY_SCHEMA_VERSION: Final = 1
+
+# One row per model response (see :meth:`SqliteHistory.add_llm_call`). No
+# foreign key, so no row is ever refused for its task, and no index: the
+# primary key serves per-task reads.
+_LLM_CALLS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS llm_calls (
+  task_id TEXT NOT NULL, seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  step INTEGER, attempt INTEGER,
+  outcome TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '', thinking TEXT NOT NULL DEFAULT '',
+  reasoning_key TEXT NOT NULL DEFAULT '',
+  step_ids_json TEXT,
+  redactions INTEGER NOT NULL DEFAULT 0,
+  tool_calls_json TEXT, usage_json TEXT, duration_s REAL, timestamp REAL NOT NULL,
+  PRIMARY KEY (task_id, seq));
+"""
+
+
+class HistorySchemaError(RuntimeError):
+    """``history.db`` has a newer schema version than this code reads."""
+
 
 class SqliteHistory(History):
     """Persistent history backed by SQLite via aiosqlite.
@@ -67,11 +95,50 @@ class SqliteHistory(History):
             if self._conn is not None:
                 return self._conn
             conn = await aiosqlite.connect(self._db_path)
-            await apply_pragmas(conn)
-            await conn.executescript(_SCHEMA)
-            await conn.commit()
+            try:
+                await apply_pragmas(conn)
+                await conn.executescript(_SCHEMA)
+                await conn.commit()
+                await self._migrate(conn)
+            except BaseException:
+                await conn.close()
+                raise
             self._conn = conn
             return conn
+
+    async def _migrate(self, conn: aiosqlite.Connection) -> None:
+        """Bring the file to :data:`HISTORY_SCHEMA_VERSION`, in one transaction.
+
+        The version is read inside the ``BEGIN IMMEDIATE`` transaction, so
+        two openers cannot both migrate. A newer file raises
+        :class:`HistorySchemaError`. Every statement runs with
+        ``execute``: ``executescript`` would commit the transaction first.
+        """
+        migrated = False
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+            async with conn.execute("PRAGMA user_version") as cur:
+                row = await cur.fetchone()
+            version = int(row[0]) if row else 0
+            if version > HISTORY_SCHEMA_VERSION:
+                raise HistorySchemaError(
+                    f"{self._db_path} has schema version {version}; this "
+                    f"localmelo reads version {HISTORY_SCHEMA_VERSION}"
+                )
+            await conn.execute(_LLM_CALLS_SCHEMA)
+            if version < HISTORY_SCHEMA_VERSION:
+                await conn.execute(f"PRAGMA user_version = {HISTORY_SCHEMA_VERSION}")
+                migrated = True
+            await conn.commit()
+        except BaseException:
+            await conn.rollback()
+            raise
+        if migrated:
+            logger.info(
+                "Migrated %s to history schema version %d",
+                self._db_path,
+                HISTORY_SCHEMA_VERSION,
+            )
 
     # ── public interface (mirrors History) ──
 
