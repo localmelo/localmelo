@@ -125,6 +125,8 @@ uv run python -m localmelo.support.gateway._test_webapp
 | [架构](https://localmelo.github.io/localmelo/zh-CN/architecture.html) | 各部分如何协同工作（网站） |
 | [路线图](https://localmelo.github.io/localmelo/zh-CN/updates.html#roadmap) | 计划和更新记录（网站） |
 
+AI 智能体和 LLM 工具请读 [localmelo for agents（英文）](docs/for-agents.md)，它用一页写清使用 localmelo 所需的内容；文档索引见 [llms.txt](https://localmelo.github.io/localmelo/llms.txt)。
+
 ## 路线图
 
 路线图记录在 [#2](https://github.com/localmelo/localmelo/issues/2) 中。v0.1.0 里程碑计划于 2026-12-20 完成。

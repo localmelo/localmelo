@@ -8,6 +8,8 @@ tools and memory on your own model server or a cloud API. The website is at
 
 - [Quickstart](quickstart.md): install localmelo, run a first task, save a
   configuration and start the gateway.
+- [localmelo for agents](for-agents.md): one compact page for AI coding
+  agents and LLM tools, indexed by [llms.txt](llms.txt). People can skip it.
 
 ## Guides
 
@@ -64,6 +66,8 @@ tools and memory on your own model server or a cloud API. The website is at
 docs/
   README.md     this index; GitHub shows it for the docs/ folder
   *.md          guides and reference pages, in English
+  for-agents.md the compact entry for AI agents
+  llms.txt      the llms.txt index for AI agents (llmstxt.org format)
   index.html    the website's root page; it redirects to en/index.html
   en/           website pages in English
   zh-CN/        website pages in Chinese
@@ -105,6 +109,9 @@ Then open `http://127.0.0.1:8080/en/`.
   website page. Memory design is the exception: it is a design record, and
   the Architecture and Roadmap pages link to it instead.
 - Check every command you document by running it.
+- Keep `for-agents.md` in step with every change to behaviour, options,
+  output or feature status, and add new pages to `llms.txt`. It is written
+  for agents: dense, exact and short.
 
 ### Translations
 

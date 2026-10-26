@@ -178,6 +178,10 @@ own computer only; see [Web workspace](docs/gateway.md#web-workspace).
 | [Architecture](https://localmelo.github.io/localmelo/en/architecture.html) | How the parts fit together (website) |
 | [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap) | Plans and dated updates (website) |
 
+AI agents and LLM tools: read [localmelo for agents](docs/for-agents.md), one
+compact page, or the [llms.txt](https://localmelo.github.io/localmelo/llms.txt)
+index.
+
 ## Roadmap
 
 The roadmap is tracked in [#2](https://github.com/localmelo/localmelo/issues/2).
