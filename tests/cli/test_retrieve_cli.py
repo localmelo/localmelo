@@ -721,6 +721,50 @@ def test_llm_against_the_test_server(
     assert summary["fallbacks"] == NO_FALLBACKS
 
 
+def test_llm_usage_details_and_call_kinds(
+    server: ModelServer, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # R1: the provider keeps the whole usage, and every request names its kind.
+    usage = {
+        **USAGE,
+        "prompt_tokens_details": {"cached_tokens": 64},
+        "completion_tokens_details": {"reasoning_tokens": 2},
+    }
+
+    def chat(body: Any) -> tuple[int, Any]:
+        content = '{"ids": ["n1"]}' if _is_retrieval(body) else "Done."
+        message = {"role": "assistant", "content": content}
+        return 200, {"choices": [{"message": message}], "usage": usage}
+
+    server.chat = chat
+    argv = ["--retriever", "llm", *FILES, "--base-url", server.base_url]
+    argv += ["--interleave", INTERLEAVE, "--repeat", "1"]
+    assert main(argv) == 0
+    out, err = capsys.readouterr()
+    assert err == ""
+
+    requests = server.chat_requests()
+    assert {
+        ("R" if _is_retrieval(r.body) else "I", r.headers["x-localmelo-call-kind"])
+        for r in requests
+    } == {("R", "retrieve"), ("I", "plan")}
+    *queries, summary = _lines(out)
+    for line in queries:
+        # Three retrieval calls per query, each with the server's usage.
+        assert line["usage"] == {
+            "prompt_tokens": 300,
+            "completion_tokens": 15,
+            "total_tokens": 315,
+            "cached_tokens": 192,
+            "reasoning_tokens": 6,
+        }
+    assert (
+        summary["prompt_tokens_mean"],
+        summary["cached_tokens_mean"],
+        summary["completion_tokens_mean"],
+    ) == (100.0, 64.0, 5.0)
+
+
 def test_embedding_against_the_test_server(
     server: ModelServer, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -226,6 +226,9 @@ planning and reflection requests alike. The history in RAM keeps none.
   of an attempt, one or two, belong to its
   [`reflection`](events.md#reflection) event; the last by `seq` is the reply
   it read. The event's `seq` and the row's `seq` are different counters.
+- **Export.** `melo-retrieve --export-run` turns a run's model calls into
+  documents for retrieval experiments; see
+  [Export a history database](retrieval.md#export-a-history-database).
 - **Schema version.** `history.db` has `PRAGMA user_version` 1. A file from
   an earlier version (version 0) gets the empty table and version 1 when this
   version first opens it, with one INFO line in the log; its tasks and steps

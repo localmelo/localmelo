@@ -350,9 +350,8 @@ then one summary line. Warnings and errors go to stderr.
 - `null` marks a figure that does not apply: interleaved figures without
   `--interleave`, warm and interleaved figures with `--repeat 0`, and the
   token means for `bm25` and `embedding`.
-- `cached_tokens_mean` is `null` for `llm` too: the chat provider keeps only
-  `prompt_tokens`, `completion_tokens` and `total_tokens` from a reply's
-  usage.
+- `cached_tokens_mean` is filled for `llm` when the server reports
+  `prompt_tokens_details.cached_tokens`, and `null` otherwise.
 
 ### Warnings
 
@@ -467,21 +466,42 @@ when you [keep memory between runs](memory.md#keep-memory-between-runs). A
 file is read as a database when it starts with the SQLite header, and as raw
 calls otherwise.
 
-The export reads the model calls from the database's `llm_calls` table.
-`melo` does not write that table in this version, so the export of its
-`history.db` stops with exit code 2:
+The export reads the model calls from the database's `llm_calls` table,
+which `melo` writes whenever it keeps memory (see
+[Model calls](memory.md#model-calls)):
 
 ```bash
-melo-retrieve --export-run ~/.cache/localmelo/memory
+LOCALMELO_PERSIST_MEMORY=1 melo "List the files"
+melo-retrieve --export-run ~/.cache/localmelo/memory > run-corpus.jsonl
 ```
 
 ```text
-melo-retrieve: error: <path> has no llm_calls table: it was written before localmelo recorded model calls. Export the calls as raw-call JSONL instead (see docs/retrieval.md).
+melo-retrieve: exported 4 documents (2 notes, 0 reflections, 0 drafts, 2 thought chunks) from 1 tasks
 ```
 
-`<path>` is the path of the database. To export such a run, write its model
-calls as [raw calls](#raw-calls) from a record made outside localmelo, such
-as a proxy's log of the requests and replies.
+The numbers depend on the run. Here the model listed the directory and then
+answered, with reasoning in both replies, so each of the two calls gave a
+note and a thought chunk.
+
+- A `history.db` that no version with model calls has opened has no such
+  table, and its export stops with exit code 2:
+
+  ```text
+  melo-retrieve: error: <path> has no llm_calls table: it was written before localmelo recorded model calls. Export the calls as raw-call JSONL instead (see docs/retrieval.md).
+  ```
+
+  `<path>` is the path of the database. To export such a run, write its
+  model calls as [raw calls](#raw-calls) from a record made outside
+  localmelo, such as a proxy's log of the requests and replies.
+- A `history.db` from an earlier version that this version then opened gets
+  an empty table: its earlier tasks export nothing, and the closing line
+  counts only the tasks with model calls.
+- Rows older than `LOCALMELO_THINKING_RETENTION_DAYS` (30 days by default)
+  have no `thinking`, so they give no thought chunks.
+- `content` and `thinking` are stored redacted, the tool calls' arguments
+  are not. A draft whose code held a key may then no longer match its
+  `file_write`, and a reflection whose JSON holds a bare 4-to-8-digit
+  number near a code keyword may no longer parse.
 
 A database that has the table is read as follows:
 
@@ -490,6 +510,10 @@ A database that has the table is read as follows:
   `timestamp`, under the rules of raw calls. A `NULL` `step` or `attempt`
   reads as 0 or 1. A missing column stops the export:
   `melo-retrieve: error: <path>: llm_calls has no column <names>`.
+- When `thinking` is not empty and `content` starts with `<think>`, a
+  newline, the thinking, a newline, `</think>` and a blank line (the copy
+  Ollama's provider adds), the content is read without that copy, so the
+  reasoning is read once.
 - Tool results come from the `steps` rows that `step_ids_json` lists,
   matched to the calls by their `id`. When a listed row is missing or
   matches no call, one warning goes to stderr:

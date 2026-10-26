@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any, TypeGuard
 
 from localmelo.melo.checker.sanitize import sanitize_assistant_text
+from localmelo.melo.contracts.providers import LLM_REQUEST_KINDS
 from localmelo.melo.memory.notes import (
     DRAFT_WRITTEN_SHARE,
     NOTE_ITEM_CHARS,
@@ -55,7 +56,8 @@ from localmelo.melo.memory.retrieval.evaluate import LabelledQuery
 from localmelo.melo.memory.retrieval.llm import _strip_code_fences
 from localmelo.melo.schema import RAW_ARGUMENTS_KEY, ToolCall, ToolResult
 
-CALL_KINDS = ("plan", "reflect", "retrieve", "estimate")
+# The call kinds, shared with the agent that records them in llm_calls.
+CALL_KINDS = LLM_REQUEST_KINDS
 
 # The decisions a reflection may recommend: a copy of REFLECTION_ACTIONS in
 # melo/agent/agent.py (see _find_reflection below).
@@ -613,7 +615,8 @@ def load_history_calls(path: str | os.PathLike[str]) -> tuple[list[RawCall], int
 
     Each ``llm_calls`` row becomes a :class:`RawCall` under the raw-call
     rules (see :func:`load_raw_calls`); a ``NULL`` ``step`` or ``attempt``
-    reads as 0 and 1. The calls come from ``tool_calls_json`` (``NULL``:
+    reads as 0 and 1, and a ``content`` that starts with the ``<think>``
+    copy of ``thinking`` that Ollama's provider adds is read without it. The calls come from ``tool_calls_json`` (``NULL``:
     none), and the results from the ``steps`` rows that ``step_ids_json``
     names: each call takes the first of them, not yet taken, whose
     ``tool_call_json`` has the call's ``id``. The agent writes those rows
@@ -703,7 +706,7 @@ def _history_call(
             "kind": values["kind"],
             "step": values["step"],
             "attempt": values["attempt"],
-            "content": values["content"],
+            "content": _without_ollama_copy(values["content"], values["thinking"]),
             "thinking": values["thinking"],
             "tool_calls": tool_calls,
             "tool_results": results,
@@ -712,6 +715,22 @@ def _history_call(
         }
     )
     return call, skipped
+
+
+def _without_ollama_copy(content: object, thinking: object) -> object:
+    """*content* without the copy of *thinking* that Ollama's provider adds.
+
+    When *thinking* is not empty and *content* starts with ``<think>``, a
+    newline, *thinking*, a newline, ``</think>`` and a blank line, the
+    content is the text after that prefix, as the provider reads it when it
+    sends the turn back. Anything else, a value that is not text included,
+    is returned as it is.
+    """
+    if isinstance(content, str) and isinstance(thinking, str) and thinking:
+        prefix = f"<think>\n{thinking}\n</think>\n\n"
+        if content.startswith(prefix):
+            return content[len(prefix) :]
+    return content
 
 
 def _linked_results(

@@ -15,7 +15,11 @@ from typing import Any
 import httpx
 import pytest
 
-from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
+from localmelo.melo.contracts.providers import (
+    LLM_REQUEST_KIND,
+    BaseLLMProvider,
+    ProviderError,
+)
 from localmelo.melo.memory.retrieval import Doc, Hit, send_from_provider
 from localmelo.melo.memory.retrieval.bm25 import BM25Retriever
 from localmelo.melo.memory.retrieval.llm import (
@@ -561,3 +565,47 @@ async def test_send_from_provider_keeps_the_reply_usage_otherwise(
         "completion_tokens": 2,
         "total_tokens": 12,
     }
+
+
+async def test_cached_tokens_reach_the_result_through_the_real_provider() -> None:
+    # R1: OpenAICompatLLM keeps the whole usage in last_usage, and every
+    # retrieval request names its kind.
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {"message": {"role": "assistant", "content": '{"ids": ["n2"]}'}}
+                ],
+                "usage": {
+                    "prompt_tokens": 50,
+                    "completion_tokens": 4,
+                    "total_tokens": 54,
+                    "prompt_tokens_details": {"cached_tokens": 32},
+                    "completion_tokens_details": {"reasoning_tokens": 3},
+                },
+            },
+        )
+
+    llm = OpenAICompatLLM(
+        "http://retrieval.test/v1",
+        "qwen-test",
+        transport=httpx.MockTransport(handler),
+    )
+    try:
+        result = await LLMRetriever(send_from_provider(llm)).search(QUERY, DOCS, k=3)
+    finally:
+        await llm.close()
+    assert result.usage == {
+        "prompt_tokens": 50,
+        "completion_tokens": 4,
+        "total_tokens": 54,
+        "cached_tokens": 32,
+        "reasoning_tokens": 3,
+    }
+    assert [r.headers["X-Localmelo-Call-Kind"] for r in requests] == ["retrieve"]
+    # The kind is set only while the request is sent.
+    assert LLM_REQUEST_KIND.get() == ""

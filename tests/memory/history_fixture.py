@@ -1,12 +1,12 @@
-"""A fixture ``history.db``: tasks and steps through SqliteHistory, plus llm_calls.
+"""A fixture ``history.db``: tasks, steps and llm_calls through SqliteHistory.
 
-At ``c295ce2`` localmelo records no model calls, and ``history.db`` holds
-only ``tasks`` and ``steps``. R1 adds the ``llm_calls`` table and the code
-that writes it. Until then this helper creates the table from the plan's v1
-sketch (``.melo/reasoning_memory_plan.md``, lines 258-271) and writes its
-rows itself. R1's migration replaces this copy of the DDL, and whichever of
-R1 and R3 merges second replaces the rows with ones R1's writer records
-(R3 spec, Requirement 15).
+The helper writes a run's model calls as a recording run would, through
+R1's writer: each task's ``tasks`` row, each tool call's ``steps`` row with
+:meth:`SqliteHistory.add_step`, each call's ``llm_calls`` row with
+:meth:`SqliteHistory.add_llm_call`, and the call's step ids with
+:meth:`SqliteHistory.link_llm_call_steps`. Its history's clock reads 0, so
+the retention of thinking never clears the fixture's rows, whose
+timestamps are far in the past.
 
 With ``llm_calls=False`` the file is one written before R1: since R1,
 ``SqliteHistory`` creates ``llm_calls`` and sets ``user_version`` 1, so the
@@ -17,36 +17,13 @@ history is closed.
 from __future__ import annotations
 
 import asyncio
-import json
 import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.retrieval import RawCall
-from localmelo.melo.schema import StepRecord, TaskRecord
-
-# The plan's v1 sketch of llm_calls, copied as it stands; R1's migration
-# replaces it.
-LLM_CALLS_V1 = """
-CREATE TABLE IF NOT EXISTS llm_calls (
-  task_id TEXT NOT NULL, seq INTEGER NOT NULL,
-  kind TEXT NOT NULL,
-  step INTEGER, attempt INTEGER,
-  outcome TEXT NOT NULL,
-  content TEXT NOT NULL DEFAULT '', thinking TEXT NOT NULL DEFAULT '',
-  reasoning_key TEXT NOT NULL DEFAULT '',
-  step_ids_json TEXT,
-  redactions INTEGER NOT NULL DEFAULT 0,
-  tool_calls_json TEXT, usage_json TEXT, duration_s REAL, timestamp REAL NOT NULL,
-  PRIMARY KEY (task_id, seq));
-"""
-
-_INSERT = """
-INSERT INTO llm_calls (task_id, seq, kind, step, attempt, outcome, content,
-                       thinking, step_ids_json, tool_calls_json, timestamp)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-"""
+from localmelo.melo.schema import LLMCallRecord, StepRecord, TaskRecord
 
 StepIds = dict[tuple[str, int], list[str]]
 
@@ -59,16 +36,18 @@ async def write_history(
     Each task gets a ``tasks`` row. Each tool call with a result gets a
     ``steps`` row through :meth:`SqliteHistory.add_step`, with the reply's
     content as the first row's thought, as the agent writes them. With
-    *llm_calls*, each call also gets an ``llm_calls`` row:
-    ``tool_calls_json`` lists its calls as ``{"tool_name", "arguments",
-    "id"}`` (``NULL`` without any), and ``step_ids_json`` its ``steps``
-    rows in call order (``NULL`` without any).
+    *llm_calls*, each call also gets an ``llm_calls`` row through
+    :meth:`SqliteHistory.add_llm_call`: ``tool_calls_json`` lists its calls
+    as ``{"tool_name", "arguments", "id"}`` (``NULL`` without any), and
+    :meth:`SqliteHistory.link_llm_call_steps` lists its ``steps`` rows in
+    call order in ``step_ids_json`` (``NULL`` without any). The rows have
+    no reasoning key, redactions, usage or duration.
 
     Returns the step ids written for each call, by ``(task_id, seq)``.
     Every connection is closed on return, so no ``-wal`` or ``-shm`` file
     is left behind.
     """
-    history = SqliteHistory(path)
+    history = SqliteHistory(path, clock=lambda: 0.0)
     step_ids: StepIds = {}
     try:
         for task_id in dict.fromkeys(call.task_id for call in calls):
@@ -76,6 +55,8 @@ async def write_history(
                 TaskRecord(query=f"fixture task {task_id}", task_id=task_id)
             )
         for call in calls:
+            if llm_calls:
+                await history.add_llm_call(_record(call))
             ids: list[str] = []
             pairs = zip(call.tool_calls, call.tool_results, strict=False)
             for index, (tool_call, result) in enumerate(pairs):
@@ -87,6 +68,8 @@ async def write_history(
                 )
                 await history.add_step(call.task_id, step)
                 ids.append(step.step_id)
+            if llm_calls:
+                await history.link_llm_call_steps(call.task_id, call.seq, ids)
             step_ids[(call.task_id, call.seq)] = ids
     finally:
         await history.aclose()
@@ -100,17 +83,6 @@ async def write_history(
             connection.commit()
         finally:
             connection.close()
-    if llm_calls:
-        connection = sqlite3.connect(path)
-        try:
-            connection.executescript(LLM_CALLS_V1)
-            connection.executemany(
-                _INSERT,
-                [_row(call, step_ids[(call.task_id, call.seq)]) for call in calls],
-            )
-            connection.commit()
-        finally:
-            connection.close()
     return step_ids
 
 
@@ -121,27 +93,21 @@ def write_history_sync(
     return asyncio.run(write_history(path, calls, llm_calls=llm_calls))
 
 
-def _row(call: RawCall, step_ids: list[str]) -> tuple[object, ...]:
-    tool_calls_json = (
-        json.dumps(
-            [
-                {"tool_name": c.tool_name, "arguments": c.arguments, "id": c.id}
-                for c in call.tool_calls
-            ]
-        )
-        if call.tool_calls
-        else None
-    )
-    return (
-        call.task_id,
-        call.seq,
-        call.kind,
-        call.step,
-        call.attempt,
-        call.outcome,
-        call.content,
-        call.thinking,
-        json.dumps(step_ids) if step_ids else None,
-        tool_calls_json,
-        call.timestamp,
+def _record(call: RawCall) -> LLMCallRecord:
+    """The ``llm_calls`` row of *call*, as R1's writer takes it."""
+    return LLMCallRecord(
+        task_id=call.task_id,
+        seq=call.seq,
+        kind=call.kind,
+        step=call.step,
+        attempt=call.attempt,
+        outcome=call.outcome,
+        content=call.content,
+        thinking=call.thinking,
+        reasoning_key="",
+        redactions=0,
+        tool_calls=tuple(call.tool_calls),
+        usage=None,
+        duration_s=0.0,
+        timestamp=call.timestamp,
     )
