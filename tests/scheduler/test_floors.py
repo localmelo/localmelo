@@ -5,14 +5,19 @@ admissible and has waited ``w_floor_s``; it is capped at twice χ̂, resets
 when the class has nothing runnable and never goes negative; lane and P0
 calls add none; a floor admission goes ahead of P1 but not of the lane,
 P0 or an urgent P1; one floor call per class is in flight; floors only
-reorder; a full bucket after a crunch pays for about two calls.
+reorder; a full bucket after a crunch pays for about two calls; in a
+simulated crunch every P3 call starts within the floor bound under las2,
+and never under class.
 """
 
 from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import replace
 from typing import Any
+
+import pytest
 
 from localmelo.support.scheduler import (
     Call,
@@ -28,8 +33,20 @@ from localmelo.support.scheduler import (
     dispatch,
     params_for_arm,
 )
+from localmelo.support.scheduler.costs import RATES_OMLX_OQ5, alone_service_s
 from localmelo.support.scheduler.model import us
-from localmelo.tests.scheduler.helpers import call, clock, lane, state, step, task
+from localmelo.support.scheduler.sim import ServerParams, Workload, engine, run
+from localmelo.support.scheduler.sim.trace import TaskTemplate
+from localmelo.support.scheduler.sim.workloads import WALL_START_US, synthetic_templates
+from localmelo.tests.scheduler.helpers import (
+    call,
+    clock,
+    lane,
+    state,
+    step,
+    task,
+    wtask,
+)
 
 NOW = clock(10_000.0)
 P = params_for_arm("las2", w_max=10)
@@ -222,3 +239,60 @@ def test_no_credit_burst_after_a_crunch() -> None:
     for parts in (2, 3, 5):
         admitted, chi = _crunch(lambda chi, n=parts: chi // n)
         assert 2 < len(admitted) <= chi // (chi // parts) + 1  # ⌊χ̂ / χ_min⌋ + 1
+
+
+def _gapless_chain(start: int, min_s: float) -> TaskTemplate:
+    """Synthetic templates joined until *min_s* of alone service, with no tool time."""
+    tpl = synthetic_templates(1)
+    calls: list[Any] = []
+    i = start
+    while (
+        sum(
+            alone_service_s(c.prompt_tokens, 0, c.completion_tokens, RATES_OMLX_OQ5)
+            for c in calls
+        )
+        < min_s
+    ):
+        calls += [replace(c, gap_before_s=0.0) for c in tpl[i % len(tpl)].calls]
+        i += 1
+    return TaskTemplate(f"chain-{start}", tuple(calls))
+
+
+def test_the_simulated_floor_bound_holds_in_a_crunch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    p2 = [_gapless_chain(4 * i, 7200.0) for i in range(4)]
+    tasks = [wtask(f"p2-{i}", 0.0, 2, t) for i, t in enumerate(p2)]
+    tasks.append(wtask("p3", 0.0, 3, _gapless_chain(20, 7200.0)))
+    wl = Workload("crunch", 1, us(5400.0), WALL_START_US, tuple(tasks))
+    over = {"n_a": 3, "w_max": 5}
+    plain = run(wl, "class", params_for_arm("class", **over))
+    assert next(t for t in plain.tasks if t.task_id == "p3").first_admit_us is None
+
+    admits: list[tuple[int, int, int]] = []  # (submit, admit, χ̂_3) of P3 calls
+    real = engine.dispatch
+
+    def spy(st: State, now: Any, p: Any, **kw: Any) -> Any:
+        d = real(st, now, p, **kw)
+        by_id = {c.call_id: c for c in st.calls}
+        for cid in d.decision.admit:
+            if by_id[cid].task_id == "p3":
+                admits.append(
+                    (by_id[cid].submit_mono_us, now.mono_us, d.decision.chi_hat_us[1])
+                )
+        return d
+
+    monkeypatch.setattr(engine, "dispatch", spy)
+    p = params_for_arm("las2", **over)
+    run(wl, "las2", p)
+    theta3 = 3 ** ServerParams().theta_alpha
+    longest = max(
+        alone_service_s(c.prompt_tokens, 0, c.completion_tokens, RATES_OMLX_OQ5)
+        for t in p2
+        for c in t.calls
+    )
+    wall = us(longest * 3 / theta3)  # the longest P2 call at K = 3, cold
+    assert len(admits) >= 2
+    for submit, admit, chi in admits:
+        bound = us(p.w_floor_s) + us(chi / 1e6 / (p.phi3 * theta3)) + 2 * wall
+        assert admit - submit <= bound + us(p.tick_s)

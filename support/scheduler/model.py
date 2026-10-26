@@ -399,11 +399,21 @@ def _finite(v: float) -> bool:
         return False
 
 
+def _classes(classes: str) -> tuple[tuple[str, ...], ...]:
+    """The six field classes of *classes*, parsed once per string."""
+    if classes not in _PARSED:
+        _PARSED[classes] = tuple(tuple(part.split()) for part in classes.split("|"))
+    return _PARSED[classes]
+
+
+# The parsed field classes, by their string: every decision cleans every
+# record, so parsing once keeps the simulator's steps cheap.
+_PARSED: dict[str, tuple[tuple[str, ...], ...]] = {}
+
+
 def _clean(rec: Any, owner: str, classes: str, out: list[str]) -> Any:
     """*rec* with its odd values replaced, appending one alarm per field."""
-    ints, opt_ints, tokens, opt_tokens, opt_floats, floats = (
-        tuple(part.split()) for part in classes.split("|")
-    )
+    ints, opt_ints, tokens, opt_tokens, opt_floats, floats = _classes(classes)
     changes: dict[str, Any] = {}
     for names, cap, null in (
         (ints, MAX_INT, 0),

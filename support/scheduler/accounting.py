@@ -239,14 +239,22 @@ def apply_dispatch(
     for tid in sorted(tasks):
         t = tasks[tid]
         reason, detail = reasons.get(tid, ("", ""))
-        tasks[tid] = replace(
-            t,
-            level_eff=levels.get(tid, t.level_eff),
-            aged=t.aged or tid in aged,
-            last_reason=reason,
-            last_detail=detail,
-            phase="held" if t.phase == "running" and tid in reasons else t.phase,
+        new = (
+            levels.get(tid, t.level_eff),
+            t.aged or tid in aged,
+            reason,
+            detail,
+            "held" if t.phase == "running" and tid in reasons else t.phase,
         )
+        if new != (t.level_eff, t.aged, t.last_reason, t.last_detail, t.phase):
+            tasks[tid] = replace(
+                t,
+                level_eff=new[0],
+                aged=new[1],
+                last_reason=new[2],
+                last_detail=new[3],
+                phase=new[4],
+            )
 
     credit = tuple(
         (
