@@ -7,8 +7,10 @@ function that receives them.
 
 > [!NOTE]
 > Events are part of the Python API, which is experimental and may change
-> before v0.1.0. Direct mode (`melo "<task>"`) and the gateway do not use
-> them.
+> before v0.1.0. Direct mode (`melo "<task>"`), the `melo ""` loop and the
+> HTTP API do not use them. The gateway's web workspace runs each chat with
+> an event sink so that Stop ends the run as `cancelled`, but it keeps only
+> `run.finished` and shows no events.
 
 ## Follow a run
 

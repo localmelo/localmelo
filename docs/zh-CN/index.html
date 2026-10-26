@@ -81,7 +81,7 @@ source .venv/bin/activate</code></pre>
         <div class="link-grid">
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">
             <strong>运行任务</strong>
-            <span>一条命令完成一个任务：在步数上限内运行，两次尝试之间会进行反思，还可以设置运行时限。</span>
+            <span>一条命令完成一个任务：在步数上限内运行，两次尝试之间会进行反思，还可以设置运行时限；也可以用 <code>melo &quot;&quot;</code> 在终端里进行对话。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">
             <strong>工具和 MCP</strong>
@@ -92,12 +92,20 @@ source .venv/bin/activate</code></pre>
             <span>连接你自己运行的 Ollama、MLC LLM、vLLM 或 SGLang 服务器，或者 OpenAI、Anthropic、Google Gemini、NVIDIA 的 API。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md">
-            <strong>网关和网页界面</strong>
-            <span>通过 HTTP 提供智能体服务，支持会话，并附带一个用来试用模型的简单网页。</span>
+            <strong>网关和网页工作区</strong>
+            <span>通过 HTTP 提供智能体服务，支持会话；还可以在网页工作区里使用智能体，模型来自你的服务器。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">
             <strong>记忆</strong>
             <span>工作记忆、任务和步骤的历史记录，以及配置了嵌入服务器时的长期记忆；开启持久化后会保存到 SQLite。</span>
+          </a>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md">
+            <strong>Python API</strong>
+            <span>在 Python 代码中运行任务（实验性）：以事件形式跟踪每一步，停止运行，审批工具调用，并把文件工具限制在一个目录内。</span>
+          </a>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">
+            <strong>离线检索</strong>
+            <span>用 <code>melo-retrieve</code> 在带标注的查询上比较 <code>bm25</code>、<code>llm</code> 和 <code>embedding</code> 三种记忆检索器。运行目前还不使用它们。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#use-melo-in-scripts">
             <strong>脚本和基准测试</strong>
@@ -125,7 +133,8 @@ source .venv/bin/activate</code></pre>
         <ul>
           <li>交互式命令行：不带任务运行 <code>melo</code> 时打开，并实时显示智能体的工具调用（目前 <code>melo</code> 会启动网关，<code>melo &quot;&quot;</code> 打开一个简单的对话循环）；</li>
           <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
-          <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）。</li>
+          <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
+          <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话。</li>
         </ul>
         <p>相关议题和更新记录见<a href="./updates.html#roadmap">路线图和更新</a>。</p>
       </section>
@@ -133,7 +142,7 @@ source .venv/bin/activate</code></pre>
       <section class="section" id="security">
         <h2>安全</h2>
         <div class="callout warning">
-          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 <code>127.0.0.1</code>（默认值）。</p>
+          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 <code>127.0.0.1</code>（默认值）：在这个地址上，它会拒绝其他网站的网页通过浏览器向它的 API 发来的请求。</p>
         </div>
         <p>请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#what-the-checks-do">检查能做什么（英文）</a>。</p>
       </section>
@@ -145,6 +154,7 @@ source .venv/bin/activate</code></pre>
       <p>早期预览版（pre-alpha）：在 v0.1.0 之前，命令和 API 都可能变化。</p>
       <nav class="footer-links" aria-label="项目">
         <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">全部文档（英文）</a>
+        <a href="../for-agents.md">给 AI 智能体（英文）</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md">贡献指南（英文）</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>

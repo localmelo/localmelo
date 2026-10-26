@@ -149,7 +149,8 @@ Example output (values vary):
 ```
 
 The health check does not contact the model server; a task does. Open
-`http://127.0.0.1:8401/` in a browser for the web UI (playground).
+`http://127.0.0.1:8401/` in a browser for the web workspace (see
+[Interactive conversations](#interactive-conversations)).
 
 Press Ctrl+C in the first terminal to stop the gateway. Tasks now use the
 saved configuration:
@@ -175,15 +176,19 @@ Use `/help` for commands and `/exit` or Ctrl-D to leave. Without the `""`,
 `melo` starts the gateway, as `melo --serve` does.
 
 The web workspace at `http://127.0.0.1:8401/` supports model discovery, separate
-chat drafts, code formatting, cancellation, and responsive navigation. Connected
-browser clients synchronize conversation state, and reloads recover live chats.
-Sessions do not survive gateway restarts, and direct CLI chats are independent.
+chat drafts, code formatting, cancellation, and responsive navigation. It does
+not read the configuration file: enter your server's URL as the Chat API URL,
+such as `http://127.0.0.1:11434/v1` for Ollama, then select Discover models and
+pick a chat model. Other browser tabs on the same gateway see the same chats,
+and reloading the page brings them back. Chats last only while the gateway
+runs, and the `melo ""` loop's conversation is separate from the web chats.
 
 ## Next steps
 
 - [Configuration](configuration.md): backends, cloud API keys, timeouts.
 - [Tools and MCP](tools.md): choose built-in tools and add MCP servers.
-- [Gateway and HTTP API](gateway.md): sessions, the web UI, running at login.
+- [Gateway and HTTP API](gateway.md): sessions, the web workspace, running at login.
+- [Python API](python-api.md): run tasks from Python, follow their events, approve tool calls.
 - [Memory](memory.md): keep memory between runs, inspect and reset it.
 - [Command-line reference](cli.md): every option, exit codes, scripting.
 - [Troubleshooting](troubleshooting.md): error messages and fixes.

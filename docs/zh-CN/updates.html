@@ -125,7 +125,7 @@
             <li>Python 代码可以实时跟踪一次运行：<code>run_task(..., on_event=sink)</code> 会报告每一步、模型的每条回复、每次工具调用和每次反思，并隐去其中的密钥。</li>
             <li>带事件接收函数或审批策略的运行可以被停止：它以 <code>cancelled</code> 结束，被打断的那一步会被妥善收尾。</li>
             <li>审批策略决定 <code>shell_exec</code>、<code>python_exec</code>、<code>file_write</code> 等标记过的工具能否运行；<code>AgentOptions(workspace_root=...)</code> 把文件工具限制在一个目录内。</li>
-            <li>对话可以在多次运行之间、在不同 agent 之间延续。直接模式和网关的行为不变。</li>
+            <li>对话可以在多次运行之间、在不同智能体之间延续。直接模式和网关的行为不变。</li>
           </ul>
         </article>
 
@@ -136,7 +136,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/36">#36</a>
           </p>
           <ul>
-            <li>在默认地址上，网关会拒绝 <code>Host</code> 不是 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>[::1]</code> 加端口的请求（HTTP 421），也会拒绝其他来源的网页通过浏览器发来的请求（HTTP 403）。网页不能再通过 DNS 重绑定访问网关、用你的工具执行任务。</li>
+            <li>监听 <code>localhost</code> 或回环 IP 地址（例如默认的 <code>127.0.0.1</code>）时，网关会拒绝 <code>Host</code> 不是 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>[::1]</code> 加端口的请求（HTTP 421），也会拒绝其他来源的网页通过浏览器发来的请求（HTTP 403）。网页不能再通过 DNS 重绑定访问网关、用你的工具执行任务。</li>
             <li>任何网页都不能在 frame 里显示网关的页面。</li>
             <li>如果监听地址不是 <code>localhost</code> 或回环 IP 地址（例如 <code>0.0.0.0</code>），网关不做这些检查，并在启动时记录一条警告：网关没有身份验证。</li>
           </ul>
@@ -171,7 +171,7 @@
             <li>支持本地 MCP 服务器提供的工具（<code>--mcp-config</code> 和 <code>--mcp-only</code>），工具也可以返回图片（#27、#30）。</li>
             <li>工具调用会以真正的工具调用轮次发给兼容 OpenAI 接口的模型，一步中的每个调用都会执行；<code>extra_body</code> 可以为对话请求添加字段（#26）。</li>
             <li>反思的回复中没有 JSON 对象时，会不带工具再请求一次（#31）。</li>
-            <li>#32：在检索模式下，每一步先提供所有已注册的内置工具，再提供对话中提到的工具和用带 IDF 的 BM25 检索到的工具，两部分都按名称排序。</li>
+            <li>#32：在检索模式下，每一步先提供所有已注册的内置工具，再从其他工具中提供对话已提到或调用过的工具，以及用带 IDF 的 BM25 检索到的工具，两部分都按名称排序。</li>
             <li>采用 MIT 许可证（#28），开发环境改用 uv，并把 <code>uv.lock</code> 提交到仓库（#25）。</li>
           </ul>
         </article>
@@ -254,6 +254,7 @@
       <p>早期预览版（pre-alpha）：在 v0.1.0 之前，命令和 API 都可能变化。</p>
       <nav class="footer-links" aria-label="项目">
         <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">全部文档（英文）</a>
+        <a href="../for-agents.md">给 AI 智能体（英文）</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md">贡献指南（英文）</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>

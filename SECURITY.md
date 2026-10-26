@@ -54,8 +54,8 @@ those tools can do.
   account.
 - **The gateway has no authentication.** It listens on `127.0.0.1:8401` by
   default, where any program on your computer can reach it and run tasks
-  with your tools, and the web UI makes the gateway fetch any URL that a
-  client sends.
+  with your tools, and the web workspace makes the gateway fetch any URL
+  that a client sends.
   - On `localhost` or a loopback IP address, such as `127.0.0.1` or `::1`,
     the gateway refuses requests whose `Host` header is not `127.0.0.1`,
     `localhost` or `[::1]` with its port (HTTP 421), which stops web pages
@@ -63,8 +63,8 @@ those tools can do.
     pages at another origin (HTTP 403): `POST`, `PUT`, `PATCH`, `DELETE` and
     `OPTIONS` requests whose `Origin` is not the gateway's, and requests
     under `/v1/` that the browser marks as cross-site or same-site. A link
-    from another site still opens the web UI, but no page can show it in a
-    frame.
+    from another site still opens the web workspace, but no page can show it
+    in a frame.
   - On any other host, such as `0.0.0.0` or a host name other than
     `localhost`, none of this applies: anything that can reach the port, web
     pages included, can run tasks. Never bind it to other interfaces.
@@ -83,7 +83,7 @@ In scope:
 
 - getting around the per-step tool allowlist, the shell command blocklist or
   the filtering of MCP server environments;
-- problems in the gateway or its web UI;
+- problems in the gateway or its web workspace;
 - secrets that leak into history, logs or output.
 
 Out of scope:
