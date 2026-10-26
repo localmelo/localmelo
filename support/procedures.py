@@ -48,6 +48,8 @@ from localmelo.melo.memory.procedures.normalize import (
     template_id,
 )
 from localmelo.melo.memory.procedures.store import (
+    COLUMNS,
+    SCHEMA_VERSION,
     TABLES,
     MemoryProcedures,
     Routine,
@@ -59,6 +61,7 @@ from localmelo.melo.memory.procedures.store import (
     routine_row,
 )
 from localmelo.melo.memory.procedures.template import (
+    COMPLETED,
     DENOMINATORS,
     DROPS,
     STATISTICS,
@@ -217,17 +220,50 @@ def _db_path(args: argparse.Namespace) -> str:
     return os.path.join(directory, DB_FILE)
 
 
-async def _export(args: argparse.Namespace) -> int:
-    path = _db_path(args)
+def _read_only(path: str) -> sqlite3.Connection:
+    return sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
+
+
+def _check_store(path: str) -> None:
+    """Refuse, without writing to it, a file that is not a procedures store."""
     if not os.path.isfile(path):
         raise _InputError(f"{path} does not exist")
-    store = SqliteProcedures(path, create=False)
     try:
-        rows = await store.export_rows()
-    except (sqlite3.Error, ValueError, RuntimeError) as exc:
+        with contextlib.closing(_read_only(path)) as conn:
+            names = {
+                row[0]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                )
+            }
+            version = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    except sqlite3.Error as exc:
         raise _InputError(f"cannot read {path}: {exc}") from None
-    finally:
-        await store.aclose()
+    if version > SCHEMA_VERSION:
+        raise _InputError(
+            f"{path} has schema version {version}; this localmelo reads "
+            f"version {SCHEMA_VERSION}"
+        )
+    if version < 1 or not set(TABLES) <= names:
+        raise _InputError(f"{path} is not a procedures store")
+
+
+async def _export(args: argparse.Namespace) -> int:
+    path = _db_path(args)
+    _check_store(path)
+    rows: list[dict[str, Any]] = []
+    try:
+        with contextlib.closing(_read_only(path)) as conn:
+            for table in TABLES:
+                columns = COLUMNS[table]
+                for values in conn.execute(
+                    f"SELECT {', '.join(columns)} FROM {table} ORDER BY rowid"
+                ):
+                    rows.append(
+                        {"table": table, **dict(zip(columns, values, strict=True))}
+                    )
+    except sqlite3.Error as exc:
+        raise _InputError(f"cannot read {path}: {exc}") from None
     for row in rows:
         print(json.dumps(row, ensure_ascii=False))
     return EXIT_OK
@@ -235,8 +271,7 @@ async def _export(args: argparse.Namespace) -> int:
 
 async def _forget(args: argparse.Namespace) -> int:
     path = _db_path(args)
-    if not os.path.isfile(path):
-        raise _InputError(f"{path} does not exist")
+    _check_store(path)
     store = SqliteProcedures(path, create=False)
     try:
         deleted = await store.forget(None if args.all else args.routine)
@@ -554,7 +589,9 @@ class _Bars:
         cap = view.params.cap
         self.errors.append(error)
         self.caps.append(sum(s >= cap - 1e-9 for s in series) / n)
-        self.jumps.append(1 - series[-1])
+        if episode.status == COMPLETED:
+            # Only a completed run's bar jumps to 1.0 at its end.
+            self.jumps.append(1 - series[-1])
         self.backward += sum(
             b < a - 1e-12 for a, b in zip(series, series[1:], strict=False)
         )
@@ -569,7 +606,7 @@ class _Bars:
             "runs": len(self.errors),
             "bar_error": _round(statistics.fmean(self.errors)),
             "cap_share": _round(statistics.fmean(self.caps)),
-            "end_jump": _round(statistics.fmean(self.jumps)),
+            "end_jump": _round(statistics.fmean(self.jumps)) if self.jumps else None,
             "backward_moves": self.backward,
             "longer_rate": _round(self.longer / len(self.errors)),
             "longer_expected": _round(statistics.fmean(self.longer_expected)),
@@ -688,7 +725,9 @@ async def replay_online(
             if routine is not None
             else RoutineKey(key=episode.routine_id, place="", name=None, query_text="")
         )
-        options: dict[str, Any] = {"template": episode.template_id}
+        # The template id's second part hashes the model and the options, the
+        # same for every routine: a similar routine's template resolves.
+        options: dict[str, Any] = {"options": episode.template_id.rpartition(":")[2]}
         if args.key_build:
             options["build"] = episode.harness_version
         group = template_id(key.key, episode.model, options)
@@ -706,7 +745,7 @@ async def replay_online(
         if in_population and view is not None:
             if level == 2:
                 error, _ = shown.add(view, episode)
-                by_prior[len(view.stats.steps)].append(error)
+                by_prior[len(prior)].append(error)
             else:
                 held.add(view, episode)
         await store.learn(
@@ -746,7 +785,11 @@ async def replay_online(
             ),
             "backward_moves": summary["backward_moves"] == 0,
             "cap_share": summary["cap_share"] <= MAX_CAP_SHARE,
-            "end_jump": summary["end_jump"] <= MAX_END_JUMP,
+            "end_jump": (
+                None
+                if summary["end_jump"] is None
+                else summary["end_jump"] <= MAX_END_JUMP
+            ),
             "longer_rate": summary["longer_rate"] <= expected,
         }
     if phase is not None:
@@ -762,6 +805,11 @@ async def replay_online(
         "level2": summary,
         "held": held_summary,
         "separation": separation,
+        "level2_share": (
+            _round(levels[2] / (levels[1] + levels[2]))
+            if levels[1] + levels[2]
+            else None
+        ),
         "level2_by_prior_runs": {
             str(n): {"runs": len(errors), "bar_error": _round(statistics.fmean(errors))}
             for n, errors in sorted(by_prior.items())
@@ -792,6 +840,14 @@ def _arms(base: Params) -> list[tuple[str, Params]]:
 
 
 def _replay(args: argparse.Namespace) -> int:
+    if args.protocol != "online":
+        for flag, given in (
+            ("--drop", args.drop is not None),
+            ("--stats", args.stats is not None),
+            ("--arms", args.arms),
+        ):
+            if given:
+                raise _InputError(f"{flag} applies only to --protocol online")
     data = load_rows(args.files)
     if not data.episodes:
         raise _InputError("no episodes in the input")

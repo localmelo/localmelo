@@ -338,3 +338,11 @@ def test_phase_agrees() -> None:
     assert phase_agrees(VERIFY, {"T"})
     assert phase_agrees(FINISHING, {"R"})
     assert not phase_agrees(None, {"R"})
+
+
+def test_a_unittest_failure_after_ok_is_no_pass() -> None:
+    output = "Ran 3 tests in 0.1s\n\nOK\n\nRan 3 tests\nFAILED (errors=1)"
+    summary = parse_test_summary(output)
+    assert summary is not None and not summary.is_pass
+    once = "Ran 3 tests in 0.1s\n\nOK\nthen\nFAILED (failures=2)"
+    assert parse_test_summary(once) == TestSummary(1, 2, 0)

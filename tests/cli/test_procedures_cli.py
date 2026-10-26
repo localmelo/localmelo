@@ -686,3 +686,123 @@ def test_a_result_without_a_task_needs_a_history_of_one_task(
     assert "names no task_id, and the history holds 2 tasks" in err
     code, out, _ = run(capsys, "episodes", "--history", str(tmp_path))
     assert code == 0 and len(lines(out)) == 4
+
+
+@pytest.mark.parametrize("command", [["export"], ["forget", "--all"]])
+def test_export_and_forget_leave_a_foreign_file_alone(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], command: list[str]
+) -> None:
+    path = tmp_path / "procedures.db"
+    with contextlib.closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE notes (text TEXT)")
+        conn.execute("INSERT INTO notes VALUES ('mine')")
+        conn.commit()
+    before = path.read_bytes()
+    code, out, err = run(capsys, *command, "--db", str(path))
+    assert code == 2 and out == ""
+    assert "is not a procedures store" in err
+    assert path.read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["procedures.db"]
+
+
+def write_rows(path: Path, rows: list[dict[str, Any]]) -> str:
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    return str(path)
+
+
+def episode(
+    task_id: str,
+    steps: int,
+    created_at: float,
+    *,
+    routine_id: str = "r",
+    status: str = "completed",
+) -> dict[str, Any]:
+    return {
+        "table": "episodes",
+        "task_id": task_id,
+        "routine_id": routine_id,
+        "template_id": f"{routine_id}:opts",
+        "model": "m",
+        "status": status,
+        "steps": steps,
+        "segments_json": json.dumps([{"cls": "R", "label": "x", "steps": [1, steps]}]),
+        "created_at": created_at,
+    }
+
+
+def test_the_end_jump_counts_completed_runs_only(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rows = [
+        episode("t1", 6, 1),
+        episode("t2", 6, 2),
+        episode("t3", 6, 3),
+        episode("t4", 3, 4, status="budget_exhausted"),
+    ]
+    code, out, _ = run(capsys, "replay", write_rows(tmp_path / "e.jsonl", rows))
+    (summary,) = lines(out)
+    assert summary["level2"]["runs"] == 2
+    # t3 ends at 6/7 and jumps to 1; t4 stops at 3/6 and does not jump.
+    assert summary["level2"]["end_jump"] == pytest.approx(1 - 6 / 7, abs=1e-4)
+
+
+def test_level2_error_by_number_of_prior_runs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rows = [episode(f"t{i:02d}", 5, i) for i in range(12)]
+    code, out, _ = run(capsys, "replay", write_rows(tmp_path / "e.jsonl", rows))
+    (summary,) = lines(out)
+    # Ten runs had 2 to 11 earlier completed runs; the window holds 8.
+    assert list(summary["level2_by_prior_runs"]) == [str(n) for n in range(2, 12)]
+    assert summary["level2_share"] == pytest.approx(10 / 11, abs=1e-4)
+
+
+def test_a_similar_task_shows_level_1_in_the_replay(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    texts = [
+        "summarize today's unread mail into the daily notes file",
+        "run pytest in the project and fix the failing tests",
+        "convert the sales csv export into a json report",
+        "copy the photos folder to the backup drive",
+        "delete log files older than a week from the logs directory",
+        "summarize the unread mail of today into the daily notes",
+    ]
+    rows: list[dict[str, Any]] = []
+    for index, text in enumerate(texts):
+        routine = f"r{index}"
+        rows.append(
+            {
+                "table": "routines",
+                "routine_id": routine,
+                "key": f"k{index}",
+                "query_text": text,
+                "place": "/p",
+                "created_at": 0,
+            }
+        )
+        runs = 2 if index < 5 else 1
+        for run_index in range(runs):
+            rows.append(
+                episode(
+                    f"{routine}-{run_index}",
+                    5,
+                    10 * index + run_index,
+                    routine_id=routine,
+                )
+            )
+    code, out, _ = run(capsys, "replay", write_rows(tmp_path / "e.jsonl", rows))
+    (summary,) = lines(out)
+    # Five first runs at level 0, five second runs at 1, the reworded run at 1.
+    assert summary["levels"] == {"0": 5, "1": 6, "2": 0}
+
+
+@pytest.mark.parametrize("protocol", ["loo", "first-k"])
+@pytest.mark.parametrize("flag", [["--drop", "off"], ["--stats", "normal"], ["--arms"]])
+def test_online_flags_are_refused_with_other_protocols(
+    capsys: pytest.CaptureFixture[str], protocol: str, flag: list[str]
+) -> None:
+    code, _, err = run(capsys, "replay", str(FIXTURE), "--protocol", protocol, *flag)
+    assert code == 2
+    assert f"{flag[0]} applies only to --protocol online" in err

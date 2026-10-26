@@ -44,14 +44,15 @@ are measured before a run shows anything.
   steps ÷ median) of at most 0.5. A model whose bar was off by more than
   0.18 on average over its last 10 scored runs (at least 5) is demoted to
   level 1 until it does better. The first run of a template is exploration:
-  once 2 later runs completed, it leaves the statistics if it took more
-  steps than all of them.
+  once 2 later runs completed, it leaves the statistics if it completed and
+  took more steps than all of them.
 - **The bar.** After step k starts, with m the median of the window: k ÷ m
   while k < m; else k ÷ (k + the median remaining steps of the longer runs),
   or k ÷ (k + 1) when no run was longer. It never moves back, never passes
   95% while running, and is 100% only when a run completes. A run longer than
   every run in the window, a reflection that the window does not expect, or
-  a stuck notice freezes it for the rest of the run.
+  a stuck notice freezes it for the rest of the run. Only a bar can leave
+  the template: at level 1 the run stays `running`.
 
 ### Classes and phases
 
@@ -61,7 +62,7 @@ Each tool call gets one class:
 |---|---|
 | `R` | `file_read`; a `shell_exec` that starts with a reading program (`ls`, `cat`, `grep`, …); `python_exec` code that reads or prints |
 | `W` | `file_write`; a `shell_exec` that writes (`>`, `mv`, `cp`, `mkdir`, `rm`, `sed -i`, `tee`, `touch`, …); `python_exec` code that writes a file |
-| `T` | Any other call whose command, code or arguments mention `pytest`, `unittest`, `_test.py`, `verify`, `check` or `assert ` |
+| `T` | A call other than `file_read` and `file_write` whose command, code or arguments mention `pytest`, `unittest`, `_test.py`, `verify`, `check` or `assert `; this is checked before the `R` and `W` rules of `shell_exec` and `python_exec` |
 | `X` | Everything else |
 
 A `T` call *passes* when the last 400 characters of its output hold a pytest
@@ -90,7 +91,7 @@ schema version 1 (`PRAGMA user_version`):
 |---|---|---|
 | `routines` | Routine: its key, name, normalized and redacted query (at most 2,000 characters), place, and the routine it was similar to | Never |
 | `episodes` | Finished run: routine, template, model, build, match, level, status, steps, attempts, tool calls, duration, first pass, cycles, segments and shadow bar error | Never |
-| `templates` | Version of a template: statistics, named steps, parameters, the runs it came from, its parent version, status, source | Only `status`: `active` → `superseded`, `candidate` → `active` or `rejected` |
+| `templates` | Version of a template: statistics, named steps, parameters, the runs it came from, its parent version, status, source | Only `status`: `active` → `superseded`, `candidate` → `active` or `rejected`; a rejected candidate's `eval_json` may record why |
 
 Triggers in the file refuse any other change, and at most one version of a
 template is `active`. A run's end writes in one `BEGIN IMMEDIATE`
@@ -145,7 +146,7 @@ melo-procedures replay episodes.jsonl
 Output (one line):
 
 ```json
-{"protocol": "online", "arm": "default", "params": {"window": 8, "stats": "completed", "drop": "conditional", "min_episodes": 2, "spread": 0.5, "cap": 0.95, "denominator": "dynamic", "demotion": 0.18, "demotion_window": 10, "demotion_min": 5}, "key_build": false, "runs": 5, "levels": {"0": 1, "1": 1, "2": 3}, "model_demoted": 0, "level2": {"runs": 3, "bar_error": 0.105, "cap_share": 0.0, "end_jump": 0.1898, "backward_moves": 0, "longer_rate": 0.3333, "longer_expected": 0.2611}, "held": {"runs": 0}, "separation": null, "level2_by_prior_runs": {"2": {"runs": 1, "bar_error": 0.0179}, "3": {"runs": 1, "bar_error": 0.0972}, "4": {"runs": 1, "bar_error": 0.2}}, "phase_agreement": 1.0, "thresholds": {"bar_error": true, "separation": null, "backward_moves": true, "cap_share": true, "end_jump": true, "longer_rate": false, "phase_agreement": true}}
+{"protocol": "online", "arm": "default", "params": {"window": 8, "stats": "completed", "drop": "conditional", "min_episodes": 2, "spread": 0.5, "cap": 0.95, "denominator": "dynamic", "demotion": 0.18, "demotion_window": 10, "demotion_min": 5}, "key_build": false, "runs": 5, "levels": {"0": 1, "1": 1, "2": 3}, "model_demoted": 0, "level2": {"runs": 3, "bar_error": 0.105, "cap_share": 0.0, "end_jump": 0.1181, "backward_moves": 0, "longer_rate": 0.3333, "longer_expected": 0.2611}, "held": {"runs": 0}, "separation": null, "level2_share": 0.75, "level2_by_prior_runs": {"2": {"runs": 1, "bar_error": 0.0179}, "3": {"runs": 1, "bar_error": 0.0972}, "4": {"runs": 1, "bar_error": 0.2}}, "phase_agreement": 1.0, "thresholds": {"bar_error": true, "separation": null, "backward_moves": true, "cap_share": true, "end_jump": true, "longer_rate": false, "phase_agreement": true}}
 ```
 
 The first run had no template (level 0), the second one past run (level 1),
@@ -160,11 +161,15 @@ and the last three a bar (level 2), whose mean error over their steps was
 | `--protocol online` | The default. Every episode in time order through the store and the tracker, as a live store would see them. One line per arm. |
 | `--protocol loo` | Each run of a template with 3 or more runs, predicted from its other runs, with no gate. One line per denominator. |
 | `--protocol first-k` | Every later run of a template, judged on its first 2 runs only, held fixed, with the spread gate. One line per denominator. |
-| `--arms` | `online` only: also each arm that changes one default: the denominators `median`, `milestone` and `hybrid`, the spread 0.4 and 0.6, the drop `off` and `unconditional`, and the statistics `normal`. |
+| `--arms` | Also each arm that changes one default: the denominators `median`, `milestone` and `hybrid`, the spread 0.4 and 0.6, the drop `off` and `unconditional`, and the statistics `normal`. |
 | `--denominator` | The bar's rule: `dynamic` (above, the default), `median` (k ÷ m), `milestone` (anchored on the first write, test and pass) or `hybrid` (`dynamic`, jumping to 90% after the first pass). `loo` and `first-k` report all four without it. |
 | `--spread S` | The gate's spread (default 0.5). |
 | `--drop` | The exploration drop: `conditional` (default), `off` or `unconditional`. |
 | `--stats` | The runs the statistics use: `completed` (default) or `normal`, which adds runs that ended `budget_exhausted`, `stuck` or `gate_stopped`. |
+
+`--arms`, `--drop` and `--stats` apply to `online` only; with `loo` or
+`first-k` they are a usage error. Those two protocols take the statistics
+from every run of a template, whatever its status, with no drop.
 | `--key-build` | Put each episode's localmelo version in its template's key. |
 
 An `online` line holds:
@@ -173,10 +178,11 @@ An `online` line holds:
 |---|---|
 | `levels` | Runs at each level, as their lookup found them. |
 | `model_demoted` | Runs held at level 1 because their model was demoted. |
-| `level2` | The runs at level 2 among those with at least 2 earlier runs in the statistics: `bar_error` (mean over each run's steps of the distance between the bar and the true fraction), `cap_share` (share of steps at 95%), `end_jump` (1 − the bar at the last step), `backward_moves`, `longer_rate` (runs that outlasted their window) and `longer_expected` (the mean of 1 ÷ (window + 1)). |
+| `level2` | The runs at level 2 among those with at least 2 earlier runs in the statistics: `bar_error` (mean over each run's steps of the distance between the bar and the true fraction), `cap_share` (the mean over the runs of the share of their steps at 95%), `end_jump` (1 − the bar at the last step, over the completed runs; `null` without one), `backward_moves`, `longer_rate` (runs that outlasted their window) and `longer_expected` (the mean of 1 ÷ (window + 1)). |
 | `held` | The same for the runs the gate held back, with the bar they would have had. |
 | `separation` | `held.bar_error` − `level2.bar_error`; `null` without both. |
-| `level2_by_prior_runs` | `level2` runs and error by the window's size. |
+| `level2_share` | Level-2 runs ÷ runs at level 1 or 2. Replayed with one key for every task of a family (`episodes --key <family>`), it is the share of runs that a family would wrongly show a bar to; section 10 of the spec wants at most 10%. |
+| `level2_by_prior_runs` | `level2` runs and error by the number of earlier runs in the template's statistics. |
 | `phase_agreement` | The share of steps whose phase matches their calls' classes. |
 | `thresholds` | Each threshold met or not: bar error ≤ 0.15, separation ≥ 0.05, no backward move, at most 5% of steps at 95%, end jump ≤ 0.30, longer rate ≤ expected + 0.05, phase agreement ≥ 0.9; `null` when not measurable. |
 

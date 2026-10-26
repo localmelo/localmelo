@@ -179,7 +179,8 @@ def parse_test_summary(output: str) -> TestSummary | None:
     pytest: the last line with ``N passed``, ``M failed`` or ``K
     error(s)``. unittest: the last ``Ran N tests``, followed by ``OK``
     (``OK (skipped=S)`` leaves N − S passed) or ``FAILED (failures=M,
-    errors=K)``; a ``Ran`` line with neither after it is no summary.
+    errors=K)``, which wins over an ``OK``; a ``Ran`` line with neither
+    after it is no summary.
     When both kinds are present, the later one counts.
     """
     pytest_at, pytest_summary = _pytest_summary(output)
@@ -215,7 +216,7 @@ def _unittest_summary(output: str) -> tuple[int, TestSummary | None]:
     rest = output[last.end() :]
     failed = _UNITTEST_FAILED.search(rest)
     ok = _UNITTEST_OK.search(rest)
-    if failed is not None and (ok is None or failed.start() < ok.start()):
+    if failed is not None:
         fields = dict(_UNITTEST_FIELD.findall(failed.group(1)))
         failures = int(fields.get("failures", 0))
         errors = int(fields.get("errors", 0))
