@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 from collections import deque
 from collections.abc import Iterable, Sequence
@@ -480,6 +481,40 @@ class TestRequest:
             _approval(write_request, origin="user", allowed=True),
             _approval(deploy_request, origin="user", allowed=True),
         ]
+
+    @pytest.mark.asyncio
+    async def test_a_rooted_request_names_the_resolved_path(
+        self, tmp_path: Path
+    ) -> None:
+        root = tmp_path / "root"
+        root.mkdir()
+        write = {"path": "notes.txt", "content": "hi"}
+        llm = ScriptedLLM([_calls(("file_write", write, "call_w")), _answer("done")])
+        policy = Policy(ApprovalDecision(True))
+        agent, _ = _agent(
+            llm, builtins=frozenset({"file_write"}), workspace_root=str(root)
+        )
+        recorder = Recorder()
+
+        result = await agent.run_task("write", on_event=recorder, approval=policy)
+
+        # The policy sees the real path that will be written, not the
+        # model's relative one, and the root it lies in.
+        resolved = os.path.join(os.path.realpath(root), "notes.txt")
+        [request] = policy.requests
+        assert request == ApprovalRequest(
+            request_id=request.request_id,
+            run_id=result.task_id,
+            call_id="call_w",
+            tool_name="file_write",
+            arguments={"path": resolved, "content": "hi"},
+            preview=f"{resolved} (2 chars)",
+            workspace_root=agent.workspace_root,
+        )
+        assert agent.workspace_root == os.path.realpath(root)
+        [started] = recorder.of("run.started")
+        assert started.data["workspace_root"] == agent.workspace_root
+        assert Path(resolved).read_text() == "hi"
 
     @pytest.mark.asyncio
     async def test_the_arguments_are_a_copy(self, tmp_path: Path) -> None:

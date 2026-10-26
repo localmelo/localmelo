@@ -477,6 +477,28 @@ async def test_path_changed_during_approval(root: Path, tmp_path: Path) -> None:
     assert outside.read_text() == "secret"
 
 
+async def test_without_a_root_an_approved_path_is_not_checked_again(
+    tmp_path: Path,
+) -> None:
+    # The re-check resolves the path that the workspace policy resolved, so
+    # it runs only with a root. Without one the path is never resolved, and
+    # the tool gets the path the gate saw, whatever it names by then.
+    other = tmp_path / "other.txt"
+    other.write_text("other")
+    notes = tmp_path / "notes.txt"
+    notes.write_text("notes")
+    stand_ins = StandIns()
+    executor, _ = _executor(None, stand_ins)
+    gate = SwappingGate(notes, other)
+    write = {"path": str(notes), "content": "x"}
+
+    outcome = await _run(executor, "file_write", write, gate)
+
+    assert outcome.status == ExecutionStatus.SUCCESS
+    assert [request.arguments for request in gate.requests] == [write]
+    assert stand_ins.calls == [("file_write", write)]
+
+
 async def test_a_directory_swapped_during_approval_is_caught(
     root: Path, tmp_path: Path
 ) -> None:

@@ -130,6 +130,26 @@ async def _run_recording(
     return outcome, codes
 
 
+@contextlib.contextmanager
+def _stdin_holding(data: bytes) -> Iterator[None]:
+    """Put a pipe that holds *data* on this process's standard input.
+
+    pytest's capture already puts ``/dev/null`` on fd 0, where a command
+    that inherited it would read EOF too.
+    """
+    saved = os.dup(0)
+    read_end, write_end = os.pipe()
+    os.write(write_end, data)
+    os.close(write_end)
+    os.dup2(read_end, 0)
+    os.close(read_end)
+    try:
+        yield
+    finally:
+        os.dup2(saved, 0)
+        os.close(saved)
+
+
 async def _pid(pid_file: Path) -> int:
     """The PID a command wrote to *pid_file*, once it is there."""
     for _ in range(500):
@@ -514,6 +534,29 @@ async def test_a_final_symlink_created_after_resolution_is_refused(
     assert secret.read_text() == "secret"
 
 
+async def test_a_final_symlink_inside_the_root_reaches_its_target(
+    root: Path,
+) -> None:
+    # The path is resolved before the tool opens it, so a symlink to a file
+    # in the root reaches that file: only one that takes the file's place
+    # after the check is refused (above).
+    target = root / "target.txt"
+    target.write_text("hello")
+    (root / "alias").symlink_to(target)
+    executor = _executor(root)
+
+    read = await _run(executor, "file_read", path="alias")
+    write = await _run(executor, "file_write", path="alias", content="new")
+
+    assert (read.status, read.output) == (ExecutionStatus.SUCCESS, "hello")
+    assert (write.status, write.output) == (
+        ExecutionStatus.SUCCESS,
+        f"Written 3 bytes to {target}",
+    )
+    assert target.read_text() == "new"
+    assert (root / "alias").is_symlink()
+
+
 async def test_text_utf_8_cannot_encode_leaves_the_file(root: Path) -> None:
     (root / "notes.txt").write_text("keep me")
     executor = _executor(root)
@@ -573,14 +616,19 @@ async def test_the_shell_starts_in_the_root_with_no_input(
 ) -> None:
     monkeypatch.chdir(tmp_path)
     executor = _executor(root)
+    read = 'read line; echo "read: $?"'
 
     where = await _run(executor, "shell_exec", command="pwd")
-    stdin = await asyncio.wait_for(
-        _run(executor, "shell_exec", command='read line; echo "read: $?"'), 10.0
-    )
+    # This process's stdin holds a line, so only a shell whose stdin is
+    # /dev/null reads EOF: one that inherited it reads the line.
+    with _stdin_holding(b"hello\n"):
+        stdin = await asyncio.wait_for(_run(executor, "shell_exec", command=read), 10.0)
+    with _stdin_holding(b"hello\n"):
+        inherited, _ = await asyncio.wait_for(builtin_tools._run_shell(read), 10.0)
 
     assert (where.status, where.output) == (ExecutionStatus.SUCCESS, str(root))
     assert stdin.output == "read: 1"
+    assert inherited == "read: 0"
 
 
 async def test_a_cwd_argument_never_runs(root: Path) -> None:
