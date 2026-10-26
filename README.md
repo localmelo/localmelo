@@ -137,6 +137,7 @@ detail.
 | [Tools and MCP](docs/tools.md) | Built-in tools, MCP servers, which tools a step offers, the checks |
 | [Gateway and HTTP API](docs/gateway.md) | HTTP API, sessions, web UI, running at login on macOS |
 | [Memory](docs/memory.md) | What localmelo remembers, keeping, inspecting and resetting it |
+| [Offline retrieval](docs/retrieval.md) | `melo-retrieve`: compare memory retrievers offline, export a run as a corpus |
 | [Python API](docs/python-api.md) | `Agent`, `AgentOptions` and `RunResult` (experimental) |
 | [Events](docs/events.md) | The events a run reports to Python code, their order and fields |
 | [How localmelo works](docs/how-it-works.md) | The run loop, reflection, memory and timeouts |
