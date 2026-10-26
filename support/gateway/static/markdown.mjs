@@ -30,100 +30,25 @@ function safeUrl(destination) {
   }
 }
 
-function closingDelimiter(text, delimiter, start) {
-  for (let position = start; position < text.length; position++) {
-    if (text[position] === "\\") {
-      position++;
-      continue;
-    }
-    if (text[position] === "`") {
-      const code = codeSpanAt(text, position);
-      if (code) {
-        position = code.end - 1;
-        continue;
-      }
-    }
-    if (text.startsWith(delimiter, position)) return position;
-  }
-  return -1;
-}
+const isSpace = (character) => character === undefined || /\s/.test(character);
+const isWordCharacter = (character) => character !== undefined && /[\p{L}\p{N}]/u.test(character);
+const isPunctuation = (character) => character !== undefined && /[\p{P}\p{S}]/u.test(character);
+const CJK = /[\p{sc=Han}\p{sc=Hiragana}\p{sc=Katakana}\p{sc=Hangul}]/u;
+const isCjk = (character) => character !== undefined && CJK.test(character);
+// The whole character before or at `position`, so a letter outside the BMP counts as one.
+const characterBefore = (text, position) =>
+  text.codePointAt(position - 2) > 0xffff
+    ? String.fromCodePoint(text.codePointAt(position - 2))
+    : text[position - 1];
+const characterAt = (text, position) =>
+  position < text.length ? String.fromCodePoint(text.codePointAt(position)) : undefined;
 
-/**
- * Find where an emphasis opened just before `start` closes. A run of the delimiter
- * character preceded by whitespace opens nested emphasis; a later run first closes those
- * nested openers, and only what is left of it can close this one.
- *
- * `tables` caches the tables built for this `text`: per delimiter character, the run ends
- * from delimiterRunEnds, so a long run of the character is crossed in one step; per
- * delimiter, the table from emphasisBlockers, so an opener without a closer returns at once
- * instead of scanning to the end of the paragraph.
- */
-function closingEmphasis(text, delimiter, start, tables) {
-  const character = delimiter[0];
-  const runEnds = (tables.runEnds[character] ??= delimiterRunEnds(text, character));
-  const blocked = (tables.blockers[delimiter] ??= emphasisBlockers(text, delimiter, runEnds));
-  let nested = 0;
-  for (let position = start; position < text.length; position++) {
-    if (position > start && nested >= blocked[position]) return -1;
-    if (text[position] === "\\") {
-      position++;
-      continue;
-    }
-    if (text[position] === "`") {
-      const code = codeSpanAt(text, position);
-      if (code) {
-        position = code.end - 1;
-        continue;
-      }
-    }
-    if (text[position] !== character) continue;
-    const runEnd = runEnds[position];
-    if (position > start && !/\s/.test(text[position - 1])) {
-      const closed = Math.min(nested, runEnd - position);
-      nested -= closed;
-      if (runEnd - position - closed >= delimiter.length) return position + closed;
-    } else if (runEnd < text.length && !/\s/.test(text[runEnd])) {
-      nested += runEnd - position;
-    }
-    position = runEnd - 1;
-  }
-  return -1;
-}
+// inline() answers its searches from tables that are built for a text on first use, each in one
+// pass: a forward search from every opener would make long answers quadratic.
 
-/**
- * For each position, the fewest pending nested openers with which closingEmphasis, scanning
- * on from that position, finds no closer. It is built once per text and delimiter, from the
- * end, and follows closingEmphasis's steps for a position after `start`.
- */
-function emphasisBlockers(text, delimiter, runEnds) {
-  const character = delimiter[0];
-  const blocked = new Array(text.length + 2).fill(0);
-  for (let position = text.length - 1; position >= 0; position--) {
-    let next = position + 1;
-    if (text[position] === "\\") next = position + 2;
-    else if (text[position] === "`") {
-      const code = codeSpanAt(text, position);
-      if (code) next = code.end;
-    } else if (text[position] === character) {
-      const runEnd = runEnds[position];
-      const run = runEnd - position;
-      const after = blocked[runEnd];
-      if (!/\s/.test(text[position - 1])) {
-        // A run that can close: it closes unless nested openers leave less than a delimiter.
-        blocked[position] = after === 0 ? run - delimiter.length + 1 : run + after;
-      } else if (runEnd < text.length && !/\s/.test(text[runEnd])) {
-        blocked[position] = Math.max(0, after - run);
-      } else blocked[position] = after;
-      continue;
-    }
-    blocked[position] = blocked[next];
-  }
-  return blocked;
-}
-
-/** For each position, where the run of `character` from it ends (itself when it is another). */
-function delimiterRunEnds(text, character) {
-  const ends = new Array(text.length + 1);
+/** For each position, where the run of `character` from it ends. */
+function runEnds(text, character) {
+  const ends = new Int32Array(text.length + 1);
   ends[text.length] = text.length;
   for (let position = text.length - 1; position >= 0; position--) {
     ends[position] = text[position] === character ? ends[position + 1] : position;
@@ -131,32 +56,189 @@ function delimiterRunEnds(text, character) {
   return ends;
 }
 
-const BARE_URL = /https?:\/\/[^\s<>"'`]+/iy;
+/**
+ * For each position, the end of the code span that the backticks from it open, or -1. A span
+ * closes at the next run of exactly as many backticks, so one backward pass that remembers the
+ * nearest run of each length answers every position.
+ */
+function codeSpanEnds(text, runs) {
+  const ends = new Int32Array(text.length + 1).fill(-1);
+  const nearest = new Map();
+  for (let start = text.length - 1; start >= 0; start--) {
+    if (text[start] !== "`" || text[start - 1] === "`") continue;
+    const end = runs[start];
+    for (let position = start; position < end; position++) {
+      const close = nearest.get(end - position);
+      if (close !== undefined) ends[position] = close + end - position;
+    }
+    nearest.set(end - start, start);
+  }
+  return ends;
+}
+
+/** Where the token at `position` ends: an escape, a code span or backtick run, or a character. */
+function tokenEnd(text, position, tables) {
+  if (text[position] === "\\") return Math.min(position + 2, text.length);
+  if (text[position] !== "`") return position + 1;
+  const runs = (tables["`"] ??= runEnds(text, "`"));
+  const span = (tables.spans ??= codeSpanEnds(text, runs))[position];
+  return span === -1 ? runs[position] : span;
+}
+
+/** The code span opened by the backticks at `start`; `code` is null when none closes. */
+function codeSpanAt(text, start, tables) {
+  const end = tokenEnd(text, start, tables);
+  if (tables.spans[start] === -1) return { code: null, end };
+  const length = tables["`"][start] - start;
+  let code = text.slice(start + length, end - length).replace(/\n/g, " ");
+  if (/^ .* $/.test(code) && /[^ ]/.test(code)) code = code.slice(1, -1);
+  return { code, end };
+}
+
+/** For each position, the first "]" from it outside escapes and code spans, or -1. */
+function bracketCloses(text, tables) {
+  const closes = new Int32Array(text.length + 2).fill(-1);
+  for (let position = text.length - 1; position >= 0; position--) {
+    closes[position] = text[position] === "]" ? position : closes[tokenEnd(text, position, tables)];
+  }
+  return closes;
+}
+
+/** For each "(" outside an escape, the position of the ")" that closes it, or -1. */
+function parenCloses(text) {
+  const closes = new Int32Array(text.length).fill(-1);
+  const open = [];
+  for (let position = 0; position < text.length; position++) {
+    if (text[position] === "\\") position++;
+    else if (text[position] === "(") open.push(position);
+    else if (text[position] === ")" && open.length) closes[open.pop()] = position;
+  }
+  return closes;
+}
+
+const OPENS = 1;
+const CLOSES = 2;
+const NESTS = 4;
+const MAY_NEST = 8;
+const LEFT_FLANKING = 16;
+
+/**
+ * Where emphasis opened with `character` closes, as `closes[length][start]` for content from
+ * `start` (-1 when it does not close), and what each run of the character can do, as bits of
+ * `kinds` decided by the characters around the whole run. A run can open before a non-space
+ * and close after one; "_" does neither inside a word. A run that can close and is at least as
+ * long as the delimiter closes it. A run that can only open starts nested emphasis, which the
+ * search skips with its own closer, so `*a **b** c*` closes at the last "*". So does a run after
+ * punctuation and before a letter, as CommonMark has it (`*x (*y*) z*`), when that nested
+ * emphasis closes at a run that CommonMark would not let open. Otherwise, and always before a
+ * Chinese, Japanese or Korean character, that run closes, since such text has no spaces:
+ * `**注意：**请…`, `**注意：**Python … 改用**setuptools**`. Content that starts with the
+ * character starts with nested emphasis too, and does not close when that does not. Filled from
+ * the end, so every lookup is already known.
+ */
+function emphasisTables(text, character, tables) {
+  const runs = (tables[character] ??= runEnds(text, character));
+  const kinds = new Uint8Array(text.length + 1);
+  for (let start = 0; start < text.length; start = Math.max(start + 1, runs[start])) {
+    if (text[start] !== character) continue;
+    const before = characterBefore(text, start);
+    const after = characterAt(text, runs[start]);
+    const word = character === "_";
+    const opens = !isSpace(after) && !(word && isWordCharacter(before));
+    const closes = !isSpace(before) && !(word && isWordCharacter(after));
+    const mayNest = opens && closes && isPunctuation(before) && !isPunctuation(after);
+    const left =
+      !isSpace(after) && (!isPunctuation(after) || isSpace(before) || isPunctuation(before));
+    kinds.fill(
+      (opens ? OPENS : 0) |
+        (closes ? CLOSES : 0) |
+        (opens && !closes ? NESTS : 0) |
+        (mayNest && !isCjk(after) ? MAY_NEST : 0) |
+        (left ? LEFT_FLANKING : 0),
+      start,
+      runs[start],
+    );
+  }
+  const table = () => new Int32Array(text.length + 2).fill(-1);
+  const scan = [null, table(), table()];
+  const closes = [null, table(), table()];
+  // Where a search continues past nested emphasis opened at `position`, or -1. With `strict`,
+  // only when it closes at a run that cannot open by CommonMark's rule.
+  const pastNested = (position, strict = false) => {
+    const length = runs[position] - position >= 2 ? 2 : 1;
+    const close = closes[length][position + length];
+    if (close === -1 || (strict && kinds[close] & LEFT_FLANKING)) return -1;
+    return close + length;
+  };
+  for (let position = text.length - 1; position >= 0; position--) {
+    const end = runs[position];
+    const kind = kinds[position];
+    if (text[position] === character) {
+      const nested =
+        kind & NESTS ? pastNested(position) : kind & MAY_NEST ? pastNested(position, true) : -1;
+      for (const length of [1, 2]) {
+        if (nested !== -1) scan[length][position] = scan[length][nested];
+        else if (kind & CLOSES && end - position >= length) scan[length][position] = position;
+        else scan[length][position] = scan[length][end];
+      }
+    } else {
+      const next = tokenEnd(text, position, tables);
+      for (const length of [1, 2]) scan[length][position] = scan[length][next];
+    }
+    const start = text[position] === character && kind & OPENS ? pastNested(position) : position;
+    for (const length of [1, 2]) closes[length][position] = start === -1 ? -1 : scan[length][start];
+  }
+  return { kinds, closes };
+}
+
+function linkAt(text, start, tables) {
+  const labelEnd = (tables.brackets ??= bracketCloses(text, tables))[start + 1];
+  if (labelEnd === -1 || text[labelEnd + 1] !== "(") return null;
+  const end = (tables.parens ??= parenCloses(text))[labelEnd + 1];
+  if (end === -1) return null;
+  return {
+    label: text.slice(start + 1, labelEnd),
+    url: safeUrl(text.slice(labelEnd + 2, end)),
+    end: end + 1,
+  };
+}
+
+// Full-width punctuation (U+3000-303F, U+FF00-FFEF) ends a URL, as in "详见 https://x.y/。".
+const BARE_URL = /https?:\/\/[^\s<>"'`\u3000-\u303f\uff00-\uffef]{1,2112}/iy;
+const MAX_BARE_URL = 2048;
 
 /** Match a bare http(s) URL at `start`, without trailing punctuation (as GFM autolinks). */
 function bareUrlAt(text, start) {
-  if (start > 0 && !/[\s(*_~]/.test(text[start - 1])) return null;
+  const before = text[start - 1];
+  if (start > 0 && !/[\s(*_~\u3000-\u303f\uff00-\uffef]/.test(before) && !isCjk(before))
+    return null;
   BARE_URL.lastIndex = start;
   const match = BARE_URL.exec(text);
-  if (!match || /["'<>]/.test(text[start + match[0].length] || "")) return null;
+  // A quote or angle bracket after the URL keeps it text, and so does a URL that runs past
+  // the pattern's cap, which bounds the work at each start.
+  const next = text[start + (match ? match[0].length : 0)];
+  if (!match || (next !== undefined && /[^\s`\u3000-\u303f\uff00-\uffef]/.test(next))) return null;
+  // Text with no space before the URL has none after it either ("请访问https://x.y/docs查看").
+  let raw = match[0];
+  if (start > 0 && isCjk(before) && raw.search(CJK) !== -1) raw = raw.slice(0, raw.search(CJK));
   // Count unmatched closers once, so trimming a long run of them stays linear.
   const unmatched = { ")": 0, "]": 0 };
-  for (const character of match[0]) {
+  for (const character of raw) {
     if (character === "(") unmatched[")"]--;
     else if (character === "[") unmatched["]"]--;
     else if (character === ")" || character === "]") unmatched[character]++;
   }
-  let length = match[0].length;
+  let length = raw.length;
   for (;;) {
-    const last = match[0][length - 1];
+    const last = raw[length - 1];
     if (/[.,:;!?*_~]/.test(last)) length--;
     else if ((last === ")" || last === "]") && unmatched[last] > 0) {
       unmatched[last]--;
       length--;
     } else break;
   }
-  const source = match[0].slice(0, length);
-  const url = safeUrl(source);
+  const source = raw.slice(0, length);
+  const url = source.length <= MAX_BARE_URL && safeUrl(source);
   return url ? { source, url, end: start + source.length } : null;
 }
 
@@ -170,42 +252,9 @@ function anchor(url, labelHtml) {
   );
 }
 
-function codeSpanAt(text, start) {
-  const delimiter = text.slice(start).match(/^`+/)[0];
-  let end = text.indexOf(delimiter, start + delimiter.length);
-  while (end !== -1 && (text[end - 1] === "`" || text[end + delimiter.length] === "`")) {
-    end = text.indexOf(delimiter, end + delimiter.length);
-  }
-  if (end === -1) return null;
-  let code = text.slice(start + delimiter.length, end).replace(/\n/g, " ");
-  if (/^ .* $/.test(code) && /[^ ]/.test(code)) code = code.slice(1, -1);
-  return { code, end: end + delimiter.length };
-}
-
-function linkAt(text, start) {
-  const labelEnd = closingDelimiter(text, "]", start + 1);
-  if (labelEnd === -1 || text[labelEnd + 1] !== "(") return null;
-  let depth = 1;
-  let end = labelEnd + 2;
-  for (; end < text.length; end++) {
-    if (text[end] === "\\") {
-      end++;
-      continue;
-    }
-    if (text[end] === "(") depth++;
-    if (text[end] === ")" && --depth === 0) break;
-  }
-  if (depth !== 0) return null;
-  return {
-    label: text.slice(start + 1, labelEnd),
-    url: safeUrl(text.slice(labelEnd + 2, end)),
-    end: end + 1,
-  };
-}
-
 function inline(text, depth = 0, allowLinks = true) {
   if (depth > 20) return escapeHtml(text);
-  const tables = { runEnds: {}, blockers: {} };
+  const tables = {};
   let html = "";
   for (let index = 0; index < text.length; ) {
     const character = text[index];
@@ -215,19 +264,16 @@ function inline(text, depth = 0, allowLinks = true) {
       continue;
     }
     if (character === "`") {
-      const delimiter = text.slice(index).match(/^`+/)[0];
-      const span = codeSpanAt(text, index);
-      if (span) {
-        html += "<code>" + escapeHtml(span.code) + "</code>";
-        index = span.end;
-        continue;
-      }
-      html += delimiter;
-      index += delimiter.length;
+      const span = codeSpanAt(text, index, tables);
+      html +=
+        span.code === null
+          ? text.slice(index, span.end)
+          : "<code>" + escapeHtml(span.code) + "</code>";
+      index = span.end;
       continue;
     }
     if (allowLinks && character === "[") {
-      const link = linkAt(text, index);
+      const link = linkAt(text, index, tables);
       if (link) {
         html += link.url
           ? anchor(link.url, inline(link.label, depth + 1, false))
@@ -245,23 +291,21 @@ function inline(text, depth = 0, allowLinks = true) {
       }
     }
     if (character === "*" || character === "_") {
-      const delimiter = text[index + 1] === character ? character.repeat(2) : character;
-      // An opener followed by whitespace never opens, so it needs no search for a closer;
-      // otherwise each spaced "*" before a real closer would scan all the way to it.
-      const opens = !/\s/.test(text[index + delimiter.length]);
-      const end = opens ? closingEmphasis(text, delimiter, index + delimiter.length, tables) : -1;
-      const intraword = character === "_" && /[\p{L}\p{N}]/u.test(text[index - 1] || "");
-      if (opens && !intraword && end > index + delimiter.length && !/\s/.test(text[end - 1])) {
-        const tag = delimiter.length === 2 ? "strong" : "em";
+      const length = text[index + 1] === character ? 2 : 1;
+      const start = index + length;
+      const emphasis = (tables["emphasis" + character] ??= emphasisTables(text, character, tables));
+      const end = emphasis.kinds[index] & OPENS ? emphasis.closes[length][start] : -1;
+      if (end > start) {
+        const tag = length === 2 ? "strong" : "em";
         html +=
           "<" +
           tag +
           ">" +
-          inline(text.slice(index + delimiter.length, end), depth + 1, allowLinks) +
+          inline(text.slice(start, end), depth + 1, allowLinks) +
           "</" +
           tag +
           ">";
-        index = end + delimiter.length;
+        index = end + length;
         continue;
       }
     }
@@ -281,7 +325,8 @@ function tableCells(line) {
   for (let index = 0; index < source.length; index++) {
     const character = source[index];
     if (character === "\\" && source[index + 1] === "|") {
-      current += "\\|";
+      // GFM drops the backslash even inside code, where inline() would show it.
+      current += codeDelimiter ? "|" : "\\|";
       index++;
       continue;
     }
@@ -314,7 +359,7 @@ function tableAlignment(line) {
 
 const fence = (line) => /^ {0,3}(`{3,}|~{3,})([^\n]*)$/.exec(line);
 const heading = (line) => /^ {0,3}(#{1,6})(?:[ \t]+(.*)|$)/.exec(line);
-const listItem = (line) => /^( {0,3})([-+*]|\d{1,9}[.)])\s+(.+)$/.exec(line);
+const listItem = (line) => /^( {0,3})([-+*]|\d{1,9}[.)])\s+(.+)$/s.exec(line);
 const rule = (line) => /^ {0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/.test(line);
 
 function blocks(lines, depth = 0) {
@@ -353,7 +398,7 @@ function blocks(lines, depth = 0) {
         "<h" +
         title[1].length +
         ">" +
-        inline((title[2] || "").replace(/[ \t]+#+[ \t]*$/, "").trim()) +
+        inline((title[2] || "").replace(/[ \t]#+[ \t]*$/, "").trim()) +
         "</h" +
         title[1].length +
         ">";
@@ -385,8 +430,14 @@ function blocks(lines, depth = 0) {
           .join("") +
         "</tr></thead><tbody>";
       index += 2;
+      // Cap the empty cells that pad short rows, as markdown-it does: a wide header over many
+      // short rows would otherwise grow a small answer into hundreds of megabytes of HTML.
+      let padding = 0;
       while (index < lines.length && lines[index].trim() && lines[index].includes("|")) {
-        const cells = tableCells(lines[index++]);
+        const cells = tableCells(lines[index]);
+        padding += Math.max(0, alignment.length - cells.length);
+        if (padding > 65536) break;
+        index++;
         html +=
           "<tr>" +
           alignment
@@ -407,14 +458,23 @@ function blocks(lines, depth = 0) {
       const start = ordered ? Number.parseInt(firstItem[2], 10) : 1;
       html += "<" + tag + (ordered && start !== 1 ? ' start="' + start + '"' : "") + ">";
       while (index < lines.length) {
-        const item = listItem(lines[index]);
+        // Blank lines between items keep the list going.
+        let next = index;
+        while (next < lines.length && !lines[next].trim()) next++;
+        const item = next < lines.length && !rule(lines[next]) && listItem(lines[next]);
         if (!item || item[1].length !== firstItem[1].length || /^\d/.test(item[2]) !== ordered)
           break;
+        index = next;
         const indent = lines[index].indexOf(item[3], item[1].length + item[2].length);
+        const prefix = " ".repeat(indent);
         const content = [item[3]];
         index++;
-        while (index < lines.length && lines[index].startsWith(" ".repeat(indent)))
-          content.push(lines[index++].slice(indent));
+        // So do blank lines inside an item, up to its last line indented under the marker.
+        for (next = index; next < lines.length; next++) {
+          if (!lines[next].trim()) continue;
+          if (!lines[next].startsWith(prefix)) break;
+          while (index <= next) content.push(lines[index++].slice(indent));
+        }
         html += "<li>" + blocks(content, depth + 1) + "</li>";
       }
       html += "</" + tag + ">";
