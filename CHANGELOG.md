@@ -9,6 +9,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Sessions in the Python API (experimental), `localmelo.support.sessions`.
+  A session keeps a conversation in SQLite: each turn begins with a stored
+  row, outlives the request that started it, and ends exactly once with a
+  status and a cause, also when the process that ran it dies; a fresh agent
+  can resume the conversation. The package has the store, a runner for an
+  agent's turns, approval helpers for surfaces that ask a person, an event
+  stream and a read-only change feed. Neither `melo` nor the gateway uses
+  sessions yet ([#41]).
 - `docs/for-agents.md`, one compact page that tells AI coding agents and LLM
   tools what localmelo is and how to use it, and `docs/llms.txt`, an index of
   the docs in the llms.txt format, served at
@@ -151,3 +159,4 @@ earlier milestones.
 [#38]: https://github.com/localmelo/localmelo/pull/38
 [#39]: https://github.com/localmelo/localmelo/pull/39
 [#40]: https://github.com/localmelo/localmelo/pull/40
+[#41]: https://github.com/localmelo/localmelo/pull/41

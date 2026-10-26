@@ -335,6 +335,16 @@
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">Offline retrieval</a>.
         </p>
         <p>
+          Sessions (experimental, Python API only) keep whole conversations in
+          <code>sessions.db</code>: each turn is a stored row that ends exactly
+          once with a status and a cause, the session's events are stored with
+          it, and a window checkpoint lets a fresh agent resume where the last
+          one stopped. The gateway's file and the terminal's file are separate.
+          <code>melo</code> and the gateway do not use sessions yet (code:
+          <code>support/sessions/</code>). See
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/sessions.md">Sessions</a>.
+        </p>
+        <p>
           Key files: <code>melo/memory/coordinator.py</code>,
           <code>short/</code> (working memory), <code>history/</code>,
           <code>long/</code>, <code>tools/</code> (the tool registry),
@@ -439,6 +449,7 @@
           <li>A conversation loop in the terminal (<code>melo ""</code>).</li>
           <li>Four built-in tools, and tools from local MCP servers in direct mode and the Python API.</li>
           <li>The Python API (experimental): run events, stopping a run, approval policies for tool calls, a workspace root for the file tools, and conversations that carry over between runs.</li>
+          <li>Sessions in the Python API (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>). <code>melo</code> and the gateway do not use them yet.</li>
           <li>The gateway: the HTTP API, sessions, the web workspace, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
           <li>Backends for Ollama, MLC LLM, vLLM, SGLang and four cloud APIs.</li>
           <li>Working memory, history and long-term memory, saved to SQLite when persistence is on.</li>
