@@ -773,3 +773,68 @@ async def test_a_cancelled_write_leaves_no_transaction_open(
     rows = _call_rows(path)
     assert [row["seq"] for row in rows] == [0]
     assert rows[0]["step_ids_json"] is None
+
+
+@pytest.mark.parametrize("write", ["add_llm_call", "link_llm_call_steps"])
+async def test_a_failed_rollback_does_not_replace_a_cancellation(
+    tmp_path: Path, write: str
+) -> None:
+    # A shutdown cancels the write while its BEGIN IMMEDIATE waits for
+    # another connection's lock, then closes the history: the rollback then
+    # fails on the closed connection, and the cancellation must still be
+    # what the write raises (CallLog logs any Exception and carries on).
+    path = tmp_path / "history.db"
+    history = SqliteHistory(path)
+    await history.add_llm_call(_record(0, timestamp=time.time()))
+    other = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    try:
+        other.execute("BEGIN IMMEDIATE")
+        if write == "add_llm_call":
+            pending = history.add_llm_call(_record(1, timestamp=time.time()))
+        else:
+            pending = history.link_llm_call_steps("t1", 0, ["s1"])
+        writing = asyncio.create_task(pending)
+        await asyncio.sleep(0.2)  # the write waits at its BEGIN IMMEDIATE
+        asyncio.get_running_loop().call_later(0.3, other.execute, "ROLLBACK")
+        writing.cancel()
+        await history.aclose()
+        with pytest.raises(asyncio.CancelledError):
+            await writing
+    finally:
+        other.close()
+    rows = _call_rows(path)
+    assert [(row["seq"], row["step_ids_json"]) for row in rows] == [(0, None)]
+
+
+def _refuse_chmod(*args: object, **kwargs: object) -> None:
+    raise PermissionError(1, "Operation not permitted")
+
+
+def test_make_private_dir_logs_a_refused_chmod(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # File systems without POSIX modes, such as FAT, refuse it.
+    path = tmp_path / "memory"
+    monkeypatch.setattr(os, "chmod", _refuse_chmod)
+    caplog.set_level(logging.DEBUG, logger=SQLITE_HELPERS_LOGGER)
+    make_private_dir(str(path))
+    assert path.is_dir()
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (
+            logging.WARNING,
+            f"Could not restrict {path} to mode 0700: "
+            "[Errno 1] Operation not permitted",
+        )
+    ]
+
+
+async def test_a_refused_fchmod_still_opens_the_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "history.db"
+    monkeypatch.setattr(os, "fchmod", _refuse_chmod)
+    with _umask(0o022):
+        await _open(path)
+    # Created with 0600 less the umask: no group or other bit.
+    assert _mode(path) == 0o600
+    assert _user_version(path) == 1

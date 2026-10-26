@@ -9,6 +9,7 @@ history is logged, never raised.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from typing import Protocol, runtime_checkable
@@ -45,6 +46,12 @@ def _exception_text(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
 
 
+def _cancelling() -> bool:
+    """Whether the current task is being cancelled (or there is no task)."""
+    task = asyncio.current_task()
+    return task is None or task.cancelling() > 0
+
+
 def _outcome(kind: str, response: Message) -> str:
     """The shape of a ``plan`` reply, by the run loop's rule; ``aux`` otherwise."""
     if kind != "plan":
@@ -64,7 +71,9 @@ class CallLog:
 
     A failure of the history is never the run's failure: each is logged
     on this module's logger, the run's first at WARNING and later ones at
-    DEBUG. A ``CancelledError``, or any other ``BaseException``, propagates.
+    DEBUG. A cancellation of the run propagates, and so does any other
+    ``BaseException``; a ``CancelledError`` that the history raises while
+    nothing cancels the task is the history's failure, and is logged.
     """
 
     def __init__(self, history: CallHistory, task_id: str, run: RunCounters) -> None:
@@ -120,6 +129,13 @@ class CallLog:
                 timestamp=timestamp,
             )
             await self._history.add_llm_call(record)
+        except asyncio.CancelledError as exc:
+            if _cancelling():
+                raise
+            self._log_failure(
+                f"Could not record model call {seq} of task {self._task_id} "
+                f"in history: {_exception_text(exc)}"
+            )
         except Exception as exc:
             self._log_failure(
                 f"Could not record model call {seq} of task {self._task_id} "
@@ -138,6 +154,13 @@ class CallLog:
             return
         try:
             await self._history.link_llm_call_steps(self._task_id, seq, step_ids)
+        except asyncio.CancelledError as exc:
+            if _cancelling():
+                raise
+            self._log_failure(
+                f"Could not link model call {seq} of task {self._task_id} "
+                f"to its steps in history: {_exception_text(exc)}"
+            )
         except Exception as exc:
             self._log_failure(
                 f"Could not link model call {seq} of task {self._task_id} "

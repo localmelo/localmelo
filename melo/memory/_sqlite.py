@@ -39,7 +39,9 @@ def make_private_dir(path: str) -> None:
     0700, with ``chmod``, so the umask cannot change it. An existing
     directory keeps its mode. Raises what ``os.makedirs(path,
     exist_ok=True)`` raises: ``FileExistsError`` for a file,
-    ``NotADirectoryError`` below a file, ``PermissionError``.
+    ``NotADirectoryError`` below a file, ``PermissionError``. A ``chmod``
+    that the file system refuses (FAT, some network mounts) is logged at
+    WARNING, not raised: the directory is made, with the mode it got.
     """
     try:
         os.makedirs(path)
@@ -47,7 +49,10 @@ def make_private_dir(path: str) -> None:
         if os.path.isdir(path):
             return
         raise
-    os.chmod(path, 0o700)
+    try:
+        os.chmod(path, 0o700)
+    except OSError as exc:
+        logger.warning("Could not restrict %s to mode 0700: %s", path, exc)
 
 
 def create_private_file(path: str) -> None:
@@ -55,7 +60,9 @@ def create_private_file(path: str) -> None:
 
     An existing file keeps its mode, also one that another opener creates
     first. SQLite gives a database's ``-wal`` and ``-shm`` files the
-    database file's mode.
+    database file's mode. A ``fchmod`` that the file system refuses is
+    ignored: the file was created with 0600 less the umask, so with no
+    group or other bit.
     """
     try:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
@@ -63,6 +70,8 @@ def create_private_file(path: str) -> None:
         return
     try:
         os.fchmod(fd, 0o600)
+    except OSError as exc:
+        logger.debug("Could not set %s to mode 0600: %s", path, exc)
     finally:
         os.close(fd)
 

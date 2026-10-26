@@ -224,15 +224,67 @@ async def test_links_go_to_the_latest_planning_row_only() -> None:
     ]
 
 
-async def test_a_cancellation_propagates() -> None:
+class BlockingHistory(FakeHistory):
+    """Its writes wait until cancelled; ``waiting`` is set once one waits."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.waiting = asyncio.Event()
+
+    async def add_llm_call(self, record: LLMCallRecord) -> None:
+        self.waiting.set()
+        await asyncio.Event().wait()
+
+    async def link_llm_call_steps(
+        self, task_id: str, seq: int, step_ids: Sequence[str]
+    ) -> None:
+        self.waiting.set()
+        await asyncio.Event().wait()
+
+
+@pytest.mark.parametrize("write", ["record", "link_steps"])
+async def test_a_cancellation_propagates(write: str) -> None:
+    history = BlockingHistory()
+    log = CallLog(history, "t1", Counters(1, 1))
+    log._latest_plan = 0  # a planning row to link
+
+    async def write_once() -> None:
+        if write == "record":
+            await _record(log, "plan", _reply("a"))
+        else:
+            await log.link_steps(["s1"])
+
+    writing = asyncio.create_task(write_once())
+    await asyncio.wait_for(history.waiting.wait(), 5)
+    writing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await writing
+
+
+async def test_any_other_base_exception_propagates() -> None:
+    history = FakeHistory()
+    history.record_error = KeyboardInterrupt()
+    log = CallLog(history, "t1", Counters(1, 1))
+    with pytest.raises(KeyboardInterrupt):
+        await _record(log, "plan", _reply("a"))
+
+
+async def test_a_cancelled_error_while_nothing_cancels_is_a_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # The history's own failure, not a cancellation of the run: logged, and
+    # the run goes on (the ground rules of cancellation).
     history = FakeHistory()
     history.record_error = asyncio.CancelledError()
     log = CallLog(history, "t1", Counters(1, 1))
-    with pytest.raises(asyncio.CancelledError):
-        await _record(log, "plan", _reply("a"))
-    history.record_error = KeyboardInterrupt()
-    with pytest.raises(KeyboardInterrupt):
-        await _record(log, "plan", _reply("a"))
+    caplog.set_level(logging.DEBUG, logger=LOGGER)
+    await _record(log, "plan", _reply("a"))
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (
+            logging.WARNING,
+            "Could not record model call 0 of task t1 in history: CancelledError",
+        )
+    ]
 
 
 # ── Chat hands every response to the recorder ───────────────────────────────

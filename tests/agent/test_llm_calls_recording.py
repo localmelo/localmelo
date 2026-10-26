@@ -26,6 +26,7 @@ from localmelo.melo.agent import agent as agent_module
 from localmelo.melo.agent._call_log import CallLog
 from localmelo.melo.agent._chat import CALL_RECORDER, Chat
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
+from localmelo.melo.memory.history import History
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.schema import (
     LLMCallRecord,
@@ -978,3 +979,53 @@ async def test_a_fake_reply_with_thinking_has_no_key(tmp_path: Path) -> None:
     llm = ScriptedLLM([_answer("hi", thinking="Greet.")])
     _, [row] = await _provider_rows(tmp_path, llm)
     assert (row["reasoning_key"], row["thinking"]) == ("", "Greet.")
+
+
+# ── Failures that are not the run's ─────────────────────────────────────────
+
+
+class CancellingCallHistory(History):
+    """In-memory history that keeps model calls, but whose writers fail with a
+    CancelledError of their own, while nothing cancels the run."""
+
+    async def add_llm_call(self, record: LLMCallRecord) -> None:
+        raise asyncio.CancelledError("the history failed")
+
+    async def link_llm_call_steps(
+        self, task_id: str, seq: int, step_ids: Sequence[str]
+    ) -> None:
+        raise asyncio.CancelledError("the history failed")
+
+
+async def test_a_history_failing_with_a_cancelled_error_is_no_cancellation(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    agent = _agent(ScriptedLLM(_two_step_script()), None)
+    agent.hippo.history = CancellingCallHistory()
+    caplog.set_level(logging.DEBUG, logger=CALL_LOG_LOGGER)
+    try:
+        result = await agent.run_task("Echo a.")
+    finally:
+        await agent.close()
+    assert (result.status, result.result) == ("completed", "a")
+    levels = [r.levelno for r in caplog.records if r.name == CALL_LOG_LOGGER]
+    # Two rows and one link failed: the first at WARNING.
+    assert levels == [logging.WARNING, logging.DEBUG, logging.DEBUG]
+
+
+async def test_a_file_system_that_refuses_modes_still_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "chmod", refuse)
+    monkeypatch.setattr(os, "fchmod", refuse)
+    agent = _agent(ScriptedLLM(_two_step_script()), tmp_path / "memory")
+    try:
+        result = await agent.run_task("Echo a.")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    rows = _call_rows(tmp_path / "memory" / "history.db", result.task_id)
+    assert len(rows) == 2

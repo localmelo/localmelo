@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import math
@@ -210,7 +211,10 @@ class SqliteHistory(History):
                 await conn.commit()
                 await self._migrate(conn)
             except BaseException:
-                await conn.close()
+                # A clean-up that fails must not replace what is raised, a
+                # cancellation above all.
+                with contextlib.suppress(Exception):
+                    await conn.close()
                 raise
             self._conn = conn
             return conn
@@ -242,7 +246,8 @@ class SqliteHistory(History):
                 await self._clear_old_reasoning(conn)
             await conn.commit()
         except BaseException:
-            await conn.rollback()
+            with contextlib.suppress(Exception):
+                await conn.rollback()
             raise
         self._retention_done = True
         if migrated:
@@ -432,7 +437,12 @@ class SqliteHistory(History):
                 )
                 await conn.commit()
             except BaseException:
-                await conn.rollback()
+                # Unlike add_step's, a rollback that fails (on a connection
+                # aclose() closed meanwhile) does not replace the error in
+                # flight: CallLog logs an Exception and carries on, so a
+                # CancelledError replaced here would be swallowed.
+                with contextlib.suppress(Exception):
+                    await conn.rollback()
                 raise
 
     async def link_llm_call_steps(
@@ -460,7 +470,9 @@ class SqliteHistory(History):
                 )
                 await conn.commit()
             except BaseException:
-                await conn.rollback()
+                # As in add_llm_call.
+                with contextlib.suppress(Exception):
+                    await conn.rollback()
                 raise
 
     async def get_steps(self, task_id: str) -> list[StepRecord]:
