@@ -1476,12 +1476,18 @@ class TestRedaction:
     async def test_no_redaction_without_a_sink(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        # The emitter logs and drops an event whose payload raises, so the
+        # fake records its calls: the raise alone would not fail the test.
+        redacted: list[str] = []
+
         def refuse(text: str) -> tuple[str, int]:
+            redacted.append(text)
             raise AssertionError("redacted without a sink")
 
         monkeypatch.setattr(_events, "redact_secrets", refuse)
         result = await _agent(ScriptedLLM([_answer(SECRET_TEXT)])).run_task("hi")
         assert result.result == SECRET_TEXT
+        assert redacted == []
 
 
 class TestExitCode:
@@ -1706,8 +1712,16 @@ class TestWithoutASink:
     async def test_no_event_is_built_without_a_sink(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        def refuse(*args: Any, **kwargs: Any) -> Any:
-            raise AssertionError("built without a sink")
+        # The emitter logs and drops an event whose payload raises, so the
+        # fakes record their calls: the raise alone would not fail the test.
+        built: list[str] = []
+
+        def refusing(name: str) -> Any:
+            def refuse(*args: Any, **kwargs: Any) -> Any:
+                built.append(name)
+                raise AssertionError("built without a sink")
+
+            return refuse
 
         for name in (
             "AgentEvent",
@@ -1715,6 +1729,7 @@ class TestWithoutASink:
             "redact_secrets",
             "call_preview",
         ):
-            monkeypatch.setattr(_events, name, refuse)
+            monkeypatch.setattr(_events, name, refusing(name))
         _, result, _ = await _rich_run(tmp_path, None)
         assert result.status == "completed"
+        assert built == []

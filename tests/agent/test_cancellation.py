@@ -1,6 +1,7 @@
 """Cancelling a run that a caller follows (Agent.run_task with a sink) — no real model.
 
-A recording sink makes each run interactive. The fakes block on an
+A recording sink makes each run interactive, except in
+``test_cancel_with_only_a_policy``, where a policy does. The fakes block on an
 ``asyncio.Event``, so each test cancels a run where it means to: in a tool
 call, in planning, in a history write, in a save. Nothing touches the
 network, and the only processes are the shell commands of
@@ -27,7 +28,11 @@ import pytest
 import localmelo.melo.agent.agent as agent_mod
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent.agent import CANCELLED_ERROR
-from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.approvals import (
+    AllowAllPolicy,
+    ApprovalDecision,
+    ApprovalRequest,
+)
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
@@ -583,6 +588,35 @@ class TestStop:
         assert _window(agent) == [("user", "q")]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"steps_per_attempt": 1, "max_attempts": 2}],
+        ids=["planning", "reflection"],
+    )
+    async def test_cancel_after_a_step_adds_no_turn(
+        self, options: dict[str, Any]
+    ) -> None:
+        # The first step is in working memory; the run is stopped while the
+        # next request, a planning or a reflection one, waits.
+        llm, history, recorder = (
+            ScriptedLLM([_calls(("echo", {"text": "a"}, "c1"))]),
+            GatedHistory(),
+            Recorder(),
+        )
+        agent = _agent(llm, history=history, **options)
+        running = asyncio.create_task(agent.run_task("q", on_event=recorder))
+        await _until(llm.blocked)
+        await _stop(running)
+
+        assert check_events(recorder).status == "cancelled"
+        assert recorder.of("step.started")[-1].data["step"] == (1 if options else 2)
+        # The finished step stays as it was, once; no partial turn follows.
+        window = agent.hippo.working.get_window()
+        assert_protocol_valid(window)
+        assert _window(agent) == [("user", "q"), ("assistant", ""), ("tool", "a")]
+        assert _row_calls(history.rows) == ["c1"]
+
+    @pytest.mark.asyncio
     async def test_cancel_during_approval_wait(self) -> None:
         # The second call waits for its approval when the run is stopped.
         tools, history, recorder = Tools(), GatedHistory(), Recorder()
@@ -632,6 +666,43 @@ class TestStop:
             "",
             CALL_NOT_STARTED,
             CALL_NOT_STARTED,
+        ]
+
+    @pytest.mark.asyncio
+    async def test_cancel_after_the_policy_allowed(self) -> None:
+        # The policy has allowed the marked call, which runs when the run is
+        # stopped: the call started, so it may have partly run.
+        tools, history, recorder = Tools(), GatedHistory(), Recorder()
+        agent = _agent(
+            ScriptedLLM([_calls(("gate", {}, "call_1"))]), tools=tools, history=history
+        )
+        agent.executor.register("gate", tools.gate, requires_approval=True)
+        running = asyncio.create_task(
+            agent.run_task("go", on_event=recorder, approval=AllowAllPolicy())
+        )
+        await _until(tools.at_gate)
+        await _stop(running)
+
+        assert tools.called == ["gate"]
+        [finished] = recorder.of("tool.finished")
+        assert (finished.data["status"], finished.data["error"]) == (
+            "cancelled",
+            CALL_INTERRUPTED,
+        )
+        approval = dict(finished.data["approval"])
+        assert len(approval.pop("request_id")) == 32
+        assert approval == {
+            "allowed": True,
+            "reason": "",
+            "remember": False,
+            "origin": "policy",
+        }
+        assert check_events(recorder).status == "cancelled"
+        window = agent.hippo.working.get_window()
+        assert_protocol_valid(window)
+        assert window[-1].content == f"Error: {CALL_INTERRUPTED}"
+        assert [row.tool_result.error for row in history.rows if row.tool_result] == [
+            CALL_INTERRUPTED
         ]
 
     @pytest.mark.asyncio
@@ -763,6 +834,41 @@ class TestOtherCancellations:
                 ("tool", "a"),
             ]
             assert _row_calls(history.rows) == ["call_1"]
+
+    @pytest.mark.asyncio
+    async def test_cancel_with_only_a_policy(self) -> None:
+        # A policy without a sink makes the run interactive too.
+        script = [
+            _calls(("echo", {"text": "a"}, "call_1")),
+            _reflection("continue"),
+            _calls(("hang", {}, "call_2")),
+        ]
+        tools, history, embedding = Tools(), GatedHistory(), CountingEmbedding()
+        agent = _agent(
+            ScriptedLLM(script),
+            tools=tools,
+            history=history,
+            embedding=embedding,
+            steps_per_attempt=1,
+            max_attempts=2,
+        )
+        running = asyncio.create_task(
+            agent.run_task("echo a", approval=AllowAllPolicy())
+        )
+        await _until(tools.hanging)
+        embeds = embedding.calls
+        await _stop(running)
+
+        assert history.saves[-1] == ("cancelled", CANCELLED_ERROR)
+        # Cleared, not promoted, and no network call.
+        assert agent.hippo.working.get_reflections() == []
+        assert _promoted(agent) == []
+        assert embedding.calls == embeds
+        # The interrupted step is closed and recorded.
+        window = agent.hippo.working.get_window()
+        assert_protocol_valid(window)
+        assert window[-1].content == f"Error: {CALL_INTERRUPTED}"
+        assert _row_calls(history.rows) == ["call_1", "call_2"]
 
     @pytest.mark.asyncio
     async def test_spurious_cancelled_error_is_a_crash(self) -> None:
@@ -1039,6 +1145,22 @@ class TestExit:
         assert embedding.calls == embeds
         hang.set()
         await asyncio.sleep(0)
+
+    @pytest.mark.asyncio
+    async def test_the_exit_reason_beats_the_cancel_message(self) -> None:
+        # U2 and U3 call begin_exit, then cancel their turn with a reason.
+        tools, history, recorder = Tools(), GatedHistory(), Recorder()
+        agent = _agent(
+            ScriptedLLM([_calls(("hang", {}, "call_1"))]), tools=tools, history=history
+        )
+        running = asyncio.create_task(agent.run_task("wait", on_event=recorder))
+        await _until(tools.hanging)
+        agent.begin_exit("Cancelled by SIGTERM", within_s=5.0)
+        await _stop(running, "Session closed")
+
+        result = check_events(recorder)
+        assert (result.status, result.error) == ("cancelled", "Cancelled by SIGTERM")
+        assert history.saves[-1] == ("cancelled", "Cancelled by SIGTERM")
 
     @pytest.mark.asyncio
     async def test_an_exit_after_a_stop_bounds_what_is_left(self) -> None:
