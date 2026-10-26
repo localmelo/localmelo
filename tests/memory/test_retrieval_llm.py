@@ -512,7 +512,7 @@ class UsageLLM(BaseLLMProvider):
         self.tools.append(tools)
         await asyncio.sleep(0)
         if self.next_usage is not _MISSING:
-            self.last_usage = self.next_usage
+            self.last_usage = self.next_usage  # type: ignore[assignment]
         return Message(
             "assistant",
             '{"ids": ["n1"]}',

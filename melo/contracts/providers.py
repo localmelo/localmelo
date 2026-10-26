@@ -66,6 +66,16 @@ class BaseLLMProvider(ABC):
     Ollama, vLLM, LMStudio, OpenAI, Groq, Together AI, etc.
     """
 
+    # The key of the response that the last successful chat() read the
+    # reasoning (``Message.thinking``) from, such as "reasoning_content", or
+    # "" for none. A provider sets it before chat() returns, with no await
+    # in between; one that never sets it keeps this default.
+    last_reasoning_key: str = ""
+    # The whole usage the server reported for the last successful chat(),
+    # token counts only: Message.usage's keys and any the server adds, such
+    # as "cached_tokens". Set as last_reasoning_key is; None when unknown.
+    last_usage: dict[str, int] | None = None
+
     @abstractmethod
     async def chat(
         self,

@@ -488,3 +488,129 @@ class TestToolCallIdRoundTrip:
         # The internal key never reaches the model.
         assert RAW_ARGUMENTS_KEY not in json.dumps(second)
         await llm.close()
+
+
+# ── The reasoning key and the full usage ────────────────────────────────────
+
+
+def _reply_body(message: dict[str, Any], usage: Any = None) -> dict[str, Any]:
+    body: dict[str, Any] = {
+        "choices": [{"index": 0, "message": message, "finish_reason": "stop"}]
+    }
+    if usage is not None:
+        body["usage"] = usage
+    return body
+
+
+async def _chat_once(body: dict[str, Any]) -> tuple[OpenAICompatLLM, Message]:
+    llm = OpenAICompatLLM(
+        base_url="http://omlx.test/v1",
+        model="m",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=body)),
+    )
+    try:
+        reply = await llm.chat([Message(role="user", content="q")])
+    finally:
+        await llm.close()
+    return llm, reply
+
+
+THREE = {"prompt_tokens": 120, "completion_tokens": 40, "total_tokens": 160}
+
+
+class TestLastReasoningKeyAndUsage:
+    def test_the_defaults(self) -> None:
+        llm = OpenAICompatLLM(base_url="http://omlx.test/v1", model="m")
+        assert (llm.last_reasoning_key, llm.last_usage) == ("", None)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("message", "key"),
+        [
+            ({"content": "a", "reasoning_content": "r"}, "reasoning_content"),
+            ({"content": "a", "reasoning": "r"}, "reasoning"),
+            # reasoning_content first, as _reasoning_text reads it.
+            (
+                {"content": "a", "reasoning_content": "r1", "reasoning": "r2"},
+                "reasoning_content",
+            ),
+            ({"content": "a", "reasoning_content": "", "reasoning": "r"}, "reasoning"),
+            ({"content": "<think>r</think>a"}, ""),
+            ({"content": "a", "reasoning_content": None}, ""),
+        ],
+    )
+    async def test_the_reasoning_key(self, message: dict[str, Any], key: str) -> None:
+        llm, _ = await _chat_once(_reply_body({"role": "assistant", **message}))
+        assert llm.last_reasoning_key == key
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("usage", "expected"),
+        [
+            (
+                {
+                    **THREE,
+                    "prompt_tokens_details": {"cached_tokens": 96},
+                    "completion_tokens_details": {"reasoning_tokens": 28},
+                },
+                {**THREE, "cached_tokens": 96, "reasoning_tokens": 28},
+            ),
+            (
+                {**THREE, "prompt_tokens_details": {"cached_tokens": "8"}},
+                {**THREE, "cached_tokens": 8},
+            ),
+            (
+                {
+                    **THREE,
+                    "prompt_tokens_details": None,
+                    "completion_tokens_details": {"reasoning_tokens": None},
+                },
+                THREE,
+            ),
+            (THREE, THREE),
+            (
+                {"prompt_tokens": 5, "completion_tokens": 2},
+                {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+            ),
+            (None, None),
+            ("not a dict", None),
+        ],
+    )
+    async def test_the_full_usage(self, usage: Any, expected: Any) -> None:
+        body = _reply_body({"role": "assistant", "content": "a"})
+        if usage is not None:
+            body["usage"] = usage
+        llm, reply = await _chat_once(body)
+        assert llm.last_usage == expected
+        # Message.usage keeps _normalize_usage's three keys.
+        if expected is None:
+            assert reply.usage is None
+        else:
+            assert reply.usage == {k: expected[k] for k in THREE}
+
+    @pytest.mark.asyncio
+    async def test_a_failed_request_keeps_the_last_values(self) -> None:
+        replies = deque(
+            [
+                httpx.Response(
+                    200,
+                    json=_reply_body(
+                        {"role": "assistant", "content": "a", "reasoning": "r"},
+                        THREE,
+                    ),
+                ),
+                httpx.Response(400, text="bad request"),
+            ]
+        )
+        llm = OpenAICompatLLM(
+            base_url="http://omlx.test/v1",
+            model="m",
+            transport=httpx.MockTransport(lambda request: replies.popleft()),
+        )
+        try:
+            await llm.chat([Message(role="user", content="q")])
+            with pytest.raises(Exception, match="HTTP 400"):
+                await llm.chat([Message(role="user", content="q")])
+        finally:
+            await llm.close()
+        assert (llm.last_reasoning_key, llm.last_usage) == ("reasoning", THREE)

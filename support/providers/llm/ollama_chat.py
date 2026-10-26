@@ -231,6 +231,9 @@ class OllamaNativeChat(BaseLLMProvider):
         else:
             combined_content = content
 
+        # Set right before the return, with no await in between.
+        self.last_reasoning_key = "thinking" if thinking else ""
+        self.last_usage = _normalize_usage(data)
         return Message(
             role="assistant",
             content=combined_content,
