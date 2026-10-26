@@ -257,6 +257,36 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
   string, and `session_id` 1 to 64 letters, digits, `_` or `-`.
 - **Fix:** correct the body. See [HTTP API](gateway.md#http-api).
 
+### HTTP 421 misdirected_request
+
+```json
+{"error":"Host header must be 127.0.0.1:8401, localhost:8401 or [::1]:8401","code":"misdirected_request"}
+```
+
+- **Cause:** the request did not name the gateway as `127.0.0.1`,
+  `localhost` or `[::1]` with its port. For example, the web UI was opened as
+  `http://0.0.0.0:8401/`, or through a proxy that sends its own host name.
+  The gateway refuses these requests so that a web page on another site
+  cannot reach it through DNS rebinding.
+- **Fix:** open `http://127.0.0.1:8401/` or `http://localhost:8401/`, with the
+  gateway's port. Proxies and remote access are not supported; see
+  [Keep the gateway private](gateway.md#keep-the-gateway-private).
+
+### HTTP 403 foreign_origin
+
+```json
+{"error":"Cross-origin request refused: only pages at http://127.0.0.1:8401, http://localhost:8401 or http://[::1]:8401 may send it","code":"foreign_origin"}
+```
+
+- **Cause:** a web page that the gateway did not serve sent the request
+  through the browser: a page on another site or on another port of your
+  computer, a page opened from a file (`Origin: null`), or the web UI opened
+  through a proxy. From a browser, the gateway accepts API requests only from
+  its own web UI.
+- **Fix:** use the web UI at `http://127.0.0.1:8401/`, or call the API from a
+  program such as curl or a script, which sends no `Origin` header. Calling
+  the API from another web page is not supported.
+
 ### A status in the result
 
 ```json

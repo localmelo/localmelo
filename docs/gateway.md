@@ -31,14 +31,44 @@ melo --serve
 ## Keep the gateway private
 
 > [!WARNING]
-> The gateway has no authentication. Anyone who can reach its port can run
-> tasks with your tools and your account's permissions, and the web UI makes
-> the gateway fetch any URL it is given. Keep the default host `127.0.0.1`,
-> and never use `--host 0.0.0.0` on a shared network.
+> The gateway has no authentication. Any program that can reach its port can
+> run tasks with your tools and your account's permissions, and the web UI
+> makes the gateway fetch any URL it is given. Keep the default host
+> `127.0.0.1`.
+
+On the default host, only programs on your computer can reach the gateway.
+Web pages can still send it requests through your browser, so the gateway
+refuses requests that are not addressed to it:
+
+| HTTP status | `code` | When |
+|---|---|---|
+| 421 | `misdirected_request` | The `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`. This stops a page on another site that reaches the gateway under its own domain name (DNS rebinding). |
+| 403 | `foreign_origin` | A web page at another origin sent the request: a `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS` request whose `Origin` is not `http://127.0.0.1:<port>`, `http://localhost:<port>` or `http://[::1]:<port>`, or a request under `/v1/` whose `Sec-Fetch-Site` is `cross-site` or `same-site`. |
+
+The body is the usual error with a `code`:
+
+```json
+{"error":"Host header must be 127.0.0.1:8401, localhost:8401 or [::1]:8401","code":"misdirected_request"}
+```
+
+- Open the web UI as `http://127.0.0.1:8401/` or `http://localhost:8401/`,
+  with your port. Other addresses that reach the gateway, such as
+  `http://0.0.0.0:8401/`, get 421.
+- curl and scripts send no `Origin` header, so only the `Host` check applies
+  to them.
+- The checks are on when the host is `127.0.0.1`, `localhost` or `::1`. With
+  `host = "0.0.0.0"`, or any other address, the gateway makes no checks and
+  logs a warning when it starts. With no checks and no authentication,
+  anything that can reach the port, web pages included, can run tasks with
+  your tools. This is not recommended.
+- Remote access, through a reverse proxy or Tailscale Serve for example, is
+  not supported until the gateway has authentication.
 
 ## HTTP API
 
-Requests and responses are JSON. The examples use the default address.
+Requests and responses are JSON. The examples use the default address. Any
+route can also answer 421 or 403; see
+[Keep the gateway private](#keep-the-gateway-private).
 
 ### GET /v1/health
 
