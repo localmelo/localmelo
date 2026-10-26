@@ -162,16 +162,17 @@ To start the gateway again without the wizard, run `melo --serve`.
 
 ## Interactive conversations
 
-Omit the task to enter a terminal conversation using the same agent across turns:
+Give an empty task to enter a terminal conversation using the same agent across
+turns:
 
 ```bash
-melo
+melo ""
 # Or use the exact model ID from an OpenAI-compatible server:
-melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID
+melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID ""
 ```
 
-Use `/help` for commands and `/exit` or Ctrl-D to leave. `melo --reconfigure`
-configures the backend; add `--serve` to start the gateway after configuration.
+Use `/help` for commands and `/exit` or Ctrl-D to leave. Without the `""`,
+`melo` starts the gateway, as `melo --serve` does.
 
 The web workspace at `http://127.0.0.1:8401/` supports model discovery, separate
 chat drafts, code formatting, cancellation, and responsive navigation. Connected

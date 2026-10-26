@@ -232,14 +232,14 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 
       <section class="section" id="interactive-conversations">
         <h2>Interactive conversations</h2>
-        <p>Omit the task to enter a terminal conversation using the same agent across turns:</p>
-        <pre><code>melo
+        <p>Give an empty task to enter a terminal conversation using the same agent across turns:</p>
+        <pre><code>melo ""
 # Or use the exact model ID from an OpenAI-compatible server:
-melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID</code></pre>
+melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID ""</code></pre>
         <p>
           Use <code>/help</code> for commands and <code>/exit</code> or Ctrl-D
-          to leave. <code>melo --reconfigure</code> configures the backend;
-          add <code>--serve</code> to start the gateway after configuration.
+          to leave. Without the <code>""</code>, <code>melo</code> starts the
+          gateway, as <code>melo --serve</code> does.
         </p>
         <p>
           The web workspace at <code>http://127.0.0.1:8401/</code> supports

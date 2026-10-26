@@ -199,7 +199,6 @@ Open `http://127.0.0.1:8401/` in a browser for the localmelo workspace:
 The sidebar supports chat search and switching. Drafts stay with each chat in
 the current browser tab. The workspace restores live chats after a page reload
 and polls for changes from other browser clients every 2.5 seconds while visible.
-Chats remain in memory and are not restored after a gateway restart.
 
 Stop cancels the harness task and its current provider/tool request. Shell
 process groups are killed; already dispatched model computation can still finish
@@ -229,9 +228,18 @@ To start only the workspace without the configuration wizard:
 uv run python -m localmelo.support.gateway._test_webapp
 ```
 
-This remains a local development service without authentication. See
-[Apple client direction](mobile-client-direction.md) for the proposed durable,
-authenticated control layer for iPhone and Mac clients.
+It always listens on `http://127.0.0.1:8401/`, so it cannot run while the
+gateway uses that port.
+
+The workspace has these limits:
+
+- Chats last as long as the gateway process. They are kept in memory and are
+  not restored after a gateway restart.
+- It is for loopback use only. Like the rest of the gateway, it has no
+  authentication: open it on this computer as `http://127.0.0.1:8401/` or
+  `http://localhost:8401/`. Remote access, from another device or through a
+  proxy, is not supported; see
+  [Keep the gateway private](#keep-the-gateway-private).
 
 ## Run the gateway at login (macOS)
 

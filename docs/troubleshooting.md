@@ -75,13 +75,13 @@ FileNotFoundError: [Errno 2] No such file or directory: '…/localmelo/tests/smo
 ### No backend configured
 
 ```text
-No backend configured. Run 'melo --reconfigure' to set up,
+No backend configured. Run 'melo --serve --reconfigure' to set up,
 or use --base-url to connect to an OpenAI-compatible endpoint.
 ```
 
 - **Cause:** there is no config file, and the command has no `--base-url`.
   `melo` exits with code 1.
-- **Fix:** save a configuration with `melo --reconfigure`, or add
+- **Fix:** save a configuration with `melo --serve --reconfigure`, or add
   `--base-url` and `--chat-model`.
 
 ### Configuration errors
@@ -124,10 +124,9 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
   `Setup cancelled — config not saved.`), correct the problem, and run the
   wizard again.
 
-### `melo --serve --reconfigure` does not return
+### `melo --reconfigure` does not return
 
-- **Cause:** `--serve` starts the gateway after saving, and the gateway keeps
-  running. Standalone `melo --reconfigure` saves the configuration and returns.
+- **Cause:** after saving, the wizard starts the gateway, which keeps running.
 - **Fix:** nothing is wrong. Press Ctrl+C to stop the gateway;
   `melo "<task>"` then uses the saved configuration.
 
