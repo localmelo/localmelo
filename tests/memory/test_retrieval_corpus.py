@@ -836,6 +836,25 @@ def test_an_unpaired_surrogate_is_refused_with_its_line(load: Any, line: str) ->
     assert (caught.value.line, str(caught.value)) == (2, SURROGATE_ERROR)
 
 
+def test_an_unpaired_surrogate_in_string_arguments_is_refused() -> None:
+    # String arguments, as OpenAI bodies carry them, hold only the escape
+    # until they are decoded, so the line's own check cannot see it.
+    call = {
+        "tool_name": "file_read",
+        "arguments": '{"path": "a\\ud83d.py"}',
+        "id": "c1",
+    }
+    line = json.dumps(
+        {"task_id": "t", "seq": 0, "tool_calls": [call], "tool_results": []}
+    )
+    with pytest.raises(CorpusError) as caught:
+        load_raw_calls(["", line])
+    assert (caught.value.line, str(caught.value)) == (
+        2,
+        f"tool_calls[0].arguments: {SURROGATE_ERROR}",
+    )
+
+
 def test_a_surrogate_pair_is_one_character() -> None:
     line = '{"task_id": "t", "seq": 0, "thinking": "ok \\ud83d\\ude00"}'
     assert load_raw_calls([line])[0].thinking == "ok \U0001f600"
@@ -1364,6 +1383,29 @@ def test_a_row_that_breaks_the_rules_is_named(
     with pytest.raises(CorpusError) as caught:
         load_history_calls(database)
     assert str(caught.value) == message.format(step_id=ids[("t-zh", 0)][0])
+
+
+def test_an_unpaired_surrogate_in_a_rows_string_arguments_is_named(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "history.db"
+    write_history_sync(database, _raw_calls())
+    calls = [
+        {
+            "tool_name": "file_read",
+            "arguments": '{"path": "a\\ud83d.py"}',
+            "id": "call_3",
+        }
+    ]
+    _execute(
+        database,
+        f"UPDATE llm_calls SET tool_calls_json = '{json.dumps(calls)}' "
+        "WHERE task_id = 't-zh' AND seq = 2",
+    )
+    with pytest.raises(CorpusError) as caught:
+        load_history_calls(database)
+    assert str(caught.value).endswith(f"tool_calls[0].arguments: {SURROGATE_ERROR}")
+    assert str(caught.value).startswith("llm_calls row t-zh/2: ")
 
 
 def test_a_file_that_is_no_database_is_refused(tmp_path: Path) -> None:

@@ -518,6 +518,21 @@ def _load(path: str, loader: Callable[[list[str]], _T], text: str | None = None)
         raise _InputError(f"{where}: {exc}") from None
 
 
+def _body_problem(body: object) -> str:
+    """Why *body* cannot go out as a JSON request body, or ``""``.
+
+    Python's json reads NaN, Infinity and an escaped unpaired surrogate,
+    but a request body cannot hold them: httpx would fail while sending.
+    """
+    try:
+        json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
+    except UnicodeEncodeError:
+        return "a string holds an unpaired surrogate, which UTF-8 cannot encode"
+    except ValueError:
+        return "a number is NaN or infinite, which JSON cannot hold"
+    return ""
+
+
 def _extra_body(text: str | None) -> dict[str, Any]:
     """The ``--retrieval-extra-body`` object, checked as the provider checks it."""
     if text is None:
@@ -533,9 +548,13 @@ def _extra_body(text: str | None) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise _InputError("--retrieval-extra-body: not a JSON object")
     try:
-        return prepare_extra_body(value)
+        body = prepare_extra_body(value)
     except ValueError as exc:
         raise _InputError(f"--retrieval-extra-body: {exc}") from None
+    problem = _body_problem(body)
+    if problem:
+        raise _InputError(f"--retrieval-extra-body: {problem}")
+    return body
 
 
 def _interleave_body(path: str) -> dict[str, Any]:
@@ -555,6 +574,9 @@ def _interleave_body(path: str) -> dict[str, Any]:
         or not body["messages"]
     ):
         raise _InputError(f"{path}: not a JSON object with a non-empty messages list")
+    problem = _body_problem(body)
+    if problem:
+        raise _InputError(f"{path}: not valid as a request body: {problem}")
     return body
 
 

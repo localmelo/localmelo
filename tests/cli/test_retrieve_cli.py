@@ -493,6 +493,11 @@ def test_a_queries_file_without_queries(
             "--retrieval-extra-body: extra_body must not set 'model'; localmelo "
             "manages that field",
         ),
+        (
+            '{"x": "cut \\ud83d"}',
+            "--retrieval-extra-body: a string holds an unpaired surrogate, which "
+            "UTF-8 cannot encode",
+        ),
     ],
 )
 def test_a_bad_retrieval_extra_body(
@@ -521,6 +526,16 @@ def test_a_bad_retrieval_extra_body(
         ("[1]", " not a JSON object with a non-empty messages list"),
         ('{"messages": []}', " not a JSON object with a non-empty messages list"),
         ('{"messages": "hi"}', " not a JSON object with a non-empty messages list"),
+        (
+            '{"messages": [{"role": "user", "content": "hi \\ud83d"}]}',
+            " not valid as a request body: a string holds an unpaired surrogate, "
+            "which UTF-8 cannot encode",
+        ),
+        (
+            '{"messages": [{"role": "user", "content": "hi"}], "temperature": NaN}',
+            " not valid as a request body: a number is NaN or infinite, which JSON "
+            "cannot hold",
+        ),
     ],
 )
 def test_a_bad_interleave_file(

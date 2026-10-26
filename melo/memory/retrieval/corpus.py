@@ -1003,7 +1003,13 @@ def _arguments(raw: object, where: str) -> dict[str, Any]:
         value = json.loads(raw)
     except (ValueError, RecursionError):
         return {RAW_ARGUMENTS_KEY: raw}
-    return value if isinstance(value, dict) else {RAW_ARGUMENTS_KEY: raw}
+    if not isinstance(value, dict):
+        return {RAW_ARGUMENTS_KEY: raw}
+    # The outer line's check sees only the escape, not the decoded string.
+    problem = _unpaired_surrogate(value)
+    if problem:
+        raise CorpusError(f"{where}.arguments: {problem}")
+    return value
 
 
 def _tool_result(item: object, index: int, call: ToolCall) -> ToolResult:
