@@ -1,0 +1,6 @@
+{"qid": "en-append", "query": "how does append build a new list from list1 and list2", "scope": {"task_id": "t-en"}, "relevant": ["d2", "n2"], "grades": {"d2": 2, "n2": 1}, "source": "gold"}
+{"qid": "zh-reverse", "query": "reverse 函数 切片 实现", "scope": {"task_id": "t-zh"}, "relevant": ["d1", "n1"], "source": "gold"}
+{"qid": "en-foldr", "query": "foldr accumulator order from the right", "relevant": ["t-en:t3.1", "t-en:n3"], "source": "gold"}
+{"qid": "en-append-excluded", "query": "append concatenation list1 list2", "scope": {"task_id": "t-en", "exclude_ids": ["d2"]}, "relevant": ["n2"], "source": "gold"}
+{"qid": "en-tests-before-3", "query": "which tests does append need", "scope": {"task_id": "t-en", "before_step": 3}, "relevant": ["n1"], "grades": {"n1": 1}, "source": "gold"}
+{"qid": "zh-empty", "query": "空列表 切片 处理", "scope": {"task_id": "t-zh", "before_step": 4}, "relevant": ["n2", "t2.1"], "grades": {"n2": 2}, "source": "silver"}

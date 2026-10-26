@@ -86,6 +86,19 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-26-retrieval">
+          <h3>Compare memory retrievers offline</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/38">#38</a>
+          </p>
+          <ul>
+            <li><code>melo-retrieve</code> runs labelled queries against a corpus with the <code>bm25</code>, <code>llm</code> or <code>embedding</code> retriever and reports how often each finds the right documents, and how fast.</li>
+            <li>It can also turn a run's model calls into such a corpus: notes on the model's reasoning, code drafts and chunks of its thinking.</li>
+            <li><code>melo</code> does not use these retrievers yet. A benchmark comparison decides which one becomes the default.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-26-workspace">
           <h3>A web workspace and a conversation in the terminal</h3>
           <p class="update-date">

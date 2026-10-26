@@ -9,6 +9,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- `melo-retrieve`, installed next to `melo`, compares the `bm25`, `llm` and
+  `embedding` memory retrievers offline on labelled queries: recall@k, mean
+  reciprocal rank, latency and token use. `--export-run` turns a run's model
+  calls or a history database into a corpus of reasoning notes, code drafts,
+  thought chunks and reflections ([#38]).
 - The web workspace replaces the gateway's playground page, at
   `http://127.0.0.1:8401/` by default. It discovers your server's models,
   keeps a draft for each chat, searches chats, renders Markdown with code,
@@ -133,3 +138,4 @@ earlier milestones.
 [#35]: https://github.com/localmelo/localmelo/pull/35
 [#36]: https://github.com/localmelo/localmelo/pull/36
 [#37]: https://github.com/localmelo/localmelo/pull/37
+[#38]: https://github.com/localmelo/localmelo/pull/38

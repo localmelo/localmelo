@@ -116,6 +116,7 @@ uv run python -m localmelo.support.gateway._test_webapp
 | [工具和 MCP（英文）](docs/tools.md) | 内置工具、MCP 服务器、每一步提供哪些工具、检查 |
 | [网关和 HTTP API（英文）](docs/gateway.md) | HTTP API、会话、网页界面、在 macOS 登录时自动运行 |
 | [记忆（英文）](docs/memory.md) | localmelo 记住什么，以及如何保留、查看和重置记忆 |
+| [离线检索（英文）](docs/retrieval.md) | `melo-retrieve`：离线比较记忆检索器，把一次运行导出为语料 |
 | [Python API（英文）](docs/python-api.md) | `Agent`、`AgentOptions` 和 `RunResult`（实验性） |
 | [事件（英文）](docs/events.md) | 一次运行向 Python 代码报告的事件，以及它们的顺序和字段 |
 | [localmelo 的工作原理（英文）](docs/how-it-works.md) | 运行循环、反思、记忆和超时 |

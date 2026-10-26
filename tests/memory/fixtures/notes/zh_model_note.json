@@ -1,0 +1,67 @@
+{
+  "name": "zh_model_note",
+  "reply": {
+    "content": "<note>\nplan: 先运行测试，确认 foldr 的修改\nfound：foldl 已经通过；foldr 还差两个用例\nhypotheses: 可能是参数顺序的问题\nremember: 是\n</note>",
+    "thinking": "我先运行测试看看。",
+    "tool_calls": [
+      {
+        "tool_name": "python_exec",
+        "arguments": {
+          "code": "import subprocess\nresult = subprocess.run(['pytest', '-q'], capture_output=True, text=True)\nprint(result.stdout)\n"
+        },
+        "id": "call_1"
+      }
+    ],
+    "tool_results": [
+      {
+        "tool_name": "python_exec",
+        "output": "..F.F...................                                                 [100%]\n2 failed, 22 passed in 0.30s",
+        "error": "",
+        "duration_ms": 950.0
+      }
+    ]
+  },
+  "recent_path": "",
+  "expected_note": {
+    "note_id": "",
+    "task_id": "",
+    "step": 0,
+    "attempt": 0,
+    "call_seq": 0,
+    "kind": "step",
+    "source": "model",
+    "plan": "先运行测试，确认 foldr 的修改",
+    "found": [
+      "foldl 已经通过",
+      "foldr 还差两个用例"
+    ],
+    "decided": [],
+    "hypotheses": [
+      "可能是参数顺序的问题"
+    ],
+    "open_questions": [],
+    "observed": [
+      "ran `python`: 2 failed, 22 passed in 0.30s"
+    ],
+    "outcome": "2 failed, 22 passed in 0.30s",
+    "drafts": [],
+    "reasoning_chars": 9,
+    "source_ids": [],
+    "remember": true,
+    "remember_by": "model",
+    "stage": "fresh",
+    "entry_id": "",
+    "uses": 0,
+    "last_used_at": 0.0,
+    "created_at": 0.0
+  },
+  "expected_rest": "",
+  "expected_draft": null,
+  "expected_chunks": [
+    {
+      "title": "我先运行测试看看。",
+      "text": "我先运行测试看看。"
+    }
+  ],
+  "expected_render": "plan: 先运行测试，确认 foldr 的修改\nfound: foldl 已经通过; foldr 还差两个用例\nhypotheses: 可能是参数顺序的问题\nobserved: ran `python`: 2 failed, 22 passed in 0.30s\noutcome: 2 failed, 22 passed in 0.30s"
+}
