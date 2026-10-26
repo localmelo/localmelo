@@ -416,6 +416,109 @@ async def test_a_cancelled_error_from_the_gate_propagates() -> None:
     assert stand_ins.calls == []
 
 
+async def test_the_gate_sees_the_resolved_path(root: Path) -> None:
+    stand_ins = StandIns()
+    executor, _ = _executor(root, stand_ins)
+    gate = Gate()
+
+    outcome = await _run(
+        executor, "file_write", {"path": "notes.txt", "content": "hi"}, gate
+    )
+
+    target = str(root / "notes.txt")
+    assert outcome.status == ExecutionStatus.SUCCESS
+    [request] = gate.requests
+    assert request.arguments == {"path": target, "content": "hi"}
+    assert stand_ins.calls == [("file_write", {"path": target, "content": "hi"})]
+
+
+class SwappingGate(Gate):
+    """Allows the call after putting *link* in place of the approved path."""
+
+    def __init__(self, swap: Path, target: Path) -> None:
+        super().__init__()
+        self.swap, self.target = swap, target
+
+    async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
+        if self.swap.is_dir() and not self.swap.is_symlink():
+            for child in self.swap.iterdir():
+                child.unlink()
+            self.swap.rmdir()
+        elif self.swap.exists() or self.swap.is_symlink():
+            self.swap.unlink()
+        self.swap.symlink_to(self.target)
+        return await super().__call__(request)
+
+
+async def test_path_changed_during_approval(root: Path, tmp_path: Path) -> None:
+    # While the person decides, a symlink to a file outside the root takes
+    # the approved file's place: the path is resolved again, and nothing
+    # runs.
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret")
+    (root / "notes.txt").write_text("notes")
+    stand_ins = StandIns()
+    executor, _ = _executor(root, stand_ins)
+    gate = SwappingGate(root / "notes.txt", outside)
+
+    outcome = await _run(
+        executor, "file_write", {"path": "notes.txt", "content": "x"}, gate
+    )
+
+    approved = root / "notes.txt"
+    assert len(gate.requests) == 1
+    assert outcome.status == ExecutionStatus.ERROR
+    assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION
+    assert outcome.error == (
+        f"Path '{approved}' changed while waiting for approval; the call did "
+        "not run."
+    )
+    assert stand_ins.calls == []
+    assert outside.read_text() == "secret"
+
+
+async def test_a_directory_swapped_during_approval_is_caught(
+    root: Path, tmp_path: Path
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (root / "sub").mkdir()
+    (root / "sub" / "notes.txt").write_text("notes")
+    executor, _ = _executor(root)
+    gate = SwappingGate(root / "sub", elsewhere)
+
+    outcome = await _run(
+        executor, "file_write", {"path": "sub/notes.txt", "content": "x"}, gate
+    )
+
+    assert outcome.error_category == ErrorCategory.PATH_POLICY_VIOLATION
+    assert "changed while waiting for approval" in outcome.error
+    assert list(elsewhere.iterdir()) == []
+
+
+async def test_a_path_swapped_within_the_root_still_runs_what_was_approved(
+    root: Path,
+) -> None:
+    # The tool gets the approved real path, so a link that the model named
+    # and that now points elsewhere changes nothing: the re-check resolves
+    # the approved path, which still names the same file.
+    (root / "a.txt").write_text("a")
+    (root / "b.txt").write_text("b")
+    (root / "link.txt").symlink_to(root / "a.txt")
+    stand_ins = StandIns()
+    executor, _ = _executor(root, stand_ins)
+    gate = SwappingGate(root / "link.txt", root / "b.txt")
+
+    outcome = await _run(
+        executor, "file_write", {"path": "link.txt", "content": "x"}, gate
+    )
+
+    assert outcome.status == ExecutionStatus.SUCCESS
+    assert stand_ins.calls == [
+        ("file_write", {"path": str(root / "a.txt"), "content": "x"})
+    ]
+
+
 async def test_approval_wait_is_outside_the_tool_timeout() -> None:
     executor, hippo = _executor()
     ran: list[str] = []

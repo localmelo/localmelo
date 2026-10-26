@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import inspect
 import time
 from collections.abc import Awaitable, Callable, Collection, Coroutine, Mapping
@@ -28,6 +29,9 @@ if TYPE_CHECKING:
     from localmelo.melo.memory.coordinator import Hippo
 
 _DEFAULT_TIMEOUT_MS = 60_000
+
+# The tools whose "path" argument the workspace policy resolves and fences.
+_FILE_TOOLS = ("file_read", "file_write")
 
 # A tool callable returns plain text or a ToolOutput (text + images).
 ToolCallable = Callable[..., Coroutine[Any, Any, "str | ToolOutput"]]
@@ -107,6 +111,17 @@ class Executor:
         ``TOOL_NOT_OFFERED`` before its arguments are looked at. ``None``
         skips that check.
 
+        With a workspace root (the executor's, or the request's
+        ``workspace_root``, which replaces it), the ``path`` of
+        ``file_read`` and ``file_write`` is resolved against the root (see
+        :meth:`WorkspacePolicy.resolve`). A path that is empty, missing or
+        holds a NUL character is refused with ``INVALID_ARGUMENTS``, and
+        one whose real path is outside the root with
+        ``PATH_POLICY_VIOLATION``. Otherwise the call goes on with the real
+        path in place of the given one, in a new request: the approval
+        gate, the tool and the outcome's artifacts get the path that was
+        checked, and the caller's request is not changed.
+
         *approve* is asked about each call of a tool registered as
         requiring approval (see :meth:`register`), after every check that
         refuses a call by itself and before the tool's timeout starts, so
@@ -122,6 +137,10 @@ class Executor:
         :data:`~localmelo.melo.contracts.approvals.APPROVAL_FAILED`. A
         ``CancelledError`` propagates, and nothing runs. ``None`` asks no
         one: a tool that requires approval then runs as any other does.
+        Once the gate allows a file tool's call under a root, its path is
+        resolved again; when the result differs, as when a symlink took the
+        file's place during the wait, the call is refused with
+        ``PATH_POLICY_VIOLATION`` and does not run.
         """
         tool_call = ToolCall(tool_name=request.tool_name, arguments=request.arguments)
 
@@ -192,23 +211,50 @@ class Executor:
                 error_category=ErrorCategory.TOOL_NOT_FOUND,
             )
 
-        # 7. Workspace path policy for file tools
-        if request.tool_name in ("file_read", "file_write"):
-            effective_root = request.workspace_root or self._policy.root
-            if effective_root:
-                policy = WorkspacePolicy(effective_root)
-                path = request.arguments.get("path", "")
-                if not policy.check_path(path):
+        # 7. Workspace path policy for the file tools: the path is resolved
+        #    against the root, and the call goes on with the real path, so
+        #    the tool opens the file that was checked (and the approval
+        #    policy sees it).
+        policy: WorkspacePolicy | None = None
+        resolved: str | None = None
+        if request.tool_name in _FILE_TOOLS:
+            policy = (
+                WorkspacePolicy(request.workspace_root)
+                if request.workspace_root
+                else self._policy
+            )
+            if policy.root is None:
+                policy = None
+            else:
+                path = request.arguments.get("path")
+                try:
+                    resolved = policy.resolve(path)
+                except ValueError:
+                    return ExecutionOutcome(
+                        tool_name=request.tool_name,
+                        status=ExecutionStatus.ERROR,
+                        error=(
+                            f"Argument 'path' for {request.tool_name} must be a "
+                            "non-empty string without NUL characters."
+                        ),
+                        error_category=ErrorCategory.INVALID_ARGUMENTS,
+                    )
+                if resolved is None:
                     return ExecutionOutcome(
                         tool_name=request.tool_name,
                         status=ExecutionStatus.ERROR,
                         error=f"Path '{path}' is outside allowed workspace root",
                         error_category=ErrorCategory.PATH_POLICY_VIOLATION,
                     )
+                # A new request: the caller's arguments stay as they were.
+                request = dataclasses.replace(
+                    request, arguments={**request.arguments, "path": resolved}
+                )
 
         # 8. Approval, for a tool that requires it: asked only about a call
         #    that every check above let through, and before the tool's
         #    timeout starts.
+        asked = False
         if approve is not None and self.requires_approval(request.tool_name):
             mismatch = _parameter_mismatch(fn, request.arguments)
             if mismatch:
@@ -241,8 +287,29 @@ class Executor:
                     error=denial_text(decision),
                     error_category=ErrorCategory.APPROVAL_DENIED,
                 )
+            asked = True
 
-        # 9. Execute with timeout
+        # 9. Re-check: an approved file path is resolved again, since a
+        #    person may take a while to answer. A path that resolves
+        #    elsewhere now, as when a symlink took the file's place, does
+        #    not run. This narrows the window between check and open.
+        if (
+            asked
+            and policy is not None
+            and resolved is not None
+            and policy.resolve(resolved) != resolved
+        ):
+            return ExecutionOutcome(
+                tool_name=request.tool_name,
+                status=ExecutionStatus.ERROR,
+                error=(
+                    f"Path '{resolved}' changed while waiting for approval; "
+                    "the call did not run."
+                ),
+                error_category=ErrorCategory.PATH_POLICY_VIOLATION,
+            )
+
+        # 10. Execute with timeout
         timeout_ms = (
             request.timeout_ms
             or self._timeouts_ms.get(request.tool_name)
@@ -281,7 +348,7 @@ class Executor:
 
         duration = (time.perf_counter() - start) * 1000
 
-        # 10. Normalize rich output (text + images)
+        # 11. Normalize rich output (text + images)
         if isinstance(output, ToolOutput):
             if output.is_error:
                 return ExecutionOutcome(
@@ -296,7 +363,7 @@ class Executor:
         else:
             text, images = (output if isinstance(output, str) else str(output)), []
 
-        # 11. Build outcome with artifact metadata
+        # 12. Build outcome with artifact metadata
         artifacts = self._collect_artifacts(request, text)
 
         return ExecutionOutcome(

@@ -3,17 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import contextlib
 import contextvars
 import os
 import signal
+import stat
 import subprocess
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from localmelo.melo.checker.validators import MAX_OUTPUT_LEN
 from localmelo.melo.schema import ToolDef
 
-BUILTINS: list[tuple[ToolDef, Callable[..., Coroutine[Any, Any, str]]]] = []
+# A built-in tool's callable.
+ToolFunction = Callable[..., Coroutine[Any, Any, str]]
+
+BUILTINS: list[tuple[ToolDef, ToolFunction]] = []
 
 # The built-ins that run code or change files. register_builtins marks them,
 # so a call of one asks the run's approval policy, when the run has one,
@@ -38,15 +44,13 @@ SHELL_TIMEOUT_S = 30.0
 # Seconds to wait for a killed shell_exec command to be reaped.
 _REAP_TIMEOUT_S = 5.0
 
+# Bytes the file_read of a workspace reads at most. As UTF-8 they always
+# hold the MAX_OUTPUT_LEN characters that the executor's result check keeps.
+MAX_FILE_READ_BYTES = 200_000
 
-def _builtin(
-    tool_def: ToolDef,
-) -> Callable[
-    [Callable[..., Coroutine[Any, Any, str]]], Callable[..., Coroutine[Any, Any, str]]
-]:
-    def decorator(
-        fn: Callable[..., Coroutine[Any, Any, str]],
-    ) -> Callable[..., Coroutine[Any, Any, str]]:
+
+def _builtin(tool_def: ToolDef) -> Callable[[ToolFunction], ToolFunction]:
+    def decorator(fn: ToolFunction) -> ToolFunction:
         BUILTINS.append((tool_def, fn))
         return fn
 
@@ -186,3 +190,102 @@ async def _python_exec(code: str) -> str:
                 "does not allow"
             ) from None
     return buf.getvalue().strip()
+
+
+# ── Built-ins with a workspace root ──
+
+
+def rooted_builtins(root: str) -> dict[str, tuple[ToolFunction, float | None]]:
+    """The built-ins that work in the workspace *root*, by tool name.
+
+    Each value is the tool's callable and its timeout in milliseconds, or
+    ``None`` for the executor's default. A callable takes exactly the
+    parameters of the tool's :class:`ToolDef`, so a call cannot pass more.
+
+    - ``file_read`` and ``file_write`` open the path they get, which the
+      executor has resolved against its own root and fenced (see
+      :meth:`~localmelo.melo.executor.policy.WorkspacePolicy.resolve`), with
+      ``O_NOFOLLOW`` and ``O_NONBLOCK``: a symlink that took the checked
+      file's place is refused, and so is anything but a regular file, such
+      as a FIFO, which would block a worker thread forever. A relative path
+      joins *root*. ``file_read`` reads at most :data:`MAX_FILE_READ_BYTES`
+      bytes as strict UTF-8; a longer text keeps as many characters as fit
+      in ``MAX_OUTPUT_LEN`` together with a note of the file's size, so the
+      executor's result check never cuts the note off. ``file_write``
+      writes UTF-8 and reports the real path.
+
+    The other built-ins keep their Phase 1a functions.
+    """
+    root = os.path.realpath(root)
+    return {
+        "file_read": (_rooted_file_read(root), None),
+        "file_write": (_rooted_file_write(root), None),
+    }
+
+
+def _rooted_file_read(root: str) -> ToolFunction:
+    async def file_read(path: str) -> str:
+        target = os.path.join(root, path)
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, _read_regular_file, target)
+
+    return file_read
+
+
+def _rooted_file_write(root: str) -> ToolFunction:
+    async def file_write(path: str, content: str) -> str:
+        target = os.path.join(root, path)
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, _write_regular_file, target, content)
+        # The count is in characters, as Phase 1a's file_write reports it.
+        return f"Written {len(content)} bytes to {target}"
+
+    return file_write
+
+
+def _read_regular_file(path: str) -> str:
+    """The text of the regular file *path*, cut as :func:`rooted_builtins` says."""
+    limit = MAX_FILE_READ_BYTES
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    try:
+        _require_regular_file(fd, path)
+        chunks: list[bytes] = []
+        left = limit + 1  # one byte more tells whether the file is longer
+        while left > 0:
+            chunk = os.read(fd, left)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            left -= len(chunk)
+        data = b"".join(chunks)
+        size = max(os.fstat(fd).st_size, len(data))
+    finally:
+        os.close(fd)
+    cut = len(data) > limit
+    # Strict UTF-8; a character that the limit cuts in two is dropped.
+    text = codecs.getincrementaldecoder("utf-8")().decode(data[:limit], final=not cut)
+    if not cut and len(text) <= MAX_OUTPUT_LEN:
+        return text
+    note = f"\n... [truncated: the file has {size} bytes]"
+    return text[: MAX_OUTPUT_LEN - len(note)] + note
+
+
+def _write_regular_file(path: str, content: str) -> None:
+    """Write *content* to the regular file *path* as UTF-8."""
+    # Encoded first, so a text that UTF-8 cannot encode (a lone surrogate)
+    # fails before the file is emptied.
+    data = content.encode("utf-8")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW | os.O_NONBLOCK
+    fd = os.open(path, flags, 0o666)
+    try:
+        _require_regular_file(fd, path)
+        view = memoryview(data)
+        while view:
+            view = view[os.write(fd, view) :]
+    finally:
+        os.close(fd)
+
+
+def _require_regular_file(fd: int, path: str) -> None:
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        raise ValueError(f"Not a regular file: {path}")
