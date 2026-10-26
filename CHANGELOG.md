@@ -12,7 +12,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - `docs/for-agents.md`, one compact page that tells AI coding agents and LLM
   tools what localmelo is and how to use it, and `docs/llms.txt`, an index of
   the docs in the llms.txt format, served at
-  <https://localmelo.github.io/localmelo/llms.txt>.
+  <https://localmelo.github.io/localmelo/llms.txt> ([#40]).
 - The scheduler's policy core and simulator, `localmelo.support.scheduler`
   (experimental). It decides which model calls reach a shared local model
   server, in what order and why a task waits, and its simulator compares the
@@ -150,3 +150,4 @@ earlier milestones.
 [#37]: https://github.com/localmelo/localmelo/pull/37
 [#38]: https://github.com/localmelo/localmelo/pull/38
 [#39]: https://github.com/localmelo/localmelo/pull/39
+[#40]: https://github.com/localmelo/localmelo/pull/40
