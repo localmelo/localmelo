@@ -120,6 +120,7 @@ uv run python -m localmelo.support.gateway._test_webapp
 | [Python API（英文）](docs/python-api.md) | `Agent`、`AgentOptions` 和 `RunResult`（实验性） |
 | [事件（英文）](docs/events.md) | 一次运行向 Python 代码报告的事件，以及它们的顺序和字段 |
 | [localmelo 的工作原理（英文）](docs/how-it-works.md) | 运行循环、反思、记忆和超时 |
+| [调度器（英文）](docs/scheduler.md) | 调度策略和模拟器，面向维护者（运行时尚未使用） |
 | [故障排查（英文）](docs/troubleshooting.md) | 常见错误信息及解决方法 |
 | [架构](https://localmelo.github.io/localmelo/zh-CN/architecture.html) | 各部分如何协同工作（网站） |
 | [路线图](https://localmelo.github.io/localmelo/zh-CN/updates.html#roadmap) | 计划和更新记录（网站） |
@@ -138,7 +139,8 @@ uv run python -m localmelo.support.gateway._test_webapp
 
 - 交互式命令行：不带任务运行 `melo` 时打开，并实时显示智能体的工具调用（目前 `melo` 会启动网关，`melo ""` 打开一个简单的对话循环）；
 - 网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；
-- 把模型的推理过程保存为记忆笔记，并可切换检索方式（`bm25`、`llm`、`embedding`）。
+- 把模型的推理过程保存为记忆笔记，并可切换检索方式（`bm25`、`llm`、`embedding`）；
+- 在一个本地模型服务器上同时运行多个任务，并优先回答你的对话。
 
 ## 安全
 

@@ -171,6 +171,7 @@ own computer only; see [Web UI](docs/gateway.md#web-ui-playground).
 | [Python API](docs/python-api.md) | `Agent`, `AgentOptions` and `RunResult` (experimental) |
 | [Events](docs/events.md) | The events a run reports to Python code, their order and fields |
 | [How localmelo works](docs/how-it-works.md) | The run loop, reflection, memory and timeouts |
+| [Scheduler](docs/scheduler.md) | The scheduling policy and its simulator, for maintainers (not used by runs yet) |
 | [Troubleshooting](docs/troubleshooting.md) | Error messages and how to fix them |
 | [Architecture](https://localmelo.github.io/localmelo/en/architecture.html) | How the parts fit together (website) |
 | [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap) | Plans and dated updates (website) |
@@ -194,7 +195,9 @@ Planned:
 - conversations that survive a gateway restart, with the agent's work shown
   live in the web workspace;
 - keeping the model's reasoning as memory notes, with switchable retrieval
-  (`bm25`, `llm`, `embedding`).
+  (`bm25`, `llm`, `embedding`);
+- running several tasks at once on one local model server, with your
+  conversation answered first.
 
 ## Security
 
