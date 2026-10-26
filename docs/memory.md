@@ -54,8 +54,9 @@ melo "What is 6*7?"
   the same files.
 - History keeps the model's reasoning for 30 days; see
   [Model calls](#model-calls). `LOCALMELO_THINKING_RETENTION_DAYS` sets
-  another number of days, such as `7` or `0.5`. A value that is not a number
-  above 0 stops `melo` before it runs anything; see
+  another number of days, such as `7` or `0.5`, for `history.db` and the
+  session store's `sessions.db` alike (see [Sessions](#sessions)). A value
+  that is not a number above 0 stops `melo` before it runs anything; see
   [Usage errors](cli.md#usage-errors).
 - Recalling long-term memory in a later run needs both persistence and an
   embedding backend.
@@ -278,12 +279,13 @@ yet; the files appear once a program opens a store.
   redaction of [events](events.md#assistantmessage) before it is stored.
 - **Retention.** When a store opens, and whenever its program calls
   `apply_retention()` (a gateway that keeps the store open is to call it
-  every 24 hours), what is older than 30 days is cleared: the thinking of
-  `assistant.message` events, and the `<think>` block in their text; the
-  `<think>` block of the final answer's copies; window checkpoints, and in a
-  newer checkpoint the thinking and `<think>` block of each message older
-  than 30 days; and withdrawn messages. The turns, their answers and their
-  events stay until you delete the session.
+  every 24 hours), what is older than 30 days, or than
+  `LOCALMELO_THINKING_RETENTION_DAYS` as for `history.db`, is cleared: the
+  thinking of `assistant.message` events, and the `<think>` block in their
+  text; the `<think>` block of the final answer's copies; window
+  checkpoints, and in a newer checkpoint the thinking and `<think>` block
+  of each message older than that; and withdrawn messages. The turns, their
+  answers and their events stay until you delete the session.
 - **A killed run.** A run killed with its process keeps the row `running` in
   `history.db`'s `tasks` table (see [Task records](#task-records)); its
   turn's status in `sessions.db` is the one to trust. The turn's `run_id` is

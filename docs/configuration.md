@@ -257,7 +257,7 @@ chat_model = "Qwen/Qwen3-8B"
 |---|---|
 | `LOCALMELO_PERSIST_MEMORY` | Any non-empty value, even `0`, saves history and long-term memory in SQLite files. |
 | `LOCALMELO_MEMORY_DIR` | The directory for those files (default `~/.cache/localmelo/memory`). It is used exactly as given: `~` is not expanded. |
-| `LOCALMELO_THINKING_RETENTION_DAYS` | The days that `history.db` keeps the model's reasoning (default 30): any number above 0, such as `7` or `0.5`. Any other value stops `melo` with exit code 2. See [Model calls](memory.md#model-calls). |
+| `LOCALMELO_THINKING_RETENTION_DAYS` | The days that `history.db` and the session store's `sessions.db` keep the model's reasoning (default 30): any number above 0, such as `7` or `0.5`. Any other value stops `melo` with exit code 2. See [Model calls](memory.md#model-calls). |
 | The variable that `api_key_env` names | The API key of a cloud backend, such as `OPENAI_API_KEY`. |
 
 See [Keep memory between runs](memory.md#keep-memory-between-runs).
