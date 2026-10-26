@@ -65,7 +65,8 @@
         <ul>
           <li>交互式命令行：不带任务运行 <code>melo</code> 时打开，并实时显示智能体的工具调用（目前 <code>melo</code> 会启动网关，<code>melo &quot;&quot;</code> 打开一个简单的对话循环）；</li>
           <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
-          <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）。</li>
+          <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
+          <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话。</li>
         </ul>
         <p>维护者撰写的记忆设计见<a href="./memory-design.html">记忆设计</a>页，其中部分内容尚未实现。</p>
       </section>
@@ -73,6 +74,19 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-26-scheduler">
+          <h3>同时运行多个任务的基础</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/39">#39</a>
+          </p>
+          <ul>
+            <li>调度器将让你的对话、后台任务和聊天共用一个本地模型服务器。它的策略决定下一个发给模型的调用，说明每个任务为什么在等，并让你的对话优先得到回答。</li>
+            <li>模拟器用这个策略重放工作负载，可以离线比较策略的几种变体，用合成的工作负载或基准测试的记录都行。</li>
+            <li>现在还没有任何地方使用调度器：运行和网关都和以前一样。下一步会把它放到模型服务器前面。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-26-retrieval">
           <h3>离线比较记忆检索器</h3>
