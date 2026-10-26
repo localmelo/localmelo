@@ -91,6 +91,12 @@ ROUTES = [
         "POST", "/v1/playground/session/pg1/run", {"query": "ls"}, id="playground-run"
     ),
     pytest.param("DELETE", "/v1/playground/session/pg1", None, id="playground-close"),
+    pytest.param("GET", "/v1/playground/sessions", None, id="playground-sessions"),
+    pytest.param("GET", "/v1/playground/session/pg1", None, id="playground-get"),
+    pytest.param(
+        "POST", "/v1/playground/session/pg1/cancel", None, id="playground-cancel"
+    ),
+    pytest.param("GET", "/assets/workspace.js", None, id="workspace-assets"),
     pytest.param("GET", "/no/such/route", None, id="404"),
     pytest.param("POST", "/v1/agent/run", ["not", "an", "object"], id="422"),
     pytest.param("POST", "/v1/agent/run", {"query": FAILING_TASK}, id="500"),

@@ -384,8 +384,11 @@ async def test_cancelled_request_returns_session_to_idle() -> None:
         return "unreachable"
 
     session.agent.run = blocked  # type: ignore[method-assign]
+    # Addressed to the gateway, as its guard requires (see _client); an
+    # AsyncClient, unlike TestClient, can cancel the request it is sending.
     async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=server.app), base_url="http://test"
+        transport=httpx.ASGITransport(app=server.app),
+        base_url=f"http://127.0.0.1:{server.port}",
     ) as client:
         request = asyncio.create_task(
             client.post(
