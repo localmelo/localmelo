@@ -68,6 +68,9 @@ EVENT_TYPES: Final = frozenset(EVENT_FIELDS)
 # Characters a string in an event's data keeps (see json_safe_payload).
 EVENT_TEXT_LIMIT: Final = 100_000
 
+# Levels of lists and dicts that an event's data keeps (see json_safe_payload).
+_DEPTH_LIMIT: Final = 100
+
 
 @dataclass(frozen=True)
 class AgentEvent:
@@ -112,12 +115,16 @@ def json_safe_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     """A copy of *data* that ``json.dumps(..., allow_nan=False)`` accepts.
 
     The copy holds only ``str``, ``int``, finite ``float``, ``bool`` and
-    ``None``, in lists and ``str``-keyed dicts, at any depth:
+    ``None``, in lists and ``str``-keyed dicts nested at most 100 levels
+    deep, the values of *data* being on level 1:
 
     - a tuple becomes a list, and a mapping's key that is not a ``str``
       becomes ``str(key)``;
     - a non-finite float becomes ``"nan"``, ``"inf"`` or ``"-inf"``;
-    - any other value becomes ``str(value)``;
+    - any other value becomes ``str(value)``, and so does a list, tuple or
+      mapping on a level past 100: data nested past the recursion limit,
+      as a model's tool-call arguments can be, still gives a payload, and
+      so does a list that holds itself;
     - a string longer than :data:`EVENT_TEXT_LIMIT` keeps its first
       ``EVENT_TEXT_LIMIT`` characters, followed by ``"… [+N chars]"``, where
       ``N`` counts the characters left out.
@@ -125,10 +132,11 @@ def json_safe_payload(data: Mapping[str, Any]) -> dict[str, Any]:
     *data* itself is not changed, and the copy shares no list or dict with
     it.
     """
-    return {_key(key): _json_safe(value) for key, value in data.items()}
+    return {_key(key): _json_safe(value, 1) for key, value in data.items()}
 
 
-def _json_safe(value: Any) -> Any:
+def _json_safe(value: Any, depth: int) -> Any:
+    """*value*, which is on level *depth* of the payload, as JSON-safe data."""
     # bool before int: True is an int too.
     if value is None or isinstance(value, bool):
         return value
@@ -142,10 +150,13 @@ def _json_safe(value: Any) -> Any:
         return "inf" if value > 0 else "-inf"
     if isinstance(value, str):
         return _clip(str.__str__(value))
+    if isinstance(value, Mapping | list | tuple) and depth > _DEPTH_LIMIT:
+        # Copying it could exhaust the stack: its text, as for any other value.
+        return _clip(_text(value))
     if isinstance(value, Mapping):
-        return {_key(key): _json_safe(item) for key, item in value.items()}
+        return {_key(key): _json_safe(item, depth + 1) for key, item in value.items()}
     if isinstance(value, list | tuple):
-        return [_json_safe(item) for item in value]
+        return [_json_safe(item, depth + 1) for item in value]
     return _clip(_text(value))
 
 

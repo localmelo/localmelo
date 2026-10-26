@@ -5,6 +5,7 @@ from __future__ import annotations
 import enum
 import json
 import math
+import sys
 from dataclasses import FrozenInstanceError
 from typing import Any
 
@@ -12,6 +13,7 @@ import pytest
 
 import localmelo
 from localmelo.melo import contracts
+from localmelo.melo.contracts import events
 from localmelo.melo.contracts.events import (
     EVENT_FIELDS,
     EVENT_SCHEMA_VERSION,
@@ -29,6 +31,16 @@ def _event(**data: Any) -> AgentEvent:
     return AgentEvent(
         type="step.started", run_id="r1", seq=3, ts=12.5, data=data, images=(PNG,)
     )
+
+
+def _nested(levels: int, inner: Any = None, *, key: str | None = None) -> Any:
+    """*inner* inside *levels* lists, or dicts under *key*, one in another.
+
+    Built without recursion, so *levels* may pass the recursion limit.
+    """
+    for _ in range(levels):
+        inner = [inner] if key is None else {key: inner}
+    return inner
 
 
 class TestCatalogue:
@@ -195,3 +207,48 @@ class TestJsonSafePayload:
         payload["inner"]["list"].append(3)
         assert inner == {"list": [1, 2]}
         assert math.isnan(data["n"])
+
+    def test_lists_and_dicts_nest_at_most_100_levels(self) -> None:
+        assert events._DEPTH_LIMIT == 100
+        # The values of data are on level 1. A list, dict or tuple on level
+        # 100 is kept; one on level 101 becomes its text.
+        kept = {
+            "list": _nested(100, 1),
+            "dict": _nested(100, 1, key="k"),
+            "tuple": _nested(99, (1,)),
+        }
+        assert json_safe_payload(kept) == {
+            "list": _nested(100, 1),
+            "dict": _nested(100, 1, key="k"),
+            "tuple": _nested(100, 1),
+        }
+        past = {
+            "list": _nested(101, 1),
+            "dict": _nested(101, 1, key="k"),
+            "tuple": _nested(100, (1,)),
+            "empty": _nested(100, {}),
+        }
+        assert json_safe_payload(past) == {
+            "list": _nested(100, "[1]"),
+            "dict": _nested(100, "{'k': 1}", key="k"),
+            "tuple": _nested(100, "(1,)"),
+            "empty": _nested(100, "{}"),
+        }
+
+    def test_data_nested_past_the_recursion_limit_gives_a_payload(self) -> None:
+        loop: list[Any] = []
+        loop.append(loop)
+        payload = json_safe_payload(
+            {"deep": _nested(2 * sys.getrecursionlimit()), "loop": loop}
+        )
+        json.dumps(payload, allow_nan=False)
+        leaves = []
+        for value in (payload["deep"], payload["loop"]):
+            for _ in range(100):
+                assert isinstance(value, list) and len(value) == 1
+                value = value[0]
+            leaves.append(value)
+        # How much of the deep list's text str() gives depends on the
+        # Python; a list that holds itself shows the reference as [...].
+        assert isinstance(leaves[0], str)
+        assert leaves[1] == "[[...]]"

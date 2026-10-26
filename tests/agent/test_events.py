@@ -12,6 +12,7 @@ import json
 import logging
 import math
 import sqlite3
+import sys
 import time
 from collections import deque
 from collections.abc import Iterable, Sequence
@@ -23,7 +24,11 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions, _events
 from localmelo.melo.agent._chat import RETRY_HOOK
-from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.approvals import (
+    AllowAllPolicy,
+    ApprovalDecision,
+    ApprovalRequest,
+)
 from localmelo.melo.contracts.events import EVENT_FIELDS, AgentEvent
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
@@ -693,6 +698,58 @@ class TestPayloads:
         # The tool gets the arguments themselves.
         assert tools.received[0]["thing"] is thing
         assert math.isnan(tools.received[0]["x"])
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("marked", [False, True])
+    async def test_arguments_nested_past_the_recursion_limit(
+        self, marked: bool
+    ) -> None:
+        # Arguments as a provider decodes them from a model's reply (json.loads
+        # in parse_tool_arguments), nested past the recursion limit.
+        depth = sys.getrecursionlimit() + 500
+        try:
+            arguments = json.loads('{"x": ' + "[" * depth + "]" * depth + "}")
+        except RecursionError:
+            pytest.skip("this Python's json cannot decode arguments this deep")
+        tools = Tools()
+        recorder = Recorder()
+        agent = _agent(
+            ScriptedLLM([_calls(("probe", arguments, "call_1")), _answer("done")]),
+            tools=tools,
+        )
+        if marked:
+            agent.executor.register("probe", tools.probe, requires_approval=True)
+        result = await agent.run_task(
+            "probe", on_event=recorder, approval=AllowAllPolicy() if marked else None
+        )
+        assert (result.status, result.steps, result.n_tool) == ("completed", 2, 1)
+        assert recorder.types == [
+            "run.started",
+            "step.started",
+            "assistant.message",
+            "tool.started",
+            "tool.finished",
+            "step.started",
+            "assistant.message",
+            "run.finished",
+        ]
+        await check_guarantees(recorder, result, agent)
+        # The arguments dict is on level 1 of tool.started's data, so 99 of
+        # x's lists are kept, and the one on level 101 becomes its text.
+        [started] = recorder.of("tool.started")
+        value = started.data["arguments"]["x"]
+        for _ in range(99):
+            assert isinstance(value, list) and len(value) == 1
+            value = value[0]
+        assert isinstance(value, str)
+        [finished] = recorder.of("tool.finished")
+        if marked:
+            # The gate cannot copy the arguments for the policy, so the call
+            # fails closed: it is refused, and its events still pair up.
+            assert (finished.data["status"], tools.received) == ("blocked", [])
+        else:
+            assert finished.data["status"] == "success"
+            assert tools.received[0]["x"] is arguments["x"]
 
     @pytest.mark.asyncio
     async def test_images_are_references(self) -> None:
