@@ -181,15 +181,16 @@
         </article>
 
         <article class="update-entry" id="u-2026-10-23">
-          <h3>Reflections decide on their own checks</h3>
+          <h3>Reflections stop fewer unfinished runs</h3>
           <p class="update-date">
             <time datetime="2026-10-23">2026-10-23</time> ·
             <a href="https://github.com/localmelo/localmelo/pull/34">#34</a>
           </p>
           <ul>
-            <li>After a reflection, the next attempt starts when the reflection chooses <code>continue</code> and its three checks hold. Its utility score no longer has to reach 0.1.</li>
-            <li>A reflection reply that still cannot be read after the retry no longer ends a run that has attempts and steps left, and a reflection over 2,000 characters is trimmed instead of ending the run.</li>
-            <li><code>--reflection-gate utility</code> keeps the previous behavior, so the two can be compared.</li>
+            <li>Before, a reflection could end a run whose task was unsolved although attempts and steps were left: its own utility score had to reach a threshold, and a reflection that could not be read, or was too long, ended the run.</li>
+            <li>Now the next attempt starts when the reflection chooses <code>continue</code> and its three checks hold. An unreadable reflection no longer ends a run that has attempts and steps left, and a long one is trimmed. <code>--reflection-gate utility</code> keeps the earlier behavior.</li>
+            <li>On 12 coding exercises run 5 times each with one local model, the new default passed 59/60 runs and the earlier behavior 50/60. Runs without reflection (<code>--attempt-policy none</code>) passed 59/60 too: the new default matches them and does not beat them.</li>
+            <li>Conditions and limits: <a href="https://github.com/localmelo/localmelo/blob/main/docs/evaluations.md#reflection-gate">Evaluations</a>.</li>
           </ul>
         </article>
 

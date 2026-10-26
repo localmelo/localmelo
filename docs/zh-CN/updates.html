@@ -169,15 +169,16 @@
         </article>
 
         <article class="update-entry" id="u-2026-10-23">
-          <h3>反思按自己的检查决定是否继续</h3>
+          <h3>反思提前结束的未完成运行更少了</h3>
           <p class="update-date">
             <time datetime="2026-10-23">2026-10-23</time> ·
             <a href="https://github.com/localmelo/localmelo/pull/34">#34</a>
           </p>
           <ul>
-            <li>反思之后，只要反思选择 <code>continue</code> 并且它的三项检查都成立，就开始下一次尝试，不再要求效用分数达到 0.1。</li>
-            <li>反思的回复重试之后仍然读不出时，如果还有尝试次数和步数，运行不再因此结束；超过 2,000 个字符的反思会被截短，而不是结束运行。</li>
-            <li><code>--reflection-gate utility</code> 保留之前的行为，方便对比两种设置。</li>
+            <li>以前，即使还有尝试次数和步数、任务也还没有完成，反思也可能结束运行：反思自己的效用分数必须达到一个阈值，读不出或过长的反思也会结束运行。</li>
+            <li>现在，只要反思选择 <code>continue</code> 并且它的三项检查都成立，就开始下一次尝试。读不出的反思不再结束还有尝试次数和步数的运行，过长的反思会被截短。<code>--reflection-gate utility</code> 保留之前的行为。</li>
+            <li>用一个本地模型把 12 个编程练习各运行 5 次：新的默认设置通过了 59/60 次，之前的行为通过了 50/60 次。不使用反思（<code>--attempt-policy none</code>）也通过了 59/60 次：新的默认设置与它持平，并没有超过它。</li>
+            <li>条件和局限见<a href="https://github.com/localmelo/localmelo/blob/main/docs/evaluations.md#reflection-gate">评测（英文）</a>。</li>
           </ul>
         </article>
 
