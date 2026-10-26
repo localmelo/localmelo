@@ -46,15 +46,15 @@ def register_builtins(
     Without *workspace_root*, the functions of :data:`BUILTINS` themselves
     are registered, and a *tool_timeout_s* raises ``ValueError``. With a
     root, the tools that :func:`rooted_builtins` gives for it take their
-    place, with the timeouts it gives them: ``file_read`` and
-    ``file_write`` refuse a symlink that takes the checked file's place and
-    anything but a regular file, and ``file_read`` caps what it reads; ``shell_exec`` and ``python_exec``
-    run in the root, in a child process, within *tool_timeout_s* seconds
-    when it is set, and the rooted ``shell_exec`` starts the text of a
-    non-zero exit with ``[exit code <n>]``. The executor fences the file
-    tools' paths with its own root, so an executor built with the same
-    ``workspace_root`` goes with them. ``shell_exec`` and ``python_exec``
-    can still reach any path: approval is their control.
+    place, with the timeouts it gives them: ``file_read`` and ``file_write``
+    refuse a symlink that takes the checked file's place and anything but a
+    regular file, and ``file_read`` caps what it reads; ``shell_exec`` and
+    ``python_exec`` run in the root, in a child process, within
+    *tool_timeout_s* seconds when it is set, and the rooted ``shell_exec``
+    starts the text of a non-zero exit with ``[exit code <n>]``. The
+    executor fences the file tools' paths with its own root, so an executor
+    built with the same ``workspace_root`` goes with them. ``shell_exec``
+    and ``python_exec`` can still reach any path: approval is their control.
     """
     selected = None if names is None else set(names)
     if selected is not None:
