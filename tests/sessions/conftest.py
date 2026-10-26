@@ -14,6 +14,7 @@ from typing import Any
 
 import pytest
 
+from localmelo.support.sessions.reader import SessionReader
 from localmelo.support.sessions.store import SessionStore
 
 
@@ -28,16 +29,27 @@ def home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 @pytest.fixture(autouse=True)
 def _close_stores(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
     stores: list[SessionStore] = []
-    original = SessionStore.__init__
+    readers: list[SessionReader] = []
+    store_init = SessionStore.__init__
+    reader_init = SessionReader.__init__
 
-    def tracked(self: SessionStore, *args: Any, **kwargs: Any) -> None:
-        original(self, *args, **kwargs)
+    def tracked_store(self: SessionStore, *args: Any, **kwargs: Any) -> None:
+        store_init(self, *args, **kwargs)
         stores.append(self)
 
-    monkeypatch.setattr(SessionStore, "__init__", tracked)
+    def tracked_reader(self: SessionReader, *args: Any, **kwargs: Any) -> None:
+        reader_init(self, *args, **kwargs)
+        readers.append(self)
+
+    monkeypatch.setattr(SessionStore, "__init__", tracked_store)
+    monkeypatch.setattr(SessionReader, "__init__", tracked_reader)
     yield
     for store in stores:
         conn, store._conn = store._conn, None
         if conn is not None:
             conn.stop()
         store._release_owner()
+    for reader in readers:
+        conn, reader._conn = reader._conn, None
+        if conn is not None:
+            conn.stop()
