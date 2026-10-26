@@ -265,11 +265,15 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
 
 - **Cause:** the request did not name the gateway as `127.0.0.1`,
   `localhost` or `[::1]` with its port. For example, the web UI was opened as
-  `http://0.0.0.0:8401/`, or through a proxy that sends its own host name.
-  The gateway refuses these requests so that a web page on another site
-  cannot reach it through DNS rebinding.
+  `http://0.0.0.0:8401/`, through a proxy that sends its own host name, or as
+  `http://127.0.0.2:8401/` because the gateway listens on another loopback
+  address. The gateway refuses these requests so that a web page on another
+  site cannot reach it through DNS rebinding.
 - **Fix:** open `http://127.0.0.1:8401/` or `http://localhost:8401/`, with the
-  gateway's port. Proxies and remote access are not supported; see
+  gateway's port. If the gateway listens on another loopback address, start
+  it on `127.0.0.1`: set `host = "127.0.0.1"` in `[gateway]`, or run
+  `melo --serve --host 127.0.0.1`. Proxies and remote access are not
+  supported; see
   [Keep the gateway private](gateway.md#keep-the-gateway-private).
 
 ### HTTP 403 foreign_origin

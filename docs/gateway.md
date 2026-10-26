@@ -52,15 +52,24 @@ The body is the usual error with a `code`:
 ```
 
 - Open the web UI as `http://127.0.0.1:8401/` or `http://localhost:8401/`,
-  with your port. Other addresses that reach the gateway, such as
+  with your port; with `host = "::1"`, use `http://localhost:8401/` or
+  `http://[::1]:8401/`. Other addresses that reach the gateway, such as
   `http://0.0.0.0:8401/`, get 421.
 - curl and scripts send no `Origin` header, so only the `Host` check applies
   to them.
-- The checks are on when the host is `127.0.0.1`, `localhost` or `::1`. With
-  `host = "0.0.0.0"`, or any other address, the gateway makes no checks and
-  logs a warning when it starts. With no checks and no authentication,
-  anything that can reach the port, web pages included, can run tasks with
-  your tools. This is not recommended.
+- Every response tells the browser not to show it in a frame, with
+  `X-Frame-Options: DENY` and
+  `Content-Security-Policy: frame-ancestors 'none'`, so a page on another
+  site cannot embed the web UI and trick you into clicking in it.
+- The checks are on when the host is `localhost` or a loopback IP address:
+  `127.0.0.1`, `::1` or another address in `127.0.0.0/8`. Requests must
+  still name the gateway as `127.0.0.1`, `localhost` or `[::1]`, so use one
+  of these three as the host: on `127.0.0.2`, for example, your browser gets
+  421 too.
+- With `host = "0.0.0.0"`, or any other host, none of this applies, and the
+  gateway logs a warning when it starts. With no checks and no
+  authentication, anything that can reach the port, web pages included, can
+  run tasks with your tools. This is not recommended.
 - Remote access, through a reverse proxy or Tailscale Serve for example, is
   not supported until the gateway has authentication.
 
