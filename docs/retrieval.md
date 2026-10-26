@@ -412,7 +412,7 @@ Tasks come in the order of their first call, and the calls of a task in
 | Call `kind` | Documents |
 |---|---|
 | `plan` | A note, `<task_id>:n<seq>`; a draft, `<task_id>:d<seq>`, when the reasoning or the reply holds code blocks; thought chunks, `<task_id>:t<seq>.<i>` with i from 1. |
-| `reflect` | A reflection, `<task_id>:r<seq>`, and thought chunks. |
+| `reflect` | A reflection, `<task_id>:r<seq>`, when the reply holds one (a JSON object whose `recommended_action` is `continue`, `stop`, `decompose` or `done`, as the agent reads it), and thought chunks. A reply without a reflection gives only its thought chunks. |
 | `retrieve`, `estimate` | None. |
 
 - **Notes** say what a reply planned, found, decided, suspected and left
