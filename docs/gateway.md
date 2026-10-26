@@ -171,7 +171,9 @@ shows which ones are busy.
 ## Sessions
 
 A session is one agent with its own working memory, so a task sees the
-earlier tasks of its session.
+earlier tasks of its session and their answers. Each answer is kept without
+its `<think>` block and cut to 8,000 characters, but a long session still
+makes larger requests: leave out `session_id` for an unrelated task.
 
 - Without a `session_id`, each request gets a new session with a generated
   id of 12 hex characters.
@@ -183,7 +185,8 @@ earlier tasks of its session.
 - Creating a session also closes the sessions that have been idle for more
   than 1 hour.
 - Each session's agent uses the config file's backends and the default run
-  options: all four built-in tools and no MCP tools.
+  options (all four built-in tools and no MCP tools), except that it keeps
+  its answers (`AgentOptions(record_answers=True)`).
 - When `LOCALMELO_PERSIST_MEMORY` is set for the gateway, all sessions save
   to the same SQLite files; see [Memory](memory.md#keep-memory-between-runs).
 
@@ -204,6 +207,10 @@ Stop cancels the harness task and its current provider/tool request. Shell
 process groups are killed; already dispatched model computation can still finish
 inside a backend. In-process `python_exec` remains non-interruptible while Python
 code blocks the event loop. See [Tools and MCP](tools.md) for execution limits.
+The task is saved with the status `cancelled`, and the chat takes the next
+message once that save is done. A Stop that comes after the answer, while the
+task is being saved, leaves the answer in the chat. Each message sees the
+earlier answers of its chat, as in a [session](#sessions).
 
 The web UI works apart from the HTTP API above:
 

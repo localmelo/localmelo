@@ -62,7 +62,8 @@ def test_an_empty_query_opens_the_loop(capsys: pytest.CaptureFixture[str]) -> No
     agent.close.assert_awaited_once()
     gateway.assert_not_called()
     redirect.assert_not_called()
-    assert build.call_args.kwargs["options"] == AgentOptions()
+    # The loop keeps its answers, so each turn sees the earlier ones.
+    assert build.call_args.kwargs["options"] == AgentOptions(record_answers=True)
     out, err = capsys.readouterr()
     assert "/help" in out and "melo --serve" in out and "42" in out
     assert not err

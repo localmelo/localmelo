@@ -1329,10 +1329,7 @@ class TestPromptCapRecovery:
         agent.hippo.working.append(Message(role="system", content="x" * 110_000))
         result = await agent.run_task("hello")
         assert (result.status, result.result) == ("completed", "ok")
-        assert [(m.role, m.content) for m in agent.hippo.working.get_window()] == [
-            ("user", "hello"),
-            ("assistant", "ok"),
-        ]
+        assert [m.content for m in agent.hippo.working.get_window()] == ["hello"]
 
     @pytest.mark.asyncio
     async def test_nothing_is_dropped_when_the_newest_unit_cannot_fit(self) -> None:

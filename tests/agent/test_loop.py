@@ -116,44 +116,6 @@ class TestFinalAnswer:
         assert len(tasks) == 1
         assert tasks[0].status == "completed"
 
-    @pytest.mark.asyncio
-    async def test_follow_up_includes_previous_assistant_answer(self) -> None:
-        llm = FakeLLM(
-            [
-                Message(role="assistant", content="The code is MAPLE-527."),
-                Message(role="assistant", content="MAPLE-527"),
-            ]
-        )
-        agent = Agent(llm=llm)
-        try:
-            await agent.run("Invent a code for this conversation.")
-            await agent.run("Repeat the code you just gave me.")
-
-            turns = [
-                (m.role, m.content)
-                for m in llm.calls[1]["messages"]
-                if m.role != "system"
-            ]
-            assert turns == [
-                ("user", "Invent a code for this conversation."),
-                ("assistant", "The code is MAPLE-527."),
-                ("user", "Repeat the code you just gave me."),
-            ]
-        finally:
-            await agent.close()
-
-    @pytest.mark.asyncio
-    async def test_final_answer_still_respects_memory_write_limit(self) -> None:
-        answer = "x" * 60_000
-        agent = _make_agent([Message(role="assistant", content=answer)])
-        try:
-            assert await agent.run("A long answer") == answer
-            assert not any(
-                m.role == "assistant" for m in agent.hippo.working.get_window()
-            )
-        finally:
-            await agent.close()
-
 
 class TestToolCallLoop:
     """LLM requests a tool call, gets the result, then answers."""

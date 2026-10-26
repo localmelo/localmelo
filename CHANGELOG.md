@@ -64,8 +64,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - `--chat-model` without `--base-url` replaces the configured chat model for
   that run; it used to be ignored ([#35]).
-- A follow-up question in a gateway session or a web chat sees the earlier
-  answers ([#35]).
+- A follow-up question in a gateway session, a web chat or the `melo ""`
+  loop sees the earlier answers, without their `<think>` blocks and cut to
+  8,000 characters each ([#35]).
 - A step runs only the tools it offered. A call to any other tool is refused
   and does not run ([#30]).
 - A call to a built-in tool whose arguments have the wrong JSON type is

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -19,7 +20,13 @@ from fastapi import FastAPI  # noqa: E402
 from localmelo.melo.agent import Agent  # noqa: E402
 from localmelo.melo.contracts.providers import BaseLLMProvider  # noqa: E402
 from localmelo.melo.memory.history.sqlite import SqliteHistory  # noqa: E402
-from localmelo.melo.schema import Message, ToolDef  # noqa: E402
+from localmelo.melo.schema import (  # noqa: E402
+    INTERRUPT_LABEL,
+    NO_ANSWER_LABEL,
+    Message,
+    TaskRecord,
+    ToolDef,
+)
 from localmelo.support.gateway.playground import (  # noqa: E402
     SessionBusyError,
     SmokePlayground,
@@ -50,6 +57,11 @@ async def manager(
     await manager.close_all()
 
 
+def outcome(result: str) -> SimpleNamespace:
+    """What a fake run_task returns: only the fields the workspace reads."""
+    return SimpleNamespace(result=result, status="completed", error="")
+
+
 async def create(manager: SmokePlayground) -> str:
     payload = await manager.create_session(
         chat_url="http://127.0.0.1:8000/v1", chat_model="Qwen-27B", adapter="omlx"
@@ -63,15 +75,15 @@ async def start_blocked(
     started = asyncio.Event()
     stopped = asyncio.Event()
 
-    async def run(query: str) -> str:
+    async def run_task(query: str, **kwargs: Any) -> SimpleNamespace:
         started.set()
         try:
             await asyncio.Event().wait()
         finally:
             stopped.set()
-        return "unreachable"
+        return outcome("unreachable")
 
-    with patch.object(manager._sessions[sid].agent, "run", run):
+    with patch.object(manager._sessions[sid].agent, "run_task", run_task):
         task = asyncio.create_task(manager.run(sid, "Long task"))
         await asyncio.wait_for(started.wait(), timeout=1)
     return task, stopped
@@ -83,8 +95,8 @@ async def test_transcript_can_be_recovered_after_reload(
     sid = await create(manager)
     with patch.object(
         manager._sessions[sid].agent,
-        "run",
-        AsyncMock(return_value="<think>Check</think>42"),
+        "run_task",
+        AsyncMock(return_value=outcome("<think>Check</think>42")),
     ):
         await manager.run(sid, "  What is six times seven?  ")
     listed = manager.list_sessions()
@@ -116,7 +128,9 @@ async def test_cancel_stops_agent_and_keeps_session_usable(
     }
     assert not await manager.cancel(sid)
     with patch.object(
-        manager._sessions[sid].agent, "run", AsyncMock(return_value="Recovered")
+        manager._sessions[sid].agent,
+        "run_task",
+        AsyncMock(return_value=outcome("Recovered")),
     ):
         assert (await manager.run(sid, "Try again"))["answer"] == "Recovered"
 
@@ -144,7 +158,7 @@ async def test_failed_runs_leave_recoverable_transcript(
     sid = await create(manager)
     with (
         patch.object(
-            manager._sessions[sid].agent, "run", AsyncMock(side_effect=failure)
+            manager._sessions[sid].agent, "run_task", AsyncMock(side_effect=failure)
         ),
         pytest.raises(type(failure)),
     ):
@@ -332,7 +346,9 @@ async def test_http_transcript_recovery_and_delete(
     assert response.status_code == 200
     sid = response.json()["session_id"]
     with patch.object(
-        manager._sessions[sid].agent, "run", AsyncMock(return_value="Hello")
+        manager._sessions[sid].agent,
+        "run_task",
+        AsyncMock(return_value=outcome("Hello")),
     ):
         assert (
             await client.post(f"/v1/playground/session/{sid}/run", json={"query": "Hi"})
@@ -381,15 +397,15 @@ async def test_timeout_cancels_provider_work(manager: SmokePlayground) -> None:
     sid = await create(manager)
     stopped = asyncio.Event()
 
-    async def blocked(query: str) -> str:
+    async def blocked(query: str, **kwargs: Any) -> SimpleNamespace:
         try:
             await asyncio.Event().wait()
         finally:
             stopped.set()
-        return "unreachable"
+        return outcome("unreachable")
 
     with (
-        patch.object(manager._sessions[sid].agent, "run", blocked),
+        patch.object(manager._sessions[sid].agent, "run_task", blocked),
         pytest.raises(TimeoutError),
     ):
         await manager.run(sid, "Slow request", timeout=0.01)
@@ -408,3 +424,200 @@ async def test_embedding_model_uses_chat_url_when_url_omitted(
     )
     build.assert_called_once_with("http://localhost:8000/v1", "embed")
     assert result["embedding_url"] == "http://localhost:8000/v1"
+
+
+class RecordingLLM(BaseLLMProvider):
+    """Answers "Answer 1", "Answer 2", ... and keeps each request's messages."""
+
+    def __init__(self, block_on: int = 0) -> None:
+        self.requests: list[list[Message]] = []
+        self.block_on = block_on
+        self.blocked = asyncio.Event()
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        self.requests.append(list(messages))
+        if len(self.requests) == self.block_on:
+            self.blocked.set()
+            await asyncio.Event().wait()
+        return Message(role="assistant", content=f"Answer {len(self.requests)}")
+
+    async def close(self) -> None:
+        pass
+
+
+def turns(messages: list[Message]) -> list[tuple[str, str]]:
+    return [(m.role, m.content) for m in messages if m.role != "system"]
+
+
+async def test_a_follow_up_sees_the_previous_answer_once(
+    manager: SmokePlayground, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    llm = RecordingLLM()
+    monkeypatch.setattr(manager, "_build_llm_provider", lambda *args: llm)
+    sid = await create(manager)
+    assert (await manager.run(sid, "First question"))["answer"] == "Answer 1"
+    assert (await manager.run(sid, "Follow-up"))["answer"] == "Answer 2"
+    assert turns(llm.requests[1]) == [
+        ("user", "First question"),
+        ("assistant", "Answer 1"),
+        ("user", "Follow-up"),
+    ]
+
+
+async def test_a_stop_closes_the_turn_with_the_interrupt_label(
+    manager: SmokePlayground, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    llm = RecordingLLM(block_on=1)
+    monkeypatch.setattr(manager, "_build_llm_provider", lambda *args: llm)
+    sid = await create(manager)
+    task = asyncio.create_task(manager.run(sid, "Long question"))
+    await asyncio.wait_for(llm.blocked.wait(), timeout=5)
+    assert await manager.cancel(sid)
+    assert (await task)["cancelled"]
+    window = manager._sessions[sid].agent.hippo.working.get_window()
+    assert turns(window) == [("user", "Long question"), ("assistant", INTERRUPT_LABEL)]
+    assert (await manager.run(sid, "Try again"))["answer"] == "Answer 2"
+    assert turns(llm.requests[1]) == [
+        ("user", "Long question"),
+        ("assistant", INTERRUPT_LABEL),
+        ("user", "Try again"),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("result", "thinking", "answer"),
+    [
+        ("<think>Check</think>42", "Check", "42"),
+        # The reply of a template that opens the block in the prompt.
+        ("Check</think>42", "Check", "42"),
+        # Cut off while the model thought: the label that memory keeps.
+        ("<think>Check", "Check", NO_ANSWER_LABEL.format(status="completed")),
+    ],
+)
+async def test_the_transcript_splits_the_answer_as_memory_does(
+    manager: SmokePlayground, result: str, thinking: str, answer: str
+) -> None:
+    sid = await create(manager)
+    with patch.object(
+        manager._sessions[sid].agent,
+        "run_task",
+        AsyncMock(return_value=outcome(result)),
+    ):
+        response = await manager.run(sid, "What is six times seven?")
+    assert (response["thinking"], response["answer"]) == (thinking, answer)
+    message = manager.get_session(sid)["messages"][-1]
+    assert (message["thinking"], message["answer"]) == (thinking, answer)
+
+
+async def test_a_stop_during_the_final_save_keeps_the_answer(
+    manager: SmokePlayground, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    llm = RecordingLLM()
+    monkeypatch.setattr(manager, "_build_llm_provider", lambda *args: llm)
+    sid = await create(manager)
+    hippo = manager._sessions[sid].agent.hippo
+    promote = hippo.promote_reflections
+    promoting = asyncio.Event()
+
+    async def stalled_promotion(task_id: str) -> None:
+        # As on an embedding server that stopped answering.
+        promoting.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(hippo, "promote_reflections", stalled_promotion)
+    task = asyncio.create_task(manager.run(sid, "Invent a code"))
+    await asyncio.wait_for(promoting.wait(), timeout=5)
+    assert await manager.cancel(sid)
+    response = await task
+    assert not response["cancelled"]
+    assert response["answer"] == "Answer 1"
+    messages = manager.get_session(sid)["messages"]
+    assert [m["role"] for m in messages] == ["user", "assistant"]
+    monkeypatch.setattr(hippo, "promote_reflections", promote)
+    assert (await manager.run(sid, "Repeat it"))["answer"] == "Answer 2"
+    assert turns(llm.requests[1]) == [
+        ("user", "Invent a code"),
+        ("assistant", "Answer 1"),
+        ("user", "Repeat it"),
+    ]
+
+
+def hold_cancelled_saves(
+    agent: Agent, monkeypatch: pytest.MonkeyPatch
+) -> tuple[asyncio.Event, asyncio.Event, list[tuple[str, str]]]:
+    """Hold the save of each cancelled task until *release* is set.
+
+    Returns ``(saving, release, saved)``: *saving* is set when a cancelled
+    task's save is held, and *saved* lists the status and result of each
+    save once it is done.
+    """
+    saving, release = asyncio.Event(), asyncio.Event()
+    saved: list[tuple[str, str]] = []
+    save_task = agent.hippo.save_task
+
+    async def held_save(task: TaskRecord) -> None:
+        if task.status == "cancelled":
+            saving.set()
+            await release.wait()
+        await save_task(task)
+        saved.append((task.status, task.result))
+
+    monkeypatch.setattr(agent.hippo, "save_task", held_save)
+    return saving, release, saved
+
+
+@pytest.mark.parametrize("second", ["stop", "dropped request"])
+async def test_the_chat_stays_busy_until_a_stopped_run_is_saved(
+    manager: SmokePlayground, monkeypatch: pytest.MonkeyPatch, second: str
+) -> None:
+    llm = RecordingLLM(block_on=1)
+    monkeypatch.setattr(manager, "_build_llm_provider", lambda *args: llm)
+    sid = await create(manager)
+    saving, release, saved = hold_cancelled_saves(
+        manager._sessions[sid].agent, monkeypatch
+    )
+    task = asyncio.create_task(manager.run(sid, "Long question"))
+    await asyncio.wait_for(llm.blocked.wait(), timeout=5)
+    stops = [asyncio.create_task(manager.cancel(sid))]
+    await asyncio.wait_for(saving.wait(), timeout=5)
+    # A Stop from a second tab, or the request of the run going away, during
+    # the save: neither may let a next run start before the save is done.
+    if second == "stop":
+        stops.append(asyncio.create_task(manager.cancel(sid)))
+    else:
+        task.cancel()
+    await asyncio.sleep(0.05)
+    assert not task.done() and not any(stop.done() for stop in stops)
+    assert manager.get_session(sid)["is_busy"]
+    release.set()
+    assert await asyncio.gather(*stops) == [True] * len(stops)
+    assert saved[-1][0] == "cancelled"
+    if second == "stop":
+        assert (await task)["cancelled"]
+    else:
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    assert manager.get_session(sid)["messages"][-1] == {
+        "role": "note",
+        "content": "Response stopped.",
+    }
+    assert (await manager.run(sid, "Try again"))["answer"] == "Answer 2"
+
+
+async def test_a_timeout_saves_the_run_as_timed_out(
+    manager: SmokePlayground, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    llm = RecordingLLM(block_on=1)
+    monkeypatch.setattr(manager, "_build_llm_provider", lambda *args: llm)
+    sid = await create(manager)
+    agent = manager._sessions[sid].agent
+    _, release, saved = hold_cancelled_saves(agent, monkeypatch)
+    release.set()
+    with pytest.raises(TimeoutError):
+        await manager.run(sid, "Long question", timeout=0.05)
+    assert saved[-1] == ("cancelled", "Timed out after 0.05 s")
+    assert manager.get_session(sid)["messages"][-1]["content"] == "Response timed out."
+    window = agent.hippo.working.get_window()
+    assert turns(window) == [("user", "Long question"), ("assistant", INTERRUPT_LABEL)]

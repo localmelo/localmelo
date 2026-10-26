@@ -414,3 +414,9 @@ def test_gateway_lifespan_closes_playground() -> None:
     with TestClient(server.app):
         close.assert_not_awaited()
     close.assert_awaited_once()
+
+
+def test_a_session_agent_keeps_its_answers() -> None:
+    with patch("localmelo.support.gateway.session.Agent") as agent:
+        SessionManager(config=_test_cfg())._create_agent()
+    assert agent.call_args.kwargs["options"].record_answers

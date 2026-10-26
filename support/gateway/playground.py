@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -12,10 +11,12 @@ from typing import Any
 
 import httpx
 
-from localmelo.melo.agent import Agent
+from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+from localmelo.melo.schema import RunResult, answer_text, split_thinking
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
@@ -23,10 +24,60 @@ from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
 _DEFAULT_MEMORY_DIR = Path("~/.cache/localmelo/playground").expanduser()
 
-_THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _SCENARIOS_PATH = (
     Path(__file__).resolve().parents[2] / "tests" / "smoke" / "data" / "scenarios.json"
 )
+
+
+async def _answer(agent: Agent, query: str) -> RunResult:
+    """Run *query* and return how the run ended.
+
+    The run has an event sink, so a Stop (a cancellation, see _stop) ends
+    it as ``cancelled`` and closes its turn in working memory, with the
+    label of an interrupted turn as the kept answer, instead of leaving
+    the query unanswered there. The workspace shows no live events yet:
+    the sink keeps only the outcome that ``run.finished`` reports, which
+    this coroutine returns when the cancellation reaches it. That is also
+    the run's own outcome when the Stop came after the run had ended,
+    during its final save, so its answer, which working memory keeps
+    already, is not lost.
+    """
+    finished: list[RunResult] = []
+
+    def keep_outcome(event: AgentEvent) -> None:
+        if event.type == "run.finished":
+            finished.append(RunResult(**event.data["result"]))
+
+    try:
+        return await agent.run_task(query, on_event=keep_outcome)
+    except asyncio.CancelledError:
+        if not finished:
+            raise  # stopped before the run began
+        return finished[-1]
+
+
+def _stop(task: asyncio.Task[RunResult], message: str | None = None) -> None:
+    """Cancel *task*, a run of _answer, unless it is done or cancelled already.
+
+    Once is enough: run_task then returns once the run is saved. A second
+    cancellation would stop only its wait for that save (see
+    Agent._finalize_in_task), so the next run could start while the save
+    of this one is still under way.
+    """
+    if not task.done() and not task.cancelling():
+        task.cancel(message)
+
+
+async def _stopped(
+    task: asyncio.Task[RunResult], message: str | None = None
+) -> RunResult | None:
+    """Stop *task* (see _stop) and wait for it to end.
+
+    Returns how its run ended, or None if the run never began.
+    """
+    _stop(task, message)
+    await asyncio.wait({task})
+    return None if task.cancelled() else task.result()
 
 
 class SessionBusyError(RuntimeError):
@@ -104,18 +155,6 @@ def _load_scenarios() -> list[dict[str, Any]]:
     return scenarios
 
 
-def split_thinking_and_answer(text: str) -> tuple[str, str]:
-    content = (text or "").strip()
-    if not content:
-        return "", ""
-    match = _THINK_RE.search(content)
-    if not match:
-        return "", content
-    thinking = match.group(1).strip()
-    answer = (content[: match.start()] + content[match.end() :]).strip()
-    return thinking, answer
-
-
 @dataclass
 class PlaygroundSession:
     agent: Agent
@@ -131,7 +170,7 @@ class PlaygroundSession:
     last_active: float = field(default_factory=time.time)
     messages: list[dict[str, str]] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
-    task: asyncio.Task[str] | None = field(default=None, repr=False)
+    task: asyncio.Task[RunResult] | None = field(default=None, repr=False)
     cancel_requested: bool = False
 
     def touch(self) -> None:
@@ -274,7 +313,10 @@ class SmokePlayground:
     ) -> PlaygroundSession:
         llm = self._build_llm_provider(detected, chat_url, chat_model)
         embedding = self._build_embedding_provider(embedding_url, embedding_model)
-        agent = Agent(llm=llm, embedding=embedding)
+        # Each chat keeps its answers, so a follow-up sees them (#37's option).
+        agent = Agent(
+            llm=llm, embedding=embedding, options=AgentOptions(record_answers=True)
+        )
 
         await agent.hippo.aclose()
         agent.hippo.history = SqliteHistory(self._history_path)
@@ -368,48 +410,80 @@ class SmokePlayground:
             session.touch()
             session.cancel_requested = False
             session.messages.append({"role": "user", "content": query.strip()})
-            session.task = asyncio.create_task(session.agent.run(query.strip()))
+            task = asyncio.create_task(_answer(session.agent, query.strip()))
+            session.task = task
+            outcome: RunResult | None
+            timed_out = False
             try:
-                result = await asyncio.wait_for(session.task, timeout=timeout)
-            except asyncio.CancelledError:
-                session.messages.append(
-                    {"role": "note", "content": "Response stopped."}
-                )
-                if not session.cancel_requested:
+                # Shielded, so that only _stop cancels the run: the chat
+                # stays busy until the run is saved.
+                outcome = await asyncio.wait_for(asyncio.shield(task), timeout)
+            except TimeoutError:
+                if task.done():  # raised by the run, not this timeout
+                    session.messages.append(
+                        {"role": "note", "content": "Response timed out."}
+                    )
                     raise
-                return {
-                    "session_id": session_id,
-                    "cancelled": True,
-                    "result": "",
-                    "thinking": "",
-                    "answer": "",
-                }
+                outcome = await _stopped(task, f"Timed out after {timeout:g} s")
+                timed_out = not session.cancel_requested
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    # This request was cancelled: stop its run too, then let
+                    # the cancellation go on.
+                    self._close_turn(session, await _stopped(task), "Response stopped.")
+                    raise
+                outcome = None  # stopped before the run began
             except Exception as exc:
-                message = (
-                    "Response timed out."
-                    if isinstance(exc, TimeoutError)
-                    else f"Error: {exc}"
-                )
-                session.messages.append({"role": "note", "content": message})
+                session.messages.append({"role": "note", "content": f"Error: {exc}"})
                 raise
             finally:
                 session.task = None
                 session.touch()
-            thinking, answer = split_thinking_and_answer(result)
-            session.messages.append(
-                {
-                    "role": "assistant",
-                    "content": result,
-                    "thinking": thinking,
-                    "answer": answer,
-                }
-            )
+            note = "Response timed out." if timed_out else "Response stopped."
+            response = self._close_turn(session, outcome, note)
+            if timed_out and response["cancelled"]:
+                raise TimeoutError(f"Timed out after {timeout:g} s")
+            return response
+
+    def _close_turn(
+        self, session: PlaygroundSession, outcome: RunResult | None, note: str
+    ) -> dict[str, Any]:
+        """End the turn in the transcript; return the response of run().
+
+        A run that ended otherwise than ``cancelled`` adds its answer, also
+        when a Stop or the timeout came during its final save, since working
+        memory keeps that answer already. A stopped run adds *note*.
+        """
+        if outcome is None or outcome.status == "cancelled":
+            session.messages.append({"role": "note", "content": note})
             return {
                 "session_id": session.session_id,
-                "result": result,
-                "thinking": thinking,
-                "answer": answer or result,
+                "cancelled": True,
+                "result": "",
+                "thinking": "",
+                "answer": "",
             }
+        result = outcome.result or f"[{outcome.status}] {outcome.error}"
+        # The split and the label that working memory keeps (see
+        # Agent._record_answer), so the transcript shows the same answer.
+        thinking, answer = split_thinking(result)
+        answer = answer_text(outcome.status, answer)
+        session.messages.append(
+            {
+                "role": "assistant",
+                "content": result,
+                "thinking": thinking,
+                "answer": answer,
+            }
+        )
+        return {
+            "session_id": session.session_id,
+            "cancelled": False,
+            "result": result,
+            "thinking": thinking,
+            "answer": answer,
+        }
 
     async def cancel(self, session_id: str) -> bool:
         session = self._sessions.get(session_id)
@@ -418,8 +492,8 @@ class SmokePlayground:
         if session.task is None or session.task.done():
             return False
         session.cancel_requested = True
-        session.task.cancel()
-        # Wait until run() has recorded the note and released its session lock.
+        _stop(session.task)
+        # Wait until run() has closed the turn and released its session lock.
         async with session.lock:
             return True
 

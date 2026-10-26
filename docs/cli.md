@@ -31,12 +31,13 @@ Quote the task. Several words without quotes are joined with spaces.
 > without a task (see the
 > [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap)).
 
-In the `melo ""` loop, turns share one agent and its working memory. A turn
-that does not complete prints its status line on stderr, and the loop asks for
-the next task. `/exit`, `/quit` or Ctrl-D ends the loop with exit code 0;
-Ctrl+C ends it at once (a shell shows 130). The loop takes `--base-url` and
-`--chat-model`; the direct-mode options are usage errors with it. Its
-conversation is separate from the web workspace's chats.
+In the `melo ""` loop, turns share one agent and its working memory, which
+keeps each answer, so a turn sees the earlier ones. A turn that does not
+complete prints its status line on stderr, and the loop asks for the next task.
+`/exit`, `/quit` or Ctrl-D ends the loop with exit code 0; Ctrl+C ends it at
+once (a shell shows 130). The loop takes `--base-url` and `--chat-model`; the
+direct-mode options are usage errors with it. Its conversation is separate from
+the web workspace's chats.
 
 ## Options
 

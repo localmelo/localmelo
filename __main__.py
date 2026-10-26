@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import dataclasses
 import importlib.metadata
 import json
 import math
@@ -723,6 +724,10 @@ def main() -> None:
     if args.query and not args.serve:
         query = " ".join(args.query)
         options = _direct_options(parser, args)
+        if not query:
+            # The loop keeps its answers, so each turn sees the earlier ones; a
+            # single task's options stay as they were.
+            options = dataclasses.replace(options, record_answers=True)
         tool_providers = _direct_tool_providers(parser, args)
         agent = _build_direct_mode_agent(
             args, options=options, tool_providers=tool_providers
