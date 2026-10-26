@@ -270,17 +270,12 @@ def _read_result(path: str) -> dict[str, Any]:
     raise _InputError(f"{path} does not end with a JSON object")
 
 
-def _connect_read_only(path: str) -> sqlite3.Connection:
+def _history_path(path: str) -> str:
     if os.path.isdir(path):
         path = os.path.join(path, "history.db")
     if not os.path.isfile(path):
         raise _InputError(f"{path} does not exist")
-    try:
-        conn = sqlite3.connect(f"{Path(path).resolve().as_uri()}?mode=ro", uri=True)
-        conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchall()
-    except sqlite3.Error as exc:
-        raise _InputError(f"cannot read {path}: {exc}") from None
-    return conn
+    return path
 
 
 def _step_map(
@@ -306,28 +301,39 @@ def _step_map(
             reflections.append(step)
         elif kind == "plan":
             last_step = max(last_step, step)
-            for step_id in json.loads(step_ids_json or "[]"):
+            step_ids = json.loads(step_ids_json or "[]")
+            if not isinstance(step_ids, list):
+                raise ValueError(f"step_ids_json of task {task_id} is not a list")
+            for step_id in step_ids:
                 mapping[str(step_id)] = (step, attempt)
     return mapping, reflections, last_step, attempts
 
 
 def _episode_lines(args: argparse.Namespace) -> list[dict[str, Any]]:
     result = _read_result(args.result_json) if args.result_json else {}
-    conn = _connect_read_only(args.history)
-    with contextlib.closing(conn):
-        try:
+    path = _history_path(args.history)
+    lines: list[dict[str, Any]] = []
+    try:
+        uri = f"{Path(path).resolve().as_uri()}?mode=ro"
+        with contextlib.closing(sqlite3.connect(uri, uri=True)) as conn:
             tasks = conn.execute(
                 "SELECT task_id, query, status FROM tasks ORDER BY rowid"
             ).fetchall()
-        except sqlite3.Error as exc:
-            raise _InputError(f"not a history database: {exc}") from None
-        if result.get("task_id"):
-            tasks = [task for task in tasks if task[0] == result["task_id"]]
-            if not tasks:
-                raise _InputError(f"task {result['task_id']} is not in the history")
-        lines: list[dict[str, Any]] = []
-        for task_id, query, status in tasks:
-            lines.extend(_task_lines(conn, args, result, task_id, query, status))
+            if result.get("task_id"):
+                tasks = [task for task in tasks if task[0] == result["task_id"]]
+                if not tasks:
+                    raise _InputError(f"task {result['task_id']} is not in the history")
+            elif result and len(tasks) > 1:
+                # The result describes one run: which one is unknown.
+                raise _InputError(
+                    f"{args.result_json} names no task_id, and the history "
+                    f"holds {len(tasks)} tasks"
+                )
+            for task_id, query, status in tasks:
+                lines.extend(_task_lines(conn, args, result, task_id, query, status))
+    except (sqlite3.Error, ValueError, TypeError) as exc:
+        # A file that is not a history, or one whose rows are damaged.
+        raise _InputError(f"cannot read {path}: {exc}") from None
     return lines
 
 
@@ -374,6 +380,8 @@ def _task_lines(
             continue
         call = json.loads(call_json)
         outcome = json.loads(result_json) if result_json else {}
+        if not isinstance(call, dict) or not isinstance(outcome, dict):
+            raise ValueError(f"a step of task {task_id} is not a JSON object")
         error = str(outcome.get("error") or "")
         trace.tool(
             str(call.get("tool_name", "")),

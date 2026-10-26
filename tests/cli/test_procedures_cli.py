@@ -11,8 +11,10 @@ rules below, not from the code under test.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
+import sqlite3
 import statistics
 import tomllib
 from pathlib import Path
@@ -644,3 +646,43 @@ def test_separation_is_null_without_held_runs(
     assert summary["separation"] is None
     assert summary["thresholds"]["separation"] is None
     assert summary["thresholds"]["bar_error"] is True
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    [
+        "UPDATE llm_calls SET step_ids_json = '{broken' WHERE seq = 0",
+        "UPDATE steps SET tool_call_json = 'not json' WHERE seq = 0",
+        "UPDATE steps SET tool_result_json = '[1, 2]' WHERE seq = 0",
+        "DROP TABLE steps",
+    ],
+)
+def test_episodes_refuse_a_damaged_history(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], corruption: str
+) -> None:
+    path = tmp_path / "history.db"
+    write_history_sync(path, CALLS)
+    with contextlib.closing(sqlite3.connect(path)) as conn:
+        conn.execute(corruption)
+        conn.commit()
+    code, out, err = run(capsys, "episodes", "--history", str(path))
+    assert code == 2 and out == ""
+    assert err.startswith(f"melo-procedures: error: cannot read {path}: ")
+
+
+def test_a_result_without_a_task_needs_a_history_of_one_task(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    two = [*CALLS, RawCall(task_id="t2", seq=0, step=1, content="x", timestamp=1.0)]
+    write_history_sync(tmp_path / "history.db", two)
+    result = write_result(tmp_path)
+    data = json.loads(Path(result).read_text(encoding="utf-8").splitlines()[-1])
+    del data["task_id"]
+    Path(result).write_text(json.dumps(data) + "\n", encoding="utf-8")
+    code, _, err = run(
+        capsys, "episodes", "--history", str(tmp_path), "--result-json", result
+    )
+    assert code == 2
+    assert "names no task_id, and the history holds 2 tasks" in err
+    code, out, _ = run(capsys, "episodes", "--history", str(tmp_path))
+    assert code == 0 and len(lines(out)) == 4

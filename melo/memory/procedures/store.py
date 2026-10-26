@@ -555,7 +555,9 @@ async def _learn(
 
     version_shown: int | None
     if view is not None:
-        level, version_shown = view.level, view.version
+        # A similar match showed another routine's version: none of its own.
+        level = view.level
+        version_shown = view.version if view.template_id == tid else None
     elif active is not None:
         scores = await tx.model_scores(facts.model, params.demotion_window)
         level, _ = decide_level(

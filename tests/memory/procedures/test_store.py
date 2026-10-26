@@ -702,3 +702,27 @@ async def test_a_memory_store_keeps_params(runs: Runs) -> None:
     view = await lookup(store)
     assert view.level == 2 and view.params == Params(drop="off", spread=0.6)
     assert DEFAULT_PARAMS.spread == 0.5
+
+
+async def test_a_similar_view_records_no_version_of_its_own_template(
+    store: Procedures, runs: Runs
+) -> None:
+    texts = [
+        "summarize today's unread mail into the daily notes file",
+        "run pytest in the project and fix the failing tests",
+        "convert the sales csv export into a json report",
+        "copy the photos folder to the backup drive",
+        "delete log files older than a week from the logs directory",
+    ]
+    for text in texts:
+        key = key_for_query(text, PLACE)
+        await store.learn(runs(5, key=key))
+        await store.learn(runs(6, key=key))
+    reworded = key_for_query("Summarize the unread mail of today into notes", PLACE)
+    view = await lookup(store, key=reworded)
+    assert view is not None and view.match == "similar"
+    result = await store.learn(runs(5, key=reworded), view=view)
+    # The version shown belonged to the similar routine's template, not to
+    # the template this episode belongs to.
+    assert result.episode.template_id != view.template_id
+    assert (result.episode.level, result.episode.template_version) == (1, None)
