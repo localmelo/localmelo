@@ -17,6 +17,7 @@ except ImportError as e:
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload, SessionTransition
 from localmelo.support import config
+from localmelo.support.gateway.guard import LoopbackGuard, is_loopback
 from localmelo.support.gateway.session import SessionManager
 
 logger = logging.getLogger("localmelo.gateway")
@@ -46,6 +47,21 @@ class GatewayServer:
         from localmelo.support.gateway.webapp import mount as mount_webapp
 
         mount_webapp(self.app)
+
+        # The guard sees each request before routing, so it covers every
+        # route, error responses and routes added later. Middleware added
+        # after it would run before it: add middleware above this point.
+        if is_loopback(self.host):
+            self.app.add_middleware(LoopbackGuard, port=self.port)
+        else:
+            logger.warning(
+                "Gateway host %s is not a loopback address, so requests are "
+                "not checked. The gateway has no authentication: anything "
+                "that can reach it, web pages through DNS rebinding included, "
+                'can run tasks with tools. Use host = "127.0.0.1" (the '
+                "default).",
+                self.host,
+            )
 
     # ── Lifespan ──
 
