@@ -203,6 +203,9 @@ Google Gemini (`gemini`), NVIDIA (`nvidia`).
 | GitHub ↗ | GitHub ↗ |
 | On this page | 本页内容 |
 | Skip to content | 跳到正文 |
+| Get started | 开始使用 |
+| Experimental (tag) | 实验性 |
+| Offline only (tag) | 仅离线 |
 
 **Chinese typography**
 
