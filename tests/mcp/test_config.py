@@ -153,6 +153,49 @@ class TestParse:
             )
 
 
+class TestRequireApproval:
+    def test_no_tool_requires_approval_by_default(self) -> None:
+        assert _one({"command": "x"}).require_approval is False
+
+    @pytest.mark.parametrize(
+        "value",
+        [True, False, ["echo", "read.file"], []],
+        ids=["true", "false", "list", "empty_list"],
+    )
+    def test_valid_values(self, value: Any) -> None:
+        assert _one({"command": "x", "require_approval": value}).require_approval == (
+            value
+        )
+
+    def test_a_list_is_copied(self) -> None:
+        names = ["echo"]
+        cfg = _one({"command": "x", "require_approval": names})
+        names.append("fail")
+        assert cfg.require_approval == ["echo"]
+
+    @pytest.mark.parametrize(
+        "value",
+        [None, "true", "echo", 1, 0, ["echo", 3], [None], {"echo": True}],
+        ids=[
+            "null",
+            "string_true",
+            "one_name",
+            "one",
+            "zero",
+            "list_with_a_number",
+            "list_with_null",
+            "object",
+        ],
+    )
+    def test_invalid_values(self, value: Any) -> None:
+        with pytest.raises(McpConfigError) as caught:
+            _one({"command": "x", "require_approval": value})
+        assert str(caught.value) == (
+            "MCP config: server 'srv': 'require_approval' must be true, false or a "
+            "list of strings"
+        )
+
+
 class TestLoad:
     def test_load_file(self, tmp_path: Path) -> None:
         path = tmp_path / "mcp.json"

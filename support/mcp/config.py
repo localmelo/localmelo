@@ -15,6 +15,11 @@ per-server keys:
 - ``timeout``: seconds per tool call (default 120)
 - ``startup_timeout``: seconds for start-up and tool listing (default 30)
 - ``include_tools``: MCP tool names to expose; others are not registered
+- ``require_approval``: ``true`` makes each call of the server's tools ask
+  the run's approval policy before it runs, a list of MCP tool names
+  (spelled as in ``include_tools``) only calls of those tools, and
+  ``false`` (the default) none. A run without a policy, such as a direct
+  ``melo "task"`` run, asks no one.
 - ``disabled``: ``true`` skips the server
 
 Other keys are ignored so files written for other clients still load.
@@ -63,6 +68,9 @@ class McpServerConfig:
     timeout_s: float = DEFAULT_TOOL_TIMEOUT_S
     startup_timeout_s: float = DEFAULT_STARTUP_TIMEOUT_S
     include_tools: list[str] | None = None
+    # True for every tool of the server, or the MCP names of the tools whose
+    # calls ask the run's approval policy first.
+    require_approval: bool | list[str] = False
 
     @property
     def namespace(self) -> str:
@@ -157,6 +165,14 @@ def _parse_server(name: Any, raw: Any, source: str) -> McpServerConfig | None:
         not isinstance(include, list) or not all(isinstance(t, str) for t in include)
     ):
         raise McpConfigError(f"{where}: 'include_tools' must be a list of strings")
+    # Omitted means false; any other value, null included, is refused.
+    approval = raw.get("require_approval", False)
+    if not isinstance(approval, bool) and not (
+        isinstance(approval, list) and all(isinstance(t, str) for t in approval)
+    ):
+        raise McpConfigError(
+            f"{where}: 'require_approval' must be true, false or a list of strings"
+        )
 
     return McpServerConfig(
         name=name,
@@ -169,6 +185,7 @@ def _parse_server(name: Any, raw: Any, source: str) -> McpServerConfig | None:
             raw, "startup_timeout", DEFAULT_STARTUP_TIMEOUT_S, where
         ),
         include_tools=list(include) if include is not None else None,
+        require_approval=list(approval) if isinstance(approval, list) else approval,
     )
 
 

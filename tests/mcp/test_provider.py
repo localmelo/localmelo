@@ -317,6 +317,59 @@ class TestStart:
             await provider.close()
 
 
+async def _marks(log_path: Path, **server: Any) -> list[tuple[str, bool]]:
+    """``(name, requires_approval)`` of each tool the server's provider starts."""
+    provider = McpToolProvider(
+        [fake_server_config(log_path, **server)],
+        client_factory=recording_factory([]),
+    )
+    try:
+        tools = await provider.start()
+    finally:
+        await provider.close()
+    return [(tool.definition.name, tool.requires_approval) for tool in tools]
+
+
+class TestRequireApproval:
+    async def test_no_tool_requires_approval_by_default(
+        self, tools: dict[str, ProvidedTool]
+    ) -> None:
+        assert len(tools) == len(TOOLS)
+        assert not any(tool.requires_approval for tool in tools.values())
+
+    async def test_true_marks_every_tool(self, log_path: Path) -> None:
+        marks = await _marks(log_path, require_approval=True)
+        assert len(marks) == len(TOOLS)
+        assert all(marked for _, marked in marks)
+
+    async def test_a_list_marks_the_tools_it_names(
+        self, log_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        marks = await _marks(
+            log_path, require_approval=["read.file", "echo", "no_such_tool"]
+        )
+        # Spelled as the server names them; registered under the exposed name.
+        assert {name for name, marked in marks if marked} == {
+            "mcp__fake__echo",
+            "mcp__fake__read_file",
+        }
+        assert len(marks) == len(TOOLS)
+        assert (
+            "MCP server 'fake' does not offer no_such_tool (named in "
+            "require_approval)"
+        ) in caplog.text
+
+    async def test_with_include_tools(
+        self, log_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        marks = await _marks(
+            log_path, include_tools=["echo", "fail"], require_approval=["fail", "slow"]
+        )
+        assert marks == [("mcp__fake__echo", False), ("mcp__fake__fail", True)]
+        # slow is offered, only not registered: nothing to warn about.
+        assert "does not offer" not in caplog.text
+
+
 class TestCalls:
     async def test_text_result(self, tools: dict[str, ProvidedTool]) -> None:
         output = await invoke(tools["mcp__fake__echo"], text="hello")
