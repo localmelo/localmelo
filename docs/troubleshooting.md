@@ -266,11 +266,11 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
 ```
 
 - **Cause:** the request did not name the gateway as `127.0.0.1`,
-  `localhost` or `[::1]` with its port. For example, the web UI was opened as
-  `http://0.0.0.0:8401/`, through a proxy that sends its own host name, or as
-  `http://127.0.0.2:8401/` because the gateway listens on another loopback
-  address. The gateway refuses these requests so that a web page on another
-  site cannot reach it through DNS rebinding.
+  `localhost` or `[::1]` with its port. For example, the web workspace was
+  opened as `http://0.0.0.0:8401/`, through a proxy that sends its own host
+  name, or as `http://127.0.0.2:8401/` because the gateway listens on another
+  loopback address. The gateway refuses these requests so that a web page on
+  another site cannot reach it through DNS rebinding.
 - **Fix:** open `http://127.0.0.1:8401/` or `http://localhost:8401/`, with the
   gateway's port. If the gateway listens on another loopback address, start
   it on `127.0.0.1`: set `host = "127.0.0.1"` in `[gateway]`, or run
@@ -286,12 +286,12 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
 
 - **Cause:** a web page that the gateway did not serve sent the request
   through the browser: a page on another site or on another port of your
-  computer, a page opened from a file (`Origin: null`), or the web UI opened
-  through a proxy. From a browser, the gateway accepts API requests only from
-  its own web UI.
-- **Fix:** use the web UI at `http://127.0.0.1:8401/`, or call the API from a
-  program such as curl or a script, which sends no `Origin` header. Calling
-  the API from another web page is not supported.
+  computer, a page opened from a file (`Origin: null`), or the web workspace
+  opened through a proxy. From a browser, the gateway accepts API requests
+  only from its own web workspace.
+- **Fix:** use the web workspace at `http://127.0.0.1:8401/`, or call the API
+  from a program such as curl or a script, which sends no `Origin` header.
+  Calling the API from another web page is not supported.
 
 ### A status in the result
 
