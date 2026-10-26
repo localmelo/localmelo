@@ -113,7 +113,8 @@ melo-retrieve --retriever llm --corpus corpus.jsonl --queries queries.jsonl \
   times are in `ms_interleaved`, `ms_interleaved_p50` and
   `ms_interleaved_p95`.
 - For figures close to an agent's, make the request look like its planning
-  requests: the same system prompt and tools, and a similar length.
+  requests: the same system prompt and tools, a similar length, and no
+  `max_tokens` (see [Interleave request](#interleave-request)).
 - A cold call runs on a new retriever, with nothing cached on the client: a
   cold `embedding` call embeds every candidate document. The server may
   still hold what earlier queries sent.
@@ -280,8 +281,11 @@ completions request, with a non-empty `messages` list.
 - `melo-retrieve` sets `model` to `--chat-model` and `stream` to `false`,
   and posts the rest as it is to `<base-url>/chat/completions`. The body may
   hold `tools` and any other field your server accepts.
-- `--retrieval-extra-body` does not apply to it. Set `max_tokens` to keep
-  its reply short.
+- `--retrieval-extra-body` does not apply to it.
+- `max_tokens` keeps the reply short, but not with `tools`: a cap that cuts
+  a tool call short can make the server fail the request (oMLX answers HTTP
+  500 for an incomplete tool call), and the run then stops. With `tools`,
+  leave `max_tokens` out; the request's time is not counted anyway.
 - If the request fails, the run stops with exit code 1:
 
   ```text
