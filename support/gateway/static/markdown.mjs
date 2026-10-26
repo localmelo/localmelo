@@ -6,10 +6,12 @@ export function escapeHtml(value) {
   })[character]);
 }
 
+/** Return the normalized http(s) URL, or null for anything that must stay text. */
 function safeUrl(destination) {
   const value = destination.startsWith('<') && destination.endsWith('>')
     ? destination.slice(1, -1) : destination;
-  if (!/^https?:\/\//i.test(value) || /[\s\u0000-\u001f\u007f]/.test(value)) return null;
+  if (!/^https?:\/\//i.test(value) || /[\s\u0000-\u001f\u007f"'<>]/.test(value)) return null;
+  if (/&(?:#\d+|#x[0-9a-f]+|[a-z][a-z0-9]*);/i.test(value)) return null;
   try {
     const url = new URL(value);
     return ['http:', 'https:'].includes(url.protocol) ? url.href : null;
@@ -28,6 +30,60 @@ function closingDelimiter(text, delimiter, start) {
     if (text.startsWith(delimiter, position)) return position;
   }
   return -1;
+}
+
+/**
+ * Find where an emphasis opened just before `start` closes. A run of the delimiter
+ * character preceded by whitespace opens nested emphasis; a later run first closes those
+ * nested openers, and only what is left of it can close this one.
+ */
+function closingEmphasis(text, delimiter, start) {
+  const character = delimiter[0];
+  let nested = 0;
+  for (let position = start; position < text.length; position++) {
+    if (text[position] === '\\') { position++; continue; }
+    if (text[position] === '`') {
+      const code = codeSpanAt(text, position);
+      if (code) { position = code.end - 1; continue; }
+    }
+    if (text[position] !== character) continue;
+    let runEnd = position;
+    while (text[runEnd] === character) runEnd++;
+    if (position > start && !/\s/.test(text[position - 1])) {
+      const closed = Math.min(nested, runEnd - position);
+      nested -= closed;
+      if (runEnd - position - closed >= delimiter.length) return position + closed;
+    } else if (runEnd < text.length && !/\s/.test(text[runEnd])) {
+      nested += runEnd - position;
+    }
+    position = runEnd - 1;
+  }
+  return -1;
+}
+
+const BARE_URL = /https?:\/\/[^\s<>"'`]+/iy;
+
+/** Match a bare http(s) URL at `start`, without trailing punctuation (as GFM autolinks). */
+function bareUrlAt(text, start) {
+  if (start > 0 && !/[\s(*_~]/.test(text[start - 1])) return null;
+  BARE_URL.lastIndex = start;
+  const match = BARE_URL.exec(text);
+  if (!match || /["'<>]/.test(text[start + match[0].length] || '')) return null;
+  let source = match[0];
+  const count = character => source.split(character).length - 1;
+  for (;;) {
+    const last = source[source.length - 1];
+    if (/[.,:;!?*_~]/.test(last)) source = source.slice(0, -1);
+    else if (last === ')' && count('(') < count(')')) source = source.slice(0, -1);
+    else if (last === ']' && count('[') < count(']')) source = source.slice(0, -1);
+    else break;
+  }
+  const url = safeUrl(source);
+  return url ? { source, url, end: start + source.length } : null;
+}
+
+function anchor(url, labelHtml) {
+  return '<a href="' + escapeHtml(url) + '" target="_blank" rel="noopener noreferrer">' + labelHtml + '</a>';
 }
 
 function codeSpanAt(text, start) {
@@ -86,15 +142,23 @@ function inline(text, depth = 0, allowLinks = true) {
       const link = linkAt(text, index);
       if (link) {
         html += link.url
-          ? '<a href="' + escapeHtml(link.url) + '" target="_blank" rel="noopener noreferrer">' + inline(link.label, depth + 1, false) + '</a>'
+          ? anchor(link.url, inline(link.label, depth + 1, false))
           : escapeHtml(text.slice(index, link.end));
         index = link.end;
         continue;
       }
     }
+    if (allowLinks && (character === 'h' || character === 'H')) {
+      const bare = bareUrlAt(text, index);
+      if (bare) {
+        html += anchor(bare.url, escapeHtml(bare.source));
+        index = bare.end;
+        continue;
+      }
+    }
     if (character === '*' || character === '_') {
       const delimiter = text[index + 1] === character ? character.repeat(2) : character;
-      const end = closingDelimiter(text, delimiter, index + delimiter.length);
+      const end = closingEmphasis(text, delimiter, index + delimiter.length);
       const intraword = character === '_' && /[\p{L}\p{N}]/u.test(text[index - 1] || '');
       if (!intraword && end > index + delimiter.length && !/\s/.test(text[index + delimiter.length]) && !/\s/.test(text[end - 1])) {
         const tag = delimiter.length === 2 ? 'strong' : 'em';

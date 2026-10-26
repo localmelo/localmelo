@@ -30,18 +30,47 @@ test('raw HTML and entity-looking text cannot become executable HTML', () => {
 });
 
 test('unsafe, relative, and malformed link destinations remain text', () => {
-  for (const destination of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', '//evil.example', '/relative', 'https://', 'https://host/\nonclick=alert(1)', 'jAvAsCrIpT:alert(1)', 'jav&#x61;script:alert(1)']) {
-    const result = renderMarkdown('[click](' + destination + ')');
-    assert.ok(!result.includes('<a '), destination);
-    assert.ok(!result.includes('<script>'), destination);
+  for (const destination of ['javascript:alert(1)', 'data:text/html,<script>alert(1)</script>', '//evil.example', '/relative', 'https://', 'https://host/\nonclick=alert(1)', 'jAvAsCrIpT:alert(1)', 'jav&#x61;script:alert(1)', 'vbscript:msgbox(1)', 'VBScript:msgbox(1)', 'java%73cript:alert(1)', '%6Aavascript:alert(1)', '&#104;ttps://example.com', 'https://example.com/&quot;onmouseover=&quot;alert(1)', 'https://example.com/&#x22;onmouseover=&#x22;alert(1)', 'https://example.com/<b>', "https://example.com/'q'", '<https://example.com/<b>>']) {
+    const bare = destination.includes('\n') ? [] : [destination];
+    for (const source of ['[click](' + destination + ')', ...bare]) {
+      const result = renderMarkdown(source);
+      assert.ok(!result.includes('<a '), source);
+      assert.ok(!/<(?!\/?p>)/.test(result), source);
+    }
   }
 });
 
 test('HTTP links have safe attributes and protect new windows', () => {
   assert.equal(renderMarkdown('[**Docs**](https://example.com/a_(b)?x=1&y=2)'), '<p><a href="https://example.com/a_(b)?x=1&amp;y=2" target="_blank" rel="noopener noreferrer"><strong>Docs</strong></a></p>');
+  assert.equal(renderMarkdown('[Docs](<https://example.com/docs>)'), '<p><a href="https://example.com/docs" target="_blank" rel="noopener noreferrer">Docs</a></p>');
   const result = renderMarkdown('[safe](https://example.com/\"onmouseover=\"alert(1))');
-  assert.match(result, /href="https:\/\/example.com\/%22onmouseover=%22alert\(1\)"/);
+  assert.equal(result, '<p>[safe](https://example.com/&quot;onmouseover=&quot;alert(1))</p>');
   assert.ok(!result.includes(' onmouseover="'));
+});
+
+test('bare http and https URLs link without their trailing punctuation', () => {
+  assert.equal(renderMarkdown('Docs: https://example.com/a_b?x=1&y=2.'), '<p>Docs: <a href="https://example.com/a_b?x=1&amp;y=2" target="_blank" rel="noopener noreferrer">https://example.com/a_b?x=1&amp;y=2</a>.</p>');
+  assert.equal(renderMarkdown('(see http://localhost:8000/v1), then HTTPS://Example.com/Path!'), '<p>(see <a href="http://localhost:8000/v1" target="_blank" rel="noopener noreferrer">http://localhost:8000/v1</a>), then <a href="https://example.com/Path" target="_blank" rel="noopener noreferrer">HTTPS://Example.com/Path</a>!</p>');
+  assert.equal(renderMarkdown('https://en.wikipedia.org/wiki/Markdown_(software) and **https://example.com**'), '<p><a href="https://en.wikipedia.org/wiki/Markdown_(software)" target="_blank" rel="noopener noreferrer">https://en.wikipedia.org/wiki/Markdown_(software)</a> and <strong><a href="https://example.com/" target="_blank" rel="noopener noreferrer">https://example.com</a></strong></p>');
+  assert.equal(renderMarkdown('| Site |\n| --- |\n| https://example.com |'), '<div class="table-scroll"><table><thead><tr><th class="align-left">Site</th></tr></thead><tbody><tr><td class="align-left"><a href="https://example.com/" target="_blank" rel="noopener noreferrer">https://example.com</a></td></tr></tbody></table></div>');
+});
+
+test('other schemes, quoted or bracketed URLs, code, and link labels do not autolink', () => {
+  for (const source of ['ftp://example.com', 'www.example.com', 'mailto:a@example.com', 'xhttps://example.com', 'https://', '"https://example.com"', "'https://example.com'", '<https://example.com>', '`https://example.com`', 'https://example.com/"onmouseover="alert(1)', 'https://example.com/<script>alert(1)</script>']) {
+    const result = renderMarkdown(source);
+    assert.ok(!result.includes('<a '), source);
+    assert.ok(!/<(?!\/?(?:p|code)>)/.test(result), source);
+  }
+  assert.equal(renderMarkdown('<a href="https://example.com">x</a>'), '<p>&lt;a href=&quot;https://example.com&quot;&gt;x&lt;/a&gt;</p>');
+  assert.equal(renderMarkdown('[https://a.example](https://b.example)'), '<p><a href="https://b.example/" target="_blank" rel="noopener noreferrer">https://a.example</a></p>');
+});
+
+test('nested emphasis closes without stray delimiters', () => {
+  assert.equal(renderMarkdown('**bold *and italic***'), '<p><strong>bold <em>and italic</em></strong></p>');
+  assert.equal(renderMarkdown('***both***'), '<p><strong><em>both</em></strong></p>');
+  assert.equal(renderMarkdown('*italic **bold***'), '<p><em>italic <strong>bold</strong></em></p>');
+  assert.equal(renderMarkdown('*a **b** c* and **a *b* c**'), '<p><em>a <strong>b</strong> c</em> and <strong>a <em>b</em> c</strong></p>');
+  assert.equal(renderMarkdown('a * b * c, 2*3*4, *a * b*'), '<p>a * b * c, 2<em>3</em>4, <em>a * b</em></p>');
 });
 
 test('normal paragraphs preserve soft breaks and CRLF input', () => {
