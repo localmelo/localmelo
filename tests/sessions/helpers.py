@@ -2,15 +2,22 @@
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import hashlib
 import json
 import os
 import sqlite3
-from collections.abc import Iterator
+from collections import deque
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.events import EVENT_FIELDS
+from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.sessions.store import CAUSES, RUN_STATUSES
 from localmelo.support.sessions.window import WINDOW_CODEC_VERSION
 
@@ -249,3 +256,62 @@ def check_invariants(path: str | os.PathLike[str], writer: str) -> None:
             "SELECT COALESCE(MAX(seq), 0) FROM sqlite_sequence WHERE name = 'events'"
         ).fetchone()[0]
         assert sequence >= largest
+
+
+class ScriptedLLM(BaseLLMProvider):
+    """Answers with each scripted reply in turn, then waits until cancelled.
+
+    ``requests`` keeps the messages of every request; ``blocked`` is set
+    once a request waits for a reply that is not scripted.
+    """
+
+    def __init__(self, replies: Iterable[Message] = ()) -> None:
+        self.replies: deque[Message] = deque(replies)
+        self.requests: list[list[Message]] = []
+        self.blocked = asyncio.Event()
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        self.requests.append(copy.deepcopy(messages))
+        if self.replies:
+            return self.replies.popleft()
+        self.blocked.set()
+        await asyncio.Event().wait()
+        raise AssertionError("not reached")
+
+    async def close(self) -> None:
+        pass
+
+
+def answer(text: str) -> Message:
+    return Message(role="assistant", content=text)
+
+
+def tool_call(name: str, arguments: dict[str, Any], call_id: str = "call_1") -> Message:
+    return Message(
+        role="assistant",
+        content="",
+        tool_calls=[ToolCall(tool_name=name, arguments=arguments, id=call_id)],
+    )
+
+
+def workspace(root: Path) -> str:
+    """A workspace directory with a notes file."""
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "notes.txt").write_text("buy milk\n")
+    return str(root)
+
+
+async def started_agent(root: Path, llm: BaseLLMProvider, **options: Any) -> Agent:
+    """A started Agent with a workspace and record_answers, in-memory history."""
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            workspace_root=workspace(root),
+            record_answers=True,
+            **options,
+        ),
+    )
+    await agent.start()
+    return agent
