@@ -491,6 +491,18 @@ async def test_an_empty_or_repeated_origin_is_foreign(
     assert inner.scopes == []
 
 
+@pytest.mark.parametrize("method", ["post", "Delete", "options"])
+async def test_the_origin_rule_ignores_the_case_of_the_method(method: str) -> None:
+    headers = [
+        (b"host", f"127.0.0.1:{PORT}".encode()),
+        (b"origin", b"http://evil.example"),
+    ]
+    sent, inner = await _call_guard(_http_scope(headers, method=method))
+    assert sent[0]["status"] == 403
+    assert json.loads(sent[1]["body"]) == ORIGIN_ERROR
+    assert inner.scopes == []
+
+
 def test_port_80_accepts_an_origin_without_the_port(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -526,6 +538,25 @@ def test_a_request_from_another_site_is_refused_under_v1(
     assert resp.status_code == 403
     assert resp.json() == ORIGIN_ERROR
     assert gateway.ran_nothing()
+
+
+@pytest.mark.parametrize("path", ["//v1/agent/run", "///v1/health"])
+async def test_the_fetch_metadata_rule_sees_through_repeated_slashes(
+    path: str,
+) -> None:
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": path,
+        "headers": [
+            (b"host", f"127.0.0.1:{PORT}".encode()),
+            (b"sec-fetch-site", b"cross-site"),
+        ],
+    }
+    sent, inner = await _call_guard(scope)
+    assert sent[0]["status"] == 403
+    assert json.loads(sent[1]["body"]) == ORIGIN_ERROR
+    assert inner.scopes == []
 
 
 @pytest.mark.parametrize("site", ["same-origin", "none"])

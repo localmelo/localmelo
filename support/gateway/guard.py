@@ -179,9 +179,10 @@ class LoopbackGuard:
             return 421, "misdirected_request", self._host_error
 
         origins = headers.get(b"origin")
+        # The server passes the method on as sent, in any case.
         origin_checked = (
             scope["type"] == "websocket"
-            or scope.get("method") in _ORIGIN_CHECKED_METHODS
+            or str(scope.get("method", "")).upper() in _ORIGIN_CHECKED_METHODS
         )
         if (
             origin_checked
@@ -190,7 +191,9 @@ class LoopbackGuard:
         ):
             return 403, "foreign_origin", self._origin_error
 
-        if scope.get("path", "").startswith("/v1/"):
+        # A path may start with several slashes, as in //v1/health.
+        path = "/" + str(scope.get("path", "")).lstrip("/")
+        if path.startswith("/v1/"):
             for site in headers.get(b"sec-fetch-site", []):
                 if site.lower() not in _OWN_FETCH_SITES:
                     return 403, "foreign_origin", self._origin_error
