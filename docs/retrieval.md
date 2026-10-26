@@ -422,7 +422,12 @@ Tasks come in the order of their first call, and the calls of a task in
   When the reply's text holds a `<note>` block, the note takes those lines
   from it (`meta.source` is `model`). Otherwise it picks sentences of the
   reasoning and the reply by marker words, in English and Chinese
-  (`heuristic`). A reflection is built in the same way.
+  (`heuristic`).
+- **Reflections** are built from the reflection's own fields, as the agent
+  reads them, not from the reply's text: `plan:` is the recommended action
+  and the summary, `found:` the useful evidence, `decided:` the next
+  promising directions (`next: …`), and `hypotheses:` the failed hypotheses
+  (`refuted: …`) and what to avoid (`avoid: …`). `meta.source` is `model`.
 - **Drafts** hold the code blocks of the reasoning and of the reply.
   `meta.target` is the last file named before the first block, or else the
   file of the task's latest read or write. `meta.status` is `written` once a
@@ -435,12 +440,13 @@ Tasks come in the order of their first call, and the calls of a task in
   and `<think>` tags are removed. A document left without text is skipped.
 - `meta` holds `task_id`, `step`, `attempt`, `seq` and `created_at` (the
   call's `timestamp`). The other keys depend on the kind:
-  - notes and reflections: `source` (`model` or `heuristic`), `note_kind`
-    (`step`, `answer` or `empty` from the call's outcome, or `reflection`),
-    and `remember` with `remember_by`. `remember` says whether the note
-    looks worth keeping: the block's `remember:` line when it has one
-    (`model`), or else `true` when the note has a `found:` or `decided:`
-    line (`heuristic`);
+  - notes and reflections: `source` (`model` or `heuristic`; always `model`
+    for a reflection), `note_kind` (`step`, `answer` or `empty` from the
+    call's outcome, or `reflection`), and `remember` with `remember_by`.
+    `remember` says whether a note looks worth keeping: the block's
+    `remember:` line when it has one (`model`), or else `true` when the note
+    has a `found:` or `decided:` line (`heuristic`); a reflection has
+    `false` and `""`;
   - drafts: `target`, `status`, `lines` (non-blank lines), `blocks`, and
     `cut`, which is `true` when code was left out to keep the draft within
     8,000 characters;

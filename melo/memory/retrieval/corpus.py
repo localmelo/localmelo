@@ -35,8 +35,12 @@ from typing import Any, TypeGuard
 from localmelo.melo.checker.sanitize import sanitize_assistant_text
 from localmelo.melo.memory.notes import (
     DRAFT_WRITTEN_SHARE,
+    NOTE_ITEM_CHARS,
+    NOTE_PLAN_CHARS,
     TITLE_CHARS,
     Draft,
+    ReasoningNote,
+    _collapse,
     _shorten,
     draft_coverage,
     extract_draft,
@@ -330,6 +334,7 @@ def _task_docs(calls: Sequence[RawCall]) -> list[Doc]:
         }
         if call.kind in ("plan", "reflect"):
             reflection = call.kind == "reflect"
+            found = _find_reflection(call.content) if reflection else None
             note, rest = note_from_reply(
                 call.content,
                 call.thinking,
@@ -339,6 +344,10 @@ def _task_docs(calls: Sequence[RawCall]) -> list[Doc]:
                     "reflection" if reflection else _NOTE_KINDS.get(_outcome(call), "")
                 ),
             )
+            if found is not None:
+                # The reply is JSON: its own fields read better than the
+                # prose heuristic run over its syntax.
+                note = _reflection_note(found)
             note_doc = _doc(
                 f"{call.task_id}:{'r' if reflection else 'n'}{call.seq}",
                 "reflection" if reflection else "note",
@@ -355,9 +364,7 @@ def _task_docs(calls: Sequence[RawCall]) -> list[Doc]:
             # The agent adds no reflection for a reflect reply without one,
             # so a doc for it would be a reflection the run never had. The
             # call's thought chunks stay.
-            if note_doc is not None and (
-                not reflection or _find_reflection(call.content) is not None
-            ):
+            if note_doc is not None and (not reflection or found is not None):
                 entries.append(note_doc)
             if not reflection:
                 draft = extract_draft(
@@ -531,6 +538,43 @@ def _find_reflection(text: str) -> dict[str, Any] | None:
     except ValueError:  # a number the decoder cannot convert ends the search
         pass
     return None
+
+
+def _reflection_note(reflection: Mapping[str, Any]) -> ReasoningNote:
+    """The note of a reflect reply that holds *reflection*, from its fields.
+
+    ``plan`` is ``<recommended_action>: <summary>``; ``found`` takes
+    ``useful_evidence`` (at most 4 items); ``decided`` takes
+    ``next_promising_directions`` as ``next: …`` (at most 3);
+    ``hypotheses`` takes ``failed_hypotheses`` as ``refuted: …``, then
+    ``recommended_avoids`` as ``avoid: …`` (at most 3 together). Items are
+    whitespace-collapsed and shortened like a note's; a field that is not
+    a list, or an item that is not a string, is left out.
+    """
+
+    def items(key: str, prefix: str = "") -> list[str]:
+        value = reflection.get(key)
+        if not isinstance(value, list):
+            return []
+        texts = (_collapse(item) for item in value if isinstance(item, str))
+        return [_shorten(prefix + text, NOTE_ITEM_CHARS) for text in texts if text]
+
+    # _find_reflection admits only a recommended_action in REFLECTION_ACTIONS.
+    plan = str(reflection.get("recommended_action"))
+    summary = reflection.get("summary")
+    if isinstance(summary, str) and _collapse(summary):
+        plan = f"{plan}: {_collapse(summary)}"
+    return ReasoningNote(
+        kind="reflection",
+        source="model",
+        plan=_shorten(plan, NOTE_PLAN_CHARS),
+        found=items("useful_evidence")[:4],
+        decided=items("next_promising_directions", "next: ")[:3],
+        hypotheses=[
+            *items("failed_hypotheses", "refuted: "),
+            *items("recommended_avoids", "avoid: "),
+        ][:3],
+    )
 
 
 def _outcome(call: RawCall) -> str:

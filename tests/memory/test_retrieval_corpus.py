@@ -190,19 +190,22 @@ RAW_CALL_DOCS: list[dict[str, Any]] = [
     },
     {
         # The reply holds a reflection (recommended_action "continue") after
-        # two sentences, which the plan takes: both are intent sentences
-        # with an action word or a file name. The JSON line has no marker.
+        # two sentences. The note is built from the reflection's own fields,
+        # not from the prose, which the agent does not keep either.
         "doc_id": "t-en:r3",
         "kind": "reflection",
-        "title": (
-            "append now passes its test. Next I need to implement reverse in "
-            "list_ops.py."
+        "title": "continue: append is done; reverse is left.",
+        "text": "plan: continue: append is done; reverse is left.",
+        "meta": _meta(
+            "t-en",
+            3,
+            3,
+            1761200030.0,
+            source="model",
+            note_kind="reflection",
+            remember=False,
+            remember_by="",
         ),
-        "text": (
-            "plan: append now passes its test. Next I need to implement reverse "
-            "in list_ops.py."
-        ),
-        "meta": _meta("t-en", 3, 3, 1761200030.0, **_heuristic("reflection")),
     },
     {
         "doc_id": "t-en:t3.1",
@@ -885,6 +888,35 @@ def test_a_repeated_seq_of_a_task_names_both_lines() -> None:
 def test_docs_from_the_fixture_raw_calls() -> None:
     docs = docs_from_calls(load_raw_calls(_lines("raw_calls.jsonl")))
     assert [doc_to_dict(doc) for doc in docs] == RAW_CALL_DOCS
+
+
+def test_a_reflection_doc_reads_the_reflections_fields() -> None:
+    # A reply whose JSON the prose heuristic would quote as text.
+    reflection = {
+        "recommended_action": "decompose",
+        "summary": "  The scale\nis wrong for flats. ",
+        "failed_hypotheses": ["sharps only"],
+        "recommended_avoids": ["hard-coding keys", 3],
+        "next_promising_directions": ["map flats", "test F major"],
+        "useful_evidence": ["Tests use F, Bb and Eb."],
+        "task_still_feasible": True,
+    }
+    call = {
+        "task_id": "t",
+        "seq": 5,
+        "kind": "reflect",
+        "content": "Reflecting.\n" + json.dumps(reflection),
+    }
+    [doc] = docs_from_calls(load_raw_calls(_jsonl(call)))
+    assert (doc.doc_id, doc.kind) == ("t:r5", "reflection")
+    assert doc.text == (
+        "plan: decompose: The scale is wrong for flats.\n"
+        "found: Tests use F, Bb and Eb.\n"
+        "decided: next: map flats; next: test F major\n"
+        "hypotheses: refuted: sharps only; avoid: hard-coding keys"
+    )
+    assert "{" not in doc.text and '"' not in doc.text
+    assert doc.meta["source"] == "model"
 
 
 def test_the_fixture_docs_in_short() -> None:
