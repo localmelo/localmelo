@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sqlite3
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -722,9 +723,13 @@ def _json_column(text: object, name: str, default: Any = None) -> Any:
     if not isinstance(text, str):
         raise CorpusError(f"{name} is not JSON text")
     try:
-        return json.loads(text)
+        value = json.loads(text)
     except (ValueError, RecursionError):
         raise CorpusError(f"{name} is not JSON") from None
+    surrogate = _unpaired_surrogate(value)
+    if surrogate:
+        raise CorpusError(f"{name}: {surrogate}")
+    return value
 
 
 # ── Line rules ──
@@ -745,7 +750,39 @@ def _json_objects(lines: Iterable[str]) -> Iterator[tuple[int, dict[str, Any]]]:
             raise CorpusError("not JSON", line=number) from None
         if not isinstance(value, dict):
             raise CorpusError("not a JSON object", line=number)
+        surrogate = _unpaired_surrogate(value)
+        if surrogate:
+            raise CorpusError(surrogate, line=number)
         yield number, value
+
+
+# One half of a UTF-16 surrogate pair. JSON's \uXXXX escapes can name one
+# alone (a writer that cut a string between the two halves), and json.loads
+# then gives a string that UTF-8 cannot encode, nor melo-retrieve print.
+_SURROGATE_RE = re.compile(r"[\ud800-\udfff]")
+
+
+def _unpaired_surrogate(value: object) -> str:
+    """The problem of a string in the JSON *value* that UTF-8 cannot encode.
+
+    ``""`` when every string of *value*, keys included, can be encoded.
+    """
+    stack: list[object] = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, str):
+            match = _SURROGATE_RE.search(item)
+            if match is not None:
+                return (
+                    f"a string holds the unpaired surrogate \\u{ord(match.group()):04x}, "
+                    "which UTF-8 cannot encode"
+                )
+        elif isinstance(item, dict):
+            stack.extend(item)
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return ""
 
 
 def _corpus_doc(obj: Mapping[str, Any]) -> Doc:

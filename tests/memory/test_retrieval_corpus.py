@@ -809,6 +809,38 @@ def test_a_non_finite_timestamp_is_refused() -> None:
         assert str(caught.value) == "timestamp must be a finite number"
 
 
+SURROGATE_ERROR = (
+    "a string holds the unpaired surrogate \\ud83d, which UTF-8 cannot encode"
+)
+
+
+@pytest.mark.parametrize(
+    "load",
+    [load_raw_calls, load_corpus, lambda lines: load_queries(lines, [])],
+    ids=["raw_calls", "corpus", "queries"],
+)
+@pytest.mark.parametrize(
+    "line",
+    [
+        '{"task_id": "t", "seq": 0, "thinking": "cut \\ud83d here"}',
+        '{"meta": {"tags": ["ok", "\\ud83d"]}}',
+        '{"\\ud83d": 1}',
+    ],
+)
+def test_an_unpaired_surrogate_is_refused_with_its_line(load: Any, line: str) -> None:
+    # A JSON escape of one half of a pair, as a writer that cut a string
+    # between the halves leaves it: valid JSON in valid UTF-8, but a string
+    # that UTF-8 cannot encode, so no corpus line could hold it.
+    with pytest.raises(CorpusError) as caught:
+        load(["", line])
+    assert (caught.value.line, str(caught.value)) == (2, SURROGATE_ERROR)
+
+
+def test_a_surrogate_pair_is_one_character() -> None:
+    line = '{"task_id": "t", "seq": 0, "thinking": "ok \\ud83d\\ude00"}'
+    assert load_raw_calls([line])[0].thinking == "ok \U0001f600"
+
+
 def test_a_repeated_seq_of_a_task_names_both_lines() -> None:
     lines = [
         *_jsonl(_call(), {"task_id": "u", "seq": 0}),
@@ -1313,6 +1345,13 @@ def test_a_missing_column_is_named(tmp_path: Path) -> None:
         (
             "UPDATE steps SET tool_result_json = 'oops' WHERE task_id = 't-zh'",
             "llm_calls row t-zh/0: steps row {step_id}: tool_result_json is not JSON",
+        ),
+        (
+            'UPDATE llm_calls SET tool_calls_json = \'[{"tool_name": "file_read", '
+            '"arguments": {"path": "a\\ud83d.py"}, "id": "call_3"}]\' '
+            "WHERE task_id = 't-zh' AND seq = 2",
+            "llm_calls row t-zh/2: tool_calls_json: a string holds the unpaired "
+            "surrogate \\ud83d, which UTF-8 cannot encode",
         ),
     ],
 )

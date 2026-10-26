@@ -411,6 +411,26 @@ def test_text_that_is_not_utf8_names_its_line(
     assert _input_error(argv, capsys) == f"{corpus}:2: not UTF-8 text"
 
 
+def test_an_unpaired_surrogate_names_its_line(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # Valid JSON in valid UTF-8, but a string no output line could hold.
+    problem = "a string holds the unpaired surrogate \\ud83d, which UTF-8 cannot encode"
+    calls = tmp_path / "calls.jsonl"
+    calls.write_text(
+        '{"task_id": "t", "seq": 0, "thinking": "Let me read list_ops.py."}\n'
+        '{"task_id": "t", "seq": 1, "thinking": "The test fails \\ud83d here."}\n',
+        encoding="utf-8",
+    )
+    assert _input_error(["--export-run", str(calls)], capsys) == f"{calls}:2: {problem}"
+    corpus = tmp_path / "corpus.jsonl"
+    corpus.write_text(
+        '{"doc_id": "a\\ud83d", "kind": "note", "text": "t"}\n', encoding="utf-8"
+    )
+    argv = ["--retriever", "bm25", "--corpus", str(corpus), "--queries", QUERIES]
+    assert _input_error(argv, capsys) == f"{corpus}:1: {problem}"
+
+
 def test_a_corpus_error_names_the_file_and_line(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
