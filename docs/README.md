@@ -43,6 +43,8 @@ tools and memory on your own model server or a cloud API. The website is at
 
 - [How localmelo works](how-it-works.md): the run loop, reflection, memory
   and timeouts.
+- [Evaluations](evaluations.md): the controlled comparisons behind the
+  defaults, such as the reflection gate, with their conditions and limits.
 - [Scheduler](scheduler.md): the scheduling policy core and its simulator,
   for maintainers and the benchmark. Runs do not use it yet.
 - [Architecture](https://localmelo.github.io/localmelo/en/architecture.html)
