@@ -169,11 +169,12 @@ yet; the files appear once a program opens a store.
   `run.finished` event, and as the turn's answer and result. Each copy, and
   the assistant text and thinking of the checkpoint, passes the minimal
   redaction of [events](events.md#assistantmessage) before it is stored.
-- **Retention.** When a store opens, and every 24 hours in a gateway that
-  keeps it open, what is older than 30 days is cleared: the thinking of
-  `assistant.message` events, and a `<think>` block at the start of their
-  text; the `<think>` block of the final answer's copies; window
-  checkpoints, and in a newer checkpoint the thinking of each message older
+- **Retention.** When a store opens, and whenever its program calls
+  `apply_retention()` (a gateway that keeps the store open is to call it
+  every 24 hours), what is older than 30 days is cleared: the thinking of
+  `assistant.message` events, and the `<think>` block in their text; the
+  `<think>` block of the final answer's copies; window checkpoints, and in a
+  newer checkpoint the thinking and `<think>` block of each message older
   than 30 days; and withdrawn messages. The turns, their answers and their
   events stay until you delete the session.
 - **A killed run.** A run killed with its process keeps the row `running` in

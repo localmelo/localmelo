@@ -92,8 +92,8 @@ with a `cause` that says what ended it:
 | `user_stop` | A person stopped it. | `cancelled` |
 | `closed` | The session's runner was closed. | `cancelled` |
 | `shutdown` | The process was asked to stop. | `cancelled` |
-| `crash` | The process died; the next open recorded the end. | `crashed`, or the status of a `run.finished` that was stored |
-| `takeover` | Another terminal took the session over. | `cancelled` |
+| `crash` | The process died; recovery recorded the end. | `crashed`, or `cancelled` when a stored `run.finished` said so |
+| `takeover` | Another terminal took over a turn whose lease, held on another host, had expired. | `cancelled` |
 | `park` | Reserved for the scheduler. | `cancelled` |
 
 "Interrupted" is a label that a surface shows for the causes `shutdown` and

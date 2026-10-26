@@ -76,17 +76,26 @@ resumed 1 turn(s)
   raises `ValueError` for any other agent. Call `await agent.start()` before
   you pass the agent to a runner.
 - **One runner per session and per agent.** A runner runs one turn at a time:
-  `run_turn` and `start_turn` raise `SessionBusyError` while a turn runs.
-- **`run_turn`** runs the turn in your task and returns its `RunResult`.
-  **`start_turn`** returns the turn's `TurnInfo` once its row is stored, and
-  the turn runs on in a task of the runner's; `await runner.wait()` returns
-  its `RunResult`.
+  `run_turn` and `start_turn` raise `SessionBusyError` while a turn runs. A
+  turn started while `runner.undo()` or `runner.resume()` loads the
+  conversation waits until it is loaded.
+- **`run_turn`** runs the turn in your task and returns its `RunResult`,
+  also when the runner stopped the turn (`cancel()`, `close()`, a takeover):
+  then the `cancelled` one, with no counters when the turn was stopped before
+  its run began. A cancellation of your task from outside the runner
+  propagates once the turn has ended, or at once when it comes while the
+  turn ends, which then ends on its own. **`start_turn`** returns the turn's
+  `TurnInfo` once its row is stored, and the turn runs on in a task of the
+  runner's; `await runner.wait()` returns its `RunResult`, the same one
+  `run_turn` would return.
 - **`title`**, on `run_turn` and `start_turn`, is the text the person typed.
   A session's first turn sets its title from it, else from the turn's text,
   so a message with an attached file still gets a short title.
 - **Listeners.** `turn.started` and `turn.finished` are the store's own
-  events, not the run's: `store.add_listener(fn)` calls `fn` with every
-  stored event, those included, once its transaction has committed.
+  events, not the run's, and so is an `approval.resolved` that a turn's end
+  writes for a request whose answer was not stored: `store.add_listener(fn)`
+  calls `fn` with every stored event, those included, once its transaction
+  has committed.
 - A runner with `None` and `new_session=NewSession(...)` creates the session
   in the same transaction as its first turn, so a refused first turn leaves
   no empty session. `runner.session_id` is set once that turn has begun.
@@ -116,11 +125,14 @@ One store implementation serves two files. Each surface opens only its own:
 
 - **A writer marker.** A new file records its writer. Opening the other
   writer's file raises `SessionStoreError`, for example
-  `<path> belongs to the gateway (writer 'gateway'); open it with writer='gateway' or use the default path`,
-  and a file that is not a sessions file, such as `history.db`, raises
-  `<path> is not a localmelo sessions file`. The store reads these before it
-  writes anything, so a refused file is left byte for byte as it was. A file
-  of a newer schema raises
+  `<path> belongs to the gateway (writer 'gateway'); open it with writer='gateway' or use the default path`;
+  a file whose marker is missing or unknown raises
+  `<path> has no valid writer marker`; and a file that is not a sessions
+  file, such as `history.db`, raises `<path> is not a localmelo sessions file`.
+  The store reads these on a read-only connection before it writes anything,
+  so a refused file is left byte for byte as it was; beside a file in WAL
+  mode, SQLite may still create its `-wal` and `-shm` files. A file of a
+  newer schema raises
   `<path> has schema version <n>; this localmelo reads version 1`.
 - **The owner lock.** The gateway's store holds a lock on `<path>.owner` for
   its life. A second gateway on the file gets `StoreOwnedError`:
@@ -133,11 +145,17 @@ One store implementation serves two files. Each surface opens only its own:
   with one WARNING when others can read it.
 - **Opening.** The store opens on its first awaited call, or with
   `await store.open()`. Every open failure raises `SessionStoreError` (or
-  `StoreOwnedError`), leaves the file as it was, and can be retried. After
+  `StoreOwnedError`) and can be retried: a file is refused before anything
+  is written to it, and each write of the open is a transaction of its own,
+  which a failure, such as a full disk, rolls back; the steps before it,
+  such as turns already recovered, stay done. After
   `await store.aclose()`, every call raises
-  `SessionStoreError("The session store is closed")`.
-- **Retention.** Opening the store also clears what is older than 30 days
-  (`thinking_retention_days`); see [Memory](memory.md#sessions).
+  `SessionStoreError("The session store is closed")`, also an open that was
+  still under way.
+- **Retention.** Opening the store also clears the thinking, the `<think>`
+  blocks, the window checkpoints and the withdrawn messages that are older
+  than 30 days (`thinking_retention_days`); turns and events stay. See
+  [Memory](memory.md#sessions).
 
 ## Turns, statuses and causes
 
@@ -151,8 +169,8 @@ and is `""` while it runs:
 | `user_stop` | A person stopped it: `runner.cancel()`. | `cancelled` |
 | `closed` | The session's runner was closed: `runner.close()`, as when a session is deleted. | `cancelled` |
 | `shutdown` | The process was asked to stop: `runner.close(cause="shutdown")` after `agent.begin_exit(...)`, or a cancellation from outside the runner, such as `asyncio.run`'s on Ctrl+C. | `cancelled` |
-| `crash` | The process died; the next open wrote the end. | `crashed`, or `cancelled` when the stored `run.finished` said so |
-| `takeover` | Another terminal took over the lease (the CLI file only). | `cancelled` |
+| `crash` | The process died; recovery wrote the end. | `crashed`, or `cancelled` when the stored `run.finished` said so |
+| `takeover` | Another terminal took over a turn whose lease, held on another host, had expired (the CLI file only). | `cancelled` |
 | `park` | Reserved for the scheduler. | `cancelled` |
 
 - **Stopping.** `runner.cancel(reason, cause="user_stop", turn_id=None)`
@@ -163,25 +181,33 @@ and is `""` while it runs:
   `RunResult` whose `error` is the reason (see
   [Stop a run](python-api.md#stop-a-run)).
 - **After a crash.** A turn whose process died stays `running` on disk until
-  the next open: the gateway's store ends every such turn before `open()`
-  returns, and the CLI store ends one when its holder's process is gone or
-  its lease has expired. Recovery withdraws the approvals nobody answered,
-  and ends the turn with the outcome of its stored `run.finished`, if any,
-  else as `crashed` with the error
+  recovery ends it. The gateway's store ends every such turn before `open()`
+  returns. The CLI store ends one when it opens, when the session's next
+  turn or undo begins, and in `recover_stale_turns()`: once its holder's
+  process on this host is gone, or, for a holder on another host, once its
+  lease has expired. Recovery withdraws the approvals nobody answered, and
+  ends the turn with the outcome of its stored `run.finished`, if any; else,
+  for another host's expired lease, as `cancelled` with the cause `takeover`
+  and the error `The session was taken over by another process`, as the old
+  terminal's run ends too; else as `crashed` with the error
   `The process running this turn stopped before it finished.`
 - **"Interrupted" is a label, not a status.** A surface shows the causes
   `shutdown` and `crash` as "Interrupted"; the status stays a run status.
 - **Write failures.** When the gateway's store cannot record a running
   turn's events or end, it refuses new work with
   `SessionStoreError("The session store could not record a change; restart the gateway")`
-  until it restarts, and reads keep working; the restart ends the turn.
+  until it restarts, and reads keep working; the restart ends the turn. With
+  the CLI file, a runner tries a turn's end again after 0.5, 1 and 2 seconds
+  (once only while it closes), and once more before the session's next turn
+  or undo; until then the session stays busy.
 
 Store methods for sessions and turns: `create_session`, `get_session`,
 `find_sessions`, `list_sessions` (newest first, chats unless you pass
 `kinds`), `rename_session`, `update_session`, `delete_session` (refused
 while a turn runs), `list_turns(session_id, limit=, before=)`,
 `list_events(session_id, after_id=, limit=, turns=)`, `undo_last_turn` and
-`get_window`. `runner.undo()` undoes the newest finished turn and resumes.
+`get_window`. `runner.undo()` undoes the newest finished turn and resumes;
+a turn started meanwhile waits for the resume.
 
 ## Message ids and submissions
 
@@ -390,7 +416,8 @@ It prints, for example:
 - `export_turns(paths, out, after=None)` writes one JSON line per record,
   `{"kind": "localmelo.session_turn", "v": 1, ...}`, and returns each path's
   new cursor; pass the cursors back as `after` next time.
-- The reader takes no lock, runs no recovery and refuses a newer schema.
+- The reader takes no lock, runs no recovery and refuses a newer schema. A
+  file of schema version 0, such as an empty one, has no records.
 
 ## Limits
 
@@ -399,7 +426,7 @@ It prints, for example:
 | A turn's text | 1 to 100,000 characters |
 | `client_request_id` | 1 to 128 characters |
 | A title | 1 to 200 characters by hand; 60 when set from the text |
-| Withdrawals | 1,000 per session, none older than 30 days |
+| Withdrawals | 1,000 per session, and 1,000 for new sessions' first turns; none older than 30 days |
 | Window checkpoints | One per session, at most 2,000,000 characters |
 | A turn's lease | 30 seconds, refreshed every 10 |
 | `list_events` page | 1 to 1,000 events |

@@ -396,9 +396,11 @@ and `"run_id": ""`.
 - `outcome` is `allowed`, `denied` or `withdrawn`. `origin` is the
   decision's, as in `tool.finished`'s `approval`: `user`, `session`,
   `policy` or `timeout`; `error` when the ask failed; or `withdrawn` when
-  the run stopped first.
+  the run stopped first, and when the store wrote the event for a request
+  whose answer it never stored (see the guarantees below).
 - `turn` is `null` for an event that belongs to no turn: `turn.undone`, a
-  rename's `session.title`, `session.updated`, and the scheduler's events.
+  rename's `session.title`, `session.updated`, and the scheduler's events
+  stored outside a turn.
 - **The scheduler's types.** Types that start with `task.`, `sched.` or
   `attention.` are reserved for the scheduler. Only the gateway's store
   keeps them, as events that belong to no turn
@@ -424,7 +426,10 @@ The store guarantees:
 - **Every request is answered.** Every `approval.requested` is followed by
   exactly one `approval.resolved`. After a crash, recovery writes it, with
   the outcome `withdrawn` and the reason
-  `melo stopped before this approval was answered.`
+  `melo stopped before this approval was answered.`; when a turn ends while
+  the answer to one of its requests is not stored, the turn's end writes
+  it, `withdrawn`, with the reason
+  `The turn ended before this approval's answer was stored.`
 - **A withdrawn message leaves no trace in the stream:** no turn number and
   no event.
 - **Ids survive a restart.** Event ids only grow, across sessions,
