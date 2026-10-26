@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import struct
 import tomllib
 from collections.abc import AsyncIterator
 from html.parser import HTMLParser
@@ -41,6 +42,17 @@ class ShellAssets(HTMLParser):
             self.paths.append(str(attributes["href"]))
         if tag == "img" and attributes.get("src"):
             self.paths.append(str(attributes["src"]))
+
+
+class IconLinks(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.icons: list[dict[str, str | None]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "link" and attributes.get("rel") in {"icon", "apple-touch-icon"}:
+            self.icons.append(attributes)
 
 
 class InputPlaceholders(HTMLParser):
@@ -101,6 +113,24 @@ async def test_shell_assets_and_module_imports_are_served(
                     "text/javascript",
                     "application/javascript",
                 }
+
+
+async def test_icon_links_point_at_images_large_enough_for_their_use(
+    client: httpx.AsyncClient,
+) -> None:
+    page = await client.get("/")
+    parser = IconLinks()
+    parser.feed(page.text)
+    assert parser.icons
+    for icon in parser.icons:
+        image = (await client.get(str(icon["href"]))).content
+        assert image[12:16] == b"IHDR", icon
+        width, height = struct.unpack(">II", image[16:24])
+        if icon["rel"] == "icon":
+            assert icon.get("sizes") == f"{width}x{height}", icon
+        else:
+            # Touch icons are drawn at up to 180 px; a smaller image is scaled up and blurs.
+            assert min(width, height) >= 180, icon
 
 
 async def test_chat_url_placeholder_matches_the_omlx_hint(
