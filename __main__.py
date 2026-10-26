@@ -831,11 +831,14 @@ def _start_gateway(cfg: Config) -> None:
     """Thin seam for gateway startup — keeps the lazy import local."""
     from localmelo.support.gateway import start_gateway
 
+    host = cfg.gateway.host
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"  # an IPv6 address, which a URL writes in brackets
     print("\n  Starting localmelo gateway ...")
     print(f"  Chat: {cfg.chat_backend}")
     print(f"  Embedding: {cfg.embedding_backend}")
-    print(f"  Gateway: http://{cfg.gateway.host}:{cfg.gateway.port}")
-    print(f"  Web UI:  http://{cfg.gateway.host}:{cfg.gateway.port}/")
+    print(f"  Gateway: http://{host}:{cfg.gateway.port}")
+    print(f"  Web UI:  http://{host}:{cfg.gateway.port}/")
     print()
 
     start_gateway(cfg)

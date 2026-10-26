@@ -29,7 +29,12 @@ logger = logging.getLogger("localmelo.gateway")
 class GatewayServer:
     def __init__(self, cfg: config.Config) -> None:
         self.cfg = cfg
-        self.host = cfg.gateway.host
+        host = cfg.gateway.host
+        # A URL writes an IPv6 address in brackets, as in [::1]; the socket
+        # takes it without them.
+        if host.startswith("[") and host.endswith("]"):
+            host = host[1:-1]
+        self.host = host
         self.port = cfg.gateway.port
         self._started_at: float | None = None
         self._checker = Checker()
@@ -55,11 +60,11 @@ class GatewayServer:
             self.app.add_middleware(LoopbackGuard, port=self.port)
         else:
             logger.warning(
-                "Gateway host %s is not a loopback address, so requests are "
-                "not checked. The gateway has no authentication: anything "
-                "that can reach it, web pages through DNS rebinding included, "
-                'can run tasks with tools. Use host = "127.0.0.1" (the '
-                "default).",
+                "Gateway host %s is not localhost or a loopback IP address, so "
+                "requests are not checked. The gateway has no authentication: "
+                "anything that can reach it, web pages through DNS rebinding "
+                'included, can run tasks with tools. Use host = "127.0.0.1" '
+                "(the default).",
                 self.host,
             )
 

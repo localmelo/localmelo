@@ -481,6 +481,33 @@ class TestGatewayMode:
         assert passed_cfg.gateway.host == "0.0.0.0"
         assert passed_cfg.gateway.port == 5000
 
+    @pytest.mark.parametrize(
+        ("host", "shown"),
+        [
+            ("127.0.0.1", "127.0.0.1"),
+            ("::1", "[::1]"),
+            ("[::1]", "[::1]"),
+            ("0:0:0:0:0:0:0:1", "[0:0:0:0:0:0:0:1]"),
+        ],
+    )
+    def test_start_gateway_prints_addresses_that_work_as_urls(
+        self, capsys: pytest.CaptureFixture[str], host: str, shown: str
+    ) -> None:
+        """An IPv6 host is printed in brackets, as a URL needs it."""
+        cfg = _valid_cfg(host=host, port=5000)
+        mock_start = mock.MagicMock()
+        gateway = mock.MagicMock(start_gateway=mock_start)
+
+        with mock.patch.dict(sys.modules, {"localmelo.support.gateway": gateway}):
+            from localmelo.__main__ import _start_gateway
+
+            _start_gateway(cfg)
+
+        out = capsys.readouterr().out
+        assert f"  Gateway: http://{shown}:5000\n" in out
+        assert f"  Web UI:  http://{shown}:5000/\n" in out
+        mock_start.assert_called_once_with(cfg)
+
 
 class TestConfigValidationFailure:
     """Bad config -> error on stderr, exit 1."""

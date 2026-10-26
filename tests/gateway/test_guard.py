@@ -12,10 +12,13 @@ Requires fastapi + uvicorn (gateway extra). Collection-safe without either.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import logging
 from dataclasses import dataclass
+from types import ModuleType
 from typing import Any
+from unittest import mock
 
 import pytest
 
@@ -255,7 +258,40 @@ def test_loopback_hosts(host: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "host", ["0.0.0.0", "::", "192.168.1.20", "example.com", "localhost.example", ""]
+    "host",
+    [
+        "127.1",
+        "127.0.1",
+        "2130706433",
+        "0x7f000001",
+        "127.0.0.2",
+        "127.255.255.254",
+        "0:0:0:0:0:0:0:1",
+        "[0:0:0:0:0:0:0:1]",
+        "::ffff:127.0.0.1",
+        "localhost.",
+        "LOCALHOST.",
+    ],
+)
+def test_other_spellings_of_a_loopback_address_are_loopback(host: str) -> None:
+    # Binding any of these listens on a loopback address.
+    assert is_loopback(host)
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "0.0.0.0",
+        "::",
+        "[::]",
+        "192.168.1.20",
+        "128.0.0.1",
+        "::ffff:192.168.1.20",
+        "example.com",
+        "localhost.example",
+        "",
+        "[]",
+    ],
 )
 def test_other_hosts_are_not_loopback(host: str) -> None:
     assert not is_loopback(host)
@@ -516,7 +552,8 @@ def test_a_link_from_another_site_opens_the_web_ui(gateway: Gateway) -> None:
         },
     )
     assert resp.status_code == 200
-    assert "localmelo playground" in resp.text
+    assert resp.headers["content-type"].startswith("text/html")
+    assert "<title>localmelo" in resp.text
 
 
 # ---------------------------------------------------------------------------
@@ -562,11 +599,58 @@ def test_no_response_carries_cors_headers(
 
 
 # ---------------------------------------------------------------------------
+# Framing
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("path", "headers", "status"),
+    [
+        pytest.param("/", {}, 200, id="web-ui"),
+        pytest.param(
+            "/",
+            {"Sec-Fetch-Site": "cross-site", "Sec-Fetch-Dest": "iframe"},
+            200,
+            id="web-ui-in-a-frame-on-another-site",
+        ),
+        pytest.param("/docs", {}, 200, id="docs"),
+        pytest.param("/redoc", {}, 200, id="redoc"),
+        pytest.param("/v1/health", {}, 200, id="health"),
+        pytest.param("/no/such/route", {}, 404, id="404"),
+        pytest.param("/v1/health", {"Host": FOREIGN_HOST}, 421, id="421"),
+        pytest.param("/v1/health", {"Sec-Fetch-Site": "cross-site"}, 403, id="403"),
+    ],
+)
+def test_every_response_forbids_framing(
+    gateway: Gateway, path: str, headers: dict[str, str], status: int
+) -> None:
+    # A page on another site may load the web UI in a frame like a link,
+    # but the browser does not show it.
+    resp = gateway.client.get(path, headers=headers)
+    assert resp.status_code == status
+    assert resp.headers["x-frame-options"] == "DENY"
+    assert resp.headers["content-security-policy"] == "frame-ancestors 'none'"
+
+
+# ---------------------------------------------------------------------------
 # Where the guard is installed
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])
+@pytest.mark.parametrize(
+    "host",
+    [
+        "127.0.0.1",
+        "localhost",
+        "::1",
+        "[::1]",
+        "127.1",
+        "2130706433",
+        "127.0.0.2",
+        "0:0:0:0:0:0:0:1",
+        "localhost.",
+    ],
+)
 def test_a_loopback_host_installs_the_guard(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture, host: str
 ) -> None:
@@ -574,6 +658,18 @@ def test_a_loopback_host_installs_the_guard(
         gateway = _build_gateway(monkeypatch, host=host)
     assert [m.cls for m in gateway.server.app.user_middleware] == [LoopbackGuard]
     assert not caplog.records
+    resp = gateway.client.get("/v1/health", headers={"Host": FOREIGN_HOST})
+    assert resp.status_code == 421
+
+
+def test_a_host_in_brackets_listens_without_them(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway = _build_gateway(monkeypatch, host="[::1]")
+    assert gateway.server.host == "::1"
+    with mock.patch("localmelo.support.gateway.uvicorn.run") as run:
+        gateway.server.run()
+    assert run.call_args.kwargs["host"] == "::1"
 
 
 def test_a_non_loopback_host_has_no_guard_and_logs_a_warning(
@@ -584,7 +680,7 @@ def test_a_non_loopback_host_has_no_guard_and_logs_a_warning(
 
     assert [r.levelno for r in caplog.records] == [logging.WARNING]
     message = caplog.records[0].getMessage()
-    assert "0.0.0.0" in message
+    assert "0.0.0.0 is not localhost or a loopback IP address" in message
     assert "no authentication" in message
     assert "DNS rebinding" in message
     assert 'host = "127.0.0.1"' in message
@@ -665,3 +761,50 @@ def test_a_websocket_from_the_gateway_page_or_a_script_is_accepted(
         f"ws://127.0.0.1:{PORT}/v1/ws", headers=dict(headers)
     ) as websocket:
         assert websocket.receive_text() == "hello"
+
+
+# ---------------------------------------------------------------------------
+# The standalone playground server
+# ---------------------------------------------------------------------------
+
+
+def _standalone_playground_server(
+    monkeypatch: pytest.MonkeyPatch, playground: RecordingPlayground
+) -> ModuleType:
+    """A fresh copy of _test_webapp whose playground is *playground*."""
+    monkeypatch.setattr(
+        "localmelo.support.gateway.webapp.SmokePlayground", lambda: playground
+    )
+    spec = importlib.util.find_spec("localmelo.support.gateway._test_webapp")
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_standalone_playground_server_is_guarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # python -m localmelo.support.gateway._test_webapp serves the same
+    # playground routes, which run tasks with tools.
+    playground = RecordingPlayground()
+    server = _standalone_playground_server(monkeypatch, playground)
+    assert server.PORT == PORT
+    client = TestClient(server.app, base_url=GATEWAY)
+    body = {"chat_url": "http://evil.example/v1", "chat_model": "m"}
+
+    resp = client.post(
+        "/v1/playground/session", json=body, headers={"Host": FOREIGN_HOST}
+    )
+    assert resp.status_code == 421
+    assert resp.json() == HOST_ERROR
+    resp = client.post(
+        "/v1/playground/session", json=body, headers={"Origin": FOREIGN_ORIGIN}
+    )
+    assert resp.status_code == 403
+    assert resp.json() == ORIGIN_ERROR
+    assert playground.calls == []
+
+    resp = client.post("/v1/playground/session", json=body, headers={"Origin": GATEWAY})
+    assert resp.status_code == 200
+    assert playground.calls == ["create_session"]

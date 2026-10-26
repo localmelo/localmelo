@@ -4,16 +4,21 @@ The gateway runs tasks with tools and has no authentication. On a
 loopback address only programs on this machine can reach it, but a
 browser on this machine sends requests for any web page: through DNS
 rebinding, a page on another domain becomes same-origin with the
-gateway, and any page can send it simple cross-origin requests.
-:class:`LoopbackGuard` refuses both before a request reaches any route.
+gateway, any page can send it simple cross-origin requests, and any
+page can show the gateway's pages in a frame. :class:`LoopbackGuard`
+refuses the requests before they reach any route, and forbids framing.
 """
 
 from __future__ import annotations
 
-from starlette.responses import JSONResponse
-from starlette.types import ASGIApp, Receive, Scope, Send
+import ipaddress
+import socket
 
-_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "[::1]"})
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+# Names of a loopback address, compared ignoring case.
+_LOOPBACK_NAMES = frozenset({"localhost", "localhost."})
 
 # The names of the gateway in a Host header or an origin, IPv6 in brackets.
 _GATEWAY_NAMES = ("127.0.0.1", "localhost", "[::1]")
@@ -29,10 +34,60 @@ _OWN_FETCH_SITES = frozenset({"same-origin", "none"})
 # Close code of a refused websocket handshake: policy violation.
 _WS_POLICY_VIOLATION = 1008
 
+# Headers of every HTTP response: no page may show the gateway's pages in
+# a frame, where a page on another site could trick the user into
+# clicking them.
+_NO_FRAMING_HEADERS = (
+    (b"x-frame-options", b"DENY"),
+    (b"content-security-policy", b"frame-ancestors 'none'"),
+)
+
 
 def is_loopback(host: str) -> bool:
-    """Whether the listen address *host* is 127.0.0.1, localhost or ::1."""
-    return host.lower() in _LOOPBACK_HOSTS
+    """Whether the listen address *host* is a loopback address.
+
+    Loopback addresses are localhost, ignoring case and a final dot, and
+    the IP addresses in 127.0.0.0/8 and ::1, in any spelling that binding
+    accepts (127.1, 2130706433, 0:0:0:0:0:0:0:1, ::ffff:127.0.0.1, IPv6
+    with or without brackets). Other host names are not looked up, so they
+    are not loopback addresses here.
+    """
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if host.lower() in _LOOPBACK_NAMES:
+        return True
+    if not host:
+        # An empty host listens on every address.
+        return False
+    try:
+        # Parse the address as binding does, without looking up a name.
+        infos = socket.getaddrinfo(
+            host, None, type=socket.SOCK_STREAM, flags=socket.AI_NUMERICHOST
+        )
+    except (OSError, UnicodeError, ValueError):
+        return False
+    return bool(infos) and all(_is_loopback_ip(str(info[4][0])) for info in infos)
+
+
+def _is_loopback_ip(address: str) -> bool:
+    """Whether the IP *address* that getaddrinfo gave is a loopback address."""
+    ip = ipaddress.ip_address(address.partition("%")[0])
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        # ::ffff:127.0.0.1 is 127.0.0.1; not every Python release says so.
+        return ip.ipv4_mapped.is_loopback
+    return ip.is_loopback
+
+
+def _forbid_framing(send: Send) -> Send:
+    """Wrap *send* so that the response carries the headers that forbid framing."""
+
+    async def send_forbidding_framing(message: Message) -> None:
+        if message["type"] == "http.response.start":
+            headers = [*message.get("headers", ()), *_NO_FRAMING_HEADERS]
+            message = {**message, "headers": headers}
+        await send(message)
+
+    return send_forbidding_framing
 
 
 def _one_of(values: list[str], allowed: frozenset[str]) -> bool:
@@ -63,6 +118,10 @@ class LoopbackGuard:
     error shape plus its code, ``{"error": "...", "code": "..."}``; a
     refused websocket handshake is closed. Other scopes, such as lifespan,
     pass through.
+
+    Every HTTP response, a refusal or not, carries ``X-Frame-Options:
+    DENY`` and ``Content-Security-Policy: frame-ancestors 'none'``, so no
+    page can show the gateway's pages in a frame.
     """
 
     def __init__(self, app: ASGIApp, *, port: int) -> None:
@@ -86,6 +145,8 @@ class LoopbackGuard:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
+        if scope["type"] == "http":
+            send = _forbid_framing(send)
 
         refusal = self._refusal(scope)
         if refusal is None:
