@@ -1526,6 +1526,74 @@ class TestExitCode:
         await agent.run_task("echo a", on_event=recorder)
         assert recorder.of("tool.finished")[0].data["exit_code"] == 3
 
+    @pytest.mark.asyncio
+    async def test_exit_code_reaches_tool_finished(self, tmp_path: Path) -> None:
+        big = "head -c 60000 /dev/zero | tr '\\0' x; exit 1"
+        llm = ScriptedLLM(
+            [
+                _calls(
+                    ("shell_exec", {"command": "exit 3"}, "call_1"),
+                    ("shell_exec", {"command": "exit 0"}, "call_2"),
+                    ("shell_exec", {"command": "sleep 5"}, "call_3"),
+                    ("python_exec", {"code": "import sys\nsys.exit(3)"}, "call_4"),
+                ),
+                _calls(
+                    ("shell_exec", {"command": big}, "call_5"),
+                    ("shell_exec", {"command": big}, "call_6"),
+                ),
+                _answer("done"),
+            ]
+        )
+        recorder = Recorder()
+        agent = _agent(
+            llm,
+            builtins=frozenset({"shell_exec", "python_exec"}),
+            workspace_root=str(tmp_path),
+            tool_timeout_s=1,
+        )
+
+        result = await agent.run_task("run them", on_event=recorder)
+
+        assert result.status == "completed"
+        await check_guarantees(recorder, result, agent)
+        finished = {e.data["call_id"]: e.data for e in recorder.of("tool.finished")}
+        reported = {
+            call_id: (data["status"], data["exit_code"])
+            for call_id, data in finished.items()
+        }
+        assert reported == {
+            "call_1": ("success", 3),
+            "call_2": ("success", 0),
+            "call_3": ("timeout", None),  # killed by tool_timeout_s
+            "call_4": ("error", 3),
+            "call_5": ("success", 1),
+            "call_6": ("success", 1),
+        }
+        assert finished["call_1"]["output"] == "[exit code 3]"
+        assert finished["call_3"]["error"] == "Command timed out after 1 s"
+        assert finished["call_4"]["error"] == "Python exited with code 3"
+        assert finished["call_5"]["output"].startswith("[exit code 1]\nxxx")
+
+        # The turn budget cut one 60,000-character result and withheld the
+        # other; the line stays first in both, after the withheld notice.
+        tool_messages = {
+            m["tool_call_id"]: m["content"]
+            for m in llm.requests[2]["messages"]
+            if m["role"] == "tool"
+        }
+        withheld, cut = sorted(
+            (tool_messages["call_5"], tool_messages["call_6"]),
+            key=lambda content: not content.startswith("[Tool result withheld"),
+        )
+        notice, preview = withheld.split("\n", 1)
+        assert notice.startswith("[Tool result withheld from working memory: ")
+        assert notice.endswith(" First 200 characters follow.]")
+        assert len(preview) == 200
+        assert preview.startswith("[exit code 1]\nxxx")
+        assert cut.startswith("[exit code 1]\nxxx")
+        assert cut.endswith(" more characters]")
+        assert "\n... [truncated: " in cut
+
 
 # ── Without a sink ──────────────────────────────────────────────────────────
 

@@ -922,6 +922,51 @@ class TestFinalizer:
         assert history.saves[-1] == ("cancelled", "Cancelled by the caller")
 
     @pytest.mark.asyncio
+    async def test_guards_hold_until_the_finalizer_ends(self) -> None:
+        tools, recorder = Tools(), Recorder()
+        history = GatedHistory(save_gate=lambda task: task.status == "cancelled")
+        agent = _agent(
+            ScriptedLLM([_calls(("hang", {}, "call_1"))]), tools=tools, history=history
+        )
+        refused_at_finish: list[str] = []
+
+        def sink(event: AgentEvent) -> None:
+            recorder(event)
+            if event.type == "run.finished":
+                # Inside the finalizer, which has not ended yet.
+                try:
+                    agent.load_conversation([])
+                except RuntimeError as exc:
+                    refused_at_finish.append(str(exc))
+
+        running = asyncio.create_task(agent.run_task("wait", on_event=sink))
+        await _until(tools.hanging)
+        running.cancel()
+        await _until(history.holding)  # the finalizer saves the task row
+        await _stop(running)  # a second cancellation: run_task raises at once
+        [finalizer] = agent._finalizers
+
+        # While the finalizer is pending, both guards hold.
+        assert not finalizer.done()
+        with pytest.raises(RuntimeError) as loading:
+            agent.load_conversation([])
+        assert str(loading.value) == "Cannot load a conversation while a run is active"
+        with pytest.raises(RuntimeError) as running_a_tool:
+            await agent.run_tool("echo", {"text": "x"})
+        assert str(running_a_tool.value) == "Cannot run a tool while a run is active"
+        assert tools.called == ["hang"]
+
+        history.release.set()
+        await asyncio.wait_for(asyncio.shield(finalizer), 5.0)
+        await asyncio.sleep(0)
+
+        # Right after run.finished, too; once the finalizer is done, no more.
+        assert refused_at_finish == ["Cannot load a conversation while a run is active"]
+        assert check_events(recorder).status == "cancelled"
+        assert agent.load_conversation([]) == 0
+        assert (await agent.run_tool("echo", {"text": "x"})).output == "x"
+
+    @pytest.mark.asyncio
     async def test_finalizer_timeout(
         self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
     ) -> None:

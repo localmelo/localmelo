@@ -9,6 +9,7 @@ anything but a regular file, and cap what they read. Its ``shell_exec`` and
 ``tool_timeout_s``; the shell starts the text of a non-zero exit with
 ``[exit code <n>]``, and both record their child's exit status in
 ``TOOL_EXIT_CODE``. Without a root, the built-ins are Phase 1a's functions.
+An agent with a root names it in the system prompt of its planning requests.
 """
 
 from __future__ import annotations
@@ -27,6 +28,9 @@ from typing import Any
 import pytest
 
 import localmelo.melo.executor.builtins as builtin_tools
+from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent._chat import REFLECTION_PROMPT, SYSTEM_PROMPT
+from localmelo.melo.agent.agent import WORKSPACE_NOTE
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import ExecutorResultPayload
 from localmelo.melo.checker.validators import (
@@ -35,6 +39,7 @@ from localmelo.melo.checker.validators import (
     validate_executor_result,
 )
 from localmelo.melo.contracts.approvals import ApprovalDecision
+from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.executor import (
     BUILTINS,
     TOOL_EXIT_CODE,
@@ -47,6 +52,7 @@ from localmelo.melo.executor import (
     register_builtins,
 )
 from localmelo.melo.memory.coordinator import Hippo
+from localmelo.melo.schema import Message, ToolCall, ToolDef
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -834,3 +840,64 @@ async def test_python_without_an_interpreter(
 
     assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
     assert outcome.error == "No Python interpreter is available for python_exec"
+
+
+# ── What the model is told ──────────────────────────────────────────────────
+
+
+class _PromptRecorder(BaseLLMProvider):
+    """Reads one file, then reflects; keeps the system prompt of each request."""
+
+    def __init__(self) -> None:
+        self.replies = [
+            Message(
+                role="assistant",
+                tool_calls=[ToolCall(tool_name="file_read", arguments={"path": "a"})],
+            ),
+            Message(role="assistant", content='{"recommended_action": "stop"}'),
+        ]
+        self.system_prompts: list[str] = []
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        self.system_prompts.append(messages[0].content)
+        return self.replies.pop(0)
+
+    async def close(self) -> None:
+        pass
+
+
+@pytest.mark.parametrize("rooted", [True, False], ids=["root", "no_root"])
+async def test_the_workspace_note_is_given_only_with_a_root(
+    root: Path, monkeypatch: pytest.MonkeyPatch, rooted: bool
+) -> None:
+    monkeypatch.delenv("LOCALMELO_PERSIST_MEMORY", raising=False)
+    monkeypatch.delenv("LOCALMELO_MEMORY_DIR", raising=False)
+    llm = _PromptRecorder()
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset({"file_read"}),
+            max_attempts=1,
+            steps_per_attempt=1,
+            workspace_root=str(root) if rooted else None,
+        ),
+    )
+
+    result = await agent.run_task("read a")
+
+    assert result.status == "budget_exhausted"
+    planning, reflecting = llm.system_prompts
+    note = WORKSPACE_NOTE.format(root=root)
+    assert note == (
+        f"Working directory: {root}. Relative paths and shell and Python commands "
+        "run there; file_read and file_write refuse paths outside it."
+    )
+    if rooted:
+        assert planning == f"{SYSTEM_PROMPT}\n\n{note}"
+    else:
+        assert planning == SYSTEM_PROMPT
+    # A reflection builds its own system prompt, without the note.
+    assert reflecting.startswith(REFLECTION_PROMPT)
+    assert "Working directory:" not in reflecting

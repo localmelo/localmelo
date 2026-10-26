@@ -162,13 +162,16 @@ def _build_system_prompt(
     context: list[Message],
     short: list[Message],
     reflections: list[ReflectionEntry] | None = None,
+    notes: Sequence[str] = (),
 ) -> tuple[str, list[Message]]:
     """Merge all system messages into a single system prompt.
 
-    Memory items (prefixed with ``[memory] ``) are collected under a
-    single ``[RECALL]`` section.  Reflection entries are rendered under
-    a ``[REFLECTION]`` section.  Other system messages are appended
-    verbatim.  Non-system messages are returned unchanged.
+    *notes*, such as the agent's workspace note, follow ``SYSTEM_PROMPT``
+    first, each as a paragraph of its own. Memory items (prefixed with
+    ``[memory] ``) are collected under a single ``[RECALL]`` section.
+    Reflection entries are rendered under a ``[REFLECTION]`` section.
+    Other system messages are appended verbatim, after the notes.
+    Non-system messages are returned unchanged.
 
     Returns ``(merged_system_prompt, non_system_messages)``.
     """
@@ -186,7 +189,7 @@ def _build_system_prompt(
         else:
             non_system.append(msg)
 
-    parts: list[str] = [SYSTEM_PROMPT]
+    parts: list[str] = [SYSTEM_PROMPT, *notes]
     for extra in extra_system:
         parts.append(extra)
     if recall_items:
@@ -239,6 +242,11 @@ class RequestStats:
 class Chat:
     """Builds the agent's LLM requests, retries failed ones, counts them.
 
+    *system_notes* go into the system prompt of every planning request,
+    right after ``SYSTEM_PROMPT`` (see :meth:`plan_step`); they are the same
+    on every step, so a server's prefix cache still holds. Reflection
+    requests build their own system prompt and do not carry them.
+
     A request that fails with a retryable :class:`ProviderError` is sent
     again after each delay in *retry_delays* (default
     :data:`RETRY_DELAYS_S`), waited out with *sleep*, so tests can pass a
@@ -249,10 +257,12 @@ class Chat:
         self,
         llm: BaseLLMProvider,
         *,
+        system_notes: Sequence[str] = (),
         retry_delays: Sequence[float] = RETRY_DELAYS_S,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.llm = llm
+        self.system_notes = tuple(system_notes)
         self.retry_delays = tuple(retry_delays)
         self.sleep = sleep
         self.stats = RequestStats()
@@ -342,7 +352,9 @@ class Chat:
         query: str,
         reflections: list[ReflectionEntry] | None = None,
     ) -> Message:
-        system_prompt, other_msgs = _build_system_prompt(context, short, reflections)
+        system_prompt, other_msgs = _build_system_prompt(
+            context, short, reflections, self.system_notes
+        )
         messages = [Message(role="system", content=system_prompt)]
         if lacks_task_query(short, query):
             # The task query is no longer in the window (evicted, or dropped

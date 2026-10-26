@@ -12,8 +12,15 @@ import os
 import sqlite3
 import time
 import uuid
-from collections.abc import Collection, Coroutine, Iterable, Iterator, Sequence
-from typing import TYPE_CHECKING, Any, TypeGuard
+from collections.abc import (
+    Collection,
+    Coroutine,
+    Iterable,
+    Iterator,
+    Mapping,
+    Sequence,
+)
+from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
 from localmelo.melo.agent._chat import (
     RETRY_HOOK,
@@ -53,6 +60,7 @@ from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.schema import (
+    ANSWER_NOT_KEPT_LABEL,
     CALL_INTERRUPTED,
     CALL_NOT_STARTED,
     EMPTY_REPLY_LABEL,
@@ -69,8 +77,13 @@ from localmelo.melo.schema import (
     TaskRecord,
     ToolCall,
     ToolDef,
+    ToolInfo,
     ToolResult,
+    answer_text,
+    clip_session_text,
     describe_images,
+    new_tool_call_id,
+    split_thinking,
 )
 
 if TYPE_CHECKING:
@@ -581,6 +594,13 @@ FINALIZE_TIMEOUT_S = 10.0
 # reason (see Agent.run_task).
 CANCELLED_ERROR = "Cancelled by the caller"
 
+# The note that every planning request of an agent with a workspace root
+# carries after the system prompt, with {root} filled in (see Chat).
+WORKSPACE_NOTE = (
+    "Working directory: {root}. Relative paths and shell and Python commands run "
+    "there; file_read and file_write refuse paths outside it."
+)
+
 
 @dataclasses.dataclass(frozen=True)
 class _Exit:
@@ -610,6 +630,29 @@ def _resolve_memory_dir(options: AgentOptions) -> str | None:
             "LOCALMELO_MEMORY_DIR", os.path.expanduser(DEFAULT_MEMORY_DIR)
         )
     return None
+
+
+def _resolve_workspace_root(value: str | None) -> str | None:
+    """The real path of the root *value*, with ``~`` expanded; ``None`` for none.
+
+    Raises ``ValueError`` when that path is not a directory.
+    """
+    if value is None:
+        return None
+    try:
+        root = os.path.realpath(os.path.expanduser(value))
+    except ValueError:  # a NUL character: no file has that path
+        root = ""
+    if not root or not os.path.isdir(root):
+        raise ValueError(f"workspace_root is not a directory: {value!r}")
+    return root
+
+
+def _answers_every_call(call_msg: Message, results: Sequence[Message]) -> bool:
+    """Whether *results* answer each tool call of *call_msg* exactly once."""
+    ids = [call.id for call in call_msg.tool_calls]
+    answered = [msg.tool_call_id for msg in results]
+    return len(set(ids)) == len(ids) and sorted(ids) == sorted(answered)
 
 
 @dataclasses.dataclass
@@ -867,10 +910,18 @@ class Agent:
     the built-ins (see :meth:`_ensure_tools`), and :meth:`close` closes
     them.
 
+    With ``workspace_root``, the built-in tools work in that directory
+    (see :class:`AgentOptions`); with ``record_answers``, each run's answer
+    stays in working memory for the next run.
+
     :meth:`run_task` runs one task and returns a
     :class:`~localmelo.melo.schema.RunResult`; :meth:`run` returns its
     outcome as text. Runs on one agent share its working memory and
-    request counters, so they must not overlap.
+    request counters, so they must not overlap. :meth:`start` sets up the
+    tool providers ahead of the first run, :meth:`list_tools` lists the
+    tools, :meth:`run_tool` runs one tool call outside a run, and
+    :meth:`conversation` and :meth:`load_conversation` read and replace the
+    working-memory window between runs.
     """
 
     def __init__(
@@ -891,12 +942,17 @@ class Agent:
             raise TypeError("Agent requires either config= or llm= to be provided")
 
         self.options = options if options is not None else AgentOptions()
+        # Resolved first, so that a bad root raises before anything, such as
+        # the memory directory, is created.
+        workspace_root = _resolve_workspace_root(self.options.workspace_root)
         self._tool_providers: tuple[BaseToolProvider, ...] = tuple(tool_providers)
         # Tool setup (_ensure_tools) runs once, under this lock. It ends
         # either ready or failed; a failure is kept as its error text.
         self._tools_lock = asyncio.Lock()
         self._tools_ready = False
         self._tools_failure: str | None = None
+        # The names of the tools that the setup registered (see list_tools).
+        self._provided_names: frozenset[str] = frozenset()
         # close() or begin_exit() has begun: no tool provider is started
         # from then on.
         self._closing = False
@@ -943,10 +999,162 @@ class Agent:
             long=long_backend,
         )
         self.checker = Checker()
-        self.executor = Executor(self.hippo, self.checker)
-        self.chat = Chat(self._llm)
+        self.executor = Executor(
+            self.hippo, self.checker, workspace_root=workspace_root
+        )
+        notes = (
+            []
+            if workspace_root is None
+            else [WORKSPACE_NOTE.format(root=workspace_root)]
+        )
+        self.chat = Chat(self._llm, system_notes=notes)
 
-        register_builtins(self.executor, self.hippo, names=self.options.builtins)
+        register_builtins(
+            self.executor,
+            self.hippo,
+            names=self.options.builtins,
+            workspace_root=workspace_root,
+            tool_timeout_s=self.options.tool_timeout_s,
+        )
+        # The names of the built-ins registered above (see list_tools).
+        self._builtin_names = (
+            builtin_names() if self.options.builtins is None else self.options.builtins
+        )
+
+    # ── Workspace, tools and conversation ──
+
+    @property
+    def workspace_root(self) -> str | None:
+        """The real path of the agent's workspace root, or ``None``."""
+        return self.executor.workspace_root
+
+    async def start(self) -> None:
+        """Start the tool providers and register their tools now.
+
+        That is the setup the first run would do otherwise (see
+        :meth:`_ensure_tools`), under the same lock, so it happens once:
+        a later call, and the first run, find it done. Its exception
+        propagates, also the ``RuntimeError`` of a setup that failed
+        earlier or of an agent that is closing. Start an agent whose runs
+        a caller may cancel before its first run: a cancellation during
+        the setup fails it for the agent's life.
+        """
+        await self._ensure_tools()
+
+    def list_tools(self) -> list[ToolInfo]:
+        """The tools registered now, sorted by name.
+
+        ``source`` is ``"builtin"`` for a built-in tool, ``"provided"`` for
+        a tool of the tool providers, which appear once :meth:`start` or
+        the first run has set them up, and ``"custom"`` for a tool
+        registered with the agent's executor and tool registry directly.
+        """
+        tools: list[ToolInfo] = []
+        for tool in sorted(self.hippo.list_tools(), key=lambda t: t.name):
+            source: Literal["builtin", "provided", "custom"] = "custom"
+            if tool.name in self._provided_names:
+                source = "provided"
+            elif tool.name in self._builtin_names:
+                source = "builtin"
+            tools.append(
+                ToolInfo(
+                    name=tool.name,
+                    description=tool.description,
+                    parameters=copy.deepcopy(tool.parameters),
+                    source=source,
+                    requires_approval=self.executor.requires_approval(tool.name),
+                )
+            )
+        return tools
+
+    async def run_tool(
+        self,
+        tool_name: str,
+        arguments: Mapping[str, Any],
+        *,
+        approval: ApprovalPolicy | None = None,
+    ) -> ToolResult:
+        """Run one call of *tool_name* with *arguments*, outside a run.
+
+        The call goes through the checks a model's call goes through, apart
+        from the offered tools, so any registered tool can run: the
+        registry, the arguments, the pre-execute check, the workspace
+        policy, *approval* for a tool that requires it (see
+        :meth:`run_task`), the tool's timeout and the result check. The
+        result is the checked one, with a denial or any other refusal as
+        its error. The call gets a fresh id, the policy's request has an
+        empty ``run_id``, and the call emits no event and writes no memory
+        or history. :meth:`start` runs first.
+
+        Raises ``RuntimeError`` during a run, and ``TypeError`` when
+        *approval* has no ``async def decide``.
+        """
+        if self._active_runs:
+            raise RuntimeError("Cannot run a tool while a run is active")
+        _check_approval(approval)
+        await self.start()
+        call = ToolCall(
+            tool_name=tool_name, arguments=dict(arguments), id=new_tool_call_id()
+        )
+        run = _RunState(task_id="", approval=approval)
+        result, _ = await self._do_execute(call, allowed=None, run=run)
+        return result
+
+    def conversation(self) -> list[Message]:
+        """A copy of the working-memory window, oldest message first."""
+        return copy.deepcopy(self.hippo.working.get_window())
+
+    def load_conversation(self, messages: Sequence[Message]) -> int:
+        """Replace the working-memory window with copies of *messages*.
+
+        Working memory and its reflection are cleared, then *messages* go
+        in by unit (see :func:`~localmelo.melo.memory.short.group_turns`):
+        an assistant message with tool calls together with tool messages
+        that answer each of its calls exactly once, an empty reply's label
+        together with the nudge after it, and each other user, assistant
+        or system message on its own. Any other unit, such as a tool call
+        with a result missing or extra, or a tool message without its call,
+        is dropped with a WARNING. Working memory evicts its oldest units
+        as usual. Returns the number of messages kept; ``[]`` clears the
+        conversation.
+
+        Raises ``RuntimeError`` during a run, and ``TypeError``, before
+        anything is cleared, for an item that is not a
+        :class:`~localmelo.melo.schema.Message`.
+        """
+        if self._active_runs:
+            raise RuntimeError("Cannot load a conversation while a run is active")
+        loaded = list(messages)
+        for msg in loaded:
+            if not isinstance(msg, Message):
+                raise TypeError(
+                    f"load_conversation takes Message objects, got {type(msg).__name__}"
+                )
+        working = self.hippo.working
+        working.clear_all()
+        for unit in group_turns(copy.deepcopy(loaded)):
+            head = unit[0]
+            if head.role == "assistant" and head.tool_calls:
+                if _answers_every_call(head, unit[1:]):
+                    working.append_turn(head, unit[1:])
+                    continue
+                reason = "a tool call whose results do not answer each call once"
+            elif len(unit) > 1:  # an empty reply's label and its nudge
+                working.append_turn(head, unit[1:])
+                continue
+            elif head.role in ("user", "assistant", "system"):
+                working.append(head)
+                continue
+            elif head.role == "tool":
+                reason = "a tool result without its call"
+            else:
+                reason = f"a message with the role {head.role!r}"
+            logger.warning(
+                "Dropped %d message(s) from the loaded conversation: %s",
+                len(unit),
+                reason,
+            )
+        return len(working.get_window())
 
     # ── Tool providers ──
 
@@ -1006,6 +1214,7 @@ class Agent:
                     timeout_ms=tool.timeout_ms,
                     requires_approval=tool.requires_approval,
                 )
+            self._provided_names = frozenset(tool.definition.name for tool in provided)
             self._tools_ready = True
 
     async def _start_provider(self, provider: BaseToolProvider) -> list[ProvidedTool]:
@@ -1268,12 +1477,13 @@ class Agent:
         return response, None
 
     async def _do_execute(
-        self, call: ToolCall, *, allowed: Collection[str], run: _RunState
+        self, call: ToolCall, *, allowed: Collection[str] | None, run: _RunState
     ) -> tuple[ToolResult, int]:
         """Stage 4: execute one tool call and validate the result.
 
         *allowed* holds the names of the tools offered in the planning
         call that produced *call*; the executor refuses any other tool.
+        ``None``, from :meth:`run_tool`, lets any registered tool run.
 
         Uses the sanitized payload from the executor-result checker
         when truncation or modification was applied; falls back to
@@ -1981,9 +2191,11 @@ class Agent:
           is abandoned (and counts in ``llm_errors``), a shell command is
           killed with every process it started, and tool providers still
           being set up are closed (so later runs end as ``setup_error``).
-          ``python_exec`` code is the exception: it runs on the event
-          loop, so neither ``timeout_s`` nor the executor's timeout can
-          interrupt it, and the run ends only once that code returns.
+          ``python_exec`` code without a ``workspace_root`` is the
+          exception: it runs on the event loop, so neither ``timeout_s``
+          nor the executor's timeout can interrupt it, and the run ends
+          only once that code returns. With a root it runs in a child
+          process, which is killed with every process it started.
           Closing the providers is not cut short, also when the deadline
           expires while a failed setup is closing them, so the run
           returns once they are closed, which can be after ``timeout_s``;
@@ -2014,6 +2226,10 @@ class Agent:
           ``CancelledError`` that something raises while nothing cancels
           the run is a crash.
 
+        With ``record_answers``, the run's answer is appended to working
+        memory once the run has ended, before it is saved (see
+        :meth:`_record_answer`), whatever the status.
+
         Whatever happens, the task record is saved with the status and
         ``result or error``, and the reflections are cleared (promoted
         to long-term memory first when ``memory`` is on); a failure while
@@ -2040,7 +2256,10 @@ class Agent:
         ``RunResult.config`` reports the effective configuration: the
         options, the registered built-ins (``builtins``), the resolved
         ``memory_dir`` and every tool registered once the tool providers
-        are set up (``tools``), with tool names sorted.
+        are set up (``tools``), with tool names sorted. It leaves out
+        ``workspace_root``, ``record_answers`` and ``tool_timeout_s``:
+        ``run.started`` and :attr:`workspace_root` give the root, and
+        ``options`` the others.
 
         *on_event*, when given, follows the run: it is called once per
         :class:`~localmelo.melo.contracts.events.AgentEvent`,
@@ -2155,6 +2374,7 @@ class Agent:
                     # Every path above ends the run; this keeps the record
                     # terminal should a later change miss one.
                     run.end("crashed", error="The run ended without a status")
+                self._record_answer(run)
                 if run.status == "cancelled":
                     # Only _on_cancelled ends a run so. Its finalizer saves the
                     # run and reports run.finished, in place of the lines below.
@@ -2189,6 +2409,40 @@ class Agent:
                 self._active_runs -= 1
             if retries is not None:
                 RETRY_HOOK.reset(retries)
+
+    def _record_answer(self, run: _RunState) -> None:
+        """Append the answer of *run*, which has ended, to working memory.
+
+        Only with ``record_answers``, and only when working memory holds
+        the run's query, so the roles still alternate. Synchronous, in
+        run_task's ``finally`` before every final save. The answer is one
+        assistant message without tool calls: the result without its
+        ``<think>`` block (see :func:`~localmelo.melo.schema.split_thinking`),
+        or a label when that leaves no text (see
+        :func:`~localmelo.melo.schema.answer_text`), cut to
+        ``SESSION_TEXT_CHARS`` characters (see
+        :func:`~localmelo.melo.schema.clip_session_text`). A text that the
+        memory-write check refuses is replaced by
+        :data:`~localmelo.melo.schema.ANSWER_NOT_KEPT_LABEL` with the
+        check's reason. The result itself is not changed. A failure is
+        logged, not raised, so it cannot replace the run's outcome or skip
+        the save.
+        """
+        if not self.options.record_answers or not run.query_in_memory:
+            return
+        try:
+            _, answer = split_thinking(run.result)
+            text = clip_session_text(answer_text(run.status, answer))
+            check = self.checker.check_memory_write(
+                MemoryWritePayload(text=text, role="assistant")
+            )
+            if not check.allowed:
+                text = ANSWER_NOT_KEPT_LABEL.format(reason=check.reason)
+            self.hippo.working.append(Message(role="assistant", content=text))
+        except Exception:
+            logger.exception(
+                "Could not keep the answer of task %s in working memory", run.task_id
+            )
 
     async def _finish_task(self, task: TaskRecord, run: _RunState) -> None:
         """Save *task* with the run's terminal status and clear reflections.

@@ -82,8 +82,33 @@ class AgentOptions:
     - ``timeout_s``: wall-clock bound for one run, in seconds; ``None``
       means no bound. A run still going when it expires is cancelled and
       ends with status ``timeout``, except while ``python_exec`` code
-      runs: that code runs on the agent's event loop and cannot be
-      interrupted, so the run ends only once the code returns.
+      runs without a ``workspace_root``: that code runs on the agent's
+      event loop and cannot be interrupted, so the run ends only once the
+      code returns. With a root it runs in a child process, which the
+      expiry kills.
+    - ``workspace_root``: the directory the built-in tools work in, or
+      ``None`` (the default) for none. The agent resolves it to its real
+      path (``~`` expanded) and raises ``ValueError`` when that is not a
+      directory. With a root, ``file_read`` and ``file_write`` resolve a
+      relative path against it and refuse a path whose real path is
+      outside it, a final symlink and anything but a regular file;
+      ``shell_exec`` and ``python_exec`` run in a child process that
+      starts in the root, but can still reach any path, so approval is
+      their control; a non-zero exit of ``shell_exec`` starts its text
+      with ``[exit code <n>]``. The planning prompt then names the root.
+      Without a root, the built-ins behave as before this option.
+    - ``record_answers``: ``True`` ends every run by appending its answer
+      to working memory as an assistant message, so the next run on the
+      agent sees it: the result without a ``<think>`` block (see
+      :func:`~localmelo.melo.schema.split_thinking`), or a label when
+      there is no answer (see :func:`~localmelo.melo.schema.answer_text`),
+      cut to ``SESSION_TEXT_CHARS`` characters. ``False``, the default,
+      keeps working memory without answers, as before this option.
+    - ``tool_timeout_s``: the time limit, in seconds, of the
+      ``shell_exec`` and ``python_exec`` that a ``workspace_root`` gives;
+      ``None`` keeps their defaults, 30 s for a shell command and the
+      executor's 60 s for Python. It needs a ``workspace_root``. The file
+      tools keep the executor's limit, and provided tools their own.
     """
 
     max_steps: int = MAX_AGENT_STEPS
@@ -96,6 +121,9 @@ class AgentOptions:
     memory: bool = True
     memory_dir: str | None = None
     timeout_s: float | None = None
+    workspace_root: str | None = None
+    record_answers: bool = False
+    tool_timeout_s: float | None = None
 
     def __post_init__(self) -> None:
         for name in ("max_steps", "steps_per_attempt", "max_attempts"):
@@ -131,6 +159,28 @@ class AgentOptions:
             raise ValueError(
                 f"timeout_s must be None or a finite number > 0, got {self.timeout_s!r}"
             )
+
+        if self.workspace_root is not None and (
+            not isinstance(self.workspace_root, str) or not self.workspace_root
+        ):
+            raise ValueError(
+                "workspace_root must be None or a non-empty str, "
+                f"got {self.workspace_root!r}"
+            )
+
+        if not isinstance(self.record_answers, bool):
+            raise ValueError(
+                f"record_answers must be a bool, got {self.record_answers!r}"
+            )
+
+        if self.tool_timeout_s is not None:
+            if not _is_positive_finite(self.tool_timeout_s):
+                raise ValueError(
+                    "tool_timeout_s must be None or a finite number > 0, "
+                    f"got {self.tool_timeout_s!r}"
+                )
+            if self.workspace_root is None:
+                raise ValueError("tool_timeout_s needs a workspace_root")
 
     @staticmethod
     def _checked_builtins(value: object) -> frozenset[str]:
