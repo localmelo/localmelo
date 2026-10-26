@@ -434,9 +434,12 @@ assistant Paris is the capital of France.
 
 - The answer is the run's `result` without its reasoning: the first
   `<think>…</think>` block, in any letter case, is left out, and so is the
-  rest of the text after a `<think>` at the start that is never closed.
-  Ollama, and OpenAI-compatible servers without a reasoning parser, put the
-  reasoning there. The `RunResult` keeps the whole text.
+  rest of the text after a `<think>` at the start that is never closed, or
+  the text before a `</think>` that has no `<think>` before it (templates
+  that open the block in the prompt, such as DeepSeek-R1's and Qwen3's
+  thinking models, leave only the closing tag). Ollama, and
+  OpenAI-compatible servers without a reasoning parser, put the reasoning
+  there. The `RunResult` keeps the whole text.
 - An answer longer than 8,000 characters is cut and ends with
   `... [<n> more characters not shown]`.
 - A run without an answer leaves a label instead:

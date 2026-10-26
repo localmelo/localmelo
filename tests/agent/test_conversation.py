@@ -420,8 +420,9 @@ class TestThinkingBlocks:
                 "<think>\nOnly thinking.\n</think>\n\n",
                 "[no answer: the run ended with status completed]",
             ),
+            ("I should greet.\n</think>\n\nHello.", "Hello."),
         ],
-        ids=["ollama_prefix", "upper_case", "unclosed", "only_a_block"],
+        ids=["ollama_prefix", "upper_case", "unclosed", "only_a_block", "bare_closing"],
     )
     @pytest.mark.asyncio
     async def test_the_kept_answer_leaves_the_block_out(
@@ -448,6 +449,10 @@ class TestThinkingBlocks:
             ),
             ("\n  <think>Cut off while", ("Cut off while", "")),
             ("Hello <think>never closed", ("", "Hello <think>never closed")),
+            # The template opened the block in the prompt: only </think> is left.
+            ("Greet first.\n</think>\n\nHello.", ("Greet first.", "Hello.")),
+            ("Greet.</THINK>Hello.", ("Greet.", "Hello.")),
+            ("Only thinking.</think>", ("Only thinking.", "")),
             ("<think></think>", ("", "")),
             ("", ("", "")),
         ],

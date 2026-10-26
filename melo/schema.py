@@ -100,6 +100,7 @@ def clip_session_text(text: str) -> str:
 
 _THINK_BLOCK = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 _THINK_OPENING = re.compile(r"\s*<think>", re.IGNORECASE)
+_THINK_CLOSING = re.compile(r"</think>", re.IGNORECASE)
 
 
 def split_thinking(text: str) -> tuple[str, str]:
@@ -110,6 +111,10 @@ def split_thinking(text: str) -> tuple[str, str]:
     - Otherwise a ``<think>`` at the start, after leading whitespace, that
       is never closed makes the rest of *text* the thinking, as when the
       output was cut off at the token limit while the model thought.
+    - Otherwise a ``</think>`` with no ``<think>`` before it makes the text
+      before it the thinking. Chat templates that open the block in the
+      prompt (DeepSeek-R1 and Qwen3 thinking models) leave only the closing
+      tag in the reply, and vLLM's R1 reasoning parser reads it the same way.
     - The rest, stripped, is the text. Without a block the result is
       ``("", text.strip())``.
 
@@ -124,6 +129,9 @@ def split_thinking(text: str) -> tuple[str, str]:
     opening = _THINK_OPENING.match(text)
     if opening is not None:
         return text[opening.end() :].strip(), ""
+    closing = _THINK_CLOSING.search(text)
+    if closing is not None:
+        return text[: closing.start()].strip(), text[closing.end() :].strip()
     return "", text.strip()
 
 
