@@ -5,12 +5,14 @@ import contextvars
 import json
 import logging
 import re
+import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
+    LLM_REQUEST_KIND,
     BaseLLMProvider,
     ProviderError,
 )
@@ -34,6 +36,34 @@ RETRY_DELAYS_S: tuple[float, ...] = (1.0, 4.0)
 RETRY_HOOK: contextvars.ContextVar[
     Callable[[int, float, ProviderError], None] | None
 ] = contextvars.ContextVar("RETRY_HOOK", default=None)
+
+
+class CallRecorder(Protocol):
+    """Keeps the model calls of a run (see :data:`CALL_RECORDER`)."""
+
+    async def record(
+        self,
+        kind: str,
+        response: Message,
+        *,
+        reasoning_key: str,
+        usage: Mapping[str, int] | None,
+        duration_s: float,
+        timestamp: float,
+    ) -> None:
+        """Keep *response*, the reply to a request of call kind *kind*."""
+
+    async def link_steps(self, step_ids: Sequence[str]) -> None:
+        """Tie the history steps *step_ids* to the latest planning reply."""
+
+
+# Hears of every response of a request that Chat sends, once it is counted.
+# A context variable, like RETRY_HOOK, so the recorder belongs to the task
+# that set it: Agent.run_task sets it for a run whose history keeps model
+# calls and resets it when the run ends.
+CALL_RECORDER: contextvars.ContextVar[CallRecorder | None] = contextvars.ContextVar(
+    "CALL_RECORDER", default=None
+)
 
 SYSTEM_PROMPT = (
     "You are a task-solving agent. You can use tools to accomplish tasks.\n"
@@ -277,7 +307,7 @@ class Chat:
         return self.stats
 
     async def _request(
-        self, messages: list[Message], tools: list[ToolDef] | None
+        self, messages: list[Message], tools: list[ToolDef] | None, *, kind: str = ""
     ) -> Message:
         """Send one request to the LLM and count it in :attr:`stats`.
 
@@ -294,8 +324,9 @@ class Chat:
         """
         attempt = 1
         while True:
+            sent = time.monotonic()
             try:
-                response = await self._send(messages, tools, attempt)
+                response = await self._send(messages, tools, attempt, kind)
                 break
             except ProviderError as exc:
                 self.stats.llm_errors += 1
@@ -317,22 +348,51 @@ class Chat:
                 raise
             await self.sleep(delay)
             attempt += 1
+        # Read right after the response arrived, with no await in between, so
+        # the values belong to this response.
+        duration_s = time.monotonic() - sent
+        timestamp = time.time()
+        reasoning_key = getattr(self.llm, "last_reasoning_key", "")
+        if not isinstance(reasoning_key, str):
+            reasoning_key = ""
+        full_usage = getattr(self.llm, "last_usage", None)
+        if not isinstance(full_usage, dict):
+            full_usage = None
         self.stats.n_llm += 1
         if tools:
             self.stats.n_main += 1
         else:
             self.stats.n_aux += 1
         self.stats.add_usage(response.usage)
+        recorder = CALL_RECORDER.get()
+        if recorder is not None:
+            await recorder.record(
+                kind,
+                response,
+                reasoning_key=reasoning_key,
+                usage=full_usage if full_usage is not None else response.usage,
+                duration_s=duration_s,
+                timestamp=timestamp,
+            )
         return response
 
     async def _send(
-        self, messages: list[Message], tools: list[ToolDef] | None, attempt: int
+        self,
+        messages: list[Message],
+        tools: list[ToolDef] | None,
+        attempt: int,
+        kind: str = "",
     ) -> Message:
-        """Send one attempt of a request, with *attempt* in LLM_REQUEST_ATTEMPT."""
+        """Send one attempt of a request, with *attempt* in LLM_REQUEST_ATTEMPT.
+
+        *kind* is in ``LLM_REQUEST_KIND`` meanwhile.
+        """
         token = LLM_REQUEST_ATTEMPT.set(attempt)
+        kind_token = LLM_REQUEST_KIND.set(kind)
         try:
             return await self.llm.chat(messages, tools=tools or None)
         finally:
+            LLM_REQUEST_KIND.reset(kind_token)
             LLM_REQUEST_ATTEMPT.reset(token)
 
     async def estimate_steps(self, query: str) -> int:
@@ -341,7 +401,7 @@ class Chat:
             Message(role="system", content=STEP_ESTIMATE_PROMPT),
             Message(role="user", content=query),
         ]
-        response = await self._request(messages, tools=None)
+        response = await self._request(messages, tools=None, kind="estimate")
         return _parse_step_estimate(response.content)
 
     async def plan_step(
@@ -365,7 +425,7 @@ class Chat:
             messages.append(Message(role="user", content=query))
         messages.extend(other_msgs)
 
-        return await self._request(messages, tools=tools)
+        return await self._request(messages, tools=tools, kind="plan")
 
     async def reflect(
         self,
@@ -436,4 +496,4 @@ class Chat:
         else:
             messages.extend(tail)
             messages.append(Message(role="user", content=request))
-        return await self._request(messages, tools=None)
+        return await self._request(messages, tools=None, kind="reflect")

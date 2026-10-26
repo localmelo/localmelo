@@ -1,10 +1,14 @@
-"""The per-run recorder of model calls, against a fake history (R1)."""
+"""The per-run recorder of model calls, against a fake history (R1).
+
+Also Chat's hook: every response of a request reaches the recorder.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import sqlite3
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -12,9 +16,11 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent._call_log import CallHistory, CallLog
+from localmelo.melo.agent._chat import CALL_RECORDER, Chat, RequestStats
+from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
 from localmelo.melo.memory.history import History
 from localmelo.melo.memory.history.sqlite import SqliteHistory
-from localmelo.melo.schema import LLMCallRecord, Message, ToolCall
+from localmelo.melo.schema import LLMCallRecord, Message, ToolCall, ToolDef
 
 LOGGER = "localmelo.melo.agent._call_log"
 KEY = "sk-" + "a" * 24
@@ -227,3 +233,129 @@ async def test_a_cancellation_propagates() -> None:
     history.record_error = KeyboardInterrupt()
     with pytest.raises(KeyboardInterrupt):
         await _record(log, "plan", _reply("a"))
+
+
+# ── Chat hands every response to the recorder ───────────────────────────────
+
+
+class KeyedLLM(BaseLLMProvider):
+    """Replies in turn; sets the provider attributes it is given per reply."""
+
+    def __init__(self, replies: list[tuple[Message | BaseException, Any, Any]]):
+        self.replies = list(replies)
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        reply, key, usage = self.replies.pop(0)
+        await asyncio.sleep(0)
+        if isinstance(reply, BaseException):
+            raise reply
+        self.last_reasoning_key = key
+        self.last_usage = usage
+        return reply
+
+    async def close(self) -> None:
+        pass
+
+
+class ListRecorder:
+    def __init__(self, stats: RequestStats | None = None) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self.stats = stats
+
+    async def record(
+        self,
+        kind: str,
+        response: Message,
+        *,
+        reasoning_key: str,
+        usage: Any,
+        duration_s: float,
+        timestamp: float,
+    ) -> None:
+        self.calls.append(
+            {
+                "kind": kind,
+                "response": response,
+                "reasoning_key": reasoning_key,
+                "usage": usage,
+                "duration_s": duration_s,
+                "timestamp": timestamp,
+                # The counters already count the response.
+                "n_llm": None if self.stats is None else self.stats.n_llm,
+            }
+        )
+
+    async def link_steps(self, step_ids: Sequence[str]) -> None:
+        pass
+
+
+async def test_chat_hands_each_response_to_the_recorder() -> None:
+    small = {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4}
+    full = {**small, "cached_tokens": 2}
+    plan = _reply("a", thinking="t", usage=small)
+    other = _reply("b", usage=small)
+    llm = KeyedLLM(
+        [
+            (plan, "reasoning_content", full),
+            # Attributes of the wrong type count as unset.
+            (other, 7, [("prompt_tokens", 1)]),
+        ]
+    )
+    chat = Chat(llm, sleep=_no_sleep)
+    recorder = ListRecorder(chat.stats)
+    token = CALL_RECORDER.set(recorder)
+    try:
+        before = time.time()
+        await chat._request(
+            [Message(role="user", content="q")], tools=None, kind="plan"
+        )
+        await chat._request([Message(role="user", content="q")], tools=None)
+    finally:
+        CALL_RECORDER.reset(token)
+    first, second = recorder.calls
+    assert (first["kind"], first["response"], first["reasoning_key"]) == (
+        "plan",
+        plan,
+        "reasoning_content",
+    )
+    assert first["usage"] == full
+    assert (second["kind"], second["reasoning_key"], second["usage"]) == ("", "", small)
+    assert (first["n_llm"], second["n_llm"]) == (1, 2)
+    assert first["timestamp"] >= before
+    assert 0 <= first["duration_s"] < 1
+    # RunResult's usage keeps the reply's own keys.
+    assert chat.stats.usage == {
+        "prompt_tokens": 6,
+        "completion_tokens": 2,
+        "total_tokens": 8,
+    }
+
+
+async def test_a_retried_request_is_recorded_once() -> None:
+    busy = ProviderError("HTTP 503: busy", status_code=503, retryable=True)
+    llm = KeyedLLM([(busy, "", None), (_reply("a"), "", None)])
+    chat = Chat(llm, sleep=_no_sleep)
+    recorder = ListRecorder()
+    token = CALL_RECORDER.set(recorder)
+    try:
+        await chat._request(
+            [Message(role="user", content="q")], tools=None, kind="plan"
+        )
+    finally:
+        CALL_RECORDER.reset(token)
+    assert [call["kind"] for call in recorder.calls] == ["plan"]
+    assert (chat.stats.n_llm, chat.stats.llm_errors) == (1, 1)
+
+
+async def test_no_recorder_records_nothing() -> None:
+    llm = KeyedLLM([(_reply("a"), "", None)])
+    chat = Chat(llm, sleep=_no_sleep)
+    assert CALL_RECORDER.get() is None
+    await chat._request([Message(role="user", content="q")], tools=None, kind="plan")
+    assert chat.stats.n_llm == 1
+
+
+async def _no_sleep(delay: float) -> None:
+    pass

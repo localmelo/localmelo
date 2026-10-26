@@ -373,9 +373,9 @@ class _Emitter:
                     "attempt": attempt,
                     "action": action,
                     "continue_run": continue_run,
-                    "rationale": rationale,
-                    "summary": summary,
-                    "best_effort_result": best_effort,
+                    "rationale": _redacted(rationale),
+                    "summary": _redacted(summary),
+                    "best_effort_result": _redacted(best_effort),
                     "requests": len(replies),
                     "readable": reflected is not None,
                     "usage": _usage(replies),
@@ -464,6 +464,11 @@ def _call_entry(call: ToolCall) -> dict[str, Any]:
         "arguments": call.arguments,
         "preview": call_preview(call.tool_name, call.arguments),
     }
+
+
+def _redacted(text: str | None) -> str | None:
+    """*text* through :func:`redact_secrets`; ``None`` stays ``None``."""
+    return None if text is None else redact_secrets(text)[0]
 
 
 def _image_entry(image: ImagePart) -> dict[str, Any]:

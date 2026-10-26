@@ -19,6 +19,8 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent import agent as agent_module
+from localmelo.melo.agent._call_log import CallLog
+from localmelo.melo.agent._chat import CALL_RECORDER, Chat
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.schema import Message, ToolDef
@@ -170,3 +172,29 @@ async def test_a_bad_retention_value_raises_before_the_directory_is_made(
     # Without persistence the variable is not read.
     agent = Agent(llm=FakeLLM())
     await agent.close()
+
+
+# ── Requests outside a run ──────────────────────────────────────────────────
+
+
+async def test_estimate_steps_with_a_recorder_set_by_hand(tmp_path: Path) -> None:
+    path = tmp_path / "history.db"
+    history = SqliteHistory(path)
+    chat = Chat(FakeLLM([Message(role="assistant", content="3", thinking="About 3.")]))
+    token = CALL_RECORDER.set(CallLog(history, "t1", _Counters()))
+    try:
+        assert await chat.estimate_steps("List the files.") == 3
+    finally:
+        CALL_RECORDER.reset(token)
+        await history.aclose()
+    with contextlib.closing(sqlite3.connect(path)) as connection:
+        rows = connection.execute(
+            "SELECT task_id, seq, kind, outcome, content, thinking, step, attempt "
+            "FROM llm_calls"
+        ).fetchall()
+    assert rows == [("t1", 0, "estimate", "aux", "3", "About 3.", 0, 0)]
+
+
+class _Counters:
+    steps = 0
+    attempts = 0
