@@ -79,6 +79,10 @@ DEFAULT_MODEL = "default"  # as melo's --chat-model and --embedding-model
 # The providers' HTTP timeout: their own default, or more, so that it never
 # cuts a retrieval request before --retrieval-timeout does.
 MIN_HTTP_TIMEOUT_S = 120.0
+# The temperature of an llm retrieval request unless --retrieval-extra-body sets
+# one. Picking ids is a choice, not writing, and a fixed choice makes runs
+# repeatable; a server's own default may be 1.0.
+RETRIEVAL_TEMPERATURE = 0
 
 HISTORY_FILE = "history.db"
 
@@ -362,7 +366,10 @@ class _Evaluation:
 
 def _evaluate(args: argparse.Namespace) -> int:
     chat_model = args.chat_model or DEFAULT_MODEL
-    extra_body = _extra_body(args.retrieval_extra_body)
+    extra_body = {
+        "temperature": RETRIEVAL_TEMPERATURE,
+        **_extra_body(args.retrieval_extra_body),
+    }
     corpus = _load(args.corpus, load_corpus)
     queries = _load(args.queries, lambda lines: load_queries(lines, corpus))
     if not queries:

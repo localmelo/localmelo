@@ -634,6 +634,17 @@ def test_repeat_0_leaves_the_warm_figures_null(
     )
 
 
+def test_the_extra_body_can_set_the_temperature(
+    server: ModelServer, capsys: pytest.CaptureFixture[str]
+) -> None:
+    argv = ["--retriever", "llm", *FILES, "--base-url", server.base_url]
+    argv += ["--retrieval-extra-body", '{"temperature": 0.7}', "--repeat", "0"]
+    assert main(argv) == 0
+    capsys.readouterr()
+    temperatures = {r.body["temperature"] for r in server.chat_requests()}
+    assert temperatures == {0.7}
+
+
 def test_llm_against_the_test_server(
     server: ModelServer, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -674,6 +685,7 @@ def test_llm_against_the_test_server(
             assert "tools" not in request.body and "tool_choice" not in request.body
             assert len(request.body["messages"]) == 2
             assert request.body["chat_template_kwargs"] == {"enable_thinking": False}
+            assert request.body["temperature"] == 0
             assert request.body["model"] == "stub-model"
         else:
             # As the file has it, model replaced, stream false, no extra body.

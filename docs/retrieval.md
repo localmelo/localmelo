@@ -137,7 +137,7 @@ melo-retrieve --export-run DIR|FILE
 | `--interleave REQUEST.json` | not set | Send this chat request before each interleaved call; see [Interleave request](#interleave-request). |
 | `--base-url URL` | not set | The OpenAI-compatible chat server, for `llm` and `--interleave`. |
 | `--chat-model NAME` | `default` | The model to request from `--base-url`. |
-| `--retrieval-extra-body JSON` | not set | A JSON object of fields to add to every `llm` retrieval request. |
+| `--retrieval-extra-body JSON` | not set | A JSON object of fields to add to every `llm` retrieval request. Its `temperature`, if any, replaces the default 0. |
 | `--embedding-base-url URL` | not set | The OpenAI-compatible embedding server, for `embedding`. |
 | `--embedding-model NAME` | `default` | The model to request from `--embedding-base-url`. |
 | `--export-run DIR\|FILE` | not set | Print a run's model calls as corpus lines; see [Export a run](#export-a-run). |
@@ -514,7 +514,9 @@ is depends on those documents alone. Then:
 
 **`llm`** sends one chat request without tools: a fixed system prompt, then
 a catalog of the documents, the aliases not to return, the query, and how
-many ids to return.
+many ids to return. `melo-retrieve` sends it with `temperature` 0, so the
+same model and files give the same picks; `--retrieval-extra-body` can set
+another.
 
 - Each catalog line reads `[<alias>] <label> · step <n> · <title>`, as in
   `[n1] note · step 1 · Find the stubs`. The alias is a letter for the kind
