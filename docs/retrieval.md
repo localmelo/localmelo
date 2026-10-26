@@ -234,7 +234,8 @@ One query per line, the input of `--queries`:
 
 In `relevant`, `grades` and `exclude_ids`, an id without `:` is short for
 `<task_id>:<id>`, with the `task_id` of the scope; without one, it is an
-error. Every relevant id must be in the corpus, and in the query's scope.
+error. Every relevant id must be in the corpus and in the query's scope, and
+none may be in `exclude_ids`.
 
 ### Raw calls
 

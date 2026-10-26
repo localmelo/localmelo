@@ -597,6 +597,11 @@ def _query(**fields: Any) -> dict[str, Any]:
             "relevant id 't:n2' is not a candidate of the query: its step 2 is not "
             "before 2",
         ),
+        # An excluded doc can never be returned, so it is never a target.
+        (
+            _query(scope={"task_id": "t", "exclude_ids": ["n1"]}, relevant=["n1"]),
+            "relevant id 't:n1' is also in scope.exclude_ids",
+        ),
     ],
 )
 def test_query_errors_name_the_line(row: dict[str, Any], message: str) -> None:

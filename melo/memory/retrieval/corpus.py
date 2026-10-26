@@ -170,8 +170,9 @@ def load_queries(lines: Iterable[str], corpus: Sequence[Doc]) -> list[LabelledQu
     is short for ``<scope.task_id>:<id>``, and an error without a
     ``task_id``. Every relevant id must be in *corpus* and a candidate of
     its query (see
-    :meth:`~localmelo.melo.memory.retrieval.evaluate.LabelledQuery.candidates`).
-    A relevant id given twice counts once.
+    :meth:`~localmelo.melo.memory.retrieval.evaluate.LabelledQuery.candidates`),
+    and none may be in ``exclude_ids``. A relevant id given twice counts
+    once.
     """
     docs = {doc.doc_id: doc for doc in corpus}
     queries: list[LabelledQuery] = []
@@ -862,6 +863,10 @@ def _labelled_query(
 
     relevant = list(dict.fromkeys(full(doc_id, "relevant") for doc_id in relevant_ids))
     excluded = frozenset(full(doc_id, "exclude_ids") for doc_id in exclude_ids)
+    # An excluded doc can never be returned, so it cannot also be a target.
+    both = [doc_id for doc_id in relevant if doc_id in excluded]
+    if both:
+        raise CorpusError(f"relevant id {both[0]!r} is also in scope.exclude_ids")
     graded: dict[str, int] = {}
     for key, value in grades.items():
         doc_id = full(key, "grades")
