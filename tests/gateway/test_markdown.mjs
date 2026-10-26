@@ -97,6 +97,21 @@ test('emphasis openers that never close render in linear time', () => {
   }
 });
 
+test('long delimiter runs and spaced delimiters before a closer render in linear time', () => {
+  for (const source of [
+    'a' + '*'.repeat(40000),
+    'a' + '_'.repeat(40000),
+    'Answer: ' + '_'.repeat(40000),
+    'a * b '.repeat(14000) + 'c*d',
+    'a _ b '.repeat(14000) + 'c_d',
+  ]) {
+    const started = performance.now();
+    const result = renderMarkdown(source);
+    assert.ok(performance.now() - started < 1000, source.slice(0, 20));
+    assert.equal(result, '<p>' + source + '</p>');
+  }
+});
+
 test('normal paragraphs preserve soft breaks and CRLF input', () => {
   assert.equal(renderMarkdown('first\r\nsecond\r\n\r\nthird'), '<p>first<br>\nsecond</p><p>third</p>');
   assert.equal(renderMarkdown(''), '');

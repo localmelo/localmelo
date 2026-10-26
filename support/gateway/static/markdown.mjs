@@ -53,12 +53,15 @@ function closingDelimiter(text, delimiter, start) {
  * character preceded by whitespace opens nested emphasis; a later run first closes those
  * nested openers, and only what is left of it can close this one.
  *
- * `blockers` caches, per delimiter, the table from emphasisBlockers for this `text`, so an
- * opener without a closer returns at once instead of scanning to the end of the paragraph.
+ * `tables` caches the tables built for this `text`: per delimiter character, the run ends
+ * from delimiterRunEnds, so a long run of the character is crossed in one step; per
+ * delimiter, the table from emphasisBlockers, so an opener without a closer returns at once
+ * instead of scanning to the end of the paragraph.
  */
-function closingEmphasis(text, delimiter, start, blockers) {
+function closingEmphasis(text, delimiter, start, tables) {
   const character = delimiter[0];
-  const blocked = (blockers[delimiter] ??= emphasisBlockers(text, delimiter));
+  const runEnds = (tables.runEnds[character] ??= delimiterRunEnds(text, character));
+  const blocked = (tables.blockers[delimiter] ??= emphasisBlockers(text, delimiter, runEnds));
   let nested = 0;
   for (let position = start; position < text.length; position++) {
     if (position > start && nested >= blocked[position]) return -1;
@@ -74,8 +77,7 @@ function closingEmphasis(text, delimiter, start, blockers) {
       }
     }
     if (text[position] !== character) continue;
-    let runEnd = position;
-    while (text[runEnd] === character) runEnd++;
+    const runEnd = runEnds[position];
     if (position > start && !/\s/.test(text[position - 1])) {
       const closed = Math.min(nested, runEnd - position);
       nested -= closed;
@@ -93,7 +95,7 @@ function closingEmphasis(text, delimiter, start, blockers) {
  * on from that position, finds no closer. It is built once per text and delimiter, from the
  * end, and follows closingEmphasis's steps for a position after `start`.
  */
-function emphasisBlockers(text, delimiter) {
+function emphasisBlockers(text, delimiter, runEnds) {
   const character = delimiter[0];
   const blocked = new Array(text.length + 2).fill(0);
   for (let position = text.length - 1; position >= 0; position--) {
@@ -103,8 +105,7 @@ function emphasisBlockers(text, delimiter) {
       const code = codeSpanAt(text, position);
       if (code) next = code.end;
     } else if (text[position] === character) {
-      let runEnd = position;
-      while (text[runEnd] === character) runEnd++;
+      const runEnd = runEnds[position];
       const run = runEnd - position;
       const after = blocked[runEnd];
       if (!/\s/.test(text[position - 1])) {
@@ -118,6 +119,16 @@ function emphasisBlockers(text, delimiter) {
     blocked[position] = blocked[next];
   }
   return blocked;
+}
+
+/** For each position, where the run of `character` from it ends (itself when it is another). */
+function delimiterRunEnds(text, character) {
+  const ends = new Array(text.length + 1);
+  ends[text.length] = text.length;
+  for (let position = text.length - 1; position >= 0; position--) {
+    ends[position] = text[position] === character ? ends[position + 1] : position;
+  }
+  return ends;
 }
 
 const BARE_URL = /https?:\/\/[^\s<>"'`]+/iy;
@@ -194,7 +205,7 @@ function linkAt(text, start) {
 
 function inline(text, depth = 0, allowLinks = true) {
   if (depth > 20) return escapeHtml(text);
-  const blockers = {};
+  const tables = { runEnds: {}, blockers: {} };
   let html = "";
   for (let index = 0; index < text.length; ) {
     const character = text[index];
@@ -235,14 +246,12 @@ function inline(text, depth = 0, allowLinks = true) {
     }
     if (character === "*" || character === "_") {
       const delimiter = text[index + 1] === character ? character.repeat(2) : character;
-      const end = closingEmphasis(text, delimiter, index + delimiter.length, blockers);
+      // An opener followed by whitespace never opens, so it needs no search for a closer;
+      // otherwise each spaced "*" before a real closer would scan all the way to it.
+      const opens = !/\s/.test(text[index + delimiter.length]);
+      const end = opens ? closingEmphasis(text, delimiter, index + delimiter.length, tables) : -1;
       const intraword = character === "_" && /[\p{L}\p{N}]/u.test(text[index - 1] || "");
-      if (
-        !intraword &&
-        end > index + delimiter.length &&
-        !/\s/.test(text[index + delimiter.length]) &&
-        !/\s/.test(text[end - 1])
-      ) {
+      if (opens && !intraword && end > index + delimiter.length && !/\s/.test(text[end - 1])) {
         const tag = delimiter.length === 2 ? "strong" : "em";
         html +=
           "<" +
