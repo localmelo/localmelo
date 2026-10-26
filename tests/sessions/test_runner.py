@@ -138,12 +138,18 @@ async def test_replace_agent_is_refused_during_a_turn_and_keeps_the_policy(
     s = await setup(tmp_path)
     await s.runner.start_turn("wait")
     await s.llm.blocked.wait()
-    other = await started_agent(tmp_path / "ws2", ScriptedLLM())
+    other_llm = ScriptedLLM([answer("from the new agent")])
+    other = await started_agent(tmp_path / "ws2", other_llm)
     with pytest.raises(SessionBusyError, match="is already running a turn"):
         s.runner.replace_agent(other)
     s.runner.cancel()
     await s.runner.wait()
     s.runner.replace_agent(other)
+    # The runner stays: the next turn runs on the new Agent, in the same
+    # session (observe_stores_the_request_and_the_answer checks the policy).
+    result = await s.runner.run_turn("next")
+    assert result.result == "from the new agent"
+    assert [t.turn for t in await s.store.list_turns(s.runner.session_id)] == [1, 2]  # type: ignore[arg-type]
     await other.close()
     await s.aclose()
 
@@ -202,7 +208,10 @@ async def test_a_slow_on_event_is_cut_off_and_a_raising_one_logged(
 
     s.runner._on_event = slow
     caplog.set_level(logging.WARNING, logger="localmelo.support.sessions.runner")
+    loop = asyncio.get_running_loop()
+    began = loop.time()
     result = await asyncio.wait_for(s.runner.run_turn("hi"), timeout=5)
+    assert loop.time() - began < 1.0  # cut at SINK_TIMEOUT_S, not after 10 s
     assert result.status == "completed"
     assert "run.finished" in calls and "turn.finished" not in calls  # it is the store's
     messages = [r.getMessage() for r in caplog.records]
@@ -260,11 +269,18 @@ async def test_a_think_block_stays_in_the_row_and_leaves_the_window(
     assert turn.answer == reply  # until retention clears it
     live = [(m.role, m.content) for m in s.agent.conversation()]
     assert live == [("user", "Capital of France?"), ("assistant", "Paris.")]
-    other = await started_agent(tmp_path / "ws2", ScriptedLLM())
-    resumed = SessionRunner(other, s.store, turn.session_id)
-    assert await resumed.resume() == 1
-    assert [(m.role, m.content) for m in other.conversation()] == live
-    await other.close()
+    window = await s.store.get_window(turn.session_id)
+    assert window is not None
+    decoded = decode_window(window.data)
+    assert decoded is not None and decoded[-1].content == "Paris."
+    for mode in ("pairs", "window"):
+        other = await started_agent(tmp_path / "ws2", ScriptedLLM())
+        resumed = SessionRunner(other, s.store, turn.session_id, resume_mode=mode)  # type: ignore[arg-type]
+        assert await resumed.resume() == 1
+        assert resumed.last_resume is not None
+        assert resumed.last_resume.mode == mode
+        assert [(m.role, m.content) for m in other.conversation()] == live
+        await other.close()
     await s.aclose()
 
 
@@ -304,7 +320,10 @@ async def test_cancel_records_user_stop(tmp_path: Path) -> None:
     turn = await last_turn(s)
     assert (turn.status, turn.cause) == ("cancelled", "user_stop")
     # The window is closed and protocol-valid, and ends in INTERRUPT_LABEL.
-    assert s.agent.conversation()[-1].content == INTERRUPT_LABEL
+    window = s.agent.conversation()
+    assert window[-1].content == INTERRUPT_LABEL
+    roles = [m.role for m in window]
+    assert roles == ["user", "assistant"]  # the query, then the label
     check_invariants(s.path, "gateway")
     await s.aclose()
 
@@ -428,7 +447,199 @@ async def test_run_turn_returns_the_cancelled_result_and_is_no_longer_cancelling
     s.runner.cancel()
     result = await task
     assert result.status == "cancelled" and after == [0]
+    # The very RunResult of run.finished.
+    finished = [e for e in await stored_events(s) if e.event["type"] == "run.finished"]
+    assert result.to_dict() == finished[-1].event["data"]["result"]
     await s.aclose()
+
+
+async def test_a_stop_then_the_callers_timeout_gives_the_caller_its_timeout_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = await setup(tmp_path)
+    gate = asyncio.Event()
+    original = Agent._save_final_state
+
+    async def slow_save(self: Agent, task: Any) -> None:
+        await gate.wait()
+        await original(self, task)
+
+    monkeypatch.setattr(Agent, "_save_final_state", slow_save)
+    scopes: list[asyncio.Timeout] = []
+    after: list[int] = []
+
+    async def caller() -> None:
+        try:
+            async with asyncio.timeout(None) as scope:
+                scopes.append(scope)
+                await s.runner.run_turn("wait")
+        except TimeoutError:
+            current = asyncio.current_task()
+            assert current is not None
+            after.append(current.cancelling())
+            raise
+
+    task = asyncio.create_task(caller())
+    await s.llm.blocked.wait()
+    assert s.runner.cancel("Stopped by you")
+    await asyncio.sleep(0.05)  # the finalizer now waits in its save
+    scopes[0].reschedule(asyncio.get_running_loop().time())
+    await asyncio.sleep(0.1)  # the caller's deadline expires meanwhile
+    gate.set()
+    with pytest.raises(TimeoutError):
+        await task
+    assert after == [0]
+    turn = await last_turn(s)
+    assert (turn.status, turn.cause) == ("cancelled", "user_stop")
+    await s.aclose()
+
+
+async def test_a_callers_timeout_while_step_7_stores_the_end_raises_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = await setup(tmp_path)
+    reached, gate = asyncio.Event(), asyncio.Event()
+    original = SessionStore.finish_turn
+
+    async def slow_finish(self: SessionStore, *args: Any, **kwargs: Any) -> TurnInfo:
+        reached.set()
+        await gate.wait()
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(SessionStore, "finish_turn", slow_finish)
+    scopes: list[asyncio.Timeout] = []
+    after: list[int] = []
+
+    async def caller() -> None:
+        try:
+            async with asyncio.timeout(None) as scope:
+                scopes.append(scope)
+                await s.runner.run_turn("wait")
+        except TimeoutError:
+            current = asyncio.current_task()
+            assert current is not None
+            after.append(current.cancelling())
+            raise
+
+    task = asyncio.create_task(caller())
+    await s.llm.blocked.wait()
+    assert s.runner.cancel("Stopped by you")
+    await reached.wait()  # step 7 waits in finish_turn
+    scopes[0].reschedule(asyncio.get_running_loop().time())
+    with pytest.raises(TimeoutError):
+        await task  # at once, while the end is still being stored
+    assert after == [0] and s.runner.busy
+    gate.set()
+    result = await s.runner.wait()  # step 7 went on alone
+    assert result is not None and result.status == "cancelled"
+    turn = await last_turn(s)
+    assert (turn.status, turn.cause) == ("cancelled", "user_stop")
+    await s.aclose()
+
+
+async def test_a_stop_right_after_begin_turn_returns_a_cancelled_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = await setup(tmp_path, [answer("the second answer")])
+    original = SessionRunner._begin_turn
+
+    async def begin_then_stop(self: SessionRunner, *args: Any) -> Any:
+        turn = await original(self, *args)
+        if turn.turn.turn == 1:  # committed; run_turn's caller has not resumed
+            assert self.cancel("Stopped at once")
+        return turn
+
+    monkeypatch.setattr(SessionRunner, "_begin_turn", begin_then_stop)
+    after: list[int] = []
+
+    async def caller() -> tuple[RunResult, RunResult]:
+        first = await s.runner.run_turn("first")
+        current = asyncio.current_task()
+        assert current is not None
+        after.append(current.cancelling())
+        second = await s.runner.run_turn("second")
+        after.append(current.cancelling())
+        return first, second
+
+    first, second = await asyncio.create_task(caller())
+    assert (first.status, first.error) == ("cancelled", "Stopped at once")
+    assert second.status == "completed" and after == [0, 0]
+    turns = await s.store.list_turns(s.runner.session_id)  # type: ignore[arg-type]
+    assert [(t.status, t.cause) for t in turns] == [
+        ("cancelled", "user_stop"),
+        ("completed", "run"),
+    ]
+    assert len(s.llm.requests) == 1  # the first turn never ran
+    check_invariants(s.path, "gateway")
+    await s.aclose()
+
+
+async def test_close_while_run_turn_begins_returns_a_cancelled_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = await setup(tmp_path)
+    gate = asyncio.Event()
+    original = SessionStore.begin_turn
+
+    async def slow_begin(self: SessionStore, *args: Any, **kwargs: Any) -> TurnInfo:
+        await gate.wait()
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(SessionStore, "begin_turn", slow_begin)
+    after: list[int] = []
+
+    async def caller() -> RunResult:
+        result = await s.runner.run_turn("never runs")
+        current = asyncio.current_task()
+        assert current is not None
+        after.append(current.cancelling())
+        return result
+
+    running = asyncio.create_task(caller())
+    await asyncio.sleep(0.05)
+    closing = asyncio.create_task(s.runner.close())
+    await asyncio.sleep(0.05)
+    gate.set()
+    result = await running  # nothing outside the runner cancelled this task
+    await closing
+    assert (result.status, result.error) == ("cancelled", "Session closed")
+    assert after == [0]
+    stored = await last_turn(s)
+    assert (stored.status, stored.cause) == ("cancelled", "closed")
+    assert s.llm.requests == []
+    await s.agent.close()
+    await s.store.aclose()
+
+
+async def test_a_cancelled_error_from_the_model_client_is_a_crash(
+    tmp_path: Path,
+) -> None:
+    class Spurious(ScriptedLLM):
+        async def chat(self, messages: Any, tools: Any = None) -> Any:
+            raise asyncio.CancelledError  # while nothing cancels the task
+
+    path = tmp_path / "s.db"
+    store = SessionStore(path, writer="gateway")
+    agent = await started_agent(tmp_path / "ws", Spurious())
+    runner = SessionRunner(agent, store, None, new_session=NewSession())
+    after: list[int] = []
+
+    async def caller() -> RunResult:
+        result = await runner.run_turn("hi")
+        current = asyncio.current_task()
+        assert current is not None
+        after.append(current.cancelling())
+        return result
+
+    result = await asyncio.create_task(caller())
+    assert result.status == "crashed" and after == [0]
+    await runner.start_turn("again")
+    waited = await runner.wait()
+    assert waited is not None and waited.status == "crashed"
+    turns = await store.list_turns(runner.session_id)  # type: ignore[arg-type]
+    assert [(t.status, t.cause) for t in turns] == [("crashed", "run")] * 2
+    await agent.close()
+    await store.aclose()
 
 
 # ── Cancellation ────────────────────────────────────────────────────────────
@@ -499,6 +710,8 @@ async def test_resume_right_after_a_cancel(tmp_path: Path) -> None:
     task = asyncio.create_task(s.runner.run_turn("wait"))
     await s.llm.blocked.wait()
     s.runner.cancel()
+    with pytest.raises(SessionBusyError):  # the turn still ends: never RuntimeError
+        await s.runner.resume()
     await task
     assert await s.runner.resume() == 1
     assert s.agent.conversation()[-1].content == INTERRUPT_LABEL
@@ -571,6 +784,9 @@ async def test_a_turn_cancelled_before_its_task_ran_still_ends(
     gate.set()
     turn = await starting
     await closing
+    waited = await s.runner.wait()  # what run_turn would return
+    assert waited is not None
+    assert (waited.status, waited.error) == ("cancelled", "Session closed")
     stored = (await s.store.list_turns(turn.session_id))[-1]
     assert (stored.status, stored.cause) == ("cancelled", "closed")
     assert stored.answer == INTERRUPT_LABEL and stored.result is None
@@ -630,6 +846,29 @@ async def test_a_takeover_ends_the_old_turn_once_and_leaves_the_new_lease(
     await s.aclose()
 
 
+async def test_the_lease_task_keeps_a_turn_live_while_its_run_waits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner_mod, "_LEASE_REFRESH_S", 0.02)
+    clock = Clock()
+    s = await setup(tmp_path, writer="cli", clock=clock)
+    s.runner._holder = "otherhost:4242:aaaaaaaa"  # its lease_until decides
+    turn = await s.runner.start_turn("wait")
+    await s.llm.blocked.wait()  # the run waits for the model, for ever
+    other = SessionStore(s.path, writer="cli", clock=clock)
+    for _ in range(9):  # 3 × LEASE_S on the clock
+        clock.advance(LEASE_S / 3)
+        await asyncio.sleep(0.06)  # the lease task's ticks
+        info = await other.get_session(turn.session_id)
+        assert info is not None and info.busy
+        assert await other.recover_stale_turns() == 0
+    assert s.runner.busy
+    s.runner.cancel()
+    await s.runner.wait()
+    await other.aclose()
+    await s.aclose()
+
+
 async def test_a_failing_refresh_cancels_nothing_and_a_recovery_does(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -681,13 +920,16 @@ async def test_a_repeated_key_returns_the_stored_turn_and_starts_nothing(
     with pytest.raises(SubmissionRepeated) as repeated:
         await s.runner.start_turn("hello", client_request_id="k1")
     assert repeated.value.turn.id == first.id
+    await asyncio.sleep(0.05)  # time for a task the repeat might have started
     assert len(s.llm.requests) == 1
+    assert s.runner.current_turn == first
+    assert rows(s.path, "SELECT COUNT(*) FROM turns") == [(1,)]
     calls: list[Any] = []
-    monkeypatch.setattr(SessionStore, "begin_turn", lambda *a, **k: calls.append(a))
-    with pytest.raises(SubmissionConflict):
-        await s.runner.start_turn("other text", client_request_id="k1")
-    assert calls == []  # refused at step 0, before begin_turn
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "begin_turn", lambda *a, **k: calls.append(a))
+        with pytest.raises(SubmissionConflict):
+            await s.runner.start_turn("other text", client_request_id="k1")
+        assert calls == []  # refused at step 0, before begin_turn
     assert (
         "client_request_id" not in inspect.signature(SessionRunner.run_turn).parameters
     )
@@ -695,6 +937,67 @@ async def test_a_repeated_key_returns_the_stored_turn_and_starts_nothing(
     await s.runner.wait()
     with pytest.raises(SubmissionRepeated):  # also once the turn has ended
         await s.runner.start_turn("hello", client_request_id="k1")
+    await asyncio.sleep(0.05)
+    assert not s.runner.busy and len(s.llm.requests) == 1
+    await s.aclose()
+
+
+async def test_a_repeat_while_its_own_turn_begins_gets_that_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = await setup(tmp_path)
+    gate = asyncio.Event()
+    original = SessionStore.begin_turn
+
+    async def slow_begin(self: SessionStore, *args: Any, **kwargs: Any) -> TurnInfo:
+        await gate.wait()
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(SessionStore, "begin_turn", slow_begin)
+    first = asyncio.create_task(s.runner.start_turn("hello", client_request_id="k1"))
+    await asyncio.sleep(0.05)
+    # The repeat finds no submission yet: the first begin_turn still runs.
+    second = asyncio.create_task(s.runner.start_turn("hello", client_request_id="k1"))
+    await asyncio.sleep(0.05)
+    gate.set()
+    turn = await first
+    with pytest.raises(SubmissionRepeated) as repeated:
+        await second
+    assert repeated.value.turn.id == turn.id
+    assert rows(s.path, "SELECT COUNT(*) FROM turns") == [(1,)]
+    await s.llm.blocked.wait()
+    s.runner.cancel()
+    await s.runner.wait()
+    await s.aclose()
+
+
+async def test_a_first_turn_refused_as_busy_leaves_no_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = await setup(tmp_path)
+    await s.store.open()
+    gate = asyncio.Event()
+    original = SessionStore.begin_turn
+
+    async def slow_begin(self: SessionStore, *args: Any, **kwargs: Any) -> TurnInfo:
+        await gate.wait()
+        return await original(self, *args, **kwargs)
+
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "begin_turn", slow_begin)
+        first = asyncio.create_task(s.runner.start_turn("one"))
+        await asyncio.sleep(0.05)
+        with pytest.raises(SessionBusyError, match="is already running a turn"):
+            await s.runner.start_turn("two")
+        assert s.runner.session_id is None
+        assert rows(s.path, "SELECT COUNT(*) FROM sessions") == [(0,)]
+        gate.set()
+        turn = await first
+    assert rows(s.path, "SELECT COUNT(*) FROM sessions") == [(1,)]
+    assert s.runner.session_id == turn.session_id
+    await s.llm.blocked.wait()
+    s.runner.cancel()
+    await s.runner.wait()
     await s.aclose()
 
 
@@ -733,8 +1036,12 @@ async def test_observe_stores_the_request_and_the_answer(tmp_path: Path) -> None
         ],
     )
     seen_before_answer: list[list[str]] = []
+    waiting = asyncio.Event()
 
     async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        if seen_before_answer:  # the second request waits for ever
+            waiting.set()
+            await asyncio.Event().wait()
         assert s.runner.session_id is not None
         await s.runner.flush()  # what a client sees once this task yields
         stored = await s.store.list_events(s.runner.session_id)
@@ -751,20 +1058,13 @@ async def test_observe_stores_the_request_and_the_answer(tmp_path: Path) -> None
         e.event["data"] for e in events if e.event["type"] == "approval.resolved"
     ]
     assert resolved[0]["outcome"] == "allowed" and resolved[0]["origin"] == "user"
-    # After replace_agent the same policy still stores them; a cancel withdraws.
+    # After replace_agent the same policy, unchanged, still stores them; a
+    # cancel withdraws.
     other_llm = ScriptedLLM(
         [tool_call("file_write", {"path": "c.txt", "content": "z"})]
     )
     other = await started_agent(tmp_path / "ws", other_llm)
     s.runner.replace_agent(other)
-    waiting = asyncio.Event()
-
-    async def ask_forever(request: ApprovalRequest) -> ApprovalDecision:
-        waiting.set()
-        await asyncio.Event().wait()
-        raise AssertionError("not reached")
-
-    policy._ask = s.runner.observe(ask_forever)
     task = asyncio.create_task(s.runner.run_turn("write more", approval=policy))
     await waiting.wait()
     s.runner.cancel()
@@ -905,13 +1205,17 @@ async def test_a_gateway_finish_is_tried_once_more_then_left_running(
         calls += 1
         raise sqlite3.OperationalError("disk I/O error")
 
-    monkeypatch.setattr(SessionStore, "finish_turn", failing)
-    loop = asyncio.get_running_loop()
-    began = loop.time()
-    assert (await s.runner.run_turn("hi")).status == "completed"
-    assert calls == 2 and loop.time() - began >= 1.0
-    assert (await last_turn(s)).status == "running"
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "finish_turn", failing)
+        loop = asyncio.get_running_loop()
+        began = loop.time()
+        assert (await s.runner.run_turn("hi")).status == "completed"
+        assert calls == 2 and loop.time() - began >= 1.0
+        assert (await last_turn(s)).status == "running"
+        # No later try in the gateway's file: the next process's open ends it.
+        with pytest.raises(SessionBusyError):
+            await s.runner.run_turn("next")
+        assert calls == 2
     await s.aclose()
 
 
@@ -920,29 +1224,92 @@ async def test_a_cli_finish_is_retried_unless_closing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, closing: bool
 ) -> None:
     assert CLI_FINISH_RETRY_DELAYS_S == (0.5, 1.0, 2.0)
-    monkeypatch.setattr(runner_mod, "CLI_FINISH_RETRY_DELAYS_S", (0.01, 0.01, 0.01))
+    delays = (0.05, 0.1, 0.2)  # shorter, and each one its own
+    monkeypatch.setattr(runner_mod, "CLI_FINISH_RETRY_DELAYS_S", delays)
     s = await setup(tmp_path, [] if closing else [answer("done")], writer="cli")
     calls = 0
+    times: list[float] = []
 
     async def failing(self: SessionStore, *args: Any, **kwargs: Any) -> TurnInfo:
         nonlocal calls
         calls += 1
+        times.append(asyncio.get_running_loop().time())
+        raise sqlite3.OperationalError("database is locked")
+
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "finish_turn", failing)
+        if closing:
+            await s.runner.start_turn("wait")
+            await s.llm.blocked.wait()
+            await s.runner.close()
+            assert calls == 1  # one try, so the close keeps its bound
+        else:
+            await s.runner.run_turn("hi")
+            assert calls == 4
+            gaps = [
+                later - earlier
+                for earlier, later in zip(times, times[1:], strict=False)
+            ]
+            assert all(gap >= delay for gap, delay in zip(gaps, delays, strict=True))
+        # The turn is left to the lease rule.
+        assert (await last_turn(s)).status == "running"
+    await s.agent.close()
+    await s.store.aclose()
+
+
+async def test_an_unrecorded_cli_end_is_retried_before_the_next_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runner_mod, "CLI_FINISH_RETRY_DELAYS_S", (0.01, 0.01, 0.01))
+    s = await setup(tmp_path, [answer("one"), answer("two")], writer="cli")
+    original = SessionStore.finish_turn
+
+    async def failing(self: SessionStore, *args: Any, **kwargs: Any) -> TurnInfo:
         raise sqlite3.OperationalError("database is locked")
 
     monkeypatch.setattr(SessionStore, "finish_turn", failing)
-    if closing:
+    assert (await s.runner.run_turn("first")).status == "completed"
+    # This process lives, so the lease rule never frees its turn.
+    assert (await last_turn(s)).status == "running"
+    monkeypatch.setattr(SessionStore, "finish_turn", original)
+    assert (await s.runner.run_turn("second")).status == "completed"
+    turns = await s.store.list_turns(s.runner.session_id)  # type: ignore[arg-type]
+    assert [(t.turn, t.status, t.cause) for t in turns] == [
+        (1, "completed", "run"),
+        (2, "completed", "run"),
+    ]
+    assert turns[0].answer == "one"
+    check_invariants(s.path, "cli")
+    await s.aclose()
+
+
+async def test_a_cli_end_lost_at_a_close_is_stored_by_the_next_runner(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = await setup(tmp_path, [], writer="cli")
+
+    async def failing(self: SessionStore, *args: Any, **kwargs: Any) -> TurnInfo:
+        raise sqlite3.OperationalError("database is locked")
+
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "finish_turn", failing)
         await s.runner.start_turn("wait")
         await s.llm.blocked.wait()
-        await s.runner.close()
-        assert calls == 1  # one try, so the close keeps its bound
-    else:
-        await s.runner.run_turn("hi")
-        assert calls == 4
-    # The turn is left to the lease rule.
+        await s.runner.close()  # one try only, which fails
     assert (await last_turn(s)).status == "running"
-    monkeypatch.undo()
-    await s.agent.close()
-    await s.store.aclose()
+    # Another runner of this process for the session stores the lost end
+    # before its first turn.
+    s.llm.replies.append(answer("now"))
+    runner = SessionRunner(s.agent, s.store, s.runner.session_id)
+    assert (await runner.run_turn("next")).status == "completed"
+    turns = await s.store.list_turns(s.runner.session_id)  # type: ignore[arg-type]
+    assert [(t.status, t.cause) for t in turns] == [
+        ("cancelled", "closed"),
+        ("completed", "run"),
+    ]
+    check_invariants(s.path, "cli")
+    await runner.close()
+    await s.aclose()
 
 
 # ── Undo ────────────────────────────────────────────────────────────────────
@@ -963,6 +1330,75 @@ async def test_undo_marks_the_turn_resumes_and_drops_its_checkpoint(
         ("assistant", "one"),
     ]
     assert s.runner.last_resume is not None and s.runner.last_resume.turns == 1
+    await s.aclose()
+
+
+async def test_undo_and_a_new_turn_at_once_never_show_the_undone_turn(
+    tmp_path: Path,
+) -> None:
+    s = await setup(tmp_path, [answer("AKITA answer"), answer("second answer")])
+    await s.runner.run_turn("AKITA question")
+    # No delay is injected: the undo and the turn race as two requests would.
+    undone, started = await asyncio.gather(
+        s.runner.undo(), s.runner.start_turn("second question")
+    )
+    assert undone is not None and undone.turn == 1 and started.turn == 2
+    result = await s.runner.wait()
+    assert result is not None and result.status == "completed"
+    assert not any("AKITA" in m.content for m in s.llm.requests[-1])
+    window = await s.store.get_window(started.session_id)
+    assert window is not None and window.turn == 2
+    decoded = decode_window(window.data)
+    assert decoded is not None
+    assert not any("AKITA" in m.content for m in decoded)
+    await s.aclose()
+
+
+async def test_an_undo_cancelled_after_its_commit_still_resumes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = await setup(tmp_path, [answer("AKITA answer"), answer("second answer")])
+    await s.runner.run_turn("AKITA question")
+    reached, gate = asyncio.Event(), asyncio.Event()
+    original = SessionStore.list_turns
+
+    async def slow_list(self: SessionStore, *args: Any, **kwargs: Any) -> Any:
+        reached.set()  # undo_last_turn has committed; the resume reads turns
+        await gate.wait()
+        return await original(self, *args, **kwargs)
+
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "list_turns", slow_list)
+        undoing = asyncio.create_task(s.runner.undo())
+        await reached.wait()
+        undoing.cancel()  # the request that asked for the undo went away
+        await asyncio.sleep(0.02)
+        gate.set()
+        with pytest.raises(asyncio.CancelledError):
+            await undoing
+    assert s.agent.conversation() == []  # the resume ran to its end
+    assert (await s.runner.run_turn("second question")).status == "completed"
+    assert not any("AKITA" in m.content for m in s.llm.requests[-1])
+    await s.aclose()
+
+
+async def test_an_undo_whose_resume_fails_leaves_no_undone_turn_in_the_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    s = await setup(tmp_path, [answer("AKITA answer"), answer("second answer")])
+    await s.runner.run_turn("AKITA question")
+
+    async def failing(self: SessionStore, *args: Any, **kwargs: Any) -> Any:
+        raise sqlite3.OperationalError("disk I/O error")
+
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "list_turns", failing)
+        with pytest.raises(sqlite3.OperationalError):
+            await s.runner.undo()
+    assert (await last_turn(s)).undone  # the undo is stored
+    assert s.agent.conversation() == []
+    assert (await s.runner.run_turn("second question")).status == "completed"
+    assert not any("AKITA" in m.content for m in s.llm.requests[-1])
     await s.aclose()
 
 

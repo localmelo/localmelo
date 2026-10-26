@@ -23,6 +23,7 @@ import functools
 import inspect
 import logging
 import time
+import weakref
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Final, Literal, cast, get_args
@@ -97,6 +98,13 @@ _RESUME_MODES: Final = frozenset(get_args(ResumeMode))
 _NOT_A_STOP: Final = frozenset({"run", "crash"})
 # What the writer finds on the queue: an event, a flush marker, the end.
 _STOP: Final = ("stop",)
+# The finish_turn arguments of each CLI turn whose end no try could store, by
+# store and session. This process's own lease never lapses while it lives, so
+# every runner of the session tries the end again before the session's next
+# turn or undo (in the gateway's file the next process's open recovers it).
+_LOST_ENDS: weakref.WeakKeyDictionary[SessionStore, dict[str, dict[str, Any]]] = (
+    weakref.WeakKeyDictionary()
+)
 
 
 @dataclass(frozen=True)
@@ -134,7 +142,10 @@ class _Turn:
     closing: bool = False
     # The run, as the sink saw it.
     saw_started: bool = False
+    run_id: str = ""
     outcome: RunResult | None = None
+    # The RunResult of a turn that ended without run.finished (step 7.4).
+    fallback: RunResult | None = None
     finished: asyncio.Event = field(default_factory=asyncio.Event)
     # Whether the writer still takes events; it stops at step 7.2.
     accepting: bool = True
@@ -228,6 +239,9 @@ class SessionRunner:
         self._begin: asyncio.Future[_Turn] | None = None
         # A turn whose run's finalizer outlived step 7.1's wait.
         self._finishing: _Turn | None = None
+        # Held while undo() or resume() loads the conversation; a turn waits
+        # for it, so that it runs on the conversation they leave.
+        self._loading = asyncio.Lock()
         self._last_resume: ResumeInfo | None = None
         self._closed = False
         self._close_reason = "Session closed"
@@ -295,11 +309,19 @@ class SessionRunner:
 
         *title* is the typed text, for the session's first title. A turn
         that this runner stopped (:meth:`cancel`, :meth:`close`, a takeover)
-        returns the ``cancelled`` RunResult of its ``run.finished``; a
+        returns the ``cancelled`` RunResult of its ``run.finished``, or, when
+        it was stopped before its run began, a ``cancelled`` RunResult with
+        the stop's reason and no counters. The runner takes back the
+        cancellations it caused, so the task is no longer cancelling. A
         cancellation from outside the runner propagates once the turn has
-        ended.
+        ended, or at once when it comes while the turn ends, which then
+        ends on its own.
         """
         turn = await self._start(text, approval, title, None, own_task=False)
+        if turn.finish is not None:  # stopped before its run began
+            task = asyncio.current_task()
+            assert task is not None
+            return self._outcome(turn, task, None, None)
         return await self._drive(turn)
 
     async def start_turn(
@@ -324,12 +346,17 @@ class SessionRunner:
         return turn.turn
 
     async def wait(self) -> RunResult | None:
-        """Wait for the last turn to end; its RunResult, or ``None`` without one."""
+        """Wait for the last turn to end and return its RunResult.
+
+        That is the RunResult of its ``run.finished``, or, for a turn that
+        ended without one, the one :meth:`run_turn` would return; ``None``
+        when no turn has begun.
+        """
         turn = self._last
         if turn is None:
             return None
         await turn.done.wait()
-        return turn.outcome
+        return turn.outcome or turn.fallback
 
     async def _start(
         self,
@@ -344,10 +371,7 @@ class SessionRunner:
         # 0. The key decides before the busy check, so a repeat of the
         # running turn gets that turn.
         if client_request_id is not None:
-            found = await self._store.get_submission(
-                self._session_id, client_request_id
-            )
-            check_submission(found, text)
+            await self._check_key(text, client_request_id)
         # 1. Checks.
         if not isinstance(text, str) or not text.strip():
             raise ValueError("text must not be blank")
@@ -356,24 +380,51 @@ class SessionRunner:
             and inspect.iscoroutinefunction(approval.decide)
         ):
             raise TypeError("approval must have an async decide(request) method")
-        self._check_open()
+        while True:
+            self._check_open()
+            begin = self._begin
+            if begin is not None and client_request_id is not None:
+                # A begin_turn under way may accept this very key: once it
+                # has ended, the key decides again.
+                await asyncio.wait({begin})
+                await self._check_key(text, client_request_id)
+            elif self._loading.locked():
+                # An undo or a resume loads the conversation: the turn runs
+                # on the conversation it leaves.
+                async with self._loading:
+                    pass
+            else:
+                break
         self._check_idle()
         # 2. The turn row, in a task of its own: once begin_turn commits, its
         # turn must get a runner even when this task is cancelled meanwhile.
-        caller = None if own_task else asyncio.current_task()
+        task = asyncio.current_task()
+        assert task is not None
+        caller = None if own_task else task
         begin = asyncio.ensure_future(
             self._begin_turn(text, approval, title, client_request_id, caller)
         )
         self._begin = begin
         try:
             return await asyncio.shield(begin)
-        except asyncio.CancelledError:
+        except asyncio.CancelledError as exc:
             await _settle(begin)
-            if not begin.cancelled() and begin.exception() is None and not own_task:
-                # This task was to run the turn, and it is being cancelled:
-                # the turn ends at once, without a run.
-                await _settle(self._start_finish(begin.result(), None, cancelled=True))
-            raise
+            if begin.cancelled() or begin.exception() is not None or own_task:
+                raise
+            # This task was to run the turn, and it is being cancelled: by
+            # the runner (a Stop, a close) or from outside. The turn ends at
+            # once, without a run.
+            turn = begin.result()
+            await _settle(self._start_finish(turn, exc, cancelled=True))
+            if task.cancelling() > turn.runner_cancels:
+                _uncancel(task, turn.runner_cancels)
+                raise
+            return turn  # run_turn returns its RunResult
+
+    async def _check_key(self, text: str, client_request_id: str) -> None:
+        """Step 0: raise what ``begin_turn`` step 1 would for this key."""
+        found = await self._store.get_submission(self._session_id, client_request_id)
+        check_submission(found, text)
 
     async def _begin_turn(
         self,
@@ -384,6 +435,9 @@ class SessionRunner:
         caller: asyncio.Task[Any] | None,
     ) -> _Turn:
         try:
+            # The last turn's end must be stored before the next turn: in a
+            # CLI file, this process's own lease never lapses while it lives.
+            await self._record_lost_end()
             info = await self._store.begin_turn(
                 self._session_id,
                 text,
@@ -427,6 +481,7 @@ class SessionRunner:
             try:
                 if event.type == "run.started":
                     turn.saw_started = True
+                    turn.run_id = event.run_id
                 elif event.type == "run.finished":
                     turn.outcome = RunResult(**event.data["result"])
                     turn.finished.set()
@@ -461,24 +516,43 @@ class SessionRunner:
                 await asyncio.shield(finish)
             except asyncio.CancelledError:
                 if task.cancelling() > turn.runner_cancels:
-                    raise  # also cancelled from outside: step 7 goes on alone
-        own = turn.runner_cancels
-        if run_exc is None and task.cancelling() <= own:
-            _uncancel(task, own)
-            assert returned is not None
-            return returned
-        if (
-            isinstance(run_exc, asyncio.CancelledError)
-            and own
-            and turn.outcome is not None
-            and task.cancelling() <= own
-        ):
-            # The runner stopped the turn: take its cancellation back.
-            _uncancel(task, own)
-            return turn.outcome
-        if run_exc is None:
+                    break  # cancelled from outside again: step 7 goes on alone
+        return self._outcome(turn, task, run_exc, returned)
+
+    def _outcome(
+        self,
+        turn: _Turn,
+        task: asyncio.Task[Any],
+        run_exc: BaseException | None,
+        returned: RunResult | None,
+    ) -> RunResult:
+        """Step 7.6 in *task*, which ran the turn: its RunResult, or a re-raise.
+
+        The runner takes back the cancellations it caused (:meth:`cancel`,
+        :meth:`close`, the lease task). A ``CancelledError`` propagates only
+        while the task is still being cancelled from outside the runner; one
+        that a component raised while nothing cancelled the task ended the
+        run ``crashed``, and its RunResult is returned.
+        """
+        _uncancel(task, turn.runner_cancels)
+        if run_exc is not None and not isinstance(run_exc, asyncio.CancelledError):
+            raise run_exc
+        if task.cancelling() > 0:
+            if isinstance(run_exc, asyncio.CancelledError):
+                raise run_exc
             raise asyncio.CancelledError()
-        raise run_exc
+        if returned is not None:
+            return returned
+        if turn.outcome is not None:
+            return turn.outcome
+        if turn.fallback is not None:
+            return turn.fallback
+        # Step 7 failed before it took the turn's status: the end is unknown.
+        return RunResult(
+            task_id=turn.run_id,
+            status="crashed",
+            error="The turn ended without a RunResult",
+        )
 
     def _start_finish(
         self, turn: _Turn, run_exc: BaseException | None, *, cancelled: bool
@@ -553,36 +627,42 @@ class SessionRunner:
                 if run_exc is not None
                 else "The run ended without run.finished"
             )
+        if outcome is None:
+            turn.fallback = RunResult(task_id=turn.run_id, status=status, error=error)
+        end: dict[str, Any] = {
+            "session_id": info.session_id,
+            "turn": info.turn,
+            "holder": self._holder,
+            "status": status,
+            "cause": cause,
+            "result": result,
+            "answer": answer,
+            "window": window,
+            "error": error,
+        }
         delays: Sequence[float] = GATEWAY_FINISH_RETRY_DELAYS_S
         if self._store.writer == "cli":
             closing = turn.closing or cause == "shutdown"
             delays = () if closing else CLI_FINISH_RETRY_DELAYS_S
         for attempt in range(len(delays) + 1):
             try:
-                await self._store.finish_turn(
-                    info.session_id,
-                    info.turn,
-                    holder=self._holder,
-                    status=status,
-                    cause=cause,
-                    result=result,
-                    answer=answer,
-                    window=window,
-                    error=error,
-                )
+                await self._store.finish_turn(**end)
                 return
             except Exception as exc:
-                final = (
-                    attempt == len(delays)
-                    or isinstance(exc, ValueError)
-                    or (isinstance(exc, SessionStoreError) and str(exc) == CLOSED_ERROR)
-                )
+                final = attempt == len(delays) or _cannot_retry(exc)
                 if final:
+                    kept = self._store.writer == "cli" and not _cannot_retry(exc)
+                    if kept:
+                        _LOST_ENDS.setdefault(self._store, {})[info.session_id] = end
                     logger.error(
-                        "Could not record the end of turn %d of session %s; the next "
-                        "open recovers it: %s",
+                        "Could not record the end of turn %d of session %s; %s: %s",
                         info.turn,
                         info.session_id,
+                        (
+                            "it is tried again before the session's next turn"
+                            if kept
+                            else "the next open recovers it"
+                        ),
                         _exception_text(exc),
                     )
                     return
@@ -595,6 +675,32 @@ class SessionRunner:
                     _exception_text(exc),
                 )
             await asyncio.sleep(delays[attempt])
+
+    async def _record_lost_end(self) -> None:
+        """Try once more to store the end of this session's turn that was lost.
+
+        A CLI turn whose end no try of :meth:`_record_end` stored stays
+        ``running`` until the lease rule frees it, which never happens while
+        this process lives. A failure is logged, and the end is tried again
+        next time.
+        """
+        lost = _LOST_ENDS.get(self._store)
+        if lost is None or self._session_id is None:
+            return
+        end = lost.pop(self._session_id, None)
+        if end is None:
+            return
+        try:
+            await self._store.finish_turn(**end)
+        except Exception as exc:
+            if not _cannot_retry(exc):
+                lost.setdefault(self._session_id, end)
+            logger.warning(
+                "Could not record the end of turn %d of session %s: %s",
+                end["turn"],
+                end["session_id"],
+                _exception_text(exc),
+            )
 
     def _cause(self, turn: _Turn) -> Cause:
         if turn.cause is not None:
@@ -931,6 +1037,12 @@ class SessionRunner:
         ):
             raise ValueError(f"max_turns must be an int >= 0, got {max_turns!r}")
         self._check_idle()
+        async with self._loading:
+            return await self._resume(max_turns)
+
+    async def _resume(self, max_turns: int) -> int:
+        """:meth:`resume`'s load, under ``_loading``."""
+        self._check_idle()
         checkpoint: list[Message] = []
         tail: list[Message] = []
         fell_back = False
@@ -1044,13 +1156,46 @@ class SessionRunner:
         return messages, tail
 
     async def undo(self) -> TurnInfo | None:
-        """Undo the newest finished turn, then resume; return it, or ``None``."""
+        """Undo the newest finished turn, then resume; return it, or ``None``.
+
+        A turn started meanwhile waits until the resume has loaded the
+        conversation without the undone turn. The undo and its resume go on
+        when this task is cancelled, and a resume that fails once the undo is
+        stored empties the Agent's window, so no later request holds the
+        undone turn; :meth:`resume` loads it again.
+        """
         self._check_idle()
-        if self._session_id is None:
-            return None
-        undone = await self._store.undo_last_turn(self._session_id)
-        await self.resume()
+        async with self._loading:
+            self._check_idle()
+            if self._session_id is None:
+                return None
+            work = asyncio.ensure_future(self._undo(self._session_id))
+            try:
+                return await asyncio.shield(work)
+            except asyncio.CancelledError:
+                await _settle(work)
+                if not work.cancelled():
+                    work.exception()  # retrieved: the cancellation propagates
+                raise
+
+    async def _undo(self, session_id: str) -> TurnInfo | None:
+        """:meth:`undo`'s work, under ``_loading``, in a task of its own."""
+        await self._record_lost_end()
+        undone = await self._store.undo_last_turn(session_id)
+        try:
+            await self._resume(RESUME_MAX_TURNS)
+        except BaseException:
+            with contextlib.suppress(RuntimeError):  # a finalizer still runs
+                self._agent.load_conversation([])
+            raise
         return undone
+
+
+def _cannot_retry(exc: Exception) -> bool:
+    """Whether a failed ``finish_turn`` would fail the same way every time."""
+    return isinstance(exc, ValueError) or (
+        isinstance(exc, SessionStoreError) and str(exc) == CLOSED_ERROR
+    )
 
 
 def _uncancel(task: asyncio.Task[Any], times: int) -> None:
