@@ -91,7 +91,8 @@ class AgentOptions:
       path (``~`` expanded) and raises ``ValueError`` when that is not a
       directory. With a root, ``file_read`` and ``file_write`` resolve a
       relative path against it and refuse a path whose real path is
-      outside it, a final symlink and anything but a regular file;
+      outside it, a symlink that replaces the checked file and anything
+      but a regular file;
       ``shell_exec`` and ``python_exec`` run in a child process that
       starts in the root, but can still reach any path, so approval is
       their control; a non-zero exit of ``shell_exec`` starts its text

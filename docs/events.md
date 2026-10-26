@@ -357,9 +357,10 @@ returned.
   finite becomes `"nan"`, `"inf"` or `"-inf"`.
 - **Clipping.** A string longer than 100,000 characters keeps its first
   100,000 and ends with `… [+N chars]`, where `N` counts the characters left
-  out. This applies to every string: the task, the reply's text and
-  thinking, the arguments, the output, the error and the reflection's
-  fields. Redaction comes first.
+  out. This applies to the task, the reply's text and thinking, the
+  arguments, the output, the error, the reflection's fields and every other
+  string, except in `run.finished`, whose `RunResult` is whole. Redaction
+  comes first.
 - **Nesting.** Lists and objects nest at most 100 levels deep, counting the
   values of `data` as level 1. A list or object deeper than that becomes its
   `str()` text, clipped like any string. A model's tool-call arguments can

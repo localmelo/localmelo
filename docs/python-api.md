@@ -314,9 +314,10 @@ The policy fails closed:
   `CancelledError`. It must withdraw its prompt and re-raise. The call does
   not run, and `tool.finished` reports the approval's origin as
   `withdrawn`.
-- When the policy allows a file tool's call, its path is resolved again. If
-  the result has changed, for example because a symlink took the file's
-  place while the policy decided, the call is refused with
+- With a workspace root, when the policy allows a file tool's call, its
+  path is resolved again. If the result has changed, for example because a
+  symlink took the file's place while the policy decided, the call is
+  refused with
   `Path '<path>' changed while waiting for approval; the call did not run.`
 
 ## Work in a directory
@@ -360,10 +361,12 @@ Both lines print the real path of `~/melo-work`, such as
   that points in is allowed. A path outside is refused with
   `Path '<path>' is outside allowed workspace root`, and an empty path with
   `Argument 'path' for <tool> must be a non-empty string without NUL characters.`
-  They do not follow a symlink in the last part of the path, and refuse
+  They open the resolved path without following symlinks, so a symlink that
+  takes the file's place after the check is refused, and they refuse
   anything but a regular file, such as a FIFO, with
   `Not a regular file: <path>`. `file_read` reads at most 200,000 bytes, as
-  UTF-8; a longer file is cut, and its text ends with
+  UTF-8. A file over 200,000 bytes, or whose text is longer than 50,000
+  characters, is cut to 50,000 characters, which end with
   `... [truncated: the file has <size> bytes]`. `file_write` reports the
   resolved path.
 - **`shell_exec` and `python_exec`** start in the root, each in a child

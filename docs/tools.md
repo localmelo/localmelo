@@ -153,8 +153,8 @@ Before a tool runs, localmelo checks the call:
 - With a workspace root, the path of `file_read` and `file_write` must be
   inside it (see [With a workspace root](#with-a-workspace-root)).
 - With an approval policy, a tool that requires approval waits for the
-  policy's decision, and a file path is then checked again (see
-  [With an approval policy](#with-an-approval-policy)).
+  policy's decision, and with a workspace root, a file path is then checked
+  again (see [With an approval policy](#with-an-approval-policy)).
 
 After a tool runs:
 
@@ -198,10 +198,12 @@ Direct mode and the gateway never set a workspace root.
   The tool gets the resolved path. `~` is not expanded, a path spelled in
   another letter case than the root is refused, and hard links are not
   detected.
-- **Opening files.** The file tools do not follow a symlink in the last part
-  of the path, and refuse anything but a regular file, such as a FIFO, with
-  `Not a regular file: <path>`. `file_read` reads at most 200,000 bytes; a
-  longer file's text is cut and ends with
+- **Opening files.** The file tools open the resolved path without following
+  symlinks, so a symlink that takes the file's place after the check is
+  refused. They refuse anything but a regular file, such as a FIFO, with
+  `Not a regular file: <path>`. `file_read` reads at most 200,000 bytes. A
+  file over 200,000 bytes, or whose text is longer than 50,000 characters,
+  is cut to 50,000 characters, which end with
   `... [truncated: the file has <size> bytes]`.
 - **Commands.** `shell_exec` and `python_exec` start in the root, each in a
   child process with a process group of its own, which a timeout or a

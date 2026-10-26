@@ -232,10 +232,10 @@
           root, the workspace policy then resolves the path of a file tool
           and refuses one outside the root. With an approval policy, a call of
           a tool that requires approval then waits for the policy's decision,
-          and once it is allowed, a file path is resolved again and refused if
-          it changed in the meantime. Each tool runs with a time limit, which
-          starts after the approval: <code>shell_exec</code> 30 seconds,
-          <code>file_read</code> and <code>file_write</code> 60 seconds, an
+          and once it is allowed, a file path under a workspace root is
+          resolved again and refused if it changed in the meantime. Each
+          tool runs with a time limit, which starts after the approval:
+          <code>shell_exec</code> 30 seconds, <code>file_read</code> and <code>file_write</code> 60 seconds, an
           MCP tool its server's <code>timeout</code>. Without a workspace root,
           <code>python_exec</code> code runs inside localmelo and cannot be
           interrupted. A refusal, a denial, a time-out or an error comes back
