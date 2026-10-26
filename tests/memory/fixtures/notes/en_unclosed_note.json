@@ -1,0 +1,48 @@
+{
+  "name": "en_unclosed_note",
+  "reply": {
+    "content": "Done.\n<note>\nplan: hand the result back\nfound: all 24 tests pass; the folds use plain loops",
+    "thinking": "Everything passes, so I can stop here.",
+    "tool_calls": [],
+    "tool_results": []
+  },
+  "recent_path": "",
+  "expected_note": {
+    "note_id": "",
+    "task_id": "",
+    "step": 0,
+    "attempt": 0,
+    "call_seq": 0,
+    "kind": "answer",
+    "source": "model",
+    "plan": "hand the result back",
+    "found": [
+      "all 24 tests pass",
+      "the folds use plain loops"
+    ],
+    "decided": [],
+    "hypotheses": [],
+    "open_questions": [],
+    "observed": [],
+    "outcome": "",
+    "drafts": [],
+    "reasoning_chars": 38,
+    "source_ids": [],
+    "remember": true,
+    "remember_by": "heuristic",
+    "stage": "fresh",
+    "entry_id": "",
+    "uses": 0,
+    "last_used_at": 0.0,
+    "created_at": 0.0
+  },
+  "expected_rest": "Done.",
+  "expected_draft": null,
+  "expected_chunks": [
+    {
+      "title": "Everything passes, so I can stop here.",
+      "text": "Everything passes, so I can stop here."
+    }
+  ],
+  "expected_render": "plan: hand the result back\nfound: all 24 tests pass; the folds use plain loops"
+}

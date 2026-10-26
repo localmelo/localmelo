@@ -1,0 +1,82 @@
+{
+  "name": "en_errors_and_records",
+  "reply": {
+    "content": "",
+    "thinking": "The user asked when the Acme invoice is due. Let me read notes/meeting.md and search the mail for the invoice at the same time. The due date might be in the second message.",
+    "tool_calls": [
+      {
+        "tool_name": "file_read",
+        "arguments": {
+          "path": "notes/meeting.md"
+        },
+        "id": "call_1"
+      },
+      {
+        "tool_name": "mail_search",
+        "arguments": {
+          "query": "invoice from Acme",
+          "limit": 5
+        },
+        "id": "call_2"
+      }
+    ],
+    "tool_results": [
+      {
+        "tool_name": "file_read",
+        "output": "",
+        "error": "\nFileNotFoundError: [Errno 2] No such file or directory: 'notes/meeting.md'\n",
+        "duration_ms": 0.4
+      },
+      {
+        "tool_name": "mail_search",
+        "output": "[{\"record_id\": \"m-17\", \"subject\": \"Invoice 4411 from Acme\", \"date\": \"2026-10-02\"}, {\"record_id\": \"m-18\", \"subject\": \"Re: Invoice 4411 due on 2026-11-01\", \"date\": \"2026-10-09\"}]",
+        "error": "",
+        "duration_ms": 120.0
+      }
+    ]
+  },
+  "recent_path": "",
+  "expected_note": {
+    "note_id": "",
+    "task_id": "",
+    "step": 0,
+    "attempt": 0,
+    "call_seq": 0,
+    "kind": "step",
+    "source": "heuristic",
+    "plan": "Let me read notes/meeting.md and search the mail for the invoice at the same time. → read notes/meeting.md; mail_search invoice from Acme",
+    "found": [],
+    "decided": [],
+    "hypotheses": [
+      "open: The due date might be in the second message."
+    ],
+    "open_questions": [],
+    "observed": [
+      "read notes/meeting.md: Error: FileNotFoundError: [Errno 2] No such file or directory: 'notes/meeting.md'",
+      "mail_search: 176 chars, 2 records"
+    ],
+    "outcome": "Error: FileNotFoundError: [Errno 2] No such file or directory: 'notes/meeting.md'",
+    "drafts": [],
+    "reasoning_chars": 172,
+    "source_ids": [
+      "m-17",
+      "m-18"
+    ],
+    "remember": false,
+    "remember_by": "heuristic",
+    "stage": "fresh",
+    "entry_id": "",
+    "uses": 0,
+    "last_used_at": 0.0,
+    "created_at": 0.0
+  },
+  "expected_rest": "",
+  "expected_draft": null,
+  "expected_chunks": [
+    {
+      "title": "The user asked when the Acme invoice is due.",
+      "text": "The user asked when the Acme invoice is due. Let me read notes/meeting.md and search the mail for the invoice at the same time. The due date might be in the second message."
+    }
+  ],
+  "expected_render": "plan: Let me read notes/meeting.md and search the mail for the invoice at the same time. → read notes/meeting.md; mail_search invoice from Acme\nhypotheses: open: The due date might be in the second message.\nobserved: read notes/meeting.md: Error: FileNotFoundError: [Errno 2] No such file or directory: 'notes/meeting.md'; mail_search: 176 chars, 2 records\noutcome: Error: FileNotFoundError: [Errno 2] No such file or directory: 'notes/meeting.md'"
+}
