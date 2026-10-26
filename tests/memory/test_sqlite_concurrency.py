@@ -7,12 +7,15 @@ session holds its own ``SqliteHistory`` object (its own aiosqlite connection)
 pointing at the same ``history.db``. Between instances, the only serialization
 is SQLite's ``BEGIN IMMEDIATE`` plus ``busy_timeout=5000`` plus WAL — this
 test asserts that combination still produces dense, unique ``seq`` values
-under contention.
+under contention. A cancellation while another connection holds the write
+lock must not leave a connection inside its transaction either.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import sqlite3
 from pathlib import Path
 
 import aiosqlite
@@ -72,3 +75,40 @@ async def test_multi_session_concurrent_writers(tmp_path: Path) -> None:
         await conn.close()
     seqs = [r[0] for r in rows]
     assert seqs == list(range(expected_total))
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_add_step_leaves_no_transaction_open(tmp_path: Path) -> None:
+    # A cancellation can reach add_step while its BEGIN IMMEDIATE waits for
+    # another connection's write lock (up to busy_timeout). aiosqlite still
+    # runs the BEGIN once the lock is free, so without a rollback queued
+    # behind it the connection would stay inside a transaction: holding the
+    # write lock, and refusing the next add_step's BEGIN.
+    db_path = tmp_path / "history.db"
+    history = SqliteHistory(db_path)
+    try:
+        await history.save_task(TaskRecord(query="q", task_id="t1"))
+        with contextlib.closing(
+            sqlite3.connect(db_path, isolation_level=None)
+        ) as other:
+            other.execute("BEGIN IMMEDIATE")
+            writing = asyncio.create_task(
+                history.add_step("t1", StepRecord(thought="cancelled"))
+            )
+            await asyncio.sleep(0.2)  # add_step waits at its BEGIN IMMEDIATE
+            writing.cancel()
+            await asyncio.sleep(0.05)
+            other.execute("ROLLBACK")
+            with pytest.raises(asyncio.CancelledError):
+                await writing
+
+        await history.add_step("t1", StepRecord(thought="next"))
+        assert history._conn is not None
+        assert not history._conn.in_transaction
+        # No write lock is kept from other connections.
+        with contextlib.closing(sqlite3.connect(db_path, timeout=0.1)) as other:
+            other.execute("BEGIN IMMEDIATE")
+            other.execute("ROLLBACK")
+        assert [step.thought for step in await history.get_steps("t1")] == ["next"]
+    finally:
+        await history.aclose()
