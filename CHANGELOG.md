@@ -9,6 +9,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The web workspace replaces the gateway's playground page, at
+  `http://127.0.0.1:8401/` by default. It discovers your server's models,
+  keeps a draft for each chat, searches chats, renders Markdown with code,
+  tables and links, can stop a run, and fits narrow screens. Chats last while
+  the gateway runs, and a reload restores them ([#35]).
+- `melo ""` opens a conversation in the terminal, with the configured backend
+  or the server given by `--base-url`. `/help` lists its commands, and
+  `/exit` or Ctrl-D leaves ([#35]).
 - Run events for Python code: `Agent.run_task(..., on_event=sink)` passes
   each run, step, model reply, tool call, notice and reflection to the sink
   as an `AgentEvent`, with secrets redacted ([#37]).
@@ -54,6 +62,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- `--chat-model` without `--base-url` replaces the configured chat model for
+  that run; it used to be ignored ([#35]).
+- A follow-up question in a gateway session or a web chat sees the earlier
+  answers ([#35]).
 - A step runs only the tools it offered. A call to any other tool is refused
   and does not run ([#30]).
 - A call to a built-in tool whose arguments have the wrong JSON type is
@@ -74,6 +86,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A request that disconnects during a run no longer leaves its gateway
+  session busy for good ([#35]).
+- Stopping the gateway closes the web workspace's model connections
+  ([#35]).
 - `--host '[::1]'` starts the gateway, and the startup lines show an IPv6
   address in brackets, as in `http://[::1]:8401/` ([#36]).
 - Tool calls are sent to OpenAI-compatible models as real tool-call turns,
@@ -113,5 +129,6 @@ earlier milestones.
 [#31]: https://github.com/localmelo/localmelo/pull/31
 [#32]: https://github.com/localmelo/localmelo/pull/32
 [#34]: https://github.com/localmelo/localmelo/pull/34
+[#35]: https://github.com/localmelo/localmelo/pull/35
 [#36]: https://github.com/localmelo/localmelo/pull/36
 [#37]: https://github.com/localmelo/localmelo/pull/37

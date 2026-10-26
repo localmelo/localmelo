@@ -69,7 +69,8 @@
         </div>
         <p>Planned:</p>
         <ul>
-          <li>durable conversations shared by the CLI, web console, and future mobile clients;</li>
+          <li>an interactive CLI that opens when you run <code>melo</code> without a task and shows the agent's tool calls as they happen (today <code>melo</code> starts the gateway, and <code>melo &quot;&quot;</code> opens a plain conversation loop);</li>
+          <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
           <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>).</li>
         </ul>
         <p>
@@ -84,6 +85,19 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-2026-10-26-workspace">
+          <h3>A web workspace and a conversation in the terminal</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/35">#35</a>
+          </p>
+          <ul>
+            <li>The gateway's page is now a web workspace: pick a model from your server, keep several chats with their own drafts, search them, read answers with code, tables and links, and stop a run. It also fits a phone-sized screen.</li>
+            <li>Chats last while the gateway runs, and reloading the page brings them back.</li>
+            <li><code>melo &quot;&quot;</code> opens a conversation in the terminal. <code>melo</code> on its own still starts the gateway.</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-26-python-api">
           <h3>Events, stopping and approvals in the Python API</h3>
