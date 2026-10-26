@@ -159,6 +159,17 @@ class SqliteHistory(History):
     Tool-result images are stored as references (MIME type, SHA-256
     digest, size), never their base64 payload, and load back as
     reference :class:`ImagePart` objects.
+
+    Besides ``tasks`` and ``steps``, the file holds ``llm_calls``, one row
+    per model response (see :meth:`add_llm_call`), at schema version
+    :data:`HISTORY_SCHEMA_VERSION` in ``PRAGMA user_version``. The first
+    call that opens the connection creates a missing file with mode 0600
+    and brings an older file to that version in one ``BEGIN IMMEDIATE``
+    transaction; a newer file raises :class:`HistorySchemaError` on every
+    call. In the same transaction, once per instance, the reasoning of
+    rows older than *thinking_retention_days* (30 by default) is cleared:
+    ``thinking`` and the inline reasoning that ``content`` repeats, by the
+    row's ``reasoning_key``. *clock* gives the time for that cutoff.
     """
 
     def __init__(

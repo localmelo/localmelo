@@ -183,7 +183,9 @@ asyncio.run(main())
 - `usage`: the integer token counts of the reply, such as `prompt_tokens`,
   or `{}` when the server sent none.
 - `duration_s`: how long the planning request took, its retries and the
-  waits before them included.
+  waits before them included. With persistence on, it also includes
+  recording the reply in history, which can wait up to 5 seconds while
+  another process writes to `history.db`.
 
 Before the event is built, `thinking` and `content` pass a minimal
 redaction of secrets, which replaces each with `[redacted]`:
@@ -195,8 +197,10 @@ redaction of secrets, which replaces each with `[redacted]`:
   `passcode`, `OTP` or `验证码`, on the same line.
 
 The redaction runs on the whole text, before it is clipped, and only for a
-run with a sink. Working memory, history, the `RunResult` and `run.finished`
-keep the text as the model wrote it.
+run with a sink. Working memory, history's tasks and steps, the `RunResult`
+and `run.finished` keep the text as the model wrote it, while history's
+model calls store it with the same redaction (see
+[Model calls](memory.md#model-calls)).
 
 ### tool.started
 
@@ -286,7 +290,10 @@ The number of `tool.started` events is `RunResult.n_tool`.
   after `done`, after the last attempt or once `max_steps` is used up, and
   when the continuation gate stops the run.
 - `rationale`, `summary` and `best_effort_result`: the reflection's
-  reasons, its summary of the attempt, and its best answer so far.
+  reasons, its summary of the attempt, and its best answer so far. They
+  pass the same redaction of secrets as `assistant.message`'s `thinking`
+  and `content`; the `RunResult` keeps the best answer as the model wrote
+  it.
 - `requests`: the number of reflection requests, 1 or 2. A reply that holds
   no reflection is asked for once more, without tools; the second request
   gets no event of its own.
@@ -298,7 +305,9 @@ The number of `tool.started` events is `RunResult.n_tool`.
   a reply counts as `stop`, with the rationale
   `Could not parse reflection response`.
 - `usage` and `duration_s`: the token counts and the time of both requests,
-  their retries included.
+  their retries included. With persistence on, `duration_s` also includes
+  recording the replies in history, which can wait up to 5 seconds while
+  another process writes to `history.db`.
 
 See [Reflection](how-it-works.md#reflection) and
 [Run results](run-results.md#statuses).
@@ -341,8 +350,8 @@ returned.
   - the response check raised an exception after the reply arrived, which
     ends the run as `crashed`;
   - the second request of a reflection failed after the first had returned;
-  - once history records model calls (planned), a cancellation interrupted
-    the recording of a reply.
+  - with persistence on, a cancellation interrupted the recording of a
+    reply in history.
 - **One id.** Every event's `run_id` is the run's `task_id`, as in the
   `RunResult` and the task record.
 

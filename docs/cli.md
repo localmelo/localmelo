@@ -140,7 +140,11 @@ These are usage errors:
 - a direct-mode option with `--serve` or without a task (`melo ""`
   included), reported as
   `only for direct mode (a query without --serve): --max-steps`;
-- an MCP config file that cannot be read or is not valid.
+- an MCP config file that cannot be read or is not valid;
+- an invalid `LOCALMELO_THINKING_RETENTION_DAYS`, also with `--serve` or
+  `melo ""`, which prints its one `melo: error:` line without the usage
+  summary:
+  `melo: error: LOCALMELO_THINKING_RETENTION_DAYS must be a number of days greater than 0, not 'abc'`.
 
 ## Output
 

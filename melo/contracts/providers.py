@@ -64,6 +64,14 @@ class BaseLLMProvider(ABC):
     should subclass this.  One implementation (OpenAICompatLLM) covers all
     backends that expose the OpenAI ``/chat/completions`` format: MLC LLM,
     Ollama, vLLM, LMStudio, OpenAI, Groq, Together AI, etc.
+
+    After a successful :meth:`chat`, :attr:`last_reasoning_key` names the
+    response key the reasoning came from and :attr:`last_usage` holds the
+    whole usage the server reported; the agent records both with the
+    reply. A provider that sets neither keeps the class defaults, ``""``
+    and ``None``. Both are class attributes, so a wrapper that forwards
+    attributes reads the defaults unless it copies them from the provider
+    it wraps right after that provider's ``chat()`` returns.
     """
 
     # The key of the response that the last successful chat() read the

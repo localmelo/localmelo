@@ -160,7 +160,7 @@
         <p>关键文件：<code>melo/executor/executor.py</code>、<code>builtins.py</code>、<code>policy.py</code>、<code>melo/contracts/approvals.py</code>。</p>
 
         <h3 id="c-memory">记忆</h3>
-        <p>工作记忆保存一次运行或一个网关会话中的对话：最近 20 条消息，只在内存中。历史记录保存每个任务和每一步。长期记忆需要嵌入后端：它把步骤摘要和反思连同嵌入向量一起保存，并在每一步召回最接近的 5 条。历史记录和长期记忆默认留在内存中；开启持久化后，分别写入 <code>history.db</code> 和 <code>long_term.db</code>。工具注册表保存所有已注册的工具，以及检索模式使用的 BM25 索引。</p>
+        <p>工作记忆保存一次运行或一个网关会话中的对话：最近 20 条消息，只在内存中。历史记录保存每个任务和每一步；开启持久化后，还保存每次模型调用及其推理。长期记忆需要嵌入后端：它把步骤摘要和反思连同嵌入向量一起保存，并在每一步召回最接近的 5 条。历史记录和长期记忆默认留在内存中；开启持久化后，分别写入 <code>history.db</code> 和 <code>long_term.db</code>。工具注册表保存所有已注册的工具，以及检索模式使用的 BM25 索引。</p>
         <p>关键文件：<code>melo/memory/coordinator.py</code>、<code>short/</code>（工作记忆）、<code>history/</code>、<code>long/</code>、<code>tools/</code>（工具注册表）、<code>bm25.py</code>。</p>
         <p>记忆设计（计划中）：<a href="./memory-design.html">记忆设计</a>页保留了维护者为记忆撰写的设计，其中部分内容尚未实现。</p>
 

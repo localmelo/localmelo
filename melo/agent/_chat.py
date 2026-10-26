@@ -316,11 +316,20 @@ class Chat:
 
         A retryable :class:`ProviderError` is retried after each of
         :attr:`retry_delays` in turn; each attempt runs with its 1-based
-        number in ``LLM_REQUEST_ATTEMPT``, and :data:`RETRY_HOOK`, when set,
-        hears of each retry before its delay. Every attempt that raises
-        counts in ``llm_errors``, including one cut short by a
-        cancellation. The error of the last attempt, and any other
-        exception at once, propagates.
+        number in ``LLM_REQUEST_ATTEMPT`` and *kind* (``plan``,
+        ``reflect``, ``estimate``, or ``""`` for none) in
+        ``LLM_REQUEST_KIND``, and :data:`RETRY_HOOK`, when set, hears of
+        each retry before its delay. Every attempt that raises counts in
+        ``llm_errors``, including one cut short by a cancellation. The
+        error of the last attempt, and any other exception at once,
+        propagates.
+
+        Once the response is counted, :data:`CALL_RECORDER`, when set, is
+        awaited with it: its *kind*, the provider's ``last_reasoning_key``
+        and ``last_usage`` (the response's own usage when the provider has
+        none), the successful attempt's duration and the time it arrived.
+        A cancellation during that await propagates with the response
+        counted.
         """
         attempt = 1
         while True:

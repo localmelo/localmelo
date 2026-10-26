@@ -4,6 +4,8 @@
 :data:`REDACTED`: well-known key shapes, and one-time codes next to a code
 keyword. It is a pure function, for text that leaves the run's own memory,
 such as the ``thinking`` and ``content`` of an ``assistant.message`` event.
+History's ``llm_calls`` table keeps the ``thinking`` and ``content`` of
+every model response redacted by it too.
 """
 
 from __future__ import annotations

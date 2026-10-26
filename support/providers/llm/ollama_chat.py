@@ -163,7 +163,10 @@ class OllamaNativeChat(BaseLLMProvider):
     A failed request raises
     :class:`~localmelo.melo.contracts.providers.ProviderError`. Every
     request sends ``LLM_REQUEST_ATTEMPT`` in the ``X-Localmelo-Attempt``
-    header.
+    header, and ``LLM_REQUEST_KIND``, when it is set, in the
+    ``X-Localmelo-Call-Kind`` header. After a reply,
+    ``last_reasoning_key`` is ``thinking`` when it has thinking, else
+    ``""``, and ``last_usage`` is its usage (token counts only).
 
     Parameters
     ----------

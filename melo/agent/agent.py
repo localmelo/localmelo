@@ -1617,9 +1617,12 @@ class Agent:
         Each record joins ``step.records`` before it is written, and
         ``step.stored`` counts it once ``store_step`` has returned, so a
         cancellation in between leaves what is missing from history known
-        (see :meth:`_save_interrupted_step`). Appending the turn is the last
-        statement and is synchronous: nothing comes between it and the
-        caller's clearing of ``run.inflight``.
+        (see :meth:`_save_interrupted_step`). Once every record is written,
+        the run's call recorder, when set, lists their ids in order on the
+        planning reply's ``llm_calls`` row (``CallLog.link_steps``).
+        Appending the turn is the last statement and is synchronous:
+        nothing comes between it and the caller's clearing of
+        ``run.inflight``.
         """
         response = step.response
         calls = response.tool_calls
@@ -2268,15 +2271,24 @@ class Agent:
         run's own status, is saved again as that method describes, and
         the cancellation then propagates.
 
+        With persistence on, or any history that keeps model calls, every
+        response of the run's model requests is also recorded, as it
+        arrives, in history's ``llm_calls`` table, and each tool step's
+        rows are listed on the row of the response that made them (see
+        :class:`~localmelo.melo.agent._call_log.CallLog`). A record that
+        fails is logged, the run's first at WARNING, and changes nothing
+        of the run: not its status, result, error or counters.
+
         A ``cancelled`` run is finalized in a task of its own instead,
         which a second cancellation does not stop (see :meth:`_finalize`):
         history gets the rows its interrupted step is missing, one per
         call, and the task record is saved, both within
-        :data:`FINALIZE_TIMEOUT_S`; the reflections are cleared without
-        being promoted, so no network call follows the cancellation. After
-        :meth:`begin_exit`, the finalizer closes the tool providers first
-        and keeps to the exit's deadline, as :meth:`begin_exit` describes
-        for other runs.
+        :data:`FINALIZE_TIMEOUT_S`, and then, within what is left, the
+        rows written are listed on their response's ``llm_calls`` row; the
+        reflections are cleared without being promoted, so no network call
+        follows the cancellation. After :meth:`begin_exit`, the finalizer
+        closes the tool providers first and keeps to the exit's deadline,
+        as :meth:`begin_exit` describes for other runs.
 
         ``RunResult.config`` reports the effective configuration: the
         options, the registered built-ins (``builtins``), the resolved
@@ -2296,9 +2308,11 @@ class Agent:
         the others. An event on which the sink raises an ``Exception`` is
         lost, and the run goes on. The sink must not block: slow work
         belongs on a queue. The ``thinking`` and ``content`` of
-        ``assistant.message`` events pass
+        ``assistant.message`` events, and the ``rationale``, ``summary``
+        and ``best_effort_result`` of ``reflection`` events, pass
         :func:`~localmelo.melo.checker.redaction.redact_secrets`, while
-        working memory, history and the RunResult keep the text as it is.
+        working memory, history's tasks and steps and the RunResult keep
+        the text as it is; history's model calls store it redacted too.
         Without a sink, no event is built.
 
         *approval*, an
@@ -2693,7 +2707,12 @@ class Agent:
         3. The task record is saved, with the status ``cancelled`` and the
            error, within what is left of step 2's
            :data:`FINALIZE_TIMEOUT_S`, or during an exit within the exit's
-           time.
+           time. Then, when the run has a call recorder, the step's rows
+           that are written are listed on its planning reply's
+           ``llm_calls`` row, within what is still left; with no time left,
+           the link is skipped. It comes after the save, so a held write
+           lock cannot cost the task record its status: an unlinked row is
+           the lesser loss. A failed link is logged by the recorder.
         4. The reflections are cleared without being promoted: no
            long-term write, and no embedding or other network call.
         5. The RunResult is built, kept as ``run.outcome`` and reported
@@ -2794,6 +2813,12 @@ class Agent:
         :meth:`_do_memorize`. Nothing goes to long-term memory. Each write
         is attempted on its own: a failure is logged, and the next write
         still runs.
+
+        *written* gets the ids of the step's rows that are in history, in
+        order: those ``store_step`` had stored, then the one written again
+        (also when it turns out committed before), then each new one once
+        its write returns. A write that fails adds none, so
+        :meth:`_finalize` never links a row that does not exist.
         """
         written.extend(record.step_id for record in step.records[: step.stored])
         if step.stored < len(step.records):

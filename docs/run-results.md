@@ -139,7 +139,8 @@ second try may succeed:
   120 seconds.
 - Every chat request carries its attempt number (1, 2 or 3) in the
   `X-Localmelo-Attempt` HTTP header, so a proxy's request log can be matched
-  with `n_llm` and `llm_errors`.
+  with `n_llm` and `llm_errors`. `X-Localmelo-Call-Kind` says `plan` for a
+  planning request and `reflect` for a reflection request.
 
 ## Where results appear
 
