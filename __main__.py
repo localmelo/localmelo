@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import dataclasses
 import importlib.metadata
 import json
 import math
@@ -10,6 +11,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, TextIO
@@ -309,6 +311,36 @@ class _ExitSignals:
 # ── Direct mode: run ──
 
 
+async def _prompt() -> str:
+    """Read a terminal line without blocking signal handling in the event loop.
+
+    A daemon reader does not hold up process exit if a signal arrives while
+    stdin is idle. The default asyncio executor would wait for a blocked
+    input() thread during shutdown.
+    """
+    loop = asyncio.get_running_loop()
+    line: asyncio.Future[str] = loop.create_future()
+
+    def deliver(value: str | BaseException) -> None:
+        if line.done():
+            return
+        if isinstance(value, BaseException):
+            line.set_exception(value)
+        else:
+            line.set_result(value)
+
+    def read() -> None:
+        try:
+            value: str | BaseException = input("\n❯ ")
+        except BaseException as exc:
+            value = exc
+        with contextlib.suppress(RuntimeError):
+            loop.call_soon_threadsafe(deliver, value)
+
+    threading.Thread(target=read, daemon=True).start()
+    return await line
+
+
 async def _run(
     agent: Agent,
     query: str | None,
@@ -337,17 +369,27 @@ async def _run(
                 return EXIT_CRASHED  # not used: the process exits by the signal
             _report(outcome, output_format, version, out)
             return _exit_code(outcome.status)
-        print("melo agent (type 'exit' to quit)")
+        print("localmelo · local agent")
+        print("Enter a task to begin. Type /help for commands or /exit to quit.")
         while True:
             try:
-                q = input("\n> ")
+                q = await _prompt()
             except (EOFError, KeyboardInterrupt):
                 break
-            if q.strip().lower() in ("exit", "quit"):
+            command = q.strip().lower()
+            if command in ("exit", "quit", "/exit", "/quit"):
                 break
-            if not q.strip():
+            if command == "/help":
+                print(
+                    "Send a task to the configured model. /exit quits. Ctrl-D also exits."
+                )
+                print("Start the web interface separately with melo --serve.")
+                continue
+            if not command:
                 continue
             outcome = await agent.run_task(q)
+            if exit_signals is not None and exit_signals.received is not None:
+                return EXIT_CRASHED  # the process exits by the signal
             if outcome.result:
                 print(f"\n{outcome.result}")
             if outcome.status != "completed":
@@ -367,7 +409,7 @@ def _run_direct(
     output_format: str,
     tool_providers: Sequence[BaseToolProvider] = (),
 ) -> int:
-    """Run *query* in direct mode and return the exit code.
+    """Run *query*, or for an empty one the interactive loop; return the exit code.
 
     Stdout carries the report alone: what tools write to it during the
     run goes to stderr (see :func:`_stdout_for_the_report`).
@@ -380,7 +422,10 @@ def _run_direct(
     version = _localmelo_version() if output_format == "json" else ""
     exit_signals = _ExitSignals(agent, tool_providers)
     try:
-        with _stdout_for_the_report() as out:
+        output = (
+            _stdout_for_the_report() if query else contextlib.nullcontext(sys.stdout)
+        )
+        with output as out:
             code = asyncio.run(
                 _run(
                     agent,
@@ -393,6 +438,8 @@ def _run_direct(
             )
     except BaseException as exc:
         if exit_signals.received is None:
+            if not query and isinstance(exc, KeyboardInterrupt):
+                _exit_by_signal(signal.SIGINT)
             raise
         if not isinstance(exc, asyncio.CancelledError):
             text = _exception_text(exc)
@@ -677,6 +724,10 @@ def main() -> None:
     if args.query and not args.serve:
         query = " ".join(args.query)
         options = _direct_options(parser, args)
+        if not query:
+            # The loop keeps its answers, so each turn sees the earlier ones; a
+            # single task's options stay as they were.
+            options = dataclasses.replace(options, record_answers=True)
         tool_providers = _direct_tool_providers(parser, args)
         agent = _build_direct_mode_agent(
             args, options=options, tool_providers=tool_providers
@@ -772,7 +823,8 @@ def _build_direct_mode_agent(
        config is validated first, as for gateway startup, so a bad value
        (e.g. an invalid extra_body) is reported instead of a traceback.
        --request-timeout, when given, replaces the configured
-       request_timeout_s for this run; the file is not written.
+       request_timeout_s for this run, and --chat-model the configured
+       chat model; the file is not written.
 
     *options* and *tool_providers* go to the Agent in both cases. The
     memory directory that *options* name is created first (see
@@ -817,6 +869,11 @@ def _build_direct_mode_agent(
         # For this run only, like the gateway's --host and --port: the
         # loaded config is changed in memory and never saved.
         cfg.request_timeout_s = request_timeout
+
+    if args.chat_model:
+        section = getattr(cfg, cfg.chat_backend, None)
+        if section is not None:
+            section.chat_model = args.chat_model
 
     try:
         cfg.validate_or_raise()

@@ -64,9 +64,11 @@ error: externally-managed-environment
 FileNotFoundError: [Errno 2] No such file or directory: '…/localmelo/tests/smoke/data/scenarios.json'
 ```
 
-- **Cause:** localmelo was installed with pip but without `-e`, which leaves
-  out this data file of the web UI.
-- **Fix:** install again with `pip install -e ".[gateway]"`.
+- **Cause:** an older build omitted this required data file from its wheel.
+  Current builds package it along with the web workspace's assets.
+- **Fix:** update and reinstall localmelo as described in
+  [Update localmelo](configuration.md#update-localmelo). An editable source
+  install with `pip install -e ".[gateway]"` also includes the file.
 
 ## Setup and configuration
 

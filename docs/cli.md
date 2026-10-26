@@ -7,6 +7,7 @@ codes and signals, and how to use it from scripts.
 
 ```text
 melo [options] "<task>"                      # run one task (direct mode)
+melo [--base-url URL] [--chat-model NAME] "" # conversation loop in the terminal
 melo --serve [--host HOST] [--port PORT]     # start the gateway
 melo --serve --reconfigure                   # run setup, then start the gateway
 melo --daemon install|uninstall|status       # macOS background service
@@ -20,6 +21,7 @@ Quote the task. Several words without quotes are joined with spaces.
 |---|---|
 | `melo "<task>"` | Direct mode: runs one task, prints the result and exits. |
 | `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration. |
+| `melo ""` (empty task) | Opens a conversation loop in the terminal: each line you type is a task for the same agent. `/help` lists the commands; `/exit`, `/quit` or Ctrl-D exits. |
 | `melo` (no task) | The same as `melo --serve`. |
 | `melo --reconfigure` | Runs the setup wizard, then starts the gateway (the same as `melo --serve --reconfigure`). |
 | `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](gateway.md#run-the-gateway-at-login-macos). |
@@ -29,23 +31,32 @@ Quote the task. Several words without quotes are joined with spaces.
 > without a task (see the
 > [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap)).
 
+In the `melo ""` loop, turns share one agent and its working memory, which
+keeps each answer, so a turn sees the earlier ones. A turn that does not
+complete prints its status line on stderr, and the loop asks for the next task.
+`/exit`, `/quit` or Ctrl-D ends the loop with exit code 0; Ctrl+C ends it at
+once (a shell shows 130). The loop takes `--base-url` and `--chat-model`; the
+direct-mode options are usage errors with it. Its conversation is separate from
+the web workspace's chats.
+
 ## Options
 
 ### General
 
 | Option | Default | Description |
 |---|---|---|
-| `query` (positional) | not set | The task to run. Giving one selects direct mode. |
+| `query` (positional) | not set | The task to run. Giving one selects direct mode; an empty one (`""`) opens the loop. |
 | `-h`, `--help` | | Show the help and exit. |
 | `--base-url URL` | not set | Send chat requests to this OpenAI-compatible server instead of the configured backend. |
-| `--chat-model NAME` | `default` | The model to request from the `--base-url` server. |
+| `--chat-model NAME` | `default` with `--base-url`; else the configured model | The model to request from the `--base-url` server, or instead of the configured chat model. |
 
 - `--base-url` is used exactly as given, so include `/v1`, as in
   `http://127.0.0.1:11434/v1`.
 - `--base-url` sends no API key, and it does not read the config file, so
   `extra_body` and `request_timeout_s` do not apply.
-- Without `--base-url`, `--chat-model` is ignored and the configured model is
-  used. With `--serve`, both are ignored.
+- Without `--base-url`, `--chat-model` replaces the configured chat model for
+  this run; the config file is not changed. With `--serve`, or with no task
+  (`melo` alone), both are ignored.
 
 ### Direct mode
 
@@ -126,7 +137,8 @@ These are usage errors:
   `--mcp-only` with `--builtins` or `--tool-exposure`, `--embedding-model`
   without `--embedding-base-url`, `--embedding-base-url` without
   `--base-url`;
-- a direct-mode option with `--serve` or without a task, reported as
+- a direct-mode option with `--serve` or without a task (`melo ""`
+  included), reported as
   `only for direct mode (a query without --serve): --max-steps`;
 - an MCP config file that cannot be read or is not valid.
 

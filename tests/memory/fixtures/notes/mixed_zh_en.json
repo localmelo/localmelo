@@ -1,0 +1,51 @@
+{
+  "name": "mixed_zh_en",
+  "reply": {
+    "content": "",
+    "thinking": "The stub targets Python 3.11, e.g. it uses match statements in list_ops.py. 我先读取 list_ops.py 的测试文件。Then I'll run the tests, i.e. pytest -q on the whole folder.\nThe error means 3.11 is required, because match needs it. 结果可能和上次一样？所以我们应该保留 match 语句。",
+    "tool_calls": [],
+    "tool_results": []
+  },
+  "recent_path": "",
+  "expected_note": {
+    "note_id": "",
+    "task_id": "",
+    "step": 0,
+    "attempt": 0,
+    "call_seq": 0,
+    "kind": "empty",
+    "source": "heuristic",
+    "plan": "我先读取 list_ops.py 的测试文件。 Then I'll run the tests, i.e. pytest -q on the whole folder.",
+    "found": [
+      "The error means 3.11 is required, because match needs it."
+    ],
+    "decided": [
+      "所以我们应该保留 match 语句。"
+    ],
+    "hypotheses": [],
+    "open_questions": [
+      "结果可能和上次一样？"
+    ],
+    "observed": [],
+    "outcome": "",
+    "drafts": [],
+    "reasoning_chars": 246,
+    "source_ids": [],
+    "remember": true,
+    "remember_by": "heuristic",
+    "stage": "fresh",
+    "entry_id": "",
+    "uses": 0,
+    "last_used_at": 0.0,
+    "created_at": 0.0
+  },
+  "expected_rest": "",
+  "expected_draft": null,
+  "expected_chunks": [
+    {
+      "title": "The stub targets Python 3.11, e.g. it uses match statements in list_ops.py.",
+      "text": "The stub targets Python 3.11, e.g. it uses match statements in list_ops.py. 我先读取 list_ops.py 的测试文件。Then I'll run the tests, i.e. pytest -q on the whole folder.\nThe error means 3.11 is required, because match needs it. 结果可能和上次一样？所以我们应该保留 match 语句。"
+    }
+  ],
+  "expected_render": "plan: 我先读取 list_ops.py 的测试文件。 Then I'll run the tests, i.e. pytest -q on the whole folder.\nfound: The error means 3.11 is required, because match needs it.\ndecided: 所以我们应该保留 match 语句。\nopen: 结果可能和上次一样？"
+}
