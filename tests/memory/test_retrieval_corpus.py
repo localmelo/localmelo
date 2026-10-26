@@ -189,6 +189,9 @@ RAW_CALL_DOCS: list[dict[str, Any]] = [
         "meta": _meta("t-en", 3, 2, 1761200020.0, chunk=1),
     },
     {
+        # The reply holds a reflection (recommended_action "continue") after
+        # two sentences, which the plan takes: both are intent sentences
+        # with an action word or a file name. The JSON line has no marker.
         "doc_id": "t-en:r3",
         "kind": "reflection",
         "title": (
@@ -856,6 +859,113 @@ def test_a_document_whose_text_is_empty_is_left_out() -> None:
     # No note fields, no code block, and a chunk the sanitizer empties.
     assert docs_from_calls([RawCall("t", 0, thinking="<think>")]) == []
     assert docs_from_calls([RawCall("t", 0, kind="reflect")]) == []
+
+
+REFLECT_THINKING = "Maybe the fix is to append. Therefore I must edit list_ops.py."
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "Maybe the fix is to append. Therefore I must edit list_ops.py.",
+        '{"summary": "append is done."}',
+        '{"recommended_action": "retry", "summary": "append is done."}',
+        '{"recommended_action": "Done"}',
+        '[{"recommended_action": "done"}]',
+    ],
+)
+def test_a_reflect_reply_without_a_reflection_gives_only_its_chunks(
+    content: str,
+) -> None:
+    # The note would not be empty: the thinking has a hedge and a decision.
+    call = RawCall("t", 1, kind="reflect", content=content, thinking=REFLECT_THINKING)
+    assert [doc.doc_id for doc in docs_from_calls([call])] == ["t:t1.1"]
+
+
+def test_a_reflect_reply_with_a_reflection_gives_it() -> None:
+    content = '{"recommended_action": "done", "summary": "append is done."}'
+    call = RawCall("t", 1, kind="reflect", content=content, thinking=REFLECT_THINKING)
+    docs = docs_from_calls([call])
+    assert [(doc.doc_id, doc.kind) for doc in docs] == [
+        ("t:r1", "reflection"),
+        ("t:t1.1", "thought"),
+    ]
+
+
+def _reflect_replies() -> list[str]:
+    calls = load_raw_calls(_lines("raw_calls.jsonl"))
+    return [call.content for call in calls if call.kind == "reflect"]
+
+
+# A number the decoder cannot convert: more digits than int() takes.
+HUGE_NUMBER = "1" * 4_301
+
+REFLECTION_EDGE_CASES = [
+    "",
+    "append now passes its test.",
+    '{"recommended_action": "continue"}',
+    'Done. {"recommended_action": "stop", "summary": "s"} trailing prose',
+    # A tool call written out as text, then the reflection.
+    '{"tool_name": "file_read", "arguments": {"path": "a.py"}}'
+    '{"recommended_action": "done"}',
+    '{"tool_name": "file_read", "arguments": {"path": "a.py"}} then prose',
+    # Nested inside another object, as the whole reply and within prose.
+    '{"wrap": {"recommended_action": "done"}}',
+    'See {"wrap": {"recommended_action": "done"}} here.',
+    '{"recommended_action": 1}',
+    '{"recommended_action": null}',
+    '{"recommended_action": true}',
+    '{"recommended_action": ["done"]}',
+    '{"recommended_action": "retry"}',
+    '{"recommended_action": "Done"}',
+    # JSON that is not an object.
+    '["done"]',
+    '[{"recommended_action": "done"}]',
+    '"done"',
+    "42",
+    # A number the decoder cannot convert, as the whole reply, inside the
+    # reflection, and before it.
+    HUGE_NUMBER,
+    '{"recommended_action": "done", "n": ' + HUGE_NUMBER + "}",
+    '{"n": ' + HUGE_NUMBER + '} {"recommended_action": "done"}',
+    # Fenced JSON, with and without a language tag.
+    '```json\n{"recommended_action": "decompose"}\n```',
+    '```\n{"recommended_action": "continue"}\n```',
+    # A brace that starts no object, then the reflection.
+    'a { b {"recommended_action": "done"}',
+    # An unclosed object; and a brace in a string, which the decoder reads
+    # as a key that runs past the reflection's own brace.
+    '{"recommended_action": "done"',
+    'Use "{" carefully. {"recommended_action": "stop"}',
+]
+
+
+@pytest.mark.parametrize("reply", [*_reflect_replies(), *REFLECTION_EDGE_CASES])
+def test_the_reflection_test_agrees_with_the_agents(reply: str) -> None:
+    # corpus.py keeps a copy of the agent's test, since melo/memory does not
+    # import melo.agent (R3 spec, Requirement 13); tests may.
+    from localmelo.melo.agent.agent import _find_reflection as agent_test
+    from localmelo.melo.memory.retrieval.corpus import _find_reflection
+
+    assert _find_reflection(reply) == agent_test(reply)
+
+
+def test_the_reflection_test_on_the_edge_cases() -> None:
+    from localmelo.melo.memory.retrieval.corpus import _find_reflection
+
+    held = [reply for reply in REFLECTION_EDGE_CASES if _find_reflection(reply)]
+    assert held == [
+        '{"recommended_action": "continue"}',
+        'Done. {"recommended_action": "stop", "summary": "s"} trailing prose',
+        '{"tool_name": "file_read", "arguments": {"path": "a.py"}}'
+        '{"recommended_action": "done"}',
+        '```json\n{"recommended_action": "decompose"}\n```',
+        '```\n{"recommended_action": "continue"}\n```',
+        'a { b {"recommended_action": "done"}',
+    ]
+    assert [_find_reflection(reply) is not None for reply in _reflect_replies()] == [
+        True
+    ]
 
 
 def test_retrieve_and_estimate_calls_give_nothing() -> None:

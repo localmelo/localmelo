@@ -12,8 +12,8 @@ the benchmark records it (:func:`load_raw_calls`), and a run's
 ``history.db`` holds the same calls once localmelo records them in its
 ``llm_calls`` table (:func:`load_history_calls`). :func:`docs_from_calls`
 turns them into documents: a note for each planning call, a draft of its
-code blocks, a reflection for each reflection call, and thought chunks of
-the reasoning.
+code blocks, a reflection for each reflection call whose reply holds one,
+and thought chunks of the reasoning.
 
 Each loader skips blank lines and raises :class:`CorpusError`, with the
 1-based line number, for anything else that is wrong. Unknown keys are
@@ -47,9 +47,14 @@ from localmelo.melo.memory.notes import (
 )
 from localmelo.melo.memory.retrieval.base import DOC_KINDS, Doc, int_step
 from localmelo.melo.memory.retrieval.evaluate import LabelledQuery
+from localmelo.melo.memory.retrieval.llm import _strip_code_fences
 from localmelo.melo.schema import RAW_ARGUMENTS_KEY, ToolCall, ToolResult
 
 CALL_KINDS = ("plan", "reflect", "retrieve", "estimate")
+
+# The decisions a reflection may recommend: a copy of REFLECTION_ACTIONS in
+# melo/agent/agent.py (see _find_reflection below).
+REFLECTION_ACTIONS = ("continue", "stop", "decompose", "done")
 CALL_OUTCOMES = ("tools", "answer", "empty", "aux")
 
 # The note kind of a planning call, by its outcome.
@@ -268,7 +273,8 @@ def docs_from_calls(calls: Iterable[RawCall]) -> list[Doc]:
       a file named before them, else ``recent_path``), titled
       ``<target or "no target">, <lines> lines: <first code line>``.
     - A ``reflect`` call gives a reflection, ``<task_id>:r<seq>``, built
-      as a note of kind ``reflection``, and no draft.
+      as a note of kind ``reflection``, when its reply holds one (see
+      :func:`_find_reflection`), and no draft.
     - Both then give the thought chunks of the reasoning,
       ``<task_id>:t<seq>.<i>`` with i from 1.
     - ``retrieve`` and ``estimate`` calls give nothing.
@@ -344,7 +350,12 @@ def _task_docs(calls: Sequence[RawCall]) -> list[Doc]:
                     "remember_by": note.remember_by,
                 },
             )
-            if note_doc is not None:
+            # The agent adds no reflection for a reflect reply without one,
+            # so a doc for it would be a reflection the run never had. The
+            # call's thought chunks stay.
+            if note_doc is not None and (
+                not reflection or _find_reflection(call.content) is not None
+            ):
                 entries.append(note_doc)
             if not reflection:
                 draft = extract_draft(
@@ -456,6 +467,68 @@ def _recent_path(call: RawCall, recent_path: str) -> str:
             if isinstance(path, str) and path.strip():
                 recent_path = path
     return recent_path
+
+
+# ── Reflections ──
+#
+# The test of a reflect reply: copies of _json_values and _find_reflection in
+# melo/agent/agent.py (lines 105-193 at c295ce2), with REFLECTION_ACTIONS
+# above and _strip_code_fences from llm.py, itself a copy. melo/memory does
+# not import melo.agent; a parity test holds the copies to the originals
+# until R5 moves the test to one place.
+
+
+def _json_values(text: str) -> Iterator[object]:
+    """The JSON values of a reflect reply, in the order they are read.
+
+    A Markdown code fence around the reply is stripped first. When the
+    rest is JSON as a whole, that value is the only one. Otherwise each
+    balanced ``{...}`` in it that parses as a JSON object is one. After a
+    ``{`` that does not start one, the search goes on from where the
+    decoder gave up, and after an object, from its end. Nesting deeper
+    than the decoder's recursion limit ends the search.
+    """
+    body = _strip_code_fences(text)
+    try:
+        value = json.loads(body)
+    except (ValueError, RecursionError):
+        pass
+    else:
+        yield value
+        return
+    decoder = json.JSONDecoder()
+    start = body.find("{")
+    while start != -1:
+        try:
+            value, end = decoder.raw_decode(body, start)
+        except json.JSONDecodeError as exc:
+            start = body.find("{", max(exc.pos, start + 1))
+            continue
+        except RecursionError:
+            return
+        yield value
+        start = body.find("{", end)
+
+
+def _find_reflection(text: str) -> dict[str, Any] | None:
+    """The reflection a reflect reply holds, or ``None``.
+
+    That is the first JSON value of the reply (see :func:`_json_values`)
+    that is an object whose ``recommended_action``, as a string, is one of
+    :data:`REFLECTION_ACTIONS`. An object without one is passed over for
+    the objects after it, but an object nested inside it is not looked at.
+    JSON that is not an object holds no reflection.
+    """
+    try:
+        for value in _json_values(text):
+            if not isinstance(value, dict):
+                continue
+            action = value.get("recommended_action")
+            if ("" if action is None else str(action)) in REFLECTION_ACTIONS:
+                return value
+    except ValueError:  # a number the decoder cannot convert ends the search
+        pass
+    return None
 
 
 def _outcome(call: RawCall) -> str:
