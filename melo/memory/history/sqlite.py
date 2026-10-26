@@ -6,7 +6,7 @@ import logging
 import math
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Final
 
@@ -20,6 +20,7 @@ from localmelo.melo.memory._sqlite import (
 from localmelo.melo.memory.history import History
 from localmelo.melo.schema import (
     ImagePart,
+    LLMCallRecord,
     StepRecord,
     TaskRecord,
     ToolCall,
@@ -360,6 +361,91 @@ class SqliteHistory(History):
                         step.timestamp,
                         seq,
                     ),
+                )
+                await conn.commit()
+            except BaseException:
+                await conn.rollback()
+                raise
+
+    async def add_llm_call(self, record: LLMCallRecord) -> None:
+        """Write *record* as a new ``llm_calls`` row; ``step_ids_json`` is NULL.
+
+        ``tool_calls_json`` lists the calls as ``{"tool_name", "arguments",
+        "id"}`` objects, as :meth:`add_step` writes one call, or is NULL
+        without calls; ``usage_json`` is the usage as JSON, or NULL. The
+        row is written in a ``BEGIN IMMEDIATE`` transaction that a failure
+        or a cancellation rolls back, as :meth:`add_step`'s is.
+        """
+        conn = await self._ensure_ready()
+
+        tool_calls_json = None
+        if record.tool_calls:
+            tool_calls_json = json.dumps(
+                [
+                    {
+                        "tool_name": call.tool_name,
+                        "arguments": call.arguments,
+                        "id": call.id,
+                    }
+                    for call in record.tool_calls
+                ]
+            )
+        usage_json = None if record.usage is None else json.dumps(record.usage)
+
+        async with self._write_lock:
+            # BEGIN IMMEDIATE is inside the try, as in add_step.
+            try:
+                await conn.execute("BEGIN IMMEDIATE")
+                await conn.execute(
+                    """INSERT INTO llm_calls
+                       (task_id, seq, kind, step, attempt, outcome, content,
+                        thinking, reasoning_key, step_ids_json, redactions,
+                        tool_calls_json, usage_json, duration_s, timestamp)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)""",
+                    (
+                        record.task_id,
+                        record.seq,
+                        record.kind,
+                        record.step,
+                        record.attempt,
+                        record.outcome,
+                        record.content,
+                        record.thinking,
+                        record.reasoning_key,
+                        record.redactions,
+                        tool_calls_json,
+                        usage_json,
+                        record.duration_s,
+                        record.timestamp,
+                    ),
+                )
+                await conn.commit()
+            except BaseException:
+                await conn.rollback()
+                raise
+
+    async def link_llm_call_steps(
+        self, task_id: str, seq: int, step_ids: Sequence[str]
+    ) -> None:
+        """Set ``step_ids_json`` of row ``(task_id, seq)`` to *step_ids*, in order.
+
+        An empty *step_ids* writes nothing, and a missing row is no error.
+        Linking a row again with the same ids writes the same value. The
+        transaction is rolled back on a failure or a cancellation, as
+        :meth:`add_step`'s is.
+        """
+        if not step_ids:
+            return
+        conn = await self._ensure_ready()
+        step_ids_json = json.dumps(list(step_ids))
+        async with self._write_lock:
+            # BEGIN IMMEDIATE is inside the try, as in add_step.
+            try:
+                await conn.execute("BEGIN IMMEDIATE")
+                await conn.execute(
+                    """UPDATE llm_calls SET step_ids_json = ?
+                       WHERE task_id = ? AND seq = ?""",
+                    (step_ids_json, task_id, seq),
                 )
                 await conn.commit()
             except BaseException:

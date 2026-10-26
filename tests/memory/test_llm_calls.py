@@ -13,6 +13,7 @@ import logging
 import math
 import os
 import sqlite3
+import time
 from collections import deque
 from collections.abc import Iterator
 from pathlib import Path
@@ -35,7 +36,14 @@ from localmelo.melo.memory.history.sqlite import (
     HistorySchemaError,
     SqliteHistory,
 )
-from localmelo.melo.schema import Message, StepRecord, TaskRecord, ToolDef
+from localmelo.melo.schema import (
+    LLMCallRecord,
+    Message,
+    StepRecord,
+    TaskRecord,
+    ToolCall,
+    ToolDef,
+)
 
 HISTORY_LOGGER = "localmelo.melo.memory.history.sqlite"
 
@@ -606,3 +614,162 @@ def test_thinking_retention_days_reads_the_environment(
     assert thinking_retention_days() == 30.0
     monkeypatch.setenv("LOCALMELO_THINKING_RETENTION_DAYS", "12")
     assert thinking_retention_days() == 12.0
+
+
+# ── Writing rows ────────────────────────────────────────────────────────────
+
+
+def _record(seq: int = 0, **fields: Any) -> LLMCallRecord:
+    values: dict[str, Any] = {
+        "task_id": "t1",
+        "seq": seq,
+        "kind": "plan",
+        "step": 2,
+        "attempt": 1,
+        "outcome": "tools",
+        "content": "Listing it.",
+        "thinking": "I list the directory with [redacted].",
+        "reasoning_key": "reasoning_content",
+        "redactions": 1,
+        "tool_calls": (
+            ToolCall(tool_name="shell_exec", arguments={"command": "ls"}, id="c1"),
+            ToolCall(tool_name="file_read", arguments={"path": "a.txt"}, id="c2"),
+        ),
+        "usage": {"prompt_tokens": 120, "completion_tokens": 40, "cached_tokens": 96},
+        "duration_s": 1.25,
+        "timestamp": 1761200000.5,
+    }
+    values.update(fields)
+    return LLMCallRecord(**values)
+
+
+def _call_rows(path: Path) -> list[dict[str, Any]]:
+    with _connect(path) as connection:
+        connection.row_factory = sqlite3.Row
+        rows = connection.execute("SELECT * FROM llm_calls ORDER BY seq").fetchall()
+    return [dict(row) for row in rows]
+
+
+async def test_rows_round_trip_every_column(tmp_path: Path) -> None:
+    path = tmp_path / "history.db"
+    history = SqliteHistory(path, clock=lambda: 0.0)
+    try:
+        await history.add_llm_call(_record(0))
+        await history.add_llm_call(
+            _record(
+                1,
+                kind="reflect",
+                step=None,
+                attempt=None,
+                outcome="aux",
+                thinking="",
+                reasoning_key="",
+                redactions=0,
+                tool_calls=(),
+                usage=None,
+            )
+        )
+        await history.link_llm_call_steps("t1", 0, ["s1", "s2"])
+        await history.link_llm_call_steps("t1", 1, [])
+        # A missing row is no error.
+        await history.link_llm_call_steps("t1", 7, ["s9"])
+    finally:
+        await history.aclose()
+
+    assert _call_rows(path) == [
+        {
+            "task_id": "t1",
+            "seq": 0,
+            "kind": "plan",
+            "step": 2,
+            "attempt": 1,
+            "outcome": "tools",
+            "content": "Listing it.",
+            "thinking": "I list the directory with [redacted].",
+            "reasoning_key": "reasoning_content",
+            "step_ids_json": '["s1", "s2"]',
+            "redactions": 1,
+            "tool_calls_json": (
+                '[{"tool_name": "shell_exec", "arguments": {"command": "ls"}, '
+                '"id": "c1"}, {"tool_name": "file_read", "arguments": '
+                '{"path": "a.txt"}, "id": "c2"}]'
+            ),
+            "usage_json": (
+                '{"prompt_tokens": 120, "completion_tokens": 40, "cached_tokens": 96}'
+            ),
+            "duration_s": 1.25,
+            "timestamp": 1761200000.5,
+        },
+        {
+            "task_id": "t1",
+            "seq": 1,
+            "kind": "reflect",
+            "step": None,
+            "attempt": None,
+            "outcome": "aux",
+            "content": "Listing it.",
+            "thinking": "",
+            "reasoning_key": "",
+            "step_ids_json": None,
+            "redactions": 0,
+            "tool_calls_json": None,
+            "usage_json": None,
+            "duration_s": 1.25,
+            "timestamp": 1761200000.5,
+        },
+    ]
+
+
+async def test_linking_again_with_the_same_ids_keeps_the_value(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "history.db"
+    history = SqliteHistory(path, clock=lambda: 0.0)
+    try:
+        await history.add_llm_call(_record(0))
+        await history.link_llm_call_steps("t1", 0, ("s1", "s2"))
+        first = _call_rows(path)
+        await history.link_llm_call_steps("t1", 0, ("s1", "s2"))
+    finally:
+        await history.aclose()
+    assert _call_rows(path) == first
+    assert first[0]["step_ids_json"] == '["s1", "s2"]'
+
+
+@pytest.mark.parametrize("write", ["add_llm_call", "link_llm_call_steps"])
+async def test_a_cancelled_write_leaves_no_transaction_open(
+    tmp_path: Path, write: str
+) -> None:
+    # As for add_step: a cancellation while BEGIN IMMEDIATE waits for another
+    # connection's write lock must not leave the connection in a transaction.
+    path = tmp_path / "history.db"
+    history = SqliteHistory(path)
+    try:
+        await history.save_task(TaskRecord(query="q", task_id="t1"))
+        await history.add_llm_call(_record(0, timestamp=time.time()))
+        with contextlib.closing(sqlite3.connect(path, isolation_level=None)) as other:
+            other.execute("BEGIN IMMEDIATE")
+            if write == "add_llm_call":
+                pending = history.add_llm_call(_record(1, timestamp=time.time()))
+            else:
+                pending = history.link_llm_call_steps("t1", 0, ["s1"])
+            writing = asyncio.create_task(pending)
+            await asyncio.sleep(0.2)  # the write waits at its BEGIN IMMEDIATE
+            writing.cancel()
+            await asyncio.sleep(0.05)
+            other.execute("ROLLBACK")
+            with pytest.raises(asyncio.CancelledError):
+                await writing
+
+        await history.add_step("t1", StepRecord(thought="next"))
+        assert history._conn is not None
+        assert not history._conn.in_transaction
+        with contextlib.closing(sqlite3.connect(path, timeout=0.1)) as other:
+            other.execute("BEGIN IMMEDIATE")
+            other.execute("ROLLBACK")
+        assert [step.thought for step in await history.get_steps("t1")] == ["next"]
+    finally:
+        await history.aclose()
+    rows = _call_rows(path)
+    assert [row["seq"] for row in rows] == [0]
+    assert rows[0]["step_ids_json"] is None

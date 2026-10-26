@@ -351,6 +351,37 @@ class StepRecord:
     timestamp: float = field(default_factory=time.time)
 
 
+@dataclass(frozen=True)
+class LLMCallRecord:
+    """One model response, as a row of history's ``llm_calls`` table.
+
+    ``seq`` numbers the responses of task ``task_id`` from 0, in the order
+    they arrived. ``kind`` is the request's call kind (``plan``,
+    ``reflect``, ...), ``outcome`` the shape of a ``plan`` reply
+    (``tools``, ``answer`` or ``empty``) and ``aux`` for any other kind.
+    ``content`` and ``thinking`` are the reply's, redacted, and
+    ``redactions`` counts the spans replaced. ``reasoning_key`` names the
+    response key the provider read the thinking from. ``usage`` is the
+    whole usage the server reported, ``duration_s`` the request's time
+    and ``timestamp`` when the response arrived.
+    """
+
+    task_id: str
+    seq: int
+    kind: str
+    step: int | None
+    attempt: int | None
+    outcome: str
+    content: str
+    thinking: str
+    reasoning_key: str
+    redactions: int
+    tool_calls: tuple[ToolCall, ...]
+    usage: dict[str, int] | None
+    duration_s: float
+    timestamp: float
+
+
 @dataclass
 class TaskRecord:
     query: str
