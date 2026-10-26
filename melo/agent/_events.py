@@ -60,7 +60,7 @@ def check_sink(on_event: object) -> None:
     ):
         raise TypeError(
             "on_event must be synchronous: put events on a queue and consume "
-            "them in a task (see localmelo.support.sessions.SessionRunner)"
+            "them in a task"
         )
 
 

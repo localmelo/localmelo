@@ -892,7 +892,7 @@ class TestSinks:
 
         synchronous = (
             "on_event must be synchronous: put events on a queue and consume them "
-            "in a task (see localmelo.support.sessions.SessionRunner)"
+            "in a task"
         )
         for sink, message in [
             (42, "on_event must be a callable that takes an AgentEvent"),
