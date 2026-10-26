@@ -74,6 +74,19 @@
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
 
+        <article class="update-entry" id="u-2026-10-26">
+          <h3>网关拒绝来自其他网站的请求</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/36">#36</a>
+          </p>
+          <ul>
+            <li>在默认地址上，网关会拒绝 <code>Host</code> 不是 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>[::1]</code> 加端口的请求（HTTP 421），也会拒绝其他来源的网页通过浏览器发来的请求（HTTP 403）。网页不能再通过 DNS 重绑定访问网关、用你的工具执行任务。</li>
+            <li>任何网页都不能在 frame 里显示网关的页面。</li>
+            <li>如果监听地址不是 <code>localhost</code> 或回环 IP 地址（例如 <code>0.0.0.0</code>），网关不做这些检查，并在启动时记录一条警告：网关没有身份验证。</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-23">
           <h3>反思按自己的检查决定是否继续</h3>
           <p class="update-date">

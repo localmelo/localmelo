@@ -17,6 +17,7 @@ except ImportError as e:
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload, SessionTransition
 from localmelo.support import config
+from localmelo.support.gateway.guard import LoopbackGuard, is_loopback
 from localmelo.support.gateway.session import SessionManager
 
 logger = logging.getLogger("localmelo.gateway")
@@ -28,7 +29,12 @@ logger = logging.getLogger("localmelo.gateway")
 class GatewayServer:
     def __init__(self, cfg: config.Config) -> None:
         self.cfg = cfg
-        self.host = cfg.gateway.host
+        host = cfg.gateway.host
+        # A URL writes an IPv6 address in brackets, as in [::1]; the socket
+        # takes it without them.
+        if host.startswith("[") and host.endswith("]"):
+            host = host[1:-1]
+        self.host = host
         self.port = cfg.gateway.port
         self._started_at: float | None = None
         self._checker = Checker()
@@ -46,6 +52,21 @@ class GatewayServer:
         from localmelo.support.gateway.webapp import mount as mount_webapp
 
         mount_webapp(self.app)
+
+        # The guard sees each request before routing, so it covers every
+        # route, error responses and routes added later. Middleware added
+        # after it would run before it: add middleware above this point.
+        if is_loopback(self.host):
+            self.app.add_middleware(LoopbackGuard, port=self.port)
+        else:
+            logger.warning(
+                "Gateway host %s is not localhost or a loopback IP address, so "
+                "requests are not checked. The gateway has no authentication: "
+                "anything that can reach it, web pages through DNS rebinding "
+                'included, can run tasks with tools. Use host = "127.0.0.1" '
+                "(the default).",
+                self.host,
+            )
 
     # ── Lifespan ──
 

@@ -98,6 +98,18 @@ def _build_server(
     return server
 
 
+def _client(server: GatewayServer) -> TestClient:
+    """A client for *server*, addressed to it as the gateway's guard requires.
+
+    Errors in routes are returned as 500 responses, not raised.
+    """
+    return TestClient(
+        server.app,
+        base_url=f"http://127.0.0.1:{server.port}",
+        raise_server_exceptions=False,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -115,8 +127,7 @@ def server(sessions: FakeSessionManager) -> GatewayServer:
 
 @pytest.fixture()
 def client(server: GatewayServer) -> TestClient:
-    # raise_server_exceptions=False so we can assert on 500 responses
-    return TestClient(server.app, raise_server_exceptions=False)
+    return _client(server)
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +311,7 @@ class TestSessionLifecycle:
         """Agent.run() raises -> 500, session returns to idle."""
         fail_sessions = FakeSessionManager(fail_agent=True)
         fail_server = _build_server(fail_sessions)
-        fail_client = TestClient(fail_server.app, raise_server_exceptions=False)
+        fail_client = _client(fail_server)
 
         resp = fail_client.post(
             "/v1/agent/run",
@@ -317,7 +328,7 @@ class TestSessionLifecycle:
         """After an error, the same session can be reused."""
         fail_sessions = FakeSessionManager(fail_agent=True)
         fail_server = _build_server(fail_sessions)
-        fail_client = TestClient(fail_server.app, raise_server_exceptions=False)
+        fail_client = _client(fail_server)
 
         r1 = fail_client.post(
             "/v1/agent/run",

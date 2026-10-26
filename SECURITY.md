@@ -38,9 +38,21 @@ those tools can do.
   tools, `--mcp-only`, a container or virtual machine, or a separate user
   account.
 - **The gateway has no authentication.** It listens on `127.0.0.1:8401` by
-  default. Anyone who can reach it can run tasks with your tools, and the web
-  UI makes the gateway fetch any URL that a client sends. Never bind it to
-  other interfaces.
+  default, where any program on your computer can reach it and run tasks
+  with your tools, and the web UI makes the gateway fetch any URL that a
+  client sends.
+  - On `localhost` or a loopback IP address, such as `127.0.0.1` or `::1`,
+    the gateway refuses requests whose `Host` header is not `127.0.0.1`,
+    `localhost` or `[::1]` with its port (HTTP 421), which stops web pages
+    that reach it through DNS rebinding. It also refuses requests from web
+    pages at another origin (HTTP 403): `POST`, `PUT`, `PATCH`, `DELETE` and
+    `OPTIONS` requests whose `Origin` is not the gateway's, and requests
+    under `/v1/` that the browser marks as cross-site or same-site. A link
+    from another site still opens the web UI, but no page can show it in a
+    frame.
+  - On any other host, such as `0.0.0.0` or a host name other than
+    `localhost`, none of this applies: anything that can reach the port, web
+    pages included, can run tasks. Never bind it to other interfaces.
 - **MCP servers** run as local processes, with a minimal environment plus
   the `env` you give them.
 - **Secrets.** The config file stores the *name* of the API-key variable,
