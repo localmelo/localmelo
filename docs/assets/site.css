@@ -407,23 +407,68 @@ caption {
   margin-top: 24px;
 }
 
-.masthead-visual {
-  max-width: 560px;
-  margin: 24px 0 0;
+.doc-hero.home-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 180px;
+  grid-template-rows: auto auto auto 1fr;
+  grid-template-areas:
+    "title mascot"
+    "lead mascot"
+    "meta mascot"
+    "actions mascot";
+  column-gap: 40px;
+  margin-bottom: 28px;
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 
-.doc-illustration {
-  max-width: 360px;
-  padding: 18px;
+.home-hero h1 {
+  grid-area: title;
+}
+
+.home-hero .lead {
+  grid-area: lead;
+}
+
+.home-hero .doc-meta {
+  grid-area: meta;
+}
+
+.home-hero .masthead-actions {
+  grid-area: actions;
+  align-self: start;
+}
+
+.home-mascot {
+  grid-area: mascot;
+  align-self: center;
+  width: 180px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: var(--surface);
+}
+
+.home-shot {
+  margin: 0;
+}
+
+.home-shot img {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.home-shot figcaption {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 0.9rem;
 }
 
 .button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   min-height: 38px;
   padding: 0 15px;
   border: 1px solid var(--line-2);
@@ -588,6 +633,20 @@ caption {
 .tag.experimental {
   background: var(--amber-soft);
   color: var(--amber);
+}
+
+.tag.note {
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.link-card .tag {
+  display: inline-flex;
+  min-height: 20px;
+  margin-left: 6px;
+  padding: 0 7px;
+  font-size: 0.72rem;
 }
 
 .callout {
@@ -964,6 +1023,30 @@ caption {
 
   .doc-hero h1 {
     font-size: 2.15rem;
+  }
+
+  .doc-hero.home-hero {
+    grid-template-columns: minmax(0, 1fr) 84px;
+    grid-template-rows: auto;
+    grid-template-areas:
+      "title mascot"
+      "lead lead"
+      "meta meta"
+      "actions actions";
+    column-gap: 16px;
+  }
+
+  .home-hero h1 {
+    align-self: center;
+    margin: 0;
+  }
+
+  .home-hero .lead {
+    margin-top: 16px;
+  }
+
+  .home-mascot {
+    width: 84px;
   }
 
   .diagram-scroll {

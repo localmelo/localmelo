@@ -43,16 +43,23 @@
     </nav>
 
     <article class="content">
-      <header class="doc-hero" id="overview">
+      <header class="doc-hero home-hero" id="overview">
         <h1>localmelo</h1>
-        <p class="lead">一个本地个人智能体：在你自己的模型服务器或云端 API 上，借助工具和记忆完成任务。它可以在命令行中运行，也可以作为一个小型 HTTP 服务运行，支持 Ollama、MLC LLM、vLLM、SGLang 和云端 API。</p>
+        <p class="lead">一个本地个人智能体：在你自己的模型服务器或云端 API 上，借助工具和记忆完成任务。它可以在命令行中运行，也可以作为一个小型 HTTP 服务运行。</p>
         <div class="doc-meta">
           <span class="tag experimental">早期预览版（pre-alpha）</span>
         </div>
-        <div class="masthead-visual doc-illustration">
-          <img src="../assets/melo.png" alt="Melo，localmelo 的吉祥物" width="896" height="1195">
+        <div class="masthead-actions">
+          <a class="button primary" href="./quickstart.html">开始使用</a>
+          <a class="button" href="https://github.com/localmelo/localmelo">GitHub <span aria-hidden="true">↗</span></a>
         </div>
+        <img class="home-mascot" src="../assets/melo.png" alt="Melo，localmelo 的吉祥物" width="400" height="534">
       </header>
+
+      <figure class="home-shot">
+        <img src="../assets/web-workspace.webp" alt="localmelo 的网页工作区：左侧是对话列表，右侧的对话中，智能体用带格式的列表和代码块回答了一个问题。" width="1920" height="1200">
+        <figcaption><code>melo --serve</code> 在 <code>http://127.0.0.1:8401/</code> 打开的网页工作区。</figcaption>
+      </figure>
 
       <section class="section" id="quickstart">
         <h2>快速开始</h2>
@@ -100,11 +107,11 @@ source .venv/bin/activate</code></pre>
             <span>工作记忆、任务和步骤的历史记录，以及配置了嵌入服务器时的长期记忆；开启持久化后会保存到 SQLite。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md">
-            <strong>Python API</strong>
-            <span>在 Python 代码中运行任务（实验性）：以事件形式跟踪每一步，停止运行，审批工具调用，并把文件工具限制在一个目录内。</span>
+            <strong>Python API <span class="tag experimental">实验性</span></strong>
+            <span>在 Python 代码中运行任务：以事件形式跟踪每一步，停止运行，审批工具调用，并把文件工具限制在一个目录内。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">
-            <strong>离线检索</strong>
+            <strong>离线检索 <span class="tag note">仅离线</span></strong>
             <span>用 <code>melo-retrieve</code> 在带标注的查询上比较 <code>bm25</code>、<code>llm</code> 和 <code>embedding</code> 三种记忆检索器。运行目前还不使用它们。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#use-melo-in-scripts">
@@ -117,18 +124,6 @@ source .venv/bin/activate</code></pre>
       <section class="section" id="roadmap">
         <h2>路线图</h2>
         <p>v0.1.0 里程碑计划于 2026-12-20 完成。</p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th scope="col">阶段</th><th scope="col">日期</th><th scope="col">范围</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>第 1 阶段</td><td>2026-10-19 至 2026-11-01</td><td>核心循环 v2 和命令行</td></tr>
-              <tr><td>第 2 阶段</td><td>2026-11-02 至 2026-11-22</td><td>记忆：笔记、检索，以及提升为长期记忆</td></tr>
-              <tr><td>第 3 阶段</td><td>2026-11-23 至 2026-12-06</td><td>安全和隐私</td></tr>
-            </tbody>
-          </table>
-        </div>
         <p>计划中：</p>
         <ul>
           <li>交互式命令行：不带任务运行 <code>melo</code> 时打开，并实时显示智能体的工具调用（目前 <code>melo</code> 会启动网关，<code>melo &quot;&quot;</code> 打开一个简单的对话循环）；</li>
@@ -136,7 +131,7 @@ source .venv/bin/activate</code></pre>
           <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话。</li>
         </ul>
-        <p>相关议题和更新记录见<a href="./updates.html#roadmap">路线图和更新</a>。</p>
+        <p>各阶段、相关议题和更新记录见<a href="./updates.html#roadmap">路线图和更新</a>。</p>
       </section>
 
       <section class="section" id="security">
