@@ -10,6 +10,8 @@ lane.
 
 from __future__ import annotations
 
+import math
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -22,6 +24,8 @@ from localmelo.support.scheduler import (
     Machine,
     Params,
     State,
+    TaskUpdated,
+    advance,
     dispatch,
     params_for_arm,
     policy,
@@ -58,6 +62,16 @@ def test_a_lane_call_is_admitted_when_decide_raises() -> None:
         and "decide_failed:ZeroDivisionError" in out.decision.alarms
     )
     assert out.decision.admit == ("c",)
+    # A caller's corrupt values (a NULL level, a NaN instant) never reach the
+    # lane: decide() cleans them with alarms instead of raising.
+    st = advance(st, NOW, [TaskUpdated("t", (("level", None),))], Params())
+    nan: Any = math.nan
+    st = replace(st, tasks=(replace(st.tasks[0], created_mono_us=nan),))
+    out = dispatch(st, NOW, Params())
+    assert out.lane_admit == ("lane",) and not out.decision.fallback
+    assert {"bad_value:t:level", "bad_value:t:created_mono_us"} <= set(
+        out.decision.alarms
+    )
 
 
 def test_a_lane_call_is_admitted_before_any_task_call() -> None:
@@ -173,6 +187,10 @@ def test_a_failing_fallback_admits_only_the_lane(
     assert dict(d.levels) == {"bad": 2, "r": 2, "t": 2}
     assert d.alarms == ("decide_failed:ZeroDivisionError", "fallback_failed:KeyError")
     assert d.limit_nonlane == 1 and d.fallback
+    monkeypatch.setattr(policy, "_last_resort", raising)  # even the last resort
+    out = dispatch(st, NOW, Params(n_srv=1), decide_fn=boom)
+    assert out.lane_admit == ("lane",) and out.decision.admit == ()
+    assert out.decision.alarms == ("last_resort_failed",)
 
 
 def test_a_focus_switch_moves_a_held_chat_call_into_the_lane() -> None:

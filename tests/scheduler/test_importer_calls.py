@@ -118,6 +118,9 @@ def test_calls_are_ordered_by_start_then_call_index(tmp_path: Path) -> None:
     assert [c.call_index for c in calls] == [1, 2, 3]
     assert [c.start_s for c in calls] == [0.0, 5.0, 5.0]
     assert [c.gap_before_s for c in calls] == [0.0, 3.0, 0.0]
+    write(tmp_path, [rec(1, 5.0, 6.0), rec(2, 0.0, 1.0)])  # a lower index, later
+    traces, _ = import_calls(tmp_path)
+    assert [c.call_index for c in traces[0].calls] == [2, 1]
 
 
 def test_endpoints_map_to_call_kinds_and_other_records_are_dropped_and_counted() -> (
@@ -227,16 +230,28 @@ def test_null_usage_bad_token_values_unknown_endpoints_and_bad_utf8_are_handled(
         rec(6, 6.0, 7.0, call_index=-1),
         rec(7, 7.0, 8.0, call_index=True),
         rec(8, 8.0, 9.0),
+        rec(8, 9.0, 9.5),  # a repeated index: a trace keys calls by it
+        rec(
+            9,
+            10.0,
+            11.0,
+            usage={"prompt_tokens": 10**400, "completion_tokens": 3},
+            usage_raw={"prompt_eval_duration": 1e308, "generation_duration": 1e308},
+        ),
     ]
     traces, report = import_calls(write(tmp_path, records))
     calls = traces[0].calls
-    assert [c.call_index for c in calls] == [0, 1, 2, 8]
+    assert [c.call_index for c in calls] == [0, 1, 2, 8, 9]
     assert [(c.prompt_tokens, c.completion_tokens) for c in calls[:3]] == [
         (None, None)
     ] * 3
-    assert [c.tokens_unknown for c in calls] == [True, True, True, False]
+    assert (calls[4].prompt_tokens, calls[4].server_prompt_s) == (None, None)
+    assert (calls[4].service_s, calls[4].service_source) == (1.0, "wall")
+    assert [c.tokens_unknown for c in calls] == [True, True, True, False, True]
+    write_trace(tmp_path / "trace.jsonl", traces)  # every value is finite
+    assert read_trace(tmp_path / "trace.jsonl") == traces
     assert dict(report.dropped) == {
-        "bad_call_index": 2,
+        "bad_call_index": 3,
         "no_run_id": 1,
         "not_a_model_call": 2,
         "not_json": 2,
@@ -277,20 +292,23 @@ def test_a_task_uses_mono_times_only_when_every_record_has_them(
         ],
         "order/calls.jsonl",
     )
+    huge = [rec(0, 0.0, 1.0, mono_start=-1.7e308), rec(1, 2.0, 3.0, mono_end=1.7e308)]
+    write(tmp_path, huge, "zhuge/calls.jsonl")  # beyond ±2**53: not a clock value
     traces, report = import_calls(tmp_path)
     by_source = {t.source.split("/")[0]: t.calls for t in traces}
+    assert [c.start_s for c in by_source["zhuge"]] == [0.0, 2.0]
     assert [c.wall_start_s for c in by_source["wall"]] == [WALL, WALL + 2.0]
     assert [c.start_s for c in by_source["wall"]] == [0.0, 2.0]
     assert [c.call_index for c in by_source["mixed"]] == [0, 2]
     assert [c.start_s for c in by_source["mixed"]] == [0.0, 4.0]
     assert [c.call_index for c in by_source["order"]] == [0]
-    assert report.wall_time_tasks == 1
+    assert report.wall_time_tasks == 2
     assert dict(report.dropped) == {
         "bad_times": 1,
         "harness": 1,
         "not_a_model_call": 1,
     }
-    check_identities(traces, report, kept_tasks=4)
+    check_identities(traces, report, kept_tasks=5)
 
 
 def test_service_prefers_server_timings_then_tokens_then_wall(tmp_path: Path) -> None:
@@ -338,10 +356,11 @@ def test_overlapping_runs_are_marked_and_left_out_by_default(tmp_path: Path) -> 
 
 def test_ttfb_and_ttft_are_never_read(tmp_path: Path) -> None:
     write(tmp_path, [rec(0, 0.0, 1.0), rec(1, 1.5, 2.0)], "a/calls.jsonl")
-    absurd: dict[str, Any] = {"ttfb_s": -1e9, "ttft_s": "x", "ttft_valid": True}
+    # Plausible values that a read would accept, as times or as a fallback.
+    seen: dict[str, Any] = {"ttfb_s": 0.4, "ttft_s": 0.7, "ttft_valid": True}
     write(
         tmp_path,
-        [rec(0, 0.0, 1.0, **absurd), rec(1, 1.5, 2.0, **absurd)],
+        [rec(0, 0.0, 1.0, **seen), rec(1, 1.5, 2.0, **seen)],
         "b/calls.jsonl",
     )
     traces, report = import_calls(tmp_path)
@@ -394,11 +413,17 @@ def test_a_trace_round_trips_and_an_s2_style_line_reads_as_a_trace_call(
         (lines + [other.replace('"harness":"localmelo"', '"harness":"x"')], "differ"),
         ([lines[0].replace('"version":1', '"version":2')], "version 1"),
         ([lines[0].replace('"attempt":1', '"attempt":1.5')], "attempt"),
+        ([lines[0].replace('"version":1', '"version":true')], "version 1"),
+        ([lines[0].replace('"version":1', '"version":1.0')], "version 1"),
+        ([lines[0].replace('"start_s":0.0', '"start_s":' + "9" * 400)], "start_s"),
         (["[1]"], "not a JSON object"),
     ):
         path.write_text("\n".join(bad) + "\n")
         with pytest.raises(TraceFormatError, match=message):
             read_trace(path)
+    path.write_bytes(first + b"\xff\n")
+    with pytest.raises(TraceFormatError, match=f":{len(lines) + 1}: not JSON"):
+        read_trace(path)
 
 
 def test_templates_drop_refused_calls_and_fill_failed_tokens() -> None:

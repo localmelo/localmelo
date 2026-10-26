@@ -178,7 +178,7 @@ def compute_metrics(result: SimResult) -> Metrics:
         slowdown_p95=percentile(slow, 95),
         deadline_miss_rate=sum(missed) / len(dl) if dl else None,
         tardiness_mean_s=mean(late),
-        throughput_per_h=tuple(f / hours for f in fin),
+        throughput_per_h=tuple(f / hours if hours else 0.0 for f in fin),
         busy_share=r.busy_us / horizon if horizon else 0.0,
         cache_hit_share=(
             sum(t.cached_tokens for t in r.tasks) / prompt if prompt else None

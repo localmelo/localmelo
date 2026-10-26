@@ -45,7 +45,12 @@ from localmelo.support.scheduler.model import (
     is_planning,
 )
 from localmelo.support.scheduler.policy import _order_keys
-from localmelo.tests.scheduler.gen import random_state
+from localmelo.tests.scheduler.gen import plain_state, random_state
+
+
+def both(seed: int) -> list[tuple[State, Params]]:
+    """The odd state and the schedulable state of *seed*."""
+    return [random_state(random.Random(seed)), plain_state(random.Random(seed))]
 
 
 def boom(st: State, now: Clock, p: Params) -> Decision:
@@ -86,8 +91,8 @@ def _blocked(st: State, task_id: str, level: int) -> bool:
 
 
 def test_decide_is_total_on_generated_states() -> None:
-    for seed in range(300):
-        st, p = random_state(random.Random(seed))
+    admitting = 0
+    for seed, (st, p) in ((k, sp) for k in range(300) for sp in both(k)):
         now = st.clock
         d = decide(st, now, p)
         decision_json(Dispatch((), (), d))
@@ -113,6 +118,8 @@ def test_decide_is_total_on_generated_states() -> None:
             assert not _blocked(st, c.task_id, levels[c.task_id]), seed
         if st.machine.lock == "foreign":
             assert not [c for c in admitted if is_planning(calls[c])], seed
+        admitting += bool(d.admit)
+    assert admitting >= 50  # the checks on admissions ran
 
 
 def _starts(st: State, p: Params) -> int:
@@ -128,9 +135,8 @@ def _starts(st: State, p: Params) -> int:
 def test_a_started_task_blocked_by_its_own_state_never_keeps_a_task_from_starting() -> (
     None
 ):
-    exercised = 0
-    for seed in range(400):
-        st, p = random_state(random.Random(seed))
+    exercised = starting = 0
+    for seed, (st, p) in ((k, sp) for k in range(400) for sp in both(k)):
         # Strict class order without inheritance, so the change moves no other task's order.
         p = replace(p, arm="class", floors=False, inheritance=False)
         touched = {d.waiter for d in st.deps} | {d.holder for d in st.deps}
@@ -149,7 +155,8 @@ def test_a_started_task_blocked_by_its_own_state_never_keeps_a_task_from_startin
         )
         assert _starts(dep, p) >= before, seed
         assert _starts(paused, p) >= before, seed
-    assert exercised >= 50
+        starting += before > 0
+    assert exercised >= 50 and starting >= 10  # tasks did start
 
 
 def test_dispatch_admits_or_answers_the_lane_on_generated_states_when_decide_raises() -> (
@@ -181,9 +188,10 @@ def test_dispatch_admits_or_answers_the_lane_on_generated_states_when_decide_rai
 
 
 def test_floor_credit_stays_within_its_cap_on_generated_event_sequences() -> None:
-    for seed in range(50):
+    accrued = 0
+    for seed in range(100):
         rng = random.Random(1000 + seed)
-        st, p = random_state(rng)
+        st, p = (random_state if seed < 50 else plain_state)(rng)
         now = st.clock
         for i in range(20):
             now = Clock(now.mono_us + rng.randint(-5, 60) * 1_000_000, now.wall_us + 1)
@@ -204,6 +212,8 @@ def test_floor_credit_stays_within_its_cap_on_generated_event_sequences() -> Non
             st = apply_dispatch(st, now, out, p)
             for k in (0, 1):
                 assert 0 <= st.credit_us[k] <= _credit_cap_us(st.chi_hat_us[k], p), seed
+            accrued += st.credit_us != (0, 0)
+    assert accrued >= 20  # credit moved, so the cap was tested
 
 
 def _new_call(call_id: str, task_id: str, mono: int, rng: random.Random) -> Call:

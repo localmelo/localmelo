@@ -43,7 +43,7 @@ MIN_SEEDS = 20
 # baseline, starvation ratio at most 8, whole-reply p95 ratio at most 1.10
 # and first-event p95 at most 10 s at the 97.5th percentile, from pools of
 # at least 200 replies.
-COMPLETION_DROP = 0.05
+COMPLETION_DROP_POINTS = 5
 STARVATION_MAX = 8.0
 REPLY_RATIO_MAX = 1.10
 FIRST_EVENT_MAX_S = 10.0
@@ -137,10 +137,11 @@ def _guardrails(
         nc, nb = sum(m.tasks_by_class[k] for m in cr), sum(
             m.tasks_by_class[k] for m in br
         )
-        if nc and nb:
-            rc = sum(m.finished_by_class[k] for m in cr) / nc
-            rb = sum(m.finished_by_class[k] for m in br) / nb
-            ok = ok and rc >= rb - COMPLETION_DROP
+        if nc and nb:  # fc/nc >= fb/nb - 5/100 in integers: exactly 5 points pass
+            fc = sum(m.finished_by_class[k] for m in cr)
+            fb = sum(m.finished_by_class[k] for m in br)
+            drop = COMPLETION_DROP_POINTS * nc * nb
+            ok = ok and 100 * fc * nb >= 100 * fb * nc - drop
     out.append(("completion", w, "pass" if ok else "fail"))
     worst = max((m.starvation_max or 0.0 for m in cr), default=0.0)
     out.append(("starvation", w, "pass" if worst <= STARVATION_MAX else "fail"))

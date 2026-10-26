@@ -13,7 +13,11 @@ from collections import Counter
 
 from localmelo.support.scheduler.model import us
 from localmelo.support.scheduler.sim import SEEDS, make_workload
-from localmelo.support.scheduler.sim.workloads import WorkloadName, _substream_seed
+from localmelo.support.scheduler.sim.workloads import (
+    WorkloadName,
+    _substream_seed,
+    synthetic_templates,
+)
 
 NAMES: tuple[WorkloadName, ...] = ("W1", "W2", "W2c", "W3", "W5")
 H = 3600.0
@@ -27,6 +31,9 @@ def test_each_workload_is_identical_for_a_seed_and_differs_across_seeds() -> Non
         assert [t.task_id for t in a.tasks][:1] == [f"{name}-1-000"]
         assert all(t.level == t.gold_level and t.size == "" for t in a.tasks)
         assert a.deps == ()
+    # A tool-time pool is an input: sorted before use, so its order is moot.
+    pool = synthetic_templates(1, n=3, tool_pool=[1.0, 2.0, 3.0])
+    assert pool == synthetic_templates(1, n=3, tool_pool=[3.0, 2.0, 1.0])
 
 
 def test_w1_follows_the_design_mix_presence_and_horizon() -> None:

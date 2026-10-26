@@ -154,7 +154,10 @@ def _field(name: str, type_: str, value: Any, where: str) -> Any:
         ok = value in _CHOICES[name]
     elif base == "float":
         ok = isinstance(value, int | float) and not isinstance(value, bool)
-        value = float(value) if ok else value
+        try:
+            value = float(value) if ok else value
+        except OverflowError:  # an integer too large for a float
+            ok = False
         ok = ok and math.isfinite(value)
     elif base == "int":
         ok = isinstance(value, int) and not isinstance(value, bool)
@@ -177,18 +180,24 @@ def read_trace(path: Path) -> tuple[TaskTrace, ...]:
     """
     tasks: dict[str, tuple[tuple[str, str, bool], list[TraceCall]]] = {}
     seen: set[tuple[str, int]] = set()
-    lines = Path(path).read_text(encoding="utf-8").split("\n")
-    for n, text in enumerate(lines, start=1):
-        if not text.strip():
+    lines = Path(path).read_bytes().split(b"\n")
+    for n, raw in enumerate(lines, start=1):
+        if not raw.strip():
             continue
         where = f"{path}:{n}"
-        try:
-            obj = json.loads(text, parse_constant=_non_finite)
+        try:  # bad UTF-8 is a ValueError too
+            obj = json.loads(raw.decode("utf-8"), parse_constant=_non_finite)
         except ValueError as exc:
             raise TraceFormatError(f"{where}: not JSON: {exc}") from None
         if not isinstance(obj, dict):
             raise TraceFormatError(f"{where}: not a JSON object")
-        if obj.get("schema") != SCHEMA or obj.get("version") != VERSION:
+        version = obj.get("version")
+        if (
+            obj.get("schema") != SCHEMA
+            or not isinstance(version, int)
+            or isinstance(version, bool)
+            or version != VERSION
+        ):
             raise TraceFormatError(f"{where}: not {SCHEMA} version {VERSION}")
         values: dict[str, Any] = {}
         for f in fields(TraceCall):

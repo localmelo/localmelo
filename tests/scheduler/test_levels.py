@@ -17,7 +17,14 @@ import pytest
 from localmelo.support.scheduler import Dep, Params, Task, decide
 from localmelo.support.scheduler.levels import Levels, compute_levels
 from localmelo.support.scheduler.model import us
-from localmelo.tests.scheduler.helpers import WALL0, clock, reasons, state, task
+from localmelo.tests.scheduler.helpers import (
+    WALL0,
+    call,
+    clock,
+    reasons,
+    state,
+    task,
+)
 
 DAY = us(86400.0)
 
@@ -126,6 +133,11 @@ def test_a_dependency_cycle_passes_nothing_blocks_its_members_and_raises_an_alar
     assert "dependency_cycle:a,b" in out.alarms and "dependency_cycle:c" in out.alarms
     d = decide(state(tasks, deps=deps), clock(0.0), Params())
     assert all(reasons(d)[k] == ("Dependency", "") for k in "abc")
+    # A cycle of confirmed result edges blocks a member that has a call too.
+    parked = [task("a", phase="parked", started_mono_us=0), task("b", phase="waiting")]
+    results = [Dep("a", "b", "result", True), Dep("b", "a", "result", True)]
+    d = decide(state(parked, [call("c-a", "a")], results), clock(0.0), Params())
+    assert d.admit == () and reasons(d)["a"] == ("Dependency", "")
     # An unconfirmed result edge that closes a loop changes no level and asks nothing.
     waiting = [
         task("a", level=1, level_source="user", phase="waiting"),

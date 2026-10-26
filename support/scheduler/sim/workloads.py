@@ -113,6 +113,7 @@ def synthetic_templates(
     *tool_pool* (sorted tool seconds from ``history.db``) when given.
     """
     rng = _rng(seed, "templates")
+    pool = sorted(tool_pool) if tool_pool else ()  # inputs sorted before use
     out: list[TaskTemplate] = []
     for j in range(n):
         k = min(MAX_CALLS, 1 + int(2 * rng.paretovariate(1.2)))
@@ -123,8 +124,8 @@ def synthetic_templates(
             completion = rng.randint(80, 600)
             if i == 0:
                 gap = 0.0
-            elif tool_pool:
-                gap = rng.choice(tool_pool)
+            elif pool:
+                gap = rng.choice(pool)
             elif rng.random() < 0.1:
                 gap = rng.uniform(30.0, 300.0)
             else:

@@ -181,7 +181,11 @@ class _Engine:
         self.wl, self.mode, self.p, self.keep_log = wl, mode, p, keep_log
         rates = sp.rates or Rates(p.prefill_tok_s, p.decode_tok_s)
         self.rates = rates
-        self.server = Server(sp.n_srv or p.n_srv, rates, sp)
+        n_srv = sp.n_srv or p.n_srv
+        if sp.foreign_calls >= n_srv:
+            raise ValueError("foreign_calls: must leave the server a slot (< n_srv)")
+        self.server = Server(n_srv, rates, sp)
+        self.tick_us = max(1, us(p.tick_s))  # a tick under 0.5 µs would never advance
         self.heap: list[tuple[int, int, int, tuple[Any, ...]]] = []
         self.seq = 0
         self.state = State(clock=Clock(0, wl.wall_start_us))
@@ -258,7 +262,8 @@ class _Engine:
         p = FRONT_PROMPT_TOKENS
         call = Call(cid, None, "front", "plan", 1, now, p)
         job = Job(cid, "front", p, p - FRONT_NEW_TOKENS, FRONT_COMPLETION_TOKENS)
-        self.push(now + us(self.p.lane_deadline_s), DEADLINE, ("deadline", cid))
+        if self.mode != "off":  # the code answer is the gate's; off has no gate
+            self.push(now + us(self.p.lane_deadline_s), DEADLINE, ("deadline", cid))
         self.submit(now, _Live(job, call, turn=ti), events)
 
     def end(self, now: int, ends: list[tuple[str, int]], events: list[Event]) -> None:
@@ -354,7 +359,7 @@ class _Engine:
                 self.expire(now, payload[1], events)
             elif kind == "tick":
                 events.append(Tick())
-                self.push(now + us(p.tick_s), TICK, ("tick",))
+                self.push(now + self.tick_us, TICK, ("tick",))
         clock = Clock(now, wl.wall_start_us + now)
         if self.mode != "off":
             self.own_wait(now)
@@ -515,10 +520,16 @@ class _Engine:
             while self.heap and self.heap[0][0] == now:
                 batch.append(heapq.heappop(self.heap)[3])
             self.step(now, batch)
-        self.server.progress(wl.horizon_us if not self.done() else last)
-        return self.result()
+        end = wl.horizon_us if not self.done() else last
+        self.server.progress(end)
+        return self.result(end)
 
-    def result(self) -> SimResult:
+    def result(self, end: int) -> SimResult:
+        if self.mode == "off":  # calls still in the server's queue waited too
+            for j in self.server.queue:
+                lv = self.live.get(j.call_id)
+                if lv is not None and lv.task is not None:
+                    self.tasks[lv.task].queue_us += end - lv.call.submit_mono_us
         by_id = {t.task_id: t for t in self.state.tasks}
         records = []
         for tr in self.tasks:

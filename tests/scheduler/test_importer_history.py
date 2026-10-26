@@ -35,6 +35,20 @@ CREATE TABLE steps (step_id TEXT PRIMARY KEY, task_id TEXT NOT NULL,
                     thought TEXT NOT NULL DEFAULT '', tool_call_json TEXT,
                     tool_result_json TEXT, timestamp REAL, seq INTEGER NOT NULL);
 """
+# The statements Requirement 57 allows, as the spec writes them: a SELECT
+# of any other column, or of *, fails the privacy test.
+SPEC_SQL = """
+SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name;
+PRAGMA table_info(steps); PRAGMA table_info(tasks);
+SELECT task_id, step_id, seq, timestamp,
+       tool_call_json IS NULL AS thought_only,
+       CASE WHEN json_valid(tool_result_json)
+            THEN json_extract(tool_result_json, '$.duration_ms') END AS duration_ms,
+       (tool_result_json IS NOT NULL AND NOT json_valid(tool_result_json)) AS bad_json
+FROM steps ORDER BY task_id, seq, step_id;
+SELECT task_id, status FROM tasks ORDER BY task_id;
+"""
+ALLOWED_WORDS = set(re.findall(r"[A-Za-z_]+", SPEC_SQL))
 CALL = json.dumps({"tool_name": "shell_exec", "arguments": {"cmd": "ls"}, "id": "c"})
 Row = tuple[str, str, str | None, str | None, float | None, int]
 
@@ -255,6 +269,7 @@ def test_the_importer_selects_no_text_column(
     for sql in statements:
         words = re.findall(r"[A-Za-z_]+", sql)
         assert not {"query", "result", "thought"} & set(words), sql
+        assert "*" not in sql and set(words) <= ALLOWED_WORDS, sql
         for i, word in enumerate(words):
             if word in ("tool_call_json", "tool_result_json"):
                 inside = i > 0 and words[i - 1] in ("json_valid", "json_extract")

@@ -32,9 +32,11 @@ from localmelo.tests.scheduler.helpers import (
     WALL0,
     call,
     clock,
+    find,
     lane,
     reasons,
     state,
+    step,
     task,
 )
 
@@ -137,6 +139,12 @@ def test_never_held_calls_are_admitted_at_once_and_count_against_slots() -> None
     locked = run(tasks, calls, m=Machine(lock="foreign"), n_srv=3)
     assert locked.admit_unheld == ("e1", "e2") and locked.admit == ()
     assert reasons(locked)["b"] == ("Reservation", "lock")
+    # A never-held call of no task is admitted too; one naming an unknown
+    # task is an orphan.
+    bare = Call("e3", None, session_kind="front_bg", kind="embed")
+    ghost = Call("e4", "ghost", kind="embed")
+    d = run([], [bare, ghost])
+    assert d.admit_unheld == ("e3",) and d.alarms == ("orphan_call:e4",)
 
 
 @pytest.mark.parametrize(
@@ -167,8 +175,17 @@ def test_a_retry_rides_on_its_first_admission_but_waits_for_the_lock_the_server_
         assert d.admit_unheld == ("r",) and "a" not in reasons(d)
     else:
         assert d.admit_unheld == () and reasons(d)["a"] == expected
-    paused = run([other_t, task("a", phase="held", paused=True)], [other_c, retry], m=m)
-    assert reasons(paused).get("a", ("Paused", "")) == ("Paused", "")
+    paused = run(
+        [other_t, task("a", phase="held", paused=True)], [other_c, retry], m=m, **kw
+    )
+    assert ("r" in paused.admit_unheld) == (expected is None)
+    assert reasons(paused).get("a") == (None if expected is None else ("Paused", ""))
+    # A retry resumes no task: a waiting task stays waiting, its block kept.
+    waiting = task("a", phase="waiting", wait_reason="approval", started_mono_us=0)
+    st = state([other_t, waiting], [other_c, retry], machine=m, clock=NOW)
+    st, out = step(st, NOW, params_for_arm("class", n_srv=3, n_a=1, **kw))
+    assert ("r" in out.decision.admit_unheld) == (expected is None)
+    assert find(st, "a").phase == "waiting"
 
 
 def test_the_memory_check_holds_a_call_that_does_not_fit() -> None:
@@ -454,6 +471,10 @@ def test_a_working_set_over_m_hot_parks_the_running_task_with_the_highest_level_
     assert d.parks == (("c", "working_set"),)
     assert d.admit == ("c-a", "c-b") and reasons(d) == {"c": ("Memory", "kv")}
     assert run(tasks, calls, kv_bytes_per_token=1.0, m_hot_bytes=12000.0).parks == ()
+    # Once parked, it does not start again while that would push the set over.
+    parked = [*tasks[:2], task("c", level=3, phase="parked", last_prompt_tokens=4000)]
+    again = run(parked, calls, **hot)
+    assert again.parks == () and reasons(again) == {"c": ("Memory", "working_set")}
 
 
 def test_a_p4_task_expires_after_7_days_without_activity() -> None:
@@ -463,6 +484,13 @@ def test_a_p4_task_expires_after_7_days_without_activity() -> None:
     created = task("created", level=4, created_wall_us=NOW.wall_us - week)
     p3 = task("p3", level=3, created_wall_us=0)
     assert run([old, fresh, created, p3]).expire == ("created", "old")
+    # Not while it runs or is admitted, nor while a waiter needs it (inherited).
+    window = Machine(away_since_mono_us=NOW.mono_us - us(3600.0))
+    now_admitted = run([old], [call("c-old", "old")], m=window)
+    assert now_admitted.admit == ("c-old",) and now_admitted.expire == ()
+    waiter = task("w", level=1, level_source="user")
+    needed = run([old, waiter], deps=[Dep("w", "old", confirmed=True)])
+    assert dict(needed.levels)["old"] == 1 and needed.expire == ()
 
 
 def test_p0_meaning_conversation_counts_a_p0_task_as_p1() -> None:
@@ -486,6 +514,12 @@ def test_p0_meaning_conversation_counts_a_p0_task_as_p1() -> None:
         (lambda: Params(phi2=1.5), "phi2"),
         (lambda: Params(m_front_bytes=float("inf")), "m_front_bytes"),
         (lambda: params_for_arm("gittins"), "arm"),
+        (lambda: Params(n_srv=False), "n_srv"),  # would close the lane for good
+        (lambda: params_for_arm("las2", n_srv=8.5), "n_srv"),
+        (lambda: params_for_arm("las2", p1_cap=1.5), "p1_cap"),  # every decide() raised
+        (lambda: Params(n_a=False), "n_a"),
+        (lambda: params_for_arm("las2", aging=1), "aging"),
+        (lambda: params_for_arm("las2", remaining_prior_s=None), "remaining_prior_s"),
     ],
 )
 def test_cloud_offload_and_bad_params_are_refused(make: Any, field: str) -> None:

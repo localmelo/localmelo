@@ -47,6 +47,11 @@ def test_promotion_resets_both_counters_and_is_tested_only_at_or_above_q() -> No
         0,
         us(500.0),
     )
+    # A root_id that names a task with a root of its own: the task charged
+    # (one hop up) is promoted too, so its tree is never stuck at gamma 1.
+    chain = [task("c"), task("b", root_id="c", promo_service_us=Q, wait_promo_us=4 * Q)]
+    out = find(advance(state(chain), clock(0.0), [], P), "b")
+    assert (out.promo_service_us, out.wait_promo_us) == (0, 0)
 
 
 @pytest.mark.parametrize(
