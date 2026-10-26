@@ -148,7 +148,7 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
         <p>给出空字符串作为任务，即可开始终端对话，并在多轮对话中使用同一个智能体：</p>
         <pre><code>melo ""
 # Or use the exact model ID from an OpenAI-compatible server:
-melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID ""</code></pre>
+melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""</code></pre>
         <p>用 <code>/help</code> 查看命令，用 <code>/exit</code> 或 Ctrl-D 退出。不加 <code>""</code> 时，<code>melo</code> 会像 <code>melo --serve</code> 一样启动网关。</p>
         <p><code>http://127.0.0.1:8401/</code> 上的网页工作区支持模型发现、独立的对话草稿、代码格式化、取消运行和响应式导航。连接到同一网关的浏览器客户端会同步对话状态，刷新页面也能恢复仍然有效的对话。会话不会在网关重启后保留，直接运行的命令行对话与网页对话相互独立。</p>
       </section>

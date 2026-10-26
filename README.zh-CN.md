@@ -90,7 +90,7 @@ source .venv/bin/activate
 运行 `melo ""`（任务为空字符串），即可使用已配置的后端开始终端对话。用 `/help` 查看命令，或用 `/exit` 退出。也可以直接连接 oMLX 或其他兼容 OpenAI 接口的服务器：
 
 ```bash
-melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID ""
+melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""
 ```
 
 不加 `""` 时，`melo` 会启动网关，见[命令行参考（英文）](docs/cli.md#modes)。
@@ -135,8 +135,8 @@ uv run python -m localmelo.support.gateway._test_webapp
 
 计划中：
 
-- 交互式命令行（不带任务运行 `melo` 时会打开它；目前这样做会启动网关）；
-- 网页控制台；
+- 交互式命令行：不带任务运行 `melo` 时打开，并实时显示智能体的工具调用（目前 `melo` 会启动网关，`melo ""` 打开一个简单的对话循环）；
+- 网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；
 - 把模型的推理过程保存为记忆笔记，并可切换检索方式（`bm25`、`llm`、`embedding`）。
 
 ## 安全

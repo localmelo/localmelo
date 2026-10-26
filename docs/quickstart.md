@@ -168,7 +168,7 @@ turns:
 ```bash
 melo ""
 # Or use the exact model ID from an OpenAI-compatible server:
-melo --base-url http://127.0.0.1:8500/v1 --chat-model YOUR_MODEL_ID ""
+melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""
 ```
 
 Use `/help` for commands and `/exit` or Ctrl-D to leave. Without the `""`,
