@@ -73,6 +73,30 @@ test('nested emphasis closes without stray delimiters', () => {
   assert.equal(renderMarkdown('a * b * c, 2*3*4, *a * b*'), '<p>a * b * c, 2<em>3</em>4, <em>a * b</em></p>');
 });
 
+test('bare URLs keep balanced brackets and drop long runs of closers in linear time', () => {
+  assert.equal(renderMarkdown('[see https://x/(a)]]'), '<p>[see <a href="https://x/(a)" target="_blank" rel="noopener noreferrer">https://x/(a)</a>]]</p>');
+  for (const closer of [')', ']']) {
+    const started = performance.now();
+    const result = renderMarkdown('https://x/' + closer.repeat(40000));
+    assert.ok(performance.now() - started < 1000, closer);
+    assert.equal(result, '<p><a href="https://x/" target="_blank" rel="noopener noreferrer">https://x/</a>' + closer.repeat(40000) + '</p>');
+  }
+});
+
+test('emphasis openers that never close render in linear time', () => {
+  for (const [source, html] of [
+    ['*a '.repeat(27000), '*a '.repeat(27000)],
+    ['void f(char *a, char *b); '.repeat(6000), 'void f(char *a, char *b); '.repeat(6000)],
+    ['*a *b* '.repeat(12000), '*a <em>b</em> '.repeat(12000)],
+    ['**a b* '.repeat(12000), '*<em>a b</em> '.repeat(12000)],
+  ]) {
+    const started = performance.now();
+    const result = renderMarkdown(source);
+    assert.ok(performance.now() - started < 1000, source.slice(0, 20));
+    assert.equal(result, '<p>' + html + '</p>');
+  }
+});
+
 test('normal paragraphs preserve soft breaks and CRLF input', () => {
   assert.equal(renderMarkdown('first\r\nsecond\r\n\r\nthird'), '<p>first<br>\nsecond</p><p>third</p>');
   assert.equal(renderMarkdown(''), '');

@@ -52,11 +52,16 @@ function closingDelimiter(text, delimiter, start) {
  * Find where an emphasis opened just before `start` closes. A run of the delimiter
  * character preceded by whitespace opens nested emphasis; a later run first closes those
  * nested openers, and only what is left of it can close this one.
+ *
+ * `blockers` caches, per delimiter, the table from emphasisBlockers for this `text`, so an
+ * opener without a closer returns at once instead of scanning to the end of the paragraph.
  */
-function closingEmphasis(text, delimiter, start) {
+function closingEmphasis(text, delimiter, start, blockers) {
   const character = delimiter[0];
+  const blocked = (blockers[delimiter] ??= emphasisBlockers(text, delimiter));
   let nested = 0;
   for (let position = start; position < text.length; position++) {
+    if (position > start && nested >= blocked[position]) return -1;
     if (text[position] === "\\") {
       position++;
       continue;
@@ -83,6 +88,38 @@ function closingEmphasis(text, delimiter, start) {
   return -1;
 }
 
+/**
+ * For each position, the fewest pending nested openers with which closingEmphasis, scanning
+ * on from that position, finds no closer. It is built once per text and delimiter, from the
+ * end, and follows closingEmphasis's steps for a position after `start`.
+ */
+function emphasisBlockers(text, delimiter) {
+  const character = delimiter[0];
+  const blocked = new Array(text.length + 2).fill(0);
+  for (let position = text.length - 1; position >= 0; position--) {
+    let next = position + 1;
+    if (text[position] === "\\") next = position + 2;
+    else if (text[position] === "`") {
+      const code = codeSpanAt(text, position);
+      if (code) next = code.end;
+    } else if (text[position] === character) {
+      let runEnd = position;
+      while (text[runEnd] === character) runEnd++;
+      const run = runEnd - position;
+      const after = blocked[runEnd];
+      if (!/\s/.test(text[position - 1])) {
+        // A run that can close: it closes unless nested openers leave less than a delimiter.
+        blocked[position] = after === 0 ? run - delimiter.length + 1 : run + after;
+      } else if (runEnd < text.length && !/\s/.test(text[runEnd])) {
+        blocked[position] = Math.max(0, after - run);
+      } else blocked[position] = after;
+      continue;
+    }
+    blocked[position] = blocked[next];
+  }
+  return blocked;
+}
+
 const BARE_URL = /https?:\/\/[^\s<>"'`]+/iy;
 
 /** Match a bare http(s) URL at `start`, without trailing punctuation (as GFM autolinks). */
@@ -91,15 +128,23 @@ function bareUrlAt(text, start) {
   BARE_URL.lastIndex = start;
   const match = BARE_URL.exec(text);
   if (!match || /["'<>]/.test(text[start + match[0].length] || "")) return null;
-  let source = match[0];
-  const count = (character) => source.split(character).length - 1;
-  for (;;) {
-    const last = source[source.length - 1];
-    if (/[.,:;!?*_~]/.test(last)) source = source.slice(0, -1);
-    else if (last === ")" && count("(") < count(")")) source = source.slice(0, -1);
-    else if (last === "]" && count("[") < count("]")) source = source.slice(0, -1);
-    else break;
+  // Count unmatched closers once, so trimming a long run of them stays linear.
+  const unmatched = { ")": 0, "]": 0 };
+  for (const character of match[0]) {
+    if (character === "(") unmatched[")"]--;
+    else if (character === "[") unmatched["]"]--;
+    else if (character === ")" || character === "]") unmatched[character]++;
   }
+  let length = match[0].length;
+  for (;;) {
+    const last = match[0][length - 1];
+    if (/[.,:;!?*_~]/.test(last)) length--;
+    else if ((last === ")" || last === "]") && unmatched[last] > 0) {
+      unmatched[last]--;
+      length--;
+    } else break;
+  }
+  const source = match[0].slice(0, length);
   const url = safeUrl(source);
   return url ? { source, url, end: start + source.length } : null;
 }
@@ -149,6 +194,7 @@ function linkAt(text, start) {
 
 function inline(text, depth = 0, allowLinks = true) {
   if (depth > 20) return escapeHtml(text);
+  const blockers = {};
   let html = "";
   for (let index = 0; index < text.length; ) {
     const character = text[index];
@@ -189,7 +235,7 @@ function inline(text, depth = 0, allowLinks = true) {
     }
     if (character === "*" || character === "_") {
       const delimiter = text[index + 1] === character ? character.repeat(2) : character;
-      const end = closingEmphasis(text, delimiter, index + delimiter.length);
+      const end = closingEmphasis(text, delimiter, index + delimiter.length, blockers);
       const intraword = character === "_" && /[\p{L}\p{N}]/u.test(text[index - 1] || "");
       if (
         !intraword &&
