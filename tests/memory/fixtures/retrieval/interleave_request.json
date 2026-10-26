@@ -1,0 +1,55 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a coding agent. Use the tools to edit files."
+    },
+    {
+      "role": "user",
+      "content": "Implement reverse in list_ops.py."
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "file_read",
+        "description": "Read a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "file_write",
+        "description": "Write a file.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "content": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "path",
+            "content"
+          ]
+        }
+      }
+    }
+  ],
+  "max_tokens": 1
+}

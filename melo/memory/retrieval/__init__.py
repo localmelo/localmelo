@@ -11,7 +11,9 @@ Three retrievers rank memory documents (:class:`Doc`) for a query:
 
 :func:`build_retriever` makes one by name, and :func:`evaluate` measures
 one on labelled queries: recall@k, MRR, and cold, warm and interleaved
-latency. Nothing here touches the agent loop.
+latency. :mod:`.corpus` reads the corpus and the labelled queries, and
+turns a run's raw model calls into a corpus. Nothing here touches the
+agent loop.
 
 Experimental: the interface may change while memory recall is built on it.
 """
@@ -31,6 +33,15 @@ from localmelo.melo.memory.retrieval.base import (
     Send,
 )
 from localmelo.melo.memory.retrieval.bm25 import BM25Retriever
+from localmelo.melo.memory.retrieval.corpus import (
+    CorpusError,
+    RawCall,
+    doc_to_dict,
+    docs_from_calls,
+    load_corpus,
+    load_queries,
+    load_raw_calls,
+)
 from localmelo.melo.memory.retrieval.embedding import EmbeddingRetriever
 from localmelo.melo.memory.retrieval.evaluate import (
     EvalReport,
@@ -43,16 +54,23 @@ from localmelo.melo.memory.retrieval.llm import LLMRetriever, send_from_provider
 __all__ = [
     "DOC_KINDS",
     "RETRIEVER_NAMES",
+    "CorpusError",
     "Doc",
     "EvalReport",
     "Hit",
     "LabelledQuery",
     "QueryResult",
+    "RawCall",
     "RetrievalResult",
     "Retriever",
     "Send",
     "build_retriever",
+    "doc_to_dict",
+    "docs_from_calls",
     "evaluate",
+    "load_corpus",
+    "load_queries",
+    "load_raw_calls",
     "send_from_provider",
 ]
 

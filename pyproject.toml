@@ -37,6 +37,7 @@ dev = [
 
 [project.scripts]
 melo = "localmelo.__main__:main"
+melo-retrieve = "localmelo.support.retrieve:main"
 
 # ── black ──
 [tool.black]
