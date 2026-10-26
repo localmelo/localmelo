@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import shutil
 import sqlite3
 import threading
@@ -881,6 +882,27 @@ def test_export_a_history_directory_and_its_database_file(
     shutil.copyfile(database, renamed)
     assert main(["--export-run", str(renamed)]) == 0
     assert capsys.readouterr() == (_expected_export(), EXPORT_LINE)
+
+
+@pytest.mark.skipif(not Path("/dev/fd").is_dir(), reason="needs /dev/fd")
+def test_export_raw_calls_through_a_pipe(capsys: pytest.CaptureFixture[str]) -> None:
+    # As a process substitution, <(cat calls.jsonl), passes them: a pipe's
+    # /dev/fd path, whose bytes go to their first reader only.
+    data = Path(RAW_CALLS).read_bytes()
+    read_end, write_end = os.pipe()
+    writer = threading.Thread(target=_write_and_close, args=(write_end, data))
+    writer.start()
+    try:
+        assert main(["--export-run", f"/dev/fd/{read_end}"]) == 0
+    finally:
+        writer.join(timeout=5)
+        os.close(read_end)
+    assert capsys.readouterr() == (_expected_export(), EXPORT_LINE)
+
+
+def _write_and_close(fd: int, data: bytes) -> None:
+    with os.fdopen(fd, "wb") as file:
+        file.write(data)
 
 
 def test_export_a_history_without_llm_calls(

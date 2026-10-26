@@ -481,6 +481,11 @@ def _read_text(path: str) -> str:
         data = Path(path).read_bytes()
     except OSError as exc:
         raise _InputError(f"{path}: {exc.strerror or exc}") from None
+    return _decode(path, data)
+
+
+def _decode(path: str, data: bytes) -> str:
+    """*data*, read from the file at *path*, as UTF-8 text."""
     try:
         return data.decode("utf-8")
     except UnicodeDecodeError as exc:
@@ -488,10 +493,13 @@ def _read_text(path: str) -> str:
         raise _InputError(f"{path}:{line}: not UTF-8 text") from None
 
 
-def _load(path: str, loader: Callable[[list[str]], _T]) -> _T:
-    """*loader* on the lines of the file at *path*, its errors as input errors."""
+def _load(path: str, loader: Callable[[list[str]], _T], text: str | None = None) -> _T:
+    """*loader* on the lines of the file at *path*, its errors as input errors.
+
+    *text* is the file's text when the caller has read it already.
+    """
     # Split at "\n" only: a JSON string may hold other line separators.
-    lines = _read_text(path).split("\n")
+    lines = (_read_text(path) if text is None else text).split("\n")
     try:
         return loader(lines)
     except CorpusError as exc:
@@ -546,10 +554,13 @@ def _export_run(target: str) -> int:
     """Print the corpus lines of the run at *target*, then a count on stderr."""
     if Path(target).is_dir():
         calls, skipped = _history(str(Path(target) / HISTORY_FILE))
-    elif _is_sqlite(target):
-        calls, skipped = _history(target)
     else:
-        calls, skipped = _load(target, load_raw_calls), 0
+        data = _unless_sqlite(target)
+        if data is None:
+            calls, skipped = _history(target)
+        else:
+            text = _decode(target, data)
+            calls, skipped = _load(target, load_raw_calls, text), 0
     docs = docs_from_calls(calls)
     for doc in docs:
         _print_line(doc_to_dict(doc))
@@ -569,11 +580,17 @@ def _export_run(target: str) -> int:
     return EXIT_OK
 
 
-def _is_sqlite(path: str) -> bool:
-    """Whether the file at *path* starts with the SQLite header."""
+def _unless_sqlite(path: str) -> bytes | None:
+    """The bytes of the file at *path*; ``None`` when it has the SQLite header.
+
+    The file is opened once, and its bytes after the header are read from
+    the same handle: a pipe or FIFO (``/dev/stdin``, a process
+    substitution) gives its bytes to its first reader only.
+    """
     try:
         with open(path, "rb") as file:
-            return file.read(len(SQLITE_HEADER)) == SQLITE_HEADER
+            head = file.read(len(SQLITE_HEADER))
+            return None if head == SQLITE_HEADER else head + file.read()
     except OSError as exc:
         raise _InputError(f"{path}: {exc.strerror or exc}") from None
 
