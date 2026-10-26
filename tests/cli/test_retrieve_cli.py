@@ -843,6 +843,26 @@ def test_the_provider_is_closed_after_ctrl_c(
     assert closed == ["llm"]
 
 
+def test_the_embedding_provider_is_closed_after_ctrl_c(
+    server: ModelServer,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    closed = _record_closes(monkeypatch)
+    calls: list[list[str]] = []
+
+    async def embed(self: OpenAICompatEmbedding, texts: list[str]) -> list[list[float]]:
+        calls.append(texts)
+        raise KeyboardInterrupt  # as a Ctrl-C during the first request would
+
+    monkeypatch.setattr(OpenAICompatEmbedding, "embed", embed)
+    argv = ["--retriever", "embedding", *FILES, "--embedding-base-url", server.base_url]
+    assert main(argv) == 130
+    assert (len(calls), closed) == (1, ["embedding"])
+    out, err = capsys.readouterr()
+    assert (out, err) == ("", "")
+
+
 # ── Export ──────────────────────────────────────────────────────────────────
 
 EXPORT_LINE = (
