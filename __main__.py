@@ -772,15 +772,18 @@ def _make_memory_dir(memory_dir: str) -> None:
     """Create --memory-dir, as the Agent would, or end melo with exit code 2.
 
     The Agent creates the directory too (with ``~`` expanded the same
-    way), so this changes nothing for a path it can create. A path that
+    way, and mode 0700 when it is new), so this changes nothing for a path
+    it can create. A path that
     cannot be a directory, such as an existing file, a path through a
     file, or a new directory where there is no permission to create one,
     is a flag value that is not valid: it is reported in one line before
     the run, as ``melo: error: ...``, rather than as the Agent's
     traceback.
     """
+    from localmelo.melo.memory._sqlite import make_private_dir
+
     try:
-        os.makedirs(os.path.expanduser(memory_dir), exist_ok=True)
+        make_private_dir(os.path.expanduser(memory_dir))
     except OSError as exc:
         if isinstance(exc, FileExistsError):
             reason = "not a directory"

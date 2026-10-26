@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import sqlite3
 from collections import deque
 from collections.abc import Iterator
@@ -20,6 +21,7 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.memory._sqlite import make_private_dir, tighten_private_dir
 from localmelo.melo.memory.history.sqlite import (
     _SCHEMA,
     HISTORY_SCHEMA_VERSION,
@@ -311,3 +313,130 @@ async def test_a_run_on_a_newer_file_ends_crashed(tmp_path: Path) -> None:
         "this localmelo reads version 1"
     )
     assert _rows(path, "tasks") == []
+
+
+# ── File modes ──────────────────────────────────────────────────────────────
+
+SQLITE_HELPERS_LOGGER = "localmelo.melo.memory._sqlite"
+
+
+def _mode(path: Path) -> int:
+    return path.stat().st_mode & 0o777
+
+
+@contextlib.contextmanager
+def _umask(mask: int) -> Iterator[None]:
+    previous = os.umask(mask)
+    try:
+        yield
+    finally:
+        os.umask(previous)
+
+
+async def test_a_new_history_file_and_its_wal_and_shm_are_0600(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "history.db"
+    history = SqliteHistory(path)
+    try:
+        with _umask(0o022):
+            await history.save_task(TaskRecord(query="q", task_id="t1"))
+        wal, shm = Path(f"{path}-wal"), Path(f"{path}-shm")
+        assert wal.exists() and shm.exists()
+        assert (_mode(path), _mode(wal), _mode(shm)) == (0o600, 0o600, 0o600)
+    finally:
+        await history.aclose()
+
+
+async def test_an_existing_history_file_keeps_its_mode(tmp_path: Path) -> None:
+    path = tmp_path / "history.db"
+    _write_v0(path)
+    path.chmod(0o644)
+    await _open(path)
+    assert _mode(path) == 0o644
+
+
+async def test_eight_openers_of_a_missing_file_make_one_private_v1_file(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "history.db"
+    caplog.set_level(logging.INFO, logger=HISTORY_LOGGER)
+    with _umask(0o022):
+        await asyncio.gather(*(_open(path) for _ in range(8)))
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["history.db"]
+    assert _mode(path) == 0o600
+    assert _user_version(path) == 1
+    assert "llm_calls" in _tables(path)
+    assert len(_migration_lines(caplog)) == 1
+
+
+@pytest.mark.parametrize("mask", [0o022, 0o077])
+def test_make_private_dir_makes_a_new_directory_0700(tmp_path: Path, mask: int) -> None:
+    path = tmp_path / "parent" / "memory"
+    with _umask(mask):
+        make_private_dir(str(path))
+    assert _mode(path) == 0o700
+    # A missing parent gets the default mode.
+    assert _mode(path.parent) == 0o777 & ~mask
+
+
+def test_make_private_dir_leaves_an_existing_directory_alone(tmp_path: Path) -> None:
+    path = tmp_path / "memory"
+    path.mkdir()
+    path.chmod(0o755)
+    make_private_dir(str(path))
+    assert _mode(path) == 0o755
+
+
+def test_make_private_dir_raises_what_makedirs_raises(tmp_path: Path) -> None:
+    a_file = tmp_path / "file"
+    a_file.write_text("", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        make_private_dir(str(a_file))
+    with pytest.raises(NotADirectoryError):
+        make_private_dir(str(a_file / "memory"))
+
+
+def test_tighten_private_dir_closes_an_open_directory(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "memory"
+    path.mkdir()
+    path.chmod(0o755)
+    caplog.set_level(logging.DEBUG, logger=SQLITE_HELPERS_LOGGER)
+    tighten_private_dir(str(path))
+    assert _mode(path) == 0o700
+    assert [(r.levelno, r.getMessage()) for r in caplog.records] == [
+        (logging.INFO, f"Restricted {path} to mode 0700")
+    ]
+
+
+def test_tighten_private_dir_leaves_a_closed_directory_alone(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "memory"
+    path.mkdir()
+    path.chmod(0o700)
+    caplog.set_level(logging.DEBUG, logger=SQLITE_HELPERS_LOGGER)
+    tighten_private_dir(str(path))
+    assert _mode(path) == 0o700
+    assert caplog.records == []
+
+
+def test_tighten_private_dir_logs_a_failed_chmod(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "memory"
+    path.mkdir()
+    path.chmod(0o755)
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "chmod", refuse)
+    caplog.set_level(logging.DEBUG, logger=SQLITE_HELPERS_LOGGER)
+    tighten_private_dir(str(path))
+    monkeypatch.undo()
+    assert _mode(path) == 0o755
+    assert [r.levelno for r in caplog.records] == [logging.WARNING]
+    assert str(path) in caplog.records[0].getMessage()

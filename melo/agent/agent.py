@@ -977,10 +977,21 @@ class Agent:
         history_backend = None
         long_backend = None
         if self._memory_dir is not None:
+            from localmelo.melo.memory._sqlite import (
+                make_private_dir,
+                tighten_private_dir,
+            )
             from localmelo.melo.memory.history.sqlite import SqliteHistory
             from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 
-            os.makedirs(self._memory_dir, exist_ok=True)
+            make_private_dir(self._memory_dir)
+            if (
+                self.options.memory_dir is None
+                and "LOCALMELO_MEMORY_DIR" not in os.environ
+            ):
+                # The default directory, localmelo's own: one that an older
+                # version made with the umask's mode is closed to others.
+                tighten_private_dir(self._memory_dir)
             history_backend = SqliteHistory(
                 os.path.join(self._memory_dir, "history.db")
             )

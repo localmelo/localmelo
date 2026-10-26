@@ -1006,3 +1006,37 @@ class TestExitSignals:
         )
         assert code == cli.EXIT_CRASHED
         assert capsys.readouterr() == ("", "")
+
+
+# ── The memory directory's mode ─────────────────────────────────────────────
+
+
+class TestMemoryDirMode:
+    """--memory-dir: a new directory is made 0700, an existing one is kept."""
+
+    def _run(self, memory_dir: Path) -> None:
+        argv = ["--base-url", "http://127.0.0.1:9/v1", "--memory-dir", str(memory_dir)]
+        with (
+            mock.patch.object(cli, "_register_backends"),
+            mock.patch.object(cli, "Agent") as agent_cls,
+            mock.patch("sys.argv", ["melo", *argv, "q"]),
+        ):
+            agent_cls.return_value = _agent(_outcome("completed", result="42"))
+            cli.main()
+        agent_cls.assert_called_once()
+
+    def test_a_new_directory_is_made_0700(self, tmp_path: Path) -> None:
+        memory_dir = tmp_path / "new" / "memory"
+        previous = os.umask(0o022)
+        try:
+            self._run(memory_dir)
+        finally:
+            os.umask(previous)
+        assert memory_dir.stat().st_mode & 0o777 == 0o700
+
+    def test_an_existing_directory_keeps_its_mode(self, tmp_path: Path) -> None:
+        memory_dir = tmp_path / "memory"
+        memory_dir.mkdir()
+        memory_dir.chmod(0o755)
+        self._run(memory_dir)
+        assert memory_dir.stat().st_mode & 0o777 == 0o755

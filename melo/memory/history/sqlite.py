@@ -8,7 +8,7 @@ from typing import Any, Final
 
 import aiosqlite
 
-from localmelo.melo.memory._sqlite import apply_pragmas
+from localmelo.melo.memory._sqlite import apply_pragmas, create_private_file
 from localmelo.melo.memory.history import History
 from localmelo.melo.schema import (
     ImagePart,
@@ -94,6 +94,8 @@ class SqliteHistory(History):
         async with self._init_lock:
             if self._conn is not None:
                 return self._conn
+            if self._db_path != ":memory:":
+                create_private_file(self._db_path)
             conn = await aiosqlite.connect(self._db_path)
             try:
                 await apply_pragmas(conn)
