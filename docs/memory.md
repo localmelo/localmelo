@@ -23,13 +23,13 @@ page.
 
 | Memory | What it holds | Where |
 |---|---|---|
-| Working memory | The conversation of a run, or of a gateway session: the last 20 messages. | RAM only. |
+| Working memory | The conversation of a run, of the `melo ""` loop, of a gateway session or of a web workspace chat: the last 20 messages. | RAM only. |
 | History | Every task with its status and result, and every step with its tool call and result. In `history.db`, also every reply of the model with its reasoning; the history in RAM keeps no model calls. | RAM, or `history.db`. |
 | Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an embedding backend. | RAM, or `long_term.db`. |
 
 By default everything stays in RAM and is lost when the process ends. In RAM,
-long-term memory lasts as long as its agent: one direct run, or one gateway
-session.
+long-term memory lasts as long as its agent: one direct run, one `melo ""`
+loop, or one gateway session.
 
 ## Keep memory between runs
 
@@ -79,7 +79,7 @@ run.
 - SQLite may also create `history.db-wal` and `history.db-shm` (and the same
   for `long_term.db`). They belong to the database; leave them in place.
 - The directory is created when an agent starts: at the start of a direct
-  run, or when a gateway session is created.
+  run or of the `melo ""` loop, or when a gateway session is created.
 - A new directory gets mode 0700, so only you can open the files in it, and
   a new `history.db`, with its `-wal` and `-shm`, gets mode 0600.
 - The default directory, `~/.cache/localmelo/memory`, is also set to 0700
@@ -94,7 +94,7 @@ run.
   ```
 
 - `long_term.db` is created with the default file mode, usually 0644.
-- The gateway's web UI keeps its own files in
+- The gateway's web workspace keeps its own files in
   `~/.cache/localmelo/playground/`. Its `history.db` keeps the model's
   reasoning for the same number of days, and clears older reasoning when a
   new chat first uses it: each chat opens its own connection to the shared
@@ -142,17 +142,19 @@ Every run saves one row in the `tasks` table of history:
 |---|---|
 | `task_id` | The run's `task_id`: 32 hex characters. |
 | `query` | The task as given. |
-| `status` | `running` during the run, then how it ended; see [Run results](run-results.md#statuses). `cancelled` appears only for interactive runs in the Python API. |
+| `status` | `running` during the run, then how it ended; see [Run results](run-results.md#statuses). `cancelled` appears only for interactive runs: in the Python API, and in the web workspace's history. |
 | `result` | The run's result, or its error when the result is empty. |
 
 - The row is saved again when the run ends, whatever ended it. A direct run
   ended by SIGTERM or SIGHUP is saved as `crashed`, with the result
   `Cancelled by SIGTERM` or `Cancelled by SIGHUP`.
-- An interactive run, one started in the Python API with `on_event` or
-  `approval`, that is cancelled is saved as `cancelled`, with the reason as
-  its result. Its interrupted step gets one row per tool call in `steps`
-  (see [Stop a run](python-api.md#stop-a-run)). Other cancelled runs are
-  saved as `crashed`.
+- An interactive run that is cancelled is saved as `cancelled`, with the
+  reason as its result: a run started in the Python API with `on_event` or
+  `approval`, or a web workspace chat stopped with Stop or by its 600-second
+  limit (its history is in `~/.cache/localmelo/playground/`). Its
+  interrupted step gets one row per tool call in `steps` (see
+  [Stop a run](python-api.md#stop-a-run)). Other cancelled runs are saved as
+  `crashed`.
 - A row that still reads `running` belongs to a run in progress, or to a
   process that was killed (for example with SIGKILL) before it could save
   the row.
@@ -240,6 +242,53 @@ planning and reflection requests alike. The history in RAM keeps none.
   every run of this version as `crashed`, with the error
   `HistorySchemaError: <path> has schema version <n>; this localmelo reads version 1`.
 
+## Sessions
+
+The session store of the Python API ([Sessions](sessions.md)) keeps
+conversations in its own files, apart from `history.db`. No command uses it
+yet; the files appear once a program opens a store.
+
+```text
+~/.cache/localmelo/gateway/sessions.db   the gateway's sessions
+~/.cache/localmelo/cli/sessions.db       the sessions of every terminal melo
+```
+
+- **One writer each.** A file records whether the gateway or a terminal
+  wrote it, and a store of the other kind refuses to open it, as it refuses
+  any other SQLite file, without writing to it. The gateway's file has one
+  owner, which holds a lock on `sessions.db.owner` while it runs; the
+  terminals share theirs, with a lease on each running turn. Next to
+  `sessions.db`, SQLite may also create `sessions.db-wal` and
+  `sessions.db-shm`.
+- **Private.** The directories are created with mode `0700` and the files
+  with `0600`; the writer's own directory (`gateway/` or `cli/`) is set to
+  `0700` when it is looser.
+- **Durability.** The gateway's file uses `synchronous=FULL`: what it has
+  committed survives an operating-system crash. The CLI file uses `NORMAL`,
+  as `history.db` does: a crash of the process loses nothing committed, an
+  operating-system crash may lose the last changes.
+- **What they hold.** Each turn's text, its events (the model's text and
+  thinking, the tool calls and their output), the images the tools returned,
+  the final answer, and a window checkpoint per session: the working window
+  at the end of the latest turn, with the tool calls and their results but
+  not the tools' output, which the events keep.
+- **Redaction.** The final answer is stored three times: in the turn's
+  `run.finished` event, and as the turn's answer and result. Each copy, and
+  the assistant text and thinking of the checkpoint, passes the minimal
+  redaction of [events](events.md#assistantmessage) before it is stored.
+- **Retention.** When a store opens, and whenever its program calls
+  `apply_retention()` (a gateway that keeps the store open is to call it
+  every 24 hours), what is older than 30 days is cleared: the thinking of
+  `assistant.message` events, and the `<think>` block in their text; the
+  `<think>` block of the final answer's copies; window checkpoints, and in a
+  newer checkpoint the thinking and `<think>` block of each message older
+  than 30 days; and withdrawn messages. The turns, their answers and their
+  events stay until you delete the session.
+- **A killed run.** A run killed with its process keeps the row `running` in
+  `history.db`'s `tasks` table (see [Task records](#task-records)); its
+  turn's status in `sessions.db` is the one to trust. The turn's `run_id` is
+  the run's `task_id`, or `""` when the run never started.
+
 ## Reset memory
 
 localmelo has no reset command. To delete memory:
@@ -259,7 +308,7 @@ localmelo has no reset command. To delete memory:
    # Only history
    rm ~/.cache/localmelo/memory/history.db*
 
-   # The web UI's memory
+   # The web workspace's memory
    rm -rf ~/.cache/localmelo/playground
    ```
 
@@ -299,7 +348,8 @@ that directory instead.
   SHA-256 digest and the size, never the image itself.
 - The files are as private as your home directory. To remove them, see
   [Reset memory](#reset-memory).
-- The gateway's web UI always saves its sessions, in
+- The gateway's web workspace always saves the history of its chats, and
+  their long-term memory when an embedding model is selected, in
   `~/.cache/localmelo/playground/`.
 
 ## How memory works
@@ -333,3 +383,9 @@ with persistence on, every model call, but never reads it back.
 **Reflections** are kept in working memory, one at a time: each new
 reflection replaces the last one. See
 [How localmelo works](how-it-works.md#reflection).
+
+**Memory notes and retrievers** are not used during a run yet.
+`melo-retrieve` compares the `bm25`, `llm` and `embedding` retrievers
+offline, over documents built from a run's model calls: notes on the
+model's reasoning, code drafts, reflections and chunks of its thinking. See
+[Offline retrieval](retrieval.md).

@@ -50,16 +50,25 @@ uv run pytest tests/agent -q
 
 | Directory | What it tests | Needs |
 |---|---|---|
-| `tests/agent` | The run loop, run options, results, reflection, tool exposure | `dev` |
+| `tests/agent` | The run loop, run options, results, reflection, tool exposure, events, cancellation and approvals | `dev` |
 | `tests/backends` | Backends, model providers, request timeouts, `extra_body` | `dev` |
-| `tests/checker` | The checks | `dev` |
-| `tests/cli` | The `melo` command | `dev` |
-| `tests/executor` | The executor and the built-in tools | `dev` |
-| `tests/memory` | Memory, SQLite persistence, BM25 | `dev` |
+| `tests/checker` | The checks, secret redaction and the sanitizer | `dev` |
+| `tests/cli` | The `melo` command, the `melo ""` loop and `melo-retrieve` | `dev` |
+| `tests/contracts` | The event and approval contracts | `dev` |
+| `tests/executor` | The executor, the built-in tools, approvals and the workspace root | `dev` |
+| `tests/memory` | Memory, SQLite persistence, BM25, memory notes and the retrievers | `dev` |
 | `tests/mcp` | The MCP client and tool provider | `dev` |
-| `tests/gateway` | Sessions and the HTTP API | `dev` and `gateway` |
+| `tests/scheduler` | The scheduling policy, the simulator and the trace importer | `dev` |
+| `tests/gateway` | Sessions, the HTTP API, the `Host` and `Origin` checks and the web workspace; the `.mjs` files test the workspace's JavaScript | `dev` and `gateway`; Node for the `.mjs` files |
 | `tests/integration` | Several parts together | `dev` and `gateway` |
 | `tests/smoke` | Offline tests of the smoke tools (parsing, metrics, logging), plus `test_backend_smoke.py`, which talks to a real model server | `dev` (and a model server for that file) |
+
+The web workspace's JavaScript has its own tests. They need Node (the version
+in `.nvmrc`), and pytest does not run them:
+
+```bash
+node --test tests/gateway/test_markdown.mjs tests/gateway/test_workspace.mjs
+```
 
 ### Real-backend smoke tests
 
@@ -83,7 +92,8 @@ offline run, use the `--ignore` command above. Results worth keeping go to
 localmelo/
   __main__.py     the melo command
   melo/           the agent: run loop, checks, executor, memory, contracts
-  support/        backends, model providers, gateway, MCP, config, setup wizard
+  support/        backends, model providers, gateway, MCP, config, setup
+                  wizard, the melo-retrieve command and the scheduler
   tests/          tests, mirroring melo/ and support/
   docs/           documentation and the website
   tests_result/   archived results of real-backend runs
@@ -98,7 +108,10 @@ localmelo/
   `localmelo.melo.agent.agent`. Do not create a `localmelo/localmelo/`
   directory.
 - `melo/sleep/`, `melo/memory/personalized/` and `support/melo_serving/` hold
-  code that the agent does not use yet.
+  code that the agent does not use yet. `melo/memory/notes.py` and
+  `melo/memory/retrieval/` are used only by `melo-retrieve`
+  (`support/retrieve.py`; see [Offline retrieval](docs/retrieval.md)), and
+  `support/scheduler/` only by its tests (see [Scheduler](docs/scheduler.md)).
 - `PersonalizedSample` has a frozen v1 shape, guarded by
   `tests/memory/test_personalized_schema.py`. Any change to its fields must
   bump `PERSONALIZED_SAMPLE_SCHEMA_VERSION` in the same commit.

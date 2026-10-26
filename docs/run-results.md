@@ -17,7 +17,7 @@ retried.
 | `setup_error` | 2 | The tool providers, such as MCP servers, could not be set up. |
 | `timeout` | 2 | The run was still going when its time limit (`--timeout`) expired. |
 | `crashed` | 1 | An unexpected error, Ctrl+C, SIGTERM or SIGHUP ended the run. |
-| `cancelled` | none | An interactive run in the Python API was stopped. Direct mode never reports it. |
+| `cancelled` | none | An interactive run was stopped: a run in the Python API with `on_event` or `approval`, or a web workspace chat stopped with Stop or by its 600-second limit. Direct mode, the `melo ""` loop and `POST /v1/agent/run` never report it. |
 
 Details:
 
@@ -69,17 +69,40 @@ Details:
   traceback is logged. Ctrl+C ends a run as `crashed` with the error
   `CancelledError`, and SIGTERM or SIGHUP with `Cancelled by SIGTERM` or
   `Cancelled by SIGHUP`. See [Signals](cli.md#signals).
-- **`cancelled`.** Only for an interactive run, one started with `on_event`
-  or `approval` in the Python API, whose task was cancelled; see
-  [Stop a run](python-api.md#stop-a-run). `result` is empty, and `error` is
-  the reason: the reason given to `Agent.begin_exit` when the process is
-  exiting, else the message of `task.cancel(msg)`, else
-  `Cancelled by the caller`. A cancelled run without `on_event` or
-  `approval` ends as `crashed`, so direct mode and the gateway never report
+- **`cancelled`.** Only for an interactive run whose task was cancelled: one
+  started with `on_event` or `approval` in the Python API (see
+  [Stop a run](python-api.md#stop-a-run)), or a web workspace chat stopped
+  with Stop or by its 600-second limit. The gateway runs each web chat with
+  an event sink (see [Web workspace](gateway.md#web-workspace)). `result` is
+  empty, and `error` is the reason: the reason given to `Agent.begin_exit`
+  when the process is exiting, else the message of `task.cancel(msg)`, such
+  as `Timed out after 600 s` for a web chat, else `Cancelled by the caller`.
+  A cancelled run without `on_event` or `approval` ends as `crashed`, so
+  direct mode, the `melo ""` loop and `POST /v1/agent/run` never report
   `cancelled`.
 
 [How localmelo works](how-it-works.md) explains attempts, reflection and the
 continuation gate.
+
+### A session turn's cause
+
+A turn of a [session](sessions.md) ends with one of these statuses too, and
+with a `cause` that says what ended it:
+
+| `cause` | What ended the turn | Status |
+|---|---|---|
+| `run` | The run itself, whatever its status. | any |
+| `user_stop` | A person stopped it. | `cancelled` |
+| `closed` | The session's runner was closed. | `cancelled` |
+| `shutdown` | The process was asked to stop. | `cancelled` |
+| `crash` | The process died; recovery recorded the end. | `crashed`, or `cancelled` when a stored `run.finished` said so |
+| `takeover` | Another terminal took over a turn whose lease, held on another host, had expired. | `cancelled` |
+| `park` | Reserved for the scheduler. | `cancelled` |
+
+"Interrupted" is a label that a surface shows for the causes `shutdown` and
+`crash`, never a status: a turn's status is always one of the statuses
+above. `crashed` with the cause `run` is a crash inside the run, a bug;
+`crashed` with `crash` means that the process stopped.
 
 ## Fields
 

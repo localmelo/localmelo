@@ -446,6 +446,9 @@ assistant Paris is the capital of France.
   `[interrupt: no assistant output for this turn]` for a `cancelled` run,
   and `[no answer: the run ended with status <status>]` for any other.
 
+To keep a conversation in a file, across processes and restarts, see
+[Sessions](sessions.md).
+
 ## Agent methods
 
 | Method | What it does |

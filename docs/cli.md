@@ -1,7 +1,9 @@
 # Command-line reference
 
 This page describes the `melo` command: its modes, options, output, exit
-codes and signals, and how to use it from scripts.
+codes and signals, and how to use it from scripts. `melo-retrieve`, the
+other command installed with localmelo, compares memory retrievers offline;
+see [Offline retrieval](retrieval.md).
 
 ## Synopsis
 
@@ -21,7 +23,7 @@ Quote the task. Several words without quotes are joined with spaces.
 |---|---|
 | `melo "<task>"` | Direct mode: runs one task, prints the result and exits. |
 | `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration. |
-| `melo ""` (empty task) | Opens a conversation loop in the terminal: each line you type is a task for the same agent. `/help` lists the commands; `/exit`, `/quit` or Ctrl-D exits. |
+| `melo ""` (empty task) | Opens a conversation loop in the terminal: each line you type is a task for the same agent. `/help` lists the commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
 | `melo` (no task) | The same as `melo --serve`. |
 | `melo --reconfigure` | Runs the setup wizard, then starts the gateway (the same as `melo --serve --reconfigure`). |
 | `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](gateway.md#run-the-gateway-at-login-macos). |
@@ -34,10 +36,10 @@ Quote the task. Several words without quotes are joined with spaces.
 In the `melo ""` loop, turns share one agent and its working memory, which
 keeps each answer, so a turn sees the earlier ones. A turn that does not
 complete prints its status line on stderr, and the loop asks for the next task.
-`/exit`, `/quit` or Ctrl-D ends the loop with exit code 0; Ctrl+C ends it at
-once (a shell shows 130). The loop takes `--base-url` and `--chat-model`; the
-direct-mode options are usage errors with it. Its conversation is separate from
-the web workspace's chats.
+`/exit`, `/quit`, `exit` or `quit` (in any letter case), or Ctrl-D, ends the
+loop with exit code 0; Ctrl+C ends it at once (a shell shows 130). The loop
+takes `--base-url` and `--chat-model`; the direct-mode options are usage
+errors with it. Its conversation is separate from the web workspace's chats.
 
 ## Options
 
@@ -107,7 +109,7 @@ These options apply to a task run without `--serve`.
 
 | Option | Default | Description |
 |---|---|---|
-| `--serve` | off | Start the gateway: the HTTP API and the web UI. |
+| `--serve` | off | Start the gateway: the HTTP API and the web workspace. |
 | `--host HOST` | `127.0.0.1` | The address the gateway listens on. |
 | `--port PORT` | `8401` | The port the gateway listens on. |
 | `--reconfigure` | off | Run the setup wizard, then start the gateway. |

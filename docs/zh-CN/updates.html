@@ -65,7 +65,8 @@
         <ul>
           <li>交互式命令行：不带任务运行 <code>melo</code> 时打开，并实时显示智能体的工具调用（目前 <code>melo</code> 会启动网关，<code>melo &quot;&quot;</code> 打开一个简单的对话循环）；</li>
           <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
-          <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）。</li>
+          <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
+          <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话。</li>
         </ul>
         <p>维护者撰写的记忆设计见<a href="./memory-design.html">记忆设计</a>页，其中部分内容尚未实现。</p>
       </section>
@@ -73,6 +74,32 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-26-sessions">
+          <h3>重启后仍在的对话（Python API）</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/41">#41</a>
+          </p>
+          <ul>
+            <li>会话把对话保存在 SQLite 中。每一轮都从一行已保存的记录开始，并且只结束一次，带有状态和原因；即使运行它的进程停止或崩溃也是如此。新的智能体可以恢复这段对话。</li>
+            <li>用同一个请求 ID 发送两次的消息只运行一次，最后一轮可以撤销，工具的审批请求也可以由人在另一个页面上回答。事件流会给重新连接的客户端补发它漏掉的每一个事件。</li>
+            <li>会话属于实验性的 Python API。<code>melo</code> 和网关目前还没有使用会话：计划中的交互式命令行和网页控制台会把对话保存在这里。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-26-scheduler">
+          <h3>同时运行多个任务的基础</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/39">#39</a>
+          </p>
+          <ul>
+            <li>调度器将让你的对话、后台任务和聊天共用一个本地模型服务器。它的策略决定下一个发给模型的调用，说明每个任务为什么在等，并让你的对话优先得到回答。</li>
+            <li>模拟器用这个策略重放工作负载，可以离线比较策略的几种变体，用合成的工作负载或基准测试的记录都行。</li>
+            <li>现在还没有任何地方使用调度器：运行和网关都和以前一样。下一步会把它放到模型服务器前面。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-26-retrieval">
           <h3>离线比较记忆检索器</h3>
@@ -111,7 +138,7 @@
             <li>Python 代码可以实时跟踪一次运行：<code>run_task(..., on_event=sink)</code> 会报告每一步、模型的每条回复、每次工具调用和每次反思，并隐去其中的密钥。</li>
             <li>带事件接收函数或审批策略的运行可以被停止：它以 <code>cancelled</code> 结束，被打断的那一步会被妥善收尾。</li>
             <li>审批策略决定 <code>shell_exec</code>、<code>python_exec</code>、<code>file_write</code> 等标记过的工具能否运行；<code>AgentOptions(workspace_root=...)</code> 把文件工具限制在一个目录内。</li>
-            <li>对话可以在多次运行之间、在不同 agent 之间延续。直接模式和网关的行为不变。</li>
+            <li>对话可以在多次运行之间、在不同智能体之间延续。直接模式和网关的行为不变。</li>
           </ul>
         </article>
 
@@ -122,7 +149,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/36">#36</a>
           </p>
           <ul>
-            <li>在默认地址上，网关会拒绝 <code>Host</code> 不是 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>[::1]</code> 加端口的请求（HTTP 421），也会拒绝其他来源的网页通过浏览器发来的请求（HTTP 403）。网页不能再通过 DNS 重绑定访问网关、用你的工具执行任务。</li>
+            <li>监听 <code>localhost</code> 或回环 IP 地址（例如默认的 <code>127.0.0.1</code>）时，网关会拒绝 <code>Host</code> 不是 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>[::1]</code> 加端口的请求（HTTP 421），也会拒绝其他来源的网页通过浏览器发来的请求（HTTP 403）。网页不能再通过 DNS 重绑定访问网关、用你的工具执行任务。</li>
             <li>任何网页都不能在 frame 里显示网关的页面。</li>
             <li>如果监听地址不是 <code>localhost</code> 或回环 IP 地址（例如 <code>0.0.0.0</code>），网关不做这些检查，并在启动时记录一条警告：网关没有身份验证。</li>
           </ul>
@@ -157,7 +184,7 @@
             <li>支持本地 MCP 服务器提供的工具（<code>--mcp-config</code> 和 <code>--mcp-only</code>），工具也可以返回图片（#27、#30）。</li>
             <li>工具调用会以真正的工具调用轮次发给兼容 OpenAI 接口的模型，一步中的每个调用都会执行；<code>extra_body</code> 可以为对话请求添加字段（#26）。</li>
             <li>反思的回复中没有 JSON 对象时，会不带工具再请求一次（#31）。</li>
-            <li>#32：在检索模式下，每一步先提供所有已注册的内置工具，再提供对话中提到的工具和用带 IDF 的 BM25 检索到的工具，两部分都按名称排序。</li>
+            <li>#32：在检索模式下，每一步先提供所有已注册的内置工具，再从其他工具中提供对话已提到或调用过的工具，以及用带 IDF 的 BM25 检索到的工具，两部分都按名称排序。</li>
             <li>采用 MIT 许可证（#28），开发环境改用 uv，并把 <code>uv.lock</code> 提交到仓库（#25）。</li>
           </ul>
         </article>
@@ -240,6 +267,7 @@
       <p>早期预览版（pre-alpha）：在 v0.1.0 之前，命令和 API 都可能变化。</p>
       <nav class="footer-links" aria-label="项目">
         <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">全部文档（英文）</a>
+        <a href="../for-agents.md">给 AI 智能体（英文）</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md">贡献指南（英文）</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>

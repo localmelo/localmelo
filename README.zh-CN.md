@@ -19,7 +19,7 @@
 - **报告每一次运行**：输出文本或一行 JSON，并使用固定的退出码，脚本和基准测试可以放心依赖。
 - **连接你的模型。** 你自己运行的模型服务器（Ollama、MLC LLM、vLLM、SGLang），或云端 API（OpenAI、Anthropic、Google Gemini、NVIDIA）。
 - **有记忆。** 运行期间的工作记忆、任务和步骤的历史记录，以及配置了嵌入服务器时的长期记忆。开启持久化后，历史记录和长期记忆会保存到 SQLite。
-- **通过 HTTP 提供同一个智能体**（网关），支持会话，并附带一个用来试用的简单网页。
+- **通过 HTTP 提供同一个智能体**（网关），支持会话，并附带一个在浏览器中使用智能体的网页工作区（模型服务器由你选择）。
 
 localmelo 不负责下载、启动或部署模型：模型服务器需要你自己运行。
 
@@ -87,7 +87,7 @@ source .venv/bin/activate
 
 ## 交互式工作区
 
-运行 `melo ""`（任务为空字符串），即可使用已配置的后端开始终端对话。用 `/help` 查看命令，或用 `/exit` 退出。也可以直接连接 oMLX 或其他兼容 OpenAI 接口的服务器：
+运行 `melo ""`（任务为空字符串），即可用已配置的后端在终端中打开对话循环。输入 `/help` 查看命令，输入 `/exit` 退出。也可以直接连接 oMLX 或其他兼容 OpenAI 接口的服务器：
 
 ```bash
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""
@@ -95,7 +95,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""
 
 不加 `""` 时，`melo` 会启动网关，见[命令行参考（英文）](docs/cli.md#modes)。
 
-运行 `melo --serve`，然后打开 `http://127.0.0.1:8401/`，即可使用网页工作区。发现服务器上的模型，选择模型，再创建对话。嵌入和初始记忆都是可选项。对话支持搜索、独立草稿、代码格式化、取消运行和响应式导航，并使用 Melo 现有的图像。同一网关上的浏览器客户端会同步对话状态；只要网关进程仍在运行，刷新页面就能恢复对话。直接运行的命令行对话与网页对话相互独立。
+运行 `melo --serve`，然后打开 `http://127.0.0.1:8401/`，即可使用网页工作区。输入服务器地址，选择它的一个模型，再创建对话；嵌入模型和初始记忆都是可选项。你可以同时保留多个对话，每个对话有自己的草稿；可以搜索对话，回答会按 Markdown 渲染（包括代码、表格和链接），也可以停止运行；页面也适合窄屏。同一网关上的其他浏览器标签页会看到相同的对话，只要网关仍在运行，刷新页面就能恢复对话。终端对话循环与网页对话相互独立。
 
 如果想先试用网页工作区，而不配置主网关：
 
@@ -103,7 +103,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""
 uv run python -m localmelo.support.gateway._test_webapp
 ```
 
-对话只在网关进程运行期间保留，工作区也只供你自己的电脑使用，见[网页界面（英文）](docs/gateway.md#web-ui-playground)。
+对话只在网关进程运行期间保留，工作区也只供你自己的电脑使用，见[网页工作区（英文）](docs/gateway.md#web-workspace)。
 
 ## 文档
 
@@ -114,15 +114,19 @@ uv run python -m localmelo.support.gateway._test_webapp
 | [运行结果（英文）](docs/run-results.md) | 一次运行有哪些结束方式、运行记录、重试 |
 | [配置（英文）](docs/configuration.md) | 配置向导、配置文件、后端、超时、环境变量 |
 | [工具和 MCP（英文）](docs/tools.md) | 内置工具、MCP 服务器、每一步提供哪些工具、检查 |
-| [网关和 HTTP API（英文）](docs/gateway.md) | HTTP API、会话、网页界面、在 macOS 登录时自动运行 |
+| [网关和 HTTP API（英文）](docs/gateway.md) | HTTP API、会话、网页工作区、在 macOS 登录时自动运行 |
 | [记忆（英文）](docs/memory.md) | localmelo 记住什么，以及如何保留、查看和重置记忆 |
 | [离线检索（英文）](docs/retrieval.md) | `melo-retrieve`：离线比较记忆检索器，把一次运行导出为语料 |
 | [Python API（英文）](docs/python-api.md) | `Agent`、`AgentOptions` 和 `RunResult`（实验性） |
 | [事件（英文）](docs/events.md) | 一次运行向 Python 代码报告的事件，以及它们的顺序和字段 |
+| [会话（英文）](docs/sessions.md) | 保存在 SQLite 中的对话：轮次、消息 ID、重启和恢复（实验性） |
 | [localmelo 的工作原理（英文）](docs/how-it-works.md) | 运行循环、反思、记忆和超时 |
+| [调度器（英文）](docs/scheduler.md) | 调度策略和模拟器，面向维护者（运行时尚未使用） |
 | [故障排查（英文）](docs/troubleshooting.md) | 常见错误信息及解决方法 |
 | [架构](https://localmelo.github.io/localmelo/zh-CN/architecture.html) | 各部分如何协同工作（网站） |
 | [路线图](https://localmelo.github.io/localmelo/zh-CN/updates.html#roadmap) | 计划和更新记录（网站） |
+
+AI 智能体和 LLM 工具请读 [localmelo for agents（英文）](docs/for-agents.md)，它用一页写清使用 localmelo 所需的内容；文档索引见 [llms.txt](https://localmelo.github.io/localmelo/llms.txt)。
 
 ## 路线图
 
@@ -138,17 +142,20 @@ uv run python -m localmelo.support.gateway._test_webapp
 
 - 交互式命令行：不带任务运行 `melo` 时打开，并实时显示智能体的工具调用（目前 `melo` 会启动网关，`melo ""` 打开一个简单的对话循环）；
 - 网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；
-- 把模型的推理过程保存为记忆笔记，并可切换检索方式（`bm25`、`llm`、`embedding`）。
+- 把模型的推理过程保存为记忆笔记，并可切换检索方式（`bm25`、`llm`、`embedding`）；
+- 在一个本地模型服务器上同时运行多个任务，并优先回答你的对话。
 
 ## 安全
 
 > [!WARNING]
-> 工具以你的账户权限运行，并且没有沙箱：模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 `127.0.0.1`（默认值）。详见 [SECURITY.md（英文）](SECURITY.md)和[检查能做什么（英文）](docs/tools.md#what-the-checks-do)。
+> 工具以你的账户权限运行，并且没有沙箱：模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 `127.0.0.1`（默认值）：在这个地址上，它会拒绝其他网站的网页通过浏览器向它的 API 发来的请求。详见 [SECURITY.md（英文）](SECURITY.md)和[检查能做什么（英文）](docs/tools.md#what-the-checks-do)。
 
 在 [Python API（英文）](docs/python-api.md)中，有两个选项可以缩小工具能做的事：
 
 - **审批。** 审批策略（approval policy，`run_task(..., approval=policy)`）决定 `shell_exec`、`python_exec`、`file_write` 以及其他标记为需要审批的工具的每次调用能否运行。只有带审批策略的运行才会审批：直接模式和网关都没有审批策略。
 - **工作区根目录。** `AgentOptions(workspace_root=DIR)` 把 `file_read` 和 `file_write` 限制在这个目录内。只有设置了工作区根目录，这个限制才生效；`shell_exec` 和 `python_exec` 不受这个限制：它们在根目录中启动，但仍然可以访问任何路径。
+
+[会话（英文）](docs/sessions.md)把对话记录和工具输出以明文保存在 `sessions.db` 中，窗口检查点（window checkpoint）也一样，这些文件的权限是 `0600`，所在目录的权限是 `0700`。保存的回答和检查点只会脱敏常见的密钥格式、Bearer 令牌和一次性验证码。浏览器里的草稿、排队的消息和尚未确认的消息发件箱都只留在浏览器中。
 
 ## 获取帮助
 

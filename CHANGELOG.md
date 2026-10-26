@@ -9,6 +9,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Sessions in the Python API (experimental), `localmelo.support.sessions`.
+  A session keeps a conversation in SQLite: each turn begins with a stored
+  row, outlives the request that started it, and ends exactly once with a
+  status and a cause, also when the process that ran it dies; a fresh agent
+  can resume the conversation. The package has the store, a runner for an
+  agent's turns, approval helpers for surfaces that ask a person, an event
+  stream and a read-only change feed. Neither `melo` nor the gateway uses
+  sessions yet ([#41]).
+- `docs/for-agents.md`, one compact page that tells AI coding agents and LLM
+  tools what localmelo is and how to use it, and `docs/llms.txt`, an index of
+  the docs in the llms.txt format, served at
+  <https://localmelo.github.io/localmelo/llms.txt> ([#40]).
+- The scheduler's policy core and simulator, `localmelo.support.scheduler`
+  (experimental). It decides which model calls reach a shared local model
+  server, in what order and why a task waits, and its simulator compares the
+  `fifo`, `class` and `las2` arms on synthetic workloads or imported bench
+  traces. Nothing uses it yet: runs and the gateway are unchanged
+  ([#39]).
 - `melo-retrieve`, installed next to `melo`, compares the `bm25`, `llm` and
   `embedding` memory retrievers offline on labelled queries: recall@k, mean
   reciprocal rank, latency and token use. `--export-run` turns a run's model
@@ -139,3 +157,6 @@ earlier milestones.
 [#36]: https://github.com/localmelo/localmelo/pull/36
 [#37]: https://github.com/localmelo/localmelo/pull/37
 [#38]: https://github.com/localmelo/localmelo/pull/38
+[#39]: https://github.com/localmelo/localmelo/pull/39
+[#40]: https://github.com/localmelo/localmelo/pull/40
+[#41]: https://github.com/localmelo/localmelo/pull/41

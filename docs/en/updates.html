@@ -71,7 +71,8 @@
         <ul>
           <li>an interactive CLI that opens when you run <code>melo</code> without a task and shows the agent's tool calls as they happen (today <code>melo</code> starts the gateway, and <code>melo &quot;&quot;</code> opens a plain conversation loop);</li>
           <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
-          <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>).</li>
+          <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
+          <li>running several tasks at once on one local model server, with your conversation answered first.</li>
         </ul>
         <p>
           The maintainer's memory design, parts of which are not built yet, is
@@ -85,6 +86,32 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-2026-10-26-sessions">
+          <h3>Conversations that survive a restart, in the Python API</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/41">#41</a>
+          </p>
+          <ul>
+            <li>A session keeps a conversation in SQLite. Each turn begins with a stored row and ends exactly once with a status and a cause, also when the process that ran it stops or dies, and a fresh agent can resume the conversation.</li>
+            <li>A message sent twice with the same request id runs once, the last turn can be undone, and a person can answer a tool's approval request from another page. An event stream replays to a client that reconnects every event it missed.</li>
+            <li>Sessions are part of the experimental Python API. <code>melo</code> and the gateway do not use them yet: the planned interactive CLI and web console will keep their conversations there.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-26-scheduler">
+          <h3>Groundwork for running several tasks at once</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/39">#39</a>
+          </p>
+          <ul>
+            <li>A scheduler will share one local model server between your conversation, background tasks and chats. Its policy decides which model call goes next and why a task waits, and keeps your conversation answering first.</li>
+            <li>A simulator replays workloads through the policy, so its variants can be compared offline, on synthetic workloads or on traces from the benchmark.</li>
+            <li>Nothing uses the scheduler yet: runs and the gateway work as before. The next step puts it in front of the model server.</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-26-retrieval">
           <h3>Compare memory retrievers offline</h3>
@@ -134,7 +161,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/36">#36</a>
           </p>
           <ul>
-            <li>On its default host, the gateway refuses requests whose <code>Host</code> is not <code>127.0.0.1</code>, <code>localhost</code> or <code>[::1]</code> with its port (HTTP 421), and requests that web pages at another origin send through your browser (HTTP 403). A web page can no longer reach the gateway through DNS rebinding and run tasks with your tools.</li>
+            <li>On <code>localhost</code> or a loopback IP address, such as the default <code>127.0.0.1</code>, the gateway refuses requests whose <code>Host</code> is not <code>127.0.0.1</code>, <code>localhost</code> or <code>[::1]</code> with its port (HTTP 421), and requests that web pages at another origin send through your browser (HTTP 403). A web page can no longer reach the gateway through DNS rebinding and run tasks with your tools.</li>
             <li>No web page can show the gateway's pages in a frame.</li>
             <li>On any other host, such as <code>0.0.0.0</code>, the gateway makes no such checks and logs a warning when it starts: it has no authentication.</li>
           </ul>
@@ -279,6 +306,7 @@
       <p>Pre-alpha: commands and APIs may change before v0.1.0.</p>
       <nav class="footer-links" aria-label="Project">
         <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">All documentation</a>
+        <a href="../for-agents.md">For AI agents</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md">Contributing</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">Security policy</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">Changelog</a>
