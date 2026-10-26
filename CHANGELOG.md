@@ -9,6 +9,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- `melo-retrieve`, installed next to `melo`, compares the `bm25`, `llm` and
+  `embedding` memory retrievers offline on labelled queries: recall@k, mean
+  reciprocal rank, latency and token use. `--export-run` turns a run's model
+  calls or a history database into a corpus of reasoning notes, code drafts,
+  thought chunks and reflections ([#38]).
 - Run events for Python code: `Agent.run_task(..., on_event=sink)` passes
   each run, step, model reply, tool call, notice and reflection to the sink
   as an `AgentEvent`, with secrets redacted ([#37]).
@@ -115,3 +120,4 @@ earlier milestones.
 [#34]: https://github.com/localmelo/localmelo/pull/34
 [#36]: https://github.com/localmelo/localmelo/pull/36
 [#37]: https://github.com/localmelo/localmelo/pull/37
+[#38]: https://github.com/localmelo/localmelo/pull/38

@@ -74,6 +74,19 @@
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
 
+        <article class="update-entry" id="u-2026-10-26-retrieval">
+          <h3>离线比较记忆检索器</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/38">#38</a>
+          </p>
+          <ul>
+            <li><code>melo-retrieve</code> 用 <code>bm25</code>、<code>llm</code> 或 <code>embedding</code> 检索器在语料上运行带标注的查询，报告每种检索器找到正确文档的比例和速度。</li>
+            <li>它还能把一次运行中的模型调用导出为这样的语料：模型推理过程的笔记、代码草稿和思考片段。</li>
+            <li><code>melo</code> 还没有使用这些检索器。默认用哪一种，由基准测试的比较结果决定。</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-26-python-api">
           <h3>Python API 支持事件、停止任务和审批</h3>
           <p class="update-date">
