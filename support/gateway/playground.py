@@ -14,6 +14,7 @@ import httpx
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.melo.memory._sqlite import thinking_retention_days
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.schema import RunResult, answer_text, split_thinking
@@ -196,6 +197,8 @@ class SmokePlayground:
         mem_dir = Path(memory_dir) if memory_dir else _DEFAULT_MEMORY_DIR
         mem_dir.mkdir(parents=True, exist_ok=True)
         self._history_path = mem_dir / "history.db"
+        # Read once, so every chat's history keeps reasoning as long.
+        self._thinking_retention_days = thinking_retention_days()
         self._long_term_path = mem_dir / "long_term.db"
 
     def scenarios_payload(self) -> list[dict[str, Any]]:
@@ -319,7 +322,9 @@ class SmokePlayground:
         )
 
         await agent.hippo.aclose()
-        agent.hippo.history = SqliteHistory(self._history_path)
+        agent.hippo.history = SqliteHistory(
+            self._history_path, thinking_retention_days=self._thinking_retention_days
+        )
         if embedding:
             agent.hippo.long = SqliteLongTerm(self._long_term_path)
 

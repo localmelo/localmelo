@@ -1040,3 +1040,48 @@ class TestMemoryDirMode:
         memory_dir.chmod(0o755)
         self._run(memory_dir)
         assert memory_dir.stat().st_mode & 0o777 == 0o755
+
+
+# ── LOCALMELO_THINKING_RETENTION_DAYS ───────────────────────────────────────
+
+
+class TestThinkingRetentionVariable:
+    """An invalid value ends melo with one line and exit code 2, before any run."""
+
+    MESSAGE = (
+        "melo: error: LOCALMELO_THINKING_RETENTION_DAYS must be a number of days "
+        "greater than 0, not 'abc'\n"
+    )
+
+    @pytest.mark.parametrize("query", ["q", ""], ids=["a-query", "the-loop"])
+    def test_direct_mode_refuses_an_invalid_value(
+        self,
+        query: str,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        monkeypatch.setenv("LOCALMELO_THINKING_RETENTION_DAYS", "abc")
+        ran = _main(query)
+        assert ran.code == 2
+        ran.build.assert_not_called()
+        assert capsys.readouterr() == ("", self.MESSAGE)
+
+    def test_the_gateway_refuses_it_before_the_config_is_loaded(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        monkeypatch.setenv("LOCALMELO_THINKING_RETENTION_DAYS", "abc")
+        with (
+            mock.patch("localmelo.support.config.load") as load,
+            mock.patch.object(cli, "_start_gateway") as start,
+        ):
+            ran = _main("--serve")
+        assert ran.code == 2
+        load.assert_not_called()
+        start.assert_not_called()
+        assert capsys.readouterr() == ("", self.MESSAGE)
+
+    def test_a_valid_value_runs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("LOCALMELO_THINKING_RETENTION_DAYS", "7")
+        ran = _main("q")
+        assert ran.code == 0
+        ran.build.assert_called_once()

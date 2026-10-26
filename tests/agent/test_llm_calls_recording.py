@@ -6,8 +6,11 @@ Every memory directory is under ``tmp_path``; no test touches
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
+import sqlite3
+import time
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -17,6 +20,7 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent import agent as agent_module
 from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.schema import Message, ToolDef
 
 SQLITE_HELPERS_LOGGER = "localmelo.melo.memory._sqlite"
@@ -105,3 +109,64 @@ async def test_a_chosen_directory_keeps_its_mode(
     await agent.close()
     assert _mode(default) == 0o755
     assert os.path.isdir(default)
+
+
+# ── Retention through the Agent ─────────────────────────────────────────────
+
+
+async def _write_old_call(path: Path, age_days: float) -> None:
+    """One llm_calls row with thinking, *age_days* old, by a separate history."""
+    history = SqliteHistory(path)
+    try:
+        conn = await history._ensure_ready()
+        await conn.execute(
+            """INSERT INTO llm_calls (task_id, seq, kind, step, attempt, outcome,
+               content, thinking, reasoning_key, timestamp)
+               VALUES ('old', 0, 'plan', 1, 1, 'answer', 'Paris.', 'Recall it.',
+                       'reasoning_content', ?)""",
+            (time.time() - age_days * 86400,),
+        )
+        await conn.commit()
+    finally:
+        await history.aclose()
+
+
+def _old_thinking(path: Path) -> str:
+    with contextlib.closing(sqlite3.connect(path)) as connection:
+        row = connection.execute(
+            "SELECT thinking FROM llm_calls WHERE task_id = 'old'"
+        ).fetchone()
+    return str(row[0])
+
+
+@pytest.mark.parametrize(("value", "kept"), [("7", ""), (None, "Recall it.")])
+async def test_the_retention_variable_reaches_the_agents_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str | None, kept: str
+) -> None:
+    memory_dir = tmp_path / "memory"
+    memory_dir.mkdir()
+    await _write_old_call(memory_dir / "history.db", age_days=8)
+    if value is not None:
+        monkeypatch.setenv("LOCALMELO_THINKING_RETENTION_DAYS", value)
+    monkeypatch.setenv("LOCALMELO_PERSIST_MEMORY", "1")
+    monkeypatch.setenv("LOCALMELO_MEMORY_DIR", str(memory_dir))
+    agent = Agent(llm=FakeLLM([Message(role="assistant", content="Paris.")]))
+    try:
+        result = await agent.run_task("What is the capital of France?")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    assert _old_thinking(memory_dir / "history.db") == kept
+
+
+async def test_a_bad_retention_value_raises_before_the_directory_is_made(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    memory_dir = tmp_path / "memory"
+    monkeypatch.setenv("LOCALMELO_THINKING_RETENTION_DAYS", "abc")
+    with pytest.raises(ValueError, match="LOCALMELO_THINKING_RETENTION_DAYS"):
+        Agent(llm=FakeLLM(), options=AgentOptions(memory_dir=str(memory_dir)))
+    assert not memory_dir.exists()
+    # Without persistence the variable is not read.
+    agent = Agent(llm=FakeLLM())
+    await agent.close()

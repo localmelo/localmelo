@@ -3,12 +3,20 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
+import re
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Final
 
 import aiosqlite
 
-from localmelo.melo.memory._sqlite import apply_pragmas, create_private_file
+from localmelo.melo.memory._sqlite import (
+    THINKING_RETENTION_DAYS,
+    apply_pragmas,
+    create_private_file,
+)
 from localmelo.melo.memory.history import History
 from localmelo.melo.schema import (
     ImagePart,
@@ -65,6 +73,76 @@ class HistorySchemaError(RuntimeError):
     """``history.db`` has a newer schema version than this code reads."""
 
 
+# The tags of an inline reasoning block, in any letter case.
+_OPEN_TAG = "<[Tt][Hh][Ii][Nn][Kk]>"
+_CLOSE_TAG = "</[Tt][Hh][Ii][Nn][Kk]>"
+# After leading whitespace, a block up to its first closing tag and the
+# whitespace after it.
+_LEADING_BLOCK = re.compile(rf"\s*{_OPEN_TAG}.*?{_CLOSE_TAG}\s*", re.DOTALL)
+# After leading whitespace, an opening tag.
+_LEADING_OPENING = re.compile(rf"\s*(?={_OPEN_TAG})")
+_OPENING = re.compile(_OPEN_TAG)
+# A closing tag and the whitespace after it.
+_CLOSING = re.compile(rf"{_CLOSE_TAG}\s*")
+
+
+def _ollama_prefix(thinking: str) -> str:
+    """The copy of *thinking* that Ollama's provider puts before the content."""
+    return f"<think>\n{thinking}\n</think>\n\n"
+
+
+def _without_inline_blocks(text: str) -> str:
+    """*text* without the reasoning a reply without a reasoning parser left in it.
+
+    The first of these forms that applies is removed, again until none
+    applies, so the result is a fixed point:
+
+    1. after leading whitespace, a ``<think>`` up to and including the
+       first ``</think>`` and the whitespace after it;
+    2. after leading whitespace, a ``<think>`` with no ``</think>`` after
+       it: everything from the ``<think>`` on (output cut off while the
+       model thought);
+    3. a ``</think>`` with no ``<think>`` before it: everything up to and
+       including it and the whitespace after it (a chat template that
+       opens the block in the prompt).
+
+    Any other text is left as it is, a tag in its middle too.
+    """
+    start = 0
+    while True:
+        block = _LEADING_BLOCK.match(text, start)
+        if block is not None:
+            start = block.end()
+            continue
+        opening = _LEADING_OPENING.match(text, start)
+        if opening is not None:
+            return text[start : opening.end()]
+        closing = _CLOSING.search(text, start)
+        if closing is not None and not _OPENING.search(text, start, closing.start()):
+            start = closing.end()
+            continue
+        return text[start:]
+
+
+def _content_without_reasoning(reasoning_key: str, thinking: str, content: str) -> str:
+    """*content* without the inline reasoning its row's *reasoning_key* implies.
+
+    - ``thinking`` (Ollama's provider): the copy of *thinking* that the
+      provider put before the content, when it is there;
+    - ``""`` (no separate reasoning): see :func:`_without_inline_blocks`;
+    - any other key, such as ``reasoning_content``: none, since the server
+      returned the reasoning apart from the content.
+    """
+    if reasoning_key == "thinking":
+        prefix = _ollama_prefix(thinking)
+        if thinking and content.startswith(prefix):
+            return content[len(prefix) :]
+        return content
+    if reasoning_key == "":
+        return _without_inline_blocks(content)
+    return content
+
+
 class SqliteHistory(History):
     """Persistent history backed by SQLite via aiosqlite.
 
@@ -82,11 +160,28 @@ class SqliteHistory(History):
     reference :class:`ImagePart` objects.
     """
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        thinking_retention_days: float = THINKING_RETENTION_DAYS,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        if not (math.isfinite(thinking_retention_days) and thinking_retention_days > 0):
+            raise ValueError(
+                "thinking_retention_days must be a finite number of days "
+                f"greater than 0, not {thinking_retention_days!r}"
+            )
         self._db_path = str(db_path)
+        self._thinking_retention_days = thinking_retention_days
+        # Read only for the retention's cutoff.
+        self._clock = clock
         self._conn: aiosqlite.Connection | None = None
         self._init_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
+        # The retention pass runs once per instance, at the first call that
+        # opens the connection; a reconnection after aclose() skips it.
+        self._retention_done = False
 
     async def _ensure_ready(self) -> aiosqlite.Connection:
         if self._conn is not None:
@@ -131,15 +226,51 @@ class SqliteHistory(History):
             if version < HISTORY_SCHEMA_VERSION:
                 await conn.execute(f"PRAGMA user_version = {HISTORY_SCHEMA_VERSION}")
                 migrated = True
+            if not self._retention_done:
+                await self._clear_old_reasoning(conn)
             await conn.commit()
         except BaseException:
             await conn.rollback()
             raise
+        self._retention_done = True
         if migrated:
             logger.info(
                 "Migrated %s to history schema version %d",
                 self._db_path,
                 HISTORY_SCHEMA_VERSION,
+            )
+
+    async def _clear_old_reasoning(self, conn: aiosqlite.Connection) -> None:
+        """Clear the reasoning of the rows older than the retention period.
+
+        Inside :meth:`_migrate`'s transaction. Each ``llm_calls`` row whose
+        ``timestamp`` is older than ``thinking_retention_days`` loses its
+        ``thinking`` and the inline reasoning its ``content`` holds (see
+        :func:`_content_without_reasoning`); every other column, and the
+        row, stays. A row that would not change is not written, so a pass
+        over rows cleared before writes nothing.
+        """
+        cutoff = self._clock() - self._thinking_retention_days * 86400
+        updates: list[tuple[str, str, int]] = []
+        # Only rows that can change: with thinking, or with no reasoning key
+        # and a tag in their content (LIKE ignores ASCII letter case).
+        async with conn.execute(
+            """SELECT task_id, seq, reasoning_key, thinking, content
+               FROM llm_calls
+               WHERE timestamp < ?
+                 AND (thinking != ''
+                      OR (reasoning_key = '' AND content LIKE '%think>%'))""",
+            (cutoff,),
+        ) as cur:
+            async for task_id, seq, reasoning_key, thinking, content in cur:
+                kept = _content_without_reasoning(reasoning_key, thinking, content)
+                if thinking or kept != content:
+                    updates.append((kept, task_id, seq))
+        if updates:
+            await conn.executemany(
+                """UPDATE llm_calls SET thinking = '', content = ?
+                   WHERE task_id = ? AND seq = ?""",
+                updates,
             )
 
     # ── public interface (mirrors History) ──

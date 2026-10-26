@@ -720,6 +720,16 @@ def main() -> None:
                 print(f"  {k}: {v}")
         return
 
+    # Checked for direct mode, the `melo ""` loop and the gateway alike,
+    # whether or not memory is kept, so a bad value is one line, not a
+    # traceback.
+    from localmelo.melo.memory._sqlite import thinking_retention_days
+
+    try:
+        thinking_retention_days()
+    except ValueError as exc:
+        parser.exit(EXIT_NOT_COMPLETED, f"{parser.prog}: error: {exc}\n")
+
     # direct mode (no gateway): exit code 0 completed, 1 crashed, 2 otherwise
     if args.query and not args.serve:
         query = " ".join(args.query)

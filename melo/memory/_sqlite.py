@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import logging
+import math
 import os
+from collections.abc import Mapping
+from typing import Final
 
 import aiosqlite
 
 logger = logging.getLogger(__name__)
+
+# Days that history keeps the model's reasoning (``llm_calls.thinking``);
+# older reasoning is cleared (see SqliteHistory). The variable below
+# replaces the default.
+THINKING_RETENTION_DAYS: Final = 30.0
+THINKING_RETENTION_ENV: Final = "LOCALMELO_THINKING_RETENTION_DAYS"
 
 _PRAGMAS: tuple[str, ...] = (
     "PRAGMA journal_mode=WAL",
@@ -78,3 +87,26 @@ def tighten_private_dir(path: str) -> None:
         logger.warning("Could not restrict %s to mode 0700: %s", path, exc)
         return
     logger.info("Restricted %s to mode 0700", path)
+
+
+def thinking_retention_days(environ: Mapping[str, str] | None = None) -> float:
+    """The days of reasoning to keep, from ``LOCALMELO_THINKING_RETENTION_DAYS``.
+
+    *environ* defaults to ``os.environ``. Unset or empty gives
+    :data:`THINKING_RETENTION_DAYS`. Any other value must be a finite
+    number above 0, else ``ValueError`` names the variable and the value.
+    """
+    env = os.environ if environ is None else environ
+    value = env.get(THINKING_RETENTION_ENV, "")
+    if not value:
+        return THINKING_RETENTION_DAYS
+    try:
+        days = float(value)
+    except ValueError:
+        days = math.nan
+    if not (math.isfinite(days) and days > 0):
+        raise ValueError(
+            f"{THINKING_RETENTION_ENV} must be a number of days greater than 0, "
+            f"not '{value}'"
+        )
+    return days

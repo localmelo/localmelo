@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import math
 import os
 import sqlite3
 from collections import deque
@@ -21,7 +22,13 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.memory._sqlite import make_private_dir, tighten_private_dir
+from localmelo.melo.memory._sqlite import (
+    THINKING_RETENTION_DAYS,
+    THINKING_RETENTION_ENV,
+    make_private_dir,
+    thinking_retention_days,
+    tighten_private_dir,
+)
 from localmelo.melo.memory.history.sqlite import (
     _SCHEMA,
     HISTORY_SCHEMA_VERSION,
@@ -440,3 +447,162 @@ def test_tighten_private_dir_logs_a_failed_chmod(
     assert _mode(path) == 0o755
     assert [r.levelno for r in caplog.records] == [logging.WARNING]
     assert str(path) in caplog.records[0].getMessage()
+
+
+# ── Retention of thinking ───────────────────────────────────────────────────
+
+DAY = 86400.0
+NOW = 2_000_000_000.0
+
+# (reasoning_key, thinking, content, content once the reasoning is cleared)
+RETENTION_CASES = [
+    ("thinking", "x", "<think>\nx\n</think>\n\nanswer", "answer"),
+    ("thinking", "a</think>b", "<think>\na</think>b\n</think>\n\nanswer", "answer"),
+    ("", "r", "<think>abc", ""),
+    ("", "r", "x\n</think>\n\nanswer", "answer"),
+    ("", "r", "use <think> tags", "use <think> tags"),
+    ("", "r", "<think>a</think>\n\n<think>b</think>\n\nc", "c"),
+    ("", "r", "x</think>y</think>z", "z"),
+    ("", "r", "plain text", "plain text"),
+    ("reasoning_content", "r", "x</think>y", "x</think>y"),
+    ("reasoning_content", "r", "<think>plain text", "<think>plain text"),
+]
+
+
+def _write_retention_rows(path: Path) -> None:
+    """For each case, a row 31 days old (seq 2n) and one 29 days old (2n + 1).
+
+    An ``AFTER UPDATE`` trigger counts the rows written.
+    """
+    with _connect(path) as connection:
+        connection.executescript("""
+            CREATE TABLE update_count (n INTEGER NOT NULL);
+            INSERT INTO update_count VALUES (0);
+            CREATE TRIGGER count_updates AFTER UPDATE ON llm_calls
+            BEGIN UPDATE update_count SET n = n + 1; END;
+            """)
+        for index, (key, thinking, content, _) in enumerate(RETENTION_CASES):
+            for offset, age in enumerate((31, 29)):
+                connection.execute(
+                    """INSERT INTO llm_calls (task_id, seq, kind, step, attempt,
+                       outcome, content, thinking, reasoning_key, step_ids_json,
+                       redactions, tool_calls_json, usage_json, duration_s,
+                       timestamp)
+                       VALUES ('t1', ?, 'plan', 1, 1, 'answer', ?, ?, ?, '["s1"]',
+                               1, '[]', '{"total_tokens": 3}', 0.5, ?)""",
+                    (2 * index + offset, content, thinking, key, NOW - age * DAY),
+                )
+        connection.commit()
+
+
+def _update_count(path: Path) -> int:
+    with _connect(path) as connection:
+        return int(connection.execute("SELECT n FROM update_count").fetchone()[0])
+
+
+async def _open_at(path: Path, days: float, now: float = NOW) -> None:
+    history = SqliteHistory(path, thinking_retention_days=days, clock=lambda: now)
+    try:
+        await history.count_tasks()
+    finally:
+        await history.aclose()
+
+
+async def test_retention_clears_old_reasoning(tmp_path: Path) -> None:
+    path = tmp_path / "history.db"
+    await _open_at(path, 30.0, now=0.0)
+    _write_retention_rows(path)
+    before = _rows(path, "llm_calls")
+
+    await _open_at(path, 30.0)
+
+    after = _rows(path, "llm_calls")
+    assert len(after) == len(before) == 2 * len(RETENTION_CASES)
+    columns = [column[1] for column in LLM_CALLS_COLUMNS]
+    content_at, thinking_at = columns.index("content"), columns.index("thinking")
+    for index, (_, _, _, cleared) in enumerate(RETENTION_CASES):
+        old_before, new_before = before[2 * index], before[2 * index + 1]
+        old_after, new_after = after[2 * index], after[2 * index + 1]
+        assert (old_after[thinking_at], old_after[content_at]) == ("", cleared)
+        # Every other column of the old row, and the newer row, unchanged.
+        assert [
+            v for i, v in enumerate(old_after) if i not in (content_at, thinking_at)
+        ] == [v for i, v in enumerate(old_before) if i not in (content_at, thinking_at)]
+        assert new_after == new_before
+    # One write per changed row: every old row had thinking.
+    assert _update_count(path) == len(RETENTION_CASES)
+
+    # A second instance finds nothing to write.
+    await _open_at(path, 30.0)
+    assert _rows(path, "llm_calls") == after
+    assert _update_count(path) == len(RETENTION_CASES)
+
+
+async def test_a_shorter_retention_clears_more(tmp_path: Path) -> None:
+    path = tmp_path / "history.db"
+    await _open_at(path, 30.0, now=0.0)
+    _write_retention_rows(path)
+
+    await _open_at(path, 7.0)
+
+    rows = _rows(path, "llm_calls")
+    thinking_at = [column[1] for column in LLM_CALLS_COLUMNS].index("thinking")
+    content_at = [column[1] for column in LLM_CALLS_COLUMNS].index("content")
+    assert [(row[thinking_at], row[content_at]) for row in rows] == [
+        ("", cleared) for (_, _, _, cleared) in RETENTION_CASES for _ in range(2)
+    ]
+    assert _update_count(path) == 2 * len(RETENTION_CASES)
+    await _open_at(path, 7.0)
+    assert _update_count(path) == 2 * len(RETENTION_CASES)
+
+
+@pytest.mark.parametrize("days", [0, -1, math.nan, math.inf])
+def test_an_invalid_retention_is_refused(tmp_path: Path, days: float) -> None:
+    with pytest.raises(ValueError, match="thinking_retention_days"):
+        SqliteHistory(tmp_path / "history.db", thinking_retention_days=days)
+
+
+async def test_retention_runs_once_per_instance(tmp_path: Path) -> None:
+    path = tmp_path / "history.db"
+    history = SqliteHistory(path, clock=lambda: NOW)
+    try:
+        await history.count_tasks()
+        # Rows added after the pass, with old timestamps, keep their thinking
+        # across a reconnection of the same instance.
+        _write_retention_rows(path)
+        await history.aclose()
+        await history.count_tasks()
+    finally:
+        await history.aclose()
+    assert _update_count(path) == 0
+
+    await _open_at(path, 30.0)
+    assert _update_count(path) == len(RETENTION_CASES)
+
+
+def test_thinking_retention_days_reads_the_variable() -> None:
+    name = "LOCALMELO_THINKING_RETENTION_DAYS"
+    assert name == THINKING_RETENTION_ENV
+    assert THINKING_RETENTION_DAYS == 30.0
+    assert thinking_retention_days({}) == 30.0
+    assert thinking_retention_days({name: ""}) == 30.0
+    assert thinking_retention_days({name: "7"}) == 7.0
+    assert thinking_retention_days({name: "0.5"}) == 0.5
+
+
+@pytest.mark.parametrize("value", ["abc", "0", "-3", "nan", "inf"])
+def test_thinking_retention_days_refuses_a_bad_value(value: str) -> None:
+    with pytest.raises(ValueError) as refused:
+        thinking_retention_days({"LOCALMELO_THINKING_RETENTION_DAYS": value})
+    assert str(refused.value) == (
+        "LOCALMELO_THINKING_RETENTION_DAYS must be a number of days greater "
+        f"than 0, not '{value}'"
+    )
+
+
+def test_thinking_retention_days_reads_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert thinking_retention_days() == 30.0
+    monkeypatch.setenv("LOCALMELO_THINKING_RETENTION_DAYS", "12")
+    assert thinking_retention_days() == 12.0

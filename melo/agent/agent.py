@@ -979,11 +979,15 @@ class Agent:
         if self._memory_dir is not None:
             from localmelo.melo.memory._sqlite import (
                 make_private_dir,
+                thinking_retention_days,
                 tighten_private_dir,
             )
             from localmelo.melo.memory.history.sqlite import SqliteHistory
             from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 
+            # Read first, so that a bad value raises before the directory is
+            # created.
+            retention_days = thinking_retention_days()
             make_private_dir(self._memory_dir)
             if (
                 self.options.memory_dir is None
@@ -993,7 +997,8 @@ class Agent:
                 # version made with the umask's mode is closed to others.
                 tighten_private_dir(self._memory_dir)
             history_backend = SqliteHistory(
-                os.path.join(self._memory_dir, "history.db")
+                os.path.join(self._memory_dir, "history.db"),
+                thinking_retention_days=retention_days,
             )
             if self._embedding and self.options.memory:
                 long_backend = SqliteLongTerm(
