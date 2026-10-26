@@ -165,8 +165,9 @@ class _Pass:
         for c in self.pending:
             if is_planning(c) and c.task_id:
                 self.planning.setdefault(c.task_id, []).append(c)
-        for c in calls:
-            if not is_lane(c) and c.task_id not in self.by_id:
+        for c in calls:  # a taskless never-held call is legitimate, not an orphan
+            unknown = c.task_id not in self.by_id
+            if not is_lane(c) and unknown and (c.task_id or is_planning(c)):
                 self.alarms.append(f"orphan_call:{c.call_id}")
         self.active = {
             t.task_id
@@ -307,9 +308,17 @@ class _Pass:
                 elif self.lv.base.get(h) == 5:
                     self.asks.append((t.task_id, "dep_later"))
             return ("Dependency", "")
+        if t.task_id in self.lv.cycle:  # waits on itself (decision D16)
+            return ("Dependency", "")
         if t.budget_exhausted:
             return ("Budget", "")
         return None
+
+    def hot(self, t: Task) -> float:
+        """The KV bytes a resident task keeps hot: its last prompt, else the prior."""
+        tokens = t.last_prompt_tokens
+        prompt = self.p.prompt_prior_tokens if tokens is None else tokens
+        return self.p.kv_bytes_per_token * prompt
 
     def large(self, t: Task) -> bool:
         return t.size == "large" or self.c_hat(t) > self.p.battery_large_s
@@ -331,12 +340,17 @@ class _Pass:
         hard = hard_gate(self.st.machine)
         for c in self.pending:
             t = self.by_id.get(c.task_id or "")
-            if is_lane(c) or is_holdable(c) or t is None or is_terminal(t.phase):
+            if is_lane(c) or is_holdable(c):
+                continue
+            if t is None and c.task_id is not None:
+                continue  # an orphan: its task is unknown
+            if t is not None and is_terminal(t.phase):
                 continue
             if is_retry(c):
                 hold = hard or (None if self.fits(c) else ("Memory", "kv"))
                 if hold is not None:
-                    self.retry_hold.setdefault(t.task_id, hold)
+                    if t is not None:
+                        self.retry_hold.setdefault(t.task_id, hold)
                     continue
             self.unheld.append(c.call_id)
             self.take(t, c)
@@ -457,16 +471,11 @@ class _Pass:
         order += [(t, c, 0) for t, c in self.cands if t.task_id not in moved]
         marks = p.yield_marks and not self.fallback
         ws_mark = ""
-        if not self.fallback and self.running:
-            hot = 0.0
-            for t in self.running:
-                tokens = t.last_prompt_tokens
-                hot += p.kv_bytes_per_token * (
-                    p.prompt_prior_tokens if tokens is None else tokens
-                )
-            if hot > p.m_hot_bytes - p.m_front_bytes:
-                top = self.worst(self.running, set())
-                ws_mark = top.task_id if top else ""
+        room = p.m_hot_bytes - p.m_front_bytes
+        hot = sum(self.hot(t) for t in self.running)
+        if not self.fallback and self.running and hot > room:
+            top = self.worst(self.running, set())
+            ws_mark = top.task_id if top else ""
         cap_bg = p.n_fg if self.focus else p.n_a
         n_running = len(self.running)
         admit: list[str] = []
@@ -495,6 +504,13 @@ class _Pass:
                     top = self.worst(pool, self.active | self.done_now)
                     if top is not None:
                         claimed.append(top.task_id)
+            elif (
+                starting
+                and n_running > 0
+                and not self.fallback
+                and hot + self.hot(t) > room
+            ):  # a start would push the working set over, then park (step 8)
+                cause = ("Memory", "working_set")
             elif not self.fits(c):
                 cause = ("Memory", "kv")
             elif tid in claimed:
@@ -504,7 +520,9 @@ class _Pass:
             if cause is None:
                 admit.append(c.call_id)
                 self.take(t, c)
-                n_running += 1 if starting else 0
+                if starting:
+                    n_running += 1
+                    hot += self.hot(t)
                 if cls:
                     floor.append((c.call_id, cls))
                 continue
@@ -555,6 +573,8 @@ class _Pass:
                 ):
                     parks.setdefault(t.task_id, "t_park")
             for t in self.sched:
+                if t.task_id in active_all or eff[t.task_id] != 4:
+                    continue  # running now, or needed by a waiter (inherited)
                 last = t.last_activity_wall_us
                 idle_us = self.now.wall_us - (
                     t.created_wall_us if last is None else last
@@ -598,12 +618,11 @@ class _Pass:
         unheld: list[str] = []
         for c in self.pending:
             t = self.by_id.get(c.task_id or "")
-            if (
-                t is not None
-                and not is_terminal(t.phase)
-                and not is_planning(c)
-                and not is_lane(c)
-            ):
+            if is_planning(c) or is_lane(c):
+                continue
+            if t is None and c.task_id is None:
+                unheld.append(c.call_id)
+            elif t is not None and not is_terminal(t.phase):
                 unheld.append(c.call_id)
                 self.active.add(t.task_id)
         reasons = tuple(
@@ -717,7 +736,9 @@ def _lane_by_count(state: State, params: Params) -> tuple[str, ...]:
         return ()
     inflight = sum(1 for c in state.calls if c.admitted_mono_us is not None)
     waiting = sorted(
-        (c.submit_mono_us, c.call_id) for c in lane if c.admitted_mono_us is None
+        (c.submit_mono_us if isinstance(c.submit_mono_us, int) else 0, c.call_id)
+        for c in lane
+        if c.admitted_mono_us is None
     )
     return (waiting[0][1],) if waiting and inflight < params.n_srv else ()
 
@@ -759,7 +780,7 @@ def _last_resort(
         t = tasks[tid]
         if t.phase in TERMINAL_PHASES:
             continue
-        lvl = t.level if 0 <= t.level <= 5 else 2
+        lvl = t.level if isinstance(t.level, int) and 0 <= t.level <= 5 else 2
         levels.append((tid, 1 if lvl == 0 and t.level_source != "user" else lvl))
         if not (
             tid in busy or tid in lane or (t.phase == "running" and tid not in planning)
@@ -804,7 +825,10 @@ def dispatch(
         try:
             decision = fallback_fcfs(view, now, params, type(exc).__name__)
         except Exception as exc2:
-            decision = _last_resort(view, params, exc, exc2)
+            try:
+                decision = _last_resort(view, params, exc, exc2)
+            except Exception:  # nothing may keep the lane's answer from the caller
+                decision = Decision(alarms=("last_resort_failed",), fallback=True)
     if by_count:
         decision = replace(
             decision, alarms=tuple(sorted({*decision.alarms, "lane_check_failed"}))

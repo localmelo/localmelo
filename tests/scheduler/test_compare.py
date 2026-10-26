@@ -83,6 +83,15 @@ def test_a_candidate_failing_a_guardrail_fails() -> None:
         {"finished_by_class": (0, 0, 1, 0, 0)},  # 50% against 100%
     ):
         assert verdict(sweep(fifo={}, las2={**good, **bad})) == "fails_guardrail"
+    # Exactly 5 points below passes (32/80 = 40% against 28/80 = 35%).
+    p1 = {"tasks_by_class": (0, 80, 0, 0, 0)}
+    edge = sweep(
+        fifo={**p1, "finished_by_class": (0, 32, 0, 0, 0)},
+        las2={**good, **p1, "finished_by_class": (0, 28, 0, 0, 0)},
+    )
+    assert verdict(edge) == "meets_margin"
+    over = {**good, **p1, "finished_by_class": (0, 27, 0, 0, 0)}
+    assert verdict({**edge, **sweep(las2=over)}) == "fails_guardrail"
     report = compare(sweep(fifo={}, las2={**good, "starvation_max": 9.0}))
     las2 = report.candidates[1]
     assert ("starvation", "W1", "fail") in las2.guardrails

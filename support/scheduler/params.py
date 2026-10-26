@@ -132,7 +132,7 @@ class Params:
 
     def __post_init__(self) -> None:
         for f in fields(self):
-            _check(f.name, getattr(self, f.name))
+            _check(f.name, str(f.type), getattr(self, f.name))
         if self.arm == "fifo" and (self.floors or self.yield_marks):
             name = "floors" if self.floors else "yield_marks"
             raise ValueError(f"{name}: not available under the fifo arm")
@@ -140,18 +140,37 @@ class Params:
             raise ValueError("cloud_offload: not supported before a later phase")
 
 
-def _check(name: str, v: Any) -> None:
-    """Raise ``ValueError`` naming *name* when the value *v* is not allowed."""
+def _number(v: Any) -> bool:
+    return isinstance(v, int | float) and not isinstance(v, bool)
+
+
+def _check(name: str, type_: str, v: Any) -> None:
+    """Raise ``ValueError`` naming *name* when the value *v* is not allowed.
+
+    A bool is only a bool: ``n_srv=False`` would close the lane for good,
+    and an int field takes no float (``p1_cap=1.5`` would make every
+    decision raise).
+    """
     if name in _CHOICES:
         if v not in _CHOICES[name]:
             raise ValueError(f"{name}: {v!r} is not one of {_CHOICES[name]}")
         return
-    if isinstance(v, bool):
-        return
     if name == "remaining_prior_s":
-        if len(v) != 3 or not all(math.isfinite(x) and x > 0 for x in v):
+        if not (
+            isinstance(v, tuple)
+            and len(v) == 3
+            and all(_number(x) and math.isfinite(x) and x > 0 for x in v)
+        ):
             raise ValueError(f"{name}: needs three positive finite seconds")
         return
+    if type_ == "bool":
+        if not isinstance(v, bool):
+            raise ValueError(f"{name}: must be a bool")
+        return
+    if not _number(v) or (type_ == "int" and not isinstance(v, int)):
+        raise ValueError(
+            f"{name}: must be {'an int' if type_ == 'int' else 'a number'}"
+        )
     if isinstance(v, float) and (
         math.isnan(v) or (math.isinf(v) and name not in _MAY_BE_INF)
     ):

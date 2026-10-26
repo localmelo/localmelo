@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from localmelo.support.scheduler.costs import RATES_OMLX_OQ5, Rates, alone_service_s
-from localmelo.support.scheduler.model import CallKind
+from localmelo.support.scheduler.model import MAX_INT, MAX_TOKENS, CallKind
 from localmelo.support.scheduler.sim.trace import (
     CHAT_KINDS,
     ServiceSource,
@@ -125,14 +125,18 @@ class HistoryTask:
 
 
 def _number(v: Any) -> float | None:
-    """*v* as a finite float, else ``None`` (booleans are not numbers)."""
+    """*v* as a float within ±2**53, else ``None`` (booleans are not numbers).
+
+    No time or duration is that large, and the bound keeps every sum and
+    difference of two values finite.
+    """
     if isinstance(v, bool) or not isinstance(v, int | float):
         return None
     try:
         f = float(v)
     except OverflowError:
         return None
-    return f if math.isfinite(f) else None
+    return f if math.isfinite(f) and abs(f) <= MAX_INT else None
 
 
 def _seconds(v: Any) -> float | None:
@@ -141,8 +145,10 @@ def _seconds(v: Any) -> float | None:
 
 
 def _count(v: Any) -> int | None:
-    """A token count: a non-negative int that is not a bool, else ``None``."""
-    return v if isinstance(v, int) and not isinstance(v, bool) and v >= 0 else None
+    """A token count: an int in 0..MAX_TOKENS that is not a bool, else ``None``."""
+    if isinstance(v, int) and not isinstance(v, bool) and 0 <= v <= MAX_TOKENS:
+        return v
+    return None
 
 
 def _obj(v: Any) -> dict[str, Any]:
@@ -321,8 +327,10 @@ def import_calls(
 
     Files are read in order of their relative POSIX path. A file with a
     record whose ``schema_version`` is not 2 (or missing) is rejected
-    whole, or raises ``CallsFormatError`` with *strict*. *rates* serve
-    only the ``"tokens"`` service fallback (``RATES_REC_FLINT`` for rec).
+    whole, or raises ``CallsFormatError`` with *strict*. A call index that
+    repeats within a task drops the later record (``bad_call_index``).
+    *rates* serve only the ``"tokens"`` service fallback
+    (``RATES_REC_FLINT`` for rec).
     """
     root = Path(root)
     files = sorted(
@@ -333,6 +341,7 @@ def import_calls(
     errors: list[str] = []
     lines = rejected = 0
     by_task: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+    seen: set[tuple[str, int]] = set()
     for path in files:
         rel = path.relative_to(root).as_posix()
         parsed = [_parse(x) for x in path.read_bytes().split(b"\n") if x.strip()]
@@ -352,7 +361,12 @@ def import_calls(
             if reason is not None:
                 drops[reason] += 1
             elif isinstance(r, dict):
-                by_task.setdefault(f"{rel}#{r['run_id']}", (rel, []))[1].append(r)
+                key = f"{rel}#{r['run_id']}"
+                if (key, r["call_index"]) in seen:  # a trace keys calls by index
+                    drops["bad_call_index"] += 1
+                    continue
+                seen.add((key, r["call_index"]))
+                by_task.setdefault(key, (rel, []))[1].append(r)
 
     traces: list[TaskTrace] = []
     kept_n = wall_tasks = overlapping_n = no_chat = 0

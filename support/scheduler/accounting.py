@@ -174,10 +174,12 @@ def advance(state: State, now: Clock, events: Sequence[Event], params: Params) -
         elif isinstance(ev, MachineChanged):
             machine = ev.machine
 
-    # LAS-2 promotion on roots, only at or above Q (spec decision D7).
+    # LAS-2 promotion, only at or above Q (spec decision D7), on every task
+    # that holds attained service: the roots where charges are booked, and a
+    # task whose root_id names a task that is not itself a root.
     for tid in sorted(tasks):
         t = tasks[tid]
-        if root_of(t, tasks).task_id != tid or t.promo_service_us < us(p.las_q_s):
+        if t.promo_service_us < us(p.las_q_s):
             continue
         if t.wait_promo_us >= p.rho_las * t.promo_service_us:
             tasks[tid] = replace(t, promo_service_us=0, wait_promo_us=0)
@@ -230,8 +232,10 @@ def apply_dispatch(
             continue
         if is_holdable(c):
             start = now.mono_us if t.started_mono_us is None else t.started_mono_us
-            t = replace(t, started_mono_us=start, wait_held_us=0)
-        tasks[t.task_id] = replace(t, phase="running")
+            t = replace(t, started_mono_us=start, wait_held_us=0, phase="running")
+        elif t.phase == "held":  # a retry resumes a resident task, nothing else
+            t = replace(t, phase="running")
+        tasks[t.task_id] = t
         recent.append(t.task_id)
 
     reasons = {tid: (r, det) for tid, r, det in d.reasons}
@@ -256,9 +260,9 @@ def apply_dispatch(
                 phase=new[4],
             )
 
-    credit = tuple(
+    credit = tuple(  # within [0, cap], also from a state that held an odd value
         (
-            min(state.credit_us[i], _credit_cap_us(d.chi_hat_us[i], params))
+            max(0, min(state.credit_us[i], _credit_cap_us(d.chi_hat_us[i], params)))
             if d.class_runnable[i]
             else 0
         )

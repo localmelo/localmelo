@@ -395,7 +395,7 @@ _PRESENCE = frozenset({"admitted_mono_us"})
 def _finite(v: float) -> bool:
     try:
         return math.isfinite(v)
-    except OverflowError:  # an int too large for a float
+    except (OverflowError, TypeError):  # an int too large for a float, a non-number
         return False
 
 
@@ -423,15 +423,19 @@ def _clean(rec: Any, owner: str, classes: str, out: list[str]) -> Any:
     ):
         for name in names:
             v = getattr(rec, name)
-            if v is not None and v > cap:
+            if v is None:
+                if null is not None:  # NULL in a field that has no NULL
+                    changes[name] = null
+            elif not isinstance(v, int) or v > cap:  # NaN or a float is odd too
                 changes[name] = 0 if name in _PRESENCE else null
-            elif v is not None and v < 0:
+            elif v < 0:
                 changes[name] = 0
     for name in opt_floats + floats:
         v = getattr(rec, name)
-        if v is not None and not _finite(v):
+        if (v is None and name in floats) or (v is not None and not _finite(v)):
             changes[name] = None if name in opt_floats else 0.0
-    if isinstance(rec, Task) and not 0 <= rec.level <= 5:
+    level = getattr(rec, "level", 2)
+    if isinstance(rec, Task) and not (isinstance(level, int) and 0 <= level <= 5):
         changes["level"] = 2  # never clamp: a corrupt -1 must not become P0
     if not changes:
         return rec
@@ -439,14 +443,15 @@ def _clean(rec: Any, owner: str, classes: str, out: list[str]) -> Any:
     return replace(rec, **changes)
 
 
+def _ok_int(v: object) -> bool:
+    return isinstance(v, int) and 0 <= v <= MAX_INT
+
+
 def _clean_pair(pair: tuple[int, int], name: str, out: list[str]) -> tuple[int, int]:
-    if all(0 <= v <= MAX_INT for v in pair):
+    if all(_ok_int(v) for v in pair):
         return pair
     out.append(f"bad_value:state:{name}")
-    return (
-        pair[0] if 0 <= pair[0] <= MAX_INT else 0,
-        pair[1] if 0 <= pair[1] <= MAX_INT else 0,
-    )
+    return (pair[0] if _ok_int(pair[0]) else 0, pair[1] if _ok_int(pair[1]) else 0)
 
 
 def clean_state(state: State) -> tuple[State, tuple[str, ...]]:
@@ -469,7 +474,7 @@ def clean_state(state: State) -> tuple[State, tuple[str, ...]]:
         else:
             calls[c.call_id] = _clean(c, c.call_id, _CALL_FIELDS, alarms)
     band = state.battery_band
-    if not 0 <= band <= 4:
+    if not (isinstance(band, int) and 0 <= band <= 4):
         alarms.append("bad_value:state:battery_band")
         band = 4
     cleaned = replace(

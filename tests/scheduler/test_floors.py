@@ -269,17 +269,18 @@ def test_the_simulated_floor_bound_holds_in_a_crunch(
     plain = run(wl, "class", params_for_arm("class", **over))
     assert next(t for t in plain.tasks if t.task_id == "p3").first_admit_us is None
 
-    admits: list[tuple[int, int, int]] = []  # (submit, admit, χ̂_3) of P3 calls
+    # Every P3 call: (submit, admit or the horizon, χ̂_3 of the last decision).
+    p3_calls: dict[str, tuple[int, int, int]] = {}
     real = engine.dispatch
 
     def spy(st: State, now: Any, p: Any, **kw: Any) -> Any:
         d = real(st, now, p, **kw)
-        by_id = {c.call_id: c for c in st.calls}
-        for cid in d.decision.admit:
-            if by_id[cid].task_id == "p3":
-                admits.append(
-                    (by_id[cid].submit_mono_us, now.mono_us, d.decision.chi_hat_us[1])
-                )
+        chi = d.decision.chi_hat_us[1]
+        for c in st.calls:
+            pending = c.admitted_mono_us is None and c.call_id not in d.decision.admit
+            if c.task_id == "p3" and c.admitted_mono_us is None:
+                end = wl.horizon_us if pending else now.mono_us
+                p3_calls[c.call_id] = (c.submit_mono_us, end, chi)
         return d
 
     monkeypatch.setattr(engine, "dispatch", spy)
@@ -292,7 +293,8 @@ def test_the_simulated_floor_bound_holds_in_a_crunch(
         for c in t.calls
     )
     wall = us(longest * 3 / theta3)  # the longest P2 call at K = 3, cold
-    assert len(admits) >= 2
-    for submit, admit, chi in admits:
+    admitted = [x for x in p3_calls.values() if x[1] < wl.horizon_us]
+    assert len(admitted) >= 2 and len(p3_calls) == len(admitted) + 1
+    for submit, admit, chi in p3_calls.values():  # a call still waiting included
         bound = us(p.w_floor_s) + us(chi / 1e6 / (p.phi3 * theta3)) + 2 * wall
         assert admit - submit <= bound + us(p.tick_s)

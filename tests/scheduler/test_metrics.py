@@ -66,11 +66,12 @@ def result(tasks: Any = (), replies: Any = (), **kw: Any) -> SimResult:
         "params_json": params_json(params_for_arm("las2")),
     }
     values.update(kw)
+    horizon = values.pop("horizon", HORIZON)
     return SimResult(
         "test",
         1,
         "las2",
-        HORIZON,
+        horizon,
         WALL_START_US,
         tuple(tasks),
         tuple(replies),
@@ -114,6 +115,8 @@ def test_empty_and_zero_cases_give_none_or_floored_values() -> None:
     assert (m.wct_s, m.slowdown_mean, m.starvation_max) == (None, None, None)
     assert (m.cache_hit_share, m.reprefill_per_finished, m.by_code_share) == (None,) * 3
     assert m.reply_whole_s == (None, None, None) and m.deadline_miss_rate is None
+    empty = compute_metrics(result(horizon=0))  # no hours: rates are 0, not a crash
+    assert empty.throughput_per_h == (0.0,) * 5 and empty.parks_per_h == 0.0
     tiny = compute_metrics(
         result(
             [

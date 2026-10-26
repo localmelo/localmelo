@@ -47,7 +47,8 @@ of mechanisms to the one before it, so comparing neighbours isolates it.
 
 Every arm keeps the lane's fast path, the reserve, the background cap, the
 machine gates and the park marks. Mode `off` still books charges and levels,
-so its metrics compare with the gated modes.
+so its metrics compare with the gated modes; with no gate, nothing answers
+the lane by code.
 
 ## Run one simulation
 

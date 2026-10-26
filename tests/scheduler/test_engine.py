@@ -85,13 +85,24 @@ def test_off_mode_sends_every_call_straight_to_the_server_queue(
     assert all(t.service_s == pytest.approx(30.0) for t in r.tasks)  # 3 × 10 s
     assert all(t.wait_own_s == t.wait_total_s for t in r.tasks)
     assert sum(t.wait_total_s for t in r.tasks) > 0  # 4 tasks on 2 slots queue
+    # A call still in the server's queue at the horizon has waited too.
+    long = flat_template("1000s", 1, 66000)
+    stuck = workload([wtask("x", 0.0, 2, long), wtask("y", 1.0, 2, long)], 600.0)
+    y = run(stuck, "off", server=ServerParams(n_srv=1)).tasks[1]
+    assert (y.first_admit_us, y.wait_total_s, y.wait_own_s) == (None, 599.0, 599.0)
 
 
 def test_the_lane_deadline_answers_by_code_after_45_s() -> None:
     msgs = ((us(10.0), "answer"), (us(100.0), "create"))
-    wl = workload((), 300.0, front_messages=msgs)
+    # A 1000 s task call takes the one slot that a foreign client leaves.
+    wl = workload(
+        [wtask("x", 0.0, 2, flat_template("1000s", 1, 66000))],
+        300.0,
+        front_messages=msgs,
+    )
+    busy = ServerParams(n_srv=2, foreign_calls=1)
     for r in (
-        run(wl, "las2", server=ServerParams(foreign_calls=8)),  # stuck in flight
+        run(wl, "las2", server=busy),  # stuck in the server's queue
         run(  # held by the gate under respect, then withdrawn
             replace(wl, machine_events=((0, Machine(lock="foreign")),)),
             "las2",
@@ -104,6 +115,11 @@ def test_the_lane_deadline_answers_by_code_after_45_s() -> None:
         ]
     free = run(wl, "las2")
     assert [x.by_code for x in free.replies] == [False, False]
+    # Mode off has no gate, so nothing answers by code: the reply waits.
+    off = run(wl, "off", server=busy)
+    assert [(x.by_code, x.end_us) for x in off.replies] == [(False, None)] * 2
+    with pytest.raises(ValueError, match="foreign_calls"):
+        run(wl, "las2", server=ServerParams(foreign_calls=8))
     create = free.replies[1]
     assert create.first_event_us is not None and create.end_us is not None
     assert create.send_us < create.first_event_us < create.end_us < us(100.0 + 45.0)
@@ -166,27 +182,29 @@ def test_events_at_one_instant_run_completions_then_submissions_then_ticks(
         return real(st, now, events, p)
 
     monkeypatch.setattr(engine, "advance", spy)
-    # "a" ends at exactly 15 s, when "b" arrives and a tick is due; "c" and
-    # "d" start together and end at one instant; the horizon is c's second end.
+    # "a" ends at exactly 15 s, when "b" arrives and a tick is due. "z"
+    # starts at 40 s with 15 s of work, "c" at 45 s with 10 s: both have 10 s
+    # left at 45 s, so they end at one instant, z first although "c/0" sorts
+    # before "z/0". The horizon is z's second end.
     fifteen = flat_template("15s", 1, 990)
-    t_cd = us(40.0) + math.ceil(10.0 * 2 / 2**0.4 * 1e6)
+    t_zc = us(45.0) + math.ceil(10.0 * 2 / 2**0.4 * 1e6)
     wl = workload(
         [
             wtask("a", 0.0, 2, fifteen),
             wtask("b", 15.0, 2, fifteen),
-            wtask("c", 40.0, 2, flat_template("pair", 2, 660)),
-            wtask("d", 40.0, 2, flat_template("one", 1, 660)),
+            wtask("z", 40.0, 2, flat_template("pair", 2, 990)),
+            wtask("c", 45.0, 2, flat_template("one", 1, 660)),
         ]
     )
-    r = run(replace(wl, horizon_us=t_cd + us(10.0)), "fifo")
+    r = run(replace(wl, horizon_us=t_zc + us(15.0)), "fifo")
     kinds = [type(e).__name__ for t, evs in steps if t == us(15.0) for e in evs]
     assert kinds.index("CallEnded") < kinds.index("CallSubmitted") < kinds.index("Tick")
-    at_cd = [evs for t, evs in steps if t == t_cd]
-    ended = [e.call_id for e in at_cd[0] if isinstance(e, CallEnded)]
-    assert ended == ["c/0", "d/0"]  # equal ends pop start-first, in one step
-    assert [type(e) for e in at_cd[1]] == [CallSubmitted]  # a further step, dt = 0
-    assert max(t for t, _ in steps) < t_cd + us(10.0)  # the horizon is exclusive
-    assert next(x for x in r.tasks if x.task_id == "c").finish_us is None
+    at_zc = [evs for t, evs in steps if t == t_zc]
+    ended = [e.call_id for e in at_zc[0] if isinstance(e, CallEnded)]
+    assert ended == ["z/0", "c/0"]  # equal ends pop start-first, in one step
+    assert [type(e) for e in at_zc[1]] == [CallSubmitted]  # a further step, dt = 0
+    assert max(t for t, _ in steps) < t_zc + us(15.0)  # the horizon is exclusive
+    assert next(x for x in r.tasks if x.task_id == "z").finish_us is None
 
     # A stale completion is discarded: "e" slows down when "f" starts.
     steps.clear()
@@ -194,3 +212,12 @@ def test_events_at_one_instant_run_completions_then_submissions_then_ticks(
     run(workload([wtask("e", 0.0, 2, ten), wtask("f", 5.0, 2, ten)], 60.0), "fifo")
     end_e = [t for t, evs in steps for e in evs if isinstance(e, CallEnded)][0]
     assert end_e == us(5.0) + math.ceil(5.0 * 2 / 2**0.4 * 1e6)
+
+    # A tick shorter than 1 µs still advances the clock (1 µs a tick).
+    steps.clear()
+    tiny = run(
+        workload([wtask("t", 0.0, 2, ten)], 0.001),
+        "fifo",
+        params_for_arm("fifo", tick_s=4e-7),
+    )
+    assert tiny.decisions == len(steps) == 1000

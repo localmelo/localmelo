@@ -2,14 +2,18 @@
 
 ``random_state(rng)`` draws a state that is valid by type but odd by
 value: zeros, NULLs, NaN and inf, oversized integers, out-of-range
-levels, dangling ids, self-loops and cycles, orphan calls. No
-hypothesis: the tests loop over fixed seeds of ``random.Random``.
+levels, dangling ids, self-loops and cycles, orphan calls. Its machine
+and own-state draws close almost every call, so ``plain_state(rng)``
+keeps its levels, edges and parameters on an open machine with
+schedulable tasks, where ``decide()`` admits calls. No hypothesis: the
+tests loop over fixed seeds of ``random.Random``.
 """
 
 from __future__ import annotations
 
 import math
 import random
+from dataclasses import replace
 from typing import Any
 
 from localmelo.support.scheduler import Call, Clock, Dep, Machine, Params, State, Task
@@ -231,3 +235,44 @@ def random_state(rng: random.Random) -> tuple[State, Params]:
         recent_admits=tuple(rng.choice(ids) for _ in range(rng.randint(0, 16)) if ids),
     )
     return st, _params(rng)
+
+
+def plain_state(rng: random.Random) -> tuple[State, Params]:
+    """A random state on an open machine whose tasks can be scheduled.
+
+    Levels, edges, counters and parameters come from ``random_state()``;
+    each task gets a started or startable phase and at most one call,
+    pending or in flight, plus at most one lane call.
+    """
+    st, p = random_state(rng)
+    tasks = tuple(
+        replace(
+            t,
+            phase=rng.choice(("queued", "running", "held", "parked")),
+            paused=False,
+            wait_reason="",
+            budget_exhausted=False,
+        )
+        for t in st.tasks
+    )
+    calls: list[Call] = []
+    for i, t in enumerate(tasks):
+        r = rng.random()
+        if r < 0.6:
+            submit = rng.randint(0, st.clock.mono_us)
+            calls.append(Call(f"p{i:02d}", t.task_id, submit_mono_us=submit))
+        elif r < 0.85:
+            calls.append(
+                Call(
+                    f"p{i:02d}",
+                    t.task_id,
+                    admitted_mono_us=0,
+                    level_at_admit=rng.choice((1, 2, 3)),
+                    floor_class=rng.choice((None, 2, 3)),
+                )
+            )
+    if rng.random() < 0.5:
+        calls.append(Call("lane", None, session_kind="front"))
+    machine = Machine(away_since_mono_us=rng.choice((None, 0)))
+    st = replace(st, tasks=tasks, calls=tuple(calls), machine=machine, battery_band=4)
+    return st, p
