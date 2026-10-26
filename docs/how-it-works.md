@@ -111,7 +111,9 @@ Three limits apply at different levels:
 The code has two parts. `melo/` holds the agent itself: the run loop, the
 checks, the tool executor, memory, and the interfaces that model providers
 implement. `support/` connects it to the outside: backends and model
-providers, the gateway, MCP servers, configuration and the setup wizard. See
+providers, the gateway and its web workspace, MCP servers, configuration and
+the setup wizard. It also holds the `melo-retrieve` command, which compares
+memory retrievers offline, and the scheduler (runs do not use it yet). See
 the [architecture page](https://localmelo.github.io/localmelo/en/architecture.html)
 and the
 [project layout](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md#project-layout).

@@ -33,8 +33,8 @@ change before v0.1.0 (milestone due 2026-12-20).
 - **Remembers.** Working memory during a run, a history of tasks and steps,
   and long-term memory when an embedding server is configured. History and
   long-term memory are saved to SQLite when you turn persistence on.
-- **Serves the same agent over HTTP** with sessions, plus a small web page
-  for trying it out (the gateway).
+- **Serves the same agent over HTTP** with sessions (the gateway), plus a web
+  workspace for running the agent in a browser, on a model server you choose.
 
 localmelo does not download, start or serve models: you run the model server
 yourself.
@@ -128,8 +128,9 @@ detail.
 
 ## Interactive workspace
 
-Run `melo ""` (an empty task) to start an interactive terminal conversation
-using your configured backend. Use `/help` for commands and `/exit` to leave.
+Run `melo ""` (an empty task) to open a conversation loop in the terminal
+with your configured backend. Type `/help` to list the commands and `/exit`
+to leave.
 To connect directly to oMLX or another OpenAI-compatible server:
 
 ```bash
@@ -140,12 +141,13 @@ Without the `""`, `melo` starts the gateway; see the
 [command-line reference](docs/cli.md#modes).
 
 Run `melo --serve` and open `http://127.0.0.1:8401/` for the web workspace.
-Discover your server's models, select one, and create a chat. Embeddings and
-seed memories are optional. Chats support search, separate drafts, code
-formatting, cancellation, and responsive navigation with Melo's existing artwork.
-Browser clients on one gateway synchronize their chat state; page reloads
-recover chats while that gateway process remains alive. Direct CLI conversations
-remain separate from web chats.
+Enter your server's URL, pick one of its models, and create a chat; an
+embedding model and seed memories are optional. You can keep several chats
+with their own drafts, search them, read answers rendered as Markdown with
+code, tables and links, and stop a run; the page also fits narrow screens.
+Other browser tabs on the same gateway see the same chats, and reloading the
+page brings them back while the gateway runs. The terminal loop's
+conversation is separate from the web chats.
 
 To try the web workspace without configuring the main gateway:
 
@@ -154,7 +156,7 @@ uv run python -m localmelo.support.gateway._test_webapp
 ```
 
 Chats last only as long as the gateway process, and the workspace is for your
-own computer only; see [Web UI](docs/gateway.md#web-ui-playground).
+own computer only; see [Web workspace](docs/gateway.md#web-workspace).
 
 ## Documentation
 
@@ -165,7 +167,7 @@ own computer only; see [Web UI](docs/gateway.md#web-ui-playground).
 | [Run results](docs/run-results.md) | How a run can end, the run record, retries |
 | [Configuration](docs/configuration.md) | Setup wizard, config file, backends, timeouts, environment variables |
 | [Tools and MCP](docs/tools.md) | Built-in tools, MCP servers, which tools a step offers, the checks |
-| [Gateway and HTTP API](docs/gateway.md) | HTTP API, sessions, web UI, running at login on macOS |
+| [Gateway and HTTP API](docs/gateway.md) | HTTP API, sessions, web workspace, running at login on macOS |
 | [Memory](docs/memory.md) | What localmelo remembers, keeping, inspecting and resetting it |
 | [Offline retrieval](docs/retrieval.md) | `melo-retrieve`: compare memory retrievers offline, export a run as a corpus |
 | [Python API](docs/python-api.md) | `Agent`, `AgentOptions` and `RunResult` (experimental) |
@@ -205,7 +207,8 @@ Planned:
 > Tools run with your account's permissions, and there is no sandbox: the
 > model can run shell commands and Python code, and read or write any file
 > you can. The gateway has no authentication, so keep it on `127.0.0.1` (the
-> default). See [SECURITY.md](SECURITY.md) and
+> default): there it refuses requests to its API that web pages at other
+> sites send through your browser. See [SECURITY.md](SECURITY.md) and
 > [What the checks do](docs/tools.md#what-the-checks-do).
 
 In the [Python API](docs/python-api.md), two options narrow what tools can

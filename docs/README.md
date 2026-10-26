@@ -16,8 +16,8 @@ tools and memory on your own model server or a cloud API. The website is at
   or uninstall localmelo.
 - [Tools and MCP](tools.md): the built-in tools, MCP servers, which tools a
   step offers, and what the checks do.
-- [Gateway and HTTP API](gateway.md): the HTTP API, sessions, the web UI, and
-  running the gateway at login on macOS.
+- [Gateway and HTTP API](gateway.md): the HTTP API, sessions, the web
+  workspace, and running the gateway at login on macOS.
 - [Memory](memory.md): what localmelo remembers, and how to keep, inspect and
   reset it.
 - [Troubleshooting](troubleshooting.md): error messages and how to fix them.

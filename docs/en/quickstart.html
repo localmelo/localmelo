@@ -219,8 +219,8 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 {"result":"42","session_id":"a7e8f646ca2e"}</code></pre>
         <p>
           The health check does not contact the model server; a task does.
-          Open <code>http://127.0.0.1:8401/</code> in a browser for the web UI
-          (playground).
+          Open <code>http://127.0.0.1:8401/</code> in a browser for the web
+          workspace (see <a href="#interactive-conversations">Interactive conversations</a>).
         </p>
         <p>
           Press Ctrl+C in the first terminal to stop the gateway. Tasks now use
@@ -244,9 +244,14 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""</code></p
         <p>
           The web workspace at <code>http://127.0.0.1:8401/</code> supports
           model discovery, separate chat drafts, code formatting, cancellation,
-          and responsive navigation. Connected browser clients synchronize
-          conversation state, and reloads recover live chats. Sessions do not
-          survive gateway restarts, and direct CLI chats are independent.
+          and responsive navigation. It does not read the configuration file:
+          enter your server's URL as the Chat API URL, such as
+          <code>http://127.0.0.1:11434/v1</code> for Ollama, then select
+          Discover models and pick a chat model. Other browser tabs on the
+          same gateway see the same chats, and reloading the page brings them
+          back. Chats last only while the gateway runs, and the
+          <code>melo ""</code> loop's conversation is separate from the web
+          chats.
         </p>
       </section>
 
@@ -255,7 +260,8 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""</code></p
         <ul>
           <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md">Configuration</a>: backends, cloud API keys, timeouts.</li>
           <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">Tools and MCP</a>: choose built-in tools and add MCP servers.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md">Gateway and HTTP API</a>: sessions, the web UI, running at login.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md">Gateway and HTTP API</a>: sessions, the web workspace, running at login.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md">Python API</a>: run tasks from Python, follow their events, approve tool calls.</li>
           <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">Memory</a>: keep memory between runs, inspect and reset it.</li>
           <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">Command-line reference</a>: every option, exit codes, scripting.</li>
           <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/troubleshooting.md">Troubleshooting</a>: error messages and fixes.</li>

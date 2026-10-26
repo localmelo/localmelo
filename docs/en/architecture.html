@@ -73,11 +73,11 @@
 
             <a class="node" id="n-cli" href="#c-cli" style="left:10px;top:40px;width:140px">
               <span class="node-title">Command line</span>
-              <span class="node-sub">melo · direct mode</span>
+              <span class="node-sub">melo · direct mode<br>conversation loop</span>
             </a>
             <a class="node" id="n-gateway" href="#c-gateway" style="left:10px;top:170px;width:140px">
               <span class="node-title">Gateway</span>
-              <span class="node-sub">HTTP API · sessions · web UI</span>
+              <span class="node-sub">HTTP API · sessions · web workspace</span>
             </a>
             <a class="node" id="n-mcp" href="#c-mcp" style="left:10px;top:300px;width:140px">
               <span class="node-title">MCP servers</span>
@@ -86,7 +86,7 @@
 
             <a class="node" id="n-agent" href="#c-agent" style="left:230px;top:40px;width:310px">
               <span class="node-title">Agent</span>
-              <span class="node-sub">run loop · reflection · run options</span>
+              <span class="node-sub">run loop · reflection · run options · events</span>
             </a>
             <a class="checker-zone" id="n-checker" href="#c-checker" style="left:200px;top:170px;width:370px;height:230px">
               <span class="cz-label">Checker</span>
@@ -141,11 +141,14 @@
           it builds one agent, runs the task, prints the result as text or as
           one JSON line, and exits with a code that tells how the run ended.
           An empty task (<code>melo ""</code>) opens a conversation loop in
-          the terminal instead.
+          the terminal instead, where each turn sees the earlier answers.
           Without a task, or with <code>--serve</code>, it starts the gateway;
           <code>--daemon</code> manages the macOS background service. With
           <code>--base-url</code>, the agent talks to that server and the
-          config file is not read.
+          config file is not read; without it, the configured backends are
+          used. <code>--chat-model</code> and <code>--request-timeout</code>
+          set the chat model and the chat request timeout in both cases, and
+          never change the config file.
         </p>
         <p>Key files: <code>__main__.py</code>.</p>
 
@@ -154,17 +157,40 @@
           The HTTP server that <code>melo --serve</code> starts. It serves the
           HTTP API (<code>/v1/health</code>, <code>/v1/agent/run</code>,
           <code>/v1/sessions</code>) and keeps up to 50 sessions, each with its
-          own agent built from the config file. It checks each request, the
-          task's length and the session id, before a run. At <code>/</code> it
-          serves the web UI (playground), which keeps sessions of its own. The
-          gateway has no authentication and listens on
-          <code>127.0.0.1:8401</code> by default.
+          own agent built from the config file. A session's agent keeps its
+          answers, so each request sees the earlier ones. It checks each
+          request, the task's length and the session id, before a run.
+        </p>
+        <p>
+          At <code>/</code> it serves the web workspace, which does not read
+          the config file: it lists the models of a server whose URL you
+          enter, and keeps up to 12 chats of its own, with search, a draft for
+          each chat, and Stop, which ends the run as <code>cancelled</code>.
+          Each chat has its own agent, with the four built-in tools and its
+          own working memory. All chats save to one history and, with an
+          embedding model, one long-term memory, in
+          <code>~/.cache/localmelo/playground/</code>. Chats last while the
+          gateway runs, but creating a chat closes those idle for 2 hours
+          and, at 12 chats, replaces the oldest idle one.
+        </p>
+        <p>
+          The gateway has no authentication. When it listens on
+          <code>localhost</code> or a loopback address, such as the default
+          <code>127.0.0.1:8401</code>, it refuses requests whose
+          <code>Host</code> is not <code>127.0.0.1</code>,
+          <code>localhost</code> or <code>[::1]</code> with its port (HTTP
+          421), and requests to its API that web pages at another origin send
+          through your browser (HTTP 403). No web page can show it in a
+          frame. On any other host, such as <code>0.0.0.0</code>, it makes
+          none of these checks and logs a warning when it starts.
         </p>
         <p>
           Key files: <code>support/gateway/__init__.py</code>,
-          <code>session.py</code>, <code>webapp.py</code>,
-          <code>playground.py</code>, and <code>daemon.py</code> for the macOS
-          background service.
+          <code>session.py</code>, <code>guard.py</code> (the
+          <code>Host</code> and <code>Origin</code> checks),
+          <code>webapp.py</code> and <code>playground.py</code> (the web
+          workspace's routes and chats), <code>static/</code> (its page), and
+          <code>daemon.py</code> for the macOS background service.
         </p>
 
         <h3 id="c-mcp">MCP servers</h3>
@@ -175,7 +201,10 @@
           lists its tools and registers them, as
           <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>, with the tool registry
           and the executor. MCP tools work in direct mode and the Python API,
-          not in gateway sessions.
+          not in gateway sessions. A server's <code>require_approval</code>
+          makes calls of its tools, or of the tools it names, ask the run's
+          approval policy first; a run without a policy, such as a direct run,
+          runs them without asking.
         </p>
         <p>
           Key files: <code>support/mcp/config.py</code>, <code>client.py</code>,
@@ -193,15 +222,33 @@
           <code>reflect</code> policy, steps come in attempts of up to 10; after
           an attempt that ends without an answer, a reflection decides whether
           another attempt starts. Every run ends with one of nine statuses, or
-          as <code>cancelled</code> when an interactive run in the Python API is
+          as <code>cancelled</code> when an interactive run (below) is
           stopped, and returns a <code>RunResult</code>. A failed model request
           is retried up to twice when a retry may succeed.
+        </p>
+        <p>
+          Python code that calls <code>run_task</code> can follow and steer a
+          run. With <code>on_event</code>, it receives each step, model reply,
+          tool call, notice and reflection as an event, with secrets in the
+          model's text redacted. With <code>approval</code>, a policy decides
+          whether each call of a tool that requires approval may run. A run
+          with either one is interactive: cancelling it ends it as
+          <code>cancelled</code> and closes the interrupted step. With
+          <code>AgentOptions(record_answers=True)</code>, working memory keeps
+          each run's answer, and <code>conversation()</code> and
+          <code>load_conversation()</code> carry a conversation to another
+          agent. Direct mode and the HTTP API pass no event sink and no
+          policy. The web workspace passes an event sink, so its Stop ends a
+          run as <code>cancelled</code>.
         </p>
         <p>
           Key files: <code>melo/agent/agent.py</code>,
           <code>melo/agent/options.py</code> (<code>AgentOptions</code>),
           <code>melo/agent/_chat.py</code> (planning and reflection requests,
-          retries), <code>melo/schema.py</code> (<code>RunResult</code> and the
+          retries), <code>melo/agent/_events.py</code> and
+          <code>melo/contracts/events.py</code> (events),
+          <code>melo/contracts/approvals.py</code> (approval policies),
+          <code>melo/schema.py</code> (<code>RunResult</code> and the
           limits).
         </p>
 
@@ -213,6 +260,7 @@
           <li>before a tool runs: <code>shell_exec</code> refuses six destructive command patterns;</li>
           <li>after a tool runs: output longer than 50,000 characters is cut;</li>
           <li>before a memory write: its size is limited;</li>
+          <li>before an event reaches Python code: API keys of well-known shapes, bearer tokens and one-time codes in a model reply's text are replaced with <code>[redacted]</code>;</li>
           <li>in the gateway: each request's task and session id.</li>
         </ul>
         <p>
@@ -222,7 +270,8 @@
         </p>
         <p>
           Key files: <code>melo/checker/checker.py</code>,
-          <code>validators.py</code>, <code>payloads.py</code>.
+          <code>validators.py</code>, <code>payloads.py</code>,
+          <code>redaction.py</code>.
         </p>
 
         <h3 id="c-executor">Executor</h3>
@@ -270,6 +319,20 @@
           to <code>history.db</code> and <code>long_term.db</code> when
           persistence is on. The tool registry holds every registered tool,
           with the BM25 index that retrieve mode searches.
+        </p>
+        <p>
+          <code>melo/memory/retrieval/</code> holds three switchable
+          retrievers, <code>bm25</code>, <code>llm</code> and
+          <code>embedding</code>. They search documents built from a run's
+          model calls: the notes on the model's reasoning, code drafts and
+          chunks of its thinking that <code>melo/memory/notes.py</code> builds
+          from a model reply, and reflections. Runs do not use them yet: the
+          <code>melo-retrieve</code> command (<code>support/retrieve.py</code>)
+          compares them offline on labelled queries, and turns model calls
+          recorded as raw-call JSONL into a corpus. The
+          <code>history.db</code> that <code>melo</code> writes does not record
+          model calls yet. See
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">Offline retrieval</a>.
         </p>
         <p>
           Key files: <code>melo/memory/coordinator.py</code>,
@@ -329,7 +392,10 @@
         <p>
           <code>melo/sleep/</code>, <code>melo/memory/personalized/</code> and
           <code>support/melo_serving/</code> hold code that the agent does not
-          use yet.
+          use yet. <code>melo/memory/retrieval/</code> and
+          <code>melo/memory/notes.py</code> serve only
+          <code>melo-retrieve</code>, and <code>support/scheduler/</code>, the
+          scheduling policy core and its simulator, only its tests.
         </p>
       </section>
 
@@ -370,10 +436,14 @@
         <h2>What exists today</h2>
         <ul>
           <li>Direct mode with run options, nine run statuses, text or JSON output, and fixed exit codes.</li>
+          <li>A conversation loop in the terminal (<code>melo ""</code>).</li>
           <li>Four built-in tools, and tools from local MCP servers in direct mode and the Python API.</li>
-          <li>The gateway: the HTTP API, sessions, the web UI and a macOS background service.</li>
+          <li>The Python API (experimental): run events, stopping a run, approval policies for tool calls, a workspace root for the file tools, and conversations that carry over between runs.</li>
+          <li>The gateway: the HTTP API, sessions, the web workspace, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
           <li>Backends for Ollama, MLC LLM, vLLM, SGLang and four cloud APIs.</li>
           <li>Working memory, history and long-term memory, saved to SQLite when persistence is on.</li>
+          <li><code>melo-retrieve</code>, which compares the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers offline. Runs do not use the retrievers yet.</li>
+          <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>). Runs and the gateway do not use it yet.</li>
         </ul>
         <p>What comes next is on the <a href="./updates.html#roadmap">roadmap</a>.</p>
       </section>

@@ -22,13 +22,13 @@ page.
 
 | Memory | What it holds | Where |
 |---|---|---|
-| Working memory | The conversation of a run, or of a gateway session: the last 20 messages. | RAM only. |
+| Working memory | The conversation of a run, of the `melo ""` loop, of a gateway session or of a web workspace chat: the last 20 messages. | RAM only. |
 | History | Every task with its status and result, and every step with its tool call and result. | RAM, or `history.db`. |
 | Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an embedding backend. | RAM, or `long_term.db`. |
 
 By default everything stays in RAM and is lost when the process ends. In RAM,
-long-term memory lasts as long as its agent: one direct run, or one gateway
-session.
+long-term memory lasts as long as its agent: one direct run, one `melo ""`
+loop, or one gateway session.
 
 ## Keep memory between runs
 
@@ -73,8 +73,8 @@ run.
 - SQLite may also create `history.db-wal` and `history.db-shm` (and the same
   for `long_term.db`). They belong to the database; leave them in place.
 - The directory is created when an agent starts: at the start of a direct
-  run, or when a gateway session is created.
-- The gateway's web UI keeps its own files in
+  run or of the `melo ""` loop, or when a gateway session is created.
+- The gateway's web workspace keeps its own files in
   `~/.cache/localmelo/playground/`.
 
 ## Inspect memory
@@ -113,17 +113,19 @@ Every run saves one row in the `tasks` table of history:
 |---|---|
 | `task_id` | The run's `task_id`: 32 hex characters. |
 | `query` | The task as given. |
-| `status` | `running` during the run, then how it ended; see [Run results](run-results.md#statuses). `cancelled` appears only for interactive runs in the Python API. |
+| `status` | `running` during the run, then how it ended; see [Run results](run-results.md#statuses). `cancelled` appears only for interactive runs: in the Python API, and in the web workspace's history. |
 | `result` | The run's result, or its error when the result is empty. |
 
 - The row is saved again when the run ends, whatever ended it. A direct run
   ended by SIGTERM or SIGHUP is saved as `crashed`, with the result
   `Cancelled by SIGTERM` or `Cancelled by SIGHUP`.
-- An interactive run, one started in the Python API with `on_event` or
-  `approval`, that is cancelled is saved as `cancelled`, with the reason as
-  its result. Its interrupted step gets one row per tool call in `steps`
-  (see [Stop a run](python-api.md#stop-a-run)). Other cancelled runs are
-  saved as `crashed`.
+- An interactive run that is cancelled is saved as `cancelled`, with the
+  reason as its result: a run started in the Python API with `on_event` or
+  `approval`, or a web workspace chat stopped with Stop or by its 600-second
+  limit (its history is in `~/.cache/localmelo/playground/`). Its
+  interrupted step gets one row per tool call in `steps` (see
+  [Stop a run](python-api.md#stop-a-run)). Other cancelled runs are saved as
+  `crashed`.
 - A row that still reads `running` belongs to a run in progress, or to a
   process that was killed (for example with SIGKILL) before it could save
   the row.
@@ -154,7 +156,7 @@ localmelo has no reset command. To delete memory:
    # Only history
    rm ~/.cache/localmelo/memory/history.db*
 
-   # The web UI's memory
+   # The web workspace's memory
    rm -rf ~/.cache/localmelo/playground
    ```
 
@@ -177,7 +179,8 @@ that directory instead.
   SHA-256 digest and the size, never the image itself.
 - The files are as private as your home directory. To remove them, see
   [Reset memory](#reset-memory).
-- The gateway's web UI always saves its sessions, in
+- The gateway's web workspace always saves the history of its chats, and
+  their long-term memory when an embedding model is selected, in
   `~/.cache/localmelo/playground/`.
 
 ## How memory works
@@ -211,3 +214,9 @@ not read it back during a run.
 **Reflections** are kept in working memory, one at a time: each new
 reflection replaces the last one. See
 [How localmelo works](how-it-works.md#reflection).
+
+**Memory notes and retrievers** are not used during a run yet.
+`melo-retrieve` compares the `bm25`, `llm` and `embedding` retrievers
+offline, over documents built from a run's model calls: notes on the
+model's reasoning, code drafts, reflections and chunks of its thinking. See
+[Offline retrieval](retrieval.md).

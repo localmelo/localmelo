@@ -17,7 +17,7 @@ retried.
 | `setup_error` | 2 | The tool providers, such as MCP servers, could not be set up. |
 | `timeout` | 2 | The run was still going when its time limit (`--timeout`) expired. |
 | `crashed` | 1 | An unexpected error, Ctrl+C, SIGTERM or SIGHUP ended the run. |
-| `cancelled` | none | An interactive run in the Python API was stopped. Direct mode never reports it. |
+| `cancelled` | none | An interactive run was stopped: a run in the Python API with `on_event` or `approval`, or a web workspace chat stopped with Stop or by its 600-second limit. Direct mode, the `melo ""` loop and `POST /v1/agent/run` never report it. |
 
 Details:
 
@@ -69,13 +69,16 @@ Details:
   traceback is logged. Ctrl+C ends a run as `crashed` with the error
   `CancelledError`, and SIGTERM or SIGHUP with `Cancelled by SIGTERM` or
   `Cancelled by SIGHUP`. See [Signals](cli.md#signals).
-- **`cancelled`.** Only for an interactive run, one started with `on_event`
-  or `approval` in the Python API, whose task was cancelled; see
-  [Stop a run](python-api.md#stop-a-run). `result` is empty, and `error` is
-  the reason: the reason given to `Agent.begin_exit` when the process is
-  exiting, else the message of `task.cancel(msg)`, else
-  `Cancelled by the caller`. A cancelled run without `on_event` or
-  `approval` ends as `crashed`, so direct mode and the gateway never report
+- **`cancelled`.** Only for an interactive run whose task was cancelled: one
+  started with `on_event` or `approval` in the Python API (see
+  [Stop a run](python-api.md#stop-a-run)), or a web workspace chat stopped
+  with Stop or by its 600-second limit. The gateway runs each web chat with
+  an event sink (see [Web workspace](gateway.md#web-workspace)). `result` is
+  empty, and `error` is the reason: the reason given to `Agent.begin_exit`
+  when the process is exiting, else the message of `task.cancel(msg)`, such
+  as `Timed out after 600 s` for a web chat, else `Cancelled by the caller`.
+  A cancelled run without `on_event` or `approval` ends as `crashed`, so
+  direct mode, the `melo ""` loop and `POST /v1/agent/run` never report
   `cancelled`.
 
 [How localmelo works](how-it-works.md) explains attempts, reflection and the

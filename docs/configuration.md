@@ -268,7 +268,7 @@ See [Keep memory between runs](memory.md#keep-memory-between-runs).
 | `~/.cache/localmelo/config.toml` | The configuration. | By the setup wizard. |
 | `~/.cache/localmelo/memory/` | `history.db`, and `long_term.db` with an embedding backend. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts. |
-| `~/.cache/localmelo/playground/` | The web UI's memory. | When the gateway starts. |
+| `~/.cache/localmelo/playground/` | The web workspace's memory. | When the gateway starts. |
 | `~/.localmelo/logs/` | The background service's logs. | By `melo --daemon install`. |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | The background service's definition. | By `melo --daemon install`. |
 

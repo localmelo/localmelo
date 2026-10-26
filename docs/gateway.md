@@ -1,8 +1,9 @@
 # Gateway and HTTP API
 
 The gateway serves the agent over HTTP: an API for your own programs, and a
-small web page for trying models by hand. This page shows how to start it,
-keep it private, call its API, and run it at login on macOS.
+web workspace for running the agent in your browser. This page shows how to
+start it, keep it private, call its API, use the web workspace, and run it at
+login on macOS.
 
 ## Start the gateway
 
@@ -32,8 +33,8 @@ melo --serve
 
 > [!WARNING]
 > The gateway has no authentication. Any program that can reach its port can
-> run tasks with your tools and your account's permissions, and the web UI
-> makes the gateway fetch any URL it is given. Keep the default host
+> run tasks with your tools and your account's permissions, and the web
+> workspace makes the gateway fetch any URL it is given. Keep the default host
 > `127.0.0.1`.
 
 On the default host, only programs on your computer can reach the gateway.
@@ -51,16 +52,16 @@ The body is the usual error with a `code`:
 {"error":"Host header must be 127.0.0.1:8401, localhost:8401 or [::1]:8401","code":"misdirected_request"}
 ```
 
-- Open the web UI as `http://127.0.0.1:8401/` or `http://localhost:8401/`,
-  with your port; with `host = "::1"`, use `http://localhost:8401/` or
-  `http://[::1]:8401/`. Other addresses that reach the gateway, such as
-  `http://0.0.0.0:8401/`, get 421.
+- Open the web workspace as `http://127.0.0.1:8401/` or
+  `http://localhost:8401/`, with your port; with `host = "::1"`, use
+  `http://localhost:8401/` or `http://[::1]:8401/`. Other addresses that
+  reach the gateway, such as `http://0.0.0.0:8401/`, get 421.
 - curl and scripts send no `Origin` header, so only the `Host` check applies
   to them.
 - Every response tells the browser not to show it in a frame, with
   `X-Frame-Options: DENY` and
   `Content-Security-Policy: frame-ancestors 'none'`, so a page on another
-  site cannot embed the web UI and trick you into clicking in it.
+  site cannot embed the web workspace and trick you into clicking in it.
 - The checks are on when the host is `localhost` or a loopback IP address:
   `127.0.0.1`, `::1` or another address in `127.0.0.0/8`. Requests must
   still name the gateway as `127.0.0.1`, `localhost` or `[::1]`, so use one
@@ -190,9 +191,9 @@ makes larger requests: leave out `session_id` for an unrelated task.
 - When `LOCALMELO_PERSIST_MEMORY` is set for the gateway, all sessions save
   to the same SQLite files; see [Memory](memory.md#keep-memory-between-runs).
 
-## Web UI (playground)
+## Web workspace
 
-Open `http://127.0.0.1:8401/` in a browser for the localmelo workspace:
+Open `http://127.0.0.1:8401/` in a browser for the web workspace:
 
 1. Enter the URL of a chat server, and optionally of an embedding server.
 2. Discover models, pick a chat model, and optionally select an embedding model
@@ -203,25 +204,30 @@ The sidebar supports chat search and switching. Drafts stay with each chat in
 the current browser tab. The workspace restores live chats after a page reload
 and polls for changes from other browser clients every 2.5 seconds while visible.
 
-Stop cancels the harness task and its current provider/tool request. Shell
-process groups are killed; already dispatched model computation can still finish
-inside a backend. In-process `python_exec` remains non-interruptible while Python
-code blocks the event loop. See [Tools and MCP](tools.md) for execution limits.
-The task is saved with the status `cancelled`, and the chat takes the next
-message once that save is done. A Stop that comes after the answer, while the
-task is being saved, leaves the answer in the chat. Each message sees the
-earlier answers of its chat, as in a [session](#sessions).
+Stop cancels the run. A model request in flight is abandoned, although the
+model server may finish computing it, and a running `shell_exec` command is
+killed with its process group. `python_exec` code runs inside the gateway
+process and cannot be interrupted: until it returns, Stop has no effect and
+the gateway answers no other request. See [Tools and MCP](tools.md) for the
+tools' limits. The task is saved with the status `cancelled`, and the chat
+takes the next message once that save is done. A Stop that comes after the
+answer, while the task is being saved, leaves the answer in the chat. Each
+message sees the earlier answers of its chat, as in a [session](#sessions).
 
-The web UI works apart from the HTTP API above:
+The web workspace works apart from the HTTP API above:
 
 - It does not use the config file. It talks to the URL you enter, so
   `extra_body` and `request_timeout_s` do not apply. Chat requests wait up to
   300 seconds, and a task is stopped after 600 seconds.
-- It keeps up to 12 sessions and closes those idle for 2 hours when creating a
+- Each chat's agent uses the default run options (all four built-in tools
+  and no MCP tools), except that it keeps its answers. A chat can therefore
+  run shell commands and Python code, and read and write files.
+- It keeps up to 12 chats and closes those idle for 2 hours when creating a
   chat. At capacity, an idle chat is replaced only after preparation succeeds;
   if all chats are busy, creation fails with HTTP 409.
-- All its sessions share one memory store in
-  `~/.cache/localmelo/playground/`, which is always on.
+- Each chat has its own working memory. All chats save to one history and,
+  when an embedding model is selected, one long-term memory, in
+  `~/.cache/localmelo/playground/`; this is always on.
 - Its routes under `/v1/playground/` are internal and may change.
 
 The workspace routes include `GET /v1/playground/sessions` for summaries,

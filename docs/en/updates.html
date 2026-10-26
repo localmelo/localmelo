@@ -148,7 +148,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/36">#36</a>
           </p>
           <ul>
-            <li>On its default host, the gateway refuses requests whose <code>Host</code> is not <code>127.0.0.1</code>, <code>localhost</code> or <code>[::1]</code> with its port (HTTP 421), and requests that web pages at another origin send through your browser (HTTP 403). A web page can no longer reach the gateway through DNS rebinding and run tasks with your tools.</li>
+            <li>On <code>localhost</code> or a loopback IP address, such as the default <code>127.0.0.1</code>, the gateway refuses requests whose <code>Host</code> is not <code>127.0.0.1</code>, <code>localhost</code> or <code>[::1]</code> with its port (HTTP 421), and requests that web pages at another origin send through your browser (HTTP 403). A web page can no longer reach the gateway through DNS rebinding and run tasks with your tools.</li>
             <li>No web page can show the gateway's pages in a frame.</li>
             <li>On any other host, such as <code>0.0.0.0</code>, the gateway makes no such checks and logs a warning when it starts: it has no authentication.</li>
           </ul>
