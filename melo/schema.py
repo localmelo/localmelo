@@ -47,6 +47,9 @@ EMPTY_REPLY_NUDGE = (
 CALL_INTERRUPTED = (
     "The run was stopped before this call finished; it may have partly run."
 )
+# The error that a cancelled interactive run gives each call of its last
+# step that had not started when the run stopped (see Agent.run_task).
+CALL_NOT_STARTED = "The run was stopped before this call started; it did not run."
 
 
 # ── Data types ──

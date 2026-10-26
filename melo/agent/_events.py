@@ -230,20 +230,23 @@ class _Emitter:
         call: ToolCall,
         exc: BaseException,
         *,
+        cancelled: bool,
         exit_codes: Sequence[int] | None,
     ) -> None:
         """*call* ended in *exc* instead of a result.
 
-        A ``CancelledError`` (a cancellation, or the run's ``timeout_s``)
-        gives the status ``cancelled``; any other exception, which ends the
-        run, ``crashed``. ``duration_s`` is the time since ``tool.started``.
+        *cancelled* says that *exc* is the run's cancellation (a caller's,
+        or the run's ``timeout_s``), which gives the status ``cancelled``.
+        Any other exception, which ends the run, gives ``crashed``, also a
+        ``CancelledError`` that something raised while nothing cancelled
+        the run. ``duration_s`` is the time since ``tool.started``.
         """
         if self._sink is None:
             return
         step = self._step
         duration_s = time.perf_counter() - self._tool_since
-        status = "cancelled" if isinstance(exc, asyncio.CancelledError) else "crashed"
-        error = CALL_INTERRUPTED if status == "cancelled" else _error_text(exc)
+        status = "cancelled" if cancelled else "crashed"
+        error = CALL_INTERRUPTED if cancelled else _error_text(exc)
         self._emit(
             "tool.finished",
             lambda: json_safe_payload(

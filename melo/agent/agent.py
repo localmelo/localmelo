@@ -8,9 +8,10 @@ import json
 import logging
 import math
 import os
+import sqlite3
 import time
-from collections.abc import Collection, Iterable, Iterator, Sequence
-from typing import TYPE_CHECKING, Any
+from collections.abc import Collection, Coroutine, Iterable, Iterator, Sequence
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 from localmelo.melo.agent._chat import (
     RETRY_HOOK,
@@ -45,6 +46,8 @@ from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.schema import (
+    CALL_INTERRUPTED,
+    CALL_NOT_STARTED,
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
     MAX_AGENT_STEPS,
@@ -562,6 +565,15 @@ PROMOTION_TIMEOUT_S = 10.0
 # tool providers leaves for saving the run's task record.
 EXIT_SAVE_RESERVE_S = 1.0
 
+# Seconds that writing the history rows and the task record of a cancelled
+# interactive run may take together (see Agent._finalize). Agent.close()
+# waits one second more for such a run to be finalized.
+FINALIZE_TIMEOUT_S = 10.0
+
+# The error of a cancelled interactive run whose cancellation gave no
+# reason (see Agent.run_task).
+CANCELLED_ERROR = "Cancelled by the caller"
+
 
 @dataclasses.dataclass(frozen=True)
 class _Exit:
@@ -594,6 +606,31 @@ def _resolve_memory_dir(options: AgentOptions) -> str | None:
 
 
 @dataclasses.dataclass
+class _InflightStep:
+    """The step whose tool calls are under way (see ``_RunState.inflight``).
+
+    It lets a cancellation that lands while the calls run, or while
+    :meth:`Agent._do_memorize` records them, close the step in working
+    memory and write the history rows it is missing (see
+    :meth:`Agent._on_cancelled` and :meth:`Agent._finalize`).
+    """
+
+    # The planning reply whose tool calls run.
+    response: Message
+    # The checked result of each call that returned, in call order ...
+    results: list[ToolResult] = dataclasses.field(default_factory=list)
+    # ... and, for each, the characters the executor-result check cut.
+    cut_before: list[int] = dataclasses.field(default_factory=list)
+    # The history records _do_memorize created, in call order, and how
+    # many of them store_step finished writing: all of them, or all but
+    # the last.
+    records: list[StepRecord] = dataclasses.field(default_factory=list)
+    stored: int = 0
+    # The result the closed step gives each call, once it is closed.
+    closed: list[ToolResult] = dataclasses.field(default_factory=list)
+
+
+@dataclasses.dataclass
 class _RunState:
     """Progress of one :meth:`Agent.run_task` call.
 
@@ -614,10 +651,24 @@ class _RunState:
     last_text: str = ""
     # Planning replies in a row with neither a tool call nor text.
     empty_replies: int = 0
+    # The run's task id ("" for a call without a task record).
+    task_id: str = ""
     # Reports the run's events to the caller's sink; silent without one.
     events: _Emitter = dataclasses.field(default_factory=_Emitter)
     # The approval policy the caller passed to run_task, or None.
     approval: ApprovalPolicy | None = None
+    # Whether working memory holds the run's query.
+    query_in_memory: bool = False
+    # The id of the call whose approval the policy is deciding, or "".
+    waiting_call_id: str = ""
+    # The step whose tool calls are under way, from right before its first
+    # call to right after _do_memorize has recorded them, else None.
+    inflight: _InflightStep | None = None
+    # The RunResult, once it is built.
+    outcome: RunResult | None = None
+    # The task that finalizes the run after an interactive cancellation
+    # (see Agent._finalize_in_task), once it is started.
+    finalizer: asyncio.Task[None] | None = None
 
     @property
     def running(self) -> bool:
@@ -638,6 +689,23 @@ def _exception_text(exc: BaseException) -> str:
     """``"<type>: <message>"``, or the type alone when the message is empty."""
     message = str(exc)
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
+def _is_cancellation(exc: BaseException) -> TypeGuard[asyncio.CancelledError]:
+    """Whether *exc* is a cancellation of the current task.
+
+    That is a ``CancelledError`` while something cancels the task: its
+    ``cancelling()`` count is above 0, as after ``task.cancel()``, a
+    scope such as ``asyncio.timeout`` that cancels it, or the run's own
+    ``timeout_s`` until the deadline turns the cancellation into a
+    ``TimeoutError``. A ``CancelledError`` that a component raises while
+    nothing cancels the task, for example a tool function's, is that
+    component's failure.
+    """
+    if not isinstance(exc, asyncio.CancelledError):
+        return False
+    task = asyncio.current_task()
+    return task is not None and task.cancelling() > 0
 
 
 def _check_approval(approval: object) -> None:
@@ -726,6 +794,13 @@ class Agent:
         # Provider start() and close() calls an exit stopped waiting for;
         # kept so they can finish in the background.
         self._abandoned: set[asyncio.Future[Any]] = set()
+        # The finalizers of cancelled interactive runs still under way, each
+        # with its run's task id (see _finalize_in_task); close() waits for
+        # them.
+        self._finalizers: dict[asyncio.Task[None], str] = {}
+        # Runs under way: run_task calls, each until it returns or raises,
+        # or after an interactive cancellation until its finalizer ends.
+        self._active_runs = 0
 
         # Optional persistent memory backends: options.memory_dir, or the
         # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History is
@@ -1096,8 +1171,10 @@ class Agent:
 
         With an event sink, *run* reports ``tool.started`` before the call
         is handed to the executor and one ``tool.finished`` after: with the
-        checked result, or, when an exception ends the call, with the status
-        ``cancelled`` or ``crashed`` before the exception propagates. The
+        checked result, or, when an exception ends the call, before the
+        exception propagates, with the status ``cancelled`` for a
+        cancellation of the run (see :func:`_is_cancellation`), its
+        ``timeout_s`` included, and ``crashed`` for any other exception. The
         call then runs with a new ``TOOL_EXIT_CODE`` list, so a tool can
         record its child's exit status for the event.
         """
@@ -1138,7 +1215,9 @@ class Agent:
             else:
                 result, cut = outcome.to_tool_result(), 0
         except BaseException as exc:
-            events.tool_stopped(call, exc, exit_codes=exit_codes)
+            events.tool_stopped(
+                call, exc, cancelled=_is_cancellation(exc), exit_codes=exit_codes
+            )
             raise
         finally:
             if slot is not None:
@@ -1146,14 +1225,12 @@ class Agent:
         events.tool_finished(call, outcome, result, exit_codes=exit_codes)
         return result, cut
 
-    async def _do_memorize(
-        self,
-        task_id: str,
-        response: Message,
-        results: Sequence[ToolResult],
-        cut_before: Sequence[int],
-    ) -> None:
+    async def _do_memorize(self, task_id: str, step: _InflightStep) -> None:
         """Stage 5: record the step and write checked results to memory.
+
+        *step* holds the planning reply and, for each of its calls, the
+        checked result and the characters the executor-result check cut
+        from it.
 
         - History gets one StepRecord per executed call (the assistant
           text is attached to the first), unconditionally.
@@ -1163,37 +1240,48 @@ class Agent:
           message with its tool calls, then one ``role="tool"`` message per
           call paired by ``tool_call_id``, appended as one unit. Checked
           writes may shorten it but never leave a call or result out (see
-          :meth:`_checked_tool_turn`, which gets *cut_before*: for each
-          result, the characters the executor-result check cut from it).
+          :meth:`_checked_tool_turn`, which gets ``step.cut_before``).
 
-        History and working memory get the same copies of *results*, whose
-        images are references without the base64 payload (see
+        History and working memory get the same copies of the results,
+        whose images are references without the base64 payload (see
         :func:`_image_references`), so no payload outlives the step.
+
+        Each record joins ``step.records`` before it is written, and
+        ``step.stored`` counts it once ``store_step`` has returned, so a
+        cancellation in between leaves what is missing from history known
+        (see :meth:`_save_interrupted_step`). Appending the turn is the last
+        statement and is synchronous: nothing comes between it and the
+        caller's clearing of ``run.inflight``.
         """
+        response = step.response
         calls = response.tool_calls
-        kept = [_image_references(result) for result in results]
+        kept = [_image_references(result) for result in step.results]
         for index, (call, result) in enumerate(zip(calls, kept, strict=True)):
-            step = StepRecord(
+            record = StepRecord(
                 thought=response.content if index == 0 else "",
                 tool_call=call,
                 tool_result=result,
             )
-            summary = await self.hippo.store_step(task_id, step)
+            step.records.append(record)
+            summary = await self.hippo.store_step(task_id, record)
+            step.stored += 1
 
             # Checked write: step summary -> long-term memory only
             mem_check = self.checker.check_memory_write(
                 MemoryWritePayload(
                     text=summary,
                     role="assistant",
-                    metadata={"step_id": step.step_id},
+                    metadata={"step_id": record.step_id},
                 )
             )
             if mem_check.allowed:
                 await self.hippo.memorize(
-                    summary, metadata={"step_id": step.step_id}, to_working=False
+                    summary, metadata={"step_id": record.step_id}, to_working=False
                 )
 
-        assistant_msg, tool_msgs = self._checked_tool_turn(response, kept, cut_before)
+        assistant_msg, tool_msgs = self._checked_tool_turn(
+            response, kept, step.cut_before
+        )
         self.hippo.working.append_turn(assistant_msg, tool_msgs)
 
     def _memory_write_allowed(self, text: str, role: str) -> bool:
@@ -1674,22 +1762,24 @@ class Agent:
             run.empty_replies = 0
 
             # Execute every call in order, each through the executor boundary,
-            # which runs only the tools this planning call offered.
+            # which runs only the tools this planning call offered. Until the
+            # step is in working memory, run.inflight holds it, so that a
+            # cancellation can close it (see _on_cancelled).
             allowed = frozenset(t.name for t in tools)
             calls = list(response.tool_calls)
-            results: list[ToolResult] = []
-            cut_before: list[int] = []
+            inflight = run.inflight = _InflightStep(response=response)
             for call in calls:
                 # Counted when handed over, so a call that timeout_s cuts
                 # short counts too.
                 run.n_tool += 1
                 result, cut = await self._do_execute(call, allowed=allowed, run=run)
-                results.append(result)
-                cut_before.append(cut)
-            await self._do_memorize(task.task_id, response, results, cut_before)
+                inflight.results.append(result)
+                inflight.cut_before.append(cut)
+            await self._do_memorize(task.task_id, inflight)
+            run.inflight = None
 
             # Stuck detection (one fingerprint per step)
-            fingerprints.append(self._make_fingerprint(calls, results))
+            fingerprints.append(self._make_fingerprint(calls, inflight.results))
             stuck = self._detect_stuck(fingerprints)
             if stuck:
                 run.events.stuck()
@@ -1762,7 +1852,25 @@ class Agent:
           from outside the run, or any other exception that is not an
           ``Exception``, still propagates once the task is saved. A
           cancellation after :meth:`begin_exit` has the exit's reason as
-          its error, and ends the run as that method describes.
+          its error, and ends the run as that method describes. All this
+          holds for a run without *on_event* and *approval*; an
+          interactive run that is cancelled ends ``cancelled`` instead;
+        - ``cancelled``: only for an interactive run, one given *on_event*
+          or *approval*: the task awaiting this method was cancelled, by
+          its caller (a Stop) or by a scope such as ``asyncio.timeout``,
+          a TaskGroup or ``asyncio.run`` on Ctrl+C. The result is empty.
+          The error is the exit's reason after :meth:`begin_exit`, else
+          the message of ``task.cancel(msg)`` when it is a non-empty
+          string, else :data:`CANCELLED_ERROR`. Working memory keeps the
+          query and, closed, the step whose tool calls were under way:
+          each of its calls that had not returned reads
+          :data:`~localmelo.melo.schema.CALL_INTERRUPTED` for the call
+          under way and :data:`~localmelo.melo.schema.CALL_NOT_STARTED`
+          for the later ones. The cancellation propagates once the run is
+          finalized (below), so the RunResult is the one ``run.finished``
+          carries. ``timeout_s`` still ends a run as ``timeout``, and a
+          ``CancelledError`` that something raises while nothing cancels
+          the run is a crash.
 
         Whatever happens, the task record is saved with the status and
         ``result or error``, and the reflections are cleared (promoted
@@ -1777,6 +1885,16 @@ class Agent:
         run's own status, is saved again as that method describes, and
         the cancellation then propagates.
 
+        A ``cancelled`` run is finalized in a task of its own instead,
+        which a second cancellation does not stop (see :meth:`_finalize`):
+        history gets the rows its interrupted step is missing, one per
+        call, and the task record is saved, both within
+        :data:`FINALIZE_TIMEOUT_S`; the reflections are cleared without
+        being promoted, so no network call follows the cancellation. After
+        :meth:`begin_exit`, the finalizer closes the tool providers first
+        and keeps to the exit's deadline, as :meth:`begin_exit` describes
+        for other runs.
+
         ``RunResult.config`` reports the effective configuration: the
         options, the registered built-ins (``builtins``), the resolved
         ``memory_dir`` and every tool registered once the tool providers
@@ -1784,16 +1902,18 @@ class Agent:
 
         *on_event*, when given, follows the run: it is called once per
         :class:`~localmelo.melo.contracts.events.AgentEvent`,
-        synchronously and in order, from the task that runs the run. The
-        first event is ``run.started`` and the last ``run.finished``, which
-        carries the RunResult's ``to_dict()`` and also comes when this
-        method raises; :mod:`localmelo.melo.contracts.events` lists the
-        others. An event on which the sink raises an ``Exception`` is lost,
-        and the run goes on. The sink must not block: slow work belongs on
-        a queue. The ``thinking`` and ``content`` of ``assistant.message``
-        events pass :func:`~localmelo.melo.checker.redaction.redact_secrets`,
-        while working memory, history and the RunResult keep the text as it
-        is. Without a sink, no event is built.
+        synchronously and in order, from the task that runs the run, or,
+        once a cancellation has ended the run, from its finalizer's task.
+        The first event is ``run.started`` and the last ``run.finished``,
+        which carries the RunResult's ``to_dict()`` and also comes when
+        this method raises; :mod:`localmelo.melo.contracts.events` lists
+        the others. An event on which the sink raises an ``Exception`` is
+        lost, and the run goes on. The sink must not block: slow work
+        belongs on a queue. The ``thinking`` and ``content`` of
+        ``assistant.message`` events pass
+        :func:`~localmelo.melo.checker.redaction.redact_secrets`, while
+        working memory, history and the RunResult keep the text as it is.
+        Without a sink, no event is built.
 
         *approval* is an
         :class:`~localmelo.melo.contracts.approvals.ApprovalPolicy`;
@@ -1808,12 +1928,17 @@ class Agent:
         _check_approval(approval)
         started = time.perf_counter()
         task = TaskRecord(query=query)
-        run = _RunState(events=_Emitter(on_event, task.task_id), approval=approval)
+        run = _RunState(
+            task_id=task.task_id,
+            events=_Emitter(on_event, task.task_id),
+            approval=approval,
+        )
         stats = self.chat.reset_stats()
         timeout_s = self.options.timeout_s
         deadline = asyncio.timeout(timeout_s)  # never expires when None
         # The retry notices of this run's model requests; only with a sink.
         retries = RETRY_HOOK.set(run.events.retry) if on_event is not None else None
+        self._active_runs += 1
         try:
             run.events.run_started(
                 query,
@@ -1829,6 +1954,7 @@ class Agent:
                     except Exception as exc:
                         raise _ToolSetupError(str(exc) or _exception_text(exc)) from exc
                     self.hippo.working.append(Message(role="user", content=query))
+                    run.query_in_memory = True
                     if self.options.attempt_policy == "none":
                         await self._run_single_attempt(task, query, run)
                     else:
@@ -1854,40 +1980,56 @@ class Agent:
                     logger.exception("Task %s crashed", task.task_id)
                     run.end("crashed", error=_exception_text(exc))
             except BaseException as exc:
-                if isinstance(exc, asyncio.CancelledError) and self._exit is not None:
-                    error = self._exit.reason  # cancelled for an exit
+                if run.interactive and _is_cancellation(exc):
+                    # A caller stopped a run that it follows.
+                    self._on_cancelled(query, run, exc)
                 else:
-                    error = _exception_text(exc)
-                run.end("crashed", error=error)
+                    if (
+                        isinstance(exc, asyncio.CancelledError)
+                        and self._exit is not None
+                    ):
+                        error = self._exit.reason  # cancelled for an exit
+                    else:
+                        error = _exception_text(exc)
+                    run.end("crashed", error=error)
                 raise
             finally:
                 if run.running:
                     # Every path above ends the run; this keeps the record
                     # terminal should a later change miss one.
                     run.end("crashed", error="The run ended without a status")
-                try:
-                    if self._exit is not None:
-                        await self._finish_task_for_exit(task, run, self._exit)
-                    else:
-                        try:
-                            await self._finish_task(task, run)
-                        except asyncio.CancelledError:
-                            # An exit that began during the final save cancelled it,
-                            # perhaps before it was committed: save again, within
-                            # the exit's time.
-                            if self._exit is None:
-                                raise
+                if run.status == "cancelled":
+                    # Only _on_cancelled ends a run so. Its finalizer saves the
+                    # run and reports run.finished, in place of the lines below.
+                    await self._finalize_in_task(task, run, stats, started)
+                else:
+                    try:
+                        if self._exit is not None:
                             await self._finish_task_for_exit(task, run, self._exit)
-                            raise
-                finally:
-                    # Built here, so that run.finished carries it on every
-                    # path, also when run_task raises.
-                    outcome = self._run_result(
-                        task, run, stats, time.perf_counter() - started
-                    )
-                    run.events.run_finished(outcome)
+                        else:
+                            try:
+                                await self._finish_task(task, run)
+                            except asyncio.CancelledError:
+                                # An exit that began during the final save
+                                # cancelled it, perhaps before it was committed:
+                                # save again, within the exit's time.
+                                if self._exit is None:
+                                    raise
+                                await self._finish_task_for_exit(task, run, self._exit)
+                                raise
+                    finally:
+                        # Built here, so that run.finished carries it on every
+                        # path, also when run_task raises.
+                        outcome = self._run_result(
+                            task, run, stats, time.perf_counter() - started
+                        )
+                        run.outcome = outcome
+                        run.events.run_finished(outcome)
             return outcome
         finally:
+            if run.finalizer is None:
+                # Else the finalizer counts the run out when it ends.
+                self._active_runs -= 1
             if retries is not None:
                 RETRY_HOOK.reset(retries)
 
@@ -1984,6 +2126,254 @@ class Agent:
             self.hippo.working.clear_reflections()
         if cancelled is not None:
             raise cancelled
+
+    # ── Cancelled interactive runs ──
+
+    def _on_cancelled(
+        self, query: str, run: _RunState, exc: asyncio.CancelledError
+    ) -> None:
+        """End *run*, an interactive run that a cancellation stopped.
+
+        Synchronous, in run_task's handler of the cancellation. The run
+        ends ``cancelled``, with :meth:`_cancel_reason` as its error.
+        Working memory gets the query, when the cancellation came before
+        it did (during the first save or the tool setup), and the step
+        whose tool calls were under way, closed (see
+        :meth:`_close_interrupted_step`); a cancellation during planning or
+        reflection adds no partial turn. :meth:`_finalize` then saves the
+        run.
+        """
+        run.end("cancelled", error=self._cancel_reason(exc))
+        if not run.query_in_memory:
+            self.hippo.working.append(Message(role="user", content=query))
+            run.query_in_memory = True
+        if run.inflight is None:
+            return
+        try:
+            self._close_interrupted_step(run.inflight, run.waiting_call_id)
+        except Exception:
+            # Logged, not raised: nothing may take the cancellation's place.
+            logger.exception(
+                "Could not close the interrupted step of task %s", run.task_id
+            )
+
+    def _cancel_reason(self, exc: asyncio.CancelledError) -> str:
+        """The error of an interactive run that the cancellation *exc* ended.
+
+        The exit's reason when :meth:`begin_exit` was called first, as for
+        any run; else the message of ``task.cancel(msg)``, when it is a
+        non-empty ``str`` and arrives as the first argument of *exc*; else
+        :data:`CANCELLED_ERROR`.
+        """
+        if self._exit is not None:
+            return self._exit.reason
+        message = exc.args[0] if exc.args else None
+        if isinstance(message, str) and message:
+            return message
+        return CANCELLED_ERROR
+
+    def _close_interrupted_step(
+        self, step: _InflightStep, waiting_call_id: str
+    ) -> None:
+        """Answer every call of *step* and append the step to working memory.
+
+        The calls that returned keep their results, as the image
+        references that :meth:`_do_memorize` would have kept (see
+        :func:`_image_references`). The call that was under way gets
+        :data:`~localmelo.melo.schema.CALL_INTERRUPTED`, or
+        :data:`~localmelo.melo.schema.CALL_NOT_STARTED` when its approval
+        was still being decided (*waiting_call_id*), and each later call
+        :data:`~localmelo.melo.schema.CALL_NOT_STARTED`; their cut counts
+        are 0. When every call had returned, the cancellation came while
+        :meth:`_do_memorize` recorded them, before it appended the turn.
+        The turn goes through :meth:`_checked_tool_turn`, so the window
+        stays protocol-valid, and ``step.closed`` keeps the results for the
+        history rows (see :meth:`_save_interrupted_step`).
+        """
+        calls = step.response.tool_calls
+        returned = len(step.results)
+        closed = [_image_references(result) for result in step.results]
+        for index in range(returned, len(calls)):
+            call = calls[index]
+            interrupted = index == returned and call.id != waiting_call_id
+            error = CALL_INTERRUPTED if interrupted else CALL_NOT_STARTED
+            closed.append(ToolResult(tool_name=call.tool_name, error=error))
+        step.closed = closed
+        cut_before = [*step.cut_before, *[0] * (len(calls) - returned)]
+        assistant_msg, tool_msgs = self._checked_tool_turn(
+            step.response, closed, cut_before
+        )
+        self.hippo.working.append_turn(assistant_msg, tool_msgs)
+
+    async def _finalize_in_task(
+        self, task: TaskRecord, run: _RunState, stats: RequestStats, started: float
+    ) -> None:
+        """Run :meth:`_finalize` in a task of its own and wait for it.
+
+        In its own task, ``asyncio.timeout`` can bound the finalizer's
+        steps although the run's task is being cancelled, and a second
+        cancellation stops only this wait: run_task then raises at once,
+        while the finalizer still saves the run and reports
+        ``run.finished``. The run counts as under way until the finalizer
+        ends, and :meth:`close` waits for it.
+        """
+        finalizer = asyncio.create_task(self._finalize(task, run, stats, started))
+        run.finalizer = finalizer
+        self._finalizers[finalizer] = task.task_id
+        finalizer.add_done_callback(self._finalizer_done)
+        await asyncio.shield(finalizer)
+
+    def _finalizer_done(self, finalizer: asyncio.Task[None]) -> None:
+        self._finalizers.pop(finalizer, None)
+        self._active_runs -= 1
+
+    async def _finalize(
+        self, task: TaskRecord, run: _RunState, stats: RequestStats, started: float
+    ) -> None:
+        """Save a cancelled interactive run, then report its ``run.finished``.
+
+        In order:
+
+        1. During an exit only, the tool providers are closed, as
+           :meth:`_finish_task_for_exit` closes them, since their processes
+           would outlive this one: a provider still closing when
+           :data:`EXIT_SAVE_RESERVE_S` of the exit's time is left is
+           killed. Without an exit they stay open for the next run.
+        2. History gets the rows the interrupted step is missing (see
+           :meth:`_save_interrupted_step`), within
+           :data:`FINALIZE_TIMEOUT_S`; during an exit, also only until
+           :data:`EXIT_SAVE_RESERVE_S` of its time is left.
+        3. The task record is saved, with the status ``cancelled`` and the
+           error, within what is left of step 2's
+           :data:`FINALIZE_TIMEOUT_S`, or during an exit within the exit's
+           time.
+        4. The reflections are cleared without being promoted: no
+           long-term write, and no embedding or other network call.
+        5. The RunResult is built, kept as ``run.outcome`` and reported
+           with ``run.finished``.
+
+        Each step reads ``self._exit`` when it starts, so an exit that
+        begins after the cancellation bounds the steps not yet started. A
+        write that fails is logged, and the next one still runs; a bound
+        that expires is logged at ERROR, and the next step still runs.
+        Steps 4 and 5 always run. A cancellation that comes during step 1
+        is raised once step 5 is done, as :meth:`_finish_task_for_exit`
+        raises it.
+        """
+        loop = asyncio.get_running_loop()
+        cancelled: asyncio.CancelledError | None = None
+        try:
+            if self._exit is not None:
+                try:
+                    await self._close_providers(self._tool_providers)
+                except asyncio.CancelledError as exc:
+                    cancelled = exc
+            finalize_by = loop.time() + FINALIZE_TIMEOUT_S
+            if run.inflight is not None:
+                bound = FINALIZE_TIMEOUT_S
+                if self._exit is not None:
+                    bound = min(bound, self._exit.time_left(keep=EXIT_SAVE_RESERVE_S))
+                await self._finalize_within(
+                    bound,
+                    task.task_id,
+                    self._save_interrupted_step(task.task_id, run.inflight),
+                )
+            task.status = run.status
+            task.result = run.result or run.error
+            if self._exit is not None:
+                bound = self._exit.time_left()
+            else:
+                bound = max(finalize_by - loop.time(), 0.0)
+            await self._finalize_within(
+                bound, task.task_id, self._save_final_state(task)
+            )
+        finally:
+            self.hippo.working.clear_reflections()
+            run.outcome = self._run_result(
+                task, run, stats, time.perf_counter() - started
+            )
+            run.events.run_finished(run.outcome)
+        if cancelled is not None:
+            raise cancelled
+
+    async def _finalize_within(
+        self, bound: float, task_id: str, writes: Coroutine[Any, Any, None]
+    ) -> None:
+        """Await *writes*, one step of :meth:`_finalize`, for at most *bound* s.
+
+        Neither an expired bound, logged at ERROR, nor a failure, logged
+        with its traceback, is raised, so the next step still runs.
+        """
+        bounded = asyncio.timeout(bound)
+        try:
+            async with bounded:
+                await writes
+        except Exception as exc:
+            if isinstance(exc, TimeoutError) and bounded.expired():
+                logger.error(
+                    "Finalizing cancelled task %s timed out; its records may be "
+                    "incomplete",
+                    task_id,
+                )
+            else:
+                logger.exception("Could not finalize cancelled task %s", task_id)
+
+    async def _save_interrupted_step(self, task_id: str, step: _InflightStep) -> None:
+        """Write the history rows of *step* that the cancellation left out.
+
+        The record whose ``store_step`` the cancellation interrupted, if
+        any, is written again, with the same ``step_id``: an
+        ``sqlite3.IntegrityError`` then means that the interrupted write
+        had been committed after all, and is logged at DEBUG. Each call
+        that has no record yet gets a new one, with the result the closed
+        step gave it (see :meth:`_close_interrupted_step`), and the
+        assistant's text goes on the step's first record, as in
+        :meth:`_do_memorize`. Nothing goes to long-term memory. Each write
+        is attempted on its own: a failure is logged, and the next write
+        still runs.
+        """
+        if step.stored < len(step.records):
+            record = step.records[step.stored]
+            try:
+                await self.hippo.store_step(task_id, record)
+            except sqlite3.IntegrityError:
+                logger.debug(
+                    "Step %s of task %s was saved before the cancellation",
+                    record.step_id,
+                    task_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Could not save a step of task %s: %s",
+                    task_id,
+                    _exception_text(exc),
+                )
+        calls = step.response.tool_calls
+        for index in range(len(step.records), len(calls)):
+            try:
+                record = StepRecord(
+                    thought=step.response.content if index == 0 else "",
+                    tool_call=calls[index],
+                    tool_result=step.closed[index],
+                )
+                await self.hippo.store_step(task_id, record)
+            except Exception as exc:
+                logger.warning(
+                    "Could not save a step of task %s: %s",
+                    task_id,
+                    _exception_text(exc),
+                )
+
+    async def _save_final_state(self, task: TaskRecord) -> None:
+        """Save *task*; a failure is logged without a traceback, not raised."""
+        try:
+            await self.hippo.save_task(task)
+        except Exception as exc:
+            logger.warning(
+                "Could not save the final state of task %s: %s",
+                task.task_id,
+                _exception_text(exc),
+            )
 
     def _run_result(
         self, task: TaskRecord, run: _RunState, stats: RequestStats, duration_s: float
@@ -2169,17 +2559,21 @@ class Agent:
         For a signal such as SIGTERM: call this from the event loop, then
         cancel the task that runs :meth:`run_task`, if one does, and await
         :meth:`close`. A run that the cancellation ends is recorded as
-        ``crashed`` with *reason* as its error. Before it saves its task
-        record, it closes the tool providers, killing any that has not
-        closed when only :data:`EXIT_SAVE_RESERVE_S` of the time is left
-        (:meth:`BaseToolProvider.kill`); its reflections are cleared
-        without being promoted. A provider that the cancellation finds
-        still starting is waited for to the same limit, then killed (see
-        :meth:`_start_provider`). A run that had already ended, and whose
-        final save the cancellation cuts short, saves its record again
-        the same way, with the status it ended with. close() keeps to the
-        same limit when it closes the providers again, and no provider
-        starts any more.
+        ``crashed`` with *reason* as its error; an interactive run, one
+        with an event sink or an approval policy, ends ``cancelled``
+        instead, with *reason* as its error too, and its finalizer keeps
+        to the same order and limit (see :meth:`run_task`). Before it
+        saves its task record, it closes the tool providers, killing any
+        that has not closed when only :data:`EXIT_SAVE_RESERVE_S` of the
+        time is left (:meth:`BaseToolProvider.kill`); its reflections are
+        cleared without being promoted. A provider that the cancellation
+        finds still starting is waited for to the same limit, then killed
+        (see :meth:`_start_provider`). A run that had already ended, and
+        whose final save the cancellation cuts short, saves its record
+        again the same way, with the status it ended with. close() keeps to
+        the same limit when it waits for the finalizers of cancelled runs
+        and when it closes the providers again, and no provider starts any
+        more.
 
         The first call sets the deadline; later calls change nothing.
         """
@@ -2207,9 +2601,24 @@ class Agent:
         a setup under way only until the exit's deadline (providers are
         killed :data:`EXIT_SAVE_RESERVE_S` before it, see
         :meth:`_close_providers`).
+
+        Before all this, close() waits for the finalizers of cancelled
+        interactive runs (see :meth:`run_task`) to save them, for at most
+        ``FINALIZE_TIMEOUT_S + 1`` seconds, or after :meth:`begin_exit`
+        only until the exit's deadline. A finalizer still running then is
+        logged at ERROR and left to end on its own: close() never cancels a
+        run.
         """
         try:
             self._closing = True
+            if self._finalizers:
+                try:
+                    await self._wait_for_finalizers()
+                except asyncio.CancelledError:
+                    # As below: the cancellation takes effect only once every
+                    # tool provider is closed.
+                    await self._close_providers(self._tool_providers)
+                    raise
             await self._close_providers(self._tool_providers)
             # Wait for a setup still running in a run (see above).
             await self._wait_for_setup()
@@ -2218,6 +2627,24 @@ class Agent:
             await self._llm.close()
             if self._embedding:
                 await self._embedding.close()
+
+    async def _wait_for_finalizers(self) -> None:
+        """Wait for the finalizers of cancelled runs, for a bounded time.
+
+        At most ``FINALIZE_TIMEOUT_S + 1`` seconds, or after
+        :meth:`begin_exit` until the exit's deadline. Each finalizer still
+        running then is logged at ERROR; none is cancelled.
+        """
+        pending = dict(self._finalizers)
+        exit_ = self._exit
+        bound = FINALIZE_TIMEOUT_S + 1 if exit_ is None else exit_.time_left()
+        _, running = await asyncio.wait(set(pending), timeout=bound)
+        for finalizer in running:
+            logger.error(
+                "Cancelled task %s is still being finalized; closing without "
+                "waiting for it",
+                pending[finalizer],
+            )
 
     async def _wait_for_setup(self) -> None:
         """Wait until no run is setting up the tool providers.

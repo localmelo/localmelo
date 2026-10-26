@@ -1,7 +1,9 @@
 """shell_exec kills its whole process group on a timeout or a cancellation.
 
 Each command writes the PIDs of its shell and of a background child to a
-file and then waits, so the tests can check that both are gone.
+file and then waits, so the tests can check that both are gone, and that
+no process of the shell's group is left. The kill is sent before the
+clean-up's first await, so a second cancellation cannot prevent it.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import signal
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
 import pytest
 
@@ -153,3 +156,98 @@ async def test_the_command_runs_in_its_own_process_group() -> None:
     out = await builtin_tools._shell_exec("ps -o pgid= -p $$; echo $$")
     group, shell = (int(value) for value in out.split())
     assert group == shell != os.getpgrp()
+
+
+# ── The whole group, and the order of the kill ──────────────────────────────
+
+
+async def _group_gone(pgid: int, timeout_s: float = 5.0) -> bool:
+    """Whether no process of group *pgid* is left within *timeout_s*.
+
+    ``os.killpg(pgid, 0)`` raises ``ProcessLookupError`` once the group is
+    empty. ``PermissionError`` means "not gone yet", as in
+    ``StdioMcpClient._wait_stopped``: macOS raises it for zombies that are
+    not reaped yet.
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            pass
+        await asyncio.sleep(0.02)
+    return False
+
+
+@pytest.mark.asyncio
+async def test_no_process_of_the_group_survives_a_cancellation(
+    pid_file: Path,
+) -> None:
+    running = asyncio.create_task(builtin_tools._shell_exec(_command(pid_file)))
+    shell, _ = await _pids(pid_file)
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    # The shell leads the group (start_new_session).
+    assert await _group_gone(shell)
+
+
+@pytest.mark.asyncio
+async def test_no_process_of_the_group_survives_its_own_timeout(
+    pid_file: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(builtin_tools, "SHELL_TIMEOUT_S", 0.5)
+    with pytest.raises(TimeoutError):
+        await builtin_tools._shell_exec(_command(pid_file))
+    shell, _ = await _pids(pid_file)
+    assert await _group_gone(shell)
+
+
+@pytest.mark.asyncio
+async def test_no_process_of_the_group_survives_the_executor_timeout(
+    pid_file: Path,
+) -> None:
+    hippo = Hippo()
+    executor = Executor(hippo, Checker())
+    register_builtins(executor, hippo, names={"shell_exec"})
+    outcome = await executor.execute_structured(
+        ExecutionRequest(
+            tool_name="shell_exec",
+            arguments={"command": _command(pid_file)},
+            timeout_ms=500,
+        )
+    )
+    assert outcome.status == ExecutionStatus.TIMEOUT
+    shell, _ = await _pids(pid_file)
+    assert await _group_gone(shell)
+
+
+@pytest.mark.asyncio
+async def test_kill_process_group_signals_before_its_first_await(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A second cancellation, at the clean-up's first await, cannot keep the
+    # group from being killed: the signal has been sent by then.
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        builtin_tools.os, "killpg", lambda pgid, sig: signals.append((pgid, sig))
+    )
+
+    class Unreaped:
+        """A process that is never reaped."""
+
+        pid = 4242
+
+        async def wait(self) -> int:
+            await asyncio.Event().wait()
+            raise AssertionError("not reached")
+
+    process = cast(asyncio.subprocess.Process, Unreaped())
+    killing = asyncio.create_task(builtin_tools._kill_process_group(process))
+    await asyncio.sleep(0)  # the task runs up to its first await
+    assert signals == [(4242, signal.SIGKILL)]
+    killing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await killing
