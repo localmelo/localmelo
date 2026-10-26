@@ -37,7 +37,7 @@ from typing import Any, TypeVar
 
 import httpx
 
-from localmelo.melo.contracts.providers import ProviderError
+from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, ProviderError
 from localmelo.melo.memory.retrieval import (
     RETRIEVER_NAMES,
     CorpusError,
@@ -465,15 +465,22 @@ async def _run_evaluation(evaluation: _Evaluation) -> int:
 def _interleave(
     client: httpx.AsyncClient, body: dict[str, Any]
 ) -> Callable[[], Awaitable[None]]:
-    """A coroutine function that posts *body* to ``/chat/completions`` once."""
+    """A coroutine function that posts *body* to ``/chat/completions`` once.
+
+    The request stands for the agent's planning request, so it says
+    ``plan`` in its ``X-Localmelo-Call-Kind`` header.
+    """
 
     async def interleave() -> None:
+        token = LLM_REQUEST_KIND.set("plan")
         try:
             await post_json(
                 client, "/chat/completions", body, headers=attempt_headers()
             )
         except ProviderError as exc:
             raise _InterleaveError(" ".join(str(exc).split())) from exc
+        finally:
+            LLM_REQUEST_KIND.reset(token)
 
     return interleave
 

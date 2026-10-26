@@ -15,6 +15,7 @@ page.
 | Choose the directory | `export LOCALMELO_MEMORY_DIR=…` (default `~/.cache/localmelo/memory`) |
 | Keep the memory of one run in a directory | `melo --memory-dir ~/melo-memory "<task>"` |
 | Turn long-term memory off for one run | `melo --memory off "<task>"` |
+| Keep the model's reasoning N days | `export LOCALMELO_THINKING_RETENTION_DAYS=N` (default 30) |
 | See past runs | `sqlite3` queries; see [Inspect memory](#inspect-memory) |
 | Delete memory | Stop localmelo, then remove the files; see [Reset memory](#reset-memory) |
 
@@ -23,7 +24,7 @@ page.
 | Memory | What it holds | Where |
 |---|---|---|
 | Working memory | The conversation of a run, of the `melo ""` loop, of a gateway session or of a web workspace chat: the last 20 messages. | RAM only. |
-| History | Every task with its status and result, and every step with its tool call and result. | RAM, or `history.db`. |
+| History | Every task with its status and result, and every step with its tool call and result. In `history.db`, also every reply of the model with its reasoning; the history in RAM keeps no model calls. | RAM, or `history.db`. |
 | Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an embedding backend. | RAM, or `long_term.db`. |
 
 By default everything stays in RAM and is lost when the process ends. In RAM,
@@ -51,6 +52,12 @@ melo "What is 6*7?"
 
 - A gateway uses the variables it was started with. All its sessions save to
   the same files.
+- History keeps the model's reasoning for 30 days; see
+  [Model calls](#model-calls). `LOCALMELO_THINKING_RETENTION_DAYS` sets
+  another number of days, such as `7` or `0.5`, for `history.db` and the
+  session store's `sessions.db` alike (see [Sessions](#sessions)). A value
+  that is not a number above 0 stops `melo` before it runs anything; see
+  [Usage errors](cli.md#usage-errors).
 - Recalling long-term memory in a later run needs both persistence and an
   embedding backend.
 
@@ -66,7 +73,7 @@ run.
 
 ```text
 ~/.cache/localmelo/memory/
-  history.db      tasks and steps
+  history.db      tasks, steps and model calls
   long_term.db    long-term memory, with an embedding backend and memory on
 ```
 
@@ -74,8 +81,25 @@ run.
   for `long_term.db`). They belong to the database; leave them in place.
 - The directory is created when an agent starts: at the start of a direct
   run or of the `melo ""` loop, or when a gateway session is created.
+- A new directory gets mode 0700, so only you can open the files in it, and
+  a new `history.db`, with its `-wal` and `-shm`, gets mode 0600.
+- The default directory, `~/.cache/localmelo/memory`, is also set to 0700
+  when it exists, you own it, and it is open to group or others, as earlier
+  versions left it. One INFO line in the log says so.
+- A directory you chose (`LOCALMELO_MEMORY_DIR`, `--memory-dir`), and every
+  existing file, keep their mode. To close them to other users:
+
+  ```bash
+  chmod 700 ~/melo-memory
+  chmod 600 ~/melo-memory/history.db*
+  ```
+
+- `long_term.db` is created with the default file mode, usually 0644.
 - The gateway's web workspace keeps its own files in
-  `~/.cache/localmelo/playground/`.
+  `~/.cache/localmelo/playground/`. Its `history.db` keeps the model's
+  reasoning for the same number of days, and clears older reasoning when a
+  new chat first uses it: each chat opens its own connection to the shared
+  file.
 
 ## Inspect memory
 
@@ -96,6 +120,12 @@ sqlite3 history.db "SELECT status, COUNT(*) FROM tasks GROUP BY status"
 
 # The steps of one task
 sqlite3 history.db "SELECT seq, tool_call_json, substr(tool_result_json, 1, 200) FROM steps WHERE task_id = '<task_id>' ORDER BY seq"
+
+# The model calls of one task, with the start of their reasoning
+sqlite3 history.db "SELECT seq, kind, outcome, step, substr(thinking, 1, 80) FROM llm_calls WHERE task_id = '<task_id>' ORDER BY seq"
+
+# Each step of one task, with the reasoning of the call that made it
+sqlite3 history.db "SELECT s.seq, c.seq, substr(c.thinking, 1, 80), s.tool_call_json FROM llm_calls c, json_each(c.step_ids_json) j JOIN steps s ON s.step_id = j.value WHERE c.task_id = '<task_id>' ORDER BY s.seq"
 
 # Long-term memory: the number of entries, and a preview
 sqlite3 long_term.db "SELECT COUNT(*) FROM long_term"
@@ -137,6 +167,82 @@ The `steps` table holds one row per tool call: `step_id`, `task_id`,
 `thought` (the model's text), `tool_call_json`, `tool_result_json`,
 `timestamp` and `seq` (the order within the task).
 
+## Model calls
+
+With persistence on, history also keeps every reply of the model, with its
+reasoning, in the `llm_calls` table of `history.db`: one row per reply, for
+planning and reflection requests alike. The history in RAM keeps none.
+
+| Column | Value |
+|---|---|
+| `task_id` | The run's `task_id`. |
+| `seq` | The reply's number in the run, from 0, in the order the replies arrived. |
+| `kind` | `plan` for a planning request, `reflect` for a reflection request. |
+| `step`, `attempt` | The run's step and attempt when the reply arrived. A reflection has the last step of the attempt it reflects on. |
+| `outcome` | For `plan`: `tools` when the reply has a tool call, else `answer` when it has text, else `empty`. `aux` for every other kind. It describes the reply, not what the run did with it. |
+| `content`, `thinking` | The reply's text and its reasoning, redacted (below). |
+| `reasoning_key` | Where the reasoning came from: `reasoning_content` or `reasoning` (an OpenAI-compatible server), `thinking` (Ollama), or `""` when the reply has none or its provider does not say. |
+| `step_ids_json` | For a reply with tool calls, the `step_id`s of its `steps` rows as a JSON list, in call order; `NULL` for a reply that produced none. |
+| `redactions` | The number of spans the redaction replaced. |
+| `tool_calls_json` | The reply's tool calls as a JSON list of `{"tool_name", "arguments", "id"}`, or `NULL`. |
+| `usage_json` | The token counts the server reported, as JSON, `cached_tokens` and `reasoning_tokens` included when an OpenAI-compatible server sends them; or `NULL`. |
+| `duration_s` | How long the request took, without earlier failed attempts and the waits before retries. |
+| `timestamp` | When the reply arrived, in seconds since the epoch. |
+
+- A request that was retried gives one row, for the reply that came back.
+  So the rows of a run number its `n_llm`, unless a row could not be
+  written: a row that waits more than 5 seconds for another process's write
+  lock on `history.db`, or fails otherwise, is left out with one warning on
+  stderr (later failures of the run are logged at debug level), and the run
+  goes on as if nothing happened. A missing row leaves a gap in `seq`.
+- `step_ids_json` stays `NULL` for answers, empty replies, reflections, a
+  reply that the plan check refused, and a planning reply whose run was cut
+  during its tools (by `--timeout`, or a cancellation): such a reply gets no
+  `steps` rows. A run cut while it wrote a step's rows can leave those rows
+  unlinked; each belongs to the task's latest `plan` row before its
+  `timestamp`. A cancelled interactive run in the Python API links the rows
+  that its clean-up writes.
+- **Redaction.** `content` and `thinking` pass a minimal redaction of
+  secrets, the same as the Python API's events: well-known key shapes
+  (`sk-` keys, GitHub tokens, AWS access key ids), the token after `Bearer`,
+  and a code of 4 to 8 digits within 20 characters of `verification code`,
+  `passcode`, `OTP` or `验证码`, on the same line, each become `[redacted]`.
+  It is minimal: tool-call arguments are not redacted, in
+  `tool_calls_json` or in `steps`, and a key glued to the text before it
+  stays: an `sk-` key right after a letter, a digit, `_` or `-`, a GitHub
+  token right after a letter, a digit or `_`, and an AWS access key id
+  right after a letter or a digit. `tasks` and `steps` keep every text as
+  it was.
+- **Retention.** Reasoning older than 30 days, or than
+  `LOCALMELO_THINKING_RETENTION_DAYS`, is cleared: `thinking` becomes `""`,
+  and the reasoning that `content` holds goes too, by the row's
+  `reasoning_key`. For `thinking` (Ollama) that is the `<think>` block at
+  the start of `content`, which Ollama's provider adds. For `""` (a server
+  without a reasoning parser) it is a `<think>` block at the start, an
+  unclosed `<think>` at the start (the output was cut off while the model
+  thought), or the text up to a `</think>` with no `<think>` before it, as
+  chat templates that open the block in the prompt leave it. For
+  `reasoning_content` and `reasoning`, `content` holds no reasoning and
+  stays. The row and its other columns stay. Old reasoning is cleared when
+  an agent first uses `history.db`: at the start of a direct run, or at a
+  gateway session's first run.
+- **Joining events.** In the Python API, a `plan` row and the
+  [`assistant.message`](events.md#assistantmessage) event of its step have
+  the same `task_id` (the event's `run_id`) and `step`. The `reflect` rows
+  of an attempt, one or two, belong to its
+  [`reflection`](events.md#reflection) event; the last by `seq` is the reply
+  it read. The event's `seq` and the row's `seq` are different counters.
+- **Export.** `melo-retrieve --export-run` turns a run's model calls into
+  documents for retrieval experiments; see
+  [Export a history database](retrieval.md#export-a-history-database).
+- **Schema version.** `history.db` has `PRAGMA user_version` 1. A file from
+  an earlier version (version 0) gets the empty table and version 1 when this
+  version first opens it, with one INFO line in the log; its tasks and steps
+  stay as they are. Earlier versions still read and write the tasks and steps of
+  a version-1 file, and ignore `llm_calls`. A file with a newer version ends
+  every run of this version as `crashed`, with the error
+  `HistorySchemaError: <path> has schema version <n>; this localmelo reads version 1`.
+
 ## Sessions
 
 The session store of the Python API ([Sessions](sessions.md)) keeps
@@ -173,12 +279,13 @@ yet; the files appear once a program opens a store.
   redaction of [events](events.md#assistantmessage) before it is stored.
 - **Retention.** When a store opens, and whenever its program calls
   `apply_retention()` (a gateway that keeps the store open is to call it
-  every 24 hours), what is older than 30 days is cleared: the thinking of
-  `assistant.message` events, and the `<think>` block in their text; the
-  `<think>` block of the final answer's copies; window checkpoints, and in a
-  newer checkpoint the thinking and `<think>` block of each message older
-  than 30 days; and withdrawn messages. The turns, their answers and their
-  events stay until you delete the session.
+  every 24 hours), what is older than 30 days, or than
+  `LOCALMELO_THINKING_RETENTION_DAYS` as for `history.db`, is cleared: the
+  thinking of `assistant.message` events, and the `<think>` block in their
+  text; the `<think>` block of the final answer's copies; window
+  checkpoints, and in a newer checkpoint the thinking and `<think>` block
+  of each message older than that; and withdrawn messages. The turns, their
+  answers and their events stay until you delete the session.
 - **A killed run.** A run killed with its process keeps the row `running` in
   `history.db`'s `tasks` table (see [Task records](#task-records)); its
   turn's status in `sessions.db` is the one to trust. The turn's `run_id` is
@@ -209,6 +316,21 @@ localmelo has no reset command. To delete memory:
 
 3. Start localmelo again. It creates new files when it needs them.
 
+To clear the model's stored reasoning, with localmelo stopped:
+
+```bash
+# The records of the calls, with all their reasoning
+sqlite3 ~/.cache/localmelo/memory/history.db "DELETE FROM llm_calls"
+
+# Only the thinking column, keeping the records of the calls
+sqlite3 ~/.cache/localmelo/memory/history.db "UPDATE llm_calls SET thinking = ''"
+```
+
+The second leaves the reasoning that `content` holds: the `<think>` copy at
+the start of an Ollama reply, which retention then no longer removes, and
+the inline block of a reply from a server without a reasoning parser. To
+remove all the stored reasoning, use the first.
+
 If you set `LOCALMELO_MEMORY_DIR` or used `--memory-dir`, remove the files in
 that directory instead.
 
@@ -219,7 +341,9 @@ that directory instead.
 ## Privacy
 
 - The files are not encrypted. `history.db` holds your tasks, the model's
-  text, every tool call with its arguments, and every tool result.
+  text, every tool call with its arguments, and every tool result. It also
+  holds the model's reasoning for every call, redacted and kept 30 days by
+  default; see [Model calls](#model-calls).
   `long_term.db` holds step summaries and reflections, with their embedding
   vectors.
 - Images that tools return are stored only as references: the MIME type, the
@@ -255,8 +379,8 @@ that directory instead.
 - On each step, the 5 entries closest to the task are recalled into the
   prompt.
 
-**History** is a record. localmelo writes every task and step to it, but does
-not read it back during a run.
+**History** is a record. localmelo writes every task and step to it, and,
+with persistence on, every model call, but never reads it back.
 
 **Reflections** are kept in working memory, one at a time: each new
 reflection replaces the last one. See

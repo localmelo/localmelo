@@ -8,7 +8,7 @@ from typing import Any
 import aiosqlite
 import numpy as np
 
-from localmelo.melo.memory._sqlite import apply_pragmas
+from localmelo.melo.memory._sqlite import prepare_connection
 from localmelo.melo.memory.long import LongTerm
 
 _SCHEMA = """
@@ -43,9 +43,7 @@ class SqliteLongTerm(LongTerm):
             if self._conn is not None:
                 return self._conn
             conn = await aiosqlite.connect(self._db_path)
-            await apply_pragmas(conn)
-            await conn.executescript(_SCHEMA)
-            await conn.commit()
+            await prepare_connection(conn, _SCHEMA)
             self._conn = conn
             return conn
 

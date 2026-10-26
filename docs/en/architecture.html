@@ -312,7 +312,8 @@
         <h3 id="c-memory">Memory</h3>
         <p>
           Working memory holds the conversation of a run or a gateway session:
-          the last 20 messages, in RAM. History records every task and step.
+          the last 20 messages, in RAM. History records every task and step
+          and, with persistence on, every model call and its reasoning.
           Long-term memory needs an embedding backend: it stores step summaries
           and reflections with their embeddings, and recalls the 5 closest
           entries on each step. History and long-term memory stay in RAM, or go
@@ -329,9 +330,9 @@
           from a model reply, and reflections. Runs do not use them yet: the
           <code>melo-retrieve</code> command (<code>support/retrieve.py</code>)
           compares them offline on labelled queries, and turns model calls
-          recorded as raw-call JSONL into a corpus. The
-          <code>history.db</code> that <code>melo</code> writes does not record
-          model calls yet. See
+          recorded as raw-call JSONL into a corpus. With persistence on, the
+          <code>history.db</code> that <code>melo</code> writes records model
+          calls too, and <code>melo-retrieve</code> exports it as well. See
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">Offline retrieval</a>.
         </p>
         <p>
@@ -452,7 +453,7 @@
           <li>Sessions in the Python API (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>). <code>melo</code> and the gateway do not use them yet.</li>
           <li>The gateway: the HTTP API, sessions, the web workspace, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
           <li>Backends for Ollama, MLC LLM, vLLM, SGLang and four cloud APIs.</li>
-          <li>Working memory, history and long-term memory, saved to SQLite when persistence is on.</li>
+          <li>Working memory, history and long-term memory, saved to SQLite when persistence is on; the saved history also keeps every model call with its reasoning, for 30 days by default.</li>
           <li><code>melo-retrieve</code>, which compares the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers offline. Runs do not use the retrievers yet.</li>
           <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>). Runs and the gateway do not use it yet.</li>
         </ul>

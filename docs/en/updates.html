@@ -87,6 +87,19 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-26-call-history">
+          <h3>Every model call kept in history</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/42">#42</a>
+          </p>
+          <ul>
+            <li>With persistence on, <code>history.db</code> keeps every reply of the model with its reasoning: one row per planning or reflection reply, linked to the tool steps it made. The planned memory of the model's reasoning will be built from these rows.</li>
+            <li>Text and reasoning pass a minimal redaction of secrets, and reasoning is kept for 30 days (<code>LOCALMELO_THINKING_RETENTION_DAYS</code> changes it). <code>melo-retrieve --export-run</code> turns a run's calls into a corpus for comparing retrievers.</li>
+            <li>Each chat request names its kind in an <code>X-Localmelo-Call-Kind</code> header, so a proxy can tell planning from reflection. The JSON line, the exit codes and the request bodies are unchanged.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-26-sessions">
           <h3>Conversations that survive a restart, in the Python API</h3>
           <p class="update-date">

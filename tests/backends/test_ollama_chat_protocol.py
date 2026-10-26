@@ -242,3 +242,48 @@ class TestOllamaResponseParsing:
         sent = server.requests[0]["messages"][1]["tool_calls"][0]["function"]
         assert sent["arguments"] == args
         await llm.close()
+
+
+# ── The reasoning key and the full usage ────────────────────────────────────
+
+
+async def _ollama_once(body: dict[str, Any]) -> OllamaNativeChat:
+    llm = OllamaNativeChat(
+        base_url="http://ollama.test",
+        model="qwen3:8b",
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json=body)),
+    )
+    try:
+        await llm.chat([Message(role="user", content="q")])
+    finally:
+        await llm.close()
+    return llm
+
+
+class TestOllamaLastReasoningKeyAndUsage:
+    def test_the_defaults(self) -> None:
+        llm = OllamaNativeChat(base_url="http://ollama.test", model="qwen3:8b")
+        assert (llm.last_reasoning_key, llm.last_usage) == ("", None)
+
+    @pytest.mark.asyncio
+    async def test_a_reply_with_thinking(self) -> None:
+        llm = await _ollama_once(
+            {
+                "message": {"role": "assistant", "content": "a", "thinking": "r"},
+                "prompt_eval_count": 4,
+                "eval_count": 2,
+                "total_duration": 123456,
+            }
+        )
+        assert llm.last_reasoning_key == "thinking"
+        # Token counts only: no server timing.
+        assert llm.last_usage == {
+            "prompt_tokens": 4,
+            "completion_tokens": 2,
+            "total_tokens": 6,
+        }
+
+    @pytest.mark.asyncio
+    async def test_a_reply_without_thinking_or_usage(self) -> None:
+        llm = await _ollama_once({"message": {"role": "assistant", "content": "a"}})
+        assert (llm.last_reasoning_key, llm.last_usage) == ("", None)

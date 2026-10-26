@@ -164,8 +164,8 @@
         <p>关键文件：<code>melo/executor/executor.py</code>、<code>builtins.py</code>、<code>policy.py</code>、<code>melo/contracts/approvals.py</code>。</p>
 
         <h3 id="c-memory">记忆</h3>
-        <p>工作记忆保存一次运行或一个网关会话中的对话：最近 20 条消息，只在内存中。历史记录保存每个任务和每一步。长期记忆需要嵌入后端：它把步骤摘要和反思连同嵌入向量一起保存，并在每一步召回最接近的 5 条。历史记录和长期记忆默认留在内存中；开启持久化后，分别写入 <code>history.db</code> 和 <code>long_term.db</code>。工具注册表保存所有已注册的工具，以及检索模式使用的 BM25 索引。</p>
-        <p><code>melo/memory/retrieval/</code> 中有三种可切换的检索器：<code>bm25</code>、<code>llm</code> 和 <code>embedding</code>。它们检索由一次运行的模型调用构建的文档：<code>melo/memory/notes.py</code> 从模型回复中提取的推理笔记、代码草稿和思考片段，以及反思。运行目前还不使用它们：<code>melo-retrieve</code> 命令（<code>support/retrieve.py</code>）在带标注的查询上离线比较这些检索器，并能把以 raw-call JSONL 记录的模型调用导出为语料。<code>melo</code> 写入的 <code>history.db</code> 目前还不记录模型调用。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">离线检索（英文）</a>。</p>
+        <p>工作记忆保存一次运行或一个网关会话中的对话：最近 20 条消息，只在内存中。历史记录保存每个任务和每一步；开启持久化后，还保存每次模型调用及其推理。长期记忆需要嵌入后端：它把步骤摘要和反思连同嵌入向量一起保存，并在每一步召回最接近的 5 条。历史记录和长期记忆默认留在内存中；开启持久化后，分别写入 <code>history.db</code> 和 <code>long_term.db</code>。工具注册表保存所有已注册的工具，以及检索模式使用的 BM25 索引。</p>
+        <p><code>melo/memory/retrieval/</code> 中有三种可切换的检索器：<code>bm25</code>、<code>llm</code> 和 <code>embedding</code>。它们检索由一次运行的模型调用构建的文档：<code>melo/memory/notes.py</code> 从模型回复中提取的推理笔记、代码草稿和思考片段，以及反思。运行目前还不使用它们：<code>melo-retrieve</code> 命令（<code>support/retrieve.py</code>）在带标注的查询上离线比较这些检索器，并能把以 raw-call JSONL 记录的模型调用导出为语料。开启持久化后，<code>melo</code> 写入的 <code>history.db</code> 也记录每次模型调用，<code>melo-retrieve</code> 同样能导出它。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">离线检索（英文）</a>。</p>
         <p>会话（实验性，只在 Python API 中）把整段对话保存在 <code>sessions.db</code> 中：每一轮都是一行记录，只结束一次，带有状态和原因；会话的事件也一起保存；窗口检查点（window checkpoint）让新的智能体从上一个智能体停下的地方继续。网关的文件和终端的文件是分开的。<code>melo</code> 和网关目前还没有使用会话（代码在 <code>support/sessions/</code>）。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/sessions.md">会话（英文）</a>。</p>
         <p>关键文件：<code>melo/memory/coordinator.py</code>、<code>short/</code>（工作记忆）、<code>history/</code>、<code>long/</code>、<code>tools/</code>（工具注册表）、<code>bm25.py</code>。</p>
         <p>记忆设计（计划中）：<a href="./memory-design.html">记忆设计</a>页保留了维护者为记忆撰写的设计，其中部分内容尚未实现。</p>
@@ -228,7 +228,7 @@
           <li>Python API 中的会话（实验性）：保存在 SQLite 中的对话，每一轮只结束一次，重启后仍在，并能在新的智能体上恢复（<code>support/sessions/</code>）。<code>melo</code> 和网关目前还没有使用会话。</li>
           <li>网关：HTTP API、会话、网页工作区、监听回环地址时拒绝其他网站请求的检查，以及 macOS 后台服务。</li>
           <li>支持 Ollama、MLC LLM、vLLM、SGLang 和四个云端 API 的后端。</li>
-          <li>工作记忆、历史记录和长期记忆；开启持久化后会保存到 SQLite。</li>
+          <li>工作记忆、历史记录和长期记忆；开启持久化后会保存到 SQLite，保存的历史记录还包括每次模型调用及其推理，默认保留 30 天。</li>
           <li><code>melo-retrieve</code>：离线比较 <code>bm25</code>、<code>llm</code> 和 <code>embedding</code> 三种记忆检索器。运行目前还不使用这些检索器。</li>
           <li>调度器的策略核心，以及离线测试它的模拟器（<code>support/scheduler/</code>）。运行和网关目前都还不使用它。</li>
         </ul>

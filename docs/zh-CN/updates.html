@@ -75,6 +75,19 @@
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
 
+        <article class="update-entry" id="u-2026-10-26-call-history">
+          <h3>历史记录保存每次模型调用</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/42">#42</a>
+          </p>
+          <ul>
+            <li>开启持久化后，<code>history.db</code> 会保存模型的每一次回复及其推理：每次规划或反思的回复一行，并关联到它产生的工具步骤。计划中的“模型推理记忆”将基于这些记录构建。</li>
+            <li>回复文本和推理会经过最基本的密钥脱敏，推理默认保留 30 天（可以用 <code>LOCALMELO_THINKING_RETENTION_DAYS</code> 修改）。<code>melo-retrieve --export-run</code> 可以把一次运行的模型调用导出为语料，用来比较检索器。</li>
+            <li>每个对话请求都会在 <code>X-Localmelo-Call-Kind</code> 请求头中注明调用类型，代理因此能区分规划和反思。JSON 行、退出码和请求体都没有变化。</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-26-sessions">
           <h3>重启后仍在的对话（Python API）</h3>
           <p class="update-date">

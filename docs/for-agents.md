@@ -135,7 +135,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
   - `failed`: a check refused, or 2 empty replies in a row. `gate_stopped`: the reflection stopped the run with budget left. `stuck` (`--attempt-policy none` only): the same calls or errors repeated.
   - `provider_error`: a chat request still failed after its retries (network errors, timeouts and HTTP 429/502/503/504 are retried twice, after 1 s, then 4 s more), or an embedding request failed (never retried). `setup_error`: an MCP server or tool provider failed to start; permanent for that `Agent`.
   - `crashed` (exit 1, or the signal's code below): an unexpected exception or a signal (`Cancelled by SIGTERM` or `Cancelled by SIGHUP`; SIGINT records `CancelledError` and prints a traceback on stderr). `cancelled`: Python runs only.
-- Other exit codes (no JSON line): 2 usage error, bad `--mcp-config` or `--memory-dir`; 1 no backend, invalid config or TOML, unset cloud key variable; 3 gateway port in use; 143, 129, 130 for SIGTERM, SIGHUP, SIGINT (the task record is saved as `crashed`).
+- Other exit codes (no JSON line): 2 usage error, bad `--mcp-config`, `--memory-dir` or `LOCALMELO_THINKING_RETENTION_DAYS`; 1 no backend, invalid config or TOML, unset cloud key variable; 3 gateway port in use; 143, 129, 130 for SIGTERM, SIGHUP, SIGINT (the task record is saved as `crashed`).
 
 ## Configuration
 
@@ -146,6 +146,8 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 - `[gateway]`: `host` (`127.0.0.1`), `port` (`8401`); `--host` and `--port` override them for one run.
 - Errors exit 1: `Configuration errors:` on stderr, or for invalid TOML a raw `TOMLDecodeError` traceback.
 - `LOCALMELO_PERSIST_MEMORY` (any non-empty value, `0` included) saves memory as SQLite in `LOCALMELO_MEMORY_DIR` (default `~/.cache/localmelo/memory`; `~` not expanded).
+- `LOCALMELO_THINKING_RETENTION_DAYS` (default 30; a number above 0, such as `7` or `0.5`): days of model reasoning kept in `history.db` and `sessions.db`. Any other value: exit 2 with one line before the run.
+- Every chat request a run sends carries the header `X-Localmelo-Call-Kind: plan` or `reflect` (`melo-retrieve`'s: `retrieve`); embedding requests and the setup wizard's probe carry none.
 
 ## Tools and MCP
 
@@ -161,7 +163,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 ## Memory
 
 - Working memory: the last 20 messages, in RAM. History (task and step records) and long-term memory: RAM unless persisted.
-- Persistence: `--memory-dir DIR` or `AgentOptions(memory_dir=DIR)` wins, else `LOCALMELO_PERSIST_MEMORY`. Files: `history.db` always, `long_term.db` only with an embedding provider and memory on.
+- Persistence: `--memory-dir DIR` or `AgentOptions(memory_dir=DIR)` wins, else `LOCALMELO_PERSIST_MEMORY`. Files: `history.db` always (tasks, steps, and in table `llm_calls` every model reply with its redacted reasoning, kind `plan` or `reflect`, usage and the steps it made), `long_term.db` only with an embedding provider and memory on. A directory localmelo creates is `0700`, a new `history.db` `0600`. Export a run's calls: `melo-retrieve --export-run MEMORY_DIR`.
 - Long-term memory needs an embedding backend; without one it is inert although `config.memory` is `true`. A new `Agent` or `melo` process recalls earlier runs only through it; history is written but never read back into a run.
 - Multi-turn chat: one `Agent` with `record_answers=True` (without it, later runs see earlier queries but not answers), or one gateway `session_id`.
 - Sessions (Python API only): `sessions.db`, by default `~/.cache/localmelo/cli/` or `~/.cache/localmelo/gateway/`; plain text, files `0600`.

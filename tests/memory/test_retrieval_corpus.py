@@ -8,6 +8,7 @@ and sha256 prefixes were computed with ``wc`` and ``shasum``.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from pathlib import Path
@@ -15,11 +16,14 @@ from typing import Any
 
 import pytest
 
+from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts.providers import LLM_REQUEST_KINDS, BaseLLMProvider
 from localmelo.melo.memory.retrieval import (
     CorpusError,
     Doc,
     LabelledQuery,
     RawCall,
+    corpus,
     doc_to_dict,
     docs_from_calls,
     load_corpus,
@@ -30,7 +34,8 @@ from localmelo.melo.memory.retrieval.corpus import (
     NoCallsTableError,
     load_history_calls,
 )
-from localmelo.melo.schema import ToolCall, ToolResult
+from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
+from localmelo.support.retrieve import main as retrieve_main
 from localmelo.tests.memory.history_fixture import write_history_sync
 
 FIXTURES = Path(__file__).parent / "fixtures" / "retrieval"
@@ -1450,3 +1455,165 @@ def test_a_file_that_is_no_database_is_refused(tmp_path: Path) -> None:
     database.write_bytes(b"SQLite format 3\x00" + b"\x01" * 200)
     with pytest.raises(CorpusError, match="cannot read the database"):
         load_history_calls(database)
+
+
+# ── R1: the agent's own history.db ──────────────────────────────────────────
+
+
+def test_the_reader_and_the_agent_share_one_vocabulary_of_kinds() -> None:
+    assert corpus.CALL_KINDS is LLM_REQUEST_KINDS
+
+
+class _ScriptedLLM(BaseLLMProvider):
+    def __init__(self, replies: list[Message]) -> None:
+        self.replies = list(replies)
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        return self.replies.pop(0)
+
+    async def close(self) -> None:
+        pass
+
+
+DRAFT_THINKING = (
+    "notes.txt must hold the greeting, so I'll write it to notes.txt:\n"
+    "```python\nprint('hello')\n```"
+)
+
+
+async def test_an_agent_run_exports_as_its_raw_calls(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    work, memory = tmp_path / "work", tmp_path / "memory"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    script = [
+        Message(
+            role="assistant",
+            content="Writing it.",
+            thinking=DRAFT_THINKING,
+            tool_calls=[
+                ToolCall(
+                    "file_write",
+                    {"path": "notes.txt", "content": "print('hello')\n"},
+                    id="call_1",
+                ),
+                ToolCall("file_read", {"path": "notes.txt"}, id="call_2"),
+            ],
+        ),
+        Message(
+            role="assistant",
+            content="notes.txt holds the greeting.",
+            thinking="The file reads back, so it is done.",
+        ),
+    ]
+    agent = Agent(
+        llm=_ScriptedLLM(script), options=AgentOptions(memory_dir=str(memory))
+    )
+    try:
+        result = await agent.run_task("Write a greeting to notes.txt.")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+
+    # The same calls as raw-call JSONL: the script, and what the run made of
+    # it (ids, steps, results, times) as a record outside localmelo has it.
+    database = memory / "history.db"
+    with contextlib.closing(sqlite3.connect(database)) as connection:
+        timestamps = [
+            row[0]
+            for row in connection.execute(
+                "SELECT timestamp FROM llm_calls ORDER BY seq"
+            )
+        ]
+        results = [
+            json.loads(row[0])
+            for row in connection.execute(
+                "SELECT tool_result_json FROM steps ORDER BY seq"
+            )
+        ]
+    lines = _jsonl(
+        *(
+            {
+                "task_id": result.task_id,
+                "seq": seq,
+                "kind": "plan",
+                "step": seq + 1,
+                "attempt": 1,
+                "content": reply.content,
+                "thinking": reply.thinking,
+                "tool_calls": [
+                    {"tool_name": c.tool_name, "arguments": c.arguments, "id": c.id}
+                    for c in reply.tool_calls
+                ],
+                "tool_results": [
+                    {"tool_name": r["tool_name"], "output": r["output"]}
+                    for r in (results if reply.tool_calls else [])
+                ],
+                "timestamp": timestamps[seq],
+            }
+            for seq, reply in enumerate(script)
+        )
+    )
+    expected = docs_from_calls(load_raw_calls(lines))
+    assert expected
+    exported, skipped = load_history_calls(database)
+    assert skipped == 0
+    assert [doc_to_dict(d) for d in docs_from_calls(exported)] == [
+        doc_to_dict(d) for d in expected
+    ]
+    # And through melo-retrieve --export-run.
+    assert retrieve_main(["--export-run", str(memory)]) == 0
+    out, _ = capsys.readouterr()
+    assert out == "".join(
+        json.dumps(doc_to_dict(doc), ensure_ascii=False) + "\n" for doc in expected
+    )
+
+
+OLLAMA_THINKING = "The list is empty, so the answer is [].\nNo tool is needed."
+
+
+@pytest.mark.parametrize(
+    "thinking",
+    [OLLAMA_THINKING, "a</think>b"],
+    ids=["plain", "with-a-closing-tag"],
+)
+def test_ollamas_copy_of_the_reasoning_is_read_once(
+    tmp_path: Path, thinking: str
+) -> None:
+    answer = "reverse([]) is [], as the tests expect."
+    copied = f"<think>\n{thinking}\n</think>\n\n{answer}"
+    docs: list[list[dict[str, Any]]] = []
+    for name, content in (("copied", copied), ("plain", answer)):
+        database = tmp_path / name / "history.db"
+        database.parent.mkdir()
+        call = RawCall(
+            "t", 0, content=content, thinking=thinking, outcome="answer", timestamp=1.0
+        )
+        write_history_sync(database, [call])
+        calls, _ = load_history_calls(database)
+        assert calls[0].content == answer
+        docs.append([doc_to_dict(doc) for doc in docs_from_calls(calls)])
+    assert docs[0] == docs[1]
+    assert docs[0]
+
+
+def test_other_content_is_read_as_it_is(tmp_path: Path) -> None:
+    database = tmp_path / "history.db"
+    # Not the provider's exact copy: a different block, and a copy without
+    # thinking.
+    calls_in = [
+        RawCall(
+            "t",
+            0,
+            content="<think>\nother\n</think>\n\nA.",
+            thinking="mine",
+            outcome="answer",
+        ),
+        RawCall("t", 1, content="<think>\n\n</think>\n\nB.", outcome="answer"),
+    ]
+    write_history_sync(database, calls_in)
+    calls, _ = load_history_calls(database)
+    assert [call.content for call in calls] == [c.content for c in calls_in]

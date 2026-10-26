@@ -20,6 +20,7 @@ from typing import Any
 
 import pytest
 
+import localmelo.melo.memory._sqlite as core_sqlite
 import localmelo.support.sessions.store as store_mod
 from localmelo.melo.schema import ImagePart, Message, answer_text, split_thinking
 from localmelo.support.sessions.store import (
@@ -1716,6 +1717,57 @@ async def test_retention_at_open_clears_old_thinking(tmp_path: Path) -> None:
     await reopened.open()
     await reopened.aclose()
     _check_retained(path, made)
+
+
+def _first_thinking(path: Path, sid: str) -> str:
+    """The thinking of a session's first assistant.message event, as stored."""
+    (event,) = rows(
+        path,
+        "SELECT event FROM events WHERE session_id = ? "
+        "AND type = 'assistant.message' ORDER BY id LIMIT 1",
+        sid,
+    )[0]
+    return str(json.loads(event)["data"]["thinking"])
+
+
+async def test_the_retention_variable_sets_the_stores_retention(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # One value for history.db, its model calls and sessions.db (R1): the
+    # store's default is the core's, LOCALMELO_THINKING_RETENTION_DAYS
+    # included.
+    assert store_mod.THINKING_RETENTION_DAYS is core_sqlite.THINKING_RETENTION_DAYS
+    path = tmp_path / "s.db"
+    clock = Clock()
+    store = gateway(path, clock)
+    assert store._retention_s == 30 * DAY
+    made = await _old_and_new_rows(store, clock)  # 31 days and 1 day old
+    await store.aclose()
+
+    # 40 days: the 31-day-old thinking stays.
+    monkeypatch.setenv("LOCALMELO_THINKING_RETENTION_DAYS", "40")
+    longer = gateway(path, clock)
+    assert longer._retention_s == 40 * DAY
+    await longer.open()
+    await longer.aclose()
+    assert _first_thinking(path, made["old"]) == "hmm"
+
+    # Half a day: the 1-day-old thinking goes too.
+    monkeypatch.setenv("LOCALMELO_THINKING_RETENTION_DAYS", "0.5")
+    shorter = gateway(path, clock)
+    assert shorter._retention_s == 0.5 * DAY
+    await shorter.open()
+    await shorter.aclose()
+    assert [_first_thinking(path, sid) for sid in made.values()] == ["", ""]
+
+    # An explicit value still wins; an invalid variable names itself.
+    explicit = SessionStore(
+        path, writer="gateway", clock=clock, thinking_retention_days=30
+    )
+    assert explicit._retention_s == 30 * DAY
+    monkeypatch.setenv("LOCALMELO_THINKING_RETENTION_DAYS", "abc")
+    with pytest.raises(ValueError, match="LOCALMELO_THINKING_RETENTION_DAYS"):
+        gateway(path, clock)
 
 
 async def test_apply_retention_on_an_open_store_returns_its_count(

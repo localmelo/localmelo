@@ -1,0 +1,647 @@
+{
+  "result": {
+    "task_id": "<task:1>",
+    "status": "completed",
+    "result": "Six times seven is 42.",
+    "error": "",
+    "steps": 4,
+    "attempts": 1,
+    "n_llm": 4,
+    "n_main": 4,
+    "n_aux": 0,
+    "n_tool": 2,
+    "llm_errors": 0,
+    "usage": {
+      "prompt_tokens": 780,
+      "completion_tokens": 32,
+      "total_tokens": 812
+    },
+    "config": {
+      "max_steps": 30,
+      "attempt_policy": "reflect",
+      "steps_per_attempt": 10,
+      "max_attempts": 5,
+      "reflection_gate": "flags",
+      "tool_exposure": "retrieve",
+      "builtins": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "memory": true,
+      "memory_dir": "<memory_dir>",
+      "timeout_s": null,
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ]
+    }
+  },
+  "requests": [
+    {
+      "model": "stub-model",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise."
+        },
+        {
+          "role": "user",
+          "content": "What is six times seven? Check it with Python."
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "file_read",
+            "description": "Read the contents of a file",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_write",
+            "description": "Write content to a file (creates or overwrites)",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Content to write"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "python_exec",
+            "description": "Execute Python code and return the result",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "Python code"
+                }
+              },
+              "required": [
+                "code"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "shell_exec",
+            "description": "Execute a shell command and return its output",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "description": "Shell command"
+                }
+              },
+              "required": [
+                "command"
+              ]
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    },
+    {
+      "model": "stub-model",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise."
+        },
+        {
+          "role": "user",
+          "content": "What is six times seven? Check it with Python."
+        },
+        {
+          "role": "assistant",
+          "content": "Computing it.",
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "python_exec",
+                "arguments": "{\"code\": \"print(6 * 7)\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_1",
+          "content": "42"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "file_read",
+            "description": "Read the contents of a file",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_write",
+            "description": "Write content to a file (creates or overwrites)",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Content to write"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "python_exec",
+            "description": "Execute Python code and return the result",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "Python code"
+                }
+              },
+              "required": [
+                "code"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "shell_exec",
+            "description": "Execute a shell command and return its output",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "description": "Shell command"
+                }
+              },
+              "required": [
+                "command"
+              ]
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    },
+    {
+      "model": "stub-model",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise."
+        },
+        {
+          "role": "user",
+          "content": "What is six times seven? Check it with Python."
+        },
+        {
+          "role": "assistant",
+          "content": "Computing it.",
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "python_exec",
+                "arguments": "{\"code\": \"print(6 * 7)\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_1",
+          "content": "42"
+        },
+        {
+          "role": "assistant",
+          "content": "[empty reply]"
+        },
+        {
+          "role": "user",
+          "content": "Your last reply was empty. Continue the task: call a tool or give your final answer."
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "file_read",
+            "description": "Read the contents of a file",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_write",
+            "description": "Write content to a file (creates or overwrites)",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Content to write"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "python_exec",
+            "description": "Execute Python code and return the result",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "Python code"
+                }
+              },
+              "required": [
+                "code"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "shell_exec",
+            "description": "Execute a shell command and return its output",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "description": "Shell command"
+                }
+              },
+              "required": [
+                "command"
+              ]
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    },
+    {
+      "model": "stub-model",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise."
+        },
+        {
+          "role": "user",
+          "content": "What is six times seven? Check it with Python."
+        },
+        {
+          "role": "assistant",
+          "content": "Computing it.",
+          "tool_calls": [
+            {
+              "id": "call_1",
+              "type": "function",
+              "function": {
+                "name": "python_exec",
+                "arguments": "{\"code\": \"print(6 * 7)\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_1",
+          "content": "42"
+        },
+        {
+          "role": "assistant",
+          "content": "[empty reply]"
+        },
+        {
+          "role": "user",
+          "content": "Your last reply was empty. Continue the task: call a tool or give your final answer."
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "id": "call_2",
+              "type": "function",
+              "function": {
+                "name": "python_exec",
+                "arguments": "{\"code\": \"print('x' * 60000)\"}"
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "tool_call_id": "call_2",
+          "content": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx… [49957 chars, sha256 217660b456ecb8d5d7467c1b6f58568fe9b10547881c6841d93a72694bcc0621]"
+        }
+      ],
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "file_read",
+            "description": "Read the contents of a file",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_write",
+            "description": "Write content to a file (creates or overwrites)",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Content to write"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "python_exec",
+            "description": "Execute Python code and return the result",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "Python code"
+                }
+              },
+              "required": [
+                "code"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "shell_exec",
+            "description": "Execute a shell command and return its output",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "description": "Shell command"
+                }
+              },
+              "required": [
+                "command"
+              ]
+            }
+          }
+        }
+      ],
+      "tool_choice": "auto"
+    }
+  ],
+  "window": [
+    {
+      "role": "user",
+      "content": "What is six times seven? Check it with Python.",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "Computing it.",
+      "thinking": "I compute six times seven with Python first.",
+      "tool_calls": [
+        {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(6 * 7)"
+          },
+          "id": "call_1"
+        }
+      ],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "42",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "call_1",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "[empty reply]",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "user",
+      "content": "Your last reply was empty. Continue the task: call a tool or give your final answer.",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "thinking": "",
+      "tool_calls": [
+        {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print('x' * 60000)"
+          },
+          "id": "call_2"
+        }
+      ],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx… [49957 chars, sha256 217660b456ecb8d5d7467c1b6f58568fe9b10547881c6841d93a72694bcc0621]",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "call_2",
+      "images": []
+    }
+  ],
+  "history": {
+    "tasks": [
+      {
+        "task_id": "<task:1>",
+        "query": "What is six times seven? Check it with Python.",
+        "status": "completed",
+        "result": "Six times seven is 42."
+      }
+    ],
+    "steps": [
+      {
+        "step_id": "<step:1>",
+        "task_id": "<task:1>",
+        "thought": "Computing it.",
+        "tool_call_json": {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(6 * 7)"
+          },
+          "id": "call_1"
+        },
+        "tool_result_json": {
+          "tool_name": "python_exec",
+          "output": "42",
+          "error": ""
+        },
+        "seq": 0
+      },
+      {
+        "step_id": "<step:2>",
+        "task_id": "<task:1>",
+        "thought": "Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. Here is a long draft of the reasoning behind the answer. ",
+        "tool_call_json": {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print('x' * 60000)"
+          },
+          "id": "call_2"
+        },
+        "tool_result_json": {
+          "tool_name": "python_exec",
+          "output": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx… [50016 chars, sha256 89a5a8b8b67020696f1758327a7e4149a7786a883cb4893e9e5f276e396d6ee2]",
+          "error": ""
+        },
+        "seq": 1
+      }
+    ]
+  }
+}

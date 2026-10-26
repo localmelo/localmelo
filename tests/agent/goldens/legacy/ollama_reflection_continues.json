@@ -1,0 +1,364 @@
+{
+  "result": {
+    "task_id": "<task:1>",
+    "status": "completed",
+    "result": "<think>\nThe reflection says the answer is 1024.\n</think>\n\n2 to the power of 10 is 1024.",
+    "error": "",
+    "steps": 2,
+    "attempts": 2,
+    "n_llm": 3,
+    "n_main": 2,
+    "n_aux": 1,
+    "n_tool": 1,
+    "llm_errors": 0,
+    "usage": {
+      "prompt_tokens": 1100,
+      "completion_tokens": 100,
+      "total_tokens": 1200
+    },
+    "config": {
+      "max_steps": 30,
+      "attempt_policy": "reflect",
+      "steps_per_attempt": 1,
+      "max_attempts": 5,
+      "reflection_gate": "flags",
+      "tool_exposure": "retrieve",
+      "builtins": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "memory": true,
+      "memory_dir": "<memory_dir>",
+      "timeout_s": null,
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ]
+    }
+  },
+  "requests": [
+    {
+      "think": true,
+      "model": "stub-model",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise."
+        },
+        {
+          "role": "user",
+          "content": "What is 2 to the power of 10? Check it with Python."
+        }
+      ],
+      "stream": false,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "file_read",
+            "description": "Read the contents of a file",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_write",
+            "description": "Write content to a file (creates or overwrites)",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Content to write"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "python_exec",
+            "description": "Execute Python code and return the result",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "Python code"
+                }
+              },
+              "required": [
+                "code"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "shell_exec",
+            "description": "Execute a shell command and return its output",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "description": "Shell command"
+                }
+              },
+              "required": [
+                "command"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "think": true,
+      "model": "stub-model",
+      "messages": [
+        {
+          "role": "system",
+          "content": "The current attempt has ended without a final answer. Reflect on what happened and decide how to proceed.\n\nIMPORTANT: this reflection is the *only* state carried into the next attempt. It is compressed working state, not a log. Treat any prior reflection the same way: keep only constraints, failed paths, and evidence that are still relevant to the next concrete step. Drop the rest. The total reflection should stay under ~1500 characters when serialized — if you cannot fit it, choose 'stop' or 'decompose' instead of 'continue'.\n\nChoose 'done' only if the task is already complete, and put the final answer in best_effort_result.\n\nRespond with a JSON object (no markdown fences):\n{\n  \"summary\": \"one-sentence summary of what was attempted\",\n  \"failed_hypotheses\": [\"approaches that did not work\"],\n  \"useful_evidence\": [\"facts discovered that may help\"],\n  \"recommended_avoids\": [\"actions to avoid next\"],\n  \"next_promising_directions\": [\"concrete next steps to try\"],\n  \"progress_made\": true/false,\n  \"task_still_feasible\": true/false,\n  \"new_information_gained\": true/false,\n  \"next_step_is_concrete\": true/false,\n  \"next_step_is_novel\": true/false,\n  \"recommended_action\": \"continue\" | \"stop\" | \"decompose\" | \"done\",\n  \"rationale\": \"why you chose this action\",\n  \"best_effort_result\": \"the final answer if done, else the best partial answer so far, or empty string\",\n  \"estimated_info_gain\": 0.0-1.0,\n  \"estimated_cost\": 0.0-1.0,\n  \"repeat_risk\": 0.0-1.0,\n  \"novelty\": 0.0-1.0,\n  \"feasibility\": 0.0-1.0\n}"
+        },
+        {
+          "role": "user",
+          "content": "What is 2 to the power of 10? Check it with Python."
+        },
+        {
+          "role": "assistant",
+          "content": "Computing it.",
+          "thinking": "Python gives the exact power.",
+          "tool_calls": [
+            {
+              "function": {
+                "name": "python_exec",
+                "arguments": {
+                  "code": "print(2 ** 10)"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "1024",
+          "tool_name": "python_exec"
+        },
+        {
+          "role": "user",
+          "content": "Original task: What is 2 to the power of 10? Check it with Python.\nThis was attempt 0. The step budget for this attempt was exhausted. Reflect and decide."
+        }
+      ],
+      "stream": false
+    },
+    {
+      "think": true,
+      "model": "stub-model",
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.\n\n[REFLECTION]\nAttempt 0: Python printed 1024.\n  Try: Answer with 1024."
+        },
+        {
+          "role": "user",
+          "content": "What is 2 to the power of 10? Check it with Python."
+        },
+        {
+          "role": "assistant",
+          "content": "Computing it.",
+          "thinking": "Python gives the exact power.",
+          "tool_calls": [
+            {
+              "function": {
+                "name": "python_exec",
+                "arguments": {
+                  "code": "print(2 ** 10)"
+                }
+              }
+            }
+          ]
+        },
+        {
+          "role": "tool",
+          "content": "1024",
+          "tool_name": "python_exec"
+        }
+      ],
+      "stream": false,
+      "tools": [
+        {
+          "type": "function",
+          "function": {
+            "name": "file_read",
+            "description": "Read the contents of a file",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                }
+              },
+              "required": [
+                "path"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "file_write",
+            "description": "Write content to a file (creates or overwrites)",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "File path"
+                },
+                "content": {
+                  "type": "string",
+                  "description": "Content to write"
+                }
+              },
+              "required": [
+                "path",
+                "content"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "python_exec",
+            "description": "Execute Python code and return the result",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "description": "Python code"
+                }
+              },
+              "required": [
+                "code"
+              ]
+            }
+          }
+        },
+        {
+          "type": "function",
+          "function": {
+            "name": "shell_exec",
+            "description": "Execute a shell command and return its output",
+            "parameters": {
+              "type": "object",
+              "properties": {
+                "command": {
+                  "type": "string",
+                  "description": "Shell command"
+                }
+              },
+              "required": [
+                "command"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "window": [
+    {
+      "role": "user",
+      "content": "What is 2 to the power of 10? Check it with Python.",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "<think>\nPython gives the exact power.\n</think>\n\nComputing it.",
+      "thinking": "Python gives the exact power.",
+      "tool_calls": [
+        {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(2 ** 10)"
+          },
+          "id": "<call:1>"
+        }
+      ],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "1024",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "<call:1>",
+      "images": []
+    }
+  ],
+  "history": {
+    "tasks": [
+      {
+        "task_id": "<task:1>",
+        "query": "What is 2 to the power of 10? Check it with Python.",
+        "status": "completed",
+        "result": "<think>\nThe reflection says the answer is 1024.\n</think>\n\n2 to the power of 10 is 1024."
+      }
+    ],
+    "steps": [
+      {
+        "step_id": "<step:1>",
+        "task_id": "<task:1>",
+        "thought": "<think>\nPython gives the exact power.\n</think>\n\nComputing it.",
+        "tool_call_json": {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(2 ** 10)"
+          },
+          "id": "<call:1>"
+        },
+        "tool_result_json": {
+          "tool_name": "python_exec",
+          "output": "1024",
+          "error": ""
+        },
+        "seq": 0
+      }
+    ]
+  }
+}

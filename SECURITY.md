@@ -72,7 +72,14 @@ those tools can do.
   the `env` you give them.
 - **Secrets.** The config file stores the *name* of the API-key variable,
   not the key. `history.db` stores tasks, the model's text, tool calls and
-  their results as plain text.
+  their results as plain text. With persistence on, it also holds the
+  model's reasoning for every call, in its `llm_calls` table. There,
+  one-time codes, key shapes and bearer tokens become `[redacted]`, and
+  reasoning older than 30 days (`LOCALMELO_THINKING_RETENTION_DAYS`) is
+  cleared, while tasks and steps keep the text as typed. A new memory
+  directory is created with mode 0700, the default one is set to 0700 when
+  it is open to group or others, and a new `history.db` is created with
+  mode 0600.
 - **Sessions.** The session store of the Python API
   ([Sessions](docs/sessions.md)) keeps transcripts and tool output in
   `sessions.db` as plain text, its window checkpoints included, in `0600`

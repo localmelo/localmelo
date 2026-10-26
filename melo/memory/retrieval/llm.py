@@ -22,7 +22,11 @@ from collections.abc import Sequence
 from collections.abc import Set as AbstractSet
 from typing import Any
 
-from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
+from localmelo.melo.contracts.providers import (
+    LLM_REQUEST_KIND,
+    BaseLLMProvider,
+    ProviderError,
+)
 from localmelo.melo.memory.retrieval.base import (
     Doc,
     RetrievalResult,
@@ -174,14 +178,21 @@ class LLMRetriever:
 def send_from_provider(llm: BaseLLMProvider) -> Send:
     """A :data:`~localmelo.melo.memory.retrieval.base.Send` on *llm*.
 
-    Each call sends one ``llm.chat(messages, tools=None)``, with no retry.
-    When the provider has a ``last_usage`` dict once ``chat()`` returns,
-    its int items replace the reply's ``usage``, so usage keys that the
-    reply's own three leave out (``cached_tokens``) reach the result.
+    Each call sends one ``llm.chat(messages, tools=None)``, with no retry,
+    and with ``LLM_REQUEST_KIND`` set to ``retrieve`` meanwhile, so an HTTP
+    provider names the request's kind in its ``X-Localmelo-Call-Kind``
+    header. When the provider has a ``last_usage`` dict once ``chat()``
+    returns, its int items replace the reply's ``usage``, so usage keys
+    that the reply's own three leave out (``cached_tokens``) reach the
+    result.
     """
 
     async def send(messages: list[Message]) -> Message:
-        reply = await llm.chat(messages, tools=None)
+        token = LLM_REQUEST_KIND.set("retrieve")
+        try:
+            reply = await llm.chat(messages, tools=None)
+        finally:
+            LLM_REQUEST_KIND.reset(token)
         # Read right after chat() returns, with no await in between, so the
         # value belongs to this call even while other calls run.
         last_usage = getattr(llm, "last_usage", None)

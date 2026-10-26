@@ -171,6 +171,15 @@ def _reasoning_text(msg: dict[str, Any]) -> str:
     return ""
 
 
+def _reasoning_key(msg: dict[str, Any]) -> str:
+    """The key that :func:`_reasoning_text` takes the reasoning from, or ``""``."""
+    for key in ("reasoning_content", "reasoning"):
+        value = msg.get(key)
+        if isinstance(value, str) and value:
+            return key
+    return ""
+
+
 def _coerce_token_count(value: Any) -> int:
     """Safely coerce a token count to a non-negative int.
 
@@ -209,6 +218,33 @@ def _normalize_usage(raw_usage: Any) -> dict[str, int] | None:
     }
 
 
+# Usage fields beyond the three of _normalize_usage, each kept only when the
+# server sends it: name -> (the usage object that holds it, its key there).
+_USAGE_DETAILS = {
+    "cached_tokens": ("prompt_tokens_details", "cached_tokens"),
+    "reasoning_tokens": ("completion_tokens_details", "reasoning_tokens"),
+}
+
+
+def _usage_details(raw_usage: Any) -> dict[str, int] | None:
+    """The whole usage of a reply, for ``last_usage``.
+
+    ``None`` when *raw_usage* is not a dict, else the three keys of
+    :func:`_normalize_usage`, plus ``cached_tokens`` from
+    ``prompt_tokens_details.cached_tokens`` and ``reasoning_tokens`` from
+    ``completion_tokens_details.reasoning_tokens``, each only when the
+    server sent it, coerced with :func:`_coerce_token_count`.
+    """
+    usage = _normalize_usage(raw_usage)
+    if usage is None:
+        return None
+    for name, (group, key) in _USAGE_DETAILS.items():
+        details = raw_usage.get(group)
+        if isinstance(details, dict) and details.get(key) is not None:
+            usage[name] = _coerce_token_count(details[key])
+    return usage
+
+
 class OpenAICompatLLM(BaseLLMProvider):
     """OpenAI-compatible chat/completion provider.
 
@@ -221,7 +257,12 @@ class OpenAICompatLLM(BaseLLMProvider):
     A failed request raises
     :class:`~localmelo.melo.contracts.providers.ProviderError`. Every
     request sends ``LLM_REQUEST_ATTEMPT`` in the ``X-Localmelo-Attempt``
-    header.
+    header, and ``LLM_REQUEST_KIND``, when it is set, in the
+    ``X-Localmelo-Call-Kind`` header. After a reply,
+    ``last_reasoning_key`` is ``reasoning_content`` or ``reasoning``, the
+    key its reasoning came from, or ``""``, and ``last_usage`` is the
+    reply's usage with ``cached_tokens`` and ``reasoning_tokens`` from the
+    usage details when the server sent them.
 
     Parameters
     ----------
@@ -288,6 +329,9 @@ class OpenAICompatLLM(BaseLLMProvider):
         if msg is None:
             raise malformed_body(resp, path, "no choices[0].message object")
 
+        # Set right before the return, with no await in between.
+        self.last_reasoning_key = _reasoning_key(msg)
+        self.last_usage = _usage_details(data.get("usage"))
         return Message(
             role="assistant",
             content=msg.get("content") or "",

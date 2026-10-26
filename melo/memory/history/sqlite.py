@@ -1,16 +1,27 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+import logging
+import math
+import re
+import time
+from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import aiosqlite
 
-from localmelo.melo.memory._sqlite import apply_pragmas
+from localmelo.melo.memory._sqlite import (
+    THINKING_RETENTION_DAYS,
+    create_private_file,
+    prepare_connection,
+)
 from localmelo.melo.memory.history import History
 from localmelo.melo.schema import (
     ImagePart,
+    LLMCallRecord,
     StepRecord,
     TaskRecord,
     ToolCall,
@@ -36,6 +47,105 @@ CREATE TABLE IF NOT EXISTS steps (
 );
 """
 
+logger = logging.getLogger(__name__)
+
+# The history schema this code reads and writes, kept in the file's
+# ``PRAGMA user_version``. Version 0 is a file written before llm_calls.
+HISTORY_SCHEMA_VERSION: Final = 1
+
+# One row per model response (see :meth:`SqliteHistory.add_llm_call`). No
+# foreign key, so no row is ever refused for its task, and no index: the
+# primary key serves per-task reads.
+_LLM_CALLS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS llm_calls (
+  task_id TEXT NOT NULL, seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  step INTEGER, attempt INTEGER,
+  outcome TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '', thinking TEXT NOT NULL DEFAULT '',
+  reasoning_key TEXT NOT NULL DEFAULT '',
+  step_ids_json TEXT,
+  redactions INTEGER NOT NULL DEFAULT 0,
+  tool_calls_json TEXT, usage_json TEXT, duration_s REAL, timestamp REAL NOT NULL,
+  PRIMARY KEY (task_id, seq));
+"""
+
+
+class HistorySchemaError(RuntimeError):
+    """``history.db`` has a newer schema version than this code reads."""
+
+
+# The tags of an inline reasoning block, in any letter case.
+_OPEN_TAG = "<[Tt][Hh][Ii][Nn][Kk]>"
+_CLOSE_TAG = "</[Tt][Hh][Ii][Nn][Kk]>"
+_SPACE = re.compile(r"\s*")
+# A block up to its first closing tag, and the whitespace after it.
+_BLOCK = re.compile(rf"{_OPEN_TAG}.*?{_CLOSE_TAG}\s*", re.DOTALL)
+_OPENING = re.compile(_OPEN_TAG)
+# A closing tag and the whitespace after it.
+_CLOSING = re.compile(rf"{_CLOSE_TAG}\s*")
+
+
+def _ollama_prefix(thinking: str) -> str:
+    """The copy of *thinking* that Ollama's provider puts before the content."""
+    return f"<think>\n{thinking}\n</think>\n\n"
+
+
+def _without_inline_blocks(text: str) -> str:
+    """*text* without the reasoning a reply without a reasoning parser left in it.
+
+    The first of these forms that applies is removed, again until none
+    applies, so the result is a fixed point:
+
+    1. after leading whitespace, a ``<think>`` up to and including the
+       first ``</think>`` and the whitespace after it;
+    2. after leading whitespace, a ``<think>`` with no ``</think>`` after
+       it: everything from the ``<think>`` on (output cut off while the
+       model thought);
+    3. a ``</think>`` with no ``<think>`` before it: everything up to and
+       including it and the whitespace after it (a chat template that
+       opens the block in the prompt).
+
+    Any other text is left as it is, a tag in its middle too, and so is
+    the leading whitespace before a block of forms 1 and 2.
+    """
+    # The text so far is lead + text[start:]: the leading whitespace kept,
+    # then what follows the parts removed.
+    lead, start = "", 0
+    while True:
+        space = _SPACE.match(text, start)  # always matches, maybe empty
+        at = start if space is None else space.end()
+        block = _BLOCK.match(text, at)
+        if block is not None:
+            lead, start = lead + text[start:at], block.end()
+            continue
+        if _OPENING.match(text, at) is not None:
+            return lead + text[start:at]
+        closing = _CLOSING.search(text, start)
+        if closing is not None and not _OPENING.search(text, start, closing.start()):
+            lead, start = "", closing.end()
+            continue
+        return lead + text[start:]
+
+
+def _content_without_reasoning(reasoning_key: str, thinking: str, content: str) -> str:
+    """*content* without the inline reasoning its row's *reasoning_key* implies.
+
+    - ``thinking`` (Ollama's provider): the copy of *thinking* that the
+      provider put before the content, when it is there;
+    - ``""`` (no separate reasoning): see :func:`_without_inline_blocks`;
+    - any other key, such as ``reasoning_content``: none, since the server
+      returned the reasoning apart from the content.
+    """
+    if reasoning_key == "thinking":
+        prefix = _ollama_prefix(thinking)
+        if thinking and content.startswith(prefix):
+            return content[len(prefix) :]
+        return content
+    if reasoning_key == "":
+        return _without_inline_blocks(content)
+    return content
+
 
 class SqliteHistory(History):
     """Persistent history backed by SQLite via aiosqlite.
@@ -52,13 +162,41 @@ class SqliteHistory(History):
     Tool-result images are stored as references (MIME type, SHA-256
     digest, size), never their base64 payload, and load back as
     reference :class:`ImagePart` objects.
+
+    Besides ``tasks`` and ``steps``, the file holds ``llm_calls``, one row
+    per model response (see :meth:`add_llm_call`), at schema version
+    :data:`HISTORY_SCHEMA_VERSION` in ``PRAGMA user_version``. The first
+    call that opens the connection creates a missing file with mode 0600
+    and brings an older file to that version in one ``BEGIN IMMEDIATE``
+    transaction; a newer file raises :class:`HistorySchemaError` on every
+    call. In the same transaction, once per instance, the reasoning of
+    rows older than *thinking_retention_days* (30 by default) is cleared:
+    ``thinking`` and the inline reasoning that ``content`` repeats, by the
+    row's ``reasoning_key``. *clock* gives the time for that cutoff.
     """
 
-    def __init__(self, db_path: str | Path) -> None:
+    def __init__(
+        self,
+        db_path: str | Path,
+        *,
+        thinking_retention_days: float = THINKING_RETENTION_DAYS,
+        clock: Callable[[], float] = time.time,
+    ) -> None:
+        if not (math.isfinite(thinking_retention_days) and thinking_retention_days > 0):
+            raise ValueError(
+                "thinking_retention_days must be a finite number of days "
+                f"greater than 0, not {thinking_retention_days!r}"
+            )
         self._db_path = str(db_path)
+        self._thinking_retention_days = thinking_retention_days
+        # Read only for the retention's cutoff.
+        self._clock = clock
         self._conn: aiosqlite.Connection | None = None
         self._init_lock = asyncio.Lock()
         self._write_lock = asyncio.Lock()
+        # The retention pass runs once per instance, at the first call that
+        # opens the connection; a reconnection after aclose() skips it.
+        self._retention_done = False
 
     async def _ensure_ready(self) -> aiosqlite.Connection:
         if self._conn is not None:
@@ -66,12 +204,91 @@ class SqliteHistory(History):
         async with self._init_lock:
             if self._conn is not None:
                 return self._conn
+            if self._db_path != ":memory:":
+                create_private_file(self._db_path)
             conn = await aiosqlite.connect(self._db_path)
-            await apply_pragmas(conn)
-            await conn.executescript(_SCHEMA)
-            await conn.commit()
+            try:
+                await prepare_connection(conn, _SCHEMA)
+                await self._migrate(conn)
+            except BaseException:
+                # A clean-up that fails must not replace what is raised, a
+                # cancellation above all.
+                with contextlib.suppress(Exception):
+                    await conn.close()
+                raise
             self._conn = conn
             return conn
+
+    async def _migrate(self, conn: aiosqlite.Connection) -> None:
+        """Bring the file to :data:`HISTORY_SCHEMA_VERSION`, in one transaction.
+
+        The version is read inside the ``BEGIN IMMEDIATE`` transaction, so
+        two openers cannot both migrate. A newer file raises
+        :class:`HistorySchemaError`. Every statement runs with
+        ``execute``: ``executescript`` would commit the transaction first.
+        """
+        migrated = False
+        try:
+            await conn.execute("BEGIN IMMEDIATE")
+            async with conn.execute("PRAGMA user_version") as cur:
+                row = await cur.fetchone()
+            version = int(row[0]) if row else 0
+            if version > HISTORY_SCHEMA_VERSION:
+                raise HistorySchemaError(
+                    f"{self._db_path} has schema version {version}; this "
+                    f"localmelo reads version {HISTORY_SCHEMA_VERSION}"
+                )
+            await conn.execute(_LLM_CALLS_SCHEMA)
+            if version < HISTORY_SCHEMA_VERSION:
+                await conn.execute(f"PRAGMA user_version = {HISTORY_SCHEMA_VERSION}")
+                migrated = True
+            if not self._retention_done:
+                await self._clear_old_reasoning(conn)
+            await conn.commit()
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await conn.rollback()
+            raise
+        self._retention_done = True
+        if migrated:
+            logger.info(
+                "Migrated %s to history schema version %d",
+                self._db_path,
+                HISTORY_SCHEMA_VERSION,
+            )
+
+    async def _clear_old_reasoning(self, conn: aiosqlite.Connection) -> None:
+        """Clear the reasoning of the rows older than the retention period.
+
+        Inside :meth:`_migrate`'s transaction. Each ``llm_calls`` row whose
+        ``timestamp`` is older than ``thinking_retention_days`` loses its
+        ``thinking`` and the inline reasoning its ``content`` holds (see
+        :func:`_content_without_reasoning`); every other column, and the
+        row, stays. A row that would not change is not written, so a pass
+        over rows cleared before writes nothing.
+        """
+        cutoff = self._clock() - self._thinking_retention_days * 86400
+        updates: list[tuple[str, str, int]] = []
+        # Only rows that can change: with thinking, or with no reasoning key
+        # and a tag in their content (LIKE ignores ASCII letter case).
+        async with conn.execute(
+            """SELECT task_id, seq, reasoning_key, thinking, content
+               FROM llm_calls
+               WHERE timestamp < ?
+                 AND (thinking != ''
+                      OR (reasoning_key = '' AND content LIKE '%think>%'))""",
+            (cutoff,),
+        ) as cur:
+            async for task_id, seq, reasoning_key, thinking, content in cur:
+                kept = _content_without_reasoning(reasoning_key, thinking, content)
+                if thinking or kept != content:
+                    updates.append((kept, task_id, seq))
+        if updates:
+            await conn.executemany(
+                """UPDATE llm_calls SET thinking = '', content = ?
+                   WHERE task_id = ? AND seq = ?""",
+                updates,
+            )
 
     # ── public interface (mirrors History) ──
 
@@ -164,6 +381,98 @@ class SqliteHistory(History):
                 await conn.commit()
             except BaseException:
                 await conn.rollback()
+                raise
+
+    async def add_llm_call(self, record: LLMCallRecord) -> None:
+        """Write *record* as a new ``llm_calls`` row; ``step_ids_json`` is NULL.
+
+        ``tool_calls_json`` lists the calls as ``{"tool_name", "arguments",
+        "id"}`` objects, as :meth:`add_step` writes one call, or is NULL
+        without calls; ``usage_json`` is the usage as JSON, or NULL. The
+        row is written in a ``BEGIN IMMEDIATE`` transaction that a failure
+        or a cancellation rolls back, as :meth:`add_step`'s is.
+        """
+        conn = await self._ensure_ready()
+
+        tool_calls_json = None
+        if record.tool_calls:
+            tool_calls_json = json.dumps(
+                [
+                    {
+                        "tool_name": call.tool_name,
+                        "arguments": call.arguments,
+                        "id": call.id,
+                    }
+                    for call in record.tool_calls
+                ]
+            )
+        usage_json = None if record.usage is None else json.dumps(record.usage)
+
+        async with self._write_lock:
+            # BEGIN IMMEDIATE is inside the try, as in add_step.
+            try:
+                await conn.execute("BEGIN IMMEDIATE")
+                await conn.execute(
+                    """INSERT INTO llm_calls
+                       (task_id, seq, kind, step, attempt, outcome, content,
+                        thinking, reasoning_key, step_ids_json, redactions,
+                        tool_calls_json, usage_json, duration_s, timestamp)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)""",
+                    (
+                        record.task_id,
+                        record.seq,
+                        record.kind,
+                        record.step,
+                        record.attempt,
+                        record.outcome,
+                        record.content,
+                        record.thinking,
+                        record.reasoning_key,
+                        record.redactions,
+                        tool_calls_json,
+                        usage_json,
+                        record.duration_s,
+                        record.timestamp,
+                    ),
+                )
+                await conn.commit()
+            except BaseException:
+                # Unlike add_step's, a rollback that fails (on a connection
+                # aclose() closed meanwhile) does not replace the error in
+                # flight: CallLog logs an Exception and carries on, so a
+                # CancelledError replaced here would be swallowed.
+                with contextlib.suppress(Exception):
+                    await conn.rollback()
+                raise
+
+    async def link_llm_call_steps(
+        self, task_id: str, seq: int, step_ids: Sequence[str]
+    ) -> None:
+        """Set ``step_ids_json`` of row ``(task_id, seq)`` to *step_ids*, in order.
+
+        An empty *step_ids* writes nothing, and a missing row is no error.
+        Linking a row again with the same ids writes the same value. The
+        transaction is rolled back on a failure or a cancellation, as
+        :meth:`add_step`'s is.
+        """
+        if not step_ids:
+            return
+        conn = await self._ensure_ready()
+        step_ids_json = json.dumps(list(step_ids))
+        async with self._write_lock:
+            # BEGIN IMMEDIATE is inside the try, as in add_step.
+            try:
+                await conn.execute("BEGIN IMMEDIATE")
+                await conn.execute(
+                    """UPDATE llm_calls SET step_ids_json = ?
+                       WHERE task_id = ? AND seq = ?""",
+                    (step_ids_json, task_id, seq),
+                )
+                await conn.commit()
+            except BaseException:
+                # As in add_llm_call.
+                with contextlib.suppress(Exception):
+                    await conn.rollback()
                 raise
 
     async def get_steps(self, task_id: str) -> list[StepRecord]:

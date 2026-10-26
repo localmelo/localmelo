@@ -54,7 +54,13 @@ from localmelo.melo.contracts.events import (
     EVENT_SCHEMA_VERSION,
     json_safe_payload,
 )
+from localmelo.melo.memory._sqlite import (
+    THINKING_RETENTION_DAYS as THINKING_RETENTION_DAYS,
+)
 from localmelo.melo.memory._sqlite import apply_pragmas
+from localmelo.melo.memory._sqlite import (
+    thinking_retention_days as core_thinking_retention_days,
+)
 from localmelo.melo.schema import (
     ImagePart,
     Message,
@@ -84,9 +90,9 @@ Writer = Literal["gateway", "cli"]
 GATEWAY_SESSIONS_DB: Final = "~/.cache/localmelo/gateway/sessions.db"
 CLI_SESSIONS_DB: Final = "~/.cache/localmelo/cli/sessions.db"
 
-# Days after which retention clears thinking, <think> blocks, window
-# checkpoints and withdrawals (R1's default; R1 moves it to the core).
-THINKING_RETENTION_DAYS: Final = 30.0
+# THINKING_RETENTION_DAYS, imported above, is the core's default: the days
+# after which retention clears thinking, <think> blocks, window checkpoints
+# and withdrawals, as history.db clears its model calls' reasoning.
 # Seconds between the gateway's apply_retention() calls.
 RETENTION_SWEEP_S: Final = 86_400.0
 # Seconds a turn's lease lasts; the runner refreshes it every LEASE_S / 3.
@@ -652,8 +658,14 @@ class SessionStore:
     surface opens the other's file by accident; *path* is that file,
     :func:`default_path` when ``None``. *clock* gives every time the store
     records, and *thinking_retention_days* the age after which
-    :meth:`apply_retention` clears thinking. Nothing touches the disk until
-    the first awaited call, which opens the store (see :meth:`open`).
+    :meth:`apply_retention` clears thinking. Without it, the store keeps
+    thinking as long as ``history.db`` does: the days of
+    ``LOCALMELO_THINKING_RETENTION_DAYS`` when it is set, else
+    :data:`THINKING_RETENTION_DAYS` (see
+    :func:`localmelo.melo.memory._sqlite.thinking_retention_days`), read
+    when the store is made; an invalid value of the variable raises
+    ``ValueError`` naming it. Nothing touches the disk until the first
+    awaited call, which opens the store (see :meth:`open`).
 
     One ``asyncio.Lock`` serializes the store's statements, reads included,
     so a read sees only committed rows. Listeners (see :meth:`add_listener`)
@@ -666,10 +678,14 @@ class SessionStore:
         *,
         writer: Writer,
         clock: Callable[[], float] = time.time,
-        thinking_retention_days: float = THINKING_RETENTION_DAYS,
+        thinking_retention_days: float | None = None,
     ) -> None:
         if writer not in _OWNERS:
             raise ValueError(f"writer must be 'gateway' or 'cli', got {writer!r}")
+        if thinking_retention_days is None:
+            # The core's value, so sessions.db, history.db and its model
+            # calls always agree.
+            thinking_retention_days = core_thinking_retention_days()
         if (
             isinstance(thinking_retention_days, bool)
             or not isinstance(thinking_retention_days, int | float)

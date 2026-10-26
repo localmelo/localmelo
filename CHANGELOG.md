@@ -9,6 +9,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- With persistence on, `history.db` keeps every reply of the model with its
+  reasoning, in a new `llm_calls` table: one row per planning or reflection
+  reply, with its kind, outcome, step, tool calls, token usage and duration,
+  and the tool steps it made. Text and reasoning pass a minimal redaction of
+  secrets. Reasoning is kept 30 days, or the days in
+  `LOCALMELO_THINKING_RETENTION_DAYS`, in `history.db` and `sessions.db`
+  alike. `melo-retrieve --export-run` exports these calls from a run's
+  directory ([#42]).
+- Every chat request carries an `X-Localmelo-Call-Kind` header (`plan` or
+  `reflect`; `retrieve` for `melo-retrieve`), so a proxy can tell the kinds
+  of calls apart. Request bodies are unchanged ([#42]).
 - Sessions in the Python API (experimental), `localmelo.support.sessions`.
   A session keeps a conversation in SQLite: each turn begins with a stored
   row, outlives the request that started it, and ends exactly once with a
@@ -85,6 +96,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A memory directory that localmelo creates gets mode 0700, and a new
+  `history.db` mode 0600. The default directory is tightened to 0700 when it
+  is open to other users ([#42]).
 - `--chat-model` without `--base-url` replaces the configured chat model for
   that run; it used to be ignored ([#35]).
 - A follow-up question in a gateway session, a web chat or the `melo ""`
@@ -160,3 +174,4 @@ earlier milestones.
 [#39]: https://github.com/localmelo/localmelo/pull/39
 [#40]: https://github.com/localmelo/localmelo/pull/40
 [#41]: https://github.com/localmelo/localmelo/pull/41
+[#42]: https://github.com/localmelo/localmelo/pull/42

@@ -22,7 +22,9 @@ from collections.abc import (
 )
 from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
+from localmelo.melo.agent._call_log import CallHistory, CallLog
 from localmelo.melo.agent._chat import (
+    CALL_RECORDER,
     RETRY_HOOK,
     Chat,
     RequestStats,
@@ -977,12 +979,28 @@ class Agent:
         history_backend = None
         long_backend = None
         if self._memory_dir is not None:
+            from localmelo.melo.memory._sqlite import (
+                make_private_dir,
+                thinking_retention_days,
+                tighten_private_dir,
+            )
             from localmelo.melo.memory.history.sqlite import SqliteHistory
             from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 
-            os.makedirs(self._memory_dir, exist_ok=True)
+            # Read first, so that a bad value raises before the directory is
+            # created.
+            retention_days = thinking_retention_days()
+            make_private_dir(self._memory_dir)
+            if (
+                self.options.memory_dir is None
+                and "LOCALMELO_MEMORY_DIR" not in os.environ
+            ):
+                # The default directory, localmelo's own: one that an older
+                # version made with the umask's mode is closed to others.
+                tighten_private_dir(self._memory_dir)
             history_backend = SqliteHistory(
-                os.path.join(self._memory_dir, "history.db")
+                os.path.join(self._memory_dir, "history.db"),
+                thinking_retention_days=retention_days,
             )
             if self._embedding and self.options.memory:
                 long_backend = SqliteLongTerm(
@@ -1599,9 +1617,12 @@ class Agent:
         Each record joins ``step.records`` before it is written, and
         ``step.stored`` counts it once ``store_step`` has returned, so a
         cancellation in between leaves what is missing from history known
-        (see :meth:`_save_interrupted_step`). Appending the turn is the last
-        statement and is synchronous: nothing comes between it and the
-        caller's clearing of ``run.inflight``.
+        (see :meth:`_save_interrupted_step`). Once every record is written,
+        the run's call recorder, when set, lists their ids in order on the
+        planning reply's ``llm_calls`` row (``CallLog.link_steps``).
+        Appending the turn is the last statement and is synchronous:
+        nothing comes between it and the caller's clearing of
+        ``run.inflight``.
         """
         response = step.response
         calls = response.tool_calls
@@ -1628,6 +1649,13 @@ class Agent:
                 await self.hippo.memorize(
                     summary, metadata={"step_id": record.step_id}, to_working=False
                 )
+
+        recorder = CALL_RECORDER.get()
+        if recorder is not None:
+            # Every record is written: the planning reply's row lists them.
+            await recorder.link_steps(
+                [record.step_id for record in step.records[: step.stored]]
+            )
 
         assistant_msg, tool_msgs = self._checked_tool_turn(
             response, kept, step.cut_before
@@ -2243,15 +2271,24 @@ class Agent:
         run's own status, is saved again as that method describes, and
         the cancellation then propagates.
 
+        With persistence on, or any history that keeps model calls, every
+        response of the run's model requests is also recorded, as it
+        arrives, in history's ``llm_calls`` table, and each tool step's
+        rows are listed on the row of the response that made them (see
+        :class:`~localmelo.melo.agent._call_log.CallLog`). A record that
+        fails is logged, the run's first at WARNING, and changes nothing
+        of the run: not its status, result, error or counters.
+
         A ``cancelled`` run is finalized in a task of its own instead,
         which a second cancellation does not stop (see :meth:`_finalize`):
         history gets the rows its interrupted step is missing, one per
         call, and the task record is saved, both within
-        :data:`FINALIZE_TIMEOUT_S`; the reflections are cleared without
-        being promoted, so no network call follows the cancellation. After
-        :meth:`begin_exit`, the finalizer closes the tool providers first
-        and keeps to the exit's deadline, as :meth:`begin_exit` describes
-        for other runs.
+        :data:`FINALIZE_TIMEOUT_S`, and then, within what is left, the
+        rows written are listed on their response's ``llm_calls`` row; the
+        reflections are cleared without being promoted, so no network call
+        follows the cancellation. After :meth:`begin_exit`, the finalizer
+        closes the tool providers first and keeps to the exit's deadline,
+        as :meth:`begin_exit` describes for other runs.
 
         ``RunResult.config`` reports the effective configuration: the
         options, the registered built-ins (``builtins``), the resolved
@@ -2271,9 +2308,11 @@ class Agent:
         the others. An event on which the sink raises an ``Exception`` is
         lost, and the run goes on. The sink must not block: slow work
         belongs on a queue. The ``thinking`` and ``content`` of
-        ``assistant.message`` events pass
+        ``assistant.message`` events, and the ``rationale``, ``summary``
+        and ``best_effort_result`` of ``reflection`` events, pass
         :func:`~localmelo.melo.checker.redaction.redact_secrets`, while
-        working memory, history and the RunResult keep the text as it is.
+        working memory, history's tasks and steps and the RunResult keep
+        the text as it is; history's model calls store it redacted too.
         Without a sink, no event is built.
 
         *approval*, an
@@ -2314,6 +2353,16 @@ class Agent:
         deadline = asyncio.timeout(timeout_s)  # never expires when None
         # The retry notices of this run's model requests; only with a sink.
         retries = RETRY_HOOK.set(run.events.retry) if on_event is not None else None
+        # Every response of this run's model requests becomes a row of
+        # history's llm_calls table, when the history keeps model calls,
+        # with or without a sink. Read at each run, so a history set after
+        # the Agent was built records too.
+        history = self.hippo.history
+        recorder = CALL_RECORDER.set(
+            CallLog(history, task.task_id, run)
+            if isinstance(history, CallHistory)
+            else None
+        )
         self._active_runs += 1
         try:
             run.events.run_started(
@@ -2409,6 +2458,7 @@ class Agent:
                 self._active_runs -= 1
             if retries is not None:
                 RETRY_HOOK.reset(retries)
+            CALL_RECORDER.reset(recorder)
 
     def _record_answer(self, run: _RunState) -> None:
         """Append the answer of *run*, which has ended, to working memory.
@@ -2657,7 +2707,12 @@ class Agent:
         3. The task record is saved, with the status ``cancelled`` and the
            error, within what is left of step 2's
            :data:`FINALIZE_TIMEOUT_S`, or during an exit within the exit's
-           time.
+           time. Then, when the run has a call recorder, the step's rows
+           that are written are listed on its planning reply's
+           ``llm_calls`` row, within what is still left; with no time left,
+           the link is skipped. It comes after the save, so a held write
+           lock cannot cost the task record its status: an unlinked row is
+           the lesser loss. A failed link is logged by the recorder.
         4. The reflections are cleared without being promoted: no
            long-term write, and no embedding or other network call.
         5. The RunResult is built, kept as ``run.outcome`` and reported
@@ -2680,6 +2735,8 @@ class Agent:
                 except asyncio.CancelledError as exc:
                     cancelled = exc
             finalize_by = loop.time() + FINALIZE_TIMEOUT_S
+            # The ids of the interrupted step's steps rows that are written.
+            written: list[str] = []
             if run.inflight is not None:
                 bound = FINALIZE_TIMEOUT_S
                 if self._exit is not None:
@@ -2687,7 +2744,7 @@ class Agent:
                 await self._finalize_within(
                     bound,
                     task.task_id,
-                    self._save_interrupted_step(task.task_id, run.inflight),
+                    self._save_interrupted_step(task.task_id, run.inflight, written),
                 )
             task.status = run.status
             task.result = run.result or run.error
@@ -2698,6 +2755,18 @@ class Agent:
             await self._finalize_within(
                 bound, task.task_id, self._save_final_state(task)
             )
+            recorder = CALL_RECORDER.get()
+            if recorder is not None and written:
+                # After the task record's save, within what is left of its
+                # time: an unlinked row is the lesser loss.
+                if self._exit is not None:
+                    bound = self._exit.time_left()
+                else:
+                    bound = max(finalize_by - loop.time(), 0.0)
+                if bound > 0:
+                    await self._finalize_within(
+                        bound, task.task_id, recorder.link_steps(written)
+                    )
         finally:
             self.hippo.working.clear_reflections()
             run.outcome = self._run_result(
@@ -2729,7 +2798,9 @@ class Agent:
             else:
                 logger.exception("Could not finalize cancelled task %s", task_id)
 
-    async def _save_interrupted_step(self, task_id: str, step: _InflightStep) -> None:
+    async def _save_interrupted_step(
+        self, task_id: str, step: _InflightStep, written: list[str]
+    ) -> None:
         """Write the history rows of *step* that the cancellation left out.
 
         The record whose ``store_step`` the cancellation interrupted, if
@@ -2742,12 +2813,21 @@ class Agent:
         :meth:`_do_memorize`. Nothing goes to long-term memory. Each write
         is attempted on its own: a failure is logged, and the next write
         still runs.
+
+        *written* gets the ids of the step's rows that are in history, in
+        order: those ``store_step`` had stored, then the one written again
+        (also when it turns out committed before), then each new one once
+        its write returns. A write that fails adds none, so
+        :meth:`_finalize` never links a row that does not exist.
         """
+        written.extend(record.step_id for record in step.records[: step.stored])
         if step.stored < len(step.records):
             record = step.records[step.stored]
             try:
                 await self.hippo.store_step(task_id, record)
+                written.append(record.step_id)
             except sqlite3.IntegrityError:
+                written.append(record.step_id)
                 logger.debug(
                     "Step %s of task %s was saved before the cancellation",
                     record.step_id,
@@ -2768,6 +2848,7 @@ class Agent:
                     tool_result=step.closed[index],
                 )
                 await self.hippo.store_step(task_id, record)
+                written.append(record.step_id)
             except Exception as exc:
                 logger.warning(
                     "Could not save a step of task %s: %s",

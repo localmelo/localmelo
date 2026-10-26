@@ -18,3 +18,14 @@ def _no_env_persistence(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.delenv("LOCALMELO_PERSIST_MEMORY", raising=False)
     monkeypatch.delenv("LOCALMELO_MEMORY_DIR", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_env_retention(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never let the environment set how long history keeps reasoning.
+
+    A test that wants ``LOCALMELO_THINKING_RETENTION_DAYS`` sets it itself.
+    A fixture of its own, since some test modules replace
+    ``_no_env_persistence`` with a copy of the same name.
+    """
+    monkeypatch.delenv("LOCALMELO_THINKING_RETENTION_DAYS", raising=False)

@@ -154,7 +154,11 @@ One store implementation serves two files. Each surface opens only its own:
   still under way.
 - **Retention.** Opening the store also clears the thinking, the `<think>`
   blocks, the window checkpoints and the withdrawn messages that are older
-  than 30 days (`thinking_retention_days`); turns and events stay. See
+  than 30 days; turns and events stay. `LOCALMELO_THINKING_RETENTION_DAYS`
+  sets another number of days for `sessions.db` and `history.db` alike, read
+  when the store is made: one value keeps the model's reasoning as long in
+  every file. An invalid value raises `ValueError` naming the variable. A
+  store made with `thinking_retention_days=` uses that number instead. See
   [Memory](memory.md#sessions).
 
 ## Turns, statuses and causes
@@ -426,7 +430,7 @@ It prints, for example:
 | A turn's text | 1 to 100,000 characters |
 | `client_request_id` | 1 to 128 characters |
 | A title | 1 to 200 characters by hand; 60 when set from the text |
-| Withdrawals | 1,000 per session, and 1,000 for new sessions' first turns; none older than 30 days |
+| Withdrawals | 1,000 per session, and 1,000 for new sessions' first turns; none older than the retention period (30 days by default) |
 | Window checkpoints | One per session, at most 2,000,000 characters |
 | A turn's lease | 30 seconds, refreshed every 10 |
 | `list_events` page | 1 to 1,000 events |

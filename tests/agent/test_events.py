@@ -1489,6 +1489,36 @@ class TestRedaction:
         assert result.result == SECRET_TEXT
         assert redacted == []
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("secret", [True, False], ids=["secrets", "none"])
+    async def test_reflection_event_text_is_redacted(self, secret: bool) -> None:
+        token = "Bearer abcdefghijklmnop1234" if secret else "Bearer token"
+        key = KEY if secret else "the key"
+        fields: dict[str, Any] = {
+            "rationale": f"Done; {key} worked.",
+            "summary": f"Called it with Authorization: {token} once.",
+            "best_effort_result": f"a, with {key}",
+        }
+        recorder = Recorder()
+        agent = _agent(
+            ScriptedLLM([_echo("a"), _reflection("done", **fields)]),
+            steps_per_attempt=1,
+        )
+        result = await agent.run_task("echo a", on_event=recorder)
+        [reflection] = recorder.of("reflection")
+        expected = (
+            {
+                "rationale": "Done; [redacted] worked.",
+                "summary": "Called it with Authorization: Bearer [redacted] once.",
+                "best_effort_result": "a, with [redacted]",
+            }
+            if secret
+            else fields
+        )
+        assert {name: reflection.data[name] for name in fields} == expected
+        # The RunResult keeps the text as the model wrote it.
+        assert result.result == fields["best_effort_result"]
+
 
 class TestExitCode:
     @pytest.mark.asyncio

@@ -100,6 +100,20 @@ or use --base-url to connect to an OpenAI-compatible endpoint.
 | `request_timeout_s must be a finite number of seconds > 0` | Write a number without quotes, such as `request_timeout_s = 600`. |
 | `extra_body must not set 'model'` | Remove that key from `extra_body`. |
 
+### LOCALMELO_THINKING_RETENTION_DAYS must be a number of days
+
+```text
+melo: error: LOCALMELO_THINKING_RETENTION_DAYS must be a number of days greater than 0, not 'abc'
+```
+
+- **Cause:** the variable holds something other than a number above 0, such
+  as `abc`, `0` or `inf`. `melo` exits with code 2 before it runs anything,
+  in direct mode, in `melo ""` and with `--serve`.
+- **Fix:** set a number of days, such as
+  `export LOCALMELO_THINKING_RETENTION_DAYS=7`, or run
+  `unset LOCALMELO_THINKING_RETENTION_DAYS` for the default of 30. See
+  [Model calls](memory.md#model-calls).
+
 ### TOMLDecodeError
 
 ```text

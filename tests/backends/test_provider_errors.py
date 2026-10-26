@@ -2,13 +2,21 @@
 
 from __future__ import annotations
 
+import json
+from collections import deque
 from collections.abc import Callable
 from typing import Any
 
 import httpx
 import pytest
 
-from localmelo.melo.contracts.providers import LLM_REQUEST_ATTEMPT, ProviderError
+from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts.providers import (
+    LLM_REQUEST_ATTEMPT,
+    LLM_REQUEST_KIND,
+    LLM_REQUEST_KINDS,
+    ProviderError,
+)
 from localmelo.melo.schema import Message
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
@@ -256,6 +264,129 @@ async def test_embedding_requests_send_no_attempt_header() -> None:
     assert "X-Localmelo-Attempt" not in seen[0]
 
 
+# ── The call-kind header ────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["openai", "ollama"])
+async def test_chat_requests_send_the_call_kind_when_it_is_set(kind: str) -> None:
+    seen: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers)
+        return httpx.Response(200, json=OK_BODIES[kind])
+
+    await _request(kind, handler)
+    token = LLM_REQUEST_KIND.set("reflect")
+    attempt = LLM_REQUEST_ATTEMPT.set(2)
+    try:
+        await _request(kind, handler)
+    finally:
+        LLM_REQUEST_ATTEMPT.reset(attempt)
+        LLM_REQUEST_KIND.reset(token)
+    assert "X-Localmelo-Call-Kind" not in seen[0]
+    assert seen[0]["X-Localmelo-Attempt"] == "1"
+    assert seen[1]["X-Localmelo-Call-Kind"] == "reflect"
+    assert seen[1]["X-Localmelo-Attempt"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_embedding_requests_send_no_call_kind() -> None:
+    seen: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers)
+        return httpx.Response(200, json=OK_BODIES["embedding"])
+
+    token = LLM_REQUEST_KIND.set("plan")
+    try:
+        await _request("embedding", handler)
+    finally:
+        LLM_REQUEST_KIND.reset(token)
+    assert "X-Localmelo-Call-Kind" not in seen[0]
+    assert "X-Localmelo-Attempt" not in seen[0]
+
+
+def test_the_call_kinds() -> None:
+    assert LLM_REQUEST_KINDS == ("plan", "reflect", "retrieve", "estimate")
+    assert LLM_REQUEST_KIND.get() == ""
+
+
 def test_provider_error_defaults() -> None:
     exc = ProviderError("down")
     assert (str(exc), exc.status_code, exc.retryable) == ("down", None, False)
+
+
+def _plan_reply(kind: str, content: str = "", call: bool = False) -> dict[str, Any]:
+    """A reply body of provider *kind*; with *call*, one python_exec call."""
+    message: dict[str, Any] = {"role": "assistant", "content": content}
+    if call and kind == "openai":
+        message["tool_calls"] = [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {
+                    "name": "python_exec",
+                    "arguments": json.dumps({"code": "print(1)"}),
+                },
+            }
+        ]
+    elif call:
+        message["tool_calls"] = [
+            {"function": {"name": "python_exec", "arguments": {"code": "print(1)"}}}
+        ]
+    if kind == "openai":
+        return {"choices": [{"message": message}]}
+    return {"message": message}
+
+
+REFLECTION = {
+    "summary": "Printed 1.",
+    "recommended_action": "continue",
+    "task_still_feasible": True,
+    "next_step_is_concrete": True,
+    "next_step_is_novel": True,
+    "rationale": "Answer now.",
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["openai", "ollama"])
+async def test_a_run_names_the_kind_of_each_request(kind: str) -> None:
+    replies = deque(
+        [
+            _plan_reply(kind, call=True),
+            # The first reflection reply is a tool call: asked again (#31).
+            _plan_reply(kind, call=True),
+            _plan_reply(kind, json.dumps(REFLECTION)),
+            _plan_reply(kind, "1"),
+        ]
+    )
+    seen: list[tuple[str | None, str | None]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(
+            (
+                request.headers.get("X-Localmelo-Call-Kind"),
+                request.headers.get("X-Localmelo-Attempt"),
+            )
+        )
+        return httpx.Response(200, json=replies.popleft())
+
+    transport = httpx.MockTransport(handler)
+    llm: OpenAICompatLLM | OllamaNativeChat
+    if kind == "openai":
+        llm = OpenAICompatLLM(
+            base_url="http://llm.test/v1", model="m", transport=transport
+        )
+    else:
+        llm = OllamaNativeChat(
+            base_url="http://ollama.test", model="m", transport=transport
+        )
+    agent = Agent(llm=llm, options=AgentOptions(steps_per_attempt=1))
+    try:
+        result = await agent.run_task("Print 1 with Python.")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    assert seen == [("plan", "1"), ("reflect", "1"), ("reflect", "1"), ("plan", "1")]
