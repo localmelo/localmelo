@@ -37,7 +37,7 @@ from typing import Any, TypeVar
 
 import httpx
 
-from localmelo.melo.contracts.providers import ProviderError
+from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, ProviderError
 from localmelo.melo.memory.retrieval import (
     RETRIEVER_NAMES,
     CorpusError,
@@ -60,7 +60,6 @@ from localmelo.melo.memory.retrieval.corpus import (
     NoCallsTableError,
     load_history_calls,
 )
-from localmelo.melo.contracts.providers import LLM_REQUEST_KIND
 from localmelo.melo.memory.retrieval.llm import RETRIEVE_TIMEOUT_S
 from localmelo.support.providers._http import attempt_headers, post_json
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
