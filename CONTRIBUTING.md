@@ -153,8 +153,9 @@ shows how the parts fit together.
 
 ## Documentation
 
-[docs/README.md](docs/README.md#maintaining-the-docs) explains where the pages
-live and how to change them. To preview the website:
+[Maintaining the docs](docs/maintaining.md) explains where the pages live,
+how to change and translate them, and the translation glossary. To preview
+the website:
 
 ```bash
 python3 -m http.server 8080 --bind 127.0.0.1 --directory docs

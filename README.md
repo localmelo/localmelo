@@ -65,11 +65,8 @@ Without uv, see [Install with pip](docs/quickstart.md#install-with-pip).
 
 The examples call `melo` directly. Activation lasts for this terminal only:
 in a new terminal, run `source <clone>/.venv/bin/activate` again, where
-`<clone>` is your `localmelo` directory. With uv you can also run
-`uv run melo …` inside the clone, or `uv run --project <clone> melo …` from
-anywhere else.
-
-To update or uninstall localmelo, see
+`<clone>` is your `localmelo` directory, or use `uv run melo …` inside the
+clone. To update or uninstall localmelo, see
 [Configuration](docs/configuration.md#update-localmelo).
 
 ## Quick start
@@ -99,64 +96,36 @@ To update or uninstall localmelo, see
    ```
 
    The setup wizard asks for the chat backend, its URL and model, and an
-   embedding backend:
+   embedding backend (`None` if you have no embedding server). It checks
+   that the servers answer, saves `~/.cache/localmelo/config.toml`, and then
+   serves the HTTP API and the web workspace on `http://127.0.0.1:8401`.
+   Press Ctrl+C to stop it. From then on, `melo "<task>"` uses the saved
+   configuration.
 
-   - For Ollama from step 1, choose `2`, then press Enter to accept the
-     suggested URL and model.
-   - For another OpenAI-compatible server, choose vLLM (`3`) and enter its
-     URL and model name.
-   - For a cloud API, choose the vendor.
-   - For the embedding backend, choose `5`, `None (no long-term memory)`, if
-     you have no embedding server.
+The [Quickstart](docs/quickstart.md) walks through each step in more detail,
+with the wizard's choices and a first request to the HTTP API.
 
-   The wizard checks that the servers answer, saves
-   `~/.cache/localmelo/config.toml`, and then serves on
-   `http://127.0.0.1:8401`. In another terminal:
+## Three ways to run it
 
-   ```bash
-   curl http://127.0.0.1:8401/v1/health
-   curl -X POST http://127.0.0.1:8401/v1/agent/run \
-     -H "Content-Type: application/json" \
-     -d '{"query": "What is 6*7?"}'
-   ```
+| Command | What it does |
+|---|---|
+| `melo "<task>"` | Runs one task, prints the result and exits. |
+| `melo ""` (an empty task) | Opens a conversation loop in the terminal. `/help` lists its commands; `/exit` leaves. |
+| `melo --serve`, or `melo` alone | Starts the gateway: the HTTP API and the web workspace at `http://127.0.0.1:8401/`. |
 
-   Press Ctrl+C to stop the gateway. From then on, `melo "<task>"` uses the
-   saved configuration.
-
-Next, the [Quickstart](docs/quickstart.md) walks through each step in more
-detail.
-
-## Interactive workspace
-
-Run `melo ""` (an empty task) to open a conversation loop in the terminal
-with your configured backend. Type `/help` to list the commands and `/exit`
-to leave.
-To connect directly to oMLX or another OpenAI-compatible server:
+To hold a conversation with oMLX or another OpenAI-compatible server without
+a saved configuration:
 
 ```bash
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""
 ```
 
-Without the `""`, `melo` starts the gateway; see the
-[command-line reference](docs/cli.md#modes).
-
-Run `melo --serve` and open `http://127.0.0.1:8401/` for the web workspace.
-Enter your server's URL, pick one of its models, and create a chat; an
-embedding model and seed memories are optional. You can keep several chats
-with their own drafts, search them, read answers rendered as Markdown with
-code, tables and links, and stop a run; the page also fits narrow screens.
-Other browser tabs on the same gateway see the same chats, and reloading the
-page brings them back while the gateway runs. The terminal loop's
+In the web workspace, enter your server's URL, pick one of its models and
+create a chat. You can keep several chats, search them, read answers rendered
+as Markdown and stop a run. Chats last only as long as the gateway process,
+and the workspace is for your own computer only; see
+[Web workspace](docs/gateway.md#web-workspace). The terminal loop's
 conversation is separate from the web chats.
-
-To try the web workspace without configuring the main gateway:
-
-```bash
-uv run python -m localmelo.support.gateway._test_webapp
-```
-
-Chats last only as long as the gateway process, and the workspace is for your
-own computer only; see [Web workspace](docs/gateway.md#web-workspace).
 
 ## Documentation
 
@@ -164,20 +133,16 @@ own computer only; see [Web workspace](docs/gateway.md#web-workspace).
 |---|---|
 | [Quickstart](docs/quickstart.md) | Install, run a first task, save a configuration, start the gateway |
 | [Command-line reference](docs/cli.md) | `melo` modes, options, output, exit codes and signals |
-| [Run results](docs/run-results.md) | How a run can end, the run record, retries |
 | [Configuration](docs/configuration.md) | Setup wizard, config file, backends, timeouts, environment variables |
 | [Tools and MCP](docs/tools.md) | Built-in tools, MCP servers, which tools a step offers, the checks |
 | [Gateway and HTTP API](docs/gateway.md) | HTTP API, sessions, web workspace, running at login on macOS |
 | [Memory](docs/memory.md) | What localmelo remembers, keeping, inspecting and resetting it |
-| [Offline retrieval](docs/retrieval.md) | `melo-retrieve`: compare memory retrievers offline, export a run as a corpus |
-| [Python API](docs/python-api.md) | `Agent`, `AgentOptions` and `RunResult` (experimental) |
-| [Events](docs/events.md) | The events a run reports to Python code, their order and fields |
-| [Sessions](docs/sessions.md) | Conversations kept in SQLite: turns, message ids, restarts, resume (experimental) |
-| [How localmelo works](docs/how-it-works.md) | The run loop, reflection, memory and timeouts |
-| [Scheduler](docs/scheduler.md) | The scheduling policy and its simulator, for maintainers (not used by runs yet) |
+| [Python API](docs/python-api.md) | Run tasks from Python code, with events and approvals (experimental) |
 | [Troubleshooting](docs/troubleshooting.md) | Error messages and how to fix them |
-| [Architecture](https://localmelo.github.io/localmelo/en/architecture.html) | How the parts fit together (website) |
-| [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap) | Plans and dated updates (website) |
+
+[All documentation](docs/README.md) lists every page, including the reference
+for events, sessions and offline retrieval. [Evaluations](docs/evaluations.md)
+reports the comparisons behind the defaults, such as the reflection gate.
 
 AI agents and LLM tools: read [localmelo for agents](docs/for-agents.md), one
 compact page, or the [llms.txt](https://localmelo.github.io/localmelo/llms.txt)
@@ -185,20 +150,15 @@ index.
 
 ## Roadmap
 
-The roadmap is tracked in [#2](https://github.com/localmelo/localmelo/issues/2).
-The v0.1.0 milestone is due 2026-12-20.
-
-| Phase | Dates | Scope |
-|---|---|---|
-| Phase 1 | 2026-10-19 to 2026-11-01 | Core loop v2 and the command line ([#3](https://github.com/localmelo/localmelo/issues/3)) |
-| Phase 2 | 2026-11-02 to 2026-11-22 | Memory: notes, retrieval and long-term promotion |
-| Phase 3 | 2026-11-23 to 2026-12-06 | Safety and privacy ([#29](https://github.com/localmelo/localmelo/issues/29)) |
+The roadmap is tracked in [#2](https://github.com/localmelo/localmelo/issues/2),
+and the v0.1.0 milestone is due 2026-12-20. The
+[website](https://localmelo.github.io/localmelo/en/updates.html#roadmap) has
+its phases and the dated updates.
 
 Planned:
 
 - an interactive CLI that opens when you run `melo` without a task and shows
-  the agent's tool calls as they happen (today `melo` starts the gateway, and
-  `melo ""` opens a plain conversation loop);
+  the agent's tool calls as they happen;
 - conversations that survive a gateway restart, with the agent's work shown
   live in the web workspace;
 - keeping the model's reasoning as memory notes, with switchable retrieval
@@ -216,24 +176,10 @@ Planned:
 > sites send through your browser. See [SECURITY.md](SECURITY.md) and
 > [What the checks do](docs/tools.md#what-the-checks-do).
 
-In the [Python API](docs/python-api.md), two options narrow what tools can
-do:
-
-- **Approvals.** An approval policy (`run_task(..., approval=policy)`)
-  decides whether each call of `shell_exec`, `python_exec`, `file_write` and
-  other tools marked as requiring approval may run. Approvals apply only to
-  a run with a policy: direct mode and the gateway have none.
-- **A workspace root.** `AgentOptions(workspace_root=DIR)` keeps `file_read`
-  and `file_write` inside that directory. The fence applies only with a
-  workspace root, and `shell_exec` and `python_exec` are not fenced: they
-  start in the root, but can reach any path.
-
-[Sessions](docs/sessions.md) keep transcripts and tool output in
-`sessions.db` as plain text, their window checkpoints included, in `0600`
-files inside `0700` directories. The stored answers and checkpoints are
-redacted only for well-known key shapes, bearer tokens and one-time codes.
-A browser's drafts, a queued message and its outbox of messages not yet
-confirmed stay in the browser.
+The experimental [Python API](docs/python-api.md) can ask for approval before
+a tool runs and keep the file tools inside one directory; direct mode and the
+gateway do neither. Memory and session files are not encrypted; see
+[Privacy](docs/memory.md#privacy).
 
 ## Getting help
 
