@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
-from localmelo.melo.agent import Agent
+from localmelo.melo.agent import Agent, AgentOptions
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -57,7 +57,8 @@ class SessionManager:
     def _create_agent(self) -> AgentLike:
         if self._config is None:
             raise RuntimeError("SessionManager requires a config to create agents")
-        return Agent(config=self._config)
+        # A session keeps its answers, so a follow-up sees them (#37's option).
+        return Agent(config=self._config, options=AgentOptions(record_answers=True))
 
     def get(self, session_id: str) -> Session | None:
         s = self._sessions.get(session_id)

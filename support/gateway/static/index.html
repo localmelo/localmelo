@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>localmelo · Workspace</title>
+    <link rel="icon" type="image/png" sizes="64x64" href="/assets/icon_small.png" />
+    <link rel="stylesheet" href="/assets/workspace.css" />
+    <script type="module" src="/assets/workspace.js"></script>
+  </head>
+  <body>
+    <div class="app" id="app">
+      <aside class="sidebar" id="sidebar" aria-label="Chat navigation">
+        <div class="brand">
+          <img
+            class="brand-icon"
+            src="/assets/icon_small.png"
+            width="32"
+            height="32"
+            alt=""
+          /><strong>localmelo</strong><span class="local-badge">LOCAL</span>
+        </div>
+        <button class="nav-button new-chat" id="new-btn">
+          <span aria-hidden="true">＋</span> New chat <kbd>⌘ K</kbd>
+        </button>
+        <label class="search"
+          ><span aria-hidden="true">⌕</span
+          ><input id="search" type="search" placeholder="Search chats" aria-label="Search chats"
+        /></label>
+        <div class="list-heading">Chats <span id="session-count">0</span></div>
+        <nav class="session-list" id="session-list" aria-label="Chats"></nav>
+        <div class="sidebar-bottom">
+          <button class="nav-button" id="settings-btn">
+            <span aria-hidden="true">⚙</span> Connection settings
+          </button>
+          <div class="local-caption">
+            <span class="status-dot"></span> Your models. Your workspace.
+          </div>
+        </div>
+      </aside>
+      <button
+        id="sidebar-backdrop"
+        class="sidebar-backdrop"
+        aria-label="Close chat navigation"
+        hidden
+      ></button>
+      <main class="chat">
+        <header class="chat-header">
+          <button
+            class="icon-button"
+            id="sidebar-toggle"
+            aria-label="Toggle chat navigation"
+            aria-expanded="false"
+            aria-controls="sidebar"
+          >
+            ☰
+          </button>
+          <div class="header-titles">
+            <strong id="header-title">New chat</strong
+            ><span id="header-model">Connect your model to get started</span>
+          </div>
+          <button class="connection-chip" id="connection-btn">
+            <span class="status-dot" id="connection-dot"></span
+            ><span id="connection-label">Set up model</span>
+          </button>
+        </header>
+        <div class="notice" id="notice" role="status" hidden></div>
+        <section class="scroll" id="scroll" aria-label="Conversation">
+          <div class="welcome" id="welcome">
+            <img
+              class="welcome-mascot"
+              src="/assets/melo.png"
+              width="96"
+              height="128"
+              alt="Melo, the localmelo Akita mascot"
+            />
+            <p class="eyebrow">A LITTLE MORE POSSIBILITY</p>
+            <h1>What would you like to work on?</h1>
+            <p id="welcome-description">
+              A quiet space to think, build, and explore with your own model.
+            </p>
+            <button class="primary-button" id="setup-btn">
+              Connect a model <span aria-hidden="true">↗</span>
+            </button>
+            <div class="suggestions">
+              <button
+                data-prompt="Help me plan a small coding project. Ask me about the goal first."
+              >
+                <span aria-hidden="true">⌘</span><strong>Build something</strong
+                ><span>Turn an idea into a plan</span>
+              </button>
+              <button
+                data-prompt="Explain a technical concept step by step. Ask me which topic I want to explore."
+              >
+                <span aria-hidden="true">✧</span><strong>Explore an idea</strong
+                ><span>Make the complex feel simple</span>
+              </button>
+              <button
+                data-prompt="Help me review a piece of code for correctness and clarity. Ask me to paste the code."
+              >
+                <span aria-hidden="true">↗</span><strong>Take a closer look</strong
+                ><span>Review code and find a way forward</span>
+              </button>
+            </div>
+          </div>
+          <div
+            id="messages"
+            role="log"
+            aria-label="Messages"
+            aria-live="polite"
+            aria-relevant="additions"
+          ></div>
+        </section>
+        <div class="composer-area">
+          <form class="composer" id="composer">
+            <label class="sr-only" for="input">Message</label>
+            <textarea
+              id="input"
+              placeholder="Ask anything, or describe a task…"
+              rows="2"
+              aria-describedby="composer-hint"
+            ></textarea>
+            <div class="composer-toolbar">
+              <button type="button" id="model-btn" class="model-button">
+                Choose a model <span aria-hidden="true">⌄</span></button
+              ><span class="composer-spacer"></span><span id="run-status" role="status"></span
+              ><button
+                type="button"
+                class="stop-button"
+                id="stop-btn"
+                hidden
+                aria-label="Stop response"
+              >
+                ■ <span>Stop</span></button
+              ><button
+                type="submit"
+                class="send-button"
+                id="send-btn"
+                disabled
+                aria-label="Send message"
+                title="Send message (Enter)"
+              >
+                ↑
+              </button>
+            </div>
+          </form>
+          <p class="composer-hint" id="composer-hint">
+            Enter to send · Shift + Enter for a new line
+            <span>Runs through your configured backend</span>
+          </p>
+        </div>
+      </main>
+    </div>
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <div class="settings-head">
+        <div>
+          <p class="eyebrow">WORKSPACE SETTINGS</p>
+          <h2 id="settings-title">Connect your model</h2>
+        </div>
+        <button class="icon-button" id="close-settings" aria-label="Close settings">×</button>
+      </div>
+      <p class="settings-description">
+        Choose a backend for your next chat. Existing chats keep their connection.
+      </p>
+      <div class="field">
+        <label for="s-chat-url">Chat API URL</label
+        ><input
+          id="s-chat-url"
+          placeholder="http://127.0.0.1:8000/v1"
+          spellcheck="false"
+          autocomplete="url"
+        />
+        <p class="field-hint">
+          Use your model server's API address. oMLX supports the OpenAI-compatible adapter.
+        </p>
+      </div>
+      <div class="field">
+        <label for="s-adapter">Adapter</label
+        ><select id="s-adapter">
+          <option value="auto">Auto-detect</option>
+          <option value="mlc">OpenAI-compatible / oMLX / MLC</option>
+          <option value="ollama">Ollama native</option>
+          <option value="vllm">vLLM</option>
+          <option value="sglang">SGLang</option>
+        </select>
+      </div>
+      <button class="secondary-button" id="discover-btn">Discover models</button>
+      <p id="discover-status" class="field-hint" role="status">
+        Discovery only lists models; it does not start a chat.
+      </p>
+      <div class="field model-field">
+        <label for="s-chat-model">Chat model</label
+        ><select id="s-chat-model">
+          <option value="">Discover models first</option>
+        </select>
+      </div>
+      <details class="advanced">
+        <summary>Memory & advanced settings <span>Optional</span></summary>
+        <div class="advanced-body">
+          <div class="field">
+            <label for="s-embed-url">Embedding API URL</label
+            ><input id="s-embed-url" placeholder="Use Chat API URL" spellcheck="false" />
+          </div>
+          <div class="field">
+            <label for="s-embed-model">Embedding model</label
+            ><select id="s-embed-model">
+              <option value="">Disabled</option>
+            </select>
+            <p class="field-hint">Disabled by default. Select a model that supports embeddings.</p>
+          </div>
+          <div class="field">
+            <label for="s-memory">Seed memory set</label
+            ><select id="s-memory">
+              <option value="">None</option>
+              <option value="__all__">All</option>
+            </select>
+            <p id="memory-count" class="field-hint">No seed memories will be loaded.</p>
+          </div>
+          <p class="field-hint">
+            Seed memories may send embedding requests when the chat is created. The workspace shares
+            its long-term memory store across chats.
+          </p>
+        </div>
+      </details>
+      <p id="create-error" class="error" role="alert" hidden></p>
+      <div class="settings-footer">
+        <span>Chats remain available until the gateway restarts or they expire.</span
+        ><button class="primary-button" id="create-btn" disabled>
+          Create chat <span aria-hidden="true">→</span>
+        </button>
+      </div>
+    </dialog>
+  </body>
+</html>
