@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import inspect
 import json
 import logging
 import math
@@ -11,7 +12,13 @@ import time
 from collections.abc import Collection, Iterable, Iterator, Sequence
 from typing import TYPE_CHECKING, Any
 
-from localmelo.melo.agent._chat import Chat, RequestStats, lacks_task_query
+from localmelo.melo.agent._chat import (
+    RETRY_HOOK,
+    Chat,
+    RequestStats,
+    lacks_task_query,
+)
+from localmelo.melo.agent._events import _Emitter, check_sink
 from localmelo.melo.agent.options import AgentOptions, ReflectionGate
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
@@ -20,13 +27,20 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
 )
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
+from localmelo.melo.contracts.approvals import ApprovalPolicy
+from localmelo.melo.contracts.events import EventSink
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
     ProviderError,
 )
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
-from localmelo.melo.executor import Executor, builtin_names, register_builtins
+from localmelo.melo.executor import (
+    TOOL_EXIT_CODE,
+    Executor,
+    builtin_names,
+    register_builtins,
+)
 from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.short import group_turns
@@ -600,10 +614,19 @@ class _RunState:
     last_text: str = ""
     # Planning replies in a row with neither a tool call nor text.
     empty_replies: int = 0
+    # Reports the run's events to the caller's sink; silent without one.
+    events: _Emitter = dataclasses.field(default_factory=_Emitter)
+    # The approval policy the caller passed to run_task, or None.
+    approval: ApprovalPolicy | None = None
 
     @property
     def running(self) -> bool:
         return self.status == "running"
+
+    @property
+    def interactive(self) -> bool:
+        """Whether a caller follows the run, with an event sink or a policy."""
+        return self.events.active or self.approval is not None
 
     def end(self, status: str, *, result: str = "", error: str = "") -> None:
         self.status = status
@@ -615,6 +638,21 @@ def _exception_text(exc: BaseException) -> str:
     """``"<type>: <message>"``, or the type alone when the message is empty."""
     message = str(exc)
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+
+
+def _check_approval(approval: object) -> None:
+    """Raise ``TypeError`` unless *approval* is ``None`` or an approval policy.
+
+    That is an :class:`ApprovalPolicy` whose ``decide`` is a coroutine
+    function.
+    """
+    if approval is None:
+        return
+    if not (
+        isinstance(approval, ApprovalPolicy)
+        and inspect.iscoroutinefunction(approval.decide)
+    ):
+        raise TypeError("approval must have an async decide(request) method")
 
 
 class _ToolSetupError(Exception):
@@ -1040,7 +1078,7 @@ class Agent:
         return response, None
 
     async def _do_execute(
-        self, call: ToolCall, *, allowed: Collection[str]
+        self, call: ToolCall, *, allowed: Collection[str], run: _RunState
     ) -> tuple[ToolResult, int]:
         """Stage 4: execute one tool call and validate the result.
 
@@ -1055,36 +1093,58 @@ class Agent:
         check shortened its output (0 when it did not), so that working
         memory can count them when it cuts the result further (see
         :func:`_cut_to`).
-        """
-        exec_request = ExecutionRequest(
-            tool_name=call.tool_name,
-            arguments=dict(call.arguments),
-        )
-        outcome = await self.executor.execute_structured(exec_request, allowed=allowed)
 
-        exec_result_check = self.checker.check_executor_result(
-            ExecutorResultPayload(
-                tool_name=outcome.tool_name,
-                output=outcome.output,
-                error=outcome.error,
-                duration_ms=outcome.duration_ms,
-                images=list(outcome.images),
+        With an event sink, *run* reports ``tool.started`` before the call
+        is handed to the executor and one ``tool.finished`` after: with the
+        checked result, or, when an exception ends the call, with the status
+        ``cancelled`` or ``crashed`` before the exception propagates. The
+        call then runs with a new ``TOOL_EXIT_CODE`` list, so a tool can
+        record its child's exit status for the event.
+        """
+        events = run.events
+        events.tool_started(call)
+        exit_codes: list[int] | None = [] if events.active else None
+        slot = TOOL_EXIT_CODE.set(exit_codes) if exit_codes is not None else None
+        try:
+            exec_request = ExecutionRequest(
+                tool_name=call.tool_name,
+                arguments=dict(call.arguments),
             )
-        )
-        if exec_result_check.sanitized_payload is not None:
-            sp = exec_result_check.sanitized_payload
-            result = ToolResult(
-                tool_name=sp.tool_name,
-                output=sp.output,
-                error=sp.error,
-                duration_ms=sp.duration_ms,
-                images=list(sp.images),
+            outcome = await self.executor.execute_structured(
+                exec_request, allowed=allowed
             )
-            # The model reads the error of a failed call, which the check
-            # never cuts, and the output otherwise.
-            cut = 0 if sp.error else max(len(outcome.output) - len(sp.output), 0)
-            return result, cut
-        return outcome.to_tool_result(), 0
+
+            exec_result_check = self.checker.check_executor_result(
+                ExecutorResultPayload(
+                    tool_name=outcome.tool_name,
+                    output=outcome.output,
+                    error=outcome.error,
+                    duration_ms=outcome.duration_ms,
+                    images=list(outcome.images),
+                )
+            )
+            if exec_result_check.sanitized_payload is not None:
+                sp = exec_result_check.sanitized_payload
+                result = ToolResult(
+                    tool_name=sp.tool_name,
+                    output=sp.output,
+                    error=sp.error,
+                    duration_ms=sp.duration_ms,
+                    images=list(sp.images),
+                )
+                # The model reads the error of a failed call, which the check
+                # never cuts, and the output otherwise.
+                cut = 0 if sp.error else max(len(outcome.output) - len(sp.output), 0)
+            else:
+                result, cut = outcome.to_tool_result(), 0
+        except BaseException as exc:
+            events.tool_stopped(call, exc, exit_codes=exit_codes)
+            raise
+        finally:
+            if slot is not None:
+                TOOL_EXIT_CODE.reset(slot)
+        events.tool_finished(call, outcome, result, exit_codes=exit_codes)
+        return result, cut
 
     async def _do_memorize(
         self,
@@ -1345,11 +1405,15 @@ class Agent:
         failure_type: str,
         *,
         final: bool = False,
+        replies: list[Message] | None = None,
     ) -> tuple[ReflectionEntry, ReflectionDecision] | None:
         """Structured reflection at attempt boundary.
 
         *final* says that no further attempt can start; the request then
-        tells the model so (see :meth:`Chat.reflect`).
+        tells the model so (see :meth:`Chat.reflect`). *replies*, when
+        given, receives each reply as it comes, one or two, so the caller
+        can report how many requests the reflection took and their usage,
+        also when no reflection comes of them.
 
         A reply that holds no reflection, often a tool call, is asked for
         once more, with the window's turns written out as text and
@@ -1390,6 +1454,8 @@ class Agent:
             prior_reflections=prior_reflections or None,
             final=final,
         )
+        if replies is not None:
+            replies.append(response)
         if flags:
             readable = _find_reflection(response.content) is not None
         else:
@@ -1407,6 +1473,8 @@ class Agent:
                 final=final,
                 retry=True,
             )
+            if replies is not None:
+                replies.append(response)
         if flags:
             data = _find_reflection(response.content)
             if data is None:
@@ -1568,6 +1636,7 @@ class Agent:
             # LLM planning step (with reflection context). The step counts
             # once the planning call is made, even if it then raises.
             run.steps += 1
+            run.events.step_started(run.steps, run.attempts)
             response, fail = await self._do_plan(
                 long_context,
                 short_window,
@@ -1575,6 +1644,8 @@ class Agent:
                 query,
                 reflections=reflections,
             )
+            # Also a reply the post-plan check refuses.
+            run.events.assistant_message(response)
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""
@@ -1598,6 +1669,7 @@ class Agent:
                     Message(role="assistant", content=EMPTY_REPLY_LABEL),
                     [Message(role="user", content=EMPTY_REPLY_NUDGE)],
                 )
+                run.events.empty_reply(run.empty_replies)
                 continue
             run.empty_replies = 0
 
@@ -1611,7 +1683,7 @@ class Agent:
                 # Counted when handed over, so a call that timeout_s cuts
                 # short counts too.
                 run.n_tool += 1
-                result, cut = await self._do_execute(call, allowed=allowed)
+                result, cut = await self._do_execute(call, allowed=allowed, run=run)
                 results.append(result)
                 cut_before.append(cut)
             await self._do_memorize(task.task_id, response, results, cut_before)
@@ -1620,8 +1692,10 @@ class Agent:
             fingerprints.append(self._make_fingerprint(calls, results))
             stuck = self._detect_stuck(fingerprints)
             if stuck:
+                run.events.stuck()
                 return step + 1, stuck
 
+        run.events.budget_used()
         return budget, "budget"
 
     # ── Main loop ──
@@ -1636,7 +1710,13 @@ class Agent:
         outcome = await self.run_task(query)
         return outcome.result or f"[{outcome.status}] {outcome.error}"
 
-    async def run_task(self, query: str) -> RunResult:
+    async def run_task(
+        self,
+        query: str,
+        *,
+        on_event: EventSink | None = None,
+        approval: ApprovalPolicy | None = None,
+    ) -> RunResult:
         """Run one task and report how it ended.
 
         The run ends with one of these statuses:
@@ -1701,71 +1781,115 @@ class Agent:
         options, the registered built-ins (``builtins``), the resolved
         ``memory_dir`` and every tool registered once the tool providers
         are set up (``tools``), with tool names sorted.
+
+        *on_event*, when given, follows the run: it is called once per
+        :class:`~localmelo.melo.contracts.events.AgentEvent`,
+        synchronously and in order, from the task that runs the run. The
+        first event is ``run.started`` and the last ``run.finished``, which
+        carries the RunResult's ``to_dict()`` and also comes when this
+        method raises; :mod:`localmelo.melo.contracts.events` lists the
+        others. An event on which the sink raises an ``Exception`` is lost,
+        and the run goes on. The sink must not block: slow work belongs on
+        a queue. The ``thinking`` and ``content`` of ``assistant.message``
+        events pass :func:`~localmelo.melo.checker.redaction.redact_secrets`,
+        while working memory, history and the RunResult keep the text as it
+        is. Without a sink, no event is built.
+
+        *approval* is an
+        :class:`~localmelo.melo.contracts.approvals.ApprovalPolicy`;
+        ``run.started`` reports whether one was given.
+
+        Before the run starts, ``TypeError`` is raised when *on_event* is
+        not callable or is a coroutine function, or when *approval* has no
+        ``async def decide``: no event is emitted, no task record is
+        written, and working memory is left as it is.
         """
+        check_sink(on_event)
+        _check_approval(approval)
         started = time.perf_counter()
         task = TaskRecord(query=query)
-        run = _RunState()
+        run = _RunState(events=_Emitter(on_event, task.task_id), approval=approval)
         stats = self.chat.reset_stats()
         timeout_s = self.options.timeout_s
         deadline = asyncio.timeout(timeout_s)  # never expires when None
+        # The retry notices of this run's model requests; only with a sink.
+        retries = RETRY_HOOK.set(run.events.retry) if on_event is not None else None
         try:
-            async with deadline:
-                await self.hippo.save_task(task)
-                try:
-                    await self._ensure_tools()
-                except Exception as exc:
-                    raise _ToolSetupError(str(exc) or _exception_text(exc)) from exc
-                self.hippo.working.append(Message(role="user", content=query))
-                if self.options.attempt_policy == "none":
-                    await self._run_single_attempt(task, query, run)
+            run.events.run_started(
+                query,
+                max_steps=self.options.max_steps,
+                workspace_root=self.executor.workspace_root,
+                approval=approval is not None,
+            )
+            try:
+                async with deadline:
+                    await self.hippo.save_task(task)
+                    try:
+                        await self._ensure_tools()
+                    except Exception as exc:
+                        raise _ToolSetupError(str(exc) or _exception_text(exc)) from exc
+                    self.hippo.working.append(Message(role="user", content=query))
+                    if self.options.attempt_policy == "none":
+                        await self._run_single_attempt(task, query, run)
+                    else:
+                        await self._run_reflective_attempts(task, query, run)
+            except _ToolSetupError as exc:
+                # Reported in the result, not a crash: no traceback.
+                logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
+                run.end("setup_error", error=str(exc))
+            except ProviderError as exc:
+                # Reported in the result, not a crash: no traceback.
+                logger.info("Task %s ended with provider_error: %s", task.task_id, exc)
+                run.end("provider_error", error=str(exc) or _exception_text(exc))
+            except Exception as exc:
+                if (
+                    isinstance(exc, TimeoutError)
+                    and timeout_s is not None
+                    and deadline.expired()
+                ):
+                    # This run's own deadline; any other TimeoutError is a crash.
+                    logger.info("Task %s timed out after %g s", task.task_id, timeout_s)
+                    run.end("timeout", error=f"Timed out after {timeout_s:g} s")
                 else:
-                    await self._run_reflective_attempts(task, query, run)
-        except _ToolSetupError as exc:
-            # Reported in the result, not a crash: no traceback.
-            logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
-            run.end("setup_error", error=str(exc))
-        except ProviderError as exc:
-            # Reported in the result, not a crash: no traceback.
-            logger.info("Task %s ended with provider_error: %s", task.task_id, exc)
-            run.end("provider_error", error=str(exc) or _exception_text(exc))
-        except Exception as exc:
-            if (
-                isinstance(exc, TimeoutError)
-                and timeout_s is not None
-                and deadline.expired()
-            ):
-                # This run's own deadline; any other TimeoutError is a crash.
-                logger.info("Task %s timed out after %g s", task.task_id, timeout_s)
-                run.end("timeout", error=f"Timed out after {timeout_s:g} s")
-            else:
-                logger.exception("Task %s crashed", task.task_id)
-                run.end("crashed", error=_exception_text(exc))
-        except BaseException as exc:
-            if isinstance(exc, asyncio.CancelledError) and self._exit is not None:
-                error = self._exit.reason  # cancelled for an exit
-            else:
-                error = _exception_text(exc)
-            run.end("crashed", error=error)
-            raise
-        finally:
-            if run.running:
-                # Every path above ends the run; this keeps the record
-                # terminal should a later change miss one.
-                run.end("crashed", error="The run ended without a status")
-            if self._exit is not None:
-                await self._finish_task_for_exit(task, run, self._exit)
-            else:
+                    logger.exception("Task %s crashed", task.task_id)
+                    run.end("crashed", error=_exception_text(exc))
+            except BaseException as exc:
+                if isinstance(exc, asyncio.CancelledError) and self._exit is not None:
+                    error = self._exit.reason  # cancelled for an exit
+                else:
+                    error = _exception_text(exc)
+                run.end("crashed", error=error)
+                raise
+            finally:
+                if run.running:
+                    # Every path above ends the run; this keeps the record
+                    # terminal should a later change miss one.
+                    run.end("crashed", error="The run ended without a status")
                 try:
-                    await self._finish_task(task, run)
-                except asyncio.CancelledError:
-                    # An exit that began during the final save cancelled it,
-                    # perhaps before it was committed: save again, within
-                    # the exit's time.
-                    if self._exit is None:
-                        raise
-                    await self._finish_task_for_exit(task, run, self._exit)
-                    raise
-        return self._run_result(task, run, stats, time.perf_counter() - started)
+                    if self._exit is not None:
+                        await self._finish_task_for_exit(task, run, self._exit)
+                    else:
+                        try:
+                            await self._finish_task(task, run)
+                        except asyncio.CancelledError:
+                            # An exit that began during the final save cancelled it,
+                            # perhaps before it was committed: save again, within
+                            # the exit's time.
+                            if self._exit is None:
+                                raise
+                            await self._finish_task_for_exit(task, run, self._exit)
+                            raise
+                finally:
+                    # Built here, so that run.finished carries it on every
+                    # path, also when run_task raises.
+                    outcome = self._run_result(
+                        task, run, stats, time.perf_counter() - started
+                    )
+                    run.events.run_finished(outcome)
+            return outcome
+        finally:
+            if retries is not None:
+                RETRY_HOOK.reset(retries)
 
     async def _finish_task(self, task: TaskRecord, run: _RunState) -> None:
         """Save *task* with the run's terminal status and clear reflections.
@@ -1969,10 +2093,16 @@ class Agent:
                 out_of = "Max steps reached"
             else:
                 out_of = ""  # another attempt can start
+            run.events.reflection_started(failure_type)
             reflection = await self._do_reflect(
-                task, attempt_id, failure_type, final=bool(out_of)
+                task,
+                attempt_id,
+                failure_type,
+                final=bool(out_of),
+                replies=run.events.replies,
             )
             if reflection is None:  # only with reflection_gate="flags"
+                run.events.reflection(None, continue_run=not out_of)
                 if out_of:
                     logger.info(
                         "Reflection after attempt %d unreadable after a retry, "
@@ -1994,13 +2124,16 @@ class Agent:
 
             best_effort = decision.best_effort_result
             if decision.recommended_action == "done":
+                run.events.reflection(reflection, continue_run=False)
                 answer = best_effort if best_effort.strip() else run.last_text
                 run.end("completed", result=answer)
                 return
             if out_of:
+                run.events.reflection(reflection, continue_run=False)
                 run.end("budget_exhausted", result=best_effort, error=out_of)
                 return
             if not _should_continue(decision, opts.reflection_gate):
+                run.events.reflection(reflection, continue_run=False)
                 stopped = f"Stopped after attempt {run.attempts}"
                 run.end(
                     "gate_stopped",
@@ -2008,6 +2141,7 @@ class Agent:
                     error=decision.rationale.strip() or stopped,
                 )
                 return
+            run.events.reflection(reflection, continue_run=True)
 
     async def _run_single_attempt(
         self, task: TaskRecord, query: str, run: _RunState

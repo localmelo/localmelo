@@ -43,6 +43,11 @@ class Executor:
         self._default_timeout_ms = timeout_ms
         self._policy = WorkspacePolicy(workspace_root)
 
+    @property
+    def workspace_root(self) -> str | None:
+        """The real path of the root the file tools are kept in, or ``None``."""
+        return self._policy.root
+
     def register(
         self, name: str, fn: ToolCallable, *, timeout_ms: float | None = None
     ) -> None:

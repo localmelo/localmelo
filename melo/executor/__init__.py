@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from localmelo.melo.executor.builtins import BUILTINS, builtin_names
+from localmelo.melo.executor.builtins import BUILTINS, TOOL_EXIT_CODE, builtin_names
 from localmelo.melo.executor.executor import Executor
 from localmelo.melo.executor.models import (
     ArtifactMeta,
@@ -15,6 +15,7 @@ from localmelo.melo.executor.models import (
     ToolOutput,
 )
 from localmelo.melo.executor.policy import WorkspacePolicy
+from localmelo.melo.executor.preview import call_preview
 
 
 def register_builtins(
@@ -49,8 +50,10 @@ __all__ = [
     "ExecutionRequest",
     "ExecutionStatus",
     "Executor",
+    "TOOL_EXIT_CODE",
     "ToolOutput",
     "WorkspacePolicy",
     "builtin_names",
+    "call_preview",
     "register_builtins",
 ]

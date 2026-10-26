@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import os
 import signal
 import subprocess
@@ -13,6 +14,16 @@ from typing import Any
 from localmelo.melo.schema import ToolDef
 
 BUILTINS: list[tuple[ToolDef, Callable[..., Coroutine[Any, Any, str]]]] = []
+
+# Exit statuses of the child processes a tool call ran, for the exit_code of
+# its tool.finished event. A run with an event sink sets a new list around
+# each call. A tool that runs a child process may append the child's
+# returncode (negative when a signal ended it) once the child has exited by
+# itself; a tool that kills its child appends nothing. Without a list
+# (None, the default), there is nothing to record.
+TOOL_EXIT_CODE: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
+    "TOOL_EXIT_CODE", default=None
+)
 
 # Seconds a shell_exec command may run before it is killed.
 SHELL_TIMEOUT_S = 30.0

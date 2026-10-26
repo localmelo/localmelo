@@ -40,6 +40,14 @@ EMPTY_REPLY_NUDGE = (
     "final answer."
 )
 
+# ── Stopped tool calls ──
+
+# The error of a tool call that the run's cancellation, or its timeout_s,
+# cut short after the call was handed to the executor.
+CALL_INTERRUPTED = (
+    "The run was stopped before this call finished; it may have partly run."
+)
+
 
 # ── Data types ──
 

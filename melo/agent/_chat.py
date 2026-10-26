@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -24,6 +25,15 @@ logger = logging.getLogger(__name__)
 # Seconds to wait before each retry of a request that failed with a
 # retryable ProviderError: at most two retries, 1 s and then 4 s apart.
 RETRY_DELAYS_S: tuple[float, ...] = (1.0, 4.0)
+
+# Called before each retry's delay is waited out, with the 1-based number of
+# the attempt that failed, the delay in seconds and the attempt's error. A
+# context variable rather than a Chat attribute, so the hook belongs to the
+# task that set it: Agent.run_task sets it for a run with an event sink (the
+# retry notice) and resets it when the run ends. It must not block.
+RETRY_HOOK: contextvars.ContextVar[
+    Callable[[int, float, ProviderError], None] | None
+] = contextvars.ContextVar("RETRY_HOOK", default=None)
 
 SYSTEM_PROMPT = (
     "You are a task-solving agent. You can use tools to accomplish tasks.\n"
@@ -266,7 +276,8 @@ class Chat:
 
         A retryable :class:`ProviderError` is retried after each of
         :attr:`retry_delays` in turn; each attempt runs with its 1-based
-        number in ``LLM_REQUEST_ATTEMPT``. Every attempt that raises
+        number in ``LLM_REQUEST_ATTEMPT``, and :data:`RETRY_HOOK`, when set,
+        hears of each retry before its delay. Every attempt that raises
         counts in ``llm_errors``, including one cut short by a
         cancellation. The error of the last attempt, and any other
         exception at once, propagates.
@@ -287,6 +298,10 @@ class Chat:
                     delay,
                     exc,
                 )
+                # Here, while exc is bound, and with no await before the sleep.
+                hook = RETRY_HOOK.get()
+                if hook is not None:
+                    hook(attempt, delay, exc)
             except BaseException:
                 self.stats.llm_errors += 1
                 raise
