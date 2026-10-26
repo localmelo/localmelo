@@ -121,7 +121,8 @@ class TaskTemplate:
 # ── Reading and writing ──
 
 
-def _dumps(obj: dict[str, Any]) -> str:
+def dumps(obj: Any) -> str:
+    """Canonical JSON (spec Requirement 50): sorted keys, no NaN, compact, UTF-8."""
     return json.dumps(
         obj, sort_keys=True, allow_nan=False, separators=(",", ":"), ensure_ascii=False
     )
@@ -134,7 +135,7 @@ def write_trace(path: Path, traces: Sequence[TaskTrace]) -> None:
         extra = {"source": t.source, "harness": t.harness, "overlapping": t.overlapping}
         for c in t.calls:
             line = {**asdict(c), **extra, "schema": SCHEMA, "version": VERSION}
-            rows.append((c.task_key, c.call_index, _dumps(line)))
+            rows.append((c.task_key, c.call_index, dumps(line)))
     rows.sort(key=lambda r: (r[0], r[1]))
     Path(path).write_text("".join(line + "\n" for _, _, line in rows), encoding="utf-8")
 

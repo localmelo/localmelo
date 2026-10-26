@@ -37,6 +37,7 @@ WALL_START_US = 1_793_001_600_000_000
 # The most calls a task makes (MAX_AGENT_STEPS).
 MAX_CALLS = 30
 
+# An hour and a minute, in seconds.
 _H = 3600.0
 _MIN = 60.0
 

@@ -13,7 +13,6 @@ does not depend on which other tests ran.
 from __future__ import annotations
 
 import itertools
-import json
 import math
 import random
 from collections.abc import Mapping, Sequence
@@ -22,8 +21,14 @@ from typing import cast
 
 from localmelo.support.scheduler.params import Params
 from localmelo.support.scheduler.sim.engine import Mode, run
-from localmelo.support.scheduler.sim.metrics import Metrics, compute_metrics, percentile
+from localmelo.support.scheduler.sim.metrics import (
+    Metrics,
+    compute_metrics,
+    mean,
+    percentile,
+)
 from localmelo.support.scheduler.sim.server import ServerParams
+from localmelo.support.scheduler.sim.trace import dumps
 from localmelo.support.scheduler.sim.workloads import SEEDS, WorkloadName, make_workload
 
 # Bootstrap resamples and the seed of every test's own generator (decision D36).
@@ -85,9 +90,7 @@ class ComparisonReport:
     validated: bool = False
 
     def to_json(self) -> str:
-        return json.dumps(
-            asdict(self), sort_keys=True, allow_nan=False, separators=(",", ":")
-        )
+        return dumps(asdict(self))
 
 
 def run_sweep(
@@ -201,8 +204,7 @@ def _s2_rule(results: Results, w: str, cand: str) -> tuple[str, bool] | None:
 
 
 def _mean(values: list[float | None]) -> float | None:
-    known = sorted(v for v in values if v is not None)
-    return math.fsum(known) / len(known) if known else None
+    return mean([v for v in values if v is not None])
 
 
 def compare(

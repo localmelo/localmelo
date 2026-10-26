@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import hashlib
 import heapq
-import json
 import math
 from collections import Counter
 from dataclasses import asdict, dataclass, replace
@@ -48,6 +47,7 @@ from localmelo.support.scheduler.model import (
 from localmelo.support.scheduler.params import Params, params_for_arm
 from localmelo.support.scheduler.policy import decide, decision_json, dispatch
 from localmelo.support.scheduler.sim.server import Job, Server, ServerParams
+from localmelo.support.scheduler.sim.trace import dumps
 from localmelo.support.scheduler.sim.workloads import (
     FRONT_COMPLETION_TOKENS,
     FRONT_NEW_TOKENS,
@@ -171,7 +171,7 @@ def params_json(p: Params) -> str:
         k: ("inf" if isinstance(v, float) and math.isinf(v) else v)
         for k, v in asdict(p).items()
     }
-    return json.dumps(values, sort_keys=True, allow_nan=False, separators=(",", ":"))
+    return dumps(values)
 
 
 class _Engine:

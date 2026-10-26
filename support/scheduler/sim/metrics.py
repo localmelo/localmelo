@@ -17,6 +17,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from localmelo.support.scheduler.sim.engine import SimResult
+from localmelo.support.scheduler.sim.trace import dumps
 
 # Weights of the gold levels P0-P4 in the weighted completion time (design 2.1).
 LEVEL_WEIGHTS = (64.0, 16.0, 4.0, 1.0, 0.25)
@@ -41,7 +42,8 @@ def _pcts(values_us: Sequence[int]) -> Pcts:
     return (percentile(s, 50), percentile(s, 95), percentile(s, 99))
 
 
-def _mean(values: Sequence[float]) -> float | None:
+def mean(values: Sequence[float]) -> float | None:
+    """The mean by ``math.fsum`` over sorted values; ``None`` for no values."""
     return math.fsum(sorted(values)) / len(values) if values else None
 
 
@@ -93,9 +95,7 @@ class Metrics:
     def to_json(self) -> str:
         """Canonical JSON with floats rounded to 9 decimals."""
         values = {k: _round(v) for k, v in asdict(self).items()}
-        return json.dumps(
-            values, sort_keys=True, allow_nan=False, separators=(",", ":")
-        )
+        return dumps(values)
 
 
 def compute_metrics(result: SimResult) -> Metrics:
@@ -167,17 +167,17 @@ def compute_metrics(result: SimResult) -> Metrics:
         reply_whole_us=tuple(whole),
         reply_first_us=tuple(first),
         wct_s=wct,
-        turnaround_mean_s=_mean([turn[t.task_id] for t in tasks]),
+        turnaround_mean_s=mean([turn[t.task_id] for t in tasks]),
         turnaround_p95_s=percentile([turn[t.task_id] for t in tasks], 95),
         finished_by_class=(fin[0], fin[1], fin[2], fin[3], fin[4]),
         tasks_by_class=(by[0], by[1], by[2], by[3], by[4]),
         completion_by_class=tuple(
             f / n if n else None for f, n in zip(fin, by, strict=True)
         ),
-        slowdown_mean=_mean(slow),
+        slowdown_mean=mean(slow),
         slowdown_p95=percentile(slow, 95),
         deadline_miss_rate=sum(missed) / len(dl) if dl else None,
-        tardiness_mean_s=_mean(late),
+        tardiness_mean_s=mean(late),
         throughput_per_h=tuple(f / hours for f in fin),
         busy_share=r.busy_us / horizon if horizon else 0.0,
         cache_hit_share=(
