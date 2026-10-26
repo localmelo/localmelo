@@ -27,6 +27,7 @@ import pytest
 import localmelo.melo.agent.agent as agent_mod
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent.agent import CANCELLED_ERROR
+from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
@@ -175,6 +176,25 @@ class Recorder:
 
     def of(self, type_: str) -> list[AgentEvent]:
         return [event for event in self.events if event.type == type_]
+
+
+class WaitingPolicy:
+    """An approval policy that never answers; ``withdrawn`` is set on a cancel."""
+
+    def __init__(self) -> None:
+        self.requests: list[ApprovalRequest] = []
+        self.asked = asyncio.Event()
+        self.withdrawn = False
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        self.requests.append(request)
+        self.asked.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            self.withdrawn = True  # the prompt is taken down
+            raise
+        raise AssertionError("not reached")
 
 
 PNG = ImagePart.from_bytes(b"\x89PNG\r\n\x1a\n a small photo", "image/png")
@@ -561,6 +581,58 @@ class TestStop:
             1,
         )
         assert _window(agent) == [("user", "q")]
+
+    @pytest.mark.asyncio
+    async def test_cancel_during_approval_wait(self) -> None:
+        # The second call waits for its approval when the run is stopped.
+        tools, history, recorder = Tools(), GatedHistory(), Recorder()
+        policy = WaitingPolicy()
+        reply = _calls(
+            ("echo", {"text": "a"}, "call_1"),
+            ("hang", {}, "call_2"),
+            ("echo", {"text": "c"}, "call_3"),
+        )
+        agent = _agent(ScriptedLLM([reply]), tools=tools, history=history)
+        agent.executor.register("hang", tools.hang, requires_approval=True)
+        running = asyncio.create_task(
+            agent.run_task("go", on_event=recorder, approval=policy)
+        )
+        await _until(policy.asked)
+        await _stop(running)
+
+        # The tool was not called, and the policy took its prompt down.
+        assert tools.called == ["echo"]
+        assert policy.withdrawn
+        first, waiting = recorder.of("tool.finished")
+        assert (first.data["status"], first.data["approval"]) == ("success", None)
+        assert (waiting.data["call_id"], waiting.data["status"]) == (
+            "call_2",
+            "cancelled",
+        )
+        assert waiting.data["error"] == CALL_NOT_STARTED
+        assert waiting.data["approval"] == {
+            "request_id": policy.requests[0].request_id,
+            "allowed": False,
+            "reason": "",
+            "remember": False,
+            "origin": "withdrawn",
+        }
+        result = check_events(recorder)
+        assert (result.status, result.error) == ("cancelled", "Cancelled by the caller")
+        # Neither the waiting call nor the one after it started.
+        window = agent.hippo.working.get_window()
+        assert_protocol_valid(window)
+        assert [msg.content for msg in window if msg.role == "tool"] == [
+            "a",
+            f"Error: {CALL_NOT_STARTED}",
+            f"Error: {CALL_NOT_STARTED}",
+        ]
+        assert _row_calls(history.rows) == ["call_1", "call_2", "call_3"]
+        assert [row.tool_result.error for row in history.rows if row.tool_result] == [
+            "",
+            CALL_NOT_STARTED,
+            CALL_NOT_STARTED,
+        ]
 
     @pytest.mark.asyncio
     async def test_cancel_before_the_first_save(self) -> None:

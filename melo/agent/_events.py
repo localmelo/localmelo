@@ -21,6 +21,7 @@ from localmelo.melo.executor.models import ExecutionOutcome
 from localmelo.melo.executor.preview import call_preview
 from localmelo.melo.schema import (
     CALL_INTERRUPTED,
+    CALL_NOT_STARTED,
     ImagePart,
     Message,
     ReflectionDecision,
@@ -195,11 +196,15 @@ class _Emitter:
         result: ToolResult,
         *,
         exit_codes: Sequence[int] | None,
+        approval: Mapping[str, Any] | None = None,
     ) -> None:
         """The checked *result* of *call*, whose executor *outcome* gives the status.
 
         *exit_codes* are those the call's tool recorded in
         ``TOOL_EXIT_CODE``; the last one is the event's ``exit_code``.
+        *approval* is what came of asking the approval policy about the
+        call (``request_id``, ``allowed``, ``reason``, ``remember`` and
+        ``origin``), or ``None`` when it was not asked.
         """
         if self._sink is None:
             return
@@ -218,7 +223,7 @@ class _Emitter:
                     "error": result.error,
                     "duration_s": result.duration_ms / 1000,
                     "images": [_image_entry(image) for image in result.images],
-                    "approval": None,
+                    "approval": None if approval is None else dict(approval),
                     "exit_code": exit_codes[-1] if exit_codes else None,
                 }
             ),
@@ -232,21 +237,31 @@ class _Emitter:
         *,
         cancelled: bool,
         exit_codes: Sequence[int] | None,
+        not_started: bool = False,
+        approval: Mapping[str, Any] | None = None,
     ) -> None:
         """*call* ended in *exc* instead of a result.
 
         *cancelled* says that *exc* is the run's cancellation (a caller's,
-        or the run's ``timeout_s``), which gives the status ``cancelled``.
-        Any other exception, which ends the run, gives ``crashed``, also a
-        ``CancelledError`` that something raised while nothing cancelled
-        the run. ``duration_s`` is the time since ``tool.started``.
+        or the run's ``timeout_s``), which gives the status ``cancelled``
+        and the error ``CALL_INTERRUPTED``, or ``CALL_NOT_STARTED`` when
+        *not_started* says that the approval policy was still deciding
+        about the call. Any other exception, which ends the run, gives
+        ``crashed``, also a ``CancelledError`` that something raised while
+        nothing cancelled the run. ``duration_s`` is the time since
+        ``tool.started``. *approval* is as for :meth:`tool_finished`.
         """
         if self._sink is None:
             return
         step = self._step
         duration_s = time.perf_counter() - self._tool_since
         status = "cancelled" if cancelled else "crashed"
-        error = CALL_INTERRUPTED if cancelled else _error_text(exc)
+        if not cancelled:
+            error = _error_text(exc)
+        elif not_started:
+            error = CALL_NOT_STARTED
+        else:
+            error = CALL_INTERRUPTED
         self._emit(
             "tool.finished",
             lambda: json_safe_payload(
@@ -261,7 +276,7 @@ class _Emitter:
                     "error": error,
                     "duration_s": duration_s,
                     "images": [],
-                    "approval": None,
+                    "approval": None if approval is None else dict(approval),
                     "exit_code": exit_codes[-1] if exit_codes else None,
                 }
             ),

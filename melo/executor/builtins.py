@@ -15,6 +15,13 @@ from localmelo.melo.schema import ToolDef
 
 BUILTINS: list[tuple[ToolDef, Callable[..., Coroutine[Any, Any, str]]]] = []
 
+# The built-ins that run code or change files. register_builtins marks them,
+# so a call of one asks the run's approval policy, when the run has one,
+# before it runs (see Executor.execute_structured).
+APPROVAL_BUILTINS: frozenset[str] = frozenset(
+    {"shell_exec", "python_exec", "file_write"}
+)
+
 # Exit statuses of the child processes a tool call ran, for the exit_code of
 # its tool.finished event. A run with an event sink sets a new list around
 # each call. A tool that runs a child process may append the child's

@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
-from localmelo.melo.executor.builtins import BUILTINS, TOOL_EXIT_CODE, builtin_names
-from localmelo.melo.executor.executor import Executor
+from localmelo.melo.executor.builtins import (
+    APPROVAL_BUILTINS,
+    BUILTINS,
+    TOOL_EXIT_CODE,
+    builtin_names,
+)
+from localmelo.melo.executor.executor import ApprovalGate, Executor
 from localmelo.melo.executor.models import (
     ArtifactMeta,
     ErrorCategory,
@@ -26,6 +31,10 @@ def register_builtins(
     *names* selects the built-ins to register: ``None`` registers all of
     them, an empty collection none. An unknown name raises ``ValueError``
     before anything is registered.
+
+    The tools in :data:`APPROVAL_BUILTINS` are registered as requiring
+    approval: a call of one asks the approval gate that
+    :meth:`Executor.execute_structured` is given, if any, before it runs.
     """
     selected = None if names is None else set(names)
     if selected is not None:
@@ -39,10 +48,16 @@ def register_builtins(
     for tool_def, fn in BUILTINS:
         if selected is None or tool_def.name in selected:
             hippo.register_tool(tool_def)  # type: ignore[attr-defined]
-            executor.register(tool_def.name, fn)
+            executor.register(
+                tool_def.name,
+                fn,
+                requires_approval=tool_def.name in APPROVAL_BUILTINS,
+            )
 
 
 __all__ = [
+    "APPROVAL_BUILTINS",
+    "ApprovalGate",
     "ArtifactMeta",
     "BUILTINS",
     "ErrorCategory",

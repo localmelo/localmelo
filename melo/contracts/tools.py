@@ -16,11 +16,18 @@ ToolFunction = Callable[..., Coroutine[Any, Any, "str | ToolOutput"]]
 
 @dataclass(frozen=True)
 class ProvidedTool:
-    """A tool definition, the coroutine that runs it, and its timeout."""
+    """A tool definition, the coroutine that runs it, and how it is run.
+
+    ``timeout_ms`` bounds each call (the executor's default when ``None``).
+    ``requires_approval`` marks a tool whose calls ask the run's approval
+    policy before they run, when the run has one (see
+    ``Agent.run_task``); without a policy it has no effect.
+    """
 
     definition: ToolDef
     function: ToolFunction
     timeout_ms: float | None = None
+    requires_approval: bool = False
 
 
 class BaseToolProvider(ABC):
@@ -33,7 +40,8 @@ class BaseToolProvider(ABC):
     allowlist (a tool runs only if the planning step that called it
     offered it), the raw-arguments check (arguments that are not a JSON
     object are refused before anything runs), the pre-execute check, the
-    timeout and the result check.
+    approval policy of a run that has one, for a tool marked
+    ``requires_approval``, the timeout and the result check.
 
     :meth:`close` releases the provider's resources. It may be called
     while :meth:`start` is still running, and must then make start() give

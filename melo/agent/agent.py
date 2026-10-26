@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import dataclasses
 import hashlib
 import inspect
@@ -10,6 +11,7 @@ import math
 import os
 import sqlite3
 import time
+import uuid
 from collections.abc import Collection, Coroutine, Iterable, Iterator, Sequence
 from typing import TYPE_CHECKING, Any, TypeGuard
 
@@ -28,7 +30,11 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
 )
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
-from localmelo.melo.contracts.approvals import ApprovalPolicy
+from localmelo.melo.contracts.approvals import (
+    ApprovalDecision,
+    ApprovalPolicy,
+    ApprovalRequest,
+)
 from localmelo.melo.contracts.events import EventSink
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
@@ -40,6 +46,7 @@ from localmelo.melo.executor import (
     TOOL_EXIT_CODE,
     Executor,
     builtin_names,
+    call_preview,
     register_builtins,
 )
 from localmelo.melo.executor.models import ExecutionRequest
@@ -723,6 +730,110 @@ def _check_approval(approval: object) -> None:
         raise TypeError("approval must have an async decide(request) method")
 
 
+class _ApprovalGate:
+    """The executor's approval gate for one call of a run with a policy.
+
+    The executor calls it just before a tool that requires approval would
+    run (see :meth:`Executor.execute_structured`). It builds the
+    :class:`ApprovalRequest` from the request that would run, asks the
+    run's policy, and keeps what came of it in :attr:`asked` for the
+    call's ``tool.finished`` event. While the policy decides,
+    ``run.waiting_call_id`` names the call, so that a cancellation there
+    closes the call as not started (see :meth:`Agent._on_cancelled`).
+
+    The run's cancellation propagates, and the prompt counts as withdrawn.
+    The policy fails closed otherwise: an exception it raises, a
+    ``CancelledError`` while nothing cancels the run, and a return value
+    other than an :class:`ApprovalDecision` each reach the executor as an
+    exception, and the executor refuses the call.
+    """
+
+    def __init__(
+        self,
+        policy: ApprovalPolicy,
+        run: _RunState,
+        call: ToolCall,
+        workspace_root: str | None,
+    ) -> None:
+        self._policy = policy
+        self._run = run
+        self._call = call
+        self._workspace_root = workspace_root
+        # The approval of tool.finished: request_id, allowed, reason,
+        # remember and origin, once the policy is asked; None until then.
+        self.asked: dict[str, Any] | None = None
+
+    async def __call__(self, request: ExecutionRequest) -> ApprovalDecision:
+        run, call = self._run, self._call
+        asking = ApprovalRequest(
+            request_id=uuid.uuid4().hex,
+            run_id=run.task_id,
+            call_id=call.id,
+            tool_name=request.tool_name,
+            arguments=copy.deepcopy(request.arguments),
+            preview=call_preview(request.tool_name, request.arguments),
+            workspace_root=self._workspace_root,
+        )
+        run.waiting_call_id = call.id
+        try:
+            decided: object = await self._policy.decide(asking)
+        except asyncio.CancelledError as exc:
+            if _is_cancellation(exc):
+                # waiting_call_id stays set: the call did not start.
+                self._record(asking, origin="withdrawn")
+                raise
+            run.waiting_call_id = ""
+            spurious = RuntimeError(
+                "the approval policy raised CancelledError while the run was "
+                "not cancelled"
+            )
+            self._record(asking, origin="error", reason=_exception_text(spurious))
+            raise spurious from None
+        except BaseException as exc:
+            run.waiting_call_id = ""
+            self._record(asking, origin="error", reason=_exception_text(exc))
+            raise
+        run.waiting_call_id = ""
+        if not isinstance(decided, ApprovalDecision):
+            no_decision = TypeError(
+                f"the approval policy returned {type(decided).__name__}, "
+                "not an ApprovalDecision"
+            )
+            self._record(asking, origin="error", reason=_exception_text(no_decision))
+            raise no_decision
+        self._record(
+            asking,
+            origin=decided.origin,
+            allowed=decided.allow,
+            reason=decided.reason,
+            remember=decided.remember,
+        )
+        return decided
+
+    def _record(
+        self,
+        asking: ApprovalRequest,
+        *,
+        origin: str,
+        allowed: bool = False,
+        reason: str = "",
+        remember: bool = False,
+    ) -> None:
+        """Keep the outcome of *asking*.
+
+        *origin* is the decision's, ``"error"`` when the policy failed (the
+        reason is then the failure), or ``"withdrawn"`` when the run was
+        cancelled while the policy decided.
+        """
+        self.asked = {
+            "request_id": asking.request_id,
+            "allowed": allowed,
+            "reason": reason,
+            "remember": remember,
+            "origin": origin,
+        }
+
+
 class _ToolSetupError(Exception):
     """The tool providers could not be set up; the message is the run's error."""
 
@@ -846,9 +957,10 @@ class Agent:
         tools they return. Only when all of them have started, and no
         provided tool's name is taken by a registered tool or by another
         provided tool, are the tools registered with the tool registry and
-        the executor (with each tool's ``timeout_ms``), so a failed setup
-        registers nothing. A taken name raises ``ValueError``; a failure
-        of a provider's ``start()`` propagates unchanged. On any failure,
+        the executor (with each tool's ``timeout_ms`` and
+        ``requires_approval``), so a failed setup registers nothing. A
+        taken name raises ``ValueError``; a failure of a provider's
+        ``start()`` propagates unchanged. On any failure,
         cancellation included, every provider whose ``start()`` was called
         is closed before the exception propagates, so none is left
         running. A cancellation that arrives during this clean-up waits
@@ -889,7 +1001,10 @@ class Agent:
             for tool in provided:
                 self.hippo.register_tool(tool.definition)
                 self.executor.register(
-                    tool.definition.name, tool.function, timeout_ms=tool.timeout_ms
+                    tool.definition.name,
+                    tool.function,
+                    timeout_ms=tool.timeout_ms,
+                    requires_approval=tool.requires_approval,
                 )
             self._tools_ready = True
 
@@ -1169,26 +1284,40 @@ class Agent:
         memory can count them when it cuts the result further (see
         :func:`_cut_to`).
 
+        With an approval policy (``run.approval``), the executor asks it
+        about a call of a tool that requires approval, through an
+        :class:`_ApprovalGate`; without one, no gate is built, and such a
+        tool runs as any other does. A denial, or a policy that fails,
+        refuses the call, and the model reads why as the call's error.
+
         With an event sink, *run* reports ``tool.started`` before the call
         is handed to the executor and one ``tool.finished`` after: with the
         checked result, or, when an exception ends the call, before the
         exception propagates, with the status ``cancelled`` for a
         cancellation of the run (see :func:`_is_cancellation`), its
-        ``timeout_s`` included, and ``crashed`` for any other exception. The
-        call then runs with a new ``TOOL_EXIT_CODE`` list, so a tool can
-        record its child's exit status for the event.
+        ``timeout_s`` included, and ``crashed`` for any other exception. A
+        cancelled call's error says that it did not start when the policy
+        was still deciding about it, and that it may have partly run
+        otherwise. ``tool.finished`` carries the policy's answer whenever
+        the policy was asked. The call runs with a new ``TOOL_EXIT_CODE``
+        list, so a tool can record its child's exit status for the event.
         """
         events = run.events
         events.tool_started(call)
         exit_codes: list[int] | None = [] if events.active else None
         slot = TOOL_EXIT_CODE.set(exit_codes) if exit_codes is not None else None
+        gate = (
+            None
+            if run.approval is None
+            else _ApprovalGate(run.approval, run, call, self.executor.workspace_root)
+        )
         try:
             exec_request = ExecutionRequest(
                 tool_name=call.tool_name,
                 arguments=dict(call.arguments),
             )
             outcome = await self.executor.execute_structured(
-                exec_request, allowed=allowed
+                exec_request, allowed=allowed, approve=gate
             )
 
             exec_result_check = self.checker.check_executor_result(
@@ -1216,13 +1345,24 @@ class Agent:
                 result, cut = outcome.to_tool_result(), 0
         except BaseException as exc:
             events.tool_stopped(
-                call, exc, cancelled=_is_cancellation(exc), exit_codes=exit_codes
+                call,
+                exc,
+                cancelled=_is_cancellation(exc),
+                exit_codes=exit_codes,
+                not_started=run.waiting_call_id == call.id,
+                approval=None if gate is None else gate.asked,
             )
             raise
         finally:
             if slot is not None:
                 TOOL_EXIT_CODE.reset(slot)
-        events.tool_finished(call, outcome, result, exit_codes=exit_codes)
+        events.tool_finished(
+            call,
+            outcome,
+            result,
+            exit_codes=exit_codes,
+            approval=None if gate is None else gate.asked,
+        )
         return result, cut
 
     async def _do_memorize(self, task_id: str, step: _InflightStep) -> None:
@@ -1865,8 +2005,10 @@ class Agent:
           query and, closed, the step whose tool calls were under way:
           each of its calls that had not returned reads
           :data:`~localmelo.melo.schema.CALL_INTERRUPTED` for the call
-          under way and :data:`~localmelo.melo.schema.CALL_NOT_STARTED`
-          for the later ones. The cancellation propagates once the run is
+          under way, or :data:`~localmelo.melo.schema.CALL_NOT_STARTED`
+          when *approval* was still deciding about it, and
+          :data:`~localmelo.melo.schema.CALL_NOT_STARTED` for the later
+          ones. The cancellation propagates once the run is
           finalized (below), so the RunResult is the one ``run.finished``
           carries. ``timeout_s`` still ends a run as ``timeout``, and a
           ``CancelledError`` that something raises while nothing cancels
@@ -1915,9 +2057,24 @@ class Agent:
         working memory, history and the RunResult keep the text as it is.
         Without a sink, no event is built.
 
-        *approval* is an
-        :class:`~localmelo.melo.contracts.approvals.ApprovalPolicy`;
-        ``run.started`` reports whether one was given.
+        *approval*, an
+        :class:`~localmelo.melo.contracts.approvals.ApprovalPolicy`, is
+        asked about each call of a tool that requires approval: the
+        built-ins ``shell_exec``, ``python_exec`` and ``file_write``, and
+        each provided tool whose ``requires_approval`` is set. It is asked
+        just before the call would run, once every automatic check has let
+        it through, so its time counts toward ``timeout_s`` but never
+        toward the tool's own timeout. A denial refuses the call, and the
+        model reads why as the call's error (see
+        :func:`~localmelo.melo.contracts.approvals.denial_text`); so does a
+        policy that raises, returns something other than an
+        ``ApprovalDecision``, or raises ``CancelledError`` while the run is
+        not cancelled. Either way the run goes on. Each call is asked about
+        on its own: a decision's ``remember`` is reported, not acted on, so
+        a policy that grants a tool for a session keeps the grant itself.
+        ``tool.finished`` reports each answer, and ``run.started`` whether
+        a policy was given. Without one, a tool that requires approval runs
+        as any other does.
 
         Before the run starts, ``TypeError`` is raised when *on_event* is
         not callable or is a coroutine function, or when *approval* has no

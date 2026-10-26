@@ -22,10 +22,13 @@ class ErrorCategory(StrEnum):
     RUNTIME_ERROR = "runtime_error"
     PATH_POLICY_VIOLATION = "path_policy_violation"
     TOOL_ERROR = "tool_error"  # the tool itself reported failure (MCP isError)
-    # Arguments that were not a JSON object, or a built-in tool's argument
-    # of a JSON type its schema does not declare.
+    # Arguments that were not a JSON object, a built-in tool's argument of a
+    # JSON type its schema does not declare, or, before the approval policy
+    # is asked, arguments that do not match the tool's parameters.
     INVALID_ARGUMENTS = "invalid_arguments"
     TOOL_NOT_OFFERED = "tool_not_offered"  # registered, but not offered this step
+    # The approval policy denied the call, or failed while it decided.
+    APPROVAL_DENIED = "approval_denied"
 
 
 @dataclass
