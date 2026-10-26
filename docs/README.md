@@ -133,7 +133,8 @@ page, a term may carry the English in parentheses, as in 嵌入（embedding）.
 | gateway, gateway mode | 网关，网关模式 |
 | session | 会话 |
 | web UI (playground) | 网页界面（playground） |
-| web console (planned) | 网页控制台（计划中） |
+| web workspace | 网页工作区 |
+| conversation loop (`melo ""`) | 对话循环（`melo ""`） |
 | interactive CLI (planned) | 交互式命令行（计划中） |
 | setup wizard | 配置向导 |
 | config file | 配置文件 |

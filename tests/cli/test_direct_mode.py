@@ -828,7 +828,11 @@ class TestInteractive:
             ("second task",),
         ]
         out, err = capsys.readouterr()
-        assert out == "melo agent (type 'exit' to quit)\n\nsecond answer\n"
+        assert out == (
+            "localmelo · local agent\n"
+            "Enter a task to begin. Type /help for commands or /exit to quit.\n"
+            "\nsecond answer\n"
+        )
         assert err == "melo: run ended with status provider_error: HTTP 500\n"
         agent.close.assert_awaited_once()
 

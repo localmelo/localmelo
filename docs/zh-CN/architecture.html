@@ -126,7 +126,7 @@
         <p>每个组件目前做什么，以及代码在哪里。路径都相对于仓库根目录。</p>
 
         <h3 id="c-cli">命令行</h3>
-        <p><code>melo</code> 命令。给出任务时，它以直接模式运行：创建一个智能体，运行这个任务，以文本或一行 JSON 输出结果，并用退出码表示运行是如何结束的。不带任务或使用 <code>--serve</code> 时，它会启动网关；<code>--daemon</code> 用来管理 macOS 后台服务。使用 <code>--base-url</code> 时，智能体直接连接该服务器，不读取配置文件。</p>
+        <p><code>melo</code> 命令。给出任务时，它以直接模式运行：创建一个智能体，运行这个任务，以文本或一行 JSON 输出结果，并用退出码表示运行是如何结束的。任务为空字符串（<code>melo ""</code>）时，它会在终端中打开对话循环。不带任务或使用 <code>--serve</code> 时，它会启动网关；<code>--daemon</code> 用来管理 macOS 后台服务。使用 <code>--base-url</code> 时，智能体直接连接该服务器，不读取配置文件。</p>
         <p>关键文件：<code>__main__.py</code>。</p>
 
         <h3 id="c-gateway">网关</h3>

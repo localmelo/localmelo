@@ -63,8 +63,8 @@
         </div>
         <p>计划中：</p>
         <ul>
-          <li>交互式命令行（不带任务运行 <code>melo</code> 时会打开它；目前这样做会启动网关）；</li>
-          <li>网页控制台；</li>
+          <li>交互式命令行：不带任务运行 <code>melo</code> 时打开，并实时显示智能体的工具调用（目前 <code>melo</code> 会启动网关，<code>melo &quot;&quot;</code> 打开一个简单的对话循环）；</li>
+          <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
           <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）。</li>
         </ul>
         <p>维护者撰写的记忆设计见<a href="./memory-design.html">记忆设计</a>页，其中部分内容尚未实现。</p>
@@ -84,6 +84,20 @@
             <li><code>melo-retrieve</code> 用 <code>bm25</code>、<code>llm</code> 或 <code>embedding</code> 检索器在语料上运行带标注的查询，报告每种检索器找到正确文档的比例和速度。</li>
             <li>它还能把一次运行中的模型调用导出为这样的语料：模型推理过程的笔记、代码草稿和思考片段。</li>
             <li><code>melo</code> 还没有使用这些检索器。默认用哪一种，由基准测试的比较结果决定。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-26-workspace">
+          <h3>网页工作区和终端里的对话</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/35">#35</a>
+          </p>
+          <ul>
+            <li>网关的页面换成了网页工作区：从你的服务器上选择模型，同时保留多个对话、各自保存草稿，可以搜索对话，回答里的代码、表格和链接都能正确显示，也可以停止正在进行的运行。手机大小的屏幕也能使用。</li>
+            <li>只要网关在运行，对话就一直保留，刷新页面后会恢复。</li>
+            <li>在网页对话、<code>melo &quot;&quot;</code> 对话循环和网关会话里，每条消息都能看到之前的回答。</li>
+            <li><code>melo &quot;&quot;</code> 会在终端里打开一个对话。只运行 <code>melo</code> 仍然会启动网关。</li>
           </ul>
         </article>
 

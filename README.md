@@ -126,6 +126,36 @@ To update or uninstall localmelo, see
 Next, the [Quickstart](docs/quickstart.md) walks through each step in more
 detail.
 
+## Interactive workspace
+
+Run `melo ""` (an empty task) to start an interactive terminal conversation
+using your configured backend. Use `/help` for commands and `/exit` to leave.
+To connect directly to oMLX or another OpenAI-compatible server:
+
+```bash
+melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""
+```
+
+Without the `""`, `melo` starts the gateway; see the
+[command-line reference](docs/cli.md#modes).
+
+Run `melo --serve` and open `http://127.0.0.1:8401/` for the web workspace.
+Discover your server's models, select one, and create a chat. Embeddings and
+seed memories are optional. Chats support search, separate drafts, code
+formatting, cancellation, and responsive navigation with Melo's existing artwork.
+Browser clients on one gateway synchronize their chat state; page reloads
+recover chats while that gateway process remains alive. Direct CLI conversations
+remain separate from web chats.
+
+To try the web workspace without configuring the main gateway:
+
+```bash
+uv run python -m localmelo.support.gateway._test_webapp
+```
+
+Chats last only as long as the gateway process, and the workspace is for your
+own computer only; see [Web UI](docs/gateway.md#web-ui-playground).
+
 ## Documentation
 
 | Page | What it covers |
@@ -158,9 +188,11 @@ The v0.1.0 milestone is due 2026-12-20.
 
 Planned:
 
-- an interactive CLI (running `melo` without a task will open it; today that
-  starts the gateway);
-- a web console;
+- an interactive CLI that opens when you run `melo` without a task and shows
+  the agent's tool calls as they happen (today `melo` starts the gateway, and
+  `melo ""` opens a plain conversation loop);
+- conversations that survive a gateway restart, with the agent's work shown
+  live in the web workspace;
 - keeping the model's reasoning as memory notes, with switchable retrieval
   (`bm25`, `llm`, `embedding`).
 
