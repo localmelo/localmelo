@@ -179,3 +179,15 @@ def test_a_decoded_window_loads_without_a_warning(
         "tool",
         "assistant",
     ]
+
+
+def test_the_image_data_of_a_message_is_dropped() -> None:
+    image = ImagePart.from_bytes(b"\x89PNG attached", "image/png")
+    assert image.data
+    text = encode_window([Message(role="user", content="see", images=[image])])
+    assert image.data not in text
+    decoded = decode_window(text)
+    assert decoded is not None
+    (kept,) = decoded[0].images
+    assert kept.data == "" and kept.sha256 == image.sha256
+    assert kept.mime_type == "image/png" and kept.size_bytes == image.size_bytes

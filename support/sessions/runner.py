@@ -58,6 +58,7 @@ from localmelo.support.sessions.store import (
     RESERVED_EVENT_PREFIXES,
     RESERVED_EVENT_TYPE_RE,
     SESSION_EVENT_FIELDS,
+    TAKEOVER_ERROR,
     WRITER_BATCH_MAX,
     Cause,
     NewSession,
@@ -89,7 +90,8 @@ DEFAULT_RESUME_MODE: Final[ResumeMode] = "pairs"
 CLI_FINISH_RETRY_DELAYS_S: Final = (0.5, 1.0, 2.0)
 # The delay before the one retry of a gateway turn's finish_turn.
 GATEWAY_FINISH_RETRY_DELAYS_S: Final = (1.0,)
-TAKEOVER_REASON: Final = "The session was taken over by another process"
+# The error of a turn that another terminal took over; recovery writes it too.
+TAKEOVER_REASON: Final = TAKEOVER_ERROR
 
 # Seconds between the lease task's refreshes, whatever the run is doing.
 _LEASE_REFRESH_S: Final = LEASE_S / 3

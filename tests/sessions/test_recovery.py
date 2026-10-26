@@ -199,23 +199,23 @@ async def test_a_failed_write_of_a_running_turn_fails_the_gateway_store_closed(
         if label == write:
             raise error
 
-    monkeypatch.setattr(SessionStore, "_before_commit", fail)
-    with pytest.raises(sqlite3.OperationalError):
-        if write == "append_events":
-            await store.append_events(
-                turn.session_id, 1, [core_event("run.started")], holder=HOLDER
-            )
-        else:
-            await store.finish_turn(
-                turn.session_id,
-                1,
-                holder=HOLDER,
-                status="completed",
-                cause="run",
-                result=None,
-                answer="x",
-            )
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "_before_commit", fail)
+        with pytest.raises(sqlite3.OperationalError):
+            if write == "append_events":
+                await store.append_events(
+                    turn.session_id, 1, [core_event("run.started")], holder=HOLDER
+                )
+            else:
+                await store.finish_turn(
+                    turn.session_id,
+                    1,
+                    holder=HOLDER,
+                    status="completed",
+                    cause="run",
+                    result=None,
+                    answer="x",
+                )
     assert store.failed is error
     refused = [
         store.begin_turn(other.id, "x", holder=HOLDER),
@@ -257,10 +257,10 @@ async def test_a_failed_begin_turn_leaves_the_store_usable(
     def fail(self: SessionStore, label: str) -> None:
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr(SessionStore, "_before_commit", fail)
-    with pytest.raises(sqlite3.OperationalError):
-        await store.begin_turn(session.id, "x", holder=HOLDER)
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "_before_commit", fail)
+        with pytest.raises(sqlite3.OperationalError):
+            await store.begin_turn(session.id, "x", holder=HOLDER)
     assert store.failed is None
     assert (await store.begin_turn(session.id, "x", holder=HOLDER)).turn == 1
     await store.aclose()
@@ -275,12 +275,12 @@ async def test_a_cli_failure_does_not_fail_the_store(
     def fail(self: SessionStore, label: str) -> None:
         raise sqlite3.OperationalError("database is locked")
 
-    monkeypatch.setattr(SessionStore, "_before_commit", fail)
-    with pytest.raises(sqlite3.OperationalError):
-        await store.append_events(
-            turn.session_id, 1, [core_event("run.started")], holder=HOLDER
-        )
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "_before_commit", fail)
+        with pytest.raises(sqlite3.OperationalError):
+            await store.append_events(
+                turn.session_id, 1, [core_event("run.started")], holder=HOLDER
+            )
     assert store.failed is None
     assert (await store.create_session()).kind == "chat"
     await store.aclose()
@@ -296,11 +296,11 @@ async def test_a_failed_recovery_fails_the_open(
         if label == "recover":
             raise sqlite3.OperationalError("disk I/O error")
 
-    monkeypatch.setattr(SessionStore, "_before_commit", fail)
-    store = SessionStore(path, writer="gateway")
-    with pytest.raises(SessionStoreError, match="disk I/O error"):
-        await store.open()
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "_before_commit", fail)
+        store = SessionStore(path, writer="gateway")
+        with pytest.raises(SessionStoreError, match="disk I/O error"):
+            await store.open()
     await store.open()  # retried, and the turn is recovered now
     check_invariants(path, "gateway")
     await store.aclose()

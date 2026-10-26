@@ -14,6 +14,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -38,7 +39,15 @@ from localmelo.support.sessions.store import (
 from localmelo.support.sessions.submissions import SubmissionRepeated
 from localmelo.support.sessions.window import decode_window
 
-from .helpers import DAY, Clock, core_event, rows, run_result
+from .helpers import (
+    DAY,
+    Clock,
+    approval_event,
+    check_invariants,
+    core_event,
+    rows,
+    run_result,
+)
 
 HOLDER = "testhost:1:aaaaaaaa"
 
@@ -182,6 +191,53 @@ async def test_a_refused_file_stays_unchanged(
     assert not Path(f"{path}.owner").exists()
 
 
+# A writer that dies with its WAL frames not yet checkpointed into the file.
+LEAVE_WAL = textwrap.dedent("""
+    import asyncio
+    import os
+    import sys
+
+    from localmelo.support.sessions.store import NewSession, SessionStore
+
+
+    async def main() -> None:
+        store = SessionStore(sys.argv[1], writer=sys.argv[2])
+        await store.begin_turn(
+            None, "hello", holder="h:1:aaaaaaaa", new_session=NewSession()
+        )
+        os._exit(0)
+
+
+    asyncio.run(main())
+    """)
+
+
+@pytest.mark.parametrize("writer", ["gateway", "cli"])
+async def test_a_refused_wal_file_keeps_its_bytes_and_its_wal(
+    tmp_path: Path, writer: str
+) -> None:
+    path = tmp_path / "sessions.db"
+    other = "cli" if writer == "gateway" else "gateway"
+    made = subprocess.run(
+        [sys.executable, "-I", "-c", LEAVE_WAL, str(path), other],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert made.returncode == 0, made.stderr
+    wal = Path(f"{path}-wal")
+    assert wal.stat().st_size > 0  # frames the refusing open must not checkpoint
+    before, wal_before = file_bytes(path), file_bytes(wal)
+    store = SessionStore(path, writer=writer)  # type: ignore[arg-type]
+    with pytest.raises(SessionStoreError, match="belongs to the"):
+        await store.open()
+    await store.aclose()
+    assert file_bytes(path) == before
+    assert file_bytes(wal) == wal_before
+    if writer == "gateway":
+        assert not Path(f"{path}.owner").exists()
+
+
 async def test_a_foreign_rollback_journal_file_is_left_byte_for_byte(
     tmp_path: Path,
 ) -> None:
@@ -195,8 +251,9 @@ async def test_a_foreign_rollback_journal_file_is_left_byte_for_byte(
     before = file_bytes(path)
     for writer in ("gateway", "cli"):
         store = SessionStore(path, writer=writer)  # type: ignore[arg-type]
-        with pytest.raises(SessionStoreError, match="is not a localmelo sessions file"):
+        with pytest.raises(SessionStoreError) as raised:
             await store.open()
+        assert str(raised.value) == f"{path} is not a localmelo sessions file"
     assert file_bytes(path) == before
     assert not Path(f"{path}-wal").exists()
     assert not Path(f"{path}-shm").exists()
@@ -231,6 +288,31 @@ async def test_an_unusable_directory_raises_and_can_be_retried(tmp_path: Path) -
     assert store._owner_fd is None
     blocker.unlink()
     await store.open()
+    await store.aclose()
+
+
+async def test_a_permission_error_raises_chained_and_can_be_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # As a directory without write permission refuses the new file, also
+    # for a test that runs as root.
+    path = tmp_path / "sessions.db"
+    store = cli(path)
+    with monkeypatch.context() as m:
+        real = os.open
+
+        def denied(target: Any, *args: Any, **kwargs: Any) -> int:
+            if os.fspath(target) == str(path):
+                raise PermissionError(13, "Permission denied", str(target))
+            return real(target, *args, **kwargs)
+
+        m.setattr(os, "open", denied)
+        with pytest.raises(SessionStoreError) as raised:
+            await store.open()
+    assert str(raised.value).startswith(f"Cannot open {path}: ")
+    assert isinstance(raised.value.__cause__, PermissionError)
+    assert not path.exists() and store._conn is None
+    await store.open()  # the next call tries again
     await store.aclose()
 
 
@@ -311,6 +393,143 @@ async def test_aclose_is_final_and_leaves_a_running_turn_running(
     other = gateway(path)  # the owner lock is free, and not taken again
     await other.open()
     await other.aclose()
+
+
+async def test_an_aclose_during_open_stops_it_before_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "sessions.db"
+    made = gateway(path)
+    await made.begin_turn(None, "hello", holder=HOLDER, new_session=NewSession())
+    await made.aclose()  # a turn left running
+    reached, gate = asyncio.Event(), asyncio.Event()
+    check = SessionStore._check_file
+
+    async def slow_check(self: SessionStore, conn: Any) -> bool:
+        reached.set()
+        await gate.wait()
+        return await check(self, conn)
+
+    monkeypatch.setattr(SessionStore, "_check_file", slow_check)
+    store = gateway(path)
+    opening = asyncio.create_task(store.open())
+    await reached.wait()
+    closing = asyncio.create_task(store.aclose())
+    await asyncio.sleep(0.02)
+    gate.set()
+    with pytest.raises(SessionStoreError) as raised:
+        await opening
+    assert str(raised.value) == "The session store is closed"
+    await closing
+    # The open stopped at its next step: no recovery ran after the close.
+    assert rows(path, "SELECT status FROM turns") == [("running",)]
+    assert store._conn is None and store._owner_fd is None
+
+
+@pytest.mark.parametrize("stage", ["connecting", "checking"])
+async def test_a_cancelled_aclose_during_open_is_still_final(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stage: str
+) -> None:
+    path = tmp_path / "sessions.db"
+    reached, gate = asyncio.Event(), asyncio.Event()
+    if stage == "connecting":
+        connect = store_mod.aiosqlite.connect
+
+        async def slow_connect(*args: Any, **kwargs: Any) -> Any:
+            reached.set()
+            await gate.wait()
+            return await connect(*args, **kwargs)
+
+        monkeypatch.setattr(store_mod.aiosqlite, "connect", slow_connect)
+    else:
+        check = SessionStore._check_file
+
+        async def slow_check(self: SessionStore, conn: Any) -> bool:
+            reached.set()
+            await gate.wait()
+            return await check(self, conn)
+
+        monkeypatch.setattr(SessionStore, "_check_file", slow_check)
+    store = gateway(path)
+    opening = asyncio.create_task(store.open())
+    await reached.wait()
+    closing = asyncio.create_task(store.aclose())
+    await asyncio.sleep(0.02)  # aclose waits for the open's lock
+    closing.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await closing
+    gate.set()
+    with pytest.raises(SessionStoreError) as raised:
+        await opening
+    assert str(raised.value) == "The session store is closed"
+    assert store._conn is None and store._owner_fd is None
+    with pytest.raises(SessionStoreError, match="The session store is closed"):
+        await store.open()
+    other = gateway(path)  # nothing holds the owner lock
+    await other.open()
+    await other.aclose()
+
+
+async def test_a_close_cancelled_at_shutdown_is_done_by_the_next_aclose(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "sessions.db"
+    store = gateway(path)
+    await store.open()
+    blocker = sqlite3.connect(path, isolation_level=None)
+    blocker.execute("BEGIN IMMEDIATE")  # a write elsewhere: the store waits
+    writing = asyncio.create_task(store.create_session())  # holds the lock
+    await asyncio.sleep(0.2)
+    closing = asyncio.create_task(store.aclose())
+    await asyncio.sleep(0.05)
+    background = store._closing
+    assert background is not None and not background.done()
+    for task in (writing, background, closing):  # as a loop's shutdown does
+        task.cancel()
+    await asyncio.gather(writing, background, closing, return_exceptions=True)
+    blocker.execute("ROLLBACK")
+    blocker.close()
+    await store.aclose()  # closes now, and raises nothing
+    assert store._conn is None and store._owner_fd is None
+    other = gateway(path)
+    await other.open()  # the owner lock is free
+    await other.aclose()
+
+
+@pytest.mark.parametrize("step", ["create", "apply_retention", "recover"])
+async def test_an_open_that_fails_partway_leaves_the_file_as_it_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, step: str
+) -> None:
+    path = tmp_path / "sessions.db"
+    if step != "create":
+        made = gateway(path)
+        await made.begin_turn(None, "hello", holder=HOLDER, new_session=NewSession())
+        await made.aclose()  # a turn left running, as by a process that died
+    before = file_bytes(path) if path.exists() else None
+
+    def disk_full(self: SessionStore, label: str) -> None:
+        if label == step:
+            raise sqlite3.OperationalError("database or disk is full")
+
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "_before_commit", disk_full)
+        store = gateway(path)
+        with pytest.raises(SessionStoreError) as raised:
+            await store.open()
+        assert str(raised.value) == f"Cannot open {path}: database or disk is full"
+        assert isinstance(raised.value.__cause__, sqlite3.OperationalError)
+        assert store._conn is None and store._owner_fd is None
+        if before is None:  # still a new file: no schema, no version
+            assert rows(path, "PRAGMA user_version") == [(0,)]
+            assert rows(path, "SELECT name FROM sqlite_master") == []
+        else:
+            assert file_bytes(path) == before
+            assert rows(path, "SELECT status FROM turns") == [("running",)]
+    await store.open()  # the retry sees the file as it was
+    if before is not None:
+        assert rows(path, "SELECT status, cause FROM turns") == [("crashed", "crash")]
+    assert (await store.create_session()).kind == "chat"
+    await store.aclose()
 
 
 async def test_an_unknown_schema_component_is_ignored(tmp_path: Path) -> None:
@@ -506,6 +725,11 @@ async def test_kinds_keep_task_sessions_out_of_chat_lists(tmp_path: Path) -> Non
     assert [i.id for i in await store.find_sessions(task.id[:6], kinds=None)] == [
         task.id
     ]
+    await store.rename_session(task.id, "Nightly job")
+    assert await store.find_sessions("nightly job") == []  # nor by its title
+    assert [i.id for i in await store.find_sessions("nightly job", kinds=None)] == [
+        task.id
+    ]
     with pytest.raises(ValueError):
         await store.create_session(kind="bogus")
     with pytest.raises(ValueError):
@@ -535,6 +759,24 @@ async def test_find_sessions_prefers_id_then_prefix_then_title(tmp_path: Path) -
     await store.rename_session(older.id, "abcdef")
     assert [i.id for i in await store.find_sessions("ABCDEF")] == [older.id]
     assert await store.find_sessions("  ") == []
+    await store.aclose()
+
+
+async def test_an_id_prefix_matches_exactly_and_with_case(tmp_path: Path) -> None:
+    path = tmp_path / "s.db"
+    store = cli(path)
+    made = await store.create_session()
+    await store.aclose()
+    conn = sqlite3.connect(path)
+    conn.execute("UPDATE sessions SET id = 'abcd_f123456' WHERE id = ?", (made.id,))
+    conn.commit()
+    conn.close()
+    store = cli(path)
+    assert [i.id for i in await store.find_sessions("abcd_f")] == ["abcd_f123456"]
+    assert await store.find_sessions("ABCD_F") == []  # ids are lowercase hex
+    await store.rename_session("abcd_f123456", "ABCD")
+    titled = await store.find_sessions("ABCD")  # no id starts so: the title
+    assert [i.id for i in titled] == ["abcd_f123456"]
     await store.aclose()
 
 
@@ -610,6 +852,10 @@ async def test_turn_counts_leave_out_running_and_undone_turns(tmp_path: Path) ->
     async def count() -> int:
         info = await store.get_session(session_id)
         assert info is not None
+        # Every read computes it alike.
+        listed = {i.id: i.turns for i in await store.list_sessions(kinds=None)}
+        found = await store.find_sessions(session_id)
+        assert listed[session_id] == found[0].turns == info.turns
         return info.turns
 
     assert await count() == 1
@@ -788,10 +1034,10 @@ async def test_a_new_session_and_its_turn_commit_together(
     def fail(self: SessionStore, label: str) -> None:
         raise sqlite3.OperationalError("disk I/O error")
 
-    monkeypatch.setattr(SessionStore, "_before_commit", fail)
-    with pytest.raises(sqlite3.OperationalError):
-        await store.begin_turn(None, "x", holder=HOLDER, new_session=NewSession())
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(SessionStore, "_before_commit", fail)
+        with pytest.raises(sqlite3.OperationalError):
+            await store.begin_turn(None, "x", holder=HOLDER, new_session=NewSession())
     assert rows(path, "SELECT COUNT(*) FROM sessions") == [(1,)]
     assert store.failed is None
     await store.aclose()
@@ -972,6 +1218,79 @@ async def test_blobs_are_stored_once_per_digest(tmp_path: Path) -> None:
     await store.aclose()
 
 
+async def test_a_turns_end_withdraws_the_approvals_left_open(tmp_path: Path) -> None:
+    path = tmp_path / "s.db"
+    store = cli(path)
+    turn = await store.begin_turn(None, "hi", holder=HOLDER, new_session=NewSession())
+    await store.append_events(
+        turn.session_id,
+        1,
+        [
+            approval_event("approval.requested", "answered"),
+            approval_event("approval.resolved", "answered"),
+            approval_event("approval.requested", "lost"),
+        ],
+        holder=HOLDER,
+    )
+    # The batch that held the second approval.resolved was lost; T-8 commits.
+    await store.finish_turn(
+        turn.session_id,
+        1,
+        holder=HOLDER,
+        status="completed",
+        cause="run",
+        result=run_result(),
+        answer="done",
+    )
+    events = [e.event for e in await store.list_events(turn.session_id)]
+    assert [e["type"] for e in events][-2:] == ["approval.resolved", "turn.finished"]
+    withdrawn = events[-2]["data"]
+    assert withdrawn["request_id"] == "lost"
+    assert (withdrawn["outcome"], withdrawn["origin"]) == ("withdrawn", "withdrawn")
+    assert withdrawn["reason"] == store_mod.ENDED_APPROVAL_REASON
+    assert (withdrawn["call_id"], withdrawn["remember"]) == ("call_1", False)
+    check_invariants(path, "cli")  # S-3: every request answered exactly once
+    await store.aclose()
+
+
+async def test_an_unknown_session_reads_as_one_everywhere(tmp_path: Path) -> None:
+    store = gateway(tmp_path / "s.db")
+    with pytest.raises(SessionStoreError) as raised:
+        await store.finish_turn(
+            "nope",
+            1,
+            holder=HOLDER,
+            status="completed",
+            cause="run",
+            result=None,
+            answer="",
+        )
+    assert str(raised.value) == "Unknown session: nope"
+    with pytest.raises(SessionStoreError) as raised:
+        await store.append_events(
+            "nope", 1, [core_event("step.started")], holder=HOLDER
+        )
+    assert str(raised.value) == "Unknown session: nope"
+    assert store.failed is None  # a caller's mistake, not a lost write
+    await store.aclose()
+
+
+@pytest.mark.parametrize("writer", ["gateway", "cli"])
+async def test_the_busy_messages_name_the_holder(tmp_path: Path, writer: str) -> None:
+    store = SessionStore(tmp_path / "s.db", writer=writer)  # type: ignore[arg-type]
+    holder = f"{cli_host_id()}:{os.getpid()}:bbbbbbbb"  # this process: alive
+    turn = await store.begin_turn(None, "hi", holder=holder, new_session=NewSession())
+    with pytest.raises(SessionBusyError) as raised:
+        await store.begin_turn(turn.session_id, "again", holder=holder)
+    assert str(raised.value) == f"Session {turn.session_id} is already running a turn"
+    with pytest.raises(SessionBusyError) as raised:
+        await store.begin_turn(turn.session_id, "mine", holder=HOLDER)
+    assert str(raised.value) == (
+        f"Session {turn.session_id} is running a turn in another process ({holder})"
+    )
+    await store.aclose()
+
+
 # ── Out-of-turn events ──────────────────────────────────────────────────────
 
 
@@ -1041,17 +1360,48 @@ async def test_an_expired_lease_is_taken_over_and_its_turn_recovered(
     assert info is not None and not info.busy
     new = await second.begin_turn(turn.session_id, "mine", holder=HOLDER)
     assert new.turn == 2
+    # Another host's lease that expired: a takeover (revision 48).
     old = (await second.list_turns(turn.session_id))[0]
-    assert (old.status, old.cause) == ("crashed", "crash")
+    assert (old.status, old.cause) == ("cancelled", "takeover")
+    assert old.answer == answer_text("cancelled", "") and old.result is None
     finished = [
         e.event for e in await second.list_events(turn.session_id) if e.turn == 1
     ][-1]
     assert finished["type"] == "turn.finished"
-    assert finished["data"]["error"] == store_mod.STALE_ERROR
+    assert finished["data"]["error"] == store_mod.TAKEOVER_ERROR
+    assert finished["data"]["error"] == "The session was taken over by another process"
     # The old holder lost the lease; refreshing it says so.
     assert not await first.refresh_lease(turn.session_id, holder=remote)
     assert await first.refresh_lease(turn.session_id, holder=HOLDER)
     await first.aclose()
+    await second.aclose()
+
+
+async def test_a_stored_run_finished_decides_also_under_a_takeover(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "s.db"
+    clock = Clock()
+    first = cli(path, clock)
+    remote = "otherhost:4242:dddddddd"
+    turn = await first.begin_turn(None, "hi", holder=remote, new_session=NewSession())
+    await first.append_events(
+        turn.session_id,
+        1,
+        [
+            core_event("run.started"),
+            core_event("run.finished", seq=2, result=run_result(result="done")),
+        ],
+        holder=remote,
+    )
+    await first.aclose()
+    clock.advance(LEASE_S + 1)  # the other host's lease expired
+    second = cli(path, clock)
+    await second.open()
+    (recovered,) = await second.list_turns(turn.session_id)
+    assert (recovered.status, recovered.cause) == ("completed", "run")
+    assert recovered.answer == "done" and recovered.result == run_result(result="done")
+    check_invariants(path, "cli")
     await second.aclose()
 
 
@@ -1064,6 +1414,17 @@ async def test_a_dead_pid_on_this_host_is_taken_over_at_once(tmp_path: Path) -> 
     info = await store.get_session(turn.session_id)
     assert info is not None and not info.busy  # lease_until is still ahead
     assert (await store.begin_turn(turn.session_id, "mine", holder=HOLDER)).turn == 2
+    # The old holder ran on this host: its process died, so a crash.
+    old = (await store.list_turns(turn.session_id))[0]
+    assert (old.status, old.cause) == ("crashed", "crash")
+    assert old.answer == answer_text("crashed", "")
+    finished = [
+        e.event for e in await store.list_events(turn.session_id) if e.turn == 1
+    ][-1]
+    assert finished["type"] == "turn.finished"
+    assert finished["data"]["cause"] == "crash"
+    assert finished["data"]["error"] == store_mod.STALE_ERROR
+    check_invariants(tmp_path / "s.db", "cli")
     await store.aclose()
 
 
@@ -1176,6 +1537,42 @@ async def test_a_cancelled_write_leaves_no_transaction_open(
     await store.aclose()
 
 
+async def test_a_failed_rollback_never_hides_a_cancellation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING, logger="localmelo.support.sessions.store")
+    path = tmp_path / "s.db"
+    store = cli(path)
+    session_id, _ = await finished_turn(store)
+    conn = store._conn
+    assert conn is not None
+    rollback = conn.rollback
+    failures = 0
+
+    async def failing_rollback() -> None:
+        nonlocal failures
+        failures += 1
+        await rollback()
+        raise sqlite3.OperationalError("disk I/O error")
+
+    with monkeypatch.context() as m:
+        m.setattr(conn, "rollback", failing_rollback)
+        blocker = sqlite3.connect(path, isolation_level=None)
+        blocker.execute("BEGIN IMMEDIATE")  # holds the write lock
+        task = asyncio.create_task(store.begin_turn(session_id, "x", holder=HOLDER))
+        await asyncio.sleep(0.2)  # waiting in busy_timeout
+        task.cancel()
+        await asyncio.sleep(0.05)
+        blocker.execute("ROLLBACK")
+        blocker.close()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert failures == 1
+        assert any("disk I/O error" in r.getMessage() for r in caplog.records)
+    assert (await store.begin_turn(session_id, "y", holder=HOLDER)).turn == 2
+    await store.aclose()
+
+
 # ── Retention (UR-M) ────────────────────────────────────────────────────────
 
 
@@ -1277,28 +1674,36 @@ def _check_retained(path: Path, made: dict[str, Any]) -> None:
                 "SELECT COUNT(*) FROM submissions WHERE session_id = ? AND state = 'withdrawn'",
                 sid,
             ) == [(0,)]
-        else:
+        else:  # newer copies are unchanged
+            block = "<think>\nprivate plan\n</think>\n\nThe answer."
             assert first["data"]["thinking"] == "hmm"
-            assert first["data"]["content"].startswith("<think>")
-            assert finished["data"]["result"]["result"].startswith("<think>")
-            assert answer[0].startswith("<think>")
-            assert rows(
-                path, "SELECT COUNT(*) FROM windows WHERE session_id = ?", sid
-            ) == [(1,)]
+            assert first["data"]["content"] == block
+            assert finished["data"]["result"]["result"] == block
+            assert answer[0] == block
+            assert json.loads(answer[1])["result"] == block
+            (data,) = rows(path, "SELECT data FROM windows WHERE session_id = ?", sid)
+            decoded = decode_window(data[0])
+            assert decoded is not None
+            assert [(m.role, m.content) for m in decoded] == [
+                ("user", "q"),
+                ("assistant", "a"),
+            ]
             assert rows(
                 path,
-                "SELECT COUNT(*) FROM submissions WHERE session_id = ? AND state = 'withdrawn'",
+                "SELECT client_request_id FROM submissions WHERE session_id = ? "
+                "AND state = 'withdrawn'",
                 sid,
-            ) == [(1,)]
+            ) == [("w-new",)]
         assert second["data"]["content"] == "plain"
         assert rows(
             path, "SELECT answer FROM turns WHERE session_id = ? AND turn = 2", sid
         ) == [("no block",)]
         assert rows(
             path,
-            "SELECT COUNT(*) FROM submissions WHERE session_id = ? AND state = 'accepted'",
+            "SELECT client_request_id FROM submissions WHERE session_id = ? "
+            "AND state = 'accepted'",
             sid,
-        ) == [(1,)]
+        ) == [(f"a-{age}",)]
 
 
 async def test_retention_at_open_clears_old_thinking(tmp_path: Path) -> None:
@@ -1324,6 +1729,38 @@ async def test_apply_retention_on_an_open_store_returns_its_count(
     assert await store.apply_retention() == 5
     _check_retained(path, made)
     assert await store.apply_retention() == 0
+    await store.aclose()
+
+
+async def test_apply_retention_counts_only_the_rows_it_changes(tmp_path: Path) -> None:
+    path = tmp_path / "s.db"
+    clock = Clock()
+    store = gateway(path, clock)
+    turn = await store.begin_turn(None, "q", holder=HOLDER, new_session=NewSession())
+    # "think>" without a block: the LIKE prefilter finds them, nothing changes.
+    text = "I think> this is fine"
+    await store.append_events(
+        turn.session_id,
+        1,
+        [
+            core_event("assistant.message", content=text, thinking=""),
+            core_event("run.finished", seq=2, result=run_result(result=text)),
+        ],
+        holder=HOLDER,
+    )
+    await store.finish_turn(
+        turn.session_id,
+        1,
+        holder=HOLDER,
+        status="completed",
+        cause="run",
+        result=run_result(result=text),
+        answer=text,
+    )
+    before = rows(path, "SELECT id, event FROM events ORDER BY id")
+    clock.advance(31 * DAY)
+    assert await store.apply_retention() == 0
+    assert rows(path, "SELECT id, event FROM events ORDER BY id") == before
     await store.aclose()
 
 
@@ -1445,19 +1882,19 @@ async def test_window_checkpoints(
     assert late.status == "running"
     assert (await store.get_window(sid)) == second
     # One over WINDOW_MAX_CHARS keeps the older row.
-    monkeypatch.setattr(store_mod, "WINDOW_MAX_CHARS", 50)
-    await store.finish_turn(
-        sid,
-        turn.turn,
-        holder=HOLDER,
-        status="completed",
-        cause="run",
-        result=None,
-        answer="x",
-        window=_window("x" * 100),
-    )
-    assert (await store.get_window(sid)) == second
-    monkeypatch.undo()
+    with monkeypatch.context() as m:
+        m.setattr(store_mod, "WINDOW_MAX_CHARS", 50)
+        await store.finish_turn(
+            sid,
+            turn.turn,
+            holder=HOLDER,
+            status="completed",
+            cause="run",
+            result=None,
+            answer="x",
+            window=_window("x" * 100),
+        )
+        assert (await store.get_window(sid)) == second
     # Undo deletes the row that covers the undone turn, and keeps an older one.
     undone = await store.undo_last_turn(sid)
     assert undone is not None and undone.turn == 3 and undone.undone

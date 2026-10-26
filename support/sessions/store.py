@@ -41,6 +41,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator, Callable, Collection, Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Final, Literal, get_args
 
@@ -96,7 +97,14 @@ RESERVED_EVENT_PREFIXES: Final = ("task.", "sched.", "attention.")
 Cause = Literal["run", "user_stop", "closed", "shutdown", "crash", "takeover", "park"]
 CAUSES: Final = frozenset(get_args(Cause))
 STALE_ERROR: Final = "The process running this turn stopped before it finished."
+# The error of a turn that another host's expired lease left (revision 48).
+TAKEOVER_ERROR: Final = "The session was taken over by another process"
 RECOVERED_APPROVAL_REASON: Final = "melo stopped before this approval was answered."
+# The reason of a request that a turn's end found unanswered: the batch that
+# held its approval.resolved was not stored.
+ENDED_APPROVAL_REASON: Final = (
+    "The turn ended before this approval's answer was stored."
+)
 MAX_WITHDRAWN_PER_SCOPE: Final = 1_000
 # Events per append_events transaction (the runner's writer batches).
 WRITER_BATCH_MAX: Final = 200
@@ -687,6 +695,7 @@ class SessionStore:
         self._owner_fd: int | None = None
         self._failed: BaseException | None = None
         self._closed = False
+        self._closing: asyncio.Future[None] | None = None
         self._listeners: list[Callable[[StoredEvent], None]] = []
 
     @property
@@ -712,13 +721,15 @@ class SessionStore:
         """Open the file, refuse a foreign one, retain and recover.
 
         Idempotent; every other method awaits it first. In order: create
-        the missing directories (``0700``) and the file (``0600``); connect;
-        read the version and the writer marker and refuse a foreign file,
-        the other writer's file or a newer schema, having written nothing;
-        take the owner lock (gateway only); apply the pragmas; create the
-        schema in a new file; run :meth:`apply_retention`; and recover the
-        turns whose process is gone, which in the gateway's file is every
-        running turn.
+        the missing directories (``0700``) and the file (``0600``); read the
+        version and the writer marker on a read-only connection and refuse a
+        foreign file, the other writer's file or a newer schema, having
+        written nothing; take the owner lock (gateway only); connect and
+        apply the pragmas; create the schema in a new file; run
+        :meth:`apply_retention`; and recover the turns whose process is
+        gone, which in the gateway's file is every running turn. Each write
+        is its own transaction, so a failure rolls back only the step it
+        stopped, and the turns recovered before it stay recovered.
 
         A failure raises :class:`SessionStoreError` (a held owner lock
         :class:`StoreOwnedError`), with an ``OSError`` or ``sqlite3.Error``
@@ -733,26 +744,37 @@ class SessionStore:
         """Close the connection, then release the owner lock; final and idempotent.
 
         Every later call raises ``SessionStoreError("The session store is
-        closed")`` and never opens the file again.
+        closed")`` and never opens the file again. The close waits for the
+        call under way, an :meth:`open` among them, which then stops at its
+        next step; a cancelled ``aclose()`` still closes the store, in the
+        background.
         """
         self._closed = True
-        try:
-            async with self._lock:
+        if self._closing is None or self._closing.cancelled():
+            # A close that was cancelled before it ended, as at a loop's
+            # shutdown, is begun again.
+            self._closing = asyncio.ensure_future(self._close())
+        await asyncio.shield(self._closing)
+
+    async def _close(self) -> None:
+        async with self._lock:
+            try:
                 await self._discard_connection()
-        finally:
-            if self._conn is not None:  # cancelled before the lock was free
-                self._conn.stop()
-                self._conn = None
-            self._release_owner()
+            finally:
+                self._release_owner()
+
+    def _stop_if_closed(self) -> None:
+        if self._closed:
+            raise SessionStoreError(CLOSED_ERROR)
 
     async def _ready(self) -> aiosqlite.Connection:
         """The open connection; opens the store first. Call it under the lock."""
-        if self._closed:
-            raise SessionStoreError(CLOSED_ERROR)
+        self._stop_if_closed()
         if self._conn is not None:
             return self._conn
         try:
             await self._open_steps()
+            self._stop_if_closed()  # aclose() came while the last step ran
         except SessionStoreError:
             await self._abandon_open()
             raise
@@ -796,22 +818,18 @@ class SessionStore:
                     0o600,
                 )
                 os.close(fd)
-        # 2. Connect; busy_timeout is local to the connection and writes nothing.
-        conn = await aiosqlite.connect(self._path, isolation_level=None)
-        self._conn = conn
-        await conn.execute("PRAGMA busy_timeout = 5000")
-        # 3. Read-only checks: nothing is written to a file they refuse.
-        try:
-            new_file = await self._check_file(conn)
-        except sqlite3.DatabaseError as exc:
-            if _not_a_database(exc):
-                raise SessionStoreError(
-                    f"{self._path} is not a localmelo sessions file"
-                ) from exc
-            raise
+        # 2. and 3. The checks, on a read-only connection: nothing is written
+        # to a file they refuse.
+        new_file = await self._check_read_only()
+        self._stop_if_closed()
         # 4. The owner lock, before the first write.
         if self._writer == "gateway":
             self._take_owner_lock()
+        # The connection that writes; busy_timeout is local to it.
+        conn = await aiosqlite.connect(self._path, isolation_level=None)
+        self._conn = conn
+        await conn.execute("PRAGMA busy_timeout = 5000")
+        self._stop_if_closed()
         # 5. Pragmas, on a new file or one with this store's marker only.
         await self._apply_pragmas(conn)
         if self._writer == "gateway":
@@ -819,10 +837,35 @@ class SessionStore:
         await conn.execute("PRAGMA journal_size_limit = 67108864")
         # 6. The schema (T-1), its checks repeated inside the transaction.
         if new_file:
+            self._stop_if_closed()
             await self._create_schema(conn)
         # 7. Retention (T-2) and 8. recovery (T-3), before anything serves.
+        self._stop_if_closed()
         await self._retain(conn)
+        self._stop_if_closed()
         await self._recover(conn, None, at_open=True)
+
+    async def _check_read_only(self) -> bool:
+        """Step 3 on a ``mode=ro`` connection; whether the file is new.
+
+        A read-write connection that closed last would checkpoint a WAL that
+        another writer left into the file it refuses; a read-only one never
+        writes to the file, though SQLite may create the ``-wal`` and
+        ``-shm`` files beside one in WAL mode.
+        """
+        uri = f"{Path(self._path).as_uri()}?mode=ro"
+        conn = await aiosqlite.connect(uri, uri=True, isolation_level=None)
+        try:
+            await conn.execute("PRAGMA busy_timeout = 5000")
+            return await self._check_file(conn)
+        except sqlite3.DatabaseError as exc:
+            if _not_a_database(exc):
+                raise SessionStoreError(
+                    f"{self._path} is not a localmelo sessions file"
+                ) from exc
+            raise
+        finally:
+            await conn.close()
 
     @staticmethod
     async def _apply_pragmas(conn: aiosqlite.Connection) -> None:
@@ -981,8 +1024,10 @@ class SessionStore:
         ``BEGIN`` is awaited inside the ``try``, so a ``BEGIN`` that fails or
         is cancelled is rolled back too: aiosqlite still runs it after its
         caller is cancelled, and the rollback queued behind it ends the
-        transaction it opens. The events appended to the list reach the
-        listeners once the transaction has committed.
+        transaction it opens. A rollback that fails is logged, and the
+        exception that ended the transaction, a cancellation included,
+        propagates. The events appended to the list reach the listeners once
+        the transaction has committed.
         """
         stored: list[StoredEvent] = []
         try:
@@ -990,12 +1035,28 @@ class SessionStore:
             yield stored
             self._before_commit(label)
         except BaseException:
-            await conn.rollback()
+            await self._roll_back(conn, label)
             raise
-        await self._commit(conn, stored)
+        await self._commit(conn, stored, label)
+
+    @staticmethod
+    async def _roll_back(conn: aiosqlite.Connection, label: str) -> None:
+        """ROLLBACK after a failed or cancelled transaction; never raises an Exception.
+
+        The caller re-raises what ended the transaction, which a failed
+        rollback must not replace.
+        """
+        try:
+            await conn.rollback()
+        except Exception as exc:
+            logger.warning(
+                "Could not roll back the %s transaction of the session store: %s",
+                label,
+                exc,
+            )
 
     async def _commit(
-        self, conn: aiosqlite.Connection, stored: list[StoredEvent]
+        self, conn: aiosqlite.Connection, stored: list[StoredEvent], label: str
     ) -> None:
         commit = asyncio.ensure_future(conn.commit())
         try:
@@ -1006,7 +1067,7 @@ class SessionStore:
             # that a failed COMMIT leaves open, and does nothing after one
             # that succeeded; the listeners still hear of committed rows.
             try:
-                await conn.rollback()
+                await self._roll_back(conn, label)
             finally:
                 if commit.done():
                     self._dispatch_if_committed(commit, stored)
@@ -1194,11 +1255,12 @@ class SessionStore:
                 return [exact]
             kind_sql, kind_args = self._kind_filter(checked)
             if len(ref) >= 4:
+                # An exact, case-sensitive prefix: LIKE would ignore case.
                 rows = await _rows(
                     conn,
-                    f"SELECT {_SESSION_COLUMNS} FROM sessions s WHERE s.id LIKE ? "
-                    f"ESCAPE '\\' {kind_sql} ORDER BY s.updated_at DESC",
-                    (_escape_like(ref) + "%", *kind_args),
+                    f"SELECT {_SESSION_COLUMNS} FROM sessions s WHERE "
+                    f"substr(s.id, 1, ?) = ? {kind_sql} ORDER BY s.updated_at DESC",
+                    (len(ref), ref, *kind_args),
                 )
                 if rows:
                     return [self._session_info(row, now) for row in rows]
@@ -1561,7 +1623,7 @@ class SessionStore:
                 if running:
                     if self._running_is_live(lease_holder, lease_until, now):
                         other = running[0][1]
-                        if self._writer == "gateway" or other == holder:
+                        if other == holder:
                             raise SessionBusyError(
                                 f"Session {session_id} is already running a turn"
                             )
@@ -1706,8 +1768,9 @@ class SessionStore:
         ``run.started`` sets the turn's ``run_id``; a ``run.finished``
         answer is stored redacted, and so is the copy returned. Returns
         ``[]``, with a WARNING, when the turn no longer runs under *holder*,
-        after a takeover or a recovery. A failed write of the gateway's
-        store sets :attr:`failed`.
+        after a takeover or a recovery; an unknown session raises
+        :class:`SessionStoreError`. A failed write of the gateway's store
+        sets :attr:`failed`.
         """
         batch = list(events)
         if len(batch) > WRITER_BATCH_MAX:
@@ -1718,6 +1781,7 @@ class SessionStore:
             try:
                 async with self._transaction(conn, "append_events") as stored:
                     if not await self._runs_under(conn, session_id, turn, holder):
+                        await self._require_session(conn, session_id)
                         logger.warning(
                             "Dropped %d event(s) of turn %d of session %s: it no "
                             "longer runs under %s",
@@ -1765,14 +1829,17 @@ class SessionStore:
         """End a turn that runs under *holder*, in one transaction (T-8).
 
         Stores *status*, *cause*, the redacted *answer* and *result* and the
-        time; writes ``turn.finished``, with *error* (by default the
+        time; writes ``approval.resolved`` (``withdrawn``) for each request
+        of the turn left unanswered, as when the batch that held its answer
+        was lost, then ``turn.finished``, with *error* (by default the
         result's); releases the lease; and, given *window*, replaces the
         session's window checkpoint (thinking older than the retention
         cleared). A checkpoint longer than ``WINDOW_MAX_CHARS`` is not
         written, with a WARNING, and the older one stays. A turn that no
         longer runs under *holder* is left as it is, with a WARNING, and its
-        stored row is returned. A failed write of the gateway's store sets
-        :attr:`failed`.
+        stored row is returned; an unknown session raises
+        :class:`SessionStoreError`. A failed write of the gateway's store
+        sets :attr:`failed`.
         """
         if cause not in CAUSES:
             raise ValueError(
@@ -1790,6 +1857,7 @@ class SessionStore:
             try:
                 async with self._transaction(conn, "finish_turn") as stored:
                     if not await self._runs_under(conn, session_id, turn, holder):
+                        await self._require_session(conn, session_id)
                         info = await self._get_turn(conn, session_id, turn)
                         if info is None:
                             raise SessionStoreError(
@@ -1816,6 +1884,7 @@ class SessionStore:
                         result=result_text,
                         error=error,
                         now=now,
+                        approval_reason=ENDED_APPROVAL_REASON,
                     )
                     await conn.execute(
                         "UPDATE sessions SET updated_at = ? WHERE id = ?",
@@ -1844,13 +1913,56 @@ class SessionStore:
         result: str | None,
         error: str,
         now: float,
+        approval_reason: str,
     ) -> None:
-        """The end of a running turn: its outcome, ``turn.finished``, the lease."""
+        """The end of a running turn: its outcome, ``turn.finished``, the lease.
+
+        First, each ``approval.requested`` of the turn without an
+        ``approval.resolved`` gets one, ``withdrawn`` with *approval_reason*,
+        so every request is answered once (S-3) also when the batch that
+        held its answer was lost.
+        """
         rows = await _rows(
             conn,
             "SELECT id FROM turns WHERE session_id = ? AND turn = ?",
             (session_id, turn),
         )
+        events = await _rows(
+            conn,
+            "SELECT type, event FROM events WHERE session_id = ? AND turn = ? "
+            "AND type IN ('approval.requested', 'approval.resolved') ORDER BY id",
+            (session_id, turn),
+        )
+        open_requests: dict[str, Mapping[str, Any]] = {}
+        for type_, text in events:
+            try:
+                data = json.loads(text)["data"]
+            except (ValueError, KeyError, TypeError):
+                continue
+            if type_ == "approval.requested":
+                open_requests[str(data.get("request_id"))] = data
+            else:
+                open_requests.pop(str(data.get("request_id")), None)
+        for request_id, request in open_requests.items():
+            await self._insert_event(
+                conn,
+                stored,
+                session_id,
+                turn,
+                _session_event(
+                    "approval.resolved",
+                    {
+                        "request_id": request_id,
+                        "call_id": request.get("call_id", ""),
+                        "tool_name": request.get("tool_name", ""),
+                        "outcome": "withdrawn",
+                        "origin": "withdrawn",
+                        "reason": approval_reason,
+                        "remember": False,
+                    },
+                    now,
+                ),
+            )
         await conn.execute(
             "UPDATE turns SET status = ?, cause = ?, answer = ?, result = ?, "
             "finished_at = ? WHERE session_id = ? AND turn = ? AND status = 'running'",
@@ -2148,20 +2260,24 @@ class SessionStore:
             # 1. Thinking of assistant.message events, by their ts.
             rows = await _rows(
                 conn,
-                "SELECT id, json_extract(event, '$.data.content') FROM events "
+                "SELECT id, json_extract(event, '$.data.content'), "
+                "json_extract(event, '$.data.thinking') FROM events "
                 "WHERE type = 'assistant.message' AND json_extract(event, '$.ts') < ? "
                 "AND (json_extract(event, '$.data.thinking') != '' "
                 "OR json_extract(event, '$.data.content') LIKE '%think>%')",
                 (cutoff,),
             )
-            for event_id, content in rows:
-                text = content if isinstance(content, str) else ""
-                if has_think_block(text):
-                    text = split_thinking(text)[1]
+            for event_id, content, thinking in rows:
+                # The LIKE above also finds a "think>" that is no block.
+                cleared = content
+                if isinstance(content, str) and has_think_block(content):
+                    cleared = split_thinking(content)[1]
+                if cleared == content and not thinking:
+                    continue
                 await conn.execute(
                     "UPDATE events SET event = json_set(event, '$.data.thinking', '', "
                     "'$.data.content', ?) WHERE id = ?",
-                    (text, event_id),
+                    (cleared, event_id),
                 )
                 changed += 1
             # 2. The final answer's copies: run.finished by ts, turns by finished_at.
@@ -2191,15 +2307,14 @@ class SessionStore:
             for session_id, turn, status, answer, result_answer in rows:
                 touched = False
                 if has_think_block(answer):
-                    await conn.execute(
-                        "UPDATE turns SET answer = ? WHERE session_id = ? AND turn = ?",
-                        (
-                            answer_text(status, split_thinking(answer)[1]),
-                            session_id,
-                            turn,
-                        ),
-                    )
-                    touched = True
+                    cleared = answer_text(status, split_thinking(answer)[1])
+                    if cleared != answer:
+                        await conn.execute(
+                            "UPDATE turns SET answer = ? WHERE session_id = ? "
+                            "AND turn = ?",
+                            (cleared, session_id, turn),
+                        )
+                        touched = True
                 if isinstance(result_answer, str) and has_think_block(result_answer):
                     await conn.execute(
                         "UPDATE turns SET result = json_set(result, '$.result', ?) "
@@ -2215,25 +2330,27 @@ class SessionStore:
             changed += max(cursor.rowcount, 0)
             rows = await _rows(
                 conn,
-                "SELECT session_id, data FROM windows WHERE thinking_since < ?",
+                "SELECT session_id, data, thinking_since FROM windows "
+                "WHERE thinking_since < ?",
                 (cutoff,),
             )
-            for session_id, data in rows:
+            for session_id, data, since in rows:
                 messages = decode_window(data)
                 if messages is None:
                     await conn.execute(
                         "DELETE FROM windows WHERE session_id = ?", (session_id,)
                     )
-                else:
-                    await conn.execute(
-                        "UPDATE windows SET data = ?, thinking_since = ? "
-                        "WHERE session_id = ?",
-                        (
-                            encode_window(messages, thinking_cutoff=cutoff),
-                            window_thinking_since(messages, thinking_cutoff=cutoff),
-                            session_id,
-                        ),
-                    )
+                    changed += 1
+                    continue
+                new_data = encode_window(messages, thinking_cutoff=cutoff)
+                new_since = window_thinking_since(messages, thinking_cutoff=cutoff)
+                if (new_data, new_since) == (data, since):
+                    continue
+                await conn.execute(
+                    "UPDATE windows SET data = ?, thinking_since = ? "
+                    "WHERE session_id = ?",
+                    (new_data, new_since, session_id),
+                )
                 changed += 1
             # 4. Withdrawals.
             cursor = await conn.execute(
@@ -2295,92 +2412,91 @@ class SessionStore:
         session_id: str,
         turn: int,
     ) -> bool:
-        """End a stale running turn; ``False`` when it no longer runs."""
+        """End a stale running turn; ``False`` when it no longer runs.
+
+        The approvals nobody answered are withdrawn (in :meth:`_end_turn`).
+        A stored ``run.finished`` gives the outcome; else, in a CLI file, a
+        lease of another host that expired is a takeover (``cancelled``,
+        cause ``takeover``), and any other stale turn is a crash
+        (``crashed``, cause ``crash``).
+        """
         rows = await _rows(
             conn,
-            "SELECT holder FROM turns WHERE session_id = ? AND turn = ? "
-            "AND status = 'running'",
+            "SELECT t.holder, s.lease_holder FROM turns t JOIN sessions s "
+            "ON s.id = t.session_id WHERE t.session_id = ? AND t.turn = ? "
+            "AND t.status = 'running'",
             (session_id, turn),
         )
         if not rows:
             return False
-        holder = rows[0][0]
+        holder, lease_holder = rows[0]
         now = self._clock()
-        # 1. Withdraw the approvals nobody answered.
-        events = await _rows(
-            conn,
-            "SELECT type, event FROM events WHERE session_id = ? AND turn = ? "
-            "AND type IN ('approval.requested', 'approval.resolved', 'run.finished') "
-            "ORDER BY id",
-            (session_id, turn),
-        )
-        open_requests: dict[str, Mapping[str, Any]] = {}
         finished: Mapping[str, Any] | None = None
-        for type_, text in events:
-            try:
-                data = json.loads(text)["data"]
-            except (ValueError, KeyError, TypeError):
-                continue
-            if type_ == "approval.requested":
-                open_requests[str(data.get("request_id"))] = data
-            elif type_ == "approval.resolved":
-                open_requests.pop(str(data.get("request_id")), None)
-            elif isinstance(data.get("result"), Mapping):
-                finished = data["result"]
-        for request_id, request in open_requests.items():
-            await self._insert_event(
-                conn,
-                stored,
-                session_id,
-                turn,
-                _session_event(
-                    "approval.resolved",
-                    {
-                        "request_id": request_id,
-                        "call_id": request.get("call_id", ""),
-                        "tool_name": request.get("tool_name", ""),
-                        "outcome": "withdrawn",
-                        "origin": "withdrawn",
-                        "reason": RECOVERED_APPROVAL_REASON,
-                        "remember": False,
-                    },
-                    now,
-                ),
-            )
-        # 2. The outcome: a stored run.finished gives it.
+        for (text,) in await _rows(
+            conn,
+            "SELECT event FROM events WHERE session_id = ? AND turn = ? "
+            "AND type = 'run.finished' ORDER BY id",
+            (session_id, turn),
+        ):
+            with contextlib.suppress(ValueError, KeyError, TypeError):
+                result = json.loads(text)["data"]["result"]
+                if isinstance(result, Mapping):
+                    finished = result
         status = None if finished is None else finished.get("status")
+        outcome: tuple[str, str, str, str | None, str]
         if finished is not None and status in RUN_STATUSES:
             assert isinstance(status, str)
             answer = finished.get("result")
-            cause = "crash" if status == "cancelled" else "run"
-            await self._end_turn(
-                conn,
-                stored,
-                session_id,
-                turn,
-                holder=holder,
-                status=status,
-                cause=cause,
-                answer=answer_text(status, answer if isinstance(answer, str) else ""),
-                result=_dumps(dict(finished)),
-                error=str(finished.get("error") or ""),
-                now=now,
+            outcome = (
+                status,
+                "crash" if status == "cancelled" else "run",
+                answer_text(status, answer if isinstance(answer, str) else ""),
+                _dumps(dict(finished)),
+                str(finished.get("error") or ""),
+            )
+        elif self._another_hosts(lease_holder):
+            outcome = (
+                "cancelled",
+                "takeover",
+                answer_text("cancelled", ""),
+                None,
+                TAKEOVER_ERROR,
             )
         else:
-            await self._end_turn(
-                conn,
-                stored,
-                session_id,
-                turn,
-                holder=holder,
-                status="crashed",
-                cause="crash",
-                answer=answer_text("crashed", ""),
-                result=None,
-                error=STALE_ERROR,
-                now=now,
+            outcome = (
+                "crashed",
+                "crash",
+                answer_text("crashed", ""),
+                None,
+                STALE_ERROR,
             )
+        status, cause, answer, result_text, error = outcome
+        await self._end_turn(
+            conn,
+            stored,
+            session_id,
+            turn,
+            holder=holder,
+            status=status,
+            cause=cause,
+            answer=answer,
+            result=result_text,
+            error=error,
+            now=now,
+            approval_reason=RECOVERED_APPROVAL_REASON,
+        )
         logger.info(
-            "Recovered turn %d of session %s, whose process is gone", turn, session_id
+            "Recovered turn %d of session %s (%s, cause %s)",
+            turn,
+            session_id,
+            status,
+            cause,
         )
         return True
+
+    def _another_hosts(self, lease_holder: str | None) -> bool:
+        """Whether a CLI file's lease is held under another host id."""
+        if self._writer != "cli" or lease_holder is None:
+            return False
+        parsed = _parse_holder(lease_holder)
+        return parsed is not None and parsed[0] != cli_host_id()

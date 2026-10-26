@@ -834,6 +834,10 @@ async def test_a_takeover_ends_the_old_turn_once_and_leaves_the_new_lease(
     events = await other.list_events(turn.session_id)
     old = [e for e in events if e.turn == 1]
     assert [e.event["type"] for e in old].count("turn.finished") == 1
+    # Recovery under the takeover: the expired lease was another host's.
+    first = (await other.list_turns(turn.session_id))[0]
+    assert (first.status, first.cause) == ("cancelled", "takeover")
+    assert old[-1].event["data"]["error"] == TAKEOVER_REASON
     started = next(
         e for e in events if e.event["type"] == "turn.started" and e.turn == 2
     )
@@ -902,7 +906,9 @@ async def test_a_failing_refresh_cancels_nothing_and_a_recovery_does(
     result = await asyncio.wait_for(s.runner.wait(), timeout=10)
     assert result is not None and result.error == TAKEOVER_REASON
     stored = (await other.list_turns(turn.session_id))[-1]
-    assert (stored.status, stored.cause) == ("crashed", "crash")  # recovery's end
+    # Recovery's end: the expired lease was another host's (revision 48).
+    assert (stored.status, stored.cause) == ("cancelled", "takeover")
+    assert result.status == "cancelled"  # the old runner ends the same way
     check_invariants(s.path, "cli")
     await other.aclose()
     await s.aclose()

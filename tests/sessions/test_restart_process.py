@@ -33,7 +33,14 @@ from localmelo.support.sessions.store import (
 )
 from localmelo.support.sessions.submissions import SubmissionRepeated
 
-from .helpers import ScriptedLLM, answer, check_invariants, started_agent, workspace
+from .helpers import (
+    ScriptedLLM,
+    answer,
+    check_invariants,
+    rows,
+    started_agent,
+    workspace,
+)
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX processes")
 
@@ -175,9 +182,21 @@ async def test_a_death_during_recovery_is_finished_by_the_next_open(
     made = await crash("c6_make", str(path))
     halfway = await crash("c6_recover", str(path))
     assert halfway == {"recovered": 1}
+    # The child died inside the second turn's recovery: the first stays done.
+    assert sorted(row[0] for row in rows(path, "SELECT status FROM turns")) == [
+        "crashed",
+        "running",
+    ]
+    last = rows(path, "SELECT MAX(id) FROM events")[0][0]
     store = SessionStore(path, writer="gateway")
     await store.open()
     check_invariants(path, "gateway")
+    replayed = [
+        e.event["type"]
+        for sid in made["session_ids"]
+        for e in await store.list_events(sid, after_id=last)
+    ]
+    assert replayed == ["turn.finished"]  # only the rest was recovered
     for sid in made["session_ids"]:
         (turn,) = await store.list_turns(sid)
         assert (turn.status, turn.cause) == ("crashed", "crash")
@@ -231,6 +250,18 @@ async def test_both_resume_arms_after_a_crash(tmp_path: Path) -> None:
         request = llm.requests[0]
         roles = [m.role for m in request if m.role != "system"]
         assert all(a != b for a, b in zip(roles, roles[1:], strict=False)), roles
+        # Turn 2 as its pair, right before turn 3.
+        talk = [(m.role, m.content) for m in request if m.role in ("user", "assistant")]
+        assert talk[-3:] == [
+            ("user", "Now wait for ever"),
+            ("assistant", NO_ANSWER_LABEL.format(status="crashed")),
+            ("user", "Turn three"),
+        ]
+        # Each tool message answers the call before it.
+        for before, message in zip(request, request[1:], strict=False):
+            if message.role == "tool":
+                assert before.tool_calls
+                assert message.tool_call_id == before.tool_calls[0].id
         has_tool_turn = any(m.role == "tool" for m in request)
         if mode == "window":
             assert has_tool_turn

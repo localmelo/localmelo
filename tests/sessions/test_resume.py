@@ -276,7 +276,9 @@ async def window_session(
     return runner.session_id, llm, agent
 
 
-async def test_the_window_arm_adds_a_crashed_turn_as_a_pair(tmp_path: Path) -> None:
+async def test_the_window_arm_adds_a_crashed_turn_as_a_pair(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     path = tmp_path / "s.db"
     store = SessionStore(path, writer="gateway")
     sid, _, live = await window_session(
@@ -289,7 +291,9 @@ async def test_the_window_arm_adds_a_crashed_turn_as_a_pair(tmp_path: Path) -> N
     await store.aclose()
     store = SessionStore(path, writer="gateway")  # recovery ends the turn crashed
     runner, agent, _ = await runner_for(tmp_path, store, sid, "window")
+    caplog.set_level(logging.WARNING)
     assert await runner.resume() == 2
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
     assert [(m.role, bool(m.tool_calls)) for m in agent.conversation()] == [
         ("user", False),
         ("assistant", True),
@@ -307,6 +311,7 @@ async def test_the_window_arm_adds_a_crashed_turn_as_a_pair(tmp_path: Path) -> N
         2,
         1,
     )
+    assert info.chars == sum(len(m.content) for m in agent.conversation())
     await live.close()
     await agent.close()
     await store.aclose()
@@ -357,7 +362,9 @@ async def test_without_a_usable_checkpoint_the_window_arm_falls_back(
     await store.aclose()
 
 
-async def test_a_checkpoint_of_four_turns_and_a_tail_of_two(tmp_path: Path) -> None:
+async def test_a_checkpoint_of_four_turns_and_a_tail_of_two(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     store = SessionStore(tmp_path / "s.db", writer="cli")
     sid, _, live = await window_session(tmp_path, store, 4)
     for index in (4, 5):  # turns another terminal ran: no checkpoint of ours
@@ -372,7 +379,9 @@ async def test_a_checkpoint_of_four_turns_and_a_tail_of_two(tmp_path: Path) -> N
             answer=f"answer {index}",
         )
     runner, agent, _ = await runner_for(tmp_path, store, sid, "window")
+    caplog.set_level(logging.WARNING)
     assert await runner.resume() == 6
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
     info = runner.last_resume
     assert info is not None and (info.turns, info.checkpoint_turns) == (6, 4)
     assert info.messages == 12

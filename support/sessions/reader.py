@@ -113,7 +113,11 @@ class SessionReader:
         return conn
 
     async def _check(self, conn: aiosqlite.Connection) -> Writer | None:
-        """The file's writer; ``None`` for a file with no schema yet."""
+        """The file's writer; ``None`` for a version-0 file, which has no records.
+
+        A version-0 file is a sessions file whose schema is not created yet,
+        or another SQLite file; neither holds a turn. A newer version raises.
+        """
         try:
             version = int(
                 list(await conn.execute_fetchall("PRAGMA user_version"))[0][0]
@@ -133,21 +137,23 @@ class SessionReader:
                 f"{self._path} has schema version {version}; this localmelo reads "
                 f"version {SCHEMA_VERSION}"
             )
-        if version == 0 and not tables:
+        if version == 0:
             return None
-        if version != SCHEMA_VERSION or "store_info" not in tables:
+        if version < 0:
             raise SessionStoreError(f"{self._path} is not a localmelo sessions file")
-        rows = list(
-            await conn.execute_fetchall(
-                "SELECT value FROM store_info WHERE key = 'writer'"
+        rows = []
+        if "store_info" in tables:
+            rows = list(
+                await conn.execute_fetchall(
+                    "SELECT value FROM store_info WHERE key = 'writer'"
+                )
             )
-        )
         if not rows or rows[0][0] not in ("gateway", "cli"):
             raise SessionStoreError(f"{self._path} has no valid writer marker")
         return cast(Writer, rows[0][0])
 
     async def writer(self) -> Writer | None:
-        """The file's writer marker; ``None`` for an empty file."""
+        """The file's writer marker; ``None`` for a version-0 file (no records)."""
         async with self._lock:
             return await self._check(await self._ready())
 

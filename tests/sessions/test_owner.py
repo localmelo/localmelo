@@ -43,9 +43,15 @@ OWNER = textwrap.dedent("""
             print("ready", flush=True)
             await asyncio.Event().wait()
         # "orphan": a tool child in its own session, as shell_exec starts one,
-        # with every inheritable descriptor left open, then a crash.
+        # with every inheritable descriptor left open, then a crash. Its
+        # stdout is not the pipe to the test, which would otherwise wait for
+        # the child to end before it sees this process exit.
         child = await asyncio.create_subprocess_exec(
-            "sleep", "60", start_new_session=True, close_fds=False
+            "sleep",
+            "60",
+            start_new_session=True,
+            close_fds=False,
+            stdout=asyncio.subprocess.DEVNULL,
         )
         print(child.pid, flush=True)
         os._exit(0)
@@ -103,8 +109,12 @@ async def test_another_process_owns_the_file_until_it_is_killed(tmp_path: Path) 
     async with owner(path, "hold") as (process, line):
         assert line == "ready"
         store = SessionStore(path, writer="gateway")
-        with pytest.raises(StoreOwnedError, match=f"pid {process.pid}"):
+        with pytest.raises(StoreOwnedError) as raised:
             await store.open()
+        assert str(raised.value) == (
+            f"Another melo gateway (pid {process.pid}) is using {path}. "
+            "Stop it to use the console here."
+        )
         process.send_signal(signal.SIGKILL)
         await process.wait()
         await store.open()  # the kernel released the lock with the process
@@ -125,8 +135,10 @@ async def test_a_failed_open_releases_the_lock_and_can_be_retried(
 
     monkeypatch.setattr(SessionStore, "_retain", failing_retain)
     store = SessionStore(path, writer="gateway")
-    with pytest.raises(SessionStoreError, match="No space left on device"):
+    with pytest.raises(SessionStoreError) as raised:
         await store.open()
+    assert str(raised.value) == f"Cannot open {path}: No space left on device"
+    assert store._owner_fd is None
     other = SessionStore(path, writer="gateway")
     await other.open()  # the failed open released the lock
     await other.aclose()
@@ -140,9 +152,15 @@ async def test_a_cli_file_is_refused_before_the_lock(tmp_path: Path) -> None:
     await terminal.create_session()
     await terminal.aclose()
     store = SessionStore(path, writer="gateway")
-    with pytest.raises(SessionStoreError, match="belongs to the terminal melo"):
+    before = path.read_bytes()
+    with pytest.raises(SessionStoreError) as raised:
         await store.open()
+    assert str(raised.value) == (
+        f"{path} belongs to the terminal melo (writer 'cli'); open it with "
+        "writer='cli' or use the default path"
+    )
     assert not Path(f"{path}.owner").exists()
+    assert path.read_bytes() == before
 
 
 async def test_a_tool_child_that_outlives_its_gateway_does_not_keep_the_lock(
@@ -152,10 +170,11 @@ async def test_a_tool_child_that_outlives_its_gateway_does_not_keep_the_lock(
     async with owner(path, "orphan") as (process, line):
         sleep_pid = int(line)
         try:
-            await process.wait()
+            await asyncio.wait_for(process.wait(), timeout=30)
             os.kill(sleep_pid, 0)  # the child still runs
             store = SessionStore(path, writer="gateway")
-            await store.open()
+            await asyncio.wait_for(store.open(), timeout=5)  # at once
+            os.kill(sleep_pid, 0)  # and still runs after the open
             await store.aclose()
         finally:
             with contextlib.suppress(ProcessLookupError):

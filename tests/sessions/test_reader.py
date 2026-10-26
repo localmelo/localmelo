@@ -244,6 +244,31 @@ async def test_a_newer_schema_raises_and_an_empty_file_has_no_records(
     assert not (tmp_path / "missing.db").exists()
 
 
+async def test_every_version_0_file_has_no_records(tmp_path: Path) -> None:
+    history = tmp_path / "history.db"  # version 0 with a table of its own
+    conn = sqlite3.connect(history)
+    conn.execute("CREATE TABLE tasks (task_id TEXT PRIMARY KEY)")
+    conn.commit()
+    conn.close()
+    before = history.read_bytes()
+    reader = SessionReader(history)
+    assert await reader.writer() is None
+    assert await reader.changes() == []
+    await reader.aclose()
+    assert history.read_bytes() == before
+    unmarked = tmp_path / "unmarked.db"  # version 1 without a writer marker
+    conn = sqlite3.connect(unmarked)
+    conn.execute("CREATE TABLE sessions (id TEXT PRIMARY KEY)")
+    conn.execute("PRAGMA user_version = 1")
+    conn.commit()
+    conn.close()
+    reader = SessionReader(unmarked)
+    with pytest.raises(SessionStoreError) as raised:
+        await reader.changes()
+    assert str(raised.value) == f"{unmarked} has no valid writer marker"
+    await reader.aclose()
+
+
 async def test_export_turns_writes_one_line_per_change(tmp_path: Path) -> None:
     gateway_path, cli_path = tmp_path / "g.db", tmp_path / "c.db"
     gateway = SessionStore(gateway_path, writer="gateway")

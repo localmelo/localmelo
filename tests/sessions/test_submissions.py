@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import uuid
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import (
     MAX_WITHDRAWN_PER_SCOPE,
     NewSession,
@@ -24,7 +27,14 @@ from localmelo.support.sessions.submissions import (
     check_submission,
 )
 
-from .helpers import Clock, check_invariants, events_of, rows
+from .helpers import (
+    Clock,
+    ScriptedLLM,
+    check_invariants,
+    events_of,
+    rows,
+    started_agent,
+)
 
 HOLDER = "testhost:1:aaaaaaaa"
 
@@ -70,6 +80,17 @@ async def test_a_repeat_returns_the_stored_turn_even_while_it_runs(
     assert conflict.value.submission.state == "accepted"
     assert rows(path, "SELECT COUNT(*) FROM turns") == [(1,)]
     assert events_of(path, session.id) == before
+    # Also once the turn has ended.
+    await finish(store, turn)
+    before = events_of(path, session.id)
+    with pytest.raises(SubmissionRepeated) as repeated:
+        await store.begin_turn(
+            session.id, "hello", holder=HOLDER, client_request_id="k1"
+        )
+    assert repeated.value.turn.id == turn.id
+    assert repeated.value.turn.status == "completed"
+    assert rows(path, "SELECT COUNT(*) FROM turns") == [(1,)]
+    assert events_of(path, session.id) == before
     await store.aclose()
 
 
@@ -82,6 +103,18 @@ async def test_a_withdrawal_refuses_the_later_submit_and_changes_nothing_else(
     first = await store.begin_turn(session.id, "first", holder=HOLDER)
     await finish(store, first)
     events_before = await store.list_events(session.id)
+
+    async def resumed(store: SessionStore) -> list[tuple[str, str]]:
+        """The window that the pairs resume loads."""
+        agent = await started_agent(tmp_path / "ws", ScriptedLLM())
+        try:
+            runner = SessionRunner(agent, store, session.id)
+            assert await runner.resume() == 1
+            return [(m.role, m.content) for m in agent.conversation()]
+        finally:
+            await agent.close()
+
+    pairs_before = await resumed(store)
     withdrawn = await store.withdraw_submission(session.id, "k1", user_text="second")
     assert withdrawn.state == "withdrawn"
     assert withdrawn.error == WITHDRAWN_ERROR
@@ -99,6 +132,7 @@ async def test_a_withdrawal_refuses_the_later_submit_and_changes_nothing_else(
         assert info is not None and info.turns == 1
         assert await store.list_events(session.id) == events_before
         assert [t.user_text for t in await store.list_turns(session.id)] == ["first"]
+        assert await resumed(store) == pairs_before
 
     await unchanged(store)
     await store.aclose()
@@ -109,7 +143,9 @@ async def test_a_withdrawal_refuses_the_later_submit_and_changes_nothing_else(
 
 
 async def test_withdrawing_an_accepted_or_withdrawn_key(tmp_path: Path) -> None:
-    store = store_at(tmp_path / "s.db")
+    path = tmp_path / "s.db"
+    clock = Clock()
+    store = store_at(path, clock=clock)
     session = await store.create_session()
     turn = await store.begin_turn(
         session.id, "hello", holder=HOLDER, client_request_id="k1"
@@ -120,8 +156,11 @@ async def test_withdrawing_an_accepted_or_withdrawn_key(tmp_path: Path) -> None:
     with pytest.raises(SubmissionConflict):
         await store.withdraw_submission(session.id, "k1", user_text="other")
     first = await store.withdraw_submission(session.id, "k2", user_text="x")
+    stored = rows(path, "SELECT * FROM submissions ORDER BY rowid")
+    clock.advance(5)
     second = await store.withdraw_submission(session.id, "k2", user_text="x")
     assert first == second  # a no-op
+    assert rows(path, "SELECT * FROM submissions ORDER BY rowid") == stored
     with pytest.raises(SubmissionConflict):
         await store.withdraw_submission(session.id, "k2", user_text="y")
     await store.aclose()
@@ -154,6 +193,7 @@ async def test_acceptance_and_withdrawal_race_and_exactly_one_wins(
             assert isinstance(begun, SubmissionWithdrawn)
             assert not isinstance(withdrawn, BaseException)
             assert withdrawn.state == "withdrawn"
+            assert begun.submission == withdrawn  # the winner's row
             assert rows(path, "SELECT COUNT(*) FROM turns") == [(0,)]
         check_invariants(path, "gateway")
         await store.aclose()
@@ -324,6 +364,30 @@ async def test_the_withdrawal_cap_prunes_the_oldest(
     # Another scope keeps its own.
     await store.withdraw_submission(None, "c0", user_text="x")
     assert rows(path, "SELECT COUNT(*) FROM submissions WHERE scope = ''") == [(1,)]
+    # The prune is in the withdrawal's transaction: when it fails, so does
+    # the withdrawal.
+    conn = store._conn
+    assert conn is not None
+    execute = conn.execute
+
+    def failing(sql: str, *args: Any, **kwargs: Any) -> Any:
+        if sql.startswith("DELETE FROM submissions WHERE rowid IN"):
+            raise sqlite3.OperationalError("disk I/O error")
+        return execute(sql, *args, **kwargs)
+
+    with monkeypatch.context() as m:
+        m.setattr(conn, "execute", failing)
+        with pytest.raises(sqlite3.OperationalError):
+            await store.withdraw_submission(session.id, "k8", user_text="x")
+    assert (
+        rows(
+            path,
+            "SELECT client_request_id FROM submissions WHERE scope = ? "
+            "ORDER BY created_at",
+            session.id,
+        )
+        == kept
+    )
     await store.aclose()
 
 
