@@ -1,0 +1,52 @@
+{
+  "result": {
+    "task_id": "<task:1>",
+    "status": "setup_error",
+    "result": "",
+    "error": "cannot reach the weather server",
+    "steps": 0,
+    "attempts": 0,
+    "n_llm": 0,
+    "n_main": 0,
+    "n_aux": 0,
+    "n_tool": 0,
+    "llm_errors": 0,
+    "usage": {},
+    "config": {
+      "max_steps": 30,
+      "attempt_policy": "reflect",
+      "steps_per_attempt": 10,
+      "max_attempts": 5,
+      "reflection_gate": "flags",
+      "tool_exposure": "retrieve",
+      "builtins": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "memory": true,
+      "memory_dir": "<memory_dir>",
+      "timeout_s": null,
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ]
+    }
+  },
+  "requests": [],
+  "window": [],
+  "history": {
+    "tasks": [
+      {
+        "task_id": "<task:1>",
+        "query": "What is the weather in Rome?",
+        "status": "setup_error",
+        "result": "cannot reach the weather server"
+      }
+    ],
+    "steps": []
+  }
+}

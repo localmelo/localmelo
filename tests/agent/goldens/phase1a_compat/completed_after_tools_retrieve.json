@@ -1,0 +1,342 @@
+{
+  "result": {
+    "task_id": "<task:1>",
+    "status": "completed",
+    "result": "It is sunny and 21 °C in Paris.",
+    "error": "",
+    "steps": 3,
+    "attempts": 1,
+    "n_llm": 3,
+    "n_main": 3,
+    "n_aux": 0,
+    "n_tool": 3,
+    "llm_errors": 0,
+    "usage": {
+      "prompt_tokens": 1240,
+      "completion_tokens": 67,
+      "total_tokens": 1307
+    },
+    "config": {
+      "max_steps": 30,
+      "attempt_policy": "reflect",
+      "steps_per_attempt": 10,
+      "max_attempts": 5,
+      "reflection_gate": "flags",
+      "tool_exposure": "retrieve",
+      "builtins": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "memory": true,
+      "memory_dir": "<memory_dir>",
+      "timeout_s": null,
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec",
+        "stock_price",
+        "weather"
+      ]
+    }
+  },
+  "requests": [
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec",
+        "weather"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "What is the weather in Paris?",
+          "tool_calls": [],
+          "tool_call_id": ""
+        }
+      ]
+    },
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec",
+        "weather"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.\n\n[RECALL]\n\nChecking the forecast. [called weather] -> Sunny, 21 °C in Paris",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "What is the weather in Paris?",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "assistant",
+          "content": "Checking the forecast.",
+          "tool_calls": [
+            {
+              "tool_name": "weather",
+              "arguments": {
+                "city": "Paris"
+              },
+              "id": "<call:1>"
+            }
+          ],
+          "tool_call_id": ""
+        },
+        {
+          "role": "tool",
+          "content": "Sunny, 21 °C in Paris\n[1 image: sha256:e3311164b2dc image/png]",
+          "tool_calls": [],
+          "tool_call_id": "<call:1>"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec",
+        "stock_price",
+        "weather"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.\n\n[RECALL]\n\nChecking the forecast. [called weather] -> Sunny, 21 °C in Paris\n\n [called python_exec] -> 42\n\n [called stock_price] -> ",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "What is the weather in Paris?",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "assistant",
+          "content": "Checking the forecast.",
+          "tool_calls": [
+            {
+              "tool_name": "weather",
+              "arguments": {
+                "city": "Paris"
+              },
+              "id": "<call:1>"
+            }
+          ],
+          "tool_call_id": ""
+        },
+        {
+          "role": "tool",
+          "content": "Sunny, 21 °C in Paris\n[1 image: sha256:e3311164b2dc image/png]",
+          "tool_calls": [],
+          "tool_call_id": "<call:1>"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "tool_name": "python_exec",
+              "arguments": {
+                "code": "print(6 * 7)"
+              },
+              "id": "<call:2>"
+            },
+            {
+              "tool_name": "stock_price",
+              "arguments": {
+                "ticker": "ACME"
+              },
+              "id": "<call:3>"
+            }
+          ],
+          "tool_call_id": ""
+        },
+        {
+          "role": "tool",
+          "content": "42",
+          "tool_calls": [],
+          "tool_call_id": "<call:2>"
+        },
+        {
+          "role": "tool",
+          "content": "Error: Tool 'stock_price' was not offered in this step.",
+          "tool_calls": [],
+          "tool_call_id": "<call:3>"
+        }
+      ]
+    }
+  ],
+  "window": [
+    {
+      "role": "user",
+      "content": "What is the weather in Paris?",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "Checking the forecast.",
+      "thinking": "The user wants the forecast, so I call the weather tool.",
+      "tool_calls": [
+        {
+          "tool_name": "weather",
+          "arguments": {
+            "city": "Paris"
+          },
+          "id": "<call:1>"
+        }
+      ],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "Sunny, 21 °C in Paris\n[1 image: sha256:e3311164b2dc image/png]",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "<call:1>",
+      "images": [
+        {
+          "mime_type": "image/png",
+          "sha256": "e3311164b2dcecbbe33a778d125156e20755565ae3a21c7e8151f253284502d5",
+          "size_bytes": 30
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "thinking": "",
+      "tool_calls": [
+        {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(6 * 7)"
+          },
+          "id": "<call:2>"
+        },
+        {
+          "tool_name": "stock_price",
+          "arguments": {
+            "ticker": "ACME"
+          },
+          "id": "<call:3>"
+        }
+      ],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "42",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "<call:2>",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "Error: Tool 'stock_price' was not offered in this step.",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "<call:3>",
+      "images": []
+    }
+  ],
+  "history": {
+    "tasks": [
+      {
+        "task_id": "<task:1>",
+        "query": "What is the weather in Paris?",
+        "status": "completed",
+        "result": "It is sunny and 21 °C in Paris."
+      }
+    ],
+    "steps": [
+      {
+        "step_id": "<step:1>",
+        "task_id": "<task:1>",
+        "thought": "Checking the forecast.",
+        "tool_call_json": {
+          "tool_name": "weather",
+          "arguments": {
+            "city": "Paris"
+          },
+          "id": "<call:1>"
+        },
+        "tool_result_json": {
+          "tool_name": "weather",
+          "output": "Sunny, 21 °C in Paris",
+          "error": "",
+          "images": [
+            {
+              "mime_type": "image/png",
+              "sha256": "e3311164b2dcecbbe33a778d125156e20755565ae3a21c7e8151f253284502d5",
+              "size_bytes": 30
+            }
+          ]
+        },
+        "seq": 0
+      },
+      {
+        "step_id": "<step:2>",
+        "task_id": "<task:1>",
+        "thought": "",
+        "tool_call_json": {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(6 * 7)"
+          },
+          "id": "<call:2>"
+        },
+        "tool_result_json": {
+          "tool_name": "python_exec",
+          "output": "42",
+          "error": ""
+        },
+        "seq": 1
+      },
+      {
+        "step_id": "<step:3>",
+        "task_id": "<task:1>",
+        "thought": "",
+        "tool_call_json": {
+          "tool_name": "stock_price",
+          "arguments": {
+            "ticker": "ACME"
+          },
+          "id": "<call:3>"
+        },
+        "tool_result_json": {
+          "tool_name": "stock_price",
+          "output": "",
+          "error": "Tool 'stock_price' was not offered in this step."
+        },
+        "seq": 2
+      }
+    ]
+  }
+}
