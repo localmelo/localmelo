@@ -22,7 +22,9 @@ from collections.abc import (
 )
 from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
+from localmelo.melo.agent._call_log import CallHistory, CallLog
 from localmelo.melo.agent._chat import (
+    CALL_RECORDER,
     RETRY_HOOK,
     Chat,
     RequestStats,
@@ -1645,6 +1647,13 @@ class Agent:
                     summary, metadata={"step_id": record.step_id}, to_working=False
                 )
 
+        recorder = CALL_RECORDER.get()
+        if recorder is not None:
+            # Every record is written: the planning reply's row lists them.
+            await recorder.link_steps(
+                [record.step_id for record in step.records[: step.stored]]
+            )
+
         assistant_msg, tool_msgs = self._checked_tool_turn(
             response, kept, step.cut_before
         )
@@ -2330,6 +2339,16 @@ class Agent:
         deadline = asyncio.timeout(timeout_s)  # never expires when None
         # The retry notices of this run's model requests; only with a sink.
         retries = RETRY_HOOK.set(run.events.retry) if on_event is not None else None
+        # Every response of this run's model requests becomes a row of
+        # history's llm_calls table, when the history keeps model calls,
+        # with or without a sink. Read at each run, so a history set after
+        # the Agent was built records too.
+        history = self.hippo.history
+        recorder = CALL_RECORDER.set(
+            CallLog(history, task.task_id, run)
+            if isinstance(history, CallHistory)
+            else None
+        )
         self._active_runs += 1
         try:
             run.events.run_started(
@@ -2425,6 +2444,7 @@ class Agent:
                 self._active_runs -= 1
             if retries is not None:
                 RETRY_HOOK.reset(retries)
+            CALL_RECORDER.reset(recorder)
 
     def _record_answer(self, run: _RunState) -> None:
         """Append the answer of *run*, which has ended, to working memory.
@@ -2696,6 +2716,8 @@ class Agent:
                 except asyncio.CancelledError as exc:
                     cancelled = exc
             finalize_by = loop.time() + FINALIZE_TIMEOUT_S
+            # The ids of the interrupted step's steps rows that are written.
+            written: list[str] = []
             if run.inflight is not None:
                 bound = FINALIZE_TIMEOUT_S
                 if self._exit is not None:
@@ -2703,7 +2725,7 @@ class Agent:
                 await self._finalize_within(
                     bound,
                     task.task_id,
-                    self._save_interrupted_step(task.task_id, run.inflight),
+                    self._save_interrupted_step(task.task_id, run.inflight, written),
                 )
             task.status = run.status
             task.result = run.result or run.error
@@ -2714,6 +2736,18 @@ class Agent:
             await self._finalize_within(
                 bound, task.task_id, self._save_final_state(task)
             )
+            recorder = CALL_RECORDER.get()
+            if recorder is not None and written:
+                # After the task record's save, within what is left of its
+                # time: an unlinked row is the lesser loss.
+                if self._exit is not None:
+                    bound = self._exit.time_left()
+                else:
+                    bound = max(finalize_by - loop.time(), 0.0)
+                if bound > 0:
+                    await self._finalize_within(
+                        bound, task.task_id, recorder.link_steps(written)
+                    )
         finally:
             self.hippo.working.clear_reflections()
             run.outcome = self._run_result(
@@ -2745,7 +2779,9 @@ class Agent:
             else:
                 logger.exception("Could not finalize cancelled task %s", task_id)
 
-    async def _save_interrupted_step(self, task_id: str, step: _InflightStep) -> None:
+    async def _save_interrupted_step(
+        self, task_id: str, step: _InflightStep, written: list[str]
+    ) -> None:
         """Write the history rows of *step* that the cancellation left out.
 
         The record whose ``store_step`` the cancellation interrupted, if
@@ -2759,11 +2795,14 @@ class Agent:
         is attempted on its own: a failure is logged, and the next write
         still runs.
         """
+        written.extend(record.step_id for record in step.records[: step.stored])
         if step.stored < len(step.records):
             record = step.records[step.stored]
             try:
                 await self.hippo.store_step(task_id, record)
+                written.append(record.step_id)
             except sqlite3.IntegrityError:
+                written.append(record.step_id)
                 logger.debug(
                     "Step %s of task %s was saved before the cancellation",
                     record.step_id,
@@ -2784,6 +2823,7 @@ class Agent:
                     tool_result=step.closed[index],
                 )
                 await self.hippo.store_step(task_id, record)
+                written.append(record.step_id)
             except Exception as exc:
                 logger.warning(
                     "Could not save a step of task %s: %s",

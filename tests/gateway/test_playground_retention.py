@@ -1,4 +1,4 @@
-"""The web workspace's shared history keeps reasoning as long as melo's (R1).
+"""The web workspace's shared history: model calls and their retention (R1).
 
 Requires fastapi (gateway extra). Each playground keeps its memory under
 ``tmp_path``.
@@ -92,3 +92,9 @@ async def test_a_new_chat_clears_old_reasoning(
     assert _query(path, "SELECT thinking FROM llm_calls WHERE task_id = 'old'") == [
         (kept,)
     ]
+    # The chat's run records its model call in the shared file.
+    assert _query(
+        path,
+        "SELECT kind, outcome, content, thinking FROM llm_calls "
+        "WHERE task_id != 'old'",
+    ) == [("plan", "answer", "Hello", "Say hello.")]
