@@ -10,6 +10,7 @@ import os
 import signal
 import stat
 import subprocess
+import sys
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -33,13 +34,24 @@ APPROVAL_BUILTINS: frozenset[str] = frozenset(
 # each call. A tool that runs a child process may append the child's
 # returncode (negative when a signal ended it) once the child has exited by
 # itself; a tool that kills its child appends nothing. Without a list
-# (None, the default), there is nothing to record.
+# (None, the default), there is nothing to record. The shell_exec and
+# python_exec of a workspace root record their child's status; the Phase 1a
+# functions record nothing.
 TOOL_EXIT_CODE: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
     "TOOL_EXIT_CODE", default=None
 )
 
-# Seconds a shell_exec command may run before it is killed.
+# Seconds a shell_exec command may run before it is killed, unless the
+# shell_exec of a workspace root has a tool_timeout_s of its own.
 SHELL_TIMEOUT_S = 30.0
+
+# Seconds the executor's limit of the rooted shell_exec lies above the
+# shell's own, more than killing and reaping its process group can take
+# (_REAP_TIMEOUT_S), so the shell's own limit fires first and names itself.
+_SHELL_TIMEOUT_MARGIN_S = 30.0
+
+# Characters of output that the error of a failed rooted python_exec keeps.
+_PYTHON_ERROR_TAIL = 4_000
 
 # Seconds to wait for a killed shell_exec command to be reaped.
 _REAP_TIMEOUT_S = 5.0
@@ -81,27 +93,54 @@ def builtin_names() -> frozenset[str]:
     )
 )
 async def _shell_exec(command: str) -> str:
+    text, _ = await _run_shell(command)
+    return text
+
+
+async def _run_shell(
+    command: str,
+    *,
+    cwd: str | None = None,
+    stdin: int | None = None,
+    timeout_s: float | None = None,
+) -> tuple[str, int]:
+    """Run *command* in a shell; return its output and its exit status.
+
+    *cwd* and *stdin* go to the shell as :mod:`subprocess` takes them
+    (``None``: this process's directory and standard input). *timeout_s*
+    limits the command, ``None`` standing for :data:`SHELL_TIMEOUT_S` as it
+    is when the command starts. A command that runs past it is killed with
+    its process group, and ``TimeoutError("Command timed out after <limit>
+    s")`` is raised.
+    """
+    limit = SHELL_TIMEOUT_S if timeout_s is None else timeout_s
     # A new session puts the shell and everything it starts in one process
     # group, which is killed as a whole when the command times out or the
     # call is cancelled (the executor's timeout, the run's timeout_s).
     proc = await asyncio.create_subprocess_shell(
         command,
+        stdin=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        cwd=cwd,
         start_new_session=True,
     )
     try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=SHELL_TIMEOUT_S
-        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=limit)
     except TimeoutError:
         await _kill_process_group(proc)
         # The executor reports a tool's own TimeoutError by its message, so
         # the error names this limit rather than the executor's timeout.
-        raise TimeoutError(f"Command timed out after {SHELL_TIMEOUT_S:g} s") from None
+        raise TimeoutError(f"Command timed out after {limit:g} s") from None
     except BaseException:
         await _kill_process_group(proc)
         raise
+    assert proc.returncode is not None  # communicate() waits for the exit
+    return _output_text(stdout, stderr), proc.returncode
+
+
+def _output_text(stdout: bytes, stderr: bytes) -> str:
+    """A child's output as a tool returns it: stdout, then stderr."""
     out = stdout.decode(errors="replace")
     err = stderr.decode(errors="replace")
     return f"{out}\n{err}".strip() if err else out.strip()
@@ -195,12 +234,15 @@ async def _python_exec(code: str) -> str:
 # ── Built-ins with a workspace root ──
 
 
-def rooted_builtins(root: str) -> dict[str, tuple[ToolFunction, float | None]]:
+def rooted_builtins(
+    root: str, *, tool_timeout_s: float | None = None
+) -> dict[str, tuple[ToolFunction, float | None]]:
     """The built-ins that work in the workspace *root*, by tool name.
 
     Each value is the tool's callable and its timeout in milliseconds, or
     ``None`` for the executor's default. A callable takes exactly the
-    parameters of the tool's :class:`ToolDef`, so a call cannot pass more.
+    parameters of the tool's :class:`ToolDef`, so a call cannot pass more,
+    such as a ``cwd``.
 
     - ``file_read`` and ``file_write`` open the path they get, which the
       executor has resolved against its own root and fenced (see
@@ -213,14 +255,93 @@ def rooted_builtins(root: str) -> dict[str, tuple[ToolFunction, float | None]]:
       in ``MAX_OUTPUT_LEN`` together with a note of the file's size, so the
       executor's result check never cuts the note off. ``file_write``
       writes UTF-8 and reports the real path.
+    - ``shell_exec`` runs the command in *root*, with its standard input
+      on ``/dev/null``, and within *tool_timeout_s* seconds, else
+      :data:`SHELL_TIMEOUT_S`. With *tool_timeout_s*, the executor's limit
+      for it is 30 s above that; without, the executor's default (60 s)
+      stays above the shell's 30 s. So the shell's own limit fires first,
+      and the error names it. A non-zero exit status starts the text with
+      the line ``[exit code <n>]`` (``-<signal>`` for a child a signal
+      ended), and the call still succeeds: every later cut keeps a text's
+      start.
+    - ``python_exec`` runs the code in a child Python, ``sys.executable
+      -``, in *root*, with the code on its standard input, so ``input()``
+      gets EOF and ``sys.exit()`` or ``os.chdir()`` stays in the child. The
+      executor's limit, *tool_timeout_s* when it is set, else its default,
+      stops it. A non-zero exit raises ``RuntimeError("Python exited with
+      code <n>")``, followed by a colon, a line break and the last 4,000
+      characters of the output when there is any.
 
-    The other built-ins keep their Phase 1a functions.
+    Both run in a process group of their own, which a timeout or a
+    cancellation kills as a whole. Once their child has exited by itself,
+    they record its status in :data:`TOOL_EXIT_CODE`.
     """
     root = os.path.realpath(root)
+    shell_timeout_ms = (
+        None
+        if tool_timeout_s is None
+        else (tool_timeout_s + _SHELL_TIMEOUT_MARGIN_S) * 1000
+    )
+    python_timeout_ms = None if tool_timeout_s is None else tool_timeout_s * 1000
     return {
         "file_read": (_rooted_file_read(root), None),
         "file_write": (_rooted_file_write(root), None),
+        "shell_exec": (_rooted_shell_exec(root, tool_timeout_s), shell_timeout_ms),
+        "python_exec": (_rooted_python_exec(root), python_timeout_ms),
     }
+
+
+def _rooted_shell_exec(root: str, tool_timeout_s: float | None) -> ToolFunction:
+    async def shell_exec(command: str) -> str:
+        text, returncode = await _run_shell(
+            command, cwd=root, stdin=subprocess.DEVNULL, timeout_s=tool_timeout_s
+        )
+        _record_exit_code(returncode)
+        if returncode:
+            line = f"[exit code {returncode}]"
+            return f"{line}\n{text}" if text else line
+        return text
+
+    return shell_exec
+
+
+def _rooted_python_exec(root: str) -> ToolFunction:
+    async def python_exec(code: str) -> str:
+        if not sys.executable:
+            raise RuntimeError("No Python interpreter is available for python_exec")
+        source = code.encode("utf-8")
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-",
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=root,
+            start_new_session=True,
+        )
+        try:
+            stdout, stderr = await proc.communicate(source)
+        except BaseException:
+            await _kill_process_group(proc)
+            raise
+        assert proc.returncode is not None  # communicate() waits for the exit
+        _record_exit_code(proc.returncode)
+        text = _output_text(stdout, stderr)
+        if proc.returncode:
+            message = f"Python exited with code {proc.returncode}"
+            if text:
+                message = f"{message}:\n{text[-_PYTHON_ERROR_TAIL:]}"
+            raise RuntimeError(message)
+        return text
+
+    return python_exec
+
+
+def _record_exit_code(returncode: int) -> None:
+    """Append *returncode* to the call's :data:`TOOL_EXIT_CODE` list, if any."""
+    codes = TOOL_EXIT_CODE.get()
+    if codes is not None:
+        codes.append(returncode)
 
 
 def _rooted_file_read(root: str) -> ToolFunction:

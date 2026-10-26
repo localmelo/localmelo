@@ -4,15 +4,23 @@ With a root, the executor resolves the path of ``file_read`` and
 ``file_write`` against it, refuses a path whose real path is outside it,
 and hands the tool the real path. The file tools that ``register_builtins``
 gives for a root open that path without following a final symlink, refuse
-anything but a regular file, and cap what they read. Without a root, the
-built-ins are Phase 1a's functions.
+anything but a regular file, and cap what they read. Its ``shell_exec`` and
+``python_exec`` run in the root, in a process group of their own, within
+``tool_timeout_s``; the shell starts the text of a non-zero exit with
+``[exit code <n>]``, and both record their child's exit status in
+``TOOL_EXIT_CODE``. Without a root, the built-ins are Phase 1a's functions.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import os
+import signal
+import sys
+import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +29,15 @@ import pytest
 import localmelo.melo.executor.builtins as builtin_tools
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import ExecutorResultPayload
-from localmelo.melo.checker.validators import MAX_OUTPUT_LEN, validate_executor_result
+from localmelo.melo.checker.validators import (
+    MAX_OUTPUT_LEN,
+    TRUNCATION_SUFFIX,
+    validate_executor_result,
+)
+from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.executor import (
     BUILTINS,
+    TOOL_EXIT_CODE,
     ErrorCategory,
     ExecutionOutcome,
     ExecutionRequest,
@@ -51,7 +65,12 @@ def outside(tmp_path: Path) -> Path:
     return Path(os.path.realpath(path))
 
 
-def _executor(root: Path | str | None, *, rooted_tools: bool = True) -> Executor:
+def _executor(
+    root: Path | str | None,
+    *,
+    rooted_tools: bool = True,
+    tool_timeout_s: float | None = None,
+) -> Executor:
     """An executor with every built-in, fenced by *root*.
 
     With *rooted_tools*, the built-ins are the ones ``register_builtins``
@@ -61,7 +80,10 @@ def _executor(root: Path | str | None, *, rooted_tools: bool = True) -> Executor
     workspace_root = None if root is None else str(root)
     executor = Executor(hippo, Checker(), workspace_root=workspace_root)
     register_builtins(
-        executor, hippo, workspace_root=workspace_root if rooted_tools else None
+        executor,
+        hippo,
+        workspace_root=workspace_root if rooted_tools else None,
+        tool_timeout_s=tool_timeout_s,
     )
     return executor
 
@@ -87,6 +109,57 @@ async def _run(executor: Executor, tool: str, **arguments: Any) -> ExecutionOutc
     return await executor.execute_structured(
         ExecutionRequest(tool_name=tool, arguments=arguments)
     )
+
+
+async def _run_recording(
+    executor: Executor, tool: str, **arguments: Any
+) -> tuple[ExecutionOutcome, list[int]]:
+    """Run one call with a ``TOOL_EXIT_CODE`` slot, as a run with a sink does."""
+    codes: list[int] = []
+    slot = TOOL_EXIT_CODE.set(codes)
+    try:
+        outcome = await _run(executor, tool, **arguments)
+    finally:
+        TOOL_EXIT_CODE.reset(slot)
+    return outcome, codes
+
+
+async def _pid(pid_file: Path) -> int:
+    """The PID a command wrote to *pid_file*, once it is there."""
+    for _ in range(500):
+        text = pid_file.read_text() if pid_file.exists() else ""
+        if text.endswith("\n"):
+            return int(text)
+        await asyncio.sleep(0.01)
+    raise AssertionError("the command did not write its PID")
+
+
+async def _group_gone(pgid: int, timeout_s: float = 5.0) -> bool:
+    """Whether no process of group *pgid* is left within *timeout_s*.
+
+    ``PermissionError`` means "not gone yet": macOS raises it for zombies
+    that are not reaped yet.
+    """
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            pass
+        await asyncio.sleep(0.02)
+    return False
+
+
+@pytest.fixture
+def pid_file(tmp_path: Path) -> Iterator[Path]:
+    """Where a command writes its PID; a leftover group is killed afterwards."""
+    path = tmp_path / "pid"
+    yield path
+    if path.exists() and path.read_text().strip():
+        with contextlib.suppress(OSError):
+            os.killpg(int(path.read_text()), signal.SIGKILL)
 
 
 # ── Paths ───────────────────────────────────────────────────────────────────
@@ -455,16 +528,309 @@ def test_without_a_root_the_callables_are_phase_1as() -> None:
     assert executor._timeouts_ms == {}
 
 
-def test_with_a_root_the_file_tools_take_exactly_their_parameters(
+def test_with_a_root_the_builtins_take_exactly_their_parameters(
     root: Path,
 ) -> None:
     executor = _executor(root)
-    phase1a = {tool_def.name: fn for tool_def, fn in BUILTINS}
-    for tool_def, _ in BUILTINS:
-        if tool_def.name not in ("file_read", "file_write"):
-            continue
+    for tool_def, phase1a_fn in BUILTINS:
         fn = executor._callables[tool_def.name]
-        assert fn is not phase1a[tool_def.name]
+        assert fn is not phase1a_fn
         assert list(inspect.signature(fn).parameters) == list(
             tool_def.parameters["properties"]
         )
+    # Without tool_timeout_s, the limits are Phase 1a's: the executor's
+    # default for every tool, and SHELL_TIMEOUT_S inside the shell.
+    assert executor._timeouts_ms == {}
+
+
+def test_tool_timeout_s_needs_a_workspace_root() -> None:
+    hippo = Hippo()
+    executor = Executor(hippo, Checker())
+    with pytest.raises(ValueError, match="^tool_timeout_s needs a workspace_root$"):
+        register_builtins(executor, hippo, tool_timeout_s=10)
+    assert executor._callables == {}
+
+
+async def test_without_a_root_python_exec_runs_in_process() -> None:
+    executor = _executor(None)
+
+    outcome = await _run(executor, "python_exec", code="import os; print(os.getpid())")
+
+    assert outcome.output == str(os.getpid())
+
+
+# ── shell_exec with a root ──────────────────────────────────────────────────
+
+
+async def test_the_shell_starts_in_the_root_with_no_input(
+    root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    executor = _executor(root)
+
+    where = await _run(executor, "shell_exec", command="pwd")
+    stdin = await asyncio.wait_for(
+        _run(executor, "shell_exec", command='read line; echo "read: $?"'), 10.0
+    )
+
+    assert (where.status, where.output) == (ExecutionStatus.SUCCESS, str(root))
+    assert stdin.output == "read: 1"
+
+
+async def test_a_cwd_argument_never_runs(root: Path) -> None:
+    executor = _executor(root)
+    asked: list[ExecutionRequest] = []
+
+    async def gate(request: ExecutionRequest) -> ApprovalDecision:
+        asked.append(request)
+        return ApprovalDecision(True)
+
+    arguments = {"command": "touch ran", "cwd": "/"}
+    without_a_policy = await _run(executor, "shell_exec", **arguments)
+    with_a_policy = await executor.execute_structured(
+        ExecutionRequest(tool_name="shell_exec", arguments=arguments), approve=gate
+    )
+
+    assert without_a_policy.error_category == ErrorCategory.RUNTIME_ERROR
+    assert "unexpected keyword argument 'cwd'" in without_a_policy.error
+    assert with_a_policy.error_category == ErrorCategory.INVALID_ARGUMENTS
+    assert asked == []
+    assert not (root / "ran").exists()
+
+
+@pytest.mark.parametrize(
+    ("command", "output", "code"),
+    [
+        ("echo hi; exit 3", "[exit code 3]\nhi", 3),
+        ("exit 3", "[exit code 3]", 3),
+        ("echo out; echo err >&2; exit 2", "[exit code 2]\nout\n\nerr", 2),
+        ("echo hi; exit 0", "hi", 0),
+        ("exit 0", "", 0),
+        ("kill -9 $$", "[exit code -9]", -9),
+    ],
+    ids=["output", "no_output", "stderr", "zero", "zero_no_output", "signal"],
+)
+async def test_the_exit_status_starts_the_text(
+    root: Path, command: str, output: str, code: int
+) -> None:
+    executor = _executor(root)
+
+    outcome, codes = await _run_recording(executor, "shell_exec", command=command)
+
+    assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, output)
+    assert codes == [code]
+
+
+async def test_the_exit_status_line_survives_the_result_check(root: Path) -> None:
+    executor = _executor(root)
+
+    outcome, codes = await _run_recording(
+        executor,
+        "shell_exec",
+        command="head -c 60000 /dev/zero | tr '\\0' x; exit 1",
+    )
+
+    # execute_structured runs no result check: the whole output follows the
+    # line.
+    assert outcome.output == "[exit code 1]\n" + "x" * 60_000
+    assert codes == [1]
+    check = validate_executor_result(
+        ExecutorResultPayload(tool_name="shell_exec", output=outcome.output)
+    )
+    checked = check.sanitized_payload.output
+    assert len(checked) == MAX_OUTPUT_LEN + len(TRUNCATION_SUFFIX)
+    assert checked.startswith("[exit code 1]\n")
+    assert checked.endswith(TRUNCATION_SUFFIX)
+
+
+async def test_the_unrooted_shell_records_no_exit_status() -> None:
+    executor = _executor(None)
+
+    outcome, codes = await _run_recording(executor, "shell_exec", command="exit 3")
+
+    assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, "")
+    assert codes == []
+
+
+async def test_tool_timeout_s_limits_the_shell(root: Path, pid_file: Path) -> None:
+    executor = _executor(root, tool_timeout_s=1)
+
+    outcome, codes = await _run_recording(
+        executor, "shell_exec", command=f'echo $$ > "{pid_file}"; sleep 5'
+    )
+
+    assert outcome.status == ExecutionStatus.TIMEOUT
+    assert outcome.error == "Command timed out after 1 s"
+    assert codes == []
+    assert await _group_gone(await _pid(pid_file))
+    assert executor._timeouts_ms["shell_exec"] == 31_000
+
+
+async def test_a_cancelled_shell_records_no_exit_status(
+    root: Path, pid_file: Path
+) -> None:
+    executor = _executor(root)
+    codes: list[int] = []
+
+    async def call() -> ExecutionOutcome:
+        TOOL_EXIT_CODE.set(codes)
+        return await _run(
+            executor, "shell_exec", command=f'echo $$ > "{pid_file}"; sleep 60'
+        )
+
+    running = asyncio.create_task(call())
+    pgid = await _pid(pid_file)
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    assert codes == []
+    assert await _group_gone(pgid)
+
+
+async def test_without_tool_timeout_s_the_shell_keeps_shell_timeout_s(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(builtin_tools, "SHELL_TIMEOUT_S", 0.5)
+    rooted = _executor(root)
+    unrooted = _executor(None)
+
+    in_the_root = await _run(rooted, "shell_exec", command="sleep 5")
+    phase1a = await _run(unrooted, "shell_exec", command="sleep 5")
+
+    assert in_the_root.error == phase1a.error == "Command timed out after 0.5 s"
+    assert "shell_exec" not in rooted._timeouts_ms
+
+
+# ── python_exec with a root ─────────────────────────────────────────────────
+
+
+async def test_python_runs_in_a_child_in_the_root(
+    root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    executor = _executor(root)
+
+    outcome, codes = await _run_recording(
+        executor,
+        "python_exec",
+        code="import os\nprint(os.getpid())\nprint(os.getcwd())\nos.chdir('/')",
+    )
+
+    pid, cwd = outcome.output.splitlines()
+    assert outcome.status == ExecutionStatus.SUCCESS
+    assert int(pid) != os.getpid()
+    assert cwd == str(root)
+    assert codes == [0]
+    assert os.getcwd() == str(Path(os.path.realpath(tmp_path)))
+
+
+@pytest.mark.parametrize(
+    ("code", "status", "error", "exit_code"),
+    [
+        (
+            "import sys\nsys.exit(3)",
+            ExecutionStatus.ERROR,
+            "Python exited with code 3",
+            3,
+        ),
+        ("import sys\nprint('bye')\nsys.exit(0)", ExecutionStatus.SUCCESS, "", 0),
+        (
+            "print('hi')\nraise SystemExit(2)",
+            ExecutionStatus.ERROR,
+            "Python exited with code 2:\nhi",
+            2,
+        ),
+    ],
+    ids=["exit_3", "exit_0", "exit_2_with_output"],
+)
+async def test_python_survives_sys_exit(
+    root: Path,
+    code: str,
+    status: ExecutionStatus,
+    error: str,
+    exit_code: int,
+) -> None:
+    executor = _executor(root)
+
+    outcome, codes = await _run_recording(executor, "python_exec", code=code)
+
+    assert (outcome.status, outcome.error) == (status, error)
+    if status == ExecutionStatus.ERROR:
+        assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
+    else:
+        assert outcome.output == "bye"
+    assert codes == [exit_code]
+
+
+async def test_a_python_error_keeps_the_end_of_the_output(root: Path) -> None:
+    executor = _executor(root)
+
+    outcome = await _run(
+        executor, "python_exec", code="print('y' * 10_000)\nraise ValueError('boom')"
+    )
+
+    assert outcome.error.startswith("Python exited with code 1:\n")
+    tail = outcome.error.removeprefix("Python exited with code 1:\n")
+    assert len(tail) == 4_000
+    assert tail.endswith("ValueError: boom")
+
+
+async def test_input_gets_eof_instead_of_hanging(root: Path) -> None:
+    executor = _executor(root)
+
+    outcome = await asyncio.wait_for(
+        _run(executor, "python_exec", code="input()"), 10.0
+    )
+
+    assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
+    assert "EOFError" in outcome.error
+
+
+def _hang(pid_file: Path) -> str:
+    """Python code that writes its PID to *pid_file* and then never ends."""
+    return (
+        "import os\n"
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()) + '\\n')\n"
+        "while True: pass\n"
+    )
+
+
+async def test_a_hang_ends_at_the_executors_limit(root: Path, pid_file: Path) -> None:
+    executor = _executor(root)
+
+    outcome = await executor.execute_structured(
+        ExecutionRequest(
+            tool_name="python_exec",
+            arguments={"code": _hang(pid_file)},
+            timeout_ms=500,
+        )
+    )
+
+    assert outcome.status == ExecutionStatus.TIMEOUT
+    assert outcome.error_category == ErrorCategory.TIMEOUT
+    assert await _group_gone(await _pid(pid_file))
+
+
+async def test_tool_timeout_s_limits_python(root: Path, pid_file: Path) -> None:
+    executor = _executor(root, tool_timeout_s=1)
+
+    outcome, codes = await _run_recording(executor, "python_exec", code=_hang(pid_file))
+
+    assert outcome.status == ExecutionStatus.TIMEOUT
+    assert outcome.error == "Execution timed out after 1.0s"
+    assert codes == []
+    assert await _group_gone(await _pid(pid_file))
+    assert executor._timeouts_ms["python_exec"] == 1_000
+
+
+async def test_python_without_an_interpreter(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    executor = _executor(root)
+    monkeypatch.setattr(sys, "executable", "")
+
+    outcome = await _run(executor, "python_exec", code="print(1)")
+
+    assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
+    assert outcome.error == "No Python interpreter is available for python_exec"

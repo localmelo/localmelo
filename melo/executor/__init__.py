@@ -31,6 +31,7 @@ def register_builtins(
     names: Collection[str] | None = None,
     *,
     workspace_root: str | None = None,
+    tool_timeout_s: float | None = None,
 ) -> None:
     """Register built-in tools with the executor and hippo.
 
@@ -43,11 +44,17 @@ def register_builtins(
     :meth:`Executor.execute_structured` is given, if any, before it runs.
 
     Without *workspace_root*, the functions of :data:`BUILTINS` themselves
-    are registered. With one, the tools that :func:`rooted_builtins` gives
-    for it take their place: ``file_read`` and ``file_write`` refuse a
-    symlink and anything but a regular file, and ``file_read`` caps what it
-    reads. The executor fences their paths with its own root, so an
-    executor built with the same ``workspace_root`` goes with them.
+    are registered, and a *tool_timeout_s* raises ``ValueError``. With a
+    root, the tools that :func:`rooted_builtins` gives for it take their
+    place, with the timeouts it gives them: ``file_read`` and
+    ``file_write`` refuse a symlink and anything but a regular file, and
+    ``file_read`` caps what it reads; ``shell_exec`` and ``python_exec``
+    run in the root, in a child process, within *tool_timeout_s* seconds
+    when it is set, and the rooted ``shell_exec`` starts the text of a
+    non-zero exit with ``[exit code <n>]``. The executor fences the file
+    tools' paths with its own root, so an executor built with the same
+    ``workspace_root`` goes with them. ``shell_exec`` and ``python_exec``
+    can still reach any path: approval is their control.
     """
     selected = None if names is None else set(names)
     if selected is not None:
@@ -58,7 +65,13 @@ def register_builtins(
                 f"Unknown built-in tools: {', '.join(sorted(unknown))} "
                 f"(known: {', '.join(sorted(known))})"
             )
-    rooted = rooted_builtins(workspace_root) if workspace_root else {}
+    if tool_timeout_s is not None and not workspace_root:
+        raise ValueError("tool_timeout_s needs a workspace_root")
+    rooted = (
+        rooted_builtins(workspace_root, tool_timeout_s=tool_timeout_s)
+        if workspace_root
+        else {}
+    )
     for tool_def, phase1a_fn in BUILTINS:
         if selected is None or tool_def.name in selected:
             fn, timeout_ms = rooted.get(tool_def.name, (phase1a_fn, None))
