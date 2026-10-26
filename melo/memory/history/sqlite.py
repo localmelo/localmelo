@@ -44,7 +44,10 @@ class SqliteHistory(History):
     constructor stays synchronous (compatible with ``Agent.__init__``).
     All write paths run under ``_write_lock`` so the
     ``SELECT MAX(seq) → INSERT`` sequence in :meth:`add_step` is atomic
-    across concurrent callers on the same event loop.
+    across concurrent callers on the same event loop. That sequence runs
+    in a ``BEGIN IMMEDIATE`` transaction, which a failure or a
+    cancellation at any of its statements, the ``BEGIN`` included, rolls
+    back, so the shared connection is never left inside it.
 
     Tool-result images are stored as references (MIME type, SHA-256
     digest, size), never their base64 payload, and load back as
@@ -129,8 +132,14 @@ class SqliteHistory(History):
             tr_json = json.dumps(tr_fields)
 
         async with self._write_lock:
-            await conn.execute("BEGIN IMMEDIATE")
+            # BEGIN IMMEDIATE is inside the try, so that a BEGIN that fails or
+            # is cancelled is rolled back too. While another connection holds
+            # the write lock, it waits up to busy_timeout, and aiosqlite still
+            # runs it after its caller is cancelled: the rollback, queued
+            # behind it, ends the transaction it then opens, which would
+            # otherwise keep the write lock and refuse the next BEGIN.
             try:
+                await conn.execute("BEGIN IMMEDIATE")
                 async with conn.execute(
                     "SELECT COALESCE(MAX(seq), -1) FROM steps WHERE task_id = ?",
                     (task_id,),

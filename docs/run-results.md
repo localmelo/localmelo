@@ -17,6 +17,7 @@ retried.
 | `setup_error` | 2 | The tool providers, such as MCP servers, could not be set up. |
 | `timeout` | 2 | The run was still going when its time limit (`--timeout`) expired. |
 | `crashed` | 1 | An unexpected error, Ctrl+C, SIGTERM or SIGHUP ended the run. |
+| `cancelled` | none | An interactive run in the Python API was stopped. Direct mode never reports it. |
 
 Details:
 
@@ -61,12 +62,21 @@ Details:
   later runs end as `setup_error` too.
 - **`timeout`.** The error is `Timed out after <n> s`. A model request in
   flight is abandoned, and a `shell_exec` command is killed with every
-  process it started. `python_exec` code cannot be interrupted: the run ends
-  only when that code returns.
+  process it started. Without a workspace root, as in direct mode,
+  `python_exec` code cannot be interrupted: the run ends only when that code
+  returns. With one, the code runs in a child process, which is killed too.
 - **`crashed`.** The error is `<ExceptionType>: <message>`, and the
   traceback is logged. Ctrl+C ends a run as `crashed` with the error
   `CancelledError`, and SIGTERM or SIGHUP with `Cancelled by SIGTERM` or
   `Cancelled by SIGHUP`. See [Signals](cli.md#signals).
+- **`cancelled`.** Only for an interactive run, one started with `on_event`
+  or `approval` in the Python API, whose task was cancelled; see
+  [Stop a run](python-api.md#stop-a-run). `result` is empty, and `error` is
+  the reason: the reason given to `Agent.begin_exit` when the process is
+  exiting, else the message of `task.cancel(msg)`, else
+  `Cancelled by the caller`. A cancelled run without `on_event` or
+  `approval` ends as `crashed`, so direct mode and the gateway never report
+  `cancelled`.
 
 [How localmelo works](how-it-works.md) explains attempts, reflection and the
 continuation gate.
@@ -138,7 +148,8 @@ second try may succeed:
 - **Gateway:** `POST /v1/agent/run` answers HTTP 200 with `result`: the
   answer or best effort, or `[<status>] <error>` when that is empty. The
   status is not reported otherwise. See [HTTP API](gateway.md#http-api).
-- **Python:** `Agent.run_task()` returns a `RunResult`. See
-  [Python API](python-api.md#results).
+- **Python:** `Agent.run_task()` returns a `RunResult`, and the
+  `run.finished` event carries it too. See
+  [Python API](python-api.md#results) and [Events](events.md#runfinished).
 - **History:** each run's task record is saved with its status. See
   [Task records](memory.md#task-records).

@@ -16,6 +16,11 @@ A `file_read` or `file_write` call may take up to 60 seconds, and an MCP tool
 call up to its server's `timeout`. Output longer than 50,000 characters is
 cut.
 
+This is how the built-in tools work in direct mode and the gateway. In the
+Python API, an agent with a workspace root keeps the file tools inside a
+directory and runs `shell_exec` and `python_exec` there (see
+[With a workspace root](#with-a-workspace-root)).
+
 ## Choose the built-in tools
 
 ```bash
@@ -74,6 +79,7 @@ Every key of a server entry:
       "timeout": 120,
       "startup_timeout": 30,
       "include_tools": ["search", "read_note"],
+      "require_approval": false,
       "disabled": false
     }
   }
@@ -89,10 +95,14 @@ Every key of a server entry:
 | `timeout` | `120` | Seconds each tool call may take. |
 | `startup_timeout` | `30` | Seconds to start the server and list its tools. |
 | `include_tools` | all tools | Register only these tools, by the names the server uses. |
+| `require_approval` | `false` | `true`: each call of the server's tools asks the run's approval policy first. A list of tool names, spelled as in `include_tools`: only calls of those tools ask. It has an effect only in a run with a policy; see [With an approval policy](#with-an-approval-policy). |
 | `disabled` | `false` | `true` skips the server. |
 
 - `servers` is accepted in place of `mcpServers`. Other keys are ignored,
   except `type` (or `transport`): when present, it must be `stdio`.
+- `require_approval` must be `true`, `false` or a list of strings; any other
+  value is a usage error. A listed name that the server does not offer is
+  logged as a warning.
 - Only stdio servers work. Any other `type` is a usage error, such as
   `only stdio servers are supported (got type 'sse')`. So is an entry with a
   `url` and no `command`:
@@ -140,6 +150,11 @@ Before a tool runs, localmelo checks the call:
   `Arguments for shell_exec: 'command' must be of type string, not array`.
 - `shell_exec` refuses commands that match one of six patterns: `rm -rf /`,
   `mkfs`, `dd if=`, a fork bomb, `shutdown` and `reboot`.
+- With a workspace root, the path of `file_read` and `file_write` must be
+  inside it (see [With a workspace root](#with-a-workspace-root)).
+- With an approval policy, a tool that requires approval waits for the
+  policy's decision, and with a workspace root, a file path is then checked
+  again (see [With an approval policy](#with-an-approval-policy)).
 
 After a tool runs:
 
@@ -155,10 +170,80 @@ and can try something else.
 The checks are guardrails, not a sandbox:
 
 - Tools run with your account's permissions.
-- File tools are not limited to a directory: they reach any file you can.
+- Without a workspace root, as in direct mode and the gateway, file tools
+  reach any file you can, and `python_exec` runs code inside the localmelo
+  process.
+- With a workspace root, `shell_exec` and `python_exec` still reach any
+  file you can: only the file tools are kept inside the root.
+- Approvals apply only to a run with an approval policy. Direct mode and the
+  gateway have none.
 - The command blocklist is easy to get around.
-- `python_exec` runs code inside the localmelo process.
 
 To limit what a task can do, use `--builtins none` or a subset of tools,
 `--mcp-only`, a container or virtual machine, or a separate user account.
 See the [security policy](https://github.com/localmelo/localmelo/blob/main/SECURITY.md).
+
+### With a workspace root
+
+An agent built in Python with `AgentOptions(workspace_root=DIR)` changes the
+built-in tools (see [Work in a directory](python-api.md#work-in-a-directory)).
+Direct mode and the gateway never set a workspace root.
+
+- **The fence.** `file_read` and `file_write` resolve a relative path against
+  the root and reach only files whose real path is inside it, after `..` and
+  symlinks are resolved. A path outside is refused with
+  `Path '<path>' is outside allowed workspace root`, and an empty path, or
+  one with a NUL character, with
+  `Argument 'path' for <tool> must be a non-empty string without NUL characters.`
+  The tool gets the resolved path. `~` is not expanded, a path spelled in
+  another letter case than the root is refused, and hard links are not
+  detected.
+- **Opening files.** The file tools open the resolved path without following
+  symlinks, so a symlink that takes the file's place after the check is
+  refused. They refuse anything but a regular file, such as a FIFO, with
+  `Not a regular file: <path>`. `file_read` reads at most 200,000 bytes. A
+  file over 200,000 bytes, or whose text is longer than 50,000 characters,
+  is cut to 50,000 characters, which end with
+  `... [truncated: the file has <size> bytes]`.
+- **Commands.** `shell_exec` and `python_exec` start in the root, each in a
+  child process with a process group of its own, which a timeout or a
+  cancellation kills with every process it started. `python_exec` code runs
+  in a child Python, so a time limit can stop it. These two tools are not
+  fenced: they can reach any path.
+- **Exit status.** A `shell_exec` command that exits with a non-zero status
+  starts its text with the line `[exit code <n>]` (`-<signal>` for a command
+  that a signal ended), and the call still succeeds. The line comes first,
+  so it stays when the output is cut. Python code that exits with a non-zero
+  status fails with `Python exited with code <n>`.
+- **Time limits.** `AgentOptions(tool_timeout_s=...)` sets the time limit of
+  `shell_exec` and `python_exec`, in seconds. Without it they keep 30
+  seconds for a shell command and 60 seconds for Python. A shell command
+  that runs too long fails with `Command timed out after <n> s`.
+
+### With an approval policy
+
+A run started in Python with `approval=policy` asks the policy before each
+call of a tool that requires approval: `shell_exec`, `python_exec`,
+`file_write`, and the tools of tool providers that are marked so, such as
+the tools of an MCP server that sets `require_approval` (see
+[Approve tool calls](python-api.md#approve-tool-calls)).
+
+- **After the other checks.** The policy is asked only about a call that
+  every check above lets through, so it sees exactly what will run, the
+  resolved file path included. A call whose arguments do not match the
+  tool's parameters is refused with
+  `Arguments for <tool> do not match its parameters: <message>`, and the
+  policy is not asked.
+- **Outside the time limit.** The tool's time limit starts once the policy
+  allows the call.
+- **A denial** refuses the call. The model reads why, for example
+  `The user denied this call. Do not run it again or reach the same result another way unless the user asks.`
+- **It fails closed.** A policy that raises an error, or returns no decision,
+  refuses the call with
+  `Approval failed, so the call did not run: <ExceptionType>: <message>`.
+- **The re-check.** Once the policy allows a file tool's call under a
+  workspace root, the path is resolved again. A path that now resolves
+  elsewhere, as when a symlink took the file's place while the policy
+  decided, is refused with
+  `Path '<path>' changed while waiting for approval; the call did not run.`
+- Without a policy, these tools run without asking.

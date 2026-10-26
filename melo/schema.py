@@ -3,11 +3,12 @@ from __future__ import annotations
 import base64
 import binascii
 import hashlib
+import re
 import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 # ── Config ──
 
@@ -39,6 +40,99 @@ EMPTY_REPLY_NUDGE = (
     "Your last reply was empty. Continue the task: call a tool or give your "
     "final answer."
 )
+
+# ── Stopped tool calls ──
+
+# The error of a tool call that the run's cancellation, or its timeout_s,
+# cut short after the call was handed to the executor.
+CALL_INTERRUPTED = (
+    "The run was stopped before this call finished; it may have partly run."
+)
+# The error that a cancelled interactive run gives each call of its last
+# step that had not started when the run stopped (see Agent.run_task).
+CALL_NOT_STARTED = "The run was stopped before this call started; it did not run."
+
+# ── Answers kept in working memory ──
+
+# With AgentOptions.record_answers, each run ends by appending its answer to
+# working memory as an assistant message (see answer_text, clip_session_text
+# and split_thinking). These labels stand in for a run that gave no answer.
+# They are structural, in brackets, because models tend to echo prose
+# placeholders that they find in their own earlier replies.
+INTERRUPT_LABEL = "[interrupt: no assistant output for this turn]"
+NO_ANSWER_LABEL = "[no answer: the run ended with status {status}]"
+# Replaces a kept answer that the memory-write check refuses, with the
+# check's reason; a status label would claim that no answer was given.
+ANSWER_NOT_KEPT_LABEL = "[answer not kept in working memory: {reason}]"
+
+# Characters of an answer or a user text that a session keeps in working
+# memory (see clip_session_text).
+SESSION_TEXT_CHARS = 8_000
+
+
+def answer_text(status: str, result: str) -> str:
+    """The answer of a run that ended with *status* and *result*, as kept.
+
+    *result* itself when it has non-whitespace text; otherwise
+    :data:`INTERRUPT_LABEL` for a ``cancelled`` run, and
+    :data:`NO_ANSWER_LABEL` with the status for any other, so the kept
+    answer is never blank.
+    """
+    if result.strip():
+        return result
+    if status == "cancelled":
+        return INTERRUPT_LABEL
+    return NO_ANSWER_LABEL.format(status=status)
+
+
+def clip_session_text(text: str) -> str:
+    """*text* cut to its first :data:`SESSION_TEXT_CHARS` characters.
+
+    A longer text ends with a line break and
+    ``... [<n> more characters not shown]``, where ``n`` counts the
+    characters left out; a text that fits is returned as it is.
+    """
+    if len(text) <= SESSION_TEXT_CHARS:
+        return text
+    left_out = len(text) - SESSION_TEXT_CHARS
+    return f"{text[:SESSION_TEXT_CHARS]}\n... [{left_out} more characters not shown]"
+
+
+_THINK_BLOCK = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
+_THINK_OPENING = re.compile(r"\s*<think>", re.IGNORECASE)
+_THINK_CLOSING = re.compile(r"</think>", re.IGNORECASE)
+
+
+def split_thinking(text: str) -> tuple[str, str]:
+    """Split the reasoning in a ``<think>`` block off *text*: ``(thinking, text)``.
+
+    - The first ``<think>...</think>`` block, in any letter case and
+      anywhere in *text*, is the thinking.
+    - Otherwise a ``<think>`` at the start, after leading whitespace, that
+      is never closed makes the rest of *text* the thinking, as when the
+      output was cut off at the token limit while the model thought.
+    - Otherwise a ``</think>`` with no ``<think>`` before it makes the text
+      before it the thinking. Chat templates that open the block in the
+      prompt (DeepSeek-R1 and Qwen3 thinking models) leave only the closing
+      tag in the reply, and vLLM's R1 reasoning parser reads it the same way.
+    - The rest, stripped, is the text. Without a block the result is
+      ``("", text.strip())``.
+
+    The thinking is returned stripped too. Ollama's provider, and an
+    OpenAI-compatible server without a reasoning parser, put the reasoning
+    at the start of a reply's content as such a block.
+    """
+    block = _THINK_BLOCK.search(text)
+    if block is not None:
+        rest = text[: block.start()] + text[block.end() :]
+        return block.group(1).strip(), rest.strip()
+    opening = _THINK_OPENING.match(text)
+    if opening is not None:
+        return text[opening.end() :].strip(), ""
+    closing = _THINK_CLOSING.search(text)
+    if closing is not None:
+        return text[: closing.start()].strip(), text[closing.end() :].strip()
+    return "", text.strip()
 
 
 # ── Data types ──
@@ -183,6 +277,24 @@ class ToolDef:
     semantic_tags: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ToolInfo:
+    """A tool an agent can run, as :meth:`Agent.list_tools` reports it.
+
+    ``source`` says who registered it: ``"builtin"`` for a built-in tool,
+    ``"provided"`` for a tool of a tool provider (an MCP server, say), and
+    ``"custom"`` for one registered with the agent's executor and tool
+    registry directly. ``requires_approval`` says whether an approval
+    policy is asked before a call of it runs.
+    """
+
+    name: str
+    description: str
+    parameters: dict[str, Any]  # JSON Schema
+    source: Literal["builtin", "provided", "custom"]
+    requires_approval: bool
+
+
 def new_tool_call_id() -> str:
     """Return a fresh OpenAI-style tool call id (``call_`` + 24 hex chars)."""
     return f"call_{uuid.uuid4().hex[:24]}"
@@ -245,7 +357,8 @@ class TaskRecord:
     task_id: str = field(default_factory=new_record_id)
     steps: list[StepRecord] = field(default_factory=list)
     # "running" until the run ends, then the run's status: one of the
-    # RunResult statuses documented in docs/quickstart.md ("Run results").
+    # RunResult statuses documented in docs/run-results.md ("Statuses"),
+    # "cancelled" (an interactive run that was cancelled) included.
     status: str = "running"
     # The run's result, or its error when the result is empty.
     result: str = ""
@@ -256,10 +369,14 @@ class TaskRecord:
 class RunResult:
     """How one run of :meth:`Agent.run_task` ended.
 
-    ``status`` is one of the statuses documented in ``docs/quickstart.md``
-    ("Run results"). ``result`` is the final answer or a best effort, and
-    may be empty; ``error`` is empty unless something failed. The counters
-    cover this run only:
+    ``status`` is one of the statuses documented in ``docs/run-results.md``
+    ("Statuses"). ``cancelled`` is only for an interactive run, one with an
+    event sink or an approval policy, whose task was cancelled: its result
+    is empty and its error the reason, which is the exit's reason after
+    :meth:`Agent.begin_exit`; any other cancelled run ends ``crashed``
+    (see :meth:`Agent.run_task`). ``result`` is the final answer or a best
+    effort, and may be empty; ``error`` is empty unless something failed.
+    The counters cover this run only:
 
     - ``steps``: planning calls made, counted when each is sent;
     - ``attempts``: attempts started (1 for an answer on the first try);

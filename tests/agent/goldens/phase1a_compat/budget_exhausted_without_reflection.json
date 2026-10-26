@@ -1,0 +1,211 @@
+{
+  "result": {
+    "task_id": "<task:1>",
+    "status": "budget_exhausted",
+    "result": "",
+    "error": "Max steps reached",
+    "steps": 2,
+    "attempts": 1,
+    "n_llm": 2,
+    "n_main": 2,
+    "n_aux": 0,
+    "n_tool": 2,
+    "llm_errors": 0,
+    "usage": {},
+    "config": {
+      "max_steps": 2,
+      "attempt_policy": "none",
+      "steps_per_attempt": 10,
+      "max_attempts": 5,
+      "reflection_gate": "flags",
+      "tool_exposure": "retrieve",
+      "builtins": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "memory": true,
+      "memory_dir": "<memory_dir>",
+      "timeout_s": null,
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ]
+    }
+  },
+  "requests": [
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "Count to two with Python.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        }
+      ]
+    },
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.\n\n[RECALL]\n\n [called python_exec] -> 1",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "Count to two with Python.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "tool_name": "python_exec",
+              "arguments": {
+                "code": "print(1)"
+              },
+              "id": "<call:1>"
+            }
+          ],
+          "tool_call_id": ""
+        },
+        {
+          "role": "tool",
+          "content": "1",
+          "tool_calls": [],
+          "tool_call_id": "<call:1>"
+        }
+      ]
+    }
+  ],
+  "window": [
+    {
+      "role": "user",
+      "content": "Count to two with Python.",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "thinking": "",
+      "tool_calls": [
+        {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(1)"
+          },
+          "id": "<call:1>"
+        }
+      ],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "1",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "<call:1>",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "thinking": "",
+      "tool_calls": [
+        {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(2)"
+          },
+          "id": "<call:2>"
+        }
+      ],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "2",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "<call:2>",
+      "images": []
+    }
+  ],
+  "history": {
+    "tasks": [
+      {
+        "task_id": "<task:1>",
+        "query": "Count to two with Python.",
+        "status": "budget_exhausted",
+        "result": "Max steps reached"
+      }
+    ],
+    "steps": [
+      {
+        "step_id": "<step:1>",
+        "task_id": "<task:1>",
+        "thought": "",
+        "tool_call_json": {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(1)"
+          },
+          "id": "<call:1>"
+        },
+        "tool_result_json": {
+          "tool_name": "python_exec",
+          "output": "1",
+          "error": ""
+        },
+        "seq": 0
+      },
+      {
+        "step_id": "<step:2>",
+        "task_id": "<task:1>",
+        "thought": "",
+        "tool_call_json": {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(2)"
+          },
+          "id": "<call:2>"
+        },
+        "tool_result_json": {
+          "tool_name": "python_exec",
+          "output": "2",
+          "error": ""
+        },
+        "seq": 1
+      }
+    ]
+  }
+}

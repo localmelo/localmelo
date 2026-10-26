@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import re
@@ -24,6 +25,15 @@ logger = logging.getLogger(__name__)
 # Seconds to wait before each retry of a request that failed with a
 # retryable ProviderError: at most two retries, 1 s and then 4 s apart.
 RETRY_DELAYS_S: tuple[float, ...] = (1.0, 4.0)
+
+# Called before each retry's delay is waited out, with the 1-based number of
+# the attempt that failed, the delay in seconds and the attempt's error. A
+# context variable rather than a Chat attribute, so the hook belongs to the
+# task that set it: Agent.run_task sets it for a run with an event sink (the
+# retry notice) and resets it when the run ends. It must not block.
+RETRY_HOOK: contextvars.ContextVar[
+    Callable[[int, float, ProviderError], None] | None
+] = contextvars.ContextVar("RETRY_HOOK", default=None)
 
 SYSTEM_PROMPT = (
     "You are a task-solving agent. You can use tools to accomplish tasks.\n"
@@ -152,13 +162,16 @@ def _build_system_prompt(
     context: list[Message],
     short: list[Message],
     reflections: list[ReflectionEntry] | None = None,
+    notes: Sequence[str] = (),
 ) -> tuple[str, list[Message]]:
     """Merge all system messages into a single system prompt.
 
-    Memory items (prefixed with ``[memory] ``) are collected under a
-    single ``[RECALL]`` section.  Reflection entries are rendered under
-    a ``[REFLECTION]`` section.  Other system messages are appended
-    verbatim.  Non-system messages are returned unchanged.
+    *notes*, such as the agent's workspace note, follow ``SYSTEM_PROMPT``
+    first, each as a paragraph of its own. Memory items (prefixed with
+    ``[memory] ``) are collected under a single ``[RECALL]`` section.
+    Reflection entries are rendered under a ``[REFLECTION]`` section.
+    Other system messages are appended verbatim, after the notes.
+    Non-system messages are returned unchanged.
 
     Returns ``(merged_system_prompt, non_system_messages)``.
     """
@@ -176,7 +189,7 @@ def _build_system_prompt(
         else:
             non_system.append(msg)
 
-    parts: list[str] = [SYSTEM_PROMPT]
+    parts: list[str] = [SYSTEM_PROMPT, *notes]
     for extra in extra_system:
         parts.append(extra)
     if recall_items:
@@ -229,6 +242,11 @@ class RequestStats:
 class Chat:
     """Builds the agent's LLM requests, retries failed ones, counts them.
 
+    *system_notes* go into the system prompt of every planning request,
+    right after ``SYSTEM_PROMPT`` (see :meth:`plan_step`); they are the same
+    on every step, so a server's prefix cache still holds. Reflection
+    requests build their own system prompt and do not carry them.
+
     A request that fails with a retryable :class:`ProviderError` is sent
     again after each delay in *retry_delays* (default
     :data:`RETRY_DELAYS_S`), waited out with *sleep*, so tests can pass a
@@ -239,10 +257,12 @@ class Chat:
         self,
         llm: BaseLLMProvider,
         *,
+        system_notes: Sequence[str] = (),
         retry_delays: Sequence[float] = RETRY_DELAYS_S,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.llm = llm
+        self.system_notes = tuple(system_notes)
         self.retry_delays = tuple(retry_delays)
         self.sleep = sleep
         self.stats = RequestStats()
@@ -266,7 +286,8 @@ class Chat:
 
         A retryable :class:`ProviderError` is retried after each of
         :attr:`retry_delays` in turn; each attempt runs with its 1-based
-        number in ``LLM_REQUEST_ATTEMPT``. Every attempt that raises
+        number in ``LLM_REQUEST_ATTEMPT``, and :data:`RETRY_HOOK`, when set,
+        hears of each retry before its delay. Every attempt that raises
         counts in ``llm_errors``, including one cut short by a
         cancellation. The error of the last attempt, and any other
         exception at once, propagates.
@@ -287,6 +308,10 @@ class Chat:
                     delay,
                     exc,
                 )
+                # Here, while exc is bound, and with no await before the sleep.
+                hook = RETRY_HOOK.get()
+                if hook is not None:
+                    hook(attempt, delay, exc)
             except BaseException:
                 self.stats.llm_errors += 1
                 raise
@@ -327,7 +352,9 @@ class Chat:
         query: str,
         reflections: list[ReflectionEntry] | None = None,
     ) -> Message:
-        system_prompt, other_msgs = _build_system_prompt(context, short, reflections)
+        system_prompt, other_msgs = _build_system_prompt(
+            context, short, reflections, self.system_notes
+        )
         messages = [Message(role="system", content=system_prompt)]
         if lacks_task_query(short, query):
             # The task query is no longer in the window (evicted, or dropped

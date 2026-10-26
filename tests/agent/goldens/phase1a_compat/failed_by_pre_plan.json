@@ -1,0 +1,61 @@
+{
+  "result": {
+    "task_id": "<task:1>",
+    "status": "failed",
+    "result": "",
+    "error": "Plan check failed: Prompt too large: 108021 chars",
+    "steps": 0,
+    "attempts": 1,
+    "n_llm": 0,
+    "n_main": 0,
+    "n_aux": 0,
+    "n_tool": 0,
+    "llm_errors": 0,
+    "usage": {},
+    "config": {
+      "max_steps": 30,
+      "attempt_policy": "reflect",
+      "steps_per_attempt": 10,
+      "max_attempts": 5,
+      "reflection_gate": "flags",
+      "tool_exposure": "retrieve",
+      "builtins": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "memory": true,
+      "memory_dir": "<memory_dir>",
+      "timeout_s": null,
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ]
+    }
+  },
+  "requests": [],
+  "window": [
+    {
+      "role": "user",
+      "content": "Summarize this text: lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem i… [108021 chars, sha256 ddbf0918a9b4d03a41acbd49362606efcc29efc0ceae96386c2ca2070ab1a0c0]",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    }
+  ],
+  "history": {
+    "tasks": [
+      {
+        "task_id": "<task:1>",
+        "query": "Summarize this text: lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem i… [108021 chars, sha256 ddbf0918a9b4d03a41acbd49362606efcc29efc0ceae96386c2ca2070ab1a0c0]",
+        "status": "failed",
+        "result": "Plan check failed: Prompt too large: 108021 chars"
+      }
+    ],
+    "steps": []
+  }
+}

@@ -35,6 +35,13 @@ def exposed_tool_name(server: McpServerConfig, tool_name: str) -> str:
     return f"{name[: MAX_TOOL_NAME_LEN - 9]}_{digest}"
 
 
+def _requires_approval(server: McpServerConfig, tool_name: str) -> bool:
+    """Whether calls of the server's MCP tool *tool_name* ask for approval."""
+    if isinstance(server.require_approval, bool):
+        return server.require_approval
+    return tool_name in server.require_approval
+
+
 def _bind(client: StdioMcpClient, tool_name: str) -> ToolFunction:
     async def call(**arguments: Any) -> ToolOutput:
         return tool_result_to_output(await client.call_tool(tool_name, arguments))
@@ -71,6 +78,11 @@ class McpToolProvider(BaseToolProvider):
     server's input schema and description. A call goes to ``tools/call``
     with the original tool name; the executor bounds it with the server's
     ``timeout``. ``include_tools`` restricts which tools are registered.
+    ``require_approval`` marks the tools whose calls ask the run's approval
+    policy, when it has one, before they reach the server
+    (``ProvidedTool.requires_approval``): every tool of the server, or the
+    ones it names. A name in either list that the server does not offer is
+    logged as a warning.
 
     A server without tools adds none, with a warning: one that does not
     declare the ``tools`` capability is not asked for them, and one that
@@ -112,14 +124,24 @@ class McpToolProvider(BaseToolProvider):
                 started.append(client)
                 await client.start()
                 listed = await _list_tools(client)
+                offered = {tool.name for tool in listed}
                 wanted = set(server.include_tools or [])
-                missing = wanted - {tool.name for tool in listed}
+                missing = wanted - offered
                 if missing:
                     logger.warning(
                         "MCP server %r does not offer %s",
                         server.name,
                         ", ".join(sorted(missing)),
                     )
+                if isinstance(server.require_approval, list):
+                    unknown = set(server.require_approval) - offered
+                    if unknown:
+                        logger.warning(
+                            "MCP server %r does not offer %s (named in "
+                            "require_approval)",
+                            server.name,
+                            ", ".join(sorted(unknown)),
+                        )
                 for tool in listed:
                     if server.include_tools is not None and tool.name not in wanted:
                         continue
@@ -141,6 +163,7 @@ class McpToolProvider(BaseToolProvider):
                             ),
                             function=_bind(client, tool.name),
                             timeout_ms=server.timeout_s * 1000,
+                            requires_approval=_requires_approval(server, tool.name),
                         )
                     )
             self._check_open()

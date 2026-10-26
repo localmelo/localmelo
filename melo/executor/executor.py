@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
+import inspect
 import time
-from collections.abc import Callable, Collection, Coroutine
+from collections.abc import Awaitable, Callable, Collection, Coroutine, Mapping
 from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.checker.checker import Checker
+from localmelo.melo.contracts.approvals import (
+    APPROVAL_FAILED,
+    ApprovalDecision,
+    denial_text,
+)
 from localmelo.melo.executor.builtins import builtin_names
 from localmelo.melo.executor.models import (
     ArtifactMeta,
@@ -23,8 +30,15 @@ if TYPE_CHECKING:
 
 _DEFAULT_TIMEOUT_MS = 60_000
 
+# The tools whose "path" argument the workspace policy resolves and fences.
+_FILE_TOOLS = ("file_read", "file_write")
+
 # A tool callable returns plain text or a ToolOutput (text + images).
 ToolCallable = Callable[..., Coroutine[Any, Any, "str | ToolOutput"]]
+
+# Asked before a call of a tool that requires approval runs (see
+# Executor.execute_structured); its decision lets the call run or denies it.
+ApprovalGate = Callable[[ExecutionRequest], Awaitable[ApprovalDecision]]
 
 
 class Executor:
@@ -40,27 +54,55 @@ class Executor:
         self.checker = checker
         self._callables: dict[str, ToolCallable] = {}
         self._timeouts_ms: dict[str, float] = {}
+        # The tools registered as requiring approval.
+        self._marked_for_approval: set[str] = set()
         self._default_timeout_ms = timeout_ms
         self._policy = WorkspacePolicy(workspace_root)
 
+    @property
+    def workspace_root(self) -> str | None:
+        """The real path of the root the file tools are kept in, or ``None``."""
+        return self._policy.root
+
     def register(
-        self, name: str, fn: ToolCallable, *, timeout_ms: float | None = None
+        self,
+        name: str,
+        fn: ToolCallable,
+        *,
+        timeout_ms: float | None = None,
+        requires_approval: bool = False,
     ) -> None:
         """Register *fn* as the callable for tool *name*.
 
         *timeout_ms* overrides the executor default for this tool (an
         ``ExecutionRequest.timeout_ms`` still takes precedence).
+        *requires_approval* marks the tool: a call of it asks the approval
+        gate of :meth:`execute_structured`, when there is one, before it
+        runs. Registering a tool again resets both to what that call
+        passes, so a call without *requires_approval* clears the mark.
         """
         self._callables[name] = fn
         if timeout_ms is not None:
             self._timeouts_ms[name] = timeout_ms
         else:
             self._timeouts_ms.pop(name, None)
+        if requires_approval:
+            self._marked_for_approval.add(name)
+        else:
+            self._marked_for_approval.discard(name)
+
+    def requires_approval(self, name: str) -> bool:
+        """Whether tool *name* is registered as requiring approval."""
+        return name in self._marked_for_approval
 
     # ── Public API ──
 
     async def execute_structured(
-        self, request: ExecutionRequest, *, allowed: Collection[str] | None = None
+        self,
+        request: ExecutionRequest,
+        *,
+        allowed: Collection[str] | None = None,
+        approve: ApprovalGate | None = None,
     ) -> ExecutionOutcome:
         """Structured execution path with rich outcome metadata.
 
@@ -68,6 +110,37 @@ class Executor:
         step. A registered tool outside it is refused with
         ``TOOL_NOT_OFFERED`` before its arguments are looked at. ``None``
         skips that check.
+
+        With a workspace root (the executor's, or the request's
+        ``workspace_root``, which replaces it), the ``path`` of
+        ``file_read`` and ``file_write`` is resolved against the root (see
+        :meth:`WorkspacePolicy.resolve`). A path that is empty, missing or
+        holds a NUL character is refused with ``INVALID_ARGUMENTS``, and
+        one whose real path is outside the root with
+        ``PATH_POLICY_VIOLATION``. Otherwise the call goes on with the real
+        path in place of the given one, in a new request: the approval
+        gate, the tool and the outcome's artifacts get the path that was
+        checked, and the caller's request is not changed.
+
+        *approve* is asked about each call of a tool registered as
+        requiring approval (see :meth:`register`), after every check that
+        refuses a call by itself and before the tool's timeout starts, so
+        the time it takes to decide never counts against that timeout. It
+        gets the request that would run, and is asked only when the
+        arguments match the tool's parameters: a missing parameter, or one
+        the tool does not take, is refused with ``INVALID_ARGUMENTS``
+        instead. A denial is ``BLOCKED`` with ``APPROVAL_DENIED`` and the
+        text of :func:`~localmelo.melo.contracts.approvals.denial_text`. A
+        gate that raises an exception, or returns something other than an
+        :class:`~localmelo.melo.contracts.approvals.ApprovalDecision`,
+        fails closed: the call is refused the same way, with the text of
+        :data:`~localmelo.melo.contracts.approvals.APPROVAL_FAILED`. A
+        ``CancelledError`` propagates, and nothing runs. ``None`` asks no
+        one: a tool that requires approval then runs as any other does.
+        Once the gate allows a file tool's call under a root, its path is
+        resolved again; when the result differs, as when a symlink took the
+        file's place during the wait, the call is refused with
+        ``PATH_POLICY_VIOLATION`` and does not run.
         """
         tool_call = ToolCall(tool_name=request.tool_name, arguments=request.arguments)
 
@@ -138,21 +211,105 @@ class Executor:
                 error_category=ErrorCategory.TOOL_NOT_FOUND,
             )
 
-        # 7. Workspace path policy for file tools
-        if request.tool_name in ("file_read", "file_write"):
-            effective_root = request.workspace_root or self._policy.root
-            if effective_root:
-                policy = WorkspacePolicy(effective_root)
-                path = request.arguments.get("path", "")
-                if not policy.check_path(path):
+        # 7. Workspace path policy for the file tools: the path is resolved
+        #    against the root, and the call goes on with the real path, so
+        #    the tool opens the file that was checked (and the approval
+        #    policy sees it).
+        policy: WorkspacePolicy | None = None
+        resolved: str | None = None
+        if request.tool_name in _FILE_TOOLS:
+            policy = (
+                WorkspacePolicy(request.workspace_root)
+                if request.workspace_root
+                else self._policy
+            )
+            if policy.root is None:
+                policy = None
+            else:
+                path = request.arguments.get("path")
+                try:
+                    resolved = policy.resolve(path)
+                except ValueError:
+                    return ExecutionOutcome(
+                        tool_name=request.tool_name,
+                        status=ExecutionStatus.ERROR,
+                        error=(
+                            f"Argument 'path' for {request.tool_name} must be a "
+                            "non-empty string without NUL characters."
+                        ),
+                        error_category=ErrorCategory.INVALID_ARGUMENTS,
+                    )
+                if resolved is None:
                     return ExecutionOutcome(
                         tool_name=request.tool_name,
                         status=ExecutionStatus.ERROR,
                         error=f"Path '{path}' is outside allowed workspace root",
                         error_category=ErrorCategory.PATH_POLICY_VIOLATION,
                     )
+                # A new request: the caller's arguments stay as they were.
+                request = dataclasses.replace(
+                    request, arguments={**request.arguments, "path": resolved}
+                )
 
-        # 8. Execute with timeout
+        # 8. Approval, for a tool that requires it: asked only about a call
+        #    that every check above let through, and before the tool's
+        #    timeout starts.
+        asked = False
+        if approve is not None and self.requires_approval(request.tool_name):
+            mismatch = _parameter_mismatch(fn, request.arguments)
+            if mismatch:
+                return ExecutionOutcome(
+                    tool_name=request.tool_name,
+                    status=ExecutionStatus.ERROR,
+                    error=(
+                        f"Arguments for {request.tool_name} do not match its "
+                        f"parameters: {mismatch}"
+                    ),
+                    error_category=ErrorCategory.INVALID_ARGUMENTS,
+                )
+            # A CancelledError propagates: the call does not run.
+            try:
+                decision: object = await approve(request)
+            except Exception as exc:
+                return _approval_failed(request.tool_name, exc)
+            if not isinstance(decision, ApprovalDecision):
+                return _approval_failed(
+                    request.tool_name,
+                    TypeError(
+                        f"the approval gate returned {type(decision).__name__}, "
+                        "not an ApprovalDecision"
+                    ),
+                )
+            if not decision.allow:
+                return ExecutionOutcome(
+                    tool_name=request.tool_name,
+                    status=ExecutionStatus.BLOCKED,
+                    error=denial_text(decision),
+                    error_category=ErrorCategory.APPROVAL_DENIED,
+                )
+            asked = True
+
+        # 9. Re-check: an approved file path is resolved again, since a
+        #    person may take a while to answer. A path that resolves
+        #    elsewhere now, as when a symlink took the file's place, does
+        #    not run. This narrows the window between check and open.
+        if (
+            asked
+            and policy is not None
+            and resolved is not None
+            and policy.resolve(resolved) != resolved
+        ):
+            return ExecutionOutcome(
+                tool_name=request.tool_name,
+                status=ExecutionStatus.ERROR,
+                error=(
+                    f"Path '{resolved}' changed while waiting for approval; "
+                    "the call did not run."
+                ),
+                error_category=ErrorCategory.PATH_POLICY_VIOLATION,
+            )
+
+        # 10. Execute with timeout
         timeout_ms = (
             request.timeout_ms
             or self._timeouts_ms.get(request.tool_name)
@@ -191,7 +348,7 @@ class Executor:
 
         duration = (time.perf_counter() - start) * 1000
 
-        # 9. Normalize rich output (text + images)
+        # 11. Normalize rich output (text + images)
         if isinstance(output, ToolOutput):
             if output.is_error:
                 return ExecutionOutcome(
@@ -206,7 +363,7 @@ class Executor:
         else:
             text, images = (output if isinstance(output, str) else str(output)), []
 
-        # 10. Build outcome with artifact metadata
+        # 12. Build outcome with artifact metadata
         artifacts = self._collect_artifacts(request, text)
 
         return ExecutionOutcome(
@@ -246,6 +403,36 @@ class Executor:
                 )
             )
         return artifacts
+
+
+def _parameter_mismatch(fn: ToolCallable, arguments: Mapping[str, Any]) -> str:
+    """Why *fn* cannot be called with *arguments* as keywords, or ``""``.
+
+    That is a missing parameter, or one *fn* does not take. A callable whose
+    signature :mod:`inspect` cannot read is not checked, and one that takes
+    ``**kwargs`` accepts any name.
+    """
+    try:
+        signature = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return ""
+    try:
+        signature.bind(**arguments)
+    except TypeError as exc:
+        return str(exc)
+    return ""
+
+
+def _approval_failed(tool_name: str, exc: BaseException) -> ExecutionOutcome:
+    """The outcome of a call whose approval gate failed: the call did not run."""
+    message = str(exc)
+    error = f"{type(exc).__name__}: {message}" if message else type(exc).__name__
+    return ExecutionOutcome(
+        tool_name=tool_name,
+        status=ExecutionStatus.BLOCKED,
+        error=APPROVAL_FAILED.format(error=error),
+        error_category=ErrorCategory.APPROVAL_DENIED,
+    )
 
 
 def _json_type(value: Any) -> str:

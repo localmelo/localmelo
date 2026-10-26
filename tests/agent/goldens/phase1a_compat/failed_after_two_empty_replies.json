@@ -1,0 +1,138 @@
+{
+  "result": {
+    "task_id": "<task:1>",
+    "status": "failed",
+    "result": "",
+    "error": "empty replies",
+    "steps": 2,
+    "attempts": 1,
+    "n_llm": 2,
+    "n_main": 2,
+    "n_aux": 0,
+    "n_tool": 0,
+    "llm_errors": 0,
+    "usage": {
+      "prompt_tokens": 175,
+      "completion_tokens": 9,
+      "total_tokens": 184
+    },
+    "config": {
+      "max_steps": 30,
+      "attempt_policy": "reflect",
+      "steps_per_attempt": 10,
+      "max_attempts": 5,
+      "reflection_gate": "flags",
+      "tool_exposure": "retrieve",
+      "builtins": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "memory": true,
+      "memory_dir": "<memory_dir>",
+      "timeout_s": null,
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ]
+    }
+  },
+  "requests": [
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "Name a prime number.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        }
+      ]
+    },
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "Name a prime number.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "assistant",
+          "content": "[empty reply]",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "Your last reply was empty. Continue the task: call a tool or give your final answer.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        }
+      ]
+    }
+  ],
+  "window": [
+    {
+      "role": "user",
+      "content": "Name a prime number.",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "[empty reply]",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "user",
+      "content": "Your last reply was empty. Continue the task: call a tool or give your final answer.",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    }
+  ],
+  "history": {
+    "tasks": [
+      {
+        "task_id": "<task:1>",
+        "query": "Name a prime number.",
+        "status": "failed",
+        "result": "empty replies"
+      }
+    ],
+    "steps": []
+  }
+}

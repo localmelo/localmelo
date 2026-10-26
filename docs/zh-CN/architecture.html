@@ -138,7 +138,7 @@
         <p>关键文件：<code>support/mcp/config.py</code>、<code>client.py</code>、<code>provider.py</code>，以及 <code>melo/contracts/tools.py</code> 中的工具提供方接口。</p>
 
         <h3 id="c-agent">智能体</h3>
-        <p>运行循环。每一步都会根据任务、工作记忆、召回的长期记忆和最新的反思构建提示词，向模型提供一组工具，发送一次规划请求，然后运行回复中的工具调用。如果回复只有文本、没有工具调用，它就是最终答案，运行以 <code>completed</code> 结束。在默认的 <code>reflect</code> 策略下，步骤按尝试分组，每次尝试最多 10 步；一次尝试没有得到答案就结束时，由反思决定是否开始下一次尝试。每次运行都以九种状态之一结束，并返回一个 <code>RunResult</code>。模型请求失败时，如果重试可能成功，最多重试两次。</p>
+        <p>运行循环。每一步都会根据任务、工作记忆、召回的长期记忆和最新的反思构建提示词，向模型提供一组工具，发送一次规划请求，然后运行回复中的工具调用。如果回复只有文本、没有工具调用，它就是最终答案，运行以 <code>completed</code> 结束。在默认的 <code>reflect</code> 策略下，步骤按尝试分组，每次尝试最多 10 步；一次尝试没有得到答案就结束时，由反思决定是否开始下一次尝试。每次运行都以九种状态之一结束（在 Python API 中，被停止的交互式运行以 <code>cancelled</code> 结束），并返回一个 <code>RunResult</code>。模型请求失败时，如果重试可能成功，最多重试两次。</p>
         <p>关键文件：<code>melo/agent/agent.py</code>、<code>melo/agent/options.py</code>（<code>AgentOptions</code>）、<code>melo/agent/_chat.py</code>（规划和反思请求、重试）、<code>melo/schema.py</code>（<code>RunResult</code> 和各项上限）。</p>
 
         <h3 id="c-checker">检查器</h3>
@@ -155,9 +155,9 @@
         <p>关键文件：<code>melo/checker/checker.py</code>、<code>validators.py</code>、<code>payloads.py</code>。</p>
 
         <h3 id="c-executor">执行器</h3>
-        <p>按顺序运行一步中的工具调用。以下调用会被拒绝：本步没有提供的工具、参数不是 JSON 对象的调用，以及内置工具参数类型不对的调用；剩下的每个调用再交给检查器检查。每个工具都有时间限制：<code>shell_exec</code> 30 秒，<code>file_read</code> 和 <code>file_write</code> 60 秒，MCP 工具使用其服务器的 <code>timeout</code>。<code>python_exec</code> 的代码在 localmelo 进程内运行，无法中断。拒绝、超时或出错都会作为工具的错误返回。</p>
-        <p>四个内置工具是 <code>shell_exec</code>、<code>python_exec</code>、<code>file_read</code> 和 <code>file_write</code>。<code>policy.py</code> 可以把文件工具限制在一个目录中，但智能体没有启用它：文件工具可以访问你能访问的任何文件。</p>
-        <p>关键文件：<code>melo/executor/executor.py</code>、<code>builtins.py</code>、<code>policy.py</code>。</p>
+        <p>按顺序运行一步中的工具调用。以下调用会被拒绝：本步没有提供的工具、参数不是 JSON 对象的调用，以及内置工具参数类型不对的调用；剩下的每个调用再交给检查器检查。设置了工作区根目录时，工作区策略接着解析文件工具的路径，并拒绝根目录之外的路径。设置了审批策略时，需要审批的工具的调用接着等待审批策略的决定；获准之后，如果设置了工作区根目录，文件路径会被重新解析，路径在等待期间发生了变化的调用会被拒绝。每个工具都有时间限制，从审批之后开始计时：<code>shell_exec</code> 30 秒，<code>file_read</code> 和 <code>file_write</code> 60 秒，MCP 工具使用其服务器的 <code>timeout</code>。没有工作区根目录时，<code>python_exec</code> 的代码在 localmelo 进程内运行，无法中断。拒绝、审批不通过、超时或出错都会作为工具的错误返回。</p>
+        <p>四个内置工具是 <code>shell_exec</code>、<code>python_exec</code>、<code>file_read</code> 和 <code>file_write</code>。直接模式和网关不给它们设置工作区根目录，所以文件工具可以访问你能访问的任何文件。在 Python API 中，<code>AgentOptions(workspace_root=…)</code> 会启用 <code>policy.py</code>：文件工具只能访问根目录内的文件；<code>shell_exec</code> 和 <code>python_exec</code> 在根目录中以子进程运行，但不受这个限制。只有带审批策略的运行才会审批。</p>
+        <p>关键文件：<code>melo/executor/executor.py</code>、<code>builtins.py</code>、<code>policy.py</code>、<code>melo/contracts/approvals.py</code>。</p>
 
         <h3 id="c-memory">记忆</h3>
         <p>工作记忆保存一次运行或一个网关会话中的对话：最近 20 条消息，只在内存中。历史记录保存每个任务和每一步。长期记忆需要嵌入后端：它把步骤摘要和反思连同嵌入向量一起保存，并在每一步召回最接近的 5 条。历史记录和长期记忆默认留在内存中；开启持久化后，分别写入 <code>history.db</code> 和 <code>long_term.db</code>。工具注册表保存所有已注册的工具，以及检索模式使用的 BM25 索引。</p>

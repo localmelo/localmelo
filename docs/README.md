@@ -27,7 +27,10 @@ tools and memory on your own model server or a cloud API. The website is at
 - [Command-line reference](cli.md): modes, options, output, exit codes and
   signals.
 - [Run results](run-results.md): statuses, the run record, and retries.
-- [Python API](python-api.md): `Agent`, `AgentOptions` and `RunResult`.
+- [Python API](python-api.md): `Agent`, `AgentOptions` and `RunResult`,
+  stopping a run, approval policies and the workspace root.
+- [Events](events.md): the events a run reports to Python code, their order,
+  fields and rules.
 
 ## Background
 
@@ -121,6 +124,8 @@ page, a term may carry the English in parentheses, as in 嵌入（embedding）.
 | agent | 智能体 |
 | task | 任务 |
 | run | 运行（一次运行） |
+| interactive run (Python API) | 交互式运行 |
+| event | 事件 |
 | direct mode | 直接模式 |
 | gateway, gateway mode | 网关，网关模式 |
 | session | 会话 |
@@ -146,6 +151,8 @@ page, a term may carry the English in parentheses, as in 嵌入（embedding）.
 | allowlist, blocklist | 允许列表，拦截列表 |
 | sandbox | 沙箱 |
 | workspace | 工作区 |
+| workspace root | 工作区根目录 |
+| approval, approval policy | 审批，审批策略 |
 | memory | 记忆 |
 | working memory | 工作记忆 |
 | long-term memory | 长期记忆 |
@@ -185,6 +192,7 @@ page, a term may carry the English in parentheses, as in 嵌入（embedding）.
 | `setup_error` | tool setup failed | 工具准备失败 |
 | `timeout` | timed out | 超时 |
 | `crashed` | crashed | 异常终止 |
+| `cancelled` (interactive runs only) | cancelled | 已取消 |
 | `running` (task records only) | running | 运行中 |
 
 **Options** (the option stays in English)

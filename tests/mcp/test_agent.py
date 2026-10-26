@@ -18,6 +18,11 @@ import pytest
 
 import localmelo.melo.agent.agent as agent_mod
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts.approvals import (
+    ApprovalDecision,
+    ApprovalRequest,
+    DenyAllPolicy,
+)
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef
 from localmelo.support.mcp import McpServerConfig, McpToolProvider, StdioMcpClient
@@ -168,6 +173,91 @@ class TestMcpTools:
         assert len(created) == 1
         methods = [m.get("method") for m in read_log(log_path)]
         assert methods.count("initialize") == 1
+
+
+class AllowAndRecord:
+    """An approval policy that allows every call and keeps each request."""
+
+    def __init__(self) -> None:
+        self.requests: list[ApprovalRequest] = []
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        self.requests.append(request)
+        return ApprovalDecision(True)
+
+
+class TestRequireApproval:
+    async def test_the_named_tools_ask_the_policy(
+        self, log_path: Path, created: list[StdioMcpClient]
+    ) -> None:
+        llm = FakeLLM(
+            [
+                _call("mcp__fake__echo", {"text": "hello"}),
+                _call("mcp__fake__cwd", {}),
+                _answer("done"),
+            ]
+        )
+        server = fake_server_config(log_path, require_approval=["echo"])
+        agent, _ = _mcp_agent(llm, [server], created)
+        policy = AllowAndRecord()
+        try:
+            result = await agent.run_task("say hello", approval=policy)
+            marked = [
+                name
+                for name in FAKE_TOOL_NAMES
+                if agent.executor.requires_approval(name)
+            ]
+        finally:
+            await agent.close()
+
+        assert result.status == "completed"
+        assert marked == ["mcp__fake__echo"]
+        # Only echo asked, with the exposed name and the model's arguments.
+        [request] = policy.requests
+        assert (request.tool_name, dict(request.arguments), request.preview) == (
+            "mcp__fake__echo",
+            {"text": "hello"},
+            '{"text":"hello"}',
+        )
+        assert [call["name"] for call in _tool_calls(log_path)] == ["echo", "cwd"]
+
+    async def test_a_denied_call_never_reaches_the_server(
+        self, log_path: Path, created: list[StdioMcpClient]
+    ) -> None:
+        llm = FakeLLM([_call("mcp__fake__echo", {"text": "hello"}), _answer("done")])
+        server = fake_server_config(log_path, require_approval=True)
+        agent, _ = _mcp_agent(llm, [server], created)
+        try:
+            result = await agent.run_task(
+                "say hello", approval=DenyAllPolicy("no MCP calls today")
+            )
+        finally:
+            await agent.close()
+
+        assert result.status == "completed"
+        assert _tool_calls(log_path) == []
+        assert _results(llm.calls[1]) == [
+            "Error: The approval policy denied this call: no MCP calls today. Do "
+            "not run it again or reach the same result another way unless the "
+            "user asks."
+        ]
+
+    async def test_without_a_policy_the_named_tools_run(
+        self, log_path: Path, created: list[StdioMcpClient]
+    ) -> None:
+        llm = FakeLLM([_call("mcp__fake__echo", {"text": "hello"}), _answer("done")])
+        server = fake_server_config(log_path, require_approval=True)
+        agent, _ = _mcp_agent(llm, [server], created)
+        try:
+            result = await agent.run_task("say hello")
+        finally:
+            await agent.close()
+
+        assert result.status == "completed"
+        assert _tool_calls(log_path) == [
+            {"name": "echo", "arguments": {"text": "hello"}}
+        ]
+        assert _results(llm.calls[1]) == ["hello"]
 
 
 class TestSetupFailures:

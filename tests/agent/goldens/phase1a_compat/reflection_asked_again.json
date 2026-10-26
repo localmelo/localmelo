@@ -1,0 +1,229 @@
+{
+  "result": {
+    "task_id": "<task:1>",
+    "status": "completed",
+    "result": "2 to the power of 10 is 1024.",
+    "error": "",
+    "steps": 2,
+    "attempts": 2,
+    "n_llm": 4,
+    "n_main": 2,
+    "n_aux": 2,
+    "n_tool": 1,
+    "llm_errors": 0,
+    "usage": {},
+    "config": {
+      "max_steps": 30,
+      "attempt_policy": "reflect",
+      "steps_per_attempt": 1,
+      "max_attempts": 5,
+      "reflection_gate": "flags",
+      "tool_exposure": "retrieve",
+      "builtins": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "memory": true,
+      "memory_dir": "<memory_dir>",
+      "timeout_s": null,
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ]
+    }
+  },
+  "requests": [
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "What is 2 to the power of 10? Check it with Python.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        }
+      ]
+    },
+    {
+      "tools": null,
+      "messages": [
+        {
+          "role": "system",
+          "content": "The current attempt has ended without a final answer. Reflect on what happened and decide how to proceed.\n\nIMPORTANT: this reflection is the *only* state carried into the next attempt. It is compressed working state, not a log. Treat any prior reflection the same way: keep only constraints, failed paths, and evidence that are still relevant to the next concrete step. Drop the rest. The total reflection should stay under ~1500 characters when serialized — if you cannot fit it, choose 'stop' or 'decompose' instead of 'continue'.\n\nChoose 'done' only if the task is already complete, and put the final answer in best_effort_result.\n\nRespond with a JSON object (no markdown fences):\n{\n  \"summary\": \"one-sentence summary of what was attempted\",\n  \"failed_hypotheses\": [\"approaches that did not work\"],\n  \"useful_evidence\": [\"facts discovered that may help\"],\n  \"recommended_avoids\": [\"actions to avoid next\"],\n  \"next_promising_directions\": [\"concrete next steps to try\"],\n  \"progress_made\": true/false,\n  \"task_still_feasible\": true/false,\n  \"new_information_gained\": true/false,\n  \"next_step_is_concrete\": true/false,\n  \"next_step_is_novel\": true/false,\n  \"recommended_action\": \"continue\" | \"stop\" | \"decompose\" | \"done\",\n  \"rationale\": \"why you chose this action\",\n  \"best_effort_result\": \"the final answer if done, else the best partial answer so far, or empty string\",\n  \"estimated_info_gain\": 0.0-1.0,\n  \"estimated_cost\": 0.0-1.0,\n  \"repeat_risk\": 0.0-1.0,\n  \"novelty\": 0.0-1.0,\n  \"feasibility\": 0.0-1.0\n}",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "What is 2 to the power of 10? Check it with Python.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "assistant",
+          "content": "Computing it.",
+          "tool_calls": [
+            {
+              "tool_name": "python_exec",
+              "arguments": {
+                "code": "print(2 ** 10)"
+              },
+              "id": "<call:1>"
+            }
+          ],
+          "tool_call_id": ""
+        },
+        {
+          "role": "tool",
+          "content": "1024",
+          "tool_calls": [],
+          "tool_call_id": "<call:1>"
+        },
+        {
+          "role": "user",
+          "content": "Original task: What is 2 to the power of 10? Check it with Python.\nThis was attempt 0. The step budget for this attempt was exhausted. Reflect and decide.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        }
+      ]
+    },
+    {
+      "tools": null,
+      "messages": [
+        {
+          "role": "system",
+          "content": "The current attempt has ended without a final answer. Reflect on what happened and decide how to proceed.\n\nIMPORTANT: this reflection is the *only* state carried into the next attempt. It is compressed working state, not a log. Treat any prior reflection the same way: keep only constraints, failed paths, and evidence that are still relevant to the next concrete step. Drop the rest. The total reflection should stay under ~1500 characters when serialized — if you cannot fit it, choose 'stop' or 'decompose' instead of 'continue'.\n\nChoose 'done' only if the task is already complete, and put the final answer in best_effort_result.\n\nRespond with a JSON object (no markdown fences):\n{\n  \"summary\": \"one-sentence summary of what was attempted\",\n  \"failed_hypotheses\": [\"approaches that did not work\"],\n  \"useful_evidence\": [\"facts discovered that may help\"],\n  \"recommended_avoids\": [\"actions to avoid next\"],\n  \"next_promising_directions\": [\"concrete next steps to try\"],\n  \"progress_made\": true/false,\n  \"task_still_feasible\": true/false,\n  \"new_information_gained\": true/false,\n  \"next_step_is_concrete\": true/false,\n  \"next_step_is_novel\": true/false,\n  \"recommended_action\": \"continue\" | \"stop\" | \"decompose\" | \"done\",\n  \"rationale\": \"why you chose this action\",\n  \"best_effort_result\": \"the final answer if done, else the best partial answer so far, or empty string\",\n  \"estimated_info_gain\": 0.0-1.0,\n  \"estimated_cost\": 0.0-1.0,\n  \"repeat_risk\": 0.0-1.0,\n  \"novelty\": 0.0-1.0,\n  \"feasibility\": 0.0-1.0\n}",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "The end of this attempt, written out as text:\n\nUser: What is 2 to the power of 10? Check it with Python.\n\nAssistant: Computing it.\n\nAssistant called python_exec({\"code\": \"print(2 ** 10)\"})\n\nResult of python_exec: 1024\n\nOriginal task: What is 2 to the power of 10? Check it with Python.\nThis was attempt 0. The step budget for this attempt was exhausted. Reflect and decide.\n\nReply with only the JSON object described above. Do not call any tool: tools are not available for this reply.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        }
+      ]
+    },
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.\n\n[RECALL]\n\nComputing it. [called python_exec] -> 1024\n\n[REFLECTION]\nAttempt 0: Python printed 1024.\n  Try: Answer with 1024.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "What is 2 to the power of 10? Check it with Python.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "assistant",
+          "content": "Computing it.",
+          "tool_calls": [
+            {
+              "tool_name": "python_exec",
+              "arguments": {
+                "code": "print(2 ** 10)"
+              },
+              "id": "<call:1>"
+            }
+          ],
+          "tool_call_id": ""
+        },
+        {
+          "role": "tool",
+          "content": "1024",
+          "tool_calls": [],
+          "tool_call_id": "<call:1>"
+        }
+      ]
+    }
+  ],
+  "window": [
+    {
+      "role": "user",
+      "content": "What is 2 to the power of 10? Check it with Python.",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "Computing it.",
+      "thinking": "",
+      "tool_calls": [
+        {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(2 ** 10)"
+          },
+          "id": "<call:1>"
+        }
+      ],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "1024",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "<call:1>",
+      "images": []
+    }
+  ],
+  "history": {
+    "tasks": [
+      {
+        "task_id": "<task:1>",
+        "query": "What is 2 to the power of 10? Check it with Python.",
+        "status": "completed",
+        "result": "2 to the power of 10 is 1024."
+      }
+    ],
+    "steps": [
+      {
+        "step_id": "<step:1>",
+        "task_id": "<task:1>",
+        "thought": "Computing it.",
+        "tool_call_json": {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print(2 ** 10)"
+          },
+          "id": "<call:1>"
+        },
+        "tool_result_json": {
+          "tool_name": "python_exec",
+          "output": "1024",
+          "error": ""
+        },
+        "seq": 0
+      }
+    ]
+  }
+}

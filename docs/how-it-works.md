@@ -100,7 +100,9 @@ Three limits apply at different levels:
 - **Tool time limits.** `shell_exec` 30 seconds, `file_read` and
   `file_write` 60 seconds, MCP tools their server's `timeout`. `python_exec`
   has no limit, because its code runs inside localmelo and cannot be
-  interrupted.
+  interrupted. In the Python API, an agent with a workspace root runs
+  `python_exec` in a child process with a limit; see
+  [Work in a directory](python-api.md#work-in-a-directory).
 - **Run time limit** (`--timeout`). It is the only limit on a whole run. When
   it expires, the run ends as `timeout`.
 

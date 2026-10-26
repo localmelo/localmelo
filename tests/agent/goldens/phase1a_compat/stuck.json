@@ -1,0 +1,315 @@
+{
+  "result": {
+    "task_id": "<task:1>",
+    "status": "stuck",
+    "result": "",
+    "error": "Stuck: the same tool calls or errors repeated",
+    "steps": 3,
+    "attempts": 1,
+    "n_llm": 3,
+    "n_main": 3,
+    "n_aux": 0,
+    "n_tool": 3,
+    "llm_errors": 0,
+    "usage": {},
+    "config": {
+      "max_steps": 30,
+      "attempt_policy": "none",
+      "steps_per_attempt": 10,
+      "max_attempts": 5,
+      "reflection_gate": "flags",
+      "tool_exposure": "retrieve",
+      "builtins": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "memory": true,
+      "memory_dir": "<memory_dir>",
+      "timeout_s": null,
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ]
+    }
+  },
+  "requests": [
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "Wait until the counter changes.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        }
+      ]
+    },
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "Wait until the counter changes.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "tool_name": "python_exec",
+              "arguments": {
+                "code": "print('counter: 1')"
+              },
+              "id": "<call:1>"
+            }
+          ],
+          "tool_call_id": ""
+        },
+        {
+          "role": "tool",
+          "content": "counter: 1",
+          "tool_calls": [],
+          "tool_call_id": "<call:1>"
+        }
+      ]
+    },
+    {
+      "tools": [
+        "file_read",
+        "file_write",
+        "python_exec",
+        "shell_exec"
+      ],
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a task-solving agent. You can use tools to accomplish tasks.\nWhen you need to use a tool, respond with a tool call.\nWhen the task is complete, respond with your final answer directly.\nThink step by step. Be concise.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "user",
+          "content": "Wait until the counter changes.",
+          "tool_calls": [],
+          "tool_call_id": ""
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "tool_name": "python_exec",
+              "arguments": {
+                "code": "print('counter: 1')"
+              },
+              "id": "<call:1>"
+            }
+          ],
+          "tool_call_id": ""
+        },
+        {
+          "role": "tool",
+          "content": "counter: 1",
+          "tool_calls": [],
+          "tool_call_id": "<call:1>"
+        },
+        {
+          "role": "assistant",
+          "content": "",
+          "tool_calls": [
+            {
+              "tool_name": "python_exec",
+              "arguments": {
+                "code": "print('counter: 1')"
+              },
+              "id": "<call:2>"
+            }
+          ],
+          "tool_call_id": ""
+        },
+        {
+          "role": "tool",
+          "content": "counter: 1",
+          "tool_calls": [],
+          "tool_call_id": "<call:2>"
+        }
+      ]
+    }
+  ],
+  "window": [
+    {
+      "role": "user",
+      "content": "Wait until the counter changes.",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "thinking": "",
+      "tool_calls": [
+        {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print('counter: 1')"
+          },
+          "id": "<call:1>"
+        }
+      ],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "counter: 1",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "<call:1>",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "thinking": "",
+      "tool_calls": [
+        {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print('counter: 1')"
+          },
+          "id": "<call:2>"
+        }
+      ],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "counter: 1",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "<call:2>",
+      "images": []
+    },
+    {
+      "role": "assistant",
+      "content": "",
+      "thinking": "",
+      "tool_calls": [
+        {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print('counter: 1')"
+          },
+          "id": "<call:3>"
+        }
+      ],
+      "tool_call_id": "",
+      "images": []
+    },
+    {
+      "role": "tool",
+      "content": "counter: 1",
+      "thinking": "",
+      "tool_calls": [],
+      "tool_call_id": "<call:3>",
+      "images": []
+    }
+  ],
+  "history": {
+    "tasks": [
+      {
+        "task_id": "<task:1>",
+        "query": "Wait until the counter changes.",
+        "status": "stuck",
+        "result": "Stuck: the same tool calls or errors repeated"
+      }
+    ],
+    "steps": [
+      {
+        "step_id": "<step:1>",
+        "task_id": "<task:1>",
+        "thought": "",
+        "tool_call_json": {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print('counter: 1')"
+          },
+          "id": "<call:1>"
+        },
+        "tool_result_json": {
+          "tool_name": "python_exec",
+          "output": "counter: 1",
+          "error": ""
+        },
+        "seq": 0
+      },
+      {
+        "step_id": "<step:2>",
+        "task_id": "<task:1>",
+        "thought": "",
+        "tool_call_json": {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print('counter: 1')"
+          },
+          "id": "<call:2>"
+        },
+        "tool_result_json": {
+          "tool_name": "python_exec",
+          "output": "counter: 1",
+          "error": ""
+        },
+        "seq": 1
+      },
+      {
+        "step_id": "<step:3>",
+        "task_id": "<task:1>",
+        "thought": "",
+        "tool_call_json": {
+          "tool_name": "python_exec",
+          "arguments": {
+            "code": "print('counter: 1')"
+          },
+          "id": "<call:3>"
+        },
+        "tool_result_json": {
+          "tool_name": "python_exec",
+          "output": "counter: 1",
+          "error": ""
+        },
+        "seq": 2
+      }
+    ]
+  }
+}
