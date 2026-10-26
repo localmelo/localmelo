@@ -43,21 +43,27 @@
     </nav>
 
     <article class="content">
-      <header class="doc-hero" id="overview">
+      <header class="doc-hero home-hero" id="overview">
         <h1>localmelo</h1>
         <p class="lead">
           A local personal agent that runs tasks with tools and memory on your
           own model server or a cloud API. It runs from the command line or as
-          a small HTTP service, and talks to Ollama, MLC LLM, vLLM, SGLang or a
-          cloud API.
+          a small HTTP service.
         </p>
         <div class="doc-meta">
           <span class="tag experimental">pre-alpha</span>
         </div>
-        <div class="masthead-visual doc-illustration">
-          <img src="../assets/melo.png" alt="Melo, the localmelo mascot" width="896" height="1195">
+        <div class="masthead-actions">
+          <a class="button primary" href="./quickstart.html">Get started</a>
+          <a class="button" href="https://github.com/localmelo/localmelo">GitHub <span aria-hidden="true">↗</span></a>
         </div>
+        <img class="home-mascot" src="../assets/melo.png" alt="Melo, the localmelo mascot" width="400" height="534">
       </header>
+
+      <figure class="home-shot">
+        <img src="../assets/web-workspace.webp" alt="The localmelo web workspace: a list of chats on the left, and a chat in which the agent answers a question with a formatted list and a code block." width="1920" height="1200">
+        <figcaption>The web workspace that <code>melo --serve</code> opens at <code>http://127.0.0.1:8401/</code>.</figcaption>
+      </figure>
 
       <section class="section" id="quickstart">
         <h2>Quick start</h2>
@@ -118,11 +124,11 @@ source .venv/bin/activate</code></pre>
             <span>Keep working memory, a history of tasks and steps, and long-term memory with an embedding server, saved to SQLite when you turn persistence on.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md">
-            <strong>Python API</strong>
-            <span>Run tasks from Python code (experimental): follow each step as an event, stop a run, approve tool calls, and keep the file tools inside one directory.</span>
+            <strong>Python API <span class="tag experimental">Experimental</span></strong>
+            <span>Run tasks from Python code: follow each step as an event, stop a run, approve tool calls, and keep the file tools inside one directory.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">
-            <strong>Offline retrieval</strong>
+            <strong>Offline retrieval <span class="tag note">Offline only</span></strong>
             <span>Compare the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers on labelled queries with <code>melo-retrieve</code>. Runs do not use them yet.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#use-melo-in-scripts">
@@ -135,18 +141,6 @@ source .venv/bin/activate</code></pre>
       <section class="section" id="roadmap">
         <h2>Roadmap</h2>
         <p>The v0.1.0 milestone is due 2026-12-20.</p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr><th scope="col">Phase</th><th scope="col">Dates</th><th scope="col">Scope</th></tr>
-            </thead>
-            <tbody>
-              <tr><td>Phase 1</td><td>2026-10-19 to 2026-11-01</td><td>Core loop v2 and the command line</td></tr>
-              <tr><td>Phase 2</td><td>2026-11-02 to 2026-11-22</td><td>Memory: notes, retrieval and long-term promotion</td></tr>
-              <tr><td>Phase 3</td><td>2026-11-23 to 2026-12-06</td><td>Safety and privacy</td></tr>
-            </tbody>
-          </table>
-        </div>
         <p>Planned:</p>
         <ul>
           <li>an interactive CLI that opens when you run <code>melo</code> without a task and shows the agent's tool calls as they happen (today <code>melo</code> starts the gateway, and <code>melo &quot;&quot;</code> opens a plain conversation loop);</li>
@@ -154,7 +148,7 @@ source .venv/bin/activate</code></pre>
           <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first.</li>
         </ul>
-        <p>See the <a href="./updates.html#roadmap">roadmap and updates</a> for the issues and dated changes.</p>
+        <p>See the <a href="./updates.html#roadmap">roadmap and updates</a> for the phases, their issues and dated changes.</p>
       </section>
 
       <section class="section" id="security">
