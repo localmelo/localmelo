@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import math
 import os
+import sqlite3
 from collections.abc import Mapping
 from typing import Final
 
@@ -26,10 +29,43 @@ _PRAGMAS: tuple[str, ...] = (
 )
 
 
+# How long prepare_connection runs its steps again while SQLite refuses
+# them with "database is locked".
+LOCKED_RETRY_S: Final = 5.0
+
+
 async def apply_pragmas(conn: aiosqlite.Connection) -> None:
     """Apply the standard PRAGMA set on a freshly opened connection."""
     for stmt in _PRAGMAS:
         await conn.execute(stmt)
+
+
+async def prepare_connection(conn: aiosqlite.Connection, schema: str) -> None:
+    """Apply the PRAGMAs and create *schema* on a freshly opened connection.
+
+    Connections that open one file at the same time can get ``database is
+    locked`` at once, without waiting for the busy timeout: when one
+    switches the file to WAL, or when a schema read cannot become a write
+    because another connection wrote first. Both steps can run again, so
+    they do, after a short wait, until :data:`LOCKED_RETRY_S` has passed;
+    then the last error is raised. Any other error is raised at once.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + LOCKED_RETRY_S
+    delay = 0.01
+    while True:
+        try:
+            await apply_pragmas(conn)
+            await conn.executescript(schema)
+            await conn.commit()
+            return
+        except sqlite3.OperationalError as exc:
+            if "database is locked" not in str(exc) or loop.time() >= deadline:
+                raise
+        with contextlib.suppress(sqlite3.Error):
+            await conn.rollback()
+        await asyncio.sleep(min(delay, max(0.0, deadline - loop.time())))
+        delay = min(delay * 2, 0.2)
 
 
 def make_private_dir(path: str) -> None:

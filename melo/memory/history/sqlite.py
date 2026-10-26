@@ -15,8 +15,8 @@ import aiosqlite
 
 from localmelo.melo.memory._sqlite import (
     THINKING_RETENTION_DAYS,
-    apply_pragmas,
     create_private_file,
+    prepare_connection,
 )
 from localmelo.melo.memory.history import History
 from localmelo.melo.schema import (
@@ -208,9 +208,7 @@ class SqliteHistory(History):
                 create_private_file(self._db_path)
             conn = await aiosqlite.connect(self._db_path)
             try:
-                await apply_pragmas(conn)
-                await conn.executescript(_SCHEMA)
-                await conn.commit()
+                await prepare_connection(conn, _SCHEMA)
                 await self._migrate(conn)
             except BaseException:
                 # A clean-up that fails must not replace what is raised, a

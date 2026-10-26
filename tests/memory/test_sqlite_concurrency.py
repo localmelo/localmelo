@@ -17,11 +17,15 @@ import asyncio
 import contextlib
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 import aiosqlite
 import pytest
 
+from localmelo.melo.memory import _sqlite as sqlite_helpers
+from localmelo.melo.memory._sqlite import prepare_connection
 from localmelo.melo.memory.history.sqlite import SqliteHistory
+from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.schema import StepRecord, TaskRecord
 
 
@@ -112,3 +116,68 @@ async def test_a_cancelled_add_step_leaves_no_transaction_open(tmp_path: Path) -
         assert [step.thought for step in await history.get_steps("t1")] == ["next"]
     finally:
         await history.aclose()
+
+
+class _LockedConn:
+    """A connection whose schema step fails *locked* times, then works."""
+
+    def __init__(self, locked: int, error: str = "database is locked") -> None:
+        self.locked = locked
+        self.error = error
+        self.scripts = 0
+        self.rollbacks = 0
+
+    async def execute(self, sql: str) -> None:
+        return None
+
+    async def executescript(self, sql: str) -> None:
+        self.scripts += 1
+        if self.locked:
+            self.locked -= 1
+            raise sqlite3.OperationalError(self.error)
+
+    async def commit(self) -> None:
+        return None
+
+    async def rollback(self) -> None:
+        self.rollbacks += 1
+
+
+async def test_prepare_connection_runs_a_locked_open_again() -> None:
+    conn = _LockedConn(locked=2)
+    await prepare_connection(conn, "CREATE TABLE t (x)")  # type: ignore[arg-type]
+    assert (conn.scripts, conn.rollbacks) == (3, 2)
+
+
+async def test_prepare_connection_raises_any_other_error_at_once() -> None:
+    conn = _LockedConn(locked=1, error="no such table: t")
+    with pytest.raises(sqlite3.OperationalError, match="no such table"):
+        await prepare_connection(conn, "CREATE TABLE t (x)")  # type: ignore[arg-type]
+    assert conn.scripts == 1
+
+
+async def test_prepare_connection_gives_up_after_its_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sqlite_helpers, "LOCKED_RETRY_S", 0.05)
+    conn = _LockedConn(locked=10_000)
+    with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+        await prepare_connection(conn, "CREATE TABLE t (x)")  # type: ignore[arg-type]
+    assert 1 < conn.scripts < 100
+
+
+@pytest.mark.parametrize("store", ["history", "long_term"])
+async def test_eight_connections_open_one_new_file_without_an_error(
+    tmp_path: Path, store: str
+) -> None:
+    # Connections that open one new file at once used to get "database is
+    # locked" without the busy timeout, about one run in eight.
+    for attempt in range(10):
+        path = tmp_path / f"{store}-{attempt}.db"
+        if store == "history":
+            stores: list[Any] = [SqliteHistory(path) for _ in range(8)]
+            await asyncio.gather(*(s.count_tasks() for s in stores))
+        else:
+            stores = [SqliteLongTerm(path) for _ in range(8)]
+            await asyncio.gather(*(s.count_entries() for s in stores))
+        await asyncio.gather(*(s.aclose() for s in stores))
