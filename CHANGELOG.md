@@ -9,6 +9,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Run events for Python code: `Agent.run_task(..., on_event=sink)` passes
+  each run, step, model reply, tool call, notice and reflection to the sink
+  as an `AgentEvent`, with secrets redacted ([#37]).
+- Cancelling a run that has an event sink or an approval policy ends it as
+  `cancelled`, with the interrupted step closed in history and in the
+  conversation. `Agent.begin_exit()` bounds the clean-up before the process
+  exits ([#37]).
+- Approval policies: `run_task(..., approval=policy)` is asked before each
+  call of `shell_exec`, `python_exec`, `file_write` and other tools marked
+  as requiring approval. An MCP server can mark its tools with
+  `require_approval` ([#37]).
+- `AgentOptions(workspace_root=...)` keeps `file_read` and `file_write`
+  inside a directory, where `shell_exec` and `python_exec` also start
+  ([#37]).
+- `AgentOptions(record_answers=True)`, `Agent.conversation()` and
+  `Agent.load_conversation()`, to carry a conversation across runs and
+  agents; `Agent.start()`, `Agent.list_tools()` and `Agent.run_tool()`
+  ([#37]).
 - Direct-mode run options `--max-steps`, `--attempt-policy`,
   `--tool-exposure`, `--builtins`, `--memory`, `--memory-dir` and
   `--timeout`, and `AgentOptions` in the Python API ([#30]).
@@ -96,3 +114,4 @@ earlier milestones.
 [#32]: https://github.com/localmelo/localmelo/pull/32
 [#34]: https://github.com/localmelo/localmelo/pull/34
 [#36]: https://github.com/localmelo/localmelo/pull/36
+[#37]: https://github.com/localmelo/localmelo/pull/37

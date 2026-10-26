@@ -86,6 +86,20 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-26-python-api">
+          <h3>Events, stopping and approvals in the Python API</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/37">#37</a>
+          </p>
+          <ul>
+            <li>Python code can follow a run as it happens: <code>run_task(..., on_event=sink)</code> reports each step, model reply, tool call and reflection, with secrets redacted.</li>
+            <li>A run with an event sink or an approval policy can be stopped: it ends as <code>cancelled</code>, and the interrupted step is closed cleanly.</li>
+            <li>An approval policy decides whether <code>shell_exec</code>, <code>python_exec</code>, <code>file_write</code> and other marked tools may run, and <code>AgentOptions(workspace_root=...)</code> keeps the file tools inside one directory.</li>
+            <li>Conversations can carry over between runs and agents. Direct mode and the gateway are unchanged.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-26">
           <h3>The gateway refuses requests from other sites</h3>
           <p class="update-date">
