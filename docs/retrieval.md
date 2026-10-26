@@ -460,8 +460,9 @@ of the calls before you export them.
 
 ### Export a history database
 
-`--export-run` also reads the `history.db` of a run: give the directory that
-holds it, or the file itself. `melo` keeps it in `~/.cache/localmelo/memory`
+`--export-run` also reads the `history.db` of a run: give the memory
+directory that holds it (the `--memory-dir` or `LOCALMELO_MEMORY_DIR` of the
+run), or the file itself. `melo` keeps it in `~/.cache/localmelo/memory`
 when you [keep memory between runs](memory.md#keep-memory-between-runs). A
 file is read as a database when it starts with the SQLite header, and as raw
 calls otherwise.
