@@ -43,6 +43,17 @@ class ShellAssets(HTMLParser):
             self.paths.append(str(attributes["src"]))
 
 
+class InputPlaceholders(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.placeholders: dict[str, str] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "input" and attributes.get("id") and attributes.get("placeholder"):
+            self.placeholders[str(attributes["id"])] = str(attributes["placeholder"])
+
+
 @pytest.fixture()
 async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
@@ -90,6 +101,17 @@ async def test_shell_assets_and_module_imports_are_served(
                     "text/javascript",
                     "application/javascript",
                 }
+
+
+async def test_chat_url_placeholder_matches_the_omlx_hint(
+    client: httpx.AsyncClient,
+) -> None:
+    page = await client.get("/")
+    parser = InputPlaceholders()
+    parser.feed(page.text)
+    # The hint beside the field names oMLX, whose server listens on port 8000 by default.
+    assert "oMLX" in page.text
+    assert parser.placeholders["s-chat-url"] == "http://127.0.0.1:8000/v1"
 
 
 @pytest.mark.parametrize(
