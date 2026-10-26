@@ -12,7 +12,11 @@ from typing import Any
 
 import httpx
 
-from localmelo.melo.contracts.providers import LLM_REQUEST_ATTEMPT, ProviderError
+from localmelo.melo.contracts.providers import (
+    LLM_REQUEST_ATTEMPT,
+    LLM_REQUEST_KIND,
+    ProviderError,
+)
 
 # Statuses for which the same request may succeed when sent again: rate
 # limiting, and a gateway or proxy in front of the model server failing.
@@ -25,10 +29,20 @@ BODY_PREVIEW_CHARS = 500
 # Header of a chat request that carries LLM_REQUEST_ATTEMPT.
 ATTEMPT_HEADER = "X-Localmelo-Attempt"
 
+# Header of a chat request that carries a non-empty LLM_REQUEST_KIND.
+CALL_KIND_HEADER = "X-Localmelo-Call-Kind"
+
 
 def attempt_headers() -> dict[str, str]:
-    """Headers naming the attempt of the LLM request being sent."""
-    return {ATTEMPT_HEADER: str(LLM_REQUEST_ATTEMPT.get())}
+    """Headers naming the attempt of the LLM request being sent, and its kind.
+
+    The kind header comes only when ``LLM_REQUEST_KIND`` is set.
+    """
+    headers = {ATTEMPT_HEADER: str(LLM_REQUEST_ATTEMPT.get())}
+    kind = LLM_REQUEST_KIND.get()
+    if kind:
+        headers[CALL_KIND_HEADER] = kind
+    return headers
 
 
 def _body_preview(response: httpx.Response) -> str:

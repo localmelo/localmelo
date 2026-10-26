@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextvars
 from abc import ABC, abstractmethod
+from typing import Final
 
 from localmelo.melo.schema import Message, ToolDef
 
@@ -13,6 +14,21 @@ from localmelo.melo.schema import Message, ToolDef
 LLM_REQUEST_ATTEMPT: contextvars.ContextVar[int] = contextvars.ContextVar(
     "LLM_REQUEST_ATTEMPT", default=1
 )
+
+# Call kind of the LLM request being sent, one of LLM_REQUEST_KINDS, or ""
+# when no caller set one. The agent sets it around each request, retries
+# included, as it sets LLM_REQUEST_ATTEMPT, so a provider can pass it on
+# without a signature change: the HTTP chat providers send a non-empty
+# kind as the ``X-Localmelo-Call-Kind`` header, which tells a proxy a
+# planning request from a reflection.
+LLM_REQUEST_KIND: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "LLM_REQUEST_KIND", default=""
+)
+
+# The call kinds: runs send "plan" and "reflect", Chat.estimate_steps sends
+# "estimate", and melo-retrieve's retrieval requests "retrieve". History's
+# llm_calls rows and melo-retrieve's reader of them share this vocabulary.
+LLM_REQUEST_KINDS: Final = ("plan", "reflect", "retrieve", "estimate")
 
 
 class ProviderError(Exception):

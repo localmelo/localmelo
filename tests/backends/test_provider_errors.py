@@ -8,7 +8,12 @@ from typing import Any
 import httpx
 import pytest
 
-from localmelo.melo.contracts.providers import LLM_REQUEST_ATTEMPT, ProviderError
+from localmelo.melo.contracts.providers import (
+    LLM_REQUEST_ATTEMPT,
+    LLM_REQUEST_KIND,
+    LLM_REQUEST_KINDS,
+    ProviderError,
+)
 from localmelo.melo.schema import Message
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
@@ -254,6 +259,54 @@ async def test_embedding_requests_send_no_attempt_header() -> None:
 
     await _request("embedding", handler)
     assert "X-Localmelo-Attempt" not in seen[0]
+
+
+# ── The call-kind header ────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["openai", "ollama"])
+async def test_chat_requests_send_the_call_kind_when_it_is_set(kind: str) -> None:
+    seen: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers)
+        return httpx.Response(200, json=OK_BODIES[kind])
+
+    await _request(kind, handler)
+    token = LLM_REQUEST_KIND.set("reflect")
+    attempt = LLM_REQUEST_ATTEMPT.set(2)
+    try:
+        await _request(kind, handler)
+    finally:
+        LLM_REQUEST_ATTEMPT.reset(attempt)
+        LLM_REQUEST_KIND.reset(token)
+    assert "X-Localmelo-Call-Kind" not in seen[0]
+    assert seen[0]["X-Localmelo-Attempt"] == "1"
+    assert seen[1]["X-Localmelo-Call-Kind"] == "reflect"
+    assert seen[1]["X-Localmelo-Attempt"] == "2"
+
+
+@pytest.mark.asyncio
+async def test_embedding_requests_send_no_call_kind() -> None:
+    seen: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers)
+        return httpx.Response(200, json=OK_BODIES["embedding"])
+
+    token = LLM_REQUEST_KIND.set("plan")
+    try:
+        await _request("embedding", handler)
+    finally:
+        LLM_REQUEST_KIND.reset(token)
+    assert "X-Localmelo-Call-Kind" not in seen[0]
+    assert "X-Localmelo-Attempt" not in seen[0]
+
+
+def test_the_call_kinds() -> None:
+    assert LLM_REQUEST_KINDS == ("plan", "reflect", "retrieve", "estimate")
+    assert LLM_REQUEST_KIND.get() == ""
 
 
 def test_provider_error_defaults() -> None:
