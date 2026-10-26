@@ -135,6 +135,52 @@ The `steps` table holds one row per tool call: `step_id`, `task_id`,
 `thought` (the model's text), `tool_call_json`, `tool_result_json`,
 `timestamp` and `seq` (the order within the task).
 
+## Sessions
+
+The session store of the Python API ([Sessions](sessions.md)) keeps
+conversations in its own files, apart from `history.db`. No command uses it
+yet; the files appear once a program opens a store.
+
+```text
+~/.cache/localmelo/gateway/sessions.db   the gateway's sessions
+~/.cache/localmelo/cli/sessions.db       the sessions of every terminal melo
+```
+
+- **One writer each.** A file records whether the gateway or a terminal
+  wrote it, and a store of the other kind refuses to open it, as it refuses
+  any other SQLite file, without writing to it. The gateway's file has one
+  owner, which holds a lock on `sessions.db.owner` while it runs; the
+  terminals share theirs, with a lease on each running turn. Next to
+  `sessions.db`, SQLite may also create `sessions.db-wal` and
+  `sessions.db-shm`.
+- **Private.** The directories are created with mode `0700` and the files
+  with `0600`; the writer's own directory (`gateway/` or `cli/`) is set to
+  `0700` when it is looser.
+- **Durability.** The gateway's file uses `synchronous=FULL`: what it has
+  committed survives an operating-system crash. The CLI file uses `NORMAL`,
+  as `history.db` does: a crash of the process loses nothing committed, an
+  operating-system crash may lose the last changes.
+- **What they hold.** Each turn's text, its events (the model's text and
+  thinking, the tool calls and their output), the images the tools returned,
+  the final answer, and a window checkpoint per session: the working window
+  at the end of the latest turn, with the tool calls and their results but
+  not the tools' output, which the events keep.
+- **Redaction.** The final answer is stored three times: in the turn's
+  `run.finished` event, and as the turn's answer and result. Each copy, and
+  the assistant text and thinking of the checkpoint, passes the minimal
+  redaction of [events](events.md#assistantmessage) before it is stored.
+- **Retention.** When a store opens, and every 24 hours in a gateway that
+  keeps it open, what is older than 30 days is cleared: the thinking of
+  `assistant.message` events, and a `<think>` block at the start of their
+  text; the `<think>` block of the final answer's copies; window
+  checkpoints, and in a newer checkpoint the thinking of each message older
+  than 30 days; and withdrawn messages. The turns, their answers and their
+  events stay until you delete the session.
+- **A killed run.** A run killed with its process keeps the row `running` in
+  `history.db`'s `tasks` table (see [Task records](#task-records)); its
+  turn's status in `sessions.db` is the one to trust. The turn's `run_id` is
+  the run's `task_id`, or `""` when the run never started.
+
 ## Reset memory
 
 localmelo has no reset command. To delete memory:

@@ -81,6 +81,26 @@ Details:
 [How localmelo works](how-it-works.md) explains attempts, reflection and the
 continuation gate.
 
+### A session turn's cause
+
+A turn of a [session](sessions.md) ends with one of these statuses too, and
+with a `cause` that says what ended it:
+
+| `cause` | What ended the turn | Status |
+|---|---|---|
+| `run` | The run itself, whatever its status. | any |
+| `user_stop` | A person stopped it. | `cancelled` |
+| `closed` | The session's runner was closed. | `cancelled` |
+| `shutdown` | The process was asked to stop. | `cancelled` |
+| `crash` | The process died; the next open recorded the end. | `crashed`, or the status of a `run.finished` that was stored |
+| `takeover` | Another terminal took the session over. | `cancelled` |
+| `park` | Reserved for the scheduler. | `cancelled` |
+
+"Interrupted" is a label that a surface shows for the causes `shutdown` and
+`crash`, never a status: a turn's status is always one of the statuses
+above. `crashed` with the cause `run` is a crash inside the run, a bug;
+`crashed` with `crash` means that the process stopped.
+
 ## Fields
 
 `--output-format json` prints these fields in this order, followed by

@@ -119,6 +119,7 @@ uv run python -m localmelo.support.gateway._test_webapp
 | [离线检索（英文）](docs/retrieval.md) | `melo-retrieve`：离线比较记忆检索器，把一次运行导出为语料 |
 | [Python API（英文）](docs/python-api.md) | `Agent`、`AgentOptions` 和 `RunResult`（实验性） |
 | [事件（英文）](docs/events.md) | 一次运行向 Python 代码报告的事件，以及它们的顺序和字段 |
+| [会话（英文）](docs/sessions.md) | 保存在 SQLite 中的对话：轮次、消息 ID、重启和恢复（实验性） |
 | [localmelo 的工作原理（英文）](docs/how-it-works.md) | 运行循环、反思、记忆和超时 |
 | [故障排查（英文）](docs/troubleshooting.md) | 常见错误信息及解决方法 |
 | [架构](https://localmelo.github.io/localmelo/zh-CN/architecture.html) | 各部分如何协同工作（网站） |
@@ -149,6 +150,8 @@ uv run python -m localmelo.support.gateway._test_webapp
 
 - **审批。** 审批策略（approval policy，`run_task(..., approval=policy)`）决定 `shell_exec`、`python_exec`、`file_write` 以及其他标记为需要审批的工具的每次调用能否运行。只有带审批策略的运行才会审批：直接模式和网关都没有审批策略。
 - **工作区根目录。** `AgentOptions(workspace_root=DIR)` 把 `file_read` 和 `file_write` 限制在这个目录内。只有设置了工作区根目录，这个限制才生效；`shell_exec` 和 `python_exec` 不受这个限制：它们在根目录中启动，但仍然可以访问任何路径。
+
+[会话（英文）](docs/sessions.md)把对话记录和工具输出以明文保存在 `sessions.db` 中，窗口检查点（window checkpoint）也一样，这些文件的权限是 `0600`，所在目录的权限是 `0700`。保存的回答和检查点只会脱敏常见的密钥格式、Bearer 令牌和一次性验证码。浏览器里的草稿、排队的消息和尚未确认的消息发件箱都只留在浏览器中。
 
 ## 获取帮助
 

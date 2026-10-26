@@ -370,8 +370,72 @@ returned.
 - **Read-only.** `to_dict()` returns a new dict with a shallow copy of
   `data`. Treat the payload as read-only.
 
+## Session events
+
+A [session](sessions.md) stores the events of each turn, the run's events
+above, between two events of its own, and adds a few for the session. Each
+stored event has a global `id`, the `session_id` and the `turn`, and its
+`event` is the envelope of `to_dict()`; a session event has `"seq": null`
+and `"run_id": ""`.
+
+| Type | When | `data` keys |
+|---|---|---|
+| `turn.started` | A turn begins, before its run's events. | `turn`, `turn_id`, `user_text`, `client_request_id` |
+| `turn.finished` | The turn ends: its last event. | `turn`, `turn_id`, `status`, `error`, `cause` |
+| `turn.undone` | A turn is undone; the event belongs to no turn. | `turn`, `turn_id` |
+| `session.title` | The first turn sets the session's title, or it is renamed. | `title` |
+| `session.updated` | The session's model, workspace or `meta` changes. | `model`, `workspace`, `meta` |
+| `approval.requested` | A person is asked about a tool call (`SessionRunner.observe`). | `request_id`, `call_id`, `tool_name`, `arguments`, `preview`, `workspace_root` |
+| `approval.resolved` | That request is answered or withdrawn. | `request_id`, `call_id`, `tool_name`, `outcome`, `origin`, `reason`, `remember` |
+
+- `client_request_id` is the message id of the turn's
+  [submission](sessions.md#message-ids-and-submissions), or `null`.
+- `cause` says what ended the turn: `run`, `user_stop`, `closed`,
+  `shutdown`, `crash`, `takeover` or `park`; see
+  [Turns, statuses and causes](sessions.md#turns-statuses-and-causes).
+- `outcome` is `allowed`, `denied` or `withdrawn`. `origin` is the
+  decision's, as in `tool.finished`'s `approval`: `user`, `session`,
+  `policy` or `timeout`; `error` when the ask failed; or `withdrawn` when
+  the run stopped first.
+- `turn` is `null` for an event that belongs to no turn: `turn.undone`, a
+  rename's `session.title`, `session.updated`, and the scheduler's events.
+- **The scheduler's types.** Types that start with `task.`, `sched.` or
+  `attention.` are reserved for the scheduler. Only the gateway's store
+  keeps them, as events that belong to no turn
+  (`SessionStore.append_session_event`), or with a turn
+  (`SessionRunner.publish`). Their keys are not pinned yet; their `data`
+  follows the [payload rules](#payload-rules). The store refuses every other
+  type.
+- **A stored `run.finished` holds the answer redacted.** Before it is
+  stored, the `result` of its `RunResult` passes the same redaction as
+  `assistant.message`'s text, and so do the turn's stored answer and result.
+  The `RunResult` that the run returns keeps the text.
+
+The store guarantees:
+
+- **One start, one end.** Every `turn.started` is followed by exactly one
+  `turn.finished` for that turn once the turn is not running, also after a
+  takeover, a shutdown or a crash, and no event of the turn comes after it.
+- **`turn.finished` closes the turn.** Read it as closing every open card of
+  its turn: a `tool.started` without a `tool.finished` reads "interrupted:
+  may have partly run", and a step without its end is over. After a crash,
+  the run's own events can stop anywhere: the store makes up no event of
+  the run.
+- **Every request is answered.** Every `approval.requested` is followed by
+  exactly one `approval.resolved`. After a crash, recovery writes it, with
+  the outcome `withdrawn` and the reason
+  `melo stopped before this approval was answered.`
+- **A withdrawn message leaves no trace in the stream:** no turn number and
+  no event.
+- **Ids survive a restart.** Event ids only grow, across sessions,
+  processes and restarts, so a client that reconnects with its last id
+  (`Last-Event-ID`) receives what it missed, the events that recovery wrote
+  included.
+
 ## Stability
 
 Within schema version 1 (`v` 1), types and keys are only ever added, never
 removed or renamed. Ignore types and keys you do not know.
-`EVENT_FIELDS` in `localmelo.melo.contracts` maps each type to its keys.
+`EVENT_FIELDS` in `localmelo.melo.contracts` maps each type to its keys, and
+`SESSION_EVENT_FIELDS` in `localmelo.support.sessions.store` each session
+type.

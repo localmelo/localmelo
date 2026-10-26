@@ -170,6 +170,7 @@ own computer only; see [Web UI](docs/gateway.md#web-ui-playground).
 | [Offline retrieval](docs/retrieval.md) | `melo-retrieve`: compare memory retrievers offline, export a run as a corpus |
 | [Python API](docs/python-api.md) | `Agent`, `AgentOptions` and `RunResult` (experimental) |
 | [Events](docs/events.md) | The events a run reports to Python code, their order and fields |
+| [Sessions](docs/sessions.md) | Conversations kept in SQLite: turns, message ids, restarts, resume (experimental) |
 | [How localmelo works](docs/how-it-works.md) | The run loop, reflection, memory and timeouts |
 | [Troubleshooting](docs/troubleshooting.md) | Error messages and how to fix them |
 | [Architecture](https://localmelo.github.io/localmelo/en/architecture.html) | How the parts fit together (website) |
@@ -216,6 +217,13 @@ do:
   and `file_write` inside that directory. The fence applies only with a
   workspace root, and `shell_exec` and `python_exec` are not fenced: they
   start in the root, but can reach any path.
+
+[Sessions](docs/sessions.md) keep transcripts and tool output in
+`sessions.db` as plain text, their window checkpoints included, in `0600`
+files inside `0700` directories. The stored answers and checkpoints are
+redacted only for well-known key shapes, bearer tokens and one-time codes.
+A browser's drafts, a queued message and its outbox of messages not yet
+confirmed stay in the browser.
 
 ## Getting help
 
