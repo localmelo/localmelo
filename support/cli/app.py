@@ -914,6 +914,17 @@ class InteractiveApp:
             if text is not None:
                 self.buffer.document = Document(text, len(text))
 
+        # A question's answer is one line: the arrows do not bring the
+        # message history into it.
+        asking = Condition(lambda: self._question is not None)
+
+        @kb.add("up", filter=in_input & asking)
+        @kb.add("down", filter=in_input & asking)
+        @kb.add("c-p", filter=in_input & asking)
+        @kb.add("c-n", filter=in_input & asking)
+        def _(event: KeyPressEvent) -> None:
+            pass
+
         return kb
 
     def _enter(self) -> None:

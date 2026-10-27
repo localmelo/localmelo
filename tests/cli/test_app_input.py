@@ -436,3 +436,24 @@ async def test_enter_takes_the_picked_completion(
         await app.wait(lambda: app.ui.buffer.text == entered)
         app.type(ENTER)
         await app.wait(lambda: controller.entered == [entered])
+
+
+async def test_a_question_does_not_walk_the_message_history() -> None:
+    from prompt_toolkit.history import InMemoryHistory
+
+    history = InMemoryHistory()
+    for entry in ("List the files here", "/backend"):
+        history.append_string(entry)
+    async with running_app(history=history) as app:
+        await app.settle()
+        asking = asyncio.ensure_future(app.ui.ask("Model server URL", "http://h/v1"))
+        await app.wait(lambda: "Model server URL [http://h/v1]:" in app.text())
+        for key in (UP, UP, "\x10", "\x1b[B", "\x0e"):  # up, ctrl+p, down, ctrl+n
+            app.type(key)
+            await app.settle(0.1)
+            assert app.ui.buffer.text == "", key
+        app.type(ENTER)
+        await app.wait(asking.done)
+        assert asking.result() == "http://h/v1"
+        app.type(UP)  # at the input box, history again
+        await app.wait(lambda: app.ui.buffer.text == "/backend")
