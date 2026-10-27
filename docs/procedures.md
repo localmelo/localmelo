@@ -6,11 +6,42 @@ can show how far a run is. It keeps what earlier runs did, never what the
 model said: the classes of their tool calls, short labels, step counts and
 times.
 
-This release has the library and an offline tool, `melo-procedures`. **A run
-does not use procedural memory yet**: `melo`, the gateway and the Python API
-neither read nor write it, and nothing here calls a model or changes a
-request. `melo-procedures` replays the rules on recorded runs, so that they
-are measured before a run shows anything.
+Every run writes it: when a run ends, through `melo`, the `melo ""` loop,
+the gateway or the Python API, its record is added. With persistence on
+(see [Memory](memory.md#keep-memory-between-runs)) that is `procedures.db`
+in the memory directory; otherwise procedural memory stays in RAM for the
+agent's life and nothing is written. To keep it off the disk, leave
+persistence off. Nothing here calls a model, reaches a prompt or changes a
+request.
+
+What a run may show from it comes as [`run.progress`](events.md#runprogress)
+events, to a Python caller that asks with `progress=True`; `melo` does not
+show progress yet. Level 2, the bar, is off in this release: replayed on
+recorded runs, the gate did not yet keep bad bars back by the margin it
+must (0.05) on both test sets, so a run shows at most level 1 until
+repeated runs of your own tasks pass the replay. `melo-procedures` replays
+the rules on recorded runs, so that they are measured before a run shows
+anything.
+
+## What a run does
+
+- **At its start**, only when a Python caller asked for progress, the run
+  looks its routine up, once, for at most 1 second; without a template, or
+  if the lookup fails, it shows facts only (level 0).
+- **During the run**, it keeps a trace in RAM: each step, and the class and
+  label of each tool call. It keeps no tool output; a test call's last 400
+  characters are read for its summary and dropped.
+- **At its end**, after its last event, it adds its routine (if new), its
+  episode and, when it completed, its template's next version. This takes a
+  few milliseconds and at most 2 seconds; a write that fails is skipped
+  with one INFO line in the log. A run that is cancelled, or that ends
+  after SIGTERM or SIGHUP, adds nothing.
+- The episode records the level the gate gives at the run's start, also
+  when that is level 2 and level 1 is shown, and, when the gate passed,
+  the error the bar would have had. A later release turns level 2 on from
+  this record.
+- `run_task(..., routine="name")` in Python makes runs one routine, named,
+  in any folder and whatever their wording.
 
 ## How it works
 
@@ -37,7 +68,7 @@ are measured before a run shows anything.
   |---|---|---|
   | 0 | No template: a first run, another model or other options | Facts only: step, attempt, phase, tests |
   | 1 | One completed run; or the gate fails; or a similar task; or the model is demoted or has no id | Past runs' steps and times, and their named steps, without a percent |
-  | 2 | The gate passes | A bar as well |
+  | 2 | The gate passes | A bar as well (off in this release: a run shows level 1) |
 
 - **The gate.** Level 2 needs the routine's own key or name, a model id,
   at least 2 completed runs in the window, and a *spread* (longest − shortest
@@ -167,10 +198,11 @@ and the last three a bar (level 2), whose mean error over their steps was
 | `--drop` | The exploration drop: `conditional` (default), `off` or `unconditional`. |
 | `--stats` | The runs the statistics use: `completed` (default) or `normal`, which adds runs that ended `budget_exhausted`, `stuck` or `gate_stopped`. |
 
+| `--key-build` | Put each episode's localmelo version in its template's key. |
+
 `--arms`, `--drop` and `--stats` apply to `online` only; with `loo` or
 `first-k` they are a usage error. Those two protocols take the statistics
 from every run of a template, whatever its status, with no drop.
-| `--key-build` | Put each episode's localmelo version in its template's key. |
 
 An `online` line holds:
 
