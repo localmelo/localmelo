@@ -179,10 +179,8 @@ class LoggingLLM(BaseLLMProvider):
     def __init__(self, inner: BaseLLMProvider) -> None:
         self._inner = inner
         self.call_log: list[dict[str, Any]] = []
-
-    @property
-    def model(self) -> str:
-        return getattr(self._inner, "model", "unknown")
+        # The inner provider's model id (BaseLLMProvider.model), copied.
+        self.model = getattr(inner, "model", "unknown")
 
     async def chat(
         self,

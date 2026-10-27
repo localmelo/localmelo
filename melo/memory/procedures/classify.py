@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.memory.procedures.mask import mask_credentials
 
 READ: Final = "R"
 WRITE: Final = "W"
@@ -39,6 +40,10 @@ FINISHING: Final = "Finishing"
 # checked output.
 OUTPUT_TAIL: Final = 400
 MAX_LABEL: Final = 40
+# Characters of a shell command that its label is read from (see
+# shell_label): enough for its first commands, few enough that a command
+# of a megabyte costs no more to label than a short one.
+LABEL_SOURCE_CHARS: Final = 2000
 
 _READ_RE: Final = re.compile(
     r"^\s*(cd [^&;]+(&&|;)\s*)?(ls|cat|head|tail|find|grep|rg|wc|tree|stat|du"
@@ -264,14 +269,35 @@ def _basename(arguments: Any) -> str:
     return os.path.basename(path.strip().rstrip("/\\")) or path.strip()
 
 
-def _command_words(command: str) -> list[str]:
-    """The words of *command*'s first simple command after any ``cd``."""
+def _lex(text: str) -> list[str] | None:
+    """*text*'s shell words, or ``None`` when shlex refuses it (an open quote)."""
     try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True
-        words = list(lexer)
+        return list(lexer)
     except ValueError:
-        words = command.split()
+        return None
+
+
+def _command_words(command: str) -> list[str]:
+    """The words of *command*'s first simple command after any ``cd``.
+
+    Only the command's first :data:`LABEL_SOURCE_CHARS` characters are
+    read: they hold its first commands, and shlex's cost stays small for
+    a command of a megabyte, such as a heredoc's content. When shlex
+    refuses them, often because the cut fell inside quotes, the first
+    line alone is read, and when it refuses that too, only that line's
+    text before its first quote, which holds nothing quoted. Raw text is
+    never split on whitespace: a word of a quoted secret, such as
+    ``PGPASSWORD='open sesame'``, would become the label.
+    """
+    command = command[:LABEL_SOURCE_CHARS]
+    words = _lex(command)
+    if words is None:
+        line = command.split("\n", 1)[0]
+        words = _lex(line)
+        if words is None:
+            words = _lex(re.split("[\"']", line, maxsplit=1)[0]) or []
     commands: list[list[str]] = [[]]
     for word in words:
         if word in _SEPARATORS or (word and set(word) <= set("&|;")):
@@ -333,9 +359,12 @@ def label_for(tool_name: str, arguments: Any) -> str:
 
 
 def clean_label(label: str) -> str:
-    """*label* redacted, on one line, cut to :data:`MAX_LABEL` characters."""
+    """*label* redacted and masked, on one line, cut to :data:`MAX_LABEL` characters.
+
+    See :func:`redact_secrets` and :func:`~.mask.mask_credentials`.
+    """
     redacted, _ = redact_secrets(" ".join(label.split()))
-    return redacted[:MAX_LABEL]
+    return mask_credentials(redacted)[:MAX_LABEL]
 
 
 def target_for(tool_name: str, arguments: Any, label: str) -> str | None:

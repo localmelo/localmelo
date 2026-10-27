@@ -83,9 +83,11 @@ On each step, the planning request includes the recent conversation from
 working memory and, with an embedding backend, the long-term memories closest
 to the task. After each tool call, the step is recorded in history and, with
 an embedding backend, summarized into long-term memory, which also receives
-the run's latest reflection when the run ends. See
-[How memory works](memory.md#how-memory-works) for the limits and the exact
-behavior.
+the run's latest reflection when the run ends. Also when the run ends, what
+it did (its step counts and the classes and labels of its tool calls) is
+recorded in [procedural memory](procedures.md), which no prompt includes.
+See [How memory works](memory.md#how-memory-works) for the limits and the
+exact behavior.
 
 ## Timeouts
 

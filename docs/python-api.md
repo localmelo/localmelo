@@ -109,6 +109,25 @@ the model, each tool call and its result, each reflection, and
 `run.finished`, which carries the `RunResult`. The sink must not block.
 [Events](events.md) lists the events and the rules for the sink.
 
+- `observe=sink` instead of `on_event=sink` gives the sink the same events
+  without making the run interactive, so a cancelled run still ends
+  `crashed` (see [Stop a run](#stop-a-run)). Use it for a display that
+  only watches.
+- `progress=True`, with either, adds
+  [`run.progress`](events.md#runprogress) events: the step, attempt, phase
+  and test counts, and, for a task run before on this model, what past runs
+  did. Without a sink it does nothing.
+- `routine="name"` makes runs one routine in
+  [procedural memory](procedures.md) whatever their wording and folder;
+  without it, a routine is the query, dates and times masked, in the folder
+  the run's tools work in. A blank name raises `ValueError`, before the run.
+
+Before `run_task` returns, after `run.finished`, the run is recorded in
+procedural memory: at most 2 seconds, usually a few milliseconds (see
+[Memory](memory.md#how-memory-works)). A run that raises, such as a
+cancelled one, is not recorded, and neither is one that ends after
+`agent.begin_exit()`.
+
 ## Stop a run
 
 To stop a run, cancel the task that awaits `run_task`, or let a scope cancel
@@ -116,7 +135,7 @@ it, such as `asyncio.timeout`, a `TaskGroup` or `asyncio.run` on Ctrl+C.
 `run_task` then raises `CancelledError`; it never swallows a cancellation.
 
 How the run ends depends on whether it is interactive, that is, whether it
-has `on_event` or `approval`:
+has `on_event` or `approval` (`observe` does not count):
 
 - **An interactive run** ends as `cancelled`. Its `RunResult` comes on the
   `run.finished` event, with an empty `result` and the reason as `error`:
@@ -453,7 +472,7 @@ To keep a conversation in a file, across processes and restarts, see
 
 | Method | What it does |
 |---|---|
-| `await agent.run_task(query, *, on_event=None, approval=None)` | Runs one task and returns its `RunResult`; see [Results](#results). |
+| `await agent.run_task(query, *, on_event=None, approval=None, observe=None, progress=False, routine=None)` | Runs one task and returns its `RunResult`; see [Results](#results) and [Follow a run with events](#follow-a-run-with-events). |
 | `await agent.run(query)` | Runs one task and returns its text. |
 | `await agent.start()` | Starts the tool providers and registers their tools now, instead of at the first run. A second call does nothing. It raises the setup's error. |
 | `agent.list_tools()` | The registered tools, sorted by name, as `ToolInfo`: `name`, `description`, `parameters`, `source` (`"builtin"`, `"provided"` or `"custom"`) and `requires_approval`. |
@@ -548,6 +567,12 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
 - To connect another kind of server, subclass `BaseLLMProvider` (or
   `BaseEmbeddingProvider`) from `localmelo.melo.contracts.providers`, and
   implement `chat()` and `close()` (or `embed()` and `close()`).
+- Set `model` on a chat provider to the id of the model it uses, as the
+  built-in providers do. Procedural memory keeps what runs did per model;
+  with the default `""`, or `"default"`, past runs' facts are shown but a
+  bar never would be. Keep `model` a plain attribute, or a property with a
+  setter, as a wrapper that forwards its inner provider's id may: mypy
+  refuses a read-only property in place of `BaseLLMProvider.model`.
 - Raise `ProviderError(message, status_code=..., retryable=True)` from
   `chat()` for a failure worth retrying. The agent then retries it like the
   built-in providers do; see

@@ -79,7 +79,10 @@ those tools can do.
   cleared, while tasks and steps keep the text as typed. A new memory
   directory is created with mode 0700, the default one is set to 0700 when
   it is open to group or others, and a new `history.db` is created with
-  mode 0600.
+  mode 0600. `procedures.db`, also mode 0600, keeps each task's normalized
+  query and its tool calls' labels (file and program names), with key
+  shapes, bearer tokens, one-time codes, URL passwords and the values of
+  `NAME=value` secrets masked; see [Privacy](docs/memory.md#privacy).
 - **Sessions.** The session store of the Python API
   ([Sessions](docs/sessions.md)) keeps transcripts and tool output in
   `sessions.db` as plain text, its window checkpoints included, in `0600`

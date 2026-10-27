@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import dataclasses
+import functools
 import hashlib
 import inspect
 import json
@@ -13,6 +14,7 @@ import sqlite3
 import time
 import uuid
 from collections.abc import (
+    Callable,
     Collection,
     Coroutine,
     Iterable,
@@ -60,6 +62,21 @@ from localmelo.melo.executor import (
 )
 from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
+from localmelo.melo.memory.procedures.normalize import (
+    RoutineKey,
+    key_for_query,
+    key_for_routine,
+    length_options,
+    run_place,
+)
+from localmelo.melo.memory.procedures.store import RunFacts, harness_version
+from localmelo.melo.memory.procedures.template import TemplateView
+from localmelo.melo.memory.procedures.trace import Trace
+from localmelo.melo.memory.procedures.tracker import (
+    Limits,
+    progress_state,
+    shown_view,
+)
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.schema import (
     ANSWER_NOT_KEPT_LABEL,
@@ -596,6 +613,19 @@ FINALIZE_TIMEOUT_S = 10.0
 # reason (see Agent.run_task).
 CANCELLED_ERROR = "Cancelled by the caller"
 
+# Seconds that a run's start may spend finding the template its progress
+# rests on, inside the run's own timeout (see Agent._look_up). A lookup
+# that takes longer, or fails, leaves the run at level 0.
+LOOKUP_TIMEOUT_S = 1.0
+
+# Seconds that recording a run in the procedural store may take once the
+# run has ended (see Agent._learn): after run.finished, before run_task
+# returns, outside RunResult.duration_s.
+LEARN_TIMEOUT_S = 2.0
+
+# The installed localmelo's version, which each episode records; read once.
+_harness_version = functools.cache(harness_version)
+
 # The note that every planning request of an agent with a workspace root
 # carries after the system prompt, with {root} filled in (see Chat).
 WORKSPACE_NOTE = (
@@ -721,6 +751,28 @@ class _RunState:
     # The task that finalizes the run after an interactive cancellation
     # (see Agent._finalize_in_task), once it is started.
     finalizer: asyncio.Task[None] | None = None
+    # The run's procedural trace: its steps, tool calls, reflections and
+    # stuck notice, appended where their events are emitted, with or
+    # without a sink (see note). It builds no event and keeps no output.
+    trace: Trace = dataclasses.field(default_factory=Trace)
+    # Whether the trace still follows the run: false once updating it
+    # failed, which ends the run's progress events and its learning.
+    tracing: bool = True
+    # Whether the run still reports progress: false once the tracker
+    # failed, which ends the run's progress events only.
+    reporting: bool = True
+    # The routine name the caller gave (run_task's routine), the folder the
+    # run's tools work in, read at its start (None when that failed), and
+    # the routine's key once it is needed (see Agent._routine_key).
+    routine: str | None = None
+    place: str | None = None
+    key: RoutineKey | None = None
+    # What the run-start lookup found: the template the run's progress
+    # rests on, at the level its gate gives, before the level cap of
+    # shown_view. None for level 0.
+    view: TemplateView | None = None
+    # The run's budgets, which run.progress reports.
+    limits: Limits | None = None
 
     @property
     def running(self) -> bool:
@@ -728,13 +780,58 @@ class _RunState:
 
     @property
     def interactive(self) -> bool:
-        """Whether a caller follows the run, with an event sink or a policy."""
-        return self.events.active or self.approval is not None
+        """Whether a caller follows the run, with ``on_event`` or a policy.
+
+        An observer (``observe``) does not make a run interactive.
+        """
+        return self.events.interactive or self.approval is not None
 
     def end(self, status: str, *, result: str = "", error: str = "") -> None:
         self.status = status
         self.result = result
         self.error = error
+
+    def note(self, update: Callable[[Trace], object]) -> None:
+        """Apply *update* to the trace, then report the run's progress.
+
+        Never raises: a failure is logged at DEBUG, and the trace stops
+        following the run, so no further ``run.progress`` event comes.
+        """
+        if not self.tracing:
+            return
+        try:
+            update(self.trace)
+        except Exception as exc:
+            self.tracing = False
+            logger.debug(
+                "The trace of task %s stopped: %s", self.task_id, _exception_text(exc)
+            )
+            return
+        self.report_progress()
+
+    def report_progress(self, *, ended: str | None = None) -> None:
+        """A ``run.progress`` event, when the caller asked for progress.
+
+        *ended* is the run's status on the event that comes right before
+        ``run.finished``. The level shown is capped by
+        :func:`~localmelo.melo.memory.procedures.tracker.shown_view`.
+        Never raises: a failure of the tracker is logged at DEBUG and ends
+        the run's progress events, not the run or its learning.
+        """
+        if not (self.tracing and self.reporting and self.events.reports_progress):
+            return
+        try:
+            view = shown_view(self.view)
+            state = progress_state(view, self.trace, self.limits, ended=ended)
+        except Exception as exc:
+            self.reporting = False
+            logger.debug(
+                "The progress of task %s stopped: %s",
+                self.task_id,
+                _exception_text(exc),
+            )
+            return
+        self.events.progress(state)
 
 
 def _exception_text(exc: BaseException) -> str:
@@ -972,12 +1069,13 @@ class Agent:
         self._active_runs = 0
 
         # Optional persistent memory backends: options.memory_dir, or the
-        # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History is
-        # SQLite whenever persistence is on; long-term only when memory is
-        # on and an embedding provider exists.
+        # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History and
+        # the procedural store are SQLite whenever persistence is on;
+        # long-term only when memory is on and an embedding provider exists.
         self._memory_dir = _resolve_memory_dir(self.options)
         history_backend = None
         long_backend = None
+        procedures_backend = None
         if self._memory_dir is not None:
             from localmelo.melo.memory._sqlite import (
                 make_private_dir,
@@ -986,6 +1084,7 @@ class Agent:
             )
             from localmelo.melo.memory.history.sqlite import SqliteHistory
             from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+            from localmelo.melo.memory.procedures.store import SqliteProcedures
 
             # Read first, so that a bad value raises before the directory is
             # created.
@@ -1006,6 +1105,10 @@ class Agent:
                 long_backend = SqliteLongTerm(
                     os.path.join(self._memory_dir, "long_term.db")
                 )
+            # Opened, and created, at its first use: a run's end.
+            procedures_backend = SqliteProcedures(
+                os.path.join(self._memory_dir, "procedures.db")
+            )
 
         # memory=False runs Hippo in its no-embedding mode, which is exactly
         # the documented behavior of that option: no long-term recall, no
@@ -1015,6 +1118,7 @@ class Agent:
             embedding=self._embedding if self.options.memory else None,
             history=history_backend,
             long=long_backend,
+            procedures=procedures_backend,
         )
         self.checker = Checker()
         self.executor = Executor(
@@ -1591,6 +1695,11 @@ class Agent:
             exit_codes=exit_codes,
             approval=None if gate is None else gate.asked,
         )
+        run.note(
+            lambda trace: trace.tool(
+                call.tool_name, call.arguments, outcome.status.value, result.output
+            )
+        )
         return result, cut
 
     async def _do_memorize(self, task_id: str, step: _InflightStep) -> None:
@@ -2103,6 +2212,7 @@ class Agent:
             # once the planning call is made, even if it then raises.
             run.steps += 1
             run.events.step_started(run.steps, run.attempts)
+            run.note(lambda trace: trace.step(run.steps, run.attempts))
             response, fail = await self._do_plan(
                 long_context,
                 short_window,
@@ -2161,6 +2271,7 @@ class Agent:
             stuck = self._detect_stuck(fingerprints)
             if stuck:
                 run.events.stuck()
+                run.note(Trace.stuck)
                 return step + 1, stuck
 
         run.events.budget_used()
@@ -2184,6 +2295,9 @@ class Agent:
         *,
         on_event: EventSink | None = None,
         approval: ApprovalPolicy | None = None,
+        observe: EventSink | None = None,
+        progress: bool = False,
+        routine: str | None = None,
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -2334,25 +2448,68 @@ class Agent:
         a policy was given. Without one, a tool that requires approval runs
         as any other does.
 
-        Before the run starts, ``TypeError`` is raised when *on_event* is
-        not callable or is a coroutine function, or when *approval* has no
-        ``async def decide``: no event is emitted, no task record is
-        written, and working memory is left as it is.
+        *observe*, when given in place of *on_event*, receives the same
+        events, but does not make the run interactive: a cancelled run
+        ends ``crashed``, as one without a sink does. A display that only
+        watches a run, such as a terminal's progress line, uses it.
+
+        *progress*, with *on_event* or *observe*, adds ``run.progress``
+        events: one right after ``run.started``, one after each
+        ``step.started``, ``tool.finished``, ``reflection.started`` and
+        ``stuck`` notice, and one whose ``state`` is ``ended`` right
+        before ``run.finished``, on every path. Each says where the run
+        stands: facts (step, attempt, phase, test counts), and, from the
+        run's routine as the procedural store remembers it on this model
+        with these options, past runs' facts and named steps (see
+        :mod:`localmelo.melo.memory.procedures`). To find them, the run's
+        start reads the store once, within :data:`LOOKUP_TIMEOUT_S` and
+        the run's ``timeout_s``; a lookup that fails or takes longer
+        leaves the run with facts only. Without *progress*, or without a
+        sink, the run reads nothing at its start and reports no progress.
+
+        *routine* names the run's routine: runs given the same name are
+        one routine in any folder and whatever their wording. Without it,
+        the routine is the query, with dates and times masked, in the
+        folder the run's tools work in.
+
+        Before the run starts, ``TypeError`` is raised when *on_event* or
+        *observe* is not callable or is a coroutine function, when both
+        are given, when *approval* has no ``async def decide``, or when
+        *routine* is not a ``str``, and ``ValueError`` when *routine* is
+        blank: no event is emitted, no task record is written, and working
+        memory is left as it is.
         """
         check_sink(on_event)
+        check_sink(observe, "observe")
+        if on_event is not None and observe is not None:
+            raise TypeError("pass on_event or observe, not both")
         _check_approval(approval)
+        if routine is not None:
+            if not isinstance(routine, str):
+                raise TypeError("routine must be a str")
+            if not routine.strip():
+                raise ValueError("routine must not be blank")
+        place = self._run_place()
         started = time.perf_counter()
         task = TaskRecord(query=query)
         run = _RunState(
             task_id=task.task_id,
-            events=_Emitter(on_event, task.task_id),
+            events=_Emitter(
+                on_event if observe is None else observe,
+                task.task_id,
+                interactive=observe is None,
+                progress=bool(progress),
+            ),
             approval=approval,
+            routine=routine,
+            place=place,
+            limits=self._limits() if progress else None,
         )
         stats = self.chat.reset_stats()
         timeout_s = self.options.timeout_s
         deadline = asyncio.timeout(timeout_s)  # never expires when None
         # The retry notices of this run's model requests; only with a sink.
-        retries = RETRY_HOOK.set(run.events.retry) if on_event is not None else None
+        retries = RETRY_HOOK.set(run.events.retry) if run.events.active else None
         # Every response of this run's model requests becomes a row of
         # history's llm_calls table, when the history keeps model calls,
         # with or without a sink. Read at each run, so a history set after
@@ -2373,6 +2530,12 @@ class Agent:
             )
             try:
                 async with deadline:
+                    try:
+                        await self._look_up(run, query)
+                    finally:
+                        # Also when a timeout or a stop cuts the lookup
+                        # short: the first run.progress follows run.started.
+                        run.report_progress()
                     await self.hippo.save_task(task)
                     try:
                         await self._ensure_tools()
@@ -2450,7 +2613,9 @@ class Agent:
                             task, run, stats, time.perf_counter() - started
                         )
                         run.outcome = outcome
+                        run.report_progress(ended=run.status)
                         run.events.run_finished(outcome)
+            await self._learn(run, query, outcome)
             return outcome
         finally:
             if run.finalizer is None:
@@ -2459,6 +2624,117 @@ class Agent:
             if retries is not None:
                 RETRY_HOOK.reset(retries)
             CALL_RECORDER.reset(recorder)
+
+    # ── Procedural memory ──
+
+    def _run_place(self) -> str | None:
+        """The folder a run's tools work in, as its routine's place.
+
+        The workspace root, or else the working directory, as it is now
+        (see :func:`~localmelo.melo.memory.procedures.normalize.run_place`);
+        ``None`` when it cannot be read, such as a removed working
+        directory: the run then has no routine of its own.
+        """
+        try:
+            return run_place(self.executor.workspace_root)
+        except (OSError, ValueError):
+            return None
+
+    def _routine_key(self, run: _RunState, query: str) -> RoutineKey | None:
+        """The key of *run*'s routine, made at its first use; ``None`` without one."""
+        if run.key is None:
+            if run.routine is not None:
+                run.key = key_for_routine(run.routine, query)
+            elif run.place is not None:
+                run.key = key_for_query(query, run.place)
+        return run.key
+
+    def _model_id(self) -> str:
+        """The model id the procedural store keys on (``BaseLLMProvider.model``)."""
+        model = getattr(self._llm, "model", "")
+        return model if isinstance(model, str) else ""
+
+    def _limits(self) -> Limits:
+        """The budgets that ``run.progress`` reports; null where a run has none."""
+        opts = self.options
+        reflective = opts.attempt_policy != "none"
+        return Limits(
+            max_steps=opts.max_steps,
+            steps_per_attempt=opts.steps_per_attempt if reflective else None,
+            max_attempts=opts.max_attempts if reflective else None,
+            timeout_s=opts.timeout_s,
+        )
+
+    async def _look_up(self, run: _RunState, query: str) -> None:
+        """Find the template *run*'s progress rests on, as ``run.view``.
+
+        Only for a run that reports progress (see :meth:`run_task`): one
+        read of the procedural store, within :data:`LOOKUP_TIMEOUT_S`. No
+        template, or a lookup that fails or takes longer, leaves the run
+        at level 0; a failure is logged at INFO, without a traceback. The
+        run's own cancellation propagates.
+        """
+        if not run.events.reports_progress:
+            return
+        bound = asyncio.timeout(LOOKUP_TIMEOUT_S)
+        try:
+            key = self._routine_key(run, query)
+            if key is None:
+                return
+            async with bound:
+                run.view = await self.hippo.procedures.lookup(
+                    key,
+                    model=self._model_id(),
+                    options=length_options(self._run_config()),
+                )
+        except Exception as exc:
+            if isinstance(exc, TimeoutError) and bound.expired():
+                reason = f"no answer within {LOOKUP_TIMEOUT_S:g} s"
+            else:
+                reason = _exception_text(exc)
+            logger.info("No progress template for task %s: %s", run.task_id, reason)
+
+    async def _learn(self, run: _RunState, query: str, outcome: RunResult) -> None:
+        """Record *run*, which has ended, in the procedural store.
+
+        Its routine, its episode and, for a completed run, its template's
+        next version (see :meth:`Procedures.learn
+        <localmelo.melo.memory.procedures.store.Procedures.learn>`). After
+        ``run.finished`` and before run_task returns, so the run's events
+        and ``duration_s`` are what they would be without it. Skipped
+        during an exit (see :meth:`begin_exit`), which never waits for it,
+        and when the run's trace stopped following it. Bounded by
+        :data:`LEARN_TIMEOUT_S`; a failure, such as a locked or damaged
+        ``procedures.db``, is logged at INFO without a traceback and
+        changes nothing of the run. The run's cancellation propagates.
+        """
+        if self._exit is not None or not run.tracing:
+            return
+        bound = asyncio.timeout(LEARN_TIMEOUT_S)
+        try:
+            async with bound:
+                key = self._routine_key(run, query)
+                if key is None:
+                    return
+                facts = RunFacts.from_trace(
+                    run.trace,
+                    task_id=outcome.task_id,
+                    key=key,
+                    model=self._model_id(),
+                    options=length_options(outcome.config),
+                    status=outcome.status,
+                    steps=outcome.steps,
+                    attempts=outcome.attempts,
+                    duration_s=outcome.duration_s,
+                    harness_version=_harness_version(),
+                )
+                await self.hippo.procedures.learn(facts, view=run.view)
+        except Exception as exc:
+            if isinstance(exc, TimeoutError) and bound.expired():
+                reason = f"no answer within {LEARN_TIMEOUT_S:g} s"
+            else:
+                reason = _exception_text(exc)
+            logger.info("Could not learn from task %s: %s", outcome.task_id, reason)
 
     def _record_answer(self, run: _RunState) -> None:
         """Append the answer of *run*, which has ended, to working memory.
@@ -2772,6 +3048,7 @@ class Agent:
             run.outcome = self._run_result(
                 task, run, stats, time.perf_counter() - started
             )
+            run.report_progress(ended=run.status)
             run.events.run_finished(run.outcome)
         if cancelled is not None:
             raise cancelled
@@ -2976,6 +3253,7 @@ class Agent:
             else:
                 out_of = ""  # another attempt can start
             run.events.reflection_started(failure_type)
+            run.note(Trace.reflection)
             reflection = await self._do_reflect(
                 task,
                 attempt_id,
@@ -3052,7 +3330,7 @@ class Agent:
         cancel the task that runs :meth:`run_task`, if one does, and await
         :meth:`close`. A run that the cancellation ends is recorded as
         ``crashed`` with *reason* as its error; an interactive run, one
-        with an event sink or an approval policy, ends ``cancelled``
+        with ``on_event`` or an approval policy, ends ``cancelled``
         instead, with *reason* as its error too, and its finalizer keeps
         to the same order and limit (see :meth:`run_task`). Before it
         saves its task record, it closes the tool providers, killing any

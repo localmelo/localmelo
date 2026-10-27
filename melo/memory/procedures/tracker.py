@@ -23,7 +23,7 @@ import logging
 import math
 import statistics
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final
 
 from localmelo.melo.memory.procedures.classify import PASS_ANCHOR, TEST, WRITE
@@ -36,6 +36,13 @@ from localmelo.melo.memory.procedures.template import (
 from localmelo.melo.memory.procedures.trace import Trace, TraceCall
 
 logger = logging.getLogger(__name__)
+
+# Whether a running task may show level 2, the bar (section 6.1). Off
+# (decision L-19): the gate is still evaluated at a run's start and the
+# run's episode records the level it gives, but a run shows at most level
+# 1, until a set of repeated runs passes the replay's separation threshold
+# (section 10). The replay (melo-procedures) measures level 2 either way.
+LEVEL2_ENABLED = False
 
 RUNNING: Final = "running"
 OFF_TEMPLATE: Final = "off_template"
@@ -195,7 +202,9 @@ def bar_series(view: TemplateView, trace: Trace) -> tuple[list[float], str | Non
 
     Entry k − 1 is the fraction shown after step k started, from what
     happened before that event. The off reason, if any, is the first
-    thing that took the run off the template, up to now.
+    thing that took the run off the template, up to now. A stuck notice
+    is checked before a reflection: at the step where both come, the
+    notice came first and caused the reflection.
     """
     stats = view.stats
     params = view.params
@@ -210,10 +219,10 @@ def bar_series(view: TemplateView, trace: Trace) -> tuple[list[float], str | Non
     series: list[float] = []
     for k in range(1, trace.step_number + 1):
         if off is None:
-            if not retry_expected and any(0 < at < k for at in reflections):
-                off = RETRYING
-            elif stuck_at is not None and stuck_at < k:
+            if stuck_at is not None and stuck_at < k:
                 off = STUCK
+            elif not retry_expected and any(0 < at < k for at in reflections):
+                off = RETRYING
             elif k > longest:
                 off = LONGER
         if off is None:
@@ -231,10 +240,10 @@ def bar_series(view: TemplateView, trace: Trace) -> tuple[list[float], str | Non
         series.append(shown)
     if off is None:
         step = trace.step_number
-        if not retry_expected and any(at >= max(step, 1) for at in reflections):
-            off = RETRYING
-        elif stuck_at is not None:
+        if stuck_at is not None:
             off = STUCK
+        elif not retry_expected and any(at >= max(step, 1) for at in reflections):
+            off = RETRYING
     return series, off
 
 
@@ -280,6 +289,19 @@ def _past(view: TemplateView) -> dict[str, Any]:
     }
 
 
+def shown_view(view: TemplateView | None) -> TemplateView | None:
+    """*view* as a running task may show it.
+
+    While :data:`LEVEL2_ENABLED` is off, a view of level 2 is shown at
+    level 1: past facts and named steps, no fraction, no expected length,
+    and no bar rule that takes the run off its template. Any other view
+    is returned as it is.
+    """
+    if view is None or view.level < 2 or LEVEL2_ENABLED:
+        return view
+    return replace(view, level=1, reason="level 2 is off")
+
+
 def track(
     view: TemplateView | None,
     trace: Trace,
@@ -298,6 +320,21 @@ def track(
     except Exception as exc:  # the tracker never fails a run
         logger.debug("Progress tracking failed: %s", exc)
         return _facts(trace, limits, ended)
+
+
+def progress_state(
+    view: TemplateView | None,
+    trace: Trace,
+    limits: Limits | None = None,
+    *,
+    ended: str | None = None,
+) -> ProgressState:
+    """:func:`track` without its guard: an exception inside propagates.
+
+    For a caller that stops asking once the tracker failed, as a run does:
+    an exception there ends the run's progress events.
+    """
+    return _track(view, trace, limits, ended)
 
 
 def _facts(trace: Trace, limits: Limits | None, ended: str | None) -> ProgressState:

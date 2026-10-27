@@ -42,6 +42,7 @@ import aiosqlite
 
 from localmelo.melo.memory._sqlite import create_private_file, prepare_connection
 from localmelo.melo.memory.procedures.normalize import (
+    SIMILAR_MAX_ROUTINES,
     RoutineKey,
     find_similar,
     known_model,
@@ -465,7 +466,10 @@ class _Tx(Protocol):
     """The reads and writes the logic needs, inside one transaction."""
 
     async def routine_by_key(self, key: str) -> Routine | None: ...
-    async def routines_in(self, place: str) -> list[tuple[str, str]]: ...
+    async def routines_in(self, place: str, limit: int) -> list[tuple[str, str]]:
+        """The latest *limit* routines of *place*, oldest first."""
+        ...
+
     async def routine(self, routine_id: str) -> Routine | None: ...
     async def insert_routine(self, routine: Routine) -> None: ...
     async def has_episode(self, task_id: str) -> bool: ...
@@ -498,7 +502,9 @@ async def _lookup(
     if routine is not None:
         match = "routine" if routine.name is not None else "exact"
     elif key.name is None:
-        similar = find_similar(key.query_text, await tx.routines_in(key.place))
+        similar = find_similar(
+            key.query_text, await tx.routines_in(key.place, SIMILAR_MAX_ROUTINES)
+        )
         if similar is None:
             return None
         routine = await tx.routine(similar.routine_id)
@@ -529,7 +535,8 @@ async def _learn(
         similar_to = None
         if facts.key.name is None:
             similar = find_similar(
-                facts.key.query_text, await tx.routines_in(facts.key.place)
+                facts.key.query_text,
+                await tx.routines_in(facts.key.place, SIMILAR_MAX_ROUTINES),
             )
             if similar is not None:
                 similar_to = similar.routine_id
@@ -788,12 +795,13 @@ class _MemoryTx:
     async def routine_by_key(self, key: str) -> Routine | None:
         return next((r for r in self.state.routines.values() if r.key == key), None)
 
-    async def routines_in(self, place: str) -> list[tuple[str, str]]:
-        return [
+    async def routines_in(self, place: str, limit: int) -> list[tuple[str, str]]:
+        found = [
             (r.routine_id, r.query_text)
             for r in self.state.routines.values()
             if r.place == place
         ]
+        return found[-limit:] if limit > 0 else []
 
     async def routine(self, routine_id: str) -> Routine | None:
         return self.state.routines.get(routine_id)
@@ -972,13 +980,15 @@ class _SqlTx:
         row = await self._one("SELECT * FROM routines WHERE key = ?", (key,))
         return None if row is None else routine_from_row(row)
 
-    async def routines_in(self, place: str) -> list[tuple[str, str]]:
+    async def routines_in(self, place: str, limit: int) -> list[tuple[str, str]]:
         rows = await self._all(
+            # Newest first by insertion, which the index on place walks
+            # backwards: the cost stays that of *limit* rows.
             "SELECT routine_id, query_text FROM routines WHERE place = ? "
-            "ORDER BY created_at, rowid",
-            (place,),
+            "ORDER BY rowid DESC LIMIT ?",
+            (place, max(limit, 0)),
         )
-        return [(row["routine_id"], row["query_text"]) for row in rows]
+        return [(row["routine_id"], row["query_text"]) for row in reversed(rows)]
 
     async def routine(self, routine_id: str) -> Routine | None:
         row = await self._one(
@@ -1131,13 +1141,29 @@ class SqliteProcedures(Procedures):
             if not self._create and not os.path.exists(self._db_path):
                 raise FileNotFoundError(f"{self._db_path} does not exist")
             create_private_file(self._db_path)
-        conn = await aiosqlite.connect(self._db_path)
+        # The store waits BUSY_TIMEOUT_MS for another writer from its first
+        # statement on, also while it creates the schema: a statement still
+        # waiting when a caller's bound cancels the call holds up closing
+        # the connection, and so the process's exit.
+        busy_s = BUSY_TIMEOUT_MS / 1000
+        conn = await aiosqlite.connect(self._db_path, timeout=busy_s)
         try:
             # A newer file is refused before anything is written to it.
-            await self._check_version(conn)
-            await prepare_connection(conn, _SCHEMA)
-            await conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
-            await self._migrate(conn)
+            version = await self._check_version(conn)
+            await prepare_connection(
+                conn,
+                _SCHEMA,
+                busy_timeout_ms=BUSY_TIMEOUT_MS,
+                locked_retry_s=busy_s,
+            )
+            # Every connection overwrites what it deletes, whatever the
+            # SQLite build's default: rows that forget removes, and the
+            # cells that a template's status change frees.
+            await conn.execute("PRAGMA secure_delete = ON")
+            if version < SCHEMA_VERSION:
+                # A write only below the current version, so that opening a
+                # current file to read takes no write lock.
+                await self._migrate(conn)
         except asyncio.CancelledError:
             self._drop(conn)
             raise
@@ -1206,19 +1232,28 @@ class SqliteProcedures(Procedures):
                 raise
 
     async def forget(self, routine_id: str | None = None) -> int:
-        """As :meth:`Procedures.forget`, overwriting what it deletes.
+        """As :meth:`Procedures.forget`, leaving nothing of what it deletes.
 
-        ``secure_delete`` zeroes the deleted rows' content, and a WAL
-        checkpoint moves the change into the database file.
+        ``secure_delete`` (on for every connection) zeroes the deleted rows;
+        ``VACUUM`` then rebuilds the file, so no free page keeps an older
+        copy of a row, such as a superseded template's; and a ``TRUNCATE``
+        checkpoint empties the WAL.
         """
-        async with self._lock:
-            conn = await self._open()
-            await conn.execute("PRAGMA secure_delete = ON")
         deleted = await super().forget(routine_id)
         async with self._lock:
             conn = await self._open()
+            await conn.execute("VACUUM")
             await conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return deleted
+
+    def close(self) -> None:
+        """Sync compatibility shim, as SqliteHistory's. Prefer :meth:`aclose`.
+
+        Drops the connection reference: aiosqlite then stops the
+        connection's worker thread, which would otherwise keep the process
+        from exiting, once the connection is collected.
+        """
+        self._conn = None
 
     async def aclose(self) -> None:
         """Close the connection, and wait for any closing in the background."""

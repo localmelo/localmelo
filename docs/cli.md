@@ -74,7 +74,7 @@ These options apply to a task run without `--serve`.
 | `--mcp-config PATH` | not set | Add the tools of the MCP servers listed in this JSON file. |
 | `--mcp-only` | off | Use only the MCP tools: the same as `--builtins none --tool-exposure all`. |
 | `--memory on\|off` | `on` | `off` turns long-term memory off for this run. |
-| `--memory-dir DIR` | not set | Save history and long-term memory as SQLite files in `DIR`. |
+| `--memory-dir DIR` | not set | Save history, long-term and procedural memory as SQLite files in `DIR`: `history.db`, `long_term.db` and `procedures.db`. |
 | `--timeout SECONDS` | not set | End the run with status `timeout` after this many seconds. |
 | `--request-timeout SECONDS` | `120` | How long each chat request may wait for the server. |
 | `--output-format text\|json` | `text` | Print the result as text, or the run record as one JSON line. |

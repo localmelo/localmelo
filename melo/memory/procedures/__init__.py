@@ -9,7 +9,12 @@ statistics and named steps (:mod:`.template`). The tracker
 display can show what is known: facts, past runs and, when the template
 is trusted, a bar.
 
+The agent keeps each run's trace, records the run at its end, and, when
+its caller asks for progress, reports the tracker's state as
+``run.progress`` events. Level 2, the bar, is off for a running task
+(:data:`.tracker.LEVEL2_ENABLED`); the gate is still evaluated and its
+level recorded.
+
 Nothing here calls a model or changes a request, and no template enters a
-prompt. Experimental: the interface may change while the agent is wired
-to it.
+prompt. Experimental: the interface may change.
 """

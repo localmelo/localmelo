@@ -31,8 +31,10 @@ change before v0.1.0 (milestone due 2026-12-20).
 - **Connects to your models.** A model server you run (Ollama, MLC LLM, vLLM,
   SGLang) or a cloud API (OpenAI, Anthropic, Google Gemini, NVIDIA).
 - **Remembers.** Working memory during a run, a history of tasks and steps,
-  and long-term memory when an embedding server is configured. History and
-  long-term memory are saved to SQLite when you turn persistence on.
+  long-term memory when an embedding server is configured, and procedural
+  memory: what the runs of each recurring task did, recorded at every
+  run's end. History, long-term and procedural memory are saved to SQLite
+  when you turn persistence on.
 - **Serves the same agent over HTTP** with sessions (the gateway), plus a web
   workspace for running the agent in a browser, on a model server you choose.
 

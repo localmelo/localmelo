@@ -316,8 +316,10 @@
           and, with persistence on, every model call and its reasoning.
           Long-term memory needs an embedding backend: it stores step summaries
           and reflections with their embeddings, and recalls the 5 closest
-          entries on each step. History and long-term memory stay in RAM, or go
-          to <code>history.db</code> and <code>long_term.db</code> when
+          entries on each step. Procedural memory keeps the steps of each run
+          and learns the steps of tasks you repeat. History, long-term and
+          procedural memory stay in RAM, or go to <code>history.db</code>,
+          <code>long_term.db</code> and <code>procedures.db</code> when
           persistence is on. The tool registry holds every registered tool,
           with the BM25 index that retrieve mode searches.
         </p>
@@ -455,7 +457,7 @@
           <li>Backends for Ollama, MLC LLM, vLLM, SGLang and four cloud APIs.</li>
           <li>Working memory, history and long-term memory, saved to SQLite when persistence is on; the saved history also keeps every model call with its reasoning, for 30 days by default.</li>
           <li><code>melo-retrieve</code>, which compares the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers offline. Runs do not use the retrievers yet.</li>
-          <li><code>melo-procedures</code>, which learns the steps of recurring tasks from a saved history and replays the rules of a planned progress display offline. Runs do not use procedural memory yet.</li>
+          <li>Procedural memory: each run records its steps, and a completed run updates the step template of its task, in <code>procedures.db</code> with persistence on. Python callers get <code>run.progress</code> events with <code>progress=True</code>, without a percent bar for now; <code>melo</code> shows no progress yet. <code>melo-procedures</code> replays the progress rules offline.</li>
           <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>). Runs and the gateway do not use it yet.</li>
         </ul>
         <p>What comes next is on the <a href="./updates.html#roadmap">roadmap</a>.</p>

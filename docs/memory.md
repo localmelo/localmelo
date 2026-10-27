@@ -26,6 +26,7 @@ page.
 | Working memory | The conversation of a run, of the `melo ""` loop, of a gateway session or of a web workspace chat: the last 20 messages. | RAM only. |
 | History | Every task with its status and result, and every step with its tool call and result. In `history.db`, also every reply of the model with its reasoning; the history in RAM keeps no model calls. | RAM, or `history.db`. |
 | Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an embedding backend. | RAM, or `long_term.db`. |
+| Procedural memory | What the runs of each recurring task did: the classes and short labels of their tool calls, their step counts and times. Written at the end of every run; never put in a prompt. See [Procedural memory](procedures.md). | RAM, or `procedures.db`. |
 
 By default everything stays in RAM and is lost when the process ends. In RAM,
 long-term memory lasts as long as its agent: one direct run, one `melo ""`
@@ -75,14 +76,17 @@ run.
 ~/.cache/localmelo/memory/
   history.db      tasks, steps and model calls
   long_term.db    long-term memory, with an embedding backend and memory on
+  procedures.db   procedural memory, written at the end of every run
 ```
 
 - SQLite may also create `history.db-wal` and `history.db-shm` (and the same
-  for `long_term.db`). They belong to the database; leave them in place.
+  for `long_term.db` and `procedures.db`). They belong to the database;
+  leave them in place.
 - The directory is created when an agent starts: at the start of a direct
   run or of the `melo ""` loop, or when a gateway session is created.
 - A new directory gets mode 0700, so only you can open the files in it, and
-  a new `history.db`, with its `-wal` and `-shm`, gets mode 0600.
+  a new `history.db` or `procedures.db`, with its `-wal` and `-shm`, gets
+  mode 0600.
 - The default directory, `~/.cache/localmelo/memory`, is also set to 0700
   when it exists, you own it, and it is open to group or others, as earlier
   versions left it. One INFO line in the log says so.
@@ -95,13 +99,15 @@ run.
   ```
 
 - `long_term.db` is created with the default file mode, usually 0644.
-- `procedures.db` holds [procedural memory](procedures.md). Runs do not
-  create it yet; only code that opens `SqliteProcedures` does.
+- `procedures.db` holds [procedural memory](procedures.md). With
+  persistence on, the first run that ends creates it, and every run adds
+  its record at its end, `--memory off` included. With persistence off,
+  procedural memory stays in RAM, and nothing is written.
 - The gateway's web workspace keeps its own files in
   `~/.cache/localmelo/playground/`. Its `history.db` keeps the model's
   reasoning for the same number of days, and clears older reasoning when a
   new chat first uses it: each chat opens its own connection to the shared
-  file.
+  file. Its chats share a `procedures.db` there too.
 
 ## Inspect memory
 
@@ -132,7 +138,14 @@ sqlite3 history.db "SELECT s.seq, c.seq, substr(c.thinking, 1, 80), s.tool_call_
 # Long-term memory: the number of entries, and a preview
 sqlite3 long_term.db "SELECT COUNT(*) FROM long_term"
 sqlite3 long_term.db "SELECT id, substr(text, 1, 80), metadata FROM long_term LIMIT 5"
+
+# Procedural memory: the routines, and how their latest runs went
+sqlite3 procedures.db "SELECT routine_id, substr(query_text, 1, 60), place FROM routines"
+sqlite3 procedures.db "SELECT routine_id, status, steps, level, model FROM episodes ORDER BY created_at DESC LIMIT 10"
 ```
+
+`melo-procedures export` prints all of procedural memory as JSON lines; see
+[melo-procedures](procedures.md#export-and-forget).
 
 Replace `<task_id>` with an id from the task list, or with the `task_id` of
 the JSON line.
@@ -312,6 +325,9 @@ localmelo has no reset command. To delete memory:
    # Only history
    rm ~/.cache/localmelo/memory/history.db*
 
+   # Only procedural memory
+   rm ~/.cache/localmelo/memory/procedures.db*
+
    # The web workspace's memory
    rm -rf ~/.cache/localmelo/playground
    ```
@@ -347,14 +363,23 @@ that directory instead.
   holds the model's reasoning for every call, redacted and kept 30 days by
   default; see [Model calls](#model-calls).
   `long_term.db` holds step summaries and reflections, with their embedding
-  vectors.
+  vectors. `procedures.db` holds each task's query, normalized, the folder
+  it ran in, and its tool calls' labels: file names and program names,
+  never their content or output. The query and the labels pass a minimal
+  redaction: the key shapes, bearer tokens and one-time codes of
+  [Model calls](#model-calls), then a URL's password
+  (`postgres://app:<redacted>@host`, the user name kept) and the value of
+  `NAME=value` or `NAME: value` when NAME contains `key`, `token`,
+  `secret`, `password`, `passwd` or `pwd` (`API_KEY=<redacted>`).
+  Anything else stays as written, such as host names, paths and other
+  values.
 - Images that tools return are stored only as references: the MIME type, the
   SHA-256 digest and the size, never the image itself.
 - The files are as private as your home directory. To remove them, see
   [Reset memory](#reset-memory).
-- The gateway's web workspace always saves the history of its chats, and
-  their long-term memory when an embedding model is selected, in
-  `~/.cache/localmelo/playground/`.
+- The gateway's web workspace always saves the history and procedural
+  memory of its chats, and their long-term memory when an embedding model
+  is selected, in `~/.cache/localmelo/playground/`.
 
 ## How memory works
 
@@ -383,6 +408,21 @@ that directory instead.
 
 **History** is a record. localmelo writes every task and step to it, and,
 with persistence on, every model call, but never reads it back.
+
+**Procedural memory** learns the steps of recurring tasks:
+
+- When a run ends, after its last event and before `melo` prints the
+  result, the run's record is added: its task's routine, its step counts and
+  the labels of its tool calls. On a file of 1,000 runs this takes a few
+  milliseconds, under 50 ms at the 95th percentile, and never more than 2
+  seconds;
+  a write that fails, such as on a locked file, is skipped with an INFO
+  line in the log. It is not part of the run's `duration_s`.
+- A run after SIGTERM or SIGHUP, and a cancelled Python run, add nothing.
+- Nothing reads it during a run, unless a Python caller asks for
+  [progress](events.md#runprogress). `melo` does not show progress yet.
+- To keep it off the disk, leave persistence off; to delete it, see
+  [Reset memory](#reset-memory) or `melo-procedures forget`.
 
 **Reflections** are kept in working memory, one at a time: each new
 reflection replaces the last one. See

@@ -6,11 +6,45 @@ can show how far a run is. It keeps what earlier runs did, never what the
 model said: the classes of their tool calls, short labels, step counts and
 times.
 
-This release has the library and an offline tool, `melo-procedures`. **A run
-does not use procedural memory yet**: `melo`, the gateway and the Python API
-neither read nor write it, and nothing here calls a model or changes a
-request. `melo-procedures` replays the rules on recorded runs, so that they
-are measured before a run shows anything.
+Every run writes it: when a run ends, through `melo`, the `melo ""` loop,
+the gateway or the Python API, its record is added. With persistence on
+(see [Memory](memory.md#keep-memory-between-runs)) that is `procedures.db`
+in the memory directory; otherwise procedural memory stays in RAM for the
+agent's life and nothing is written. To keep it off the disk, leave
+persistence off. Nothing here calls a model, reaches a prompt or changes a
+request.
+
+What a run may show from it comes as [`run.progress`](events.md#runprogress)
+events, to a Python caller that asks with `progress=True`; `melo` does not
+show progress yet. Level 2, the bar, is off in this release: replayed on
+recorded runs, the gate did not yet keep bad bars back by the margin it
+must (0.05) on both test sets, so a run shows at most level 1 until a
+later release turns level 2 on, once a set of repeated runs passes the
+replay. `melo-procedures` replays
+the rules on recorded runs, so that they are measured before a run shows
+anything.
+
+## What a run does
+
+- **At its start**, only when a Python caller asked for progress, the run
+  looks its routine up, once, for at most 1 second; without a template, or
+  if the lookup fails, it shows facts only (level 0).
+- **During the run**, it keeps a trace in RAM: each step, and the class and
+  label of each tool call. It keeps no tool output; a test call's last 400
+  characters are read for its summary and dropped.
+- **At its end**, after its last event, it adds its routine (if new), its
+  episode and, when it completed, its template's next version. This takes a
+  few milliseconds and at most 2 seconds; a write that fails is skipped
+  with one INFO line in the log. A run that is cancelled, or that ends
+  after SIGTERM or SIGHUP, adds nothing.
+- The episode records the level the gate gives, also when that is level 2
+  and level 1 is shown, and, when the gate passed, the error the bar would
+  have had: evidence for turning level 2 on. The gate is the one the
+  run's start found when it asked for progress; otherwise, since such a
+  run reads nothing at its start, the one its routine's template gives
+  as the run ends.
+- `run_task(..., routine="name")` in Python makes runs one routine, named,
+  in any folder and whatever their wording.
 
 ## How it works
 
@@ -23,6 +57,11 @@ are measured before a run shows anything.
   `星期一`, `周一`, and `HH:MM[:SS]`). Other numbers stay: "fix issue 123" and
   "fix issue 456" are two routines. A named routine is one routine in any
   folder.
+- **Similar task.** A new routine in a folder that holds at least 5 others
+  is compared, by BM25 over their normalized queries, with the folder's
+  latest 1,000. A clear best match lends the run its named steps and past
+  facts, at level 1: a hint, never a bar. The run still starts a routine
+  of its own.
 - **Episode.** One finished run of a routine: its status, steps, attempts,
   duration, and its *segments*, the runs of consecutive tool calls with the
   same class and target.
@@ -37,7 +76,7 @@ are measured before a run shows anything.
   |---|---|---|
   | 0 | No template: a first run, another model or other options | Facts only: step, attempt, phase, tests |
   | 1 | One completed run; or the gate fails; or a similar task; or the model is demoted or has no id | Past runs' steps and times, and their named steps, without a percent |
-  | 2 | The gate passes | A bar as well |
+  | 2 | The gate passes | A bar as well (off in this release: a run shows level 1) |
 
 - **The gate.** Level 2 needs the routine's own key or name, a model id,
   at least 2 completed runs in the window, and a *spread* (longest − shortest
@@ -77,8 +116,10 @@ test after a write.
 
 A call's label names it without its arguments' content: `Read parser.py`,
 `Edit parser.py`, the program and its first subcommand (`pytest`,
-`git status`, `npm test`), `Python`, or an MCP tool's name. Labels pass the
-same secret redaction as model text and are cut to 40 characters.
+`git status`, `npm test`), `Python`, or an MCP tool's name. Labels, like
+the query a routine keeps, pass a minimal redaction (see
+[Privacy](memory.md#privacy)) and are cut to 40 characters. A shell label is
+read from the command's first 2,000 characters, never from inside quotes.
 
 ## The store
 
@@ -166,11 +207,11 @@ and the last three a bar (level 2), whose mean error over their steps was
 | `--spread S` | The gate's spread (default 0.5). |
 | `--drop` | The exploration drop: `conditional` (default), `off` or `unconditional`. |
 | `--stats` | The runs the statistics use: `completed` (default) or `normal`, which adds runs that ended `budget_exhausted`, `stuck` or `gate_stopped`. |
+| `--key-build` | Put each episode's localmelo version in its template's key. |
 
 `--arms`, `--drop` and `--stats` apply to `online` only; with `loo` or
 `first-k` they are a usage error. Those two protocols take the statistics
 from every run of a template, whatever its status, with no drop.
-| `--key-build` | Put each episode's localmelo version in its template's key. |
 
 An `online` line holds:
 
@@ -229,7 +270,9 @@ melo-procedures forget (--routine ID | --all) [--db FILE | --memory-dir DIR]
 `export` prints every row of a `procedures.db` as a JSON line: the
 `table`, then the row's columns by name, JSON columns as text. `forget`
 deletes one routine with its episodes and templates, or every row, prints
-`{"deleted": <rows>}`, and overwrites what it deleted in the file. Both read
+`{"deleted": <rows>}`, and rebuilds the file (`VACUUM`), so that neither it
+nor its `-wal` keeps any copy of what was deleted. Run it while no
+localmelo process is running. Both read
 `procedures.db` in `--memory-dir`, else in `LOCALMELO_MEMORY_DIR`, else in
 `~/.cache/localmelo/memory`; neither creates it.
 

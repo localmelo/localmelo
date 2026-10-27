@@ -59,6 +59,14 @@ A run with `on_event` or an approval policy is an *interactive* run. That
 matters only when the run is cancelled: it then ends as `cancelled` instead
 of `crashed` (see [Stop a run](python-api.md#stop-a-run)).
 
+To watch a run without making it interactive, pass the function as
+`observe` instead. It receives the same events, but a cancelled run ends as
+`crashed`, as a run without a sink does. Give `on_event` or `observe`, not
+both.
+
+To also learn where the run stands, pass `progress=True` with either: the
+run then reports [`run.progress`](#runprogress) events as well.
+
 ## The event
 
 Each event is an `AgentEvent`, which `localmelo` exports:
@@ -83,15 +91,16 @@ always succeeds.
 
 ## Rules for the sink
 
-The function you pass as `on_event` is the sink.
+The function you pass as `on_event` or `observe` is the sink.
 
 - **Synchronous, in order.** The sink is called once per event, in `seq`
   order, from one task at a time: the task that runs `run_task`, or, after a
   cancellation, the task that finalizes the run. It is never called from two
   tasks at once or from another thread.
 - **A plain function.** `run_task` raises `TypeError` before the run starts
-  when `on_event` is not callable, or when it is an `async def` function.
-  Then no event is emitted and no task record is written.
+  when `on_event` or `observe` is not callable, when it is an `async def`
+  function, or when both are given. Then no event is emitted and no task
+  record is written.
 - **Do not block.** There is no buffer and no timeout: a slow sink holds up
   the run. Put slow work on a queue and do it in another task (see the
   example below).
@@ -104,8 +113,8 @@ The function you pass as `on_event` is the sink.
   WARNING, with a traceback, on the logger `localmelo.melo.agent._events`,
   and later ones at DEBUG. Any other exception, such as
   `KeyboardInterrupt`, propagates.
-- **Without a sink, nothing is built.** A run without `on_event` builds no
-  event and no payload.
+- **Without a sink, nothing is built.** A run without `on_event` or
+  `observe` builds no event and no payload.
 
 To do slow work with the events, such as writing them to a file or sending
 them to a client, give the run a queue's `put_nowait` and read the queue in
@@ -155,6 +164,7 @@ asyncio.run(main())
 | `notice` | When an attempt ends, the model gave an empty reply, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
 | `reflection.started` | Before the reflection that follows an attempt. | `attempt`, `failure_type` |
 | `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `usage`, `duration_s` |
+| `run.progress` | Only with `progress=True`: right after `run.started`; after each `step.started`, `tool.finished`, `reflection.started` and `stuck` notice; and right before `run.finished`. | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
 | `run.finished` | Last. | `result` |
 
 ### run.started
@@ -314,6 +324,72 @@ The number of `tool.started` events is `RunResult.n_tool`.
 See [Reflection](how-it-works.md#reflection) and
 [Run results](run-results.md#statuses).
 
+### run.progress
+
+Where the run stands, for a progress display. It comes only when
+`run_task` gets `progress=True` and a sink. Every key is always present,
+`null` where it is unknown. What it shows rests on the run's routine, as
+[procedural memory](procedures.md) remembers it on this model with these
+options:
+
+| Key | Meaning |
+|---|---|
+| `level` | What may be shown: 0, facts only (a first run, another model or other options); 1, past runs' facts and named steps as well. Level 2, a bar, is not shown in this release. |
+| `state` | `running`, then `ended` on the event right before `run.finished`. |
+| `step`, `attempt` | Those of the latest `step.started`; 0 before the first step. |
+| `limits` | `{max_steps, steps_per_attempt, max_attempts, timeout_s}`: the run's budgets, `null` where the run has none (the attempt limits with `attempt_policy="none"`). `max_steps` is a budget, not the expected length. |
+| `phase`, `cycle` | `Explore`, `Write`, `Verify` or `Finishing`, from the classes of the run's tool calls (see [Classes and phases](procedures.md#classes-and-phases)), and the number of tests after a write; `null` and 0 before the first call. |
+| `tests` | `{passed, failed, total}` from the latest pytest or unittest summary in a test call's output, or `null`. |
+| `items` | Level 1: the routine's named steps, each `{label, state, repeat}`, `state` being `done`, `current`, `pending` or `skipped`; they tick forward only. `null` at level 0. |
+| `fraction`, `expected_steps` | Always `null` in this release. |
+| `past` | Level 1: `{runs, steps_lo, steps_median, steps_hi, wall_lo_s, wall_hi_s, last_steps, last_wall_s}`, facts about the past completed runs. |
+| `off_reason` | Always `null` in this release. |
+| `basis` | Level 1: `{routine_id, template_id, version, match, model}`, the memory the display rests on; `match` is `exact`, `routine` (a named routine) or `similar` (a similar task's steps, a hint). |
+
+A first run has no past to rest on: its events are facts only. This sink
+prints the level, state, step and phase of each:
+
+```python
+import asyncio
+
+from localmelo import Agent, AgentEvent, AgentOptions
+from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+
+
+def show(event: AgentEvent) -> None:
+    if event.type == "run.progress":
+        data = event.data
+        print(data["level"], data["state"], data["step"], data["phase"])
+
+
+async def main() -> None:
+    llm = OpenAICompatLLM(base_url="http://127.0.0.1:11434/v1", model="qwen3:8b")
+    agent = Agent(llm=llm, options=AgentOptions(builtins=["shell_exec"]))
+    try:
+        await agent.run_task("Which files are here?", observe=show, progress=True)
+    finally:
+        await agent.close()
+
+
+asyncio.run(main())
+```
+
+When the model runs `ls` and then answers, it prints:
+
+```text
+0 running 0 None
+0 running 1 None
+0 running 1 Explore
+0 running 2 Explore
+0 ended 2 Explore
+```
+
+At level 1, show the items as what the last runs did, not as a to-do list:
+this run may do other work. The run's start looks the routine up once,
+for at most 1 second, which counts toward the run's `timeout_s`; a lookup
+that fails or takes longer gives level 0. A failure inside the tracker
+ends the run's `run.progress` events, never the run.
+
 ### run.finished
 
 - `result`: the run's `RunResult`, as `RunResult.to_dict()`. Nothing in it
@@ -342,6 +418,12 @@ returned.
   reflection's requests, and `reflection`, unless one of its requests
   failed or the run was cancelled. With `"none"`, it is followed by
   `run.finished`.
+- **Progress follows what it reports.** With `progress=True`, a
+  `run.progress` comes right after `run.started`, right after each
+  `step.started`, `tool.finished` (of a call that returned),
+  `reflection.started` and `stuck` notice, and right before `run.finished`
+  with `state` `ended`, on every path. Without `progress=True`, a run's
+  events are the same as before `run.progress` existed.
 - **The counts match the run.** The number of `step.started` events is
   `RunResult.steps`, and the number of `tool.started` events is
   `RunResult.n_tool`. `run.finished`'s `result` equals the `to_dict()` of

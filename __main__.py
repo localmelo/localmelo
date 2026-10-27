@@ -643,7 +643,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--memory-dir",
         type=_non_empty,
         metavar="DIR",
-        help="Directory for SQLite memory (history.db, long_term.db)",
+        help="Directory for SQLite memory (history.db, long_term.db, procedures.db)",
     )
     direct.add_argument(
         "--timeout",
