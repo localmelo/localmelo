@@ -26,7 +26,8 @@ from localmelo.support.cli.output import RecordingOut
 from localmelo.support.cli.render import TurnRenderer
 from localmelo.support.cli.session import STOP_REASON, CliSession
 from localmelo.support.cli.theme import UNICODE
-from localmelo.support.sessions.store import SessionStore
+from localmelo.support.sessions.runner import SessionRunner
+from localmelo.support.sessions.store import SessionBusyError, SessionStore
 from localmelo.tests.sessions.helpers import ScriptedLLM, answer, started_agent
 
 URL = "http://127.0.0.1:9/v1"
@@ -126,7 +127,8 @@ async def _until(check: Callable[[], bool], timeout_s: float = 5.0) -> None:
 
 
 @pytest.fixture
-async def setup(tmp_path: Path) -> Any:
+async def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setenv("HOME", str(tmp_path))  # the store writes its host id there
     scripts = {"m1": [answer("Paris.")], "m2": [answer("Lyon.")]}
     factory = FakeFactory(tmp_path / "work", scripts)
     store = SessionStore(tmp_path / "sessions.db", writer="cli")
@@ -412,3 +414,234 @@ async def test_model_ids_from_the_server_cannot_act_on_the_terminal(
     text = setup.out.text()
     assert "\x1b" not in text and "PWNED" not in text
     assert "2. evilmodel" in text
+
+
+# ── Review fixes ──
+
+
+def _gated_llm(setup: Setup, *answers: str) -> asyncio.Event:
+    """The session's Agent answers *answers* in turn, each once the gate opens."""
+    gate = asyncio.Event()
+    llm = ScriptedLLM([answer(text) for text in answers])
+    real_chat = llm.chat
+
+    async def slow(messages: list[Message], tools: Any = None) -> Message:
+        await gate.wait()
+        return await real_chat(messages, tools)
+
+    llm.chat = slow  # type: ignore[method-assign]
+    setup.session.agent = Agent(llm=llm, options=setup.session.agent.options)
+    return gate
+
+
+async def _reopened_rows(setup: Setup) -> list[Any]:
+    store = SessionStore(setup.store.path, writer="cli")
+    try:
+        sessions = await store.list_sessions()
+        return [] if not sessions else await store.list_turns(sessions[0].id)
+    finally:
+        await store.aclose()
+
+
+async def test_a_queued_message_is_not_sent_once_the_session_shuts_down(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = setup.session
+    gate = _gated_llm(setup, "first done", "second done")
+    await session.agent.start()
+    session.enter("first")
+    session.enter("then this")
+    # The turn's end waits here, as while the runner finishes it.
+    held = [True]
+    monkeypatch.setattr(
+        SessionRunner,
+        "busy",
+        property(lambda self: held[0] or self._active is not None),
+    )
+    gate.set()
+    await _until(
+        lambda: session.renderer.live is not None and session.renderer.live.finished
+    )
+    closing = asyncio.ensure_future(session.shutdown())
+    await asyncio.sleep(0.1)
+    held[0] = False
+    await closing
+    assert [t.user_text for t in await _reopened_rows(setup)] == ["first"]
+    assert "second done" not in setup.out.text()
+
+
+async def test_model_n_lists_the_models_first_when_none_were_listed(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    assert session.models == []  # startup listed them, or nothing did
+    await session.model("2")
+    assert session.factory.backend.model == "m2"
+    assert setup.factory.saved == [(URL, "m2")]
+
+
+async def test_model_n_switches_nothing_when_the_models_cannot_be_listed(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    setup.factory.listed = DiscoveryError("connection refused", reachable=False)
+    await session.model("3")
+    assert session.factory.backend.model == "m1" and setup.factory.saved == []
+    assert "✗ Could not list the models: connection refused" in setup.out.text()
+
+
+async def test_the_next_turn_after_a_switch_runs_on_the_new_model(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    session.enter("one")
+    await setup.idle()
+    await session.model("m2")
+    session.enter("two")
+    await setup.idle()
+    assert "● Lyon." in setup.out.text()
+    turns = await setup.rows()
+    assert [t.status for t in turns] == ["completed", "completed"]
+
+
+async def test_a_switch_stays_switching_until_it_is_complete(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = setup.session
+    closing, gate = asyncio.Event(), asyncio.Event()
+    real_close = setup.factory.close
+
+    async def slow_close(agent: Agent) -> None:
+        closing.set()
+        await gate.wait()
+        await real_close(agent)
+
+    monkeypatch.setattr(setup.factory, "close", slow_close)
+    switching = asyncio.ensure_future(session.model("m2"))
+    await asyncio.wait_for(closing.wait(), 5)
+    assert session.state == "switching"
+    assert session.enter("What is the capital?") is not None  # a hint, not a turn
+    assert not session.stop()  # the new Agent is in place: nothing to cancel
+    gate.set()
+    await switching
+    assert session.state == "idle" and session.factory.backend.model == "m2"
+    assert "Model: m2 (OpenAI-compatible). Saved as the default." in setup.out.text()
+
+
+async def test_a_late_check_of_the_old_server_does_not_replace_the_new_list(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = setup.session
+    gate = asyncio.Event()
+
+    async def listing(url: str | None = None) -> list[str]:
+        if url is None and setup.factory.backend.base_url == URL:
+            await gate.wait()
+            return ["old-a", "old-b"]
+        return ["new-a"]
+
+    monkeypatch.setattr(setup.factory, "list_models", listing)
+    check = asyncio.ensure_future(session.check_server())
+    await asyncio.sleep(0.05)
+    await session.backend("http://127.0.0.1:19/v1")
+    assert session.models == ["new-a"]
+    gate.set()
+    await check
+    assert session.models == ["new-a"]
+
+
+async def test_esc_after_the_run_ended_does_not_stop_the_turn(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = setup.session
+    gate = _gated_llm(setup, "done")
+    await session.agent.start()
+    renderer = session.renderer
+    real_on_event = renderer.on_event
+
+    def on_event(event: Any) -> None:  # run.finished has not reached it yet
+        if event.type != "run.finished":
+            real_on_event(event)
+
+    monkeypatch.setattr(renderer, "on_event", on_event)
+    session.enter("first")
+    await _until(lambda: session.runner is not None and session.runner.busy)
+    runner = session.runner
+    assert runner is not None
+    ending = asyncio.Event()
+    real_record = runner._record_end
+
+    async def held_record(*args: Any) -> None:
+        await ending.wait()
+        await real_record(*args)
+
+    monkeypatch.setattr(runner, "_record_end", held_record)
+    gate.set()
+    await _until(lambda: runner.run_ended)
+    assert not session.stop()
+    assert session.state == "running"
+    ending.set()
+    await setup.idle()
+    [turn] = await setup.rows()
+    assert (turn.status, turn.cause) == ("completed", "run")
+
+
+async def test_the_session_stays_stopping_while_the_runner_finishes(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = setup.session
+    held = [True]
+    monkeypatch.setattr(SessionRunner, "busy", property(lambda self: held[0]))
+
+    async def returns_early(self: SessionRunner, *args: Any, **kwargs: Any) -> Any:
+        raise SessionBusyError("a turn still finishes")
+
+    monkeypatch.setattr(SessionRunner, "run_turn", returns_early)
+    session.enter("one")
+    await asyncio.sleep(0.2)
+    assert session.state == "running"
+    held[0] = False
+    await setup.idle()
+
+
+def _config_factory(tmp_path: Path) -> AgentFactory:
+    from localmelo.support import config
+    from localmelo.support.cli.agents import config_backend
+
+    cfg = config.Config(
+        chat_backend="vllm",
+        embedding_backend="none",
+        vllm=config.LocalBackendConfig(chat_url=URL, chat_model="m1"),
+    )
+    config.save(cfg)
+    return AgentFactory(
+        backend=config_backend(cfg, None),
+        cfg=cfg,
+        options=AgentOptions(),
+        workspace=str(tmp_path),
+    )
+
+
+@pytest.mark.parametrize(
+    ("edited", "problem"),
+    [
+        ("chat_backend = \n", "not saved: "),
+        (
+            'chat_backend = "vllm"\nembedding_backend = "none"\n\n[vllm]\n'
+            'chat_url = "http://127.0.0.1:19/v1"\nchat_model = "m1"\n',
+            "not saved: the config file changed",
+        ),
+    ],
+)
+def test_a_config_file_edited_during_the_session_is_not_written_over(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, edited: str, problem: str
+) -> None:
+    path = tmp_path / "config.toml"
+    monkeypatch.setattr("localmelo.support.config.CONFIG_PATH", str(path))
+    monkeypatch.setattr("localmelo.support.config.CONFIG_DIR", str(tmp_path))
+    factory = _config_factory(tmp_path)
+    path.write_text(edited, encoding="utf-8")
+    factory.use_model("m2")
+    assert factory.save().startswith(problem)
+    assert path.read_text(encoding="utf-8") == edited
+    assert factory._cfg is not None and factory._cfg.vllm.chat_url == URL

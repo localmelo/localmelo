@@ -104,6 +104,11 @@ def test_a_base_url_takes_the_first_chat_model_it_lists() -> None:
     faked.offer.assert_not_called()  # a config exists
 
 
+def test_a_base_url_keeps_the_models_it_listed_for_model_n() -> None:
+    faked = Faked(cfg=_configured(), listed=["embed-x", "chat-a", "chat-b"])
+    assert _choice(faked.choose(base_url=URL)).models == ("embed-x", "chat-a", "chat-b")
+
+
 def test_a_base_url_with_a_model_sends_no_listing_when_a_config_exists() -> None:
     faked = Faked(cfg=_configured())
     choice = _choice(faked.choose(base_url=URL, chat_model="M"))

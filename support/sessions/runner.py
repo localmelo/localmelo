@@ -266,6 +266,16 @@ class SessionRunner:
         )
 
     @property
+    def run_ended(self) -> bool:
+        """Whether the running turn's run has ended; the turn may still finish.
+
+        True from the moment the run sends ``run.finished`` (before that
+        event is stored and forwarded) or returns.
+        """
+        turn = self._active
+        return turn is not None and (turn.finished.is_set() or turn.finish is not None)
+
+    @property
     def current_turn(self) -> TurnInfo | None:
         return None if self._active is None else self._active.turn
 

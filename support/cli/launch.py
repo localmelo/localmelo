@@ -49,7 +49,8 @@ class Choice:
     """The backend startup chose, and what the session may do with it.
 
     *checked* says the server was listed at startup, so the banner's check
-    does not list it again; *warning* is a line for under the banner.
+    does not list it again; *models* is what it listed then; *warning* is
+    a line for under the banner.
     """
 
     backend: BackendInfo
@@ -57,6 +58,7 @@ class Choice:
     saves: bool = True
     checked: bool = False
     warning: str = ""
+    models: tuple[str, ...] = ()
 
 
 def ui_terminal() -> bool:
@@ -109,7 +111,14 @@ def _with_url(args: argparse.Namespace) -> Choice:
     backend = url_backend(
         url, model, source="saved" if saved else "--base-url", listed=picked
     )
-    return Choice(backend, None, saves=bool(saved), checked=listed, warning=warning)
+    return Choice(
+        backend,
+        None,
+        saves=bool(saved),
+        checked=listed,
+        warning=warning,
+        models=tuple(models),
+    )
 
 
 def choose_backend(args: argparse.Namespace) -> Choice | int:
@@ -377,6 +386,7 @@ async def main_async(
             no_color=no_color,
         )
         session.attach(ui)
+        session.models = list(choice.models)
         restore = save_terminal()
 
         signals = ExitSignals(

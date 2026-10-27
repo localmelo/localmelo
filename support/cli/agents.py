@@ -156,17 +156,23 @@ class AgentFactory:
         captured = io.StringIO()
         try:
             if backend.source == "config" and self._cfg is not None:
+                # The session keeps the server it uses; a config file that
+                # now names another one is not written over.
                 cfg = config.load()
                 section = getattr(cfg, cfg.chat_backend, None)
-                if cfg.chat_backend != backend.key or section is None:
+                if (
+                    cfg.chat_backend != backend.key
+                    or section is None
+                    or config_backend(cfg, None).base_url != backend.base_url
+                ):
                     return "not saved: the config file changed"
                 section.chat_model = backend.model
                 config.save(cfg)
-                self._cfg = cfg
                 return ""
             with contextlib.redirect_stdout(captured):
                 saved = onboard.save_chat_server(backend.base_url, backend.model)
-        except (OSError, config.ConfigError) as exc:
+        except (OSError, ValueError, config.ConfigError) as exc:
+            # ValueError: a config file that is no longer valid TOML.
             return f"not saved: {exc}"
         if not saved:
             return captured.getvalue().strip() or "not saved"

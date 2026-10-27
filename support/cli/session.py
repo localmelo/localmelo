@@ -248,6 +248,8 @@ class CliSession:
             if self._clock() - started >= BELL_AFTER_S:
                 self.app.bell()
             self.app.invalidate()
+        if self._closed:
+            return  # the session shuts down: a queued message is not sent
         queued = self.take_queued()
         if queued is None:
             return
@@ -263,13 +265,15 @@ class CliSession:
     def stop(self, reason: str = STOP_REASON) -> bool:
         """Stop the turn or the switch, once; Esc and Ctrl+C."""
         if self._state == "switching":
-            if self._work is not None:
-                self._work.cancel()
+            if self._work is None:
+                return False  # the new Agent is in place; the switch ends
+            self._work.cancel()
             return True
         if self._state != "running":
             return False
         live = self.renderer.live
-        if live is not None and live.finished:
+        ended = self.runner is not None and self.runner.run_ended
+        if ended or (live is not None and live.finished):
             # The run has ended; the turn is wrapping up.
             self._hint("Finishing the turn…")
             return False
@@ -347,6 +351,15 @@ class CliSession:
             self.out.print(lines)
             return
         name = arguments
+        if name.isdigit() and not self.models and self.factory.listable():
+            # A number picks from the list: list first (startup may not have).
+            try:
+                self.models = await self.factory.list_models()
+            except discovery.DiscoveryError as exc:
+                self.out.print(
+                    _text(f"✗ Could not list the models: {exc}", style="error")
+                )
+                return
         if (
             name.isdigit()
             and name not in self.models
@@ -360,9 +373,7 @@ class CliSession:
                     style="warn",
                 )
             )
-        if await self._switch(name, url=None):
-            self.factory.use_model(name)
-            self._report_switch(f"Model: {name} ({self.factory.backend.label}).")
+        await self._switch(name, url=None)
 
     async def backend(self, arguments: str) -> None:
         """``/backend``: ask for a server and a model, check them, switch and save."""
@@ -411,8 +422,6 @@ class CliSession:
         url = normalize_url(url)
         if await self._switch(model, url=url):
             self.models = models
-            self.factory.use_url(url, model)
-            self._report_switch(f"Backend: {url} · {model}.")
 
     async def _pick_model(self, url: str, models: list[str]) -> str | None:
         chat = [model for model in models if discovery.is_chat_model(model)]
@@ -440,38 +449,52 @@ class CliSession:
             )
 
     async def _switch(self, model: str, *, url: str | None) -> bool:
-        """Move the conversation to a new Agent on *model*; False when it failed."""
+        """Move the conversation to a new Agent on *model*, then save it.
+
+        False when it failed. The session stays "switching" until the
+        switch is complete: a message sent meanwhile would start on the old
+        model. Esc cancels only the start of the new Agent.
+        """
         old = self.agent
         self._state, self.activity = "switching", f"Starting {model}"
         self._work = asyncio.current_task()
         try:
-            new = await self.factory.build(model, url=url)
-        except asyncio.CancelledError:
-            self.out.print(
-                _text(
-                    f"Switch cancelled. Still using {self.factory.backend.model}.",
-                    style="muted",
+            try:
+                new = await self.factory.build(model, url=url)
+            except asyncio.CancelledError:
+                self.out.print(
+                    _text(
+                        f"Switch cancelled. Still using {self.factory.backend.model}.",
+                        style="muted",
+                    )
                 )
-            )
-            return False
-        except Exception as exc:
-            self.out.print(
-                _text(
-                    f"✗ Could not start {model}: {exc}. Still using {self.factory.backend.model}.",
-                    style="error",
+                return False
+            except Exception as exc:
+                self.out.print(
+                    _text(
+                        f"✗ Could not start {model}: {exc}. Still using {self.factory.backend.model}.",
+                        style="error",
+                    )
                 )
-            )
-            return False
+                return False
+            self._work = None  # past this point the switch completes
+            new.load_conversation(old.conversation())
+            if self.runner is not None:
+                self.runner.replace_agent(new)
+            self.agent = new
+            if url is None:
+                self.factory.use_model(model)
+                done = f"Model: {model} ({self.factory.backend.label})."
+            else:
+                self.factory.use_url(url, model)
+                done = f"Backend: {url} · {model}."
+            if self.runner is not None and self.runner.session_id is not None:
+                await self.store.update_session(self.runner.session_id, model=model)
+            await self.factory.close(old)
+            self._report_switch(done)
+            return True
         finally:
             self._state, self.activity, self._work = "idle", None, None
-        new.load_conversation(old.conversation())
-        if self.runner is not None:
-            self.runner.replace_agent(new)
-            if self.runner.session_id is not None:
-                await self.store.update_session(self.runner.session_id, model=model)
-        self.agent = new
-        await self.factory.close(old)
-        return True
 
     def _report_switch(self, done: str) -> None:
         problem = self.factory.save()
@@ -490,12 +513,16 @@ class CliSession:
         try:
             models = await self.factory.list_models()
         except discovery.DiscoveryError as exc:
+            if self.factory.backend.base_url != backend.base_url:
+                return  # /backend moved to another server meanwhile
             if not exc.reachable:
                 text = f"Cannot reach the model server at {backend.base_url} ({exc}). Start it, then send your message."
             else:
                 text = f"{backend.base_url} could not list its models ({exc}); the first message may fail."
             self.out.print(_text(f"⚠ {text}", style="warn"))
             return
+        if self.factory.backend.base_url != backend.base_url:
+            return  # /backend moved to another server meanwhile
         self.models = models
         if models and backend.model not in models:
             self.out.print(
