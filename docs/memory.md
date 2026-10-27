@@ -419,8 +419,9 @@ with persistence on, every model call, but never reads it back.
   a write that fails, such as on a locked file, is skipped with an INFO
   line in the log. It is not part of the run's `duration_s`.
 - A run after SIGTERM or SIGHUP, and a cancelled Python run, add nothing.
-- Nothing reads it during a run, unless a Python caller asks for
-  [progress](events.md#runprogress). `melo` does not show progress yet.
+- Nothing reads it during a run, unless progress is asked for: by a Python
+  caller ([`run.progress`](events.md#runprogress)), or by `melo` drawing
+  its [progress line](cli.md#progress-line) on a terminal.
 - To keep it off the disk, leave persistence off; to delete it, see
   [Reset memory](#reset-memory) or `melo-procedures forget`.
 

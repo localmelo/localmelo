@@ -48,6 +48,7 @@ echo $?   # 0 completed; 1 crashed (JSON line) or no/invalid config (no JSON lin
   - `--builtins all|none|LIST` (comma list of `file_read,file_write,python_exec,shell_exec`); `--mcp-config PATH` (stdio MCP servers); `--mcp-only` = `--builtins none --tool-exposure all` (needs `--mcp-config`; do not also pass `--builtins` or `--tool-exposure`).
   - `--memory on|off` (long-term memory); `--memory-dir DIR` (save memory as SQLite); `--embedding-base-url URL`, `--embedding-model NAME` (embeddings for a `--base-url` run).
   - `--timeout S` (run wall clock; none); `--request-timeout S` (per chat request; `request_timeout_s`, else 120, 300 for `ollama`); `--output-format text|json`.
+  - `--progress auto|off` (`auto`: a progress line on stderr, `\r\x1b[2K` redraws, erased before the result, only when stderr is a TTY, `TERM` is not `dumb` and the output is text; with JSON output or no TTY nothing is drawn and the run is unchanged); `--routine NAME` (procedural routine; blank is a usage error). Past-run facts on the line need `LOCALMELO_PERSIST_MEMORY=1` or `--memory-dir`.
 
 Other modes:
 
@@ -188,7 +189,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 
 - Available: direct mode, the gateway, the `melo ""` loop, MCP stdio servers, the macOS background service.
 - Experimental: the Python API. Offline only (runs do not use them): `melo-retrieve` and its `bm25`, `llm`, `embedding` retrievers; `melo-procedures` (`episodes`, `replay`, `export`, `forget`: replays the progress rules on recorded runs; every run itself writes procedural memory at its end); the scheduler core in `support/scheduler/`. Python only, not used by `melo` or the gateway yet: sessions (`support/sessions/`).
-- Planned, not on main: an interactive CLI for bare `melo`; gateway sessions that survive a restart; the model's reasoning kept as memory notes and retrieved during runs; several tasks on one model server, the user's conversation first; a terminal progress line for `melo` (the Python API already has `run.progress`); a percent bar, off until repeated runs pass the replay.
+- Planned, not on main: an interactive CLI for bare `melo`; gateway sessions that survive a restart; the model's reasoning kept as memory notes and retrieved during runs; several tasks on one model server, the user's conversation first; a percent bar, off until repeated runs pass the replay.
 
 ## Working on the code
 
