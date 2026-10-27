@@ -363,9 +363,16 @@ that directory instead.
   holds the model's reasoning for every call, redacted and kept 30 days by
   default; see [Model calls](#model-calls).
   `long_term.db` holds step summaries and reflections, with their embedding
-  vectors. `procedures.db` holds each task's query, normalized and with
-  secrets redacted, the folder it ran in, and its tool calls' labels: file
-  names and program names, never their content or output.
+  vectors. `procedures.db` holds each task's query, normalized, the folder
+  it ran in, and its tool calls' labels: file names and program names,
+  never their content or output. The query and the labels pass a minimal
+  redaction: the key shapes, bearer tokens and one-time codes of
+  [Model calls](#model-calls), then a URL's password
+  (`postgres://app:<redacted>@host`, the user name kept) and the value of
+  `NAME=value` or `NAME: value` when NAME contains `key`, `token`,
+  `secret`, `password`, `passwd` or `pwd` (`API_KEY=<redacted>`).
+  Anything else stays as written, such as host names, paths and other
+  values.
 - Images that tools return are stored only as references: the MIME type, the
   SHA-256 digest and the size, never the image itself.
 - The files are as private as your home directory. To remove them, see

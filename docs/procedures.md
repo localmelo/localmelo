@@ -116,8 +116,10 @@ test after a write.
 
 A call's label names it without its arguments' content: `Read parser.py`,
 `Edit parser.py`, the program and its first subcommand (`pytest`,
-`git status`, `npm test`), `Python`, or an MCP tool's name. Labels pass the
-same secret redaction as model text and are cut to 40 characters.
+`git status`, `npm test`), `Python`, or an MCP tool's name. Labels, like
+the query a routine keeps, pass a minimal redaction (see
+[Privacy](memory.md#privacy)) and are cut to 40 characters. A shell label is
+read from the command's first 2,000 characters, never from inside quotes.
 
 ## The store
 
