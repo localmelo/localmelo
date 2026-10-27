@@ -9,6 +9,7 @@ stream in memory with a clock the test sets.
 
 from __future__ import annotations
 
+import gc
 import io
 import logging
 import os
@@ -846,6 +847,56 @@ def test_a_warning_keeps_its_traceback(
     assert "Run crashed\nTraceback (most recent call last):" in text
     assert "ValueError: bad value\n" in text
     assert text.endswith(ERASE + "starting · 0s")
+
+
+def test_a_record_logged_while_the_line_is_drawn(
+    quiet_logger: logging.Logger,
+) -> None:
+    """A finalizer can log on the drawing thread, in the middle of a draw.
+
+    Cyclic garbage collection runs finalizers on whichever thread
+    allocates, and asyncio logs a Future whose exception was never
+    retrieved from its finalizer. Here a gc callback logs during the
+    collection that a draw starts.
+    """
+    stream, armed = Stream(), threading.Event()
+    message = "Future exception was never retrieved"
+
+    def log_from_gc(phase: str, info: dict[str, Any]) -> None:
+        if phase == "stop" and armed.is_set():
+            armed.clear()
+            quiet_logger.error(message)
+
+    def columns() -> int:
+        if armed.is_set():
+            gc.collect()
+        return 200
+
+    line_ = ProgressLine(stream, interval_s=3600, columns=columns)
+    line_.start()
+    gc.callbacks.append(log_from_gc)
+    event = _event("run.progress", 1, **payload(step=2))
+    worker = threading.Thread(target=line_.observe, args=(event,), daemon=True)
+    try:
+        armed.set()
+        worker.start()
+        worker.join(5)
+        assert not worker.is_alive(), "the draw waits for itself"
+        # The record above the line, and the line drawn again below it.
+        assert _wait_for(
+            lambda: message + "\n" + ERASE + "step 2 · 0s" in stream.getvalue()
+        ), stream.getvalue()
+    finally:
+        gc.callbacks.remove(log_from_gc)
+        handler = line_._handler
+        if worker.is_alive() and handler is not None:
+            # Stuck for good, holding the handler's lock: take the handler
+            # away, and let logging.shutdown() at exit pass it by.
+            logging.getLogger().removeHandler(handler)
+            handler.lock = None
+        else:
+            line_.close()
+    assert stream.getvalue().count(message) == 1
 
 
 def test_no_handler_without_a_line() -> None:

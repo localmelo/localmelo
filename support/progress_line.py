@@ -469,7 +469,9 @@ class ProgressLine:
         self._interval_s = interval_s
         self._clock = clock
         self._columns = columns or (lambda: terminal_columns(stream))
-        self._lock = threading.Lock()
+        # Re-entrant: a record can reach the log handler on the thread that
+        # holds it, from a finalizer that garbage collection runs mid-draw.
+        self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._handler: _LineLogHandler | None = None
