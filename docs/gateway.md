@@ -13,6 +13,11 @@ melo --serve
 
 - When there is no config file yet, `melo --serve` runs the setup wizard
   first; see [Configuration](configuration.md#set-up-with-the-wizard).
+  Without a terminal it cannot ask, so it prints
+  `melo: no backend is configured; run melo --reconfigure in a terminal`
+  and exits with code 1.
+- `--base-url` and `--chat-model` are usage errors with `--serve`: the
+  gateway uses the config file.
 - It listens on `127.0.0.1:8401`, the `[gateway]` defaults of the config
   file. `--host` and `--port` change them for one run, as in
   `melo --serve --port 9401`.
@@ -272,8 +277,10 @@ melo --daemon uninstall
   `~/.localmelo/logs/gateway.stderr.log`.
 - `status` prints whether the service is `installed` and `running`, and its
   `pid`.
-- Run the setup wizard before `install`. The service cannot answer the
-  wizard's questions.
+- Save a configuration before `install`, with `melo` or the setup wizard in
+  a terminal. The service cannot answer questions: without a config file it
+  writes `melo: no backend is configured; run melo --reconfigure in a terminal`
+  to `gateway.stderr.log` each time launchd starts it.
 - launchd starts the service without your shell's environment variables, so
   cloud API keys and `LOCALMELO_PERSIST_MEMORY` are missing. Use a local
   backend with the service.

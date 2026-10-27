@@ -14,7 +14,7 @@ Humans: start at the [README](https://github.com/localmelo/localmelo#readme) or 
 - Never expose the gateway: host `127.0.0.1`, `localhost` or `::1` only (check `--host` and the user's `[gateway] host`); no `0.0.0.0`, LAN IP, reverse proxy or Tailscale Serve. It has no authentication: whatever reaches the port runs `shell_exec`, `python_exec` and `file_write` as the user, unapproved, and makes the web workspace fetch any URL. Any other host only logs a warning and turns the Host/Origin guard off.
 - Never edit the user's `~/.cache/localmelo/config.toml` or delete `~/.cache/localmelo/` (cleaning `~/.cache` deletes both). For tests or your own backend, run `melo` with a temporary `HOME`.
 - No API keys in the config file; `api_key_env` holds the variable's name.
-- Never run `--daemon install` in tests, `--reconfigure` without a TTY, or bare `melo` or `--serve` with no config and no TTY: the setup wizard crashes (`EOFError`, exit 1).
+- Never run `--daemon install` in tests. Never run bare `melo` (no task) in a pty or terminal under the user's `HOME`: with no config it asks setup questions and writes `~/.cache/localmelo/config.toml`. Without a TTY, bare `melo` or `--serve` with no config exit 1 with one stderr line and ask nothing; `--reconfigure` without a TTY reads the wizard's answers from stdin (EOF: `Setup cancelled.`, exit 0).
 
 ## Install
 
@@ -39,7 +39,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model MODEL \
 echo $?   # 0 completed; 1 crashed (JSON line) or no/invalid config (no JSON line); 2 other status (JSON line) or usage error (no JSON line)
 ```
 
-- `--base-url` is used verbatim (include `/v1`): no config file, no API key, a 120 s chat request timeout unless `--request-timeout`; `--chat-model` defaults to `default`. Cloud APIs need the config file.
+- `--base-url` is used verbatim (include `/v1`): no config file, no API key, a 120 s chat request timeout unless `--request-timeout`; with a task, `--chat-model` defaults to `default`. Cloud APIs need the config file.
 - oMLX (Apple silicon, macOS 15+): `omlx serve --model-dir DIR --port 8000` (a port saved in oMLX's settings.json wins when `--port` is left out; each subfolder of DIR with a `config.json` is a model; its folder name, or an alias set in oMLX, is the model id), then `--base-url http://127.0.0.1:8000/v1 --chat-model ID`; in the config file it is the `vllm` backend. oMLX must accept requests without an API key (no `--api-key`, no key from its admin page or `OMLX_API_KEY`, or "Allow inference without API key" on): localmelo sends none to local servers, and HTTP 401 means a key is set.
 - Without `--base-url`: the config file; `--chat-model` and `--request-timeout` override it for the run. No config: exit 1, `No backend configured`.
 - Drop `--builtins none` to give the model the four built-in tools. Quote the task.
@@ -52,9 +52,10 @@ echo $?   # 0 completed; 1 crashed (JSON line) or no/invalid config (no JSON lin
 
 Other modes:
 
-- `melo` with no task = `melo --serve`: the gateway, not a CLI.
 - `melo ""`: a conversation loop on stdin (`/help`, `/exit` or `/quit`, Ctrl-D). Takes only `--base-url` and `--chat-model`; exits 0 even if every turn failed. Do not parse its output.
-- `melo --serve [--host H] [--port P]`, `melo --reconfigure` (always the wizard, then the gateway), `melo --daemon install|uninstall|status` (macOS launchd). Direct-mode flags here or in `melo ""` are usage errors (exit 2).
+- `melo` with no task, no `--serve`, no `--daemon`: the same loop when stdin and stdout are TTYs or `--base-url`/`--chat-model` is given; otherwise the gateway, as `melo --serve`. First prints `Model: MODEL · URL`. `--base-url URL` without `--chat-model`: the first id from `GET URL/models` without `embed`/`rerank` (else the first; `default` and a stderr warning if the listing fails or is empty); a URL without `/v1` is listed at `URL/v1/models` and, when that answers, chatted with at `URL/v1`. In a TTY with no config file: `--base-url` asks `Save URL · MODEL as the default backend? [Y/n]`; bare `melo` asks `Model server URL [..]:` (prefilled from `GET /v1/models` on 127.0.0.1 ports 8000, 8400, 11434, 30000; `LOCALMELO_DETECT_URLS`, comma-separated, replaces them, empty turns it off) and `Model [N]:`, saves `chat_backend = "vllm"`, `[vllm] chat_url`/`chat_model`, `embedding_backend = "none"`. Failure: `[r]etry, [s]tart anyway, [q]uit [r]:`. Ctrl-D: exit 0; Ctrl+C: 130.
+- `melo --serve [--host H] [--port P]`, `melo --reconfigure` (the wizard, then the loop; with `--serve`, then the gateway; without a TTY it reads answers from stdin; with `--base-url` and no task: exit 2), `melo --daemon install|uninstall|status` (macOS launchd). Direct-mode flags here or in `melo ""` are usage errors (exit 2), so are `--base-url`/`--chat-model` with `--serve`/`--daemon`, and `--host`/`--port` where bare `melo` opens the loop.
+- Wizard: every prompt defaults to the config's value (embedding: `None` when unset); a failed chat check asks `[r]etry, [s]ave anyway, [N]o [N]:`; a failed embedding check saves with `embedding_backend = "none"`. Never asks for an API key for a local server.
 
 ### Python API (experimental)
 
@@ -138,7 +139,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
   - `failed`: a check refused, or 2 empty replies in a row. `gate_stopped`: the reflection stopped the run with budget left. `stuck` (`--attempt-policy none` only): the same calls or errors repeated.
   - `provider_error`: a chat request still failed after its retries (network errors, timeouts and HTTP 429/502/503/504 are retried twice, after 1 s, then 4 s more), or an embedding request failed (never retried). `setup_error`: an MCP server or tool provider failed to start; permanent for that `Agent`.
   - `crashed` (exit 1, or the signal's code below): an unexpected exception or a signal (`Cancelled by SIGTERM` or `Cancelled by SIGHUP`; SIGINT records `CancelledError` and prints a traceback on stderr). `cancelled`: Python runs only.
-- Other exit codes (no JSON line): 2 usage error, bad `--mcp-config`, `--memory-dir` or `LOCALMELO_THINKING_RETENTION_DAYS`; 1 no backend, invalid config or TOML, unset cloud key variable; 3 gateway port in use; 143, 129, 130 for SIGTERM, SIGHUP, SIGINT (the task record is saved as `crashed`).
+- Other exit codes (no JSON line): 2 usage error, bad `--mcp-config`, `--memory-dir` or `LOCALMELO_THINKING_RETENTION_DAYS`; 1 no backend, invalid config or TOML, unset cloud key variable, the wizard needed without a TTY; 3 gateway port in use; 143, 129, 130 for SIGTERM, SIGHUP, SIGINT (the task record is saved as `crashed`).
 
 ## Configuration
 
@@ -176,7 +177,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 
 - Exit 1 and exit 2 can come with no JSON line (setup or usage error, message on stderr). Check that stdout is non-empty before parsing, then read `status`.
 - Always set `--timeout` (or `timeout_s`): the request timeout counts per read, so a server that keeps sending bytes never trips it, and a silent server costs about 3 x the request timeout + 5 s per request (two retries). It cannot interrupt `python_exec` without a workspace root (direct mode has none).
-- `--serve` silently ignores `--base-url`, `--chat-model` and a positional task; direct mode silently ignores `--host`, `--port`, `--reconfigure`.
+- `--serve` silently ignores a positional task; direct mode silently ignores `--host`, `--port`, `--reconfigure`.
 - A non-string `session_id` gets a plain-text HTTP 500; omit it or send `null` for a new session.
 - One `Agent` per concurrent task: `run_task` has no overlap guard (runs share working memory and counters).
 - `ollama` backend: `result` can start with a `<think>...</think>` block.
@@ -187,9 +188,9 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 
 ## Status of features
 
-- Available: direct mode, the gateway, the `melo ""` loop, MCP stdio servers, the macOS background service.
+- Available: direct mode, the gateway, the `melo ""` loop (also bare `melo` in a terminal, with first-run setup), MCP stdio servers, the macOS background service.
 - Experimental: the Python API. Offline only (runs do not use them): `melo-retrieve` and its `bm25`, `llm`, `embedding` retrievers; `melo-procedures` (`episodes`, `replay`, `export`, `forget`: replays the progress rules on recorded runs; every run itself writes procedural memory at its end); the scheduler core in `support/scheduler/`. Python only, not used by `melo` or the gateway yet: sessions (`support/sessions/`).
-- Planned, not on main: an interactive CLI for bare `melo`; gateway sessions that survive a restart; the model's reasoning kept as memory notes and retrieved during runs; several tasks on one model server, the user's conversation first; a percent bar, off until repeated runs pass the replay.
+- Planned, not on main: an interactive CLI for bare `melo` in place of the loop (live tool output, approvals, `/model`, `/backend`); gateway sessions that survive a restart; the model's reasoning kept as memory notes and retrieved during runs; several tasks on one model server, the user's conversation first; a percent bar, off until repeated runs pass the replay.
 
 ## Working on the code
 

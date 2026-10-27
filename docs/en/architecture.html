@@ -142,7 +142,8 @@
           one JSON line, and exits with a code that tells how the run ended.
           An empty task (<code>melo ""</code>) opens a conversation loop in
           the terminal instead, where each turn sees the earlier answers.
-          Without a task, or with <code>--serve</code>, it starts the gateway;
+          Without a task it opens the same loop in a terminal, and starts the
+          gateway elsewhere; <code>--serve</code> always starts the gateway;
           <code>--daemon</code> manages the macOS background service. With
           <code>--base-url</code>, the agent talks to that server and the
           config file is not read; without it, the configured backends are
@@ -362,14 +363,19 @@
         <h3 id="c-config">Config and setup</h3>
         <p>
           <code>~/.cache/localmelo/config.toml</code> names the chat and
-          embedding backends and their settings. The setup wizard
-          (<code>melo --serve --reconfigure</code>) asks for them, sends a test
-          request to each server, saves the file and starts the gateway. Direct
-          mode and the gateway build their agents from this file.
+          embedding backends and their settings. On a first run in a
+          terminal, <code>melo</code> finds a model server with
+          <code>GET /v1/models</code>, asks for its URL and model and saves
+          them. The setup wizard (<code>melo --reconfigure</code>) asks for
+          every backend, sends a test request to each server, saves the file,
+          then opens the conversation loop, or with <code>--serve</code>
+          starts the gateway. Direct mode and the gateway build their agents
+          from this file.
         </p>
         <p>
           Key files: <code>support/config.py</code>,
-          <code>support/onboard.py</code>, <code>support/onboard_probe.py</code>.
+          <code>support/onboard.py</code>, <code>support/onboard_probe.py</code>,
+          <code>support/backends/discovery.py</code>.
         </p>
 
         <h3 id="c-providers">Providers</h3>

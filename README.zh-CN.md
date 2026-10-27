@@ -57,13 +57,21 @@ source .venv/bin/activate
 
    答案会输出到 stdout；运行完成时退出码为 0。加上 `--output-format json`，输出就会变成一行 JSON，记录这次运行的结果。`--base-url` 不会发送 API 密钥；使用云端 API 时，请直接跳到第 3 步。
 
-3. 保存配置并启动网关。使用云端 API 时，请先在同一个终端中运行 `export OPENAI_API_KEY="<your key>"`（或你所用服务商对应的变量）：向导的测试请求会用到这个密钥。
+3. 保存配置。在终端里运行 `melo`：
+
+   ```bash
+   melo
+   ```
+
+   还没有配置时，它会找到本机上的模型服务器（这里是 11434 端口上的 Ollama），请你确认地址并从列表里选一个模型，保存 `~/.cache/localmelo/config.toml`，然后打开对话循环：输入任务，或输入 `/exit` 退出。以后运行 `melo` 会直接进入对话循环，`melo "<task>"` 也会使用保存的服务器。
+
+   需要嵌入服务器或云端 API 时，请改用配置向导，它还会启动网关。使用云端 API 时，请先在同一个终端中运行 `export OPENAI_API_KEY="<your key>"`（或你所用服务商对应的变量）：向导的测试请求会用到这个密钥。
 
    ```bash
    melo --serve --reconfigure
    ```
 
-   配置向导会询问对话后端、它的地址和模型，以及嵌入后端（没有嵌入服务器时选择 `None`）。向导会检查服务器能否连通，保存 `~/.cache/localmelo/config.toml`，然后在 `http://127.0.0.1:8401` 上提供 HTTP API 和网页工作区。按 Ctrl+C 停止网关。之后运行 `melo "<task>"` 时会使用保存的配置。
+   配置向导会询问对话后端、它的地址和模型，以及嵌入后端（没有嵌入服务器时选择 `None`）。向导会检查服务器能否连通，保存配置，然后在 `http://127.0.0.1:8401` 上提供 HTTP API 和网页工作区。按 Ctrl+C 停止网关。
 
 [快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html)会更详细地介绍每一步，包括向导的选项和第一个 HTTP API 请求。
 
@@ -72,13 +80,14 @@ source .venv/bin/activate
 | 命令 | 作用 |
 |---|---|
 | `melo "<task>"` | 运行一个任务，输出结果后退出。 |
-| `melo ""`（任务为空字符串） | 在终端中打开对话循环。输入 `/help` 查看命令，输入 `/exit` 退出。 |
-| `melo --serve`，或者只运行 `melo` | 启动网关：在 `http://127.0.0.1:8401/` 上提供 HTTP API 和网页工作区。 |
+| `melo`（在终端中） | 用保存的模型服务器打开对话循环；第一次会先询问服务器。输入 `/help` 查看命令，输入 `/exit` 退出。`melo ""` 效果相同。 |
+| `melo --serve` | 启动网关：在 `http://127.0.0.1:8401/` 上提供 HTTP API 和网页工作区。没有终端时，单独的 `melo` 也会启动网关。 |
 
-不保存配置，直接和 oMLX 或其他兼容 OpenAI 接口的服务器对话：
+不保存配置，直接和 oMLX 或其他兼容 OpenAI 接口的服务器对话，使用它的第一个模型或你指定的模型：
 
 ```bash
-melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""
+melo --base-url http://127.0.0.1:8000/v1
+melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 ```
 
 在网页工作区中，输入服务器地址，选择它的一个模型，再创建对话。你可以保留多个对话、搜索对话、阅读按 Markdown 渲染的回答，也可以停止运行。对话只在网关进程运行期间保留，工作区也只供你自己的电脑使用，见[网页工作区（英文）](docs/gateway.md#web-workspace)。终端对话循环与网页对话相互独立。
@@ -106,7 +115,7 @@ AI 智能体和 LLM 工具请读 [localmelo for agents（英文）](docs/for-age
 
 计划中：
 
-- 交互式命令行：不带任务运行 `melo` 时打开，并实时显示智能体的工具调用；
+- 交互式命令行：取代现在的对话循环，实时显示智能体的工具调用，运行前征求确认，并可用 `/model` 切换模型；
 - 网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；
 - 把模型的推理过程保存为记忆笔记，并可切换检索方式（`bm25`、`llm`、`embedding`）；
 - 在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；

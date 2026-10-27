@@ -69,7 +69,7 @@
         </div>
         <p>Planned:</p>
         <ul>
-          <li>an interactive CLI that opens when you run <code>melo</code> without a task and shows the agent's tool calls as they happen (today <code>melo</code> starts the gateway, and <code>melo &quot;&quot;</code> opens a plain conversation loop);</li>
+          <li>an interactive CLI that opens when you run <code>melo</code> without a task and shows the agent's tool calls as they happen, asks before it runs them and switches models with <code>/model</code> (today <code>melo</code> in a terminal opens a plain conversation loop);</li>
           <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
           <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
@@ -87,6 +87,20 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-2026-10-27-first-run">
+          <h3>Type <code>melo</code> to start a conversation</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/52">#52</a>
+          </p>
+          <ul>
+            <li>In a terminal, <code>melo</code> without a task opens the conversation loop on the saved model server, and names the model and the server first. It used to start the gateway; <code>melo --serve</code> still does, and so does <code>melo</code> without a terminal.</li>
+            <li>The first time, with no configuration, <code>melo</code> looks for a model server on this computer, asks you to confirm its URL and to pick a model from the server's list, and saves both. It only asks the server for its model list, so no model is loaded for it.</li>
+            <li><code>melo --base-url URL</code> without a task opens the loop on that server, with the first chat model it lists unless you name one with <code>--chat-model</code>.</li>
+            <li>The setup wizard keeps your saved values as its defaults, lets you retry a failed check, and explains an HTTP 401 from a local server: localmelo sends no API key to local servers. Without a terminal, <code>melo --serve</code> with no configuration prints one line instead of a traceback.</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-27-progress-line">
           <h3>A progress line in the terminal</h3>

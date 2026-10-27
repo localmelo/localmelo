@@ -126,7 +126,7 @@
         <p>每个组件目前做什么，以及代码在哪里。路径都相对于仓库根目录。</p>
 
         <h3 id="c-cli">命令行</h3>
-        <p><code>melo</code> 命令。给出任务时，它以直接模式运行：创建一个智能体，运行这个任务，以文本或一行 JSON 输出结果，并用退出码表示运行是如何结束的。任务为空字符串（<code>melo ""</code>）时，它会在终端中打开对话循环，每一轮都能看到之前的回答。不带任务或使用 <code>--serve</code> 时，它会启动网关；<code>--daemon</code> 用来管理 macOS 后台服务。使用 <code>--base-url</code> 时，智能体直接连接该服务器，不读取配置文件；不使用它时，使用配置中的后端。无论是否使用 <code>--base-url</code>，<code>--chat-model</code> 和 <code>--request-timeout</code> 都会设置对话模型和对话请求的超时，并且都不会修改配置文件。</p>
+        <p><code>melo</code> 命令。给出任务时，它以直接模式运行：创建一个智能体，运行这个任务，以文本或一行 JSON 输出结果，并用退出码表示运行是如何结束的。任务为空字符串（<code>melo ""</code>）时，它会在终端中打开对话循环，每一轮都能看到之前的回答。不带任务时，它在终端中打开同样的对话循环，在其他情况下启动网关；使用 <code>--serve</code> 时总是启动网关；<code>--daemon</code> 用来管理 macOS 后台服务。使用 <code>--base-url</code> 时，智能体直接连接该服务器，不读取配置文件；不使用它时，使用配置中的后端。无论是否使用 <code>--base-url</code>，<code>--chat-model</code> 和 <code>--request-timeout</code> 都会设置对话模型和对话请求的超时，并且都不会修改配置文件。</p>
         <p>关键文件：<code>__main__.py</code>。</p>
 
         <h3 id="c-gateway">网关</h3>
@@ -171,8 +171,8 @@
         <p>记忆设计（计划中）：<a href="./memory-design.html">记忆设计</a>页保留了维护者为记忆撰写的设计，其中部分内容尚未实现。</p>
 
         <h3 id="c-config">配置和向导</h3>
-        <p><code>~/.cache/localmelo/config.toml</code> 记录对话后端、嵌入后端及其设置。配置向导（<code>melo --serve --reconfigure</code>）会询问这些设置，向每个服务器发送测试请求，保存文件，然后启动网关。直接模式和网关都根据这个文件创建智能体。</p>
-        <p>关键文件：<code>support/config.py</code>、<code>support/onboard.py</code>、<code>support/onboard_probe.py</code>。</p>
+        <p><code>~/.cache/localmelo/config.toml</code> 记录对话后端、嵌入后端及其设置。在终端中第一次运行时，<code>melo</code> 用 <code>GET /v1/models</code> 查找模型服务器，询问地址和模型并保存。配置向导（<code>melo --reconfigure</code>）会询问所有后端设置，向每个服务器发送测试请求，保存文件，然后打开对话循环；加上 <code>--serve</code> 时则启动网关。直接模式和网关都根据这个文件创建智能体。</p>
+        <p>关键文件：<code>support/config.py</code>、<code>support/onboard.py</code>、<code>support/onboard_probe.py</code>、<code>support/backends/discovery.py</code>。</p>
 
         <h3 id="c-providers">提供方</h3>
         <p>连接模型服务器的 HTTP 客户端：兼容 OpenAI 的对话接口（<code>/chat/completions</code>）、Ollama 自己的 <code>/api/chat</code>，以及兼容 OpenAI 的嵌入接口。它们实现 <code>melo/contracts/providers.py</code> 中的接口，应用对话请求超时，并把每个失败的请求报告为 <code>ProviderError</code>，同时说明重试是否可能成功。</p>

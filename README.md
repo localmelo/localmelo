@@ -91,7 +91,20 @@ clone. To update or uninstall localmelo, see
    record instead. `--base-url` sends no API key; for a cloud API, skip to
    step 3.
 
-3. Save a configuration and start the gateway. For a cloud API, first run
+3. Save a configuration. In a terminal, run `melo`:
+
+   ```bash
+   melo
+   ```
+
+   With no configuration yet, it finds the model server on this computer
+   (Ollama on port 11434 here), asks you to confirm its URL and to pick a
+   model from its list, saves `~/.cache/localmelo/config.toml` and opens a
+   conversation loop: type a task, or `/exit` to leave. From then on, `melo`
+   goes straight to the loop and `melo "<task>"` uses the saved server.
+
+   For an embedding server or a cloud API, run the setup wizard instead,
+   which also starts the gateway. For a cloud API, first run
    `export OPENAI_API_KEY="<your key>"` (or your vendor's variable) in the
    same terminal: the wizard's test request uses that key.
 
@@ -99,12 +112,11 @@ clone. To update or uninstall localmelo, see
    melo --serve --reconfigure
    ```
 
-   The setup wizard asks for the chat backend, its URL and model, and an
+   The wizard asks for the chat backend, its URL and model, and an
    embedding backend (`None` if you have no embedding server). It checks
-   that the servers answer, saves `~/.cache/localmelo/config.toml`, and then
-   serves the HTTP API and the web workspace on `http://127.0.0.1:8401`.
-   Press Ctrl+C to stop it. From then on, `melo "<task>"` uses the saved
-   configuration.
+   that the servers answer, saves the configuration, and then serves the
+   HTTP API and the web workspace on `http://127.0.0.1:8401`. Press Ctrl+C
+   to stop it.
 
 The [Quickstart](docs/quickstart.md) walks through each step in more detail,
 with the wizard's choices and a first request to the HTTP API.
@@ -114,14 +126,15 @@ with the wizard's choices and a first request to the HTTP API.
 | Command | What it does |
 |---|---|
 | `melo "<task>"` | Runs one task, prints the result and exits. |
-| `melo ""` (an empty task) | Opens a conversation loop in the terminal. `/help` lists its commands; `/exit` leaves. |
-| `melo --serve`, or `melo` alone | Starts the gateway: the HTTP API and the web workspace at `http://127.0.0.1:8401/`. |
+| `melo` (in a terminal) | Opens a conversation loop on the saved model server, after asking for one the first time. `/help` lists its commands; `/exit` leaves. `melo ""` does the same. |
+| `melo --serve` | Starts the gateway: the HTTP API and the web workspace at `http://127.0.0.1:8401/`. Without a terminal, `melo` alone does the same. |
 
 To hold a conversation with oMLX or another OpenAI-compatible server without
-a saved configuration:
+a saved configuration, on its first model or the one you name:
 
 ```bash
-melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""
+melo --base-url http://127.0.0.1:8000/v1
+melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 ```
 
 In the web workspace, enter your server's URL, pick one of its models and
@@ -161,8 +174,9 @@ its phases and the dated updates.
 
 Planned:
 
-- an interactive CLI that opens when you run `melo` without a task and shows
-  the agent's tool calls as they happen;
+- an interactive CLI, in place of today's conversation loop, that shows the
+  agent's tool calls as they happen, asks before it runs them and switches
+  models with `/model`;
 - conversations that survive a gateway restart, with the agent's work shown
   live in the web workspace;
 - keeping the model's reasoning as memory notes, with switchable retrieval

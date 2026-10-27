@@ -63,7 +63,7 @@
         </div>
         <p>计划中：</p>
         <ul>
-          <li>交互式命令行：不带任务运行 <code>melo</code> 时打开，并实时显示智能体的工具调用（目前 <code>melo</code> 会启动网关，<code>melo &quot;&quot;</code> 打开一个简单的对话循环）；</li>
+          <li>交互式命令行：不带任务运行 <code>melo</code> 时打开，实时显示智能体的工具调用，运行前征求确认，并可用 <code>/model</code> 切换模型（目前 <code>melo</code> 在终端中打开一个简单的对话循环）；</li>
           <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
           <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
@@ -75,6 +75,20 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-27-first-run">
+          <h3>输入 <code>melo</code> 即可开始对话</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/52">#52</a>
+          </p>
+          <ul>
+            <li>在终端中不带任务运行 <code>melo</code>，会用保存的模型服务器打开对话循环，并先显示模型和服务器。以前它会启动网关；现在 <code>melo --serve</code> 仍然启动网关，没有终端时的 <code>melo</code> 也一样。</li>
+            <li>第一次运行、还没有配置时，<code>melo</code> 会在本机查找模型服务器，请你确认地址并从服务器列出的模型中选一个，然后保存下来。它只向服务器请求模型列表，不会因此加载模型。</li>
+            <li>不带任务运行 <code>melo --base-url URL</code>，会用该服务器列出的第一个对话模型打开对话循环；用 <code>--chat-model</code> 可以指定模型。</li>
+            <li>配置向导会把已保存的值作为默认值，检查失败时可以重试，并会说明本地服务器返回的 HTTP 401：localmelo 不向本地服务器发送 API 密钥。没有终端且没有配置时，<code>melo --serve</code> 只输出一行提示，不再输出 traceback。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-27-progress-line">
           <h3>终端里的进度行</h3>

@@ -81,8 +81,37 @@ or use --base-url to connect to an OpenAI-compatible endpoint.
 
 - **Cause:** there is no config file, and the command has no `--base-url`.
   `melo` exits with code 1.
-- **Fix:** save a configuration with `melo --serve --reconfigure`, or add
-  `--base-url` and `--chat-model`.
+- **Fix:** run `melo` in a terminal, which asks for a model server and
+  saves it (see [First run](cli.md#first-run)), or save a configuration
+  with `melo --serve --reconfigure`, or add `--base-url` and `--chat-model`.
+
+### No backend is configured; run melo --reconfigure in a terminal
+
+```text
+melo: no backend is configured; run melo --reconfigure in a terminal
+```
+
+- **Cause:** `melo --serve`, or `melo` without a terminal, found no config
+  file, and the setup wizard cannot ask its questions without a terminal.
+  Under launchd this line goes to the gateway's error log. `melo` exits
+  with code 1.
+- **Fix:** run `melo` or `melo --reconfigure` once in a terminal, then
+  start the gateway again.
+
+### A model server cannot be used at the first run
+
+```text
+✗ http://127.0.0.1:8000/v1: connection refused.
+[r]etry, [s]tart anyway, [q]uit [r]:
+```
+
+- **Cause:** `GET /v1/models` on that URL failed. `connection refused`:
+  nothing listens there; `HTTP 401` or `HTTP 403`: the server wants an API
+  key, which localmelo does not send to local servers; `it lists no
+  models`: the server serves no model yet.
+- **Fix:** start the server, check its port and the `/v1` at the end of
+  the URL, then press Enter to try again. In oMLX, turn on
+  **Allow inference without API key**. `q` quits without saving.
 
 ### Configuration errors
 
@@ -129,20 +158,26 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 
 ```text
   Probe failed: chat probe failed: …
-  Save config anyway? [N]:
+  [r]etry, [s]ave anyway, [N]o [N]:
 ```
 
 - **Cause:** the wizard's test request failed. The server is not running,
-  the URL or model is wrong, or the API key is missing.
-- **Fix:** press Enter (nothing is saved:
-  `Setup cancelled — config not saved.`), correct the problem, and run the
-  wizard again.
+  the URL or model is wrong, or the API key is missing. For a local server,
+  an HTTP 401 or 403 adds a note: localmelo sends no API key to local
+  servers.
+- **Fix:** correct the problem, then type `r`: the wizard asks for the URL
+  and model again, with what you typed as the defaults. Enter saves
+  nothing (`Setup cancelled — config not saved.`). A failed check of the
+  embedding server does not stop the setup: the wizard saves with
+  embedding off.
 
-### `melo --reconfigure` does not return
+### `melo --serve --reconfigure` does not return
 
 - **Cause:** after saving, the wizard starts the gateway, which keeps running.
 - **Fix:** nothing is wrong. Press Ctrl+C to stop the gateway;
-  `melo "<task>"` then uses the saved configuration.
+  `melo "<task>"` then uses the saved configuration. Without `--serve`,
+  `melo --reconfigure` opens the conversation loop instead, which `/exit`
+  ends.
 
 ### request_timeout_s has no effect
 
