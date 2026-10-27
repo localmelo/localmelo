@@ -645,3 +645,46 @@ def test_a_config_file_edited_during_the_session_is_not_written_over(
     assert factory.save().startswith(problem)
     assert path.read_text(encoding="utf-8") == edited
     assert factory._cfg is not None and factory._cfg.vllm.chat_url == URL
+
+
+# ── /model switches among the models the server lists ──
+
+
+async def test_model_refuses_a_name_the_server_does_not_list(setup: Setup) -> None:
+    session = setup.session
+    await session.model("m3")
+    assert session.factory.backend.model == "m1" and setup.factory.saved == []
+    assert f"✗ {URL} lists no model named 'm3'. /model lists them." in setup.out.text()
+    assert session.state == "idle"
+
+
+@pytest.mark.parametrize("number", ["0", "3", "9"])
+async def test_model_refuses_a_number_outside_the_list(
+    setup: Setup, number: str
+) -> None:
+    session = setup.session
+    await session.model(number)
+    assert session.factory.backend.model == "m1" and setup.factory.saved == []
+    assert "✗ Type a number from 1 to 2, or a model id." in setup.out.text()
+
+
+async def test_model_with_the_server_down_warns_and_still_switches(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    setup.factory.listed = DiscoveryError("connection refused", reachable=False)
+    await session.model("m2")
+    text = " ".join(setup.out.text().split())
+    assert "⚠ Could not list the models (connection refused); switching anyway." in text
+    assert session.factory.backend.model == "m2"
+    assert setup.factory.saved == [(URL, "m2")]
+
+
+async def test_model_on_a_server_that_cannot_list_switches_without_asking(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session = setup.session
+    monkeypatch.setattr(setup.factory, "listable", lambda: False)  # a cloud API
+    await session.model("any-model")
+    assert session.factory.backend.model == "any-model"
+    assert "lists no model" not in setup.out.text()

@@ -361,28 +361,42 @@ class CliSession:
             self.out.print(lines)
             return
         name = arguments
-        if name.isdigit() and not self.models and self.factory.listable():
-            # A number picks from the list: list first (startup may not have).
+        if not self.models and self.factory.listable():
+            # Startup may not have listed them: /model picks from the list.
             try:
                 self.models = await self.factory.list_models()
             except discovery.DiscoveryError as exc:
+                if name.isdigit():
+                    self.out.print(
+                        self._text(f"✗ Could not list the models: {exc}", style="error")
+                    )
+                    return
                 self.out.print(
-                    self._text(f"✗ Could not list the models: {exc}", style="error")
+                    self._text(
+                        f"⚠ Could not list the models ({exc}); switching anyway.",
+                        style="warn",
+                    )
+                )
+        if self.models and name not in self.models:
+            # A listed server: only its models, by id or by number.
+            if not name.isdigit():
+                self.out.print(
+                    self._text(
+                        f"✗ {backend.base_url} lists no model named '{name}'. "
+                        "/model lists them.",
+                        style="error",
+                    )
                 )
                 return
-        if (
-            name.isdigit()
-            and name not in self.models
-            and 1 <= int(name) <= len(self.models)
-        ):
-            name = self.models[int(name) - 1]
-        if self.models and name not in self.models:
-            self.out.print(
-                self._text(
-                    f"⚠ {backend.base_url} lists no model named '{name}'; switching anyway.",
-                    style="warn",
+            if not 1 <= int(name) <= len(self.models):
+                self.out.print(
+                    self._text(
+                        f"✗ Type a number from 1 to {len(self.models)}, or a model id.",
+                        style="error",
+                    )
                 )
-            )
+                return
+            name = self.models[int(name) - 1]
         await self._switch(name, url=None)
 
     async def backend(self, arguments: str) -> None:
