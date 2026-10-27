@@ -14,29 +14,25 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import uuid
 from typing import Any
 
 import pytest
 
-from localmelo.melo.agent import Agent
 from localmelo.melo.agent import agent as agent_module
 from localmelo.melo.contracts.events import EVENT_FIELDS
 from localmelo.melo.contracts.providers import ProviderError
 from localmelo.melo.memory.procedures import tracker
 from localmelo.melo.memory.procedures.normalize import (
     RoutineKey,
-    key_for_query,
     key_for_routine,
-    length_options,
-    run_place,
 )
-from localmelo.melo.memory.procedures.store import MemoryProcedures, RunFacts
+from localmelo.melo.memory.procedures.store import MemoryProcedures
 from localmelo.melo.memory.procedures.template import TemplateView
 from localmelo.melo.memory.procedures.trace import Trace
 from localmelo.melo.memory.procedures.tracker import PROGRESS_KEYS
 from localmelo.tests.agent.procedural_helpers import (
     MODEL,
+    QUERY,
     Recorder,
     ScriptedLLM,
     Tools,
@@ -46,10 +42,9 @@ from localmelo.tests.agent.procedural_helpers import (
     make_agent,
     passing_tools,
     read,
+    remember,
     shell,
 )
-
-QUERY = "run pytest in the project and fix the failures"
 
 
 @pytest.fixture(params=[False, True], ids=["level2-off", "level2-on"])
@@ -78,46 +73,6 @@ class CountingStore(MemoryProcedures):
         if self.fail is not None:
             raise self.fail
         return await super().lookup(key, model=model, options=options)
-
-
-def past_trace(steps: int) -> Trace:
-    """A past fix run of *steps* steps: read, edits, a passing pytest, an answer."""
-    trace = Trace()
-    trace.step(1, 1)
-    trace.tool("file_read", {"path": "/p/test_parser.py"}, "success", "")
-    for k in range(2, steps - 1):
-        trace.step(k, 1)
-        trace.tool(
-            "file_write", {"path": "/p/parser.py", "content": "x"}, "success", ""
-        )
-    trace.step(steps - 1, 1)
-    trace.tool("shell_exec", {"command": "pytest -q"}, "success", "8 passed in 0.1s")
-    trace.step(steps, 1)
-    return trace
-
-
-def query_key(agent: Agent, query: str = QUERY) -> RoutineKey:
-    return key_for_query(query, run_place(agent.workspace_root))
-
-
-async def remember(
-    agent: Agent, *steps: int, key: RoutineKey | None = None, model: str = MODEL
-) -> None:
-    """Record completed past runs of *steps* steps in the agent's store."""
-    for n in steps:
-        await agent.hippo.procedures.learn(
-            RunFacts.from_trace(
-                past_trace(n),
-                task_id=uuid.uuid4().hex,
-                key=key or query_key(agent),
-                model=model,
-                options=length_options(agent._run_config()),
-                status="completed",
-                steps=n,
-                attempts=1,
-                duration_s=60.0,
-            )
-        )
 
 
 def progress(recorder: Recorder) -> list[dict[str, Any]]:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import dataclasses
+import functools
 import hashlib
 import inspect
 import json
@@ -68,6 +69,7 @@ from localmelo.melo.memory.procedures.normalize import (
     length_options,
     run_place,
 )
+from localmelo.melo.memory.procedures.store import RunFacts, harness_version
 from localmelo.melo.memory.procedures.template import TemplateView
 from localmelo.melo.memory.procedures.trace import Trace
 from localmelo.melo.memory.procedures.tracker import Limits, shown_view, track
@@ -611,6 +613,14 @@ CANCELLED_ERROR = "Cancelled by the caller"
 # rests on, inside the run's own timeout (see Agent._look_up). A lookup
 # that takes longer, or fails, leaves the run at level 0.
 LOOKUP_TIMEOUT_S = 1.0
+
+# Seconds that recording a run in the procedural store may take once the
+# run has ended (see Agent._learn): after run.finished, before run_task
+# returns, outside RunResult.duration_s.
+LEARN_TIMEOUT_S = 2.0
+
+# The installed localmelo's version, which each episode records; read once.
+_harness_version = functools.cache(harness_version)
 
 # The note that every planning request of an agent with a workspace root
 # carries after the system prompt, with {root} filled in (see Chat).
@@ -2581,6 +2591,7 @@ class Agent:
                         run.outcome = outcome
                         run.report_progress(ended=run.status)
                         run.events.run_finished(outcome)
+            await self._learn(run, query, outcome)
             return outcome
         finally:
             if run.finalizer is None:
@@ -2658,6 +2669,48 @@ class Agent:
             else:
                 reason = _exception_text(exc)
             logger.info("No progress template for task %s: %s", run.task_id, reason)
+
+    async def _learn(self, run: _RunState, query: str, outcome: RunResult) -> None:
+        """Record *run*, which has ended, in the procedural store.
+
+        Its routine, its episode and, for a completed run, its template's
+        next version (see :meth:`Procedures.learn
+        <localmelo.melo.memory.procedures.store.Procedures.learn>`). After
+        ``run.finished`` and before run_task returns, so the run's events
+        and ``duration_s`` are what they would be without it. Skipped
+        during an exit (see :meth:`begin_exit`), which never waits for it,
+        and when the run's trace stopped following it. Bounded by
+        :data:`LEARN_TIMEOUT_S`; a failure, such as a locked or damaged
+        ``procedures.db``, is logged at INFO without a traceback and
+        changes nothing of the run. The run's cancellation propagates.
+        """
+        if self._exit is not None or not run.tracing:
+            return
+        bound = asyncio.timeout(LEARN_TIMEOUT_S)
+        try:
+            async with bound:
+                key = self._routine_key(run, query)
+                if key is None:
+                    return
+                facts = RunFacts.from_trace(
+                    run.trace,
+                    task_id=outcome.task_id,
+                    key=key,
+                    model=self._model_id(),
+                    options=length_options(outcome.config),
+                    status=outcome.status,
+                    steps=outcome.steps,
+                    attempts=outcome.attempts,
+                    duration_s=outcome.duration_s,
+                    harness_version=_harness_version(),
+                )
+                await self.hippo.procedures.learn(facts, view=run.view)
+        except Exception as exc:
+            if isinstance(exc, TimeoutError) and bound.expired():
+                reason = f"no answer within {LEARN_TIMEOUT_S:g} s"
+            else:
+                reason = _exception_text(exc)
+            logger.info("Could not learn from task %s: %s", outcome.task_id, reason)
 
     def _record_answer(self, run: _RunState) -> None:
         """Append the answer of *run*, which has ended, to working memory.
