@@ -71,6 +71,10 @@ BASE_OPTIONS = [
     "-h",
 ]
 
+# Options added after R1, each by a stage whose spec calls for it: P3's
+# progress line (progress_spec.md section 11, "New flags only").
+LATER_OPTIONS = ["--progress", "--routine"]
+
 
 def _openai_reply(content: str = "", call: bool = False) -> dict[str, Any]:
     message: dict[str, Any] = {
@@ -288,5 +292,8 @@ async def test_history_gets_the_same_calls_in_the_same_order(tmp_path: Path) -> 
 
 
 def test_no_new_flag_and_the_same_exit_codes() -> None:
-    assert sorted(cli._build_parser()._option_string_actions) == BASE_OPTIONS
+    """R1 adds no flag: the options are R1's base and those of later stages."""
+    assert sorted(cli._build_parser()._option_string_actions) == sorted(
+        BASE_OPTIONS + LATER_OPTIONS
+    )
     assert (cli.EXIT_COMPLETED, cli.EXIT_CRASHED, cli.EXIT_NOT_COMPLETED) == (0, 1, 2)
