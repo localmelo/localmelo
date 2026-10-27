@@ -570,7 +570,9 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
 - Set `model` on a chat provider to the id of the model it uses, as the
   built-in providers do. Procedural memory keeps what runs did per model;
   with the default `""`, or `"default"`, past runs' facts are shown but a
-  bar never would be.
+  bar never would be. Keep `model` a plain attribute, or a property with a
+  setter, as a wrapper that forwards its inner provider's id may: mypy
+  refuses a read-only property in place of `BaseLLMProvider.model`.
 - Raise `ProviderError(message, status_code=..., retryable=True)` from
   `chat()` for a failure worth retrying. The agent then retries it like the
   built-in providers do; see

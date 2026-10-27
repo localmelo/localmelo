@@ -156,3 +156,34 @@ def test_the_built_in_chat_providers_report_their_model() -> None:
     openai = OpenAICompatLLM(base_url="http://127.0.0.1:9/v1", model="qwen3-8b")
     ollama = OllamaNativeChat(base_url="http://127.0.0.1:9", model="llama3")
     assert (openai.model, ollama.model) == ("qwen3-8b", "llama3")
+
+
+class Forwarding(BaseLLMProvider):
+    """A wrapper whose model id is a property with a setter, which mypy takes."""
+
+    def __init__(self, inner: BaseLLMProvider) -> None:
+        self._inner = inner
+
+    @property
+    def model(self) -> str:
+        return self._inner.model
+
+    @model.setter
+    def model(self, value: str) -> None:
+        self._inner.model = value
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        return await self._inner.chat(messages, tools)
+
+    async def close(self) -> None:
+        await self._inner.close()
+
+
+async def test_a_wrapper_may_forward_the_model_through_a_property() -> None:
+    wrapper = Forwarding(ScriptedLLM([answer("hi")], model="qwen3-8b"))
+    agent = make_agent(wrapper)
+    assert agent._model_id() == "qwen3-8b"
+    wrapper.model = "llama3"
+    assert agent._model_id() == "llama3"

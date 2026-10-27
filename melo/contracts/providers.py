@@ -77,7 +77,9 @@ class BaseLLMProvider(ABC):
     procedural store keeps step templates per model. The class default
     ``""`` means unknown, and so does ``"default"``: a run on such a
     provider shows past runs' facts but never a bar. A wrapper copies it
-    from the provider it wraps.
+    from the provider it wraps. A subclass keeps it a plain attribute or a
+    property with a setter: mypy refuses a read-only property in place of
+    the base class's writable attribute.
     """
 
     # The id of the model this provider's requests go to, such as
