@@ -13,7 +13,7 @@ import pytest
 from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
 
-from localmelo.support.cli.app import open_history
+from localmelo.support.cli.app import StatusBar, open_history, status_fragments
 from localmelo.support.cli.render import LiveState
 from localmelo.support.cli.text import cells
 from localmelo.tests.cli.ui_helpers import (
@@ -360,6 +360,32 @@ async def test_a_tall_chinese_draft_scrolls_to_its_cursor(
         box = _box(app)
         assert len(box) == 10
         assert "终" in box[-1] or "终" in box[-2], box
+
+
+def _bar_line(width: int, mode: str = "ask") -> str:
+    bar = StatusBar("stub-model", "~/demo-project", "ctx 120", "fail please", mode)
+    return "".join(fragment[1] for fragment in status_fragments(bar, width, "…"))
+
+
+def test_a_dropped_context_gives_its_room_back_to_the_workspace() -> None:
+    assert _bar_line(30) == "  stub-model · ~/demo-pro… ask"
+
+
+@pytest.mark.parametrize("width", [16, 20, 22, 25, 27, 30, 40])
+def test_the_status_bar_never_overflows_or_shows_a_bare_ellipsis(width: int) -> None:
+    for mode in ("ask", "⚠ YOLO: no approvals"):
+        line = _bar_line(width, mode)
+        assert cells(line) == width, (width, mode, line)
+        assert "YOLO" in line or mode == "ask"
+        assert (
+            "……" not in line and " … " not in line and not line.strip().startswith("…")
+        )
+
+
+async def test_the_placeholder_is_cut_with_an_ellipsis_when_narrow() -> None:
+    async with running_app(columns=20) as app:
+        await app.settle()
+        assert _box(app) == ["› Ask melo · / for…"]
 
 
 def test_a_closed_terminal_closes_the_input() -> None:

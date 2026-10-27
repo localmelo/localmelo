@@ -34,6 +34,7 @@ from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import Approvals, Mode, TerminalApprover
 from localmelo.support.cli.output import Out
 from localmelo.support.cli.render import TurnRenderer
+from localmelo.support.cli.theme import in_symbols
 from localmelo.support.sessions.display import (
     clean_output,
     format_tokens,
@@ -50,7 +51,7 @@ from localmelo.support.sessions.store import (
 logger = logging.getLogger(__name__)
 
 
-def _text(text: str = "", style: str | None = None) -> Text:
+def _line(text: str = "", style: str | None = None) -> Text:
     """A line to print, with what came from a server (model ids, errors) cleaned."""
     return Text(clean_output(text), style=style or "")
 
@@ -121,13 +122,17 @@ class CliSession:
             workspace=home_label(self.agent.workspace_root or ""),
             context=f"ctx {format_tokens(context)}" if context else "",
             title=self.title or "New session",
-            mode="⚠ YOLO: no approvals" if yolo else "ask",
+            mode=f"{self.renderer.symbols.warn} YOLO: no approvals" if yolo else "ask",
             mode_style="class:yolo" if yolo else "class:muted",
         )
 
     def _hint(self, text: str) -> None:
         if self.app is not None:
             self.app.hint(text)
+
+    def _text(self, text: str = "", style: str | None = None) -> Text:
+        """A line of melo's, in the session's symbols, cleaned (:func:`_line`)."""
+        return _line(in_symbols(text, self.renderer.symbols), style)
 
     # ── Enter ──
 
@@ -138,7 +143,7 @@ class CliSession:
             command, name, arguments = parsed
             if command is None:
                 self.out.print(
-                    _text(
+                    self._text(
                         f"Unknown command /{name}. /help lists the commands.",
                         style="error",
                     )
@@ -187,7 +192,7 @@ class CliSession:
         if exc is not None:
             logger.error("A session task failed", exc_info=exc)
             self.out.print(
-                _text(
+                self._text(
                     f"⚠ {type(exc).__name__}: {exc} (details in "
                     "~/.cache/localmelo/logs/cli.log)",
                     style="muted",
@@ -259,7 +264,9 @@ class CliSession:
             buffer = self.app.buffer
             buffer.text = queued + ("\n" + buffer.text if buffer.text else "")
             self.out.print(
-                _text("Your queued message is back in the input box.", style="muted")
+                self._text(
+                    "Your queued message is back in the input box.", style="muted"
+                )
             )
 
     def stop(self, reason: str = STOP_REASON) -> bool:
@@ -298,7 +305,7 @@ class CliSession:
 
     async def _command(self, name: str, arguments: str) -> None:
         if name == "help":
-            self.out.print(commands.help_text(arguments))
+            self.out.print(commands.help_text(arguments, self.renderer.symbols))
         elif name in ("exit", "quit"):
             if self.app is not None:
                 self.app.exit()
@@ -320,14 +327,15 @@ class CliSession:
         self.renderer.context_tokens = 0
         label = " New session "
         side = max(2, (self.out.width - len(label)) // 2)
-        self.out.print(_text("─" * side + label + "─" * side, style="muted"))
+        rule = self.renderer.symbols.rule
+        self.out.print(self._text(rule * side + label + rule * side, style="muted"))
 
     async def model(self, arguments: str) -> None:
         """``/model``: list the server's models, or switch to one and save it."""
         backend = self.factory.backend
         if not arguments:
             self.out.print(
-                _text(
+                self._text(
                     f"Model: {backend.model} · {backend.label} · {backend.base_url or backend.label}"
                 )
             )
@@ -337,12 +345,14 @@ class CliSession:
                 self.models = await self.factory.list_models()
             except discovery.DiscoveryError as exc:
                 self.out.print(
-                    _text(f"✗ Could not list the models: {exc}", style="error")
+                    self._text(f"✗ Could not list the models: {exc}", style="error")
                 )
                 return
-            lines = _text()
+            lines = self._text()
             for number, model in enumerate(self.models, 1):
-                mark = "❯" if model == backend.model else " "
+                mark = (
+                    self.renderer.symbols.selection if model == backend.model else " "
+                )
                 lines.append(
                     clean_output(f"{mark} {number}. {model}") + "\n",
                     style="accent" if mark != " " else None,
@@ -357,7 +367,7 @@ class CliSession:
                 self.models = await self.factory.list_models()
             except discovery.DiscoveryError as exc:
                 self.out.print(
-                    _text(f"✗ Could not list the models: {exc}", style="error")
+                    self._text(f"✗ Could not list the models: {exc}", style="error")
                 )
                 return
         if (
@@ -368,7 +378,7 @@ class CliSession:
             name = self.models[int(name) - 1]
         if self.models and name not in self.models:
             self.out.print(
-                _text(
+                self._text(
                     f"⚠ {backend.base_url} lists no model named '{name}'; switching anyway.",
                     style="warn",
                 )
@@ -391,7 +401,7 @@ class CliSession:
             models = await self.factory.list_models(url)
         except discovery.DiscoveryError as exc:
             self.out.print(
-                _text(
+                self._text(
                     f"✗ Could not reach {url}: {exc}. Still using {old.base_url or old.label}.",
                     style="error",
                 )
@@ -399,7 +409,7 @@ class CliSession:
             return
         except asyncio.CancelledError:
             self.out.print(
-                _text(
+                self._text(
                     f"Cancelled. Still using {old.base_url or old.label}.",
                     style="muted",
                 )
@@ -409,7 +419,7 @@ class CliSession:
             self._state, self.activity, self._work = "idle", None, None
         if not models:
             self.out.print(
-                _text(
+                self._text(
                     f"✗ {url} lists no models. Still using {old.base_url or old.label}.",
                     style="error",
                 )
@@ -427,7 +437,7 @@ class CliSession:
         chat = [model for model in models if discovery.is_chat_model(model)]
         if len(models) == 1 and chat:
             return models[0]
-        lines = _text(f"Models on {url}:\n")
+        lines = self._text(f"Models on {url}:\n")
         for number, model in enumerate(models, 1):
             lines.append(clean_output(f"  {number}. {model}") + "\n")
         self.out.print(lines)
@@ -442,7 +452,7 @@ class CliSession:
             if answer.isdigit() and 1 <= int(answer) <= len(models):
                 return models[int(answer) - 1]
             self.out.print(
-                _text(
+                self._text(
                     f"Type a number from 1 to {len(models)}, or a model id.",
                     style="muted",
                 )
@@ -463,7 +473,7 @@ class CliSession:
                 new = await self.factory.build(model, url=url)
             except asyncio.CancelledError:
                 self.out.print(
-                    _text(
+                    self._text(
                         f"Switch cancelled. Still using {self.factory.backend.model}.",
                         style="muted",
                     )
@@ -471,7 +481,7 @@ class CliSession:
                 return False
             except Exception as exc:
                 self.out.print(
-                    _text(
+                    self._text(
                         f"✗ Could not start {model}: {exc}. Still using {self.factory.backend.model}.",
                         style="error",
                     )
@@ -500,10 +510,10 @@ class CliSession:
         problem = self.factory.save()
         if problem:
             self.out.print(
-                _text(f"{done} {problem[0].upper()}{problem[1:]}.", style="warn")
+                self._text(f"{done} {problem[0].upper()}{problem[1:]}.", style="warn")
             )
         else:
-            self.out.print(_text(f"{done} Saved as the default.", style="ok"))
+            self.out.print(self._text(f"{done} Saved as the default.", style="ok"))
 
     # ── The model server at startup ──
 
@@ -519,14 +529,14 @@ class CliSession:
                 text = f"Cannot reach the model server at {backend.base_url} ({exc}). Start it, then send your message."
             else:
                 text = f"{backend.base_url} could not list its models ({exc}); the first message may fail."
-            self.out.print(_text(f"⚠ {text}", style="warn"))
+            self.out.print(self._text(f"⚠ {text}", style="warn"))
             return
         if self.factory.backend.base_url != backend.base_url:
             return  # /backend moved to another server meanwhile
         self.models = models
         if models and backend.model not in models:
             self.out.print(
-                _text(
+                self._text(
                     f"⚠ {backend.base_url} lists no model named '{backend.model}'; the first message may fail.",
                     style="warn",
                 )

@@ -131,6 +131,45 @@ ASCII: Final = Symbols(
 )
 
 
+def _ascii_table() -> dict[int, str]:
+    table: dict[int, str] = {ord("↑"): "up", ord("↓"): "down"}
+    for name in (
+        "prompt",
+        "assistant",
+        "ok",
+        "failed",
+        "blocked",
+        "not_run",
+        "connector",
+        "thought",
+        "retry",
+        "warn",
+        "stopped",
+        "session",
+        "image",
+        "selection",
+        "queued",
+        "minus",
+        "dot",
+        "ellipsis",
+        "rule",
+    ):
+        table[ord(getattr(UNICODE, name))] = getattr(ASCII, name)
+    return table
+
+
+_TO_ASCII: Final = _ascii_table()
+
+
+def in_symbols(text: str, symbols: Symbols) -> str:
+    """*text*, melo's own words, with its symbols in *symbols*' set.
+
+    With :data:`ASCII`, each Unicode symbol becomes its stand-in, and the
+    arrows become words: a terminal that is not UTF-8 would show ``?``.
+    """
+    return text if symbols is not ASCII else text.translate(_TO_ASCII)
+
+
 def symbols_for(
     encoding: str | None, environ: Mapping[str, str] | None = None
 ) -> Symbols:

@@ -77,7 +77,7 @@ from localmelo.support.cli.text import (
     input_rows,
     wrap_words,
 )
-from localmelo.support.cli.theme import PT_STYLE, Symbols
+from localmelo.support.cli.theme import PT_STYLE, Symbols, in_symbols
 from localmelo.support.sessions.display import home_label
 
 # Seconds between redraws of the live area while the session is busy.
@@ -87,6 +87,8 @@ DOUBLE_PRESS_S: Final = 2.0
 # How long a hint stays.
 HINT_S: Final = 2.0
 COMPLETION_ROWS: Final = 8
+# The fewest cells a cut workspace keeps in the status bar.
+MIN_PART_CELLS: Final = 4
 PLACEHOLDER: Final = "Ask melo · / for commands"
 # Continuation rows of the input box start this many cells in.
 PREFIX_CELLS: Final = 2
@@ -141,40 +143,50 @@ class Controller(Protocol):
     def status_bar(self) -> StatusBar: ...
 
 
-def status_fragments(bar: StatusBar, width: int, ellipsis: str) -> StyleAndTextTuples:
+def status_fragments(
+    bar: StatusBar, width: int, ellipsis: str, dot: str = " · "
+) -> StyleAndTextTuples:
     """The status bar at *width*: the mode always shows, at the right edge.
 
     When the width is short, the title is cut first, then the workspace
-    (from the middle), then the context goes, then the model is cut. Every
-    cut counts cells.
+    (from the middle), then the context goes (and the workspace takes its
+    room back), then the model is cut. Every cut counts cells, and no
+    part is left as a bare ellipsis.
     """
-    room = width - 2 - cells(bar.mode) - 1
-    model, workspace, context, title = bar.model, bar.workspace, bar.context, bar.title
-    dot = " · "
+    mode = cut_cells(bar.mode, max(1, width - 3), ellipsis)
+    room = width - 2 - cells(mode) - 1
+    model, context, title = bar.model, bar.context, bar.title
 
-    def joined() -> str:
+    def joined(workspace: str) -> str:
         return dot.join(part for part in (model, workspace, context, title) if part)
 
-    if cells(joined()) > room and title:
+    def fit_workspace() -> str:
+        keep = room - cells(joined(bar.workspace)) + cells(bar.workspace)
+        return cut_middle(bar.workspace, max(MIN_PART_CELLS, keep), ellipsis)
+
+    workspace = bar.workspace
+    if cells(joined(workspace)) > room and title:
         title = cut_cells(
-            title, max(0, room - cells(joined()) + cells(title)), ellipsis
+            title, max(0, room - cells(joined(workspace)) + cells(title)), ellipsis
         )
         if cells(title) < 6:
             title = ""
-    if cells(joined()) > room:
-        keep = room - cells(joined()) + cells(workspace)
-        workspace = cut_middle(workspace, max(4, keep), ellipsis)
-    if cells(joined()) > room:
+    if cells(joined(workspace)) > room:
+        workspace = fit_workspace()
+    if cells(joined(workspace)) > room and context:
         context = ""
-    if cells(joined()) > room:
-        model = cut_cells(
-            model, max(1, room - cells(joined()) + cells(model)), ellipsis
-        )
-    left = cut_cells(joined(), max(0, room), ellipsis)
-    gap = max(1, width - 2 - cells(left) - cells(bar.mode))
+        workspace = fit_workspace()
+    if cells(joined(workspace)) > room:
+        workspace = ""
+    if cells(joined(workspace)) > room:
+        model = cut_cells(model, room, ellipsis)
+    left = joined(workspace)
+    if cells(left) > room or cells(left) <= cells(ellipsis) + 1 and ellipsis in left:
+        left = ""  # no room for even a cut model
+    gap = max(1, width - 2 - cells(left) - cells(mode))
     return [
         ("class:status", "  " + left + " " * gap),
-        (bar.mode_style, bar.mode),
+        (bar.mode_style, mode),
     ]
 
 
@@ -384,7 +396,7 @@ class InteractiveApp:
             BufferControl(self.reason),
             height=1,
             get_line_prefix=lambda lineno, wrap: [
-                ("class:muted", "  Reason (optional, enter sends): ")
+                ("class:muted", self._reason_label())
             ],
         )
         self.reason_row = VSplit(
@@ -458,7 +470,7 @@ class InteractiveApp:
 
     def hint(self, text: str, seconds: float = HINT_S) -> None:
         """Show *text* under the input box for *seconds*."""
-        self._hint = text
+        self._hint = in_symbols(text, self.symbols)
         self._hint_until = self._clock() + seconds
         self.app.invalidate()
         with contextlib.suppress(RuntimeError):
@@ -522,7 +534,11 @@ class InteractiveApp:
     def _placeholder(self) -> str:
         if self._question is not None:
             return ""
-        return PLACEHOLDER
+        # One row: cut, with an ellipsis, on a narrow terminal.
+        room = self.app.output.get_size().columns - cells(self._prompt()) - 1
+        return cut_cells(
+            in_symbols(PLACEHOLDER, self.symbols), room, self.symbols.ellipsis
+        )
 
     def _input_height(self) -> Dimension:
         columns = self.app.output.get_size().columns
@@ -594,7 +610,10 @@ class InteractiveApp:
     def _status_fragments(self) -> StyleAndTextTuples:
         width = self.app.output.get_size().columns
         return status_fragments(
-            self.controller.status_bar(), width, self.symbols.ellipsis
+            self.controller.status_bar(),
+            width,
+            self.symbols.ellipsis,
+            f" {self.symbols.dot} ",
         )
 
     # ── The approval panel ──
@@ -707,7 +726,8 @@ class InteractiveApp:
             inner = width - 4 if boxed else width
             text = panel_text(pending.request, exists=pending.exists, width=inner - 2)
             # The header holds a path: its rows keep every character.
-            head = [("class:tool", part) for part in wrap_words(text.header, inner)]
+            header = text.header.replace(" · ", f" {symbols.dot} ")
+            head = [("class:tool", part) for part in wrap_words(header, inner)]
             tail = (
                 wrapped("class:warn", f"{symbols.warn} {ESCAPED_WARNING}", inner)
                 if text.escaped
@@ -752,6 +772,12 @@ class InteractiveApp:
         if out:
             out.pop()  # no newline after the last row
         return out
+
+    def _reason_label(self) -> str:
+        # The long label leaves room for the reason from 60 columns on.
+        if self.app.output.get_size().columns >= 60:
+            return "  Reason (optional, enter sends): "
+        return "  Reason: "
 
     def _reason_count(self) -> StyleAndTextTuples:
         return [("class:muted", f" {len(self.reason.text)}/{REASON_MAX_CHARS}")]
@@ -798,7 +824,8 @@ class InteractiveApp:
         text = panel_text(
             pending.request, exists=pending.exists, width=self.renderer.out.width - 2
         )
-        self.renderer.out.print(Text("\n".join([text.header, *text.body])))
+        header = text.header.replace(" · ", f" {self.symbols.dot} ")
+        self.renderer.out.print(Text("\n".join([header, *text.body])))
 
     def _panel_bindings(self) -> list[KeyBindings]:
         kb = KeyBindings()

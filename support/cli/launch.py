@@ -298,7 +298,7 @@ async def main_async(
     from localmelo.support.cli.render import TurnRenderer
     from localmelo.support.cli.session import STOP_REASON, CliSession
     from localmelo.support.cli.signals import ExitSignals, save_terminal
-    from localmelo.support.cli.theme import symbols_for, wants_no_color
+    from localmelo.support.cli.theme import in_symbols, symbols_for, wants_no_color
     from localmelo.support.cli.views import banner
     from localmelo.support.sessions.display import home_label, localmelo_version
     from localmelo.support.sessions.store import SessionStore, SessionStoreError
@@ -452,7 +452,7 @@ async def main_async(
         def on_sigint() -> None:
             presses[0] += 1
             if presses[0] == 1:
-                out.print(Text("Closing…", style="muted"))
+                out.print(Text(in_symbols("Closing…", symbols), style="muted"))
                 return
             for agent in factory.live_agents():
                 for provider in agent._tool_providers:

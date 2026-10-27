@@ -503,3 +503,22 @@ async def test_ctrl_c_in_an_empty_reason_goes_back_to_the_choices(
         assert approver.pending is not None and not approver.pending.reason
         app.type("1")
         assert await asyncio.wait_for(asking, 3) == ApprovalDecision(True)
+
+
+@pytest.mark.parametrize("columns", [30, 40, 50])
+async def test_the_reason_typed_shows_on_a_narrow_terminal(
+    now: list[float], columns: int
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(
+        approver=approver, columns=columns, clock=lambda: now[0]
+    ) as app:
+        asking = asyncio.ensure_future(approver.ask(_request()))
+        await app.wait(lambda: "Run a shell command?" in app.text())
+        now[0] += 1
+        app.type("3")
+        await app.wait(lambda: "Reason" in app.text())
+        app.type("keep it")
+        await app.wait(lambda: "Reason: keep it" in app.text())
+        app.type(ENTER)
+        assert (await asyncio.wait_for(asking, 3)).reason == "keep it"

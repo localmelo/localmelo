@@ -604,8 +604,8 @@ def live_rows(
 
     Row 1 is the spinner line: the frame, the activity, the step, the
     attempt from the second, the elapsed time, the output tokens and the
-    stop hint; the hint goes first, then the tokens, when the width is
-    short. Row 2, while a tool runs, is its name, preview, clock and limit.
+    stop hint; when the width is short, whole parts go: the hint, then the
+    tokens, then the elapsed time, the attempt and the step. Row 2, while a tool runs, is its name, preview, clock and limit.
     *frame* fixes the spinner's frame (``LOCALMELO_SPINNER_FRAME``).
     """
     dot = f" {symbols.dot} "
@@ -627,18 +627,18 @@ def live_rows(
         else ""
     )
     extras = [part for part in (tokens, hint) if part]
-    while True:
-        tail = "".join(dot + part for part in extras)
-        room = width - cells(head) - cells(dot) - cells(tail)
-        if room >= 8 or not extras:
-            break
-        extras.pop()
     payload = {"step": live.step, "attempt": live.attempt}
-    facts = format_line(payload, None, now, max(1, room), run_started=live.started)
-    facts = cut_cells(facts.replace(" · ", dot), max(0, room), symbols.ellipsis)
-    first = cut_cells(
-        head + (dot + facts if facts else "") + tail, width, symbols.ellipsis
-    )
+    line = format_line(payload, None, now, 10**6, run_started=live.started)
+    facts = [part for part in line.split(" · ") if part]
+    # Whole parts go when the row is short, never half a number: the hint,
+    # the tokens, then the facts from the end (the elapsed time, then the
+    # attempt, then the step).
+    while True:
+        first = dot.join([head, *facts, *extras])
+        if cells(first) <= width or not (extras or facts):
+            break
+        (extras or facts).pop()
+    first = cut_cells(first, width, symbols.ellipsis)
     rows = [[("class:accent", first)]]
     if live.tool and not live.waiting:
         clock = tool_elapsed(now - live.tool_started)

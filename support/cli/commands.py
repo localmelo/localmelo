@@ -18,6 +18,7 @@ from rich.console import Group, RenderableType
 from rich.text import Text
 
 from localmelo.support.cli.text import pad_cells
+from localmelo.support.cli.theme import UNICODE, Symbols, in_symbols
 
 
 @dataclass(frozen=True)
@@ -66,7 +67,7 @@ def parse_command(text: str) -> tuple[Command | None, str, str] | None:
     return find(name), name, arguments
 
 
-def help_text(topic: str = "") -> RenderableType:
+def help_text(topic: str = "", symbols: Symbols = UNICODE) -> RenderableType:
     """``/help``: every command and the keys, or one command's details."""
     if topic:
         command = find(topic.lstrip("/"))
@@ -87,7 +88,7 @@ def help_text(topic: str = "") -> RenderableType:
         line.append(command.summary, style="muted")
         lines.append(line)
     lines.append(Text("Input", style="bold"))
-    lines += [Text("  " + keys, style="muted") for keys in KEYS]
+    lines += [Text("  " + in_symbols(keys, symbols), style="muted") for keys in KEYS]
     return Group(*lines)
 
 

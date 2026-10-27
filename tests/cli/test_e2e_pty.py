@@ -51,12 +51,15 @@ class Melo:
         columns: int = 100,
         iutf8: bool | None = None,
         nohup: bool = False,
+        env: dict[str, str] | None = None,
     ) -> None:
         self.home = home
         self.workspace = home / "demo-project"
         self.workspace.mkdir(exist_ok=True)
+        extra = env or {}
         env = _env(home)
         env.update(TERM="xterm-256color", NO_COLOR="1", LOCALMELO_DETECT_URLS="")
+        env.update(extra)
         self._master, slave = os.openpty()
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 30, columns, 0, 0))
         if iutf8 is not None:
@@ -390,3 +393,25 @@ def test_a_history_file_that_cannot_be_opened_is_not_fatal(
     term.type("hello\r")
     term.see("Hello! I am melo")
     assert term.quit() == 0
+
+
+def test_ascii_mode_prints_only_ascii(
+    melo: Callable[..., Melo], tmp_path: Path
+) -> None:
+    term = melo(env={"LOCALMELO_ASCII": "1"})
+    term.see("Ask melo")
+    term.type("hold on\r")
+    term.see("esc to stop")
+    term.type(b"\x1b")
+    term.see("Stopped")
+    time.sleep(1)  # the turn wraps up
+    term.type("/help\r")
+    term.see("ctrl+d quit")
+    term.type("/model\r")
+    term.see("/model NAME or /model N")
+    term.type("/new\r")
+    term.see("New session -")
+    term.type("hello\r")
+    term.see("Hello! I am melo")
+    assert term.quit() == 0
+    term.output.decode("ascii")  # nothing else reached the terminal

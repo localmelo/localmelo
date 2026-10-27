@@ -716,3 +716,36 @@ def test_a_best_effort_keeps_its_code_block() -> None:
     code = lines.index(next(line for line in lines if "def f(x):" in line))
     assert lines[code + 1].strip() == "return x * 2"
     assert lines[code + 1].index("return") > lines[code].index("def")
+
+
+@pytest.mark.parametrize(
+    ("width", "row"),
+    [
+        (20, "✳ Thinking… · step 3"),
+        (30, "✳ Thinking… · step 3 · 1h22m"),
+        (41, "✳ Thinking… · step 3 · 1h22m"),
+        (50, "✳ Thinking… · step 3 · 1h22m · ↓ 1.2k tokens"),
+        (60, "✳ Thinking… · step 3 · 1h22m · ↓ 1.2k tokens · esc to stop"),
+    ],
+)
+def test_the_spinner_row_drops_whole_facts_rather_than_cut_them(
+    width: int, row: str
+) -> None:
+    live = LiveState(activity="Thinking", started=0.0, step=3, output_tokens=1200)
+    assert live_rows(live, 4920.0, width, UNICODE, frame=2)[0] == [
+        ("class:accent", row)
+    ]
+
+
+@pytest.mark.parametrize("width", [30, 45, 50, 60])
+def test_banner_values_wrap_under_themselves(width: int) -> None:
+    lines = _banner(width=width, model="a-model-name-that-is-rather-long").split("\n")
+    rows = [line for line in lines if line.strip()]
+    assert all(cells(line) <= width for line in rows), rows
+    joined = "".join(line.strip("│ ") for line in rows)
+    assert URL in joined  # the URL shows whole, never cut
+    body = [line.strip("│") for line in rows[1:]]
+    tools = next(i for i, line in enumerate(body) if line.lstrip().startswith("tools"))
+    assert body[tools + 1].startswith(" " * 11) or body[tools + 1].lstrip().startswith(
+        "memory"
+    )
