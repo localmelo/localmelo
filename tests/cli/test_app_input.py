@@ -95,6 +95,13 @@ async def test_wrapped_wide_text_shows_whole_and_shrinks_without_blank_rows() ->
         box = _box(app)
         assert box == ["› " + "你" * 9, "  " + "你" * 9, "  " + "你" * 2]
         assert all(row.strip() for row in box)
+        # The app itself shrank: no blank rows of it are left under the
+        # status bar (the inline renderer never shrinks on its own).
+        screen = app.screen()
+        top = next(i for i, row in enumerate(screen) if row.startswith("─"))
+        bar = max(i for i, row in enumerate(screen) if row.strip())
+        last = app.ui.app.renderer._last_screen
+        assert last is not None and last.height == bar - top + 1
 
 
 async def test_a_bracketed_paste_inserts_lines_and_sends_nothing() -> None:

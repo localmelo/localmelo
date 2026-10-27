@@ -345,6 +345,40 @@ def test_sigterm_right_after_exit_ends_the_process_by_it(
     assert (turn["status"], turn["cause"]) == ("cancelled", "user_stop")
 
 
+def test_exit_during_a_turn_records_a_user_stop(
+    melo: Callable[..., Melo], tmp_path: Path
+) -> None:
+    term = melo()
+    term.see("Ask melo")
+    term.type("hold on\r")
+    term.see("esc to stop")
+    term.type("/exit\r")
+    assert term.wait() == 0
+    [turn] = _turns(tmp_path)
+    assert (turn["status"], turn["cause"], turn["error"]) == (
+        "cancelled",
+        "user_stop",
+        "Stopped by the user",
+    )
+
+
+def test_yolo_runs_tools_without_asking(
+    melo: Callable[..., Melo], tmp_path: Path
+) -> None:
+    (tmp_path / "demo-project").mkdir(exist_ok=True)
+    (tmp_path / "demo-project" / "notes.txt").write_text("x\n")
+    term = melo("--yolo")
+    term.see("Ask melo")
+    # The status bar's right edge (its last cell is drawn on its own).
+    assert "⚠ YOLO: no approval" in term.text()
+    term.type("list the folder\r")
+    term.see("The folder holds what")
+    assert "Run a shell command?" not in term.text()
+    assert "No approvals for this turn (--yolo)" in term.text()
+    assert "notes.txt" in term.text()
+    assert term.quit() == 0
+
+
 def test_a_history_file_that_cannot_be_opened_is_not_fatal(
     melo: Callable[..., Melo], tmp_path: Path
 ) -> None:
