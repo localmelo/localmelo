@@ -134,9 +134,9 @@ def test_a_tool_block_shows_three_lines_then_the_rest_count() -> None:
     assert "  └ app.py\n    notes.txt\n    tests\n    … +2 lines\n" in text
 
 
-def test_a_single_line_left_prints_instead_of_the_marker() -> None:
+def test_a_fourth_line_becomes_the_marker() -> None:
     text = Turn().tool("shell_exec", "ls", output="a\nb\nc\nd").text()
-    assert "    c\n    d\n" in text and "+1 lines" not in text
+    assert "    c\n    … +1 lines\n" in text and "    d\n" not in text
 
 
 def test_a_nonzero_exit_of_a_command_that_ran_is_a_tag_not_a_failure() -> None:

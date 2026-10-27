@@ -497,7 +497,7 @@ class TurnRenderer:
         ]
         if not "".join(lines).strip():
             lines = ["(no output)"]
-        shown = lines if len(lines) <= BLOCK_LINES + 1 else lines[:BLOCK_LINES]
+        shown = lines[:BLOCK_LINES]
         width = max(1, self.out.width - 4)
         body = Text()
         for number, line in enumerate(shown):
