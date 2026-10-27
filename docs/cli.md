@@ -211,7 +211,9 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
   with `--output-format json` (on a terminal or not), when stderr is a pipe
   or a file (as in scripts and benchmarks), with `--progress off`, or in the
   `melo ""` loop; the run then starts exactly as it would without the
-  option. Stdout is the same either way.
+  option. Stdout is the same either way. While `melo` runs in the
+  background (`melo "<task>" &`, or Ctrl+Z then `bg`), the line is not
+  drawn, so it never covers the shell's prompt; it comes back with `fg`.
 - **First runs: facts.** `step 4` counts planning steps; `attempt 2` appears
   from the second attempt on. The phase is read from the tool calls so far:
   `Explore` (before the first edit), `Write` (editing), `Verify` (running

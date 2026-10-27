@@ -902,6 +902,68 @@ def test_a_failed_write_leaves_nothing_in_the_streams_buffer() -> None:
             stream.close()
 
 
+@contextlib.contextmanager
+def _pipe_stream() -> Iterator[tuple[io.TextIOWrapper, Callable[[], str]]]:
+    """A stream on a pipe, like sys.stderr; and what reached the pipe once closed."""
+    read_end, write_end = os.pipe()
+    stream = open(write_end, "w", buffering=1, encoding="utf-8")
+    with open(read_end, "rb") as reader:
+
+        def received() -> str:
+            stream.close()
+            return reader.read().decode()
+
+        try:
+            yield stream, received
+        finally:
+            stream.close()
+
+
+@pytest.fixture
+def foreground() -> Iterator[list[int]]:
+    """The terminal's foreground process group, as os.tcgetpgrp reports it."""
+    group = [os.getpgrp()]
+    with mock.patch.object(pl.os, "tcgetpgrp", side_effect=lambda fd: group[0]):
+        yield group
+
+
+def test_no_line_while_melo_runs_in_the_background(
+    foreground: list[int], quiet_logger: logging.Logger
+) -> None:
+    """``melo "<task>" &``, or Ctrl+Z then ``bg``: the shell has the cursor.
+
+    A draw would wipe what the user types at the prompt, and with ``stty
+    tostop`` the first one would stop the job. Records are written as
+    they are, and the line comes back in the foreground.
+    """
+    foreground[0] = os.getpgrp() + 1  # another job has the terminal
+    with _pipe_stream() as (stream, received):
+        line_ = ProgressLine(stream, interval_s=3600, clock=Clock(), columns=lambda: 80)
+        line_.start()
+        line_.observe(_event("run.progress", 1, **payload(step=2)))
+        quiet_logger.warning("careful now")
+        foreground[0] = os.getpgrp()  # fg
+        line_.observe(_event("run.progress", 2, **payload(step=3)))
+        line_.close()
+        assert received() == "careful now\n" + ERASE + "step 3 · 0s" + ERASE
+
+
+def test_a_line_left_in_the_background_is_not_erased(foreground: list[int]) -> None:
+    """After Ctrl+Z, the shell wrote below the line: an erase would hit its row."""
+    with _pipe_stream() as (stream, received):
+        line_ = ProgressLine(stream, interval_s=3600, clock=Clock(), columns=lambda: 80)
+        line_.start()
+        foreground[0] = os.getpgrp() + 1  # Ctrl+Z, bg
+        line_.close()
+        assert received() == ERASE + "starting · 0s"
+
+
+def test_a_stream_that_is_not_the_controlling_terminal_is_the_foreground() -> None:
+    with _pipe_stream() as (stream, _):
+        assert pl.in_foreground(stream)  # ENOTTY
+    assert pl.in_foreground(io.StringIO())  # no file
+
+
 # ── Log records above the line ──────────────────────────────────────────────
 
 

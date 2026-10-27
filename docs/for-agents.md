@@ -48,7 +48,7 @@ echo $?   # 0 completed; 1 crashed (JSON line) or no/invalid config (no JSON lin
   - `--builtins all|none|LIST` (comma list of `file_read,file_write,python_exec,shell_exec`); `--mcp-config PATH` (stdio MCP servers); `--mcp-only` = `--builtins none --tool-exposure all` (needs `--mcp-config`; do not also pass `--builtins` or `--tool-exposure`).
   - `--memory on|off` (long-term memory); `--memory-dir DIR` (save memory as SQLite); `--embedding-base-url URL`, `--embedding-model NAME` (embeddings for a `--base-url` run).
   - `--timeout S` (run wall clock; none); `--request-timeout S` (per chat request; `request_timeout_s`, else 120, 300 for `ollama`); `--output-format text|json`.
-  - `--progress auto|off` (`auto`: a progress line on stderr, `\r\x1b[2K` redraws, erased before the result, only when stderr is a TTY, `TERM` is not `dumb` and the output is text; with JSON output or no TTY nothing is drawn and the run is unchanged); `--routine NAME` (procedural routine; blank is a usage error). Past-run facts on the line need `LOCALMELO_PERSIST_MEMORY=1` or `--memory-dir`.
+  - `--progress auto|off` (`auto`: a progress line on stderr, `\r\x1b[2K` redraws, erased before the result, only when stderr is a TTY, `TERM` is not `dumb` and the output is text; with JSON output or no TTY nothing is drawn and the run is unchanged; not drawn while melo is a background job, `tcgetpgrp(2) != getpgrp()`); `--routine NAME` (procedural routine; blank is a usage error). Past-run facts on the line need `LOCALMELO_PERSIST_MEMORY=1` or `--memory-dir`.
 
 Other modes:
 

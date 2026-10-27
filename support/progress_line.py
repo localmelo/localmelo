@@ -446,6 +446,21 @@ def terminal_columns(stream: TextIO) -> int:
     return columns if columns > 0 else FALLBACK_COLUMNS
 
 
+def in_foreground(stream: TextIO) -> bool:
+    """Whether melo may draw on *stream*: it is in the foreground there.
+
+    A job in the background (``melo "<task>" &``, or Ctrl+Z then ``bg``)
+    draws nothing, as git's progress does: its draws would wipe what the
+    user types at the shell's prompt, and with ``stty tostop`` the first
+    one would stop the job. A stream that is not melo's controlling
+    terminal, or no terminal, counts as the foreground.
+    """
+    try:
+        return os.tcgetpgrp(stream.fileno()) == os.getpgrp()
+    except (AttributeError, OSError, ValueError):
+        return True
+
+
 # ── The display ──
 
 
@@ -652,8 +667,14 @@ class ProgressLine:
 
     def _carry_out(self, records: list[str], *, closing: bool) -> bool:
         """Write *records* above the line, then draw it, or erase it if
-        *closing*, in one write. False once the writer is done for good."""
-        text, drawn, line = "", self._drawn, None
+        *closing*, in one write. False once the writer is done for good.
+
+        In the background (see :func:`in_foreground`) the records are
+        written as they are, and the line is neither drawn nor erased: the
+        shell wrote below it, so it is no longer where the cursor is.
+        """
+        foreground = in_foreground(self._stream)
+        text, drawn, line = "", self._drawn and foreground, None
         if records:
             if drawn:
                 text += ERASE
@@ -663,7 +684,7 @@ class ProgressLine:
             if drawn:
                 text += ERASE
                 drawn = False
-        else:
+        elif foreground:
             # One cell short of the width, so the cursor never wraps a row.
             line = format_line(
                 self._payload,
