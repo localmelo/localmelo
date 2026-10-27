@@ -889,6 +889,36 @@ def test_the_label_names_a_file_without_its_folder(
     assert stream.draws()[-1] == "starting · Edit parser.py 0:00 · 0s"
 
 
+@pytest.mark.parametrize("color", [False, True], ids=["plain", "dim"])
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("file_read", {"path": "/x/\x1b]0;pwned\x07a.py"}),  # a window title
+        ("shell_exec", {"command": "\x1b[2Jrm -rf x"}),  # clears the screen
+        ("mcp__files__\x1b]52;c;cHduZWQ=\x07read", {}),  # writes the clipboard
+    ],
+    ids=["file", "command", "mcp-tool"],
+)
+def test_the_running_tools_label_cannot_write_escape_sequences(
+    name: str, arguments: dict[str, Any], color: bool
+) -> None:
+    """The model chooses the file, the command and the tool's name."""
+    stream = Stream()
+    line_ = ProgressLine(stream, interval_s=3600, color=color, columns=lambda: 200)
+    line_.start()
+    try:
+        line_.observe(
+            _event("tool.started", 1, call_id="c", name=name, arguments=arguments)
+        )
+    finally:
+        line_.close()
+    text = stream.getvalue()
+    assert len(stream.draws()) == 2  # the tool's label was drawn
+    for own in (ERASE, DIM, RESET):  # the line's own sequences
+        text = text.replace(own, "")
+    assert "\x1b" not in text and "\x07" not in text
+
+
 def test_an_unchanged_line_is_not_drawn_again(
     display: tuple[ProgressLine, Stream, Clock],
 ) -> None:
