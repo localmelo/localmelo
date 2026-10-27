@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Any
 
 import pytest
 from prompt_toolkit.completion import WordCompleter
@@ -547,3 +548,32 @@ async def test_tab_completes_at_once_before_the_menu_shows(
         await app.wait(lambda: app.ui.buffer.text == completed)
         app.type(ENTER)
         await app.wait(lambda: controller.entered == [completed])
+
+
+async def test_printing_above_the_app_keeps_the_terminal_raw(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # In cooked mode the terminal echoes keys typed meanwhile and turns
+    # Enter into Ctrl+J, a new line: a message typed then was not sent.
+    from rich.text import Text
+
+    from localmelo.support.cli.output import TerminalOut
+
+    async with running_app() as app:
+        cooked: list[bool] = []
+        real = app.ui.app.input.cooked_mode
+
+        def cooked_mode() -> Any:
+            cooked.append(True)
+            return real()
+
+        monkeypatch.setattr(app.ui.app.input, "cooked_mode", cooked_mode)
+        out = TerminalOut(app.ui.app.output, no_color=True)
+        out.print(Text("printed above"))
+        await app.wait(lambda: "printed above" in app.text())
+        await app.wait(lambda: "Ask melo" in app.text())
+        assert cooked == []
+        screen = app.screen()
+        assert screen.index("printed above") < screen.index(
+            "› Ask melo · / for commands"
+        )

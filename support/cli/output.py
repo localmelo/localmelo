@@ -14,7 +14,7 @@ import contextlib
 import io
 from typing import Protocol
 
-from prompt_toolkit.application import get_app_or_none, run_in_terminal
+from prompt_toolkit.application import get_app_or_none
 from prompt_toolkit.output import Output
 from rich.console import Console, RenderableType
 
@@ -80,9 +80,26 @@ class TerminalOut:
             asyncio.get_running_loop().call_soon(self._print_above)
 
     def _print_above(self) -> None:
+        """Write what is pending above the app, the terminal kept raw.
+
+        prompt_toolkit's ``run_in_terminal`` switches the terminal to cooked
+        mode while it runs: keys typed meanwhile were echoed into the
+        scrollback, and Enter arrived as Ctrl+J, a new line, so a message
+        typed then was not sent. Only text is written here, so the app is
+        erased, the text written, and the app drawn again below it.
+        """
         self._scheduled = False
-        if self._pending:
-            run_in_terminal(self.flush)
+        if not self._pending:
+            return
+        app = get_app_or_none()
+        if app is None or not app.is_running:
+            self.flush()
+            return
+        app.renderer.erase()
+        self.flush()
+        app.renderer.reset()
+        app.renderer.request_absolute_cursor_position()
+        app.invalidate()
 
     def flush(self) -> None:
         """Write what is pending; the newlines go out as CR LF."""
