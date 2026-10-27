@@ -39,6 +39,10 @@ FINISHING: Final = "Finishing"
 # checked output.
 OUTPUT_TAIL: Final = 400
 MAX_LABEL: Final = 40
+# Characters of a shell command that its label is read from (see
+# shell_label): enough for its first commands, few enough that a command
+# of a megabyte costs no more to label than a short one.
+LABEL_SOURCE_CHARS: Final = 2000
 
 _READ_RE: Final = re.compile(
     r"^\s*(cd [^&;]+(&&|;)\s*)?(ls|cat|head|tail|find|grep|rg|wc|tree|stat|du"
@@ -265,7 +269,13 @@ def _basename(arguments: Any) -> str:
 
 
 def _command_words(command: str) -> list[str]:
-    """The words of *command*'s first simple command after any ``cd``."""
+    """The words of *command*'s first simple command after any ``cd``.
+
+    Only the command's first :data:`LABEL_SOURCE_CHARS` characters are
+    read: they hold its first commands, and shlex's cost stays small for
+    a command of a megabyte, such as a heredoc's content.
+    """
+    command = command[:LABEL_SOURCE_CHARS]
     try:
         lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
         lexer.whitespace_split = True

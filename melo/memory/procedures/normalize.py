@@ -184,8 +184,11 @@ def run_place(root: str | None) -> str:
 
     The executor's workspace root when there is one, else the process's
     working directory, read now; either as ``os.path.realpath`` gives it.
+    A byte of the path that is not UTF-8 is written ``\\xNN``: Python reads
+    it as a lone surrogate, which neither the key's hash nor SQLite takes.
     """
-    return os.path.realpath(root if root else os.getcwd())
+    path = os.path.realpath(root if root else os.getcwd())
+    return os.fsencode(path).decode("utf-8", "backslashreplace")
 
 
 def known_model(model: str) -> bool:
