@@ -51,6 +51,11 @@ LENGTH_OPTIONS: Final = (
 SIMILAR_MIN_ROUTINES: Final = 5
 SIMILAR_SELF_RATIO: Final = 0.6
 SIMILAR_SECOND_RATIO: Final = 0.5
+# The most routines of a place, its latest, that a new routine is compared
+# with: a comparison costs about 17 µs a routine, at a run's end and, with
+# progress, at its start, so a place that keeps every routine of years of
+# use must not make each new task's run slower.
+SIMILAR_MAX_ROUTINES: Final = 1000
 
 _MONTH = (
     r"(?:january|february|march|april|may|june|july|august|september|october"

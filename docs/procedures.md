@@ -54,6 +54,11 @@ anything.
   `星期一`, `周一`, and `HH:MM[:SS]`). Other numbers stay: "fix issue 123" and
   "fix issue 456" are two routines. A named routine is one routine in any
   folder.
+- **Similar task.** A new routine in a folder that holds at least 5 others
+  is compared, by BM25 over their normalized queries, with the folder's
+  latest 1,000. A clear best match lends the run its named steps and past
+  facts, at level 1: a hint, never a bar. The run still starts a routine
+  of its own.
 - **Episode.** One finished run of a routine: its status, steps, attempts,
   duration, and its *segments*, the runs of consecutive tool calls with the
   same class and target.

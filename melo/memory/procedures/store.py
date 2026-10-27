@@ -42,6 +42,7 @@ import aiosqlite
 
 from localmelo.melo.memory._sqlite import create_private_file, prepare_connection
 from localmelo.melo.memory.procedures.normalize import (
+    SIMILAR_MAX_ROUTINES,
     RoutineKey,
     find_similar,
     known_model,
@@ -465,7 +466,10 @@ class _Tx(Protocol):
     """The reads and writes the logic needs, inside one transaction."""
 
     async def routine_by_key(self, key: str) -> Routine | None: ...
-    async def routines_in(self, place: str) -> list[tuple[str, str]]: ...
+    async def routines_in(self, place: str, limit: int) -> list[tuple[str, str]]:
+        """The latest *limit* routines of *place*, oldest first."""
+        ...
+
     async def routine(self, routine_id: str) -> Routine | None: ...
     async def insert_routine(self, routine: Routine) -> None: ...
     async def has_episode(self, task_id: str) -> bool: ...
@@ -498,7 +502,9 @@ async def _lookup(
     if routine is not None:
         match = "routine" if routine.name is not None else "exact"
     elif key.name is None:
-        similar = find_similar(key.query_text, await tx.routines_in(key.place))
+        similar = find_similar(
+            key.query_text, await tx.routines_in(key.place, SIMILAR_MAX_ROUTINES)
+        )
         if similar is None:
             return None
         routine = await tx.routine(similar.routine_id)
@@ -529,7 +535,8 @@ async def _learn(
         similar_to = None
         if facts.key.name is None:
             similar = find_similar(
-                facts.key.query_text, await tx.routines_in(facts.key.place)
+                facts.key.query_text,
+                await tx.routines_in(facts.key.place, SIMILAR_MAX_ROUTINES),
             )
             if similar is not None:
                 similar_to = similar.routine_id
@@ -788,12 +795,13 @@ class _MemoryTx:
     async def routine_by_key(self, key: str) -> Routine | None:
         return next((r for r in self.state.routines.values() if r.key == key), None)
 
-    async def routines_in(self, place: str) -> list[tuple[str, str]]:
-        return [
+    async def routines_in(self, place: str, limit: int) -> list[tuple[str, str]]:
+        found = [
             (r.routine_id, r.query_text)
             for r in self.state.routines.values()
             if r.place == place
         ]
+        return found[-limit:] if limit > 0 else []
 
     async def routine(self, routine_id: str) -> Routine | None:
         return self.state.routines.get(routine_id)
@@ -972,13 +980,15 @@ class _SqlTx:
         row = await self._one("SELECT * FROM routines WHERE key = ?", (key,))
         return None if row is None else routine_from_row(row)
 
-    async def routines_in(self, place: str) -> list[tuple[str, str]]:
+    async def routines_in(self, place: str, limit: int) -> list[tuple[str, str]]:
         rows = await self._all(
+            # Newest first by insertion, which the index on place walks
+            # backwards: the cost stays that of *limit* rows.
             "SELECT routine_id, query_text FROM routines WHERE place = ? "
-            "ORDER BY created_at, rowid",
-            (place,),
+            "ORDER BY rowid DESC LIMIT ?",
+            (place, max(limit, 0)),
         )
-        return [(row["routine_id"], row["query_text"]) for row in rows]
+        return [(row["routine_id"], row["query_text"]) for row in reversed(rows)]
 
     async def routine(self, routine_id: str) -> Routine | None:
         row = await self._one(
