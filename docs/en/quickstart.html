@@ -289,12 +289,14 @@ brew install jundot/omlx/omlx</code></pre>
           </li>
           <li>
             <p>Start the server, and leave it running in its own terminal:</p>
-            <pre><code>omlx serve --model-dir ~/models</code></pre>
+            <pre><code>omlx serve --model-dir ~/models --port 8000</code></pre>
             <p>
-              It listens on <code>http://127.0.0.1:8000</code>;
-              <code>--port</code> changes the port. oMLX saves
-              <code>--model-dir</code> and <code>--port</code> in
-              <code>~/.omlx/settings.json</code> for later runs. Keep the
+              It listens on <code>http://127.0.0.1:8000</code>. oMLX saves
+              <code>--model-dir</code> and <code>--port</code> in its
+              <code>settings.json</code> (under <code>~/.omlx</code> by
+              default) and uses them when you leave the flags out, so a port
+              saved earlier wins over the default 8000; giving
+              <code>--port</code> avoids that. Keep the
               default host and do not set <code>--api-key</code>: localmelo
               sends no API key to a local server. If requests fail with HTTP
               401 (<code>API key required</code>), a key was set earlier, in
@@ -305,11 +307,14 @@ brew install jundot/omlx/omlx</code></pre>
           </li>
           <li>
             <p>Check that the server lists the model:</p>
-            <pre><code>curl -s http://127.0.0.1:8000/v1/models</code></pre>
+            <pre><code>curl -sS http://127.0.0.1:8000/v1/models</code></pre>
             <p>
               The reply's <code>data</code> list holds an entry with
               <code>"id": "Qwen3-8B-4bit"</code>. It can also list MLX models
-              from your Hugging Face cache.
+              from your Hugging Face cache. <code>Failed to connect</code>
+              means that nothing listens on that port: check the port in
+              oMLX's startup log. <code>API key required</code> means that a
+              key is set: see step 3.
             </p>
           </li>
           <li>

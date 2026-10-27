@@ -213,12 +213,13 @@ use it instead of Ollama:
 3. Start the server, and leave it running in its own terminal:
 
    ```bash
-   omlx serve --model-dir ~/models
+   omlx serve --model-dir ~/models --port 8000
    ```
 
-   It listens on `http://127.0.0.1:8000`; `--port` changes the port. oMLX
-   saves `--model-dir` and `--port` in `~/.omlx/settings.json` for later
-   runs. Keep the default host and do not set `--api-key`: localmelo sends
+   It listens on `http://127.0.0.1:8000`. oMLX saves `--model-dir` and
+   `--port` in its `settings.json` (under `~/.omlx` by default) and uses
+   them when you leave the flags out, so a port saved earlier wins over the
+   default 8000; giving `--port` avoids that. Keep the default host and do not set `--api-key`: localmelo sends
    no API key to a local server. If requests fail with HTTP 401
    (`API key required`), a key was set earlier, in oMLX's admin page or
    with `OMLX_API_KEY`: turn on **Allow inference without API key** in the
@@ -227,11 +228,14 @@ use it instead of Ollama:
 4. Check that the server lists the model:
 
    ```bash
-   curl -s http://127.0.0.1:8000/v1/models
+   curl -sS http://127.0.0.1:8000/v1/models
    ```
 
    The reply's `data` list holds an entry with `"id": "Qwen3-8B-4bit"`. It
    can also list MLX models from your Hugging Face cache.
+   `Failed to connect` means that nothing listens on that port: check the
+   port in oMLX's startup log. `API key required` means that a key is set:
+   see step 3.
 
 5. Run a task with that id:
 
