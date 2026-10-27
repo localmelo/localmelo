@@ -483,3 +483,45 @@ async def test_control_characters_in_the_queued_line_and_the_hint_are_spelled() 
         await app.settle()
         assert "Queued for the next turn: one^Ztwo" in app.text()
         assert "hint^Ghere" in app.text()
+
+
+# ── The input box fits the terminal's rows ──
+
+PASTE = "\x1b[200~" + "\n".join(f"line {n}" for n in range(1, 16)) + "\x1b[201~"
+
+
+async def test_a_tall_draft_on_a_short_terminal_keeps_the_ui() -> None:
+    async with running_app(columns=60, rows=12) as app:
+        app.type(PASTE)
+        await app.wait(lambda: app.ui.buffer.text.endswith("line 15"))
+        await app.settle()
+        screen = app.screen()
+        assert "Window too small" not in "\n".join(screen)
+        rows = [row for row in screen if row.strip()]
+        assert "stub-model" in rows[-1]  # the status bar
+        assert any("line 15" in row for row in rows)  # the cursor's row
+
+
+async def test_a_tall_draft_during_a_turn_keeps_the_live_rows() -> None:
+    now = [50.0]
+    controller = FakeController(state="running", queued="queued one")
+    async with running_app(
+        controller, columns=80, rows=15, clock=lambda: now[0]
+    ) as app:
+        app.ui.renderer.live = LiveState(
+            activity="Running",
+            started=40.0,
+            step=2,
+            tool="shell_exec",
+            preview="pytest -q",
+            tool_started=47.0,
+            tool_limit_s=600,
+        )
+        app.type(PASTE)
+        await app.wait(lambda: app.ui.buffer.text.endswith("line 15"))
+        await app.settle()
+        text = app.text()
+        assert "Window too small" not in text
+        assert "esc to stop" in text and "of 10:00" in text  # both live rows
+        assert "Queued for the next turn: queued one" in text
+        assert any("line 15" in row for row in app.screen())

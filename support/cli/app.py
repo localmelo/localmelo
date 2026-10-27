@@ -553,11 +553,32 @@ class InteractiveApp:
         )
 
     def _input_height(self) -> Dimension:
-        columns = self.app.output.get_size().columns
+        """The draft's rows, at most what the screen has left (at least 1).
+
+        The status bar, the rules, the live area (a turn's spinner and its
+        running tool), a queued line, a hint and the search field keep
+        their rows; a taller draft scrolls to the cursor.
+        """
+        size = self.app.output.get_size()
         rows = input_rows(
-            self._shown_text(), cells(self._prompt()), PREFIX_CELLS, columns
+            self._shown_text(), cells(self._prompt()), PREFIX_CELLS, size.columns
         )
-        return Dimension.exact(rows)
+        others = 3 + sum(
+            (
+                self._live_rows(),
+                self.controller.queued is not None,
+                self._hint_visible(),
+                self.app.layout.is_searching,
+            )
+        )
+        rows = max(1, min(rows, size.rows - others))
+        return Dimension(min=1, preferred=rows, max=rows)
+
+    def _live_rows(self) -> int:
+        if not self._live_visible():
+            return 0
+        text = "".join(fragment[1] for fragment in self._live_fragments())
+        return text.count("\n") + 1
 
     def _shown_text(self) -> str:
         """The draft, or during Ctrl+R the history entry the box previews."""
