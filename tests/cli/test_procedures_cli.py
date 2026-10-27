@@ -230,7 +230,7 @@ def test_episodes_with_llm_calls(
     assert episode["template_id"].startswith(routine["routine_id"] + ":")
 
 
-def test_episodes_without_llm_calls_group_rows_by_thought(
+def test_episodes_without_llm_calls_split_steps_at_a_thought_or_a_pause(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     write_history_sync(tmp_path / "history.db", CALLS, llm_calls=False)
@@ -238,12 +238,49 @@ def test_episodes_without_llm_calls_group_rows_by_thought(
     assert code == 0, err
     _, episode = lines(out)
     segments = [Segment.from_dict(s) for s in json.loads(episode["segments_json"])]
-    # "Look first." starts step 1; the second call's "" is another thought,
-    # so it starts step 2; the third repeats "Look first." after "" (step 3).
-    assert [s.steps for s in segments] == [(1, 1), (2, 2), (3, 3), (4, 4), (5, 5)]
-    assert episode["steps"] == 5
+    # The agent writes a step's thought on its first call only: the second
+    # read, with "" and the same time, belongs to step 1.
+    assert [(s.cls, s.steps) for s in segments] == [
+        ("R", (1, 1)),
+        ("R", (1, 1)),
+        ("T", (2, 2)),
+        ("W", (3, 3)),
+        ("T", (4, 4)),
+    ]
+    # Without a result, the steps are those that called a tool.
+    assert episode["steps"] == 4
     assert episode["model"] == "" and episode["harness_version"] == "unknown"
     assert episode["status"] == "running"
+
+
+def test_episodes_without_llm_calls_split_silent_steps_by_time(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def silent(seq: int, command: str, at: float) -> RawCall:
+        return RawCall(
+            task_id="t1",
+            seq=seq,
+            tool_calls=(shell(f"c{seq}", command),),
+            tool_results=(result("ok"),),
+            timestamp=at,
+        )
+
+    calls = [
+        silent(0, "ls", 100.0),
+        silent(1, "cat a", 103.0),
+        silent(2, "pytest", 103.2),
+    ]
+    write_history_sync(tmp_path / "history.db", calls, llm_calls=False)
+    code, out, err = run(capsys, "episodes", "--history", str(tmp_path))
+    assert code == 0, err
+    _, episode = lines(out)
+    segments = [Segment.from_dict(s) for s in json.loads(episode["segments_json"])]
+    # No thought anywhere: 3 s between rows is a planning call, 0.2 s is not.
+    assert [(s.cls, s.target, s.steps) for s in segments] == [
+        ("R", "ls", (1, 1)),
+        ("R", "cat", (2, 2)),
+        ("T", "pytest", (2, 2)),
+    ]
 
 
 def test_episodes_with_a_key_and_a_place(
@@ -806,3 +843,17 @@ def test_online_flags_are_refused_with_other_protocols(
     code, _, err = run(capsys, "replay", str(FIXTURE), "--protocol", protocol, *flag)
     assert code == 2
     assert f"{flag[0]} applies only to --protocol online" in err
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"steps": 1e999}, {"segments_json": '[{"cls": "R", "steps": [1, 1e999]}]'}],
+)
+def test_replay_refuses_infinite_numbers(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], change: dict[str, Any]
+) -> None:
+    row = {**episode("t1", 5, 1), **change}
+    path = tmp_path / "e.jsonl"
+    path.write_text(json.dumps(row) + "\n", encoding="utf-8")
+    code, _, err = run(capsys, "replay", str(path))
+    assert code == 2 and err.startswith(f"melo-procedures: error: {path}:1: ")

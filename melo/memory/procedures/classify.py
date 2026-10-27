@@ -183,6 +183,8 @@ def parse_test_summary(output: str) -> TestSummary | None:
     after it is no summary.
     When both kinds are present, the later one counts.
     """
+    if not isinstance(output, str):
+        return None
     pytest_at, pytest_summary = _pytest_summary(output)
     unittest_at, unittest_summary = _unittest_summary(output)
     if pytest_summary is None:
@@ -243,6 +245,8 @@ def call_failed(status: str, output: str) -> bool:
     """
     if status != "success":
         return True
+    if not isinstance(output, str):
+        return False
     first_line = output.split("\n", 1)[0].strip()
     match = _EXIT_CODE.fullmatch(first_line)
     return match is not None and int(match.group(1)) != 0
@@ -313,6 +317,8 @@ def label_for(tool_name: str, arguments: Any) -> str:
     any other tool. The label passes ``redact_secrets`` and is cut to
     :data:`MAX_LABEL` characters.
     """
+    if not isinstance(tool_name, str):
+        tool_name = "" if tool_name is None else str(tool_name)
     if tool_name in ("file_read", "file_write"):
         verb = "Read" if tool_name == "file_read" else "Edit"
         base = _basename(arguments)

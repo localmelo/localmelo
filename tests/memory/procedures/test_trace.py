@@ -176,10 +176,11 @@ def test_trace_from_segments_spreads_calls_over_their_steps() -> None:
         ("W", 3),
         ("W", 3),
         ("W", 3),
-        ("T", 4),
+        # The call nearest the first pass moves onto it.
         ("T", 5),
+        ("T", 6),
     ]
-    assert [c.passed for c in trace.calls][-2:] == [False, True]
+    assert [c.passed for c in trace.calls][-2:] == [True, False]
     assert trace.first_pass_step == 5
     assert trace.step_number == 7
 
@@ -225,3 +226,33 @@ def test_add_accepts_a_classified_call() -> None:
     )
     assert trace.first_pass_step == 1
     assert trace.phase == FINISHING
+
+
+def test_odd_tool_results_never_raise() -> None:
+    trace = Trace(clock=lambda: 0.0)
+    trace.step(1, 1)
+    trace.tool(None, None, None, None)  # type: ignore[arg-type]
+    trace.tool("shell_exec", {"command": "pytest"}, "success", b"3 passed")  # type: ignore[arg-type]
+    assert [call.cls for call in trace.calls] == ["X", "T"]
+
+
+def test_a_rebuilt_segment_keeps_its_last_step_and_its_pass() -> None:
+    segment = Segment("T", "pytest", "pytest", (2, 5), calls=2, passed=True)
+    trace = trace_from_segments([segment], 5, first_pass_step=5)
+    assert [call.step for call in trace.calls] == [2, 5]
+    assert trace.first_pass_step == 5
+    assert trace.segments()[0].steps == (2, 5)
+    three = trace_from_segments([Segment("R", "", None, (1, 7), calls=3)], 7)
+    assert [call.step for call in three.calls] == [1, 4, 7]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"cls": "R", "steps": [1, 1e999]},
+        {"cls": "R", "steps": [1, 1], "calls": float("inf")},
+    ],
+)
+def test_an_infinite_number_is_a_malformed_segment(bad: dict[str, object]) -> None:
+    with pytest.raises(ValueError):
+        Segment.from_dict(bad)

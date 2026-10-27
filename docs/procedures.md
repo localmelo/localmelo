@@ -203,8 +203,11 @@ directory that holds it.
   none). `--key` sets the routine's key; by default it is the normalized
   query with `--place` (default: empty).
 - A tool call's step comes from the `llm_calls` table when the file has it.
-  Without it, consecutive history rows with the same thought form one step,
-  an approximation; `--result-json` then gives the true step total.
+  Without it, the step is an approximation: the agent writes a step's text
+  on its first history row only and a step's rows within moments of each
+  other, so a row with text, or one written more than 0.5 s after the row
+  before it (a planning call came between), starts a new step.
+  `--result-json` then gives the true step total.
 
 Join the lines of several runs and replay them:
 

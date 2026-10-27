@@ -346,3 +346,13 @@ def test_a_unittest_failure_after_ok_is_no_pass() -> None:
     assert summary is not None and not summary.is_pass
     once = "Ran 3 tests in 0.1s\n\nOK\nthen\nFAILED (failures=2)"
     assert parse_test_summary(once) == TestSummary(1, 2, 0)
+
+
+def test_odd_outputs_and_names_never_raise() -> None:
+    assert call_failed("success", None) is False  # type: ignore[arg-type]
+    assert call_failed(None, "") is True  # type: ignore[arg-type]
+    assert parse_test_summary(None) is None  # type: ignore[arg-type]
+    assert parse_test_summary(b"3 passed") is None  # type: ignore[arg-type]
+    assert label_for(5, {}) == "5"  # type: ignore[arg-type]
+    assert label_for(None, {}) == "tool"  # type: ignore[arg-type]
+    assert classify_call(None, {}) == "X"  # type: ignore[arg-type]

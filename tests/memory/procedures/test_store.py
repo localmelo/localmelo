@@ -726,3 +726,27 @@ async def test_a_similar_view_records_no_version_of_its_own_template(
     # the template this episode belongs to.
     assert result.episode.template_id != view.template_id
     assert (result.episode.level, result.episode.template_version) == (1, None)
+
+
+async def test_a_newer_file_is_not_written_to(tmp_path: Path) -> None:
+    path = tmp_path / "procedures.db"
+    with contextlib.closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE notes (text TEXT)")
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
+    before = path.read_bytes()
+    store = SqliteProcedures(path)
+    with pytest.raises(ProceduresSchemaError):
+        await store.export_rows()
+    await store.aclose()
+    assert path.read_bytes() == before
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["procedures.db"]
+
+
+def test_segments_from_json_skips_infinite_numbers() -> None:
+    from localmelo.melo.memory.procedures.store import segments_from_json
+
+    text = '[{"cls": "R", "steps": [1, 1e999]}, {"cls": "W", "steps": [2, 2]}]'
+    assert [s.cls for s in segments_from_json(text)] == ["W"]
+    with pytest.raises(ValueError):
+        segments_from_json(text, strict=True)

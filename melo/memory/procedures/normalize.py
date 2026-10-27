@@ -118,8 +118,8 @@ class RoutineKey:
     """What identifies a routine, with the text a new routine stores.
 
     ``name`` is the routine's name for a named routine, else ``None``;
-    ``query_text`` is the normalized query, redacted and cut to
-    :data:`MAX_QUERY_TEXT` characters (empty when there is no query).
+    ``query_text`` is the query as :func:`query_text_of` keeps it (empty
+    when there is no query).
     """
 
     key: str
@@ -130,12 +130,11 @@ class RoutineKey:
 
 def key_for_query(query: str, place: str) -> RoutineKey:
     """The routine of *query* run in *place* (see :func:`run_place`)."""
-    normalized = normalize_query(query)
     return RoutineKey(
-        key=routine_key(normalized, place),
+        key=routine_key(normalize_query(query), place),
         place=place,
         name=None,
-        query_text=stored_query_text(normalized),
+        query_text=query_text_of(query),
     )
 
 
@@ -143,7 +142,7 @@ def key_for_routine(name: str, query: str = "") -> RoutineKey:
     """The named routine *name*: one routine in any folder.
 
     The key's text is ``routine:<name>`` with *name* stripped, and its
-    place is empty. *query*, normalized, is the text a new routine stores.
+    place is empty. *query* gives the text a new routine stores.
     Raises ``ValueError`` for a blank name.
     """
     stripped = name.strip()
@@ -153,8 +152,20 @@ def key_for_routine(name: str, query: str = "") -> RoutineKey:
         key=routine_key(f"routine:{stripped}", ""),
         place="",
         name=stripped,
-        query_text=stored_query_text(normalize_query(query)),
+        query_text=query_text_of(query),
     )
+
+
+def query_text_of(query: str) -> str:
+    """The text a routine keeps for *query*.
+
+    Secrets are redacted before normalizing, whose lowercasing and date
+    masks would hide a key's shape from :func:`redact_secrets`, and again
+    after; the text is cut to :data:`MAX_QUERY_TEXT` characters. The key
+    still hashes the query without redaction.
+    """
+    redacted, _ = redact_secrets(query)
+    return stored_query_text(normalize_query(redacted))
 
 
 def stored_query_text(normalized: str) -> str:

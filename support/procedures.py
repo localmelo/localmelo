@@ -43,8 +43,7 @@ from localmelo.melo.memory.procedures.normalize import (
     RoutineKey,
     key_for_query,
     length_options,
-    normalize_query,
-    stored_query_text,
+    query_text_of,
     template_id,
 )
 from localmelo.melo.memory.procedures.store import (
@@ -94,6 +93,9 @@ MIN_PHASE_AGREEMENT: Final = 0.9
 FIRST_K: Final = 2
 # loo needs a group of at least this many runs.
 LOO_MIN_GROUP: Final = 3
+# Without llm_calls, a pause this long between two history rows means a
+# planning call came between them: a new step.
+STEP_PAUSE_S: Final = 0.5
 
 
 class _InputError(Exception):
@@ -390,7 +392,6 @@ def _task_lines(
     reflect_after = sorted(reflections)
     step = 0
     attempt = 1
-    previous_thought: str | None = None
 
     def start_steps(to_step: int, to_attempt: int) -> None:
         nonlocal step, attempt
@@ -402,14 +403,24 @@ def _task_lines(
             trace.step(k, to_attempt)
         step, attempt = max(step, to_step), max(attempt, to_attempt)
 
-    for step_id, thought, call_json, result_json, _ in rows:
+    previous_time: float | None = None
+    for step_id, thought, call_json, result_json, written in rows:
         if mapping:
             row_step, row_attempt = mapping.get(step_id, (max(step, 1), attempt))
         else:
-            # Without llm_calls, consecutive rows with one thought are one step.
-            new = step == 0 or thought != previous_thought
+            # Without llm_calls: the agent writes a step's text on its first
+            # row only, and a step's rows within moments of each other, so a
+            # row with a thought, or one written after a pause (a planning
+            # call), starts a step.
+            paused = (
+                previous_time is not None
+                and written is not None
+                and written - previous_time > STEP_PAUSE_S
+            )
+            new = step == 0 or bool(thought) or paused
             row_step, row_attempt = step + new, attempt
-        previous_thought = thought
+        if written is not None:
+            previous_time = float(written)
         start_steps(row_step, row_attempt)
         if not call_json:
             continue
@@ -481,7 +492,7 @@ def _task_lines(
 
 
 def _text(query: str | None) -> str:
-    return stored_query_text(normalize_query(query or ""))
+    return query_text_of(query or "")
 
 
 def _episodes(args: argparse.Namespace) -> int:
@@ -531,7 +542,7 @@ def load_rows(paths: Iterable[str]) -> _Data:
                         raise ValueError(f"task {episode.task_id} appears twice")
                     seen.add(episode.task_id)
                     data.episodes.append(episode)
-            except (KeyError, TypeError, ValueError) as exc:
+            except (KeyError, TypeError, ValueError, OverflowError) as exc:
                 raise _InputError(f"{where}: {exc}") from None
     order = {id(e): i for i, e in enumerate(data.episodes)}
     data.episodes.sort(key=lambda e: (e.created_at, order[id(e)]))

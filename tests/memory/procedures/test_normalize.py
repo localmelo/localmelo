@@ -239,3 +239,17 @@ def test_a_routine_id_like_the_probe_does_not_collide() -> None:
     routines = [*ROUTINES, ("\0query", "something else entirely")]
     match = find_similar(ROUTINES[0][1], routines)
     assert match is not None and match.routine_id == "r-mail"
+
+
+def test_secrets_are_redacted_before_the_query_is_lowercased() -> None:
+    aws = "deploy with key AKIAIOSFODNN7EXAMPLE now"
+    stored = key_for_query(aws, "/p").query_text
+    assert "akiaiosfodnn7example" not in stored
+    assert stored == "deploy with key [redacted] now"
+    assert "akia" not in key_for_routine("deploy", aws).query_text
+    # A key with a date-like part is redacted whole, not split by the mask.
+    key = "sk-2026-10-26" + "a" * 20
+    assert key_for_query(f"use {key}", "/p").query_text == "use [redacted]"
+    # The key still tells two secrets apart.
+    other = aws.replace("EXAMPLE", "EXAMPLX")
+    assert key_for_query(other, "/p").key != key_for_query(aws, "/p").key

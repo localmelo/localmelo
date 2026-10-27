@@ -1133,6 +1133,8 @@ class SqliteProcedures(Procedures):
             create_private_file(self._db_path)
         conn = await aiosqlite.connect(self._db_path)
         try:
+            # A newer file is refused before anything is written to it.
+            await self._check_version(conn)
             await prepare_connection(conn, _SCHEMA)
             await conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
             await self._migrate(conn)
@@ -1146,17 +1148,22 @@ class SqliteProcedures(Procedures):
         self._conn = conn
         return conn
 
+    async def _check_version(self, conn: aiosqlite.Connection) -> int:
+        async with conn.execute("PRAGMA user_version") as cursor:
+            row = await cursor.fetchone()
+        version = int(row[0]) if row else 0
+        if version > SCHEMA_VERSION:
+            raise ProceduresSchemaError(
+                f"{self._db_path} has schema version {version}; this "
+                f"localmelo reads version {SCHEMA_VERSION}"
+            )
+        return version
+
     async def _migrate(self, conn: aiosqlite.Connection) -> None:
         try:
             await conn.execute("BEGIN IMMEDIATE")
-            async with conn.execute("PRAGMA user_version") as cursor:
-                row = await cursor.fetchone()
-            version = int(row[0]) if row else 0
-            if version > SCHEMA_VERSION:
-                raise ProceduresSchemaError(
-                    f"{self._db_path} has schema version {version}; this "
-                    f"localmelo reads version {SCHEMA_VERSION}"
-                )
+            # Again inside the transaction: another opener may have migrated.
+            version = await self._check_version(conn)
             if version < SCHEMA_VERSION:
                 await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             await conn.commit()

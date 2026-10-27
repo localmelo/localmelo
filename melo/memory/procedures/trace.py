@@ -103,7 +103,7 @@ class Segment:
             calls = int(data.get("calls", 1))
             attempt = int(data.get("attempt", 1))
             wall_s = float(data.get("wall_s", 0.0))
-        except (KeyError, TypeError) as exc:
+        except (KeyError, TypeError, OverflowError) as exc:
             raise ValueError(f"malformed segment: {exc}") from None
         if not (1 <= first <= last) or calls < 1 or attempt < 1:
             raise ValueError("malformed segment: bad steps, calls or attempt")
@@ -157,6 +157,8 @@ class Trace:
         The call is classified and labelled; a test call's summary is read
         from its output's tail. The output itself is not kept.
         """
+        if not isinstance(output, str):
+            output = ""
         cls = classify_call(name, arguments)
         label = label_for(name, arguments)
         failed = call_failed(status, output)
@@ -254,20 +256,19 @@ def trace_from_segments(
     highest = 1
     for segment in segments:
         first, last = segment.steps
-        span = last - first + 1
         if segment.attempt > highest:
             reflect_before.add(first)
             highest = segment.attempt
-        at = [
-            first + min(span - 1, i * span // segment.calls)
-            for i in range(segment.calls)
-        ]
+        at = _spread(first, last, segment.calls)
         pass_index = -1
         if segment.passed:
-            pass_index = next(
-                (i for i, step in enumerate(at) if step == first_pass_step),
-                segment.calls - 1,
-            )
+            pass_index = segment.calls - 1
+            if first_pass_step is not None and first <= first_pass_step <= last:
+                # The call nearest the first pass moves onto it.
+                pass_index = min(
+                    range(segment.calls), key=lambda i: abs(at[i] - first_pass_step)
+                )
+                at[pass_index] = first_pass_step
         for index, step in enumerate(at):
             attempt_at.setdefault(step, segment.attempt)
             calls.append(
@@ -294,6 +295,14 @@ def trace_from_segments(
     for call in calls[index:]:
         trace.add(call)
     return trace
+
+
+def _spread(first: int, last: int, calls: int) -> list[int]:
+    """The steps of *calls* calls spread over *first*..*last*, ends included."""
+    if calls == 1:
+        return [first]
+    span = last - first
+    return [first + (i * span + (calls - 1) // 2) // (calls - 1) for i in range(calls)]
 
 
 def first_steps(segments: Sequence[Segment]) -> dict[str, int]:
