@@ -445,8 +445,8 @@ def save(cfg: Config) -> None:
     os.makedirs(CONFIG_DIR, exist_ok=True)
 
     lines: list[str] = []
-    lines.append(f'chat_backend = "{cfg.chat_backend}"')
-    lines.append(f'embedding_backend = "{cfg.embedding_backend}"')
+    lines.append(f"chat_backend = {_toml_string(cfg.chat_backend)}")
+    lines.append(f"embedding_backend = {_toml_string(cfg.embedding_backend)}")
     # Top-level keys go before the first table. Only a value that is set
     # is written, so a config without one is saved as it was before.
     if cfg.request_timeout_s is not None:
@@ -457,10 +457,10 @@ def save(cfg: Config) -> None:
     for section in _LOCAL_SECTIONS:
         sec = getattr(cfg, section)
         lines.append(f"[{section}]")
-        lines.append(f'chat_url = "{sec.chat_url}"')
-        lines.append(f'chat_model = "{sec.chat_model}"')
-        lines.append(f'embedding_url = "{sec.embedding_url}"')
-        lines.append(f'embedding_model = "{sec.embedding_model}"')
+        lines.append(f"chat_url = {_toml_string(sec.chat_url)}")
+        lines.append(f"chat_model = {_toml_string(sec.chat_model)}")
+        lines.append(f"embedding_url = {_toml_string(sec.embedding_url)}")
+        lines.append(f"embedding_model = {_toml_string(sec.embedding_model)}")
         if sec.extra_body:
             lines.append(f"extra_body = {_toml_value(sec.extra_body)}")
         lines.append("")
@@ -469,16 +469,16 @@ def save(cfg: Config) -> None:
     for section in _CLOUD_SECTIONS:
         sec = getattr(cfg, section)
         lines.append(f"[{section}]")
-        lines.append(f'api_key_env = "{sec.api_key_env}"')
-        lines.append(f'chat_model = "{sec.chat_model}"')
-        lines.append(f'base_url = "{sec.base_url}"')
+        lines.append(f"api_key_env = {_toml_string(sec.api_key_env)}")
+        lines.append(f"chat_model = {_toml_string(sec.chat_model)}")
+        lines.append(f"base_url = {_toml_string(sec.base_url)}")
         if sec.extra_body:
             lines.append(f"extra_body = {_toml_value(sec.extra_body)}")
         lines.append("")
 
     lines.append("[gateway]")
     lines.append(f"port = {cfg.gateway.port}")
-    lines.append(f'host = "{cfg.gateway.host}"')
+    lines.append(f"host = {_toml_string(cfg.gateway.host)}")
     lines.append("")
 
     # TOML files are UTF-8. Encode before opening the file, so text that

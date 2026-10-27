@@ -19,6 +19,7 @@ from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.procedures.store import SqliteProcedures
 from localmelo.melo.schema import RunResult, answer_text, split_thinking
+from localmelo.support.backends.discovery import parse_model_ids
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
@@ -111,32 +112,6 @@ def _detect_adapter(chat_url: str, hint: str | None) -> str:
     if "11434" in lowered or "ollama" in lowered:
         return "ollama"
     return "mlc"
-
-
-def _parse_model_ids(payload: Any) -> list[str]:
-    items: list[Any] = []
-    if isinstance(payload, dict):
-        if isinstance(payload.get("data"), list):
-            items = payload["data"]
-        elif isinstance(payload.get("models"), list):
-            items = payload["models"]
-
-    names: list[str] = []
-    seen: set[str] = set()
-    for item in items:
-        model_id = ""
-        if isinstance(item, str):
-            model_id = item
-        elif isinstance(item, dict):
-            for key in ("id", "name", "model"):
-                value = item.get(key)
-                if isinstance(value, str) and value.strip():
-                    model_id = value.strip()
-                    break
-        if model_id and model_id not in seen:
-            seen.add(model_id)
-            names.append(model_id)
-    return names
 
 
 def _load_scenarios() -> list[dict[str, Any]]:
@@ -531,7 +506,7 @@ class SmokePlayground:
         ) as client:
             resp = await client.get("/models")
             resp.raise_for_status()
-            models = _parse_model_ids(resp.json())
+            models = parse_model_ids(resp.json())
         if not models:
             raise ValueError(f"No models found at {url}")
         return models

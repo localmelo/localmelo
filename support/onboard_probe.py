@@ -62,7 +62,12 @@ async def probe_embedding(cfg: _config_mod.Config) -> None:
         return
 
     backend = get_backend(cfg.embedding_backend)
-    provider: BaseEmbeddingProvider | None = backend.build_embedding_provider(cfg)
+    try:
+        provider: BaseEmbeddingProvider | None = backend.build_embedding_provider(cfg)
+    except Exception as exc:  # noqa: BLE001 — wrap as ProbeError for callers
+        raise ProbeError(
+            f"embedding probe failed: [{cfg.embedding_backend}] {exc}"
+        ) from exc
     if provider is None:
         raise ProbeError(
             f"embedding probe failed: backend '{cfg.embedding_backend}' "

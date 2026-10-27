@@ -570,6 +570,8 @@ class TestConfigValidationFailure:
 
         with (
             mock.patch("localmelo.__main__._register_backends"),
+            # The wizard asks its questions only on a terminal.
+            mock.patch("localmelo.__main__._on_a_terminal", return_value=True),
             mock.patch("sys.argv", ["melo", "--serve"]),
             mock.patch("localmelo.support.config.load", return_value=empty_cfg),
             mock.patch(
@@ -594,6 +596,8 @@ class TestReconfigure:
 
         with (
             mock.patch("localmelo.__main__._register_backends"),
+            # The wizard asks its questions only on a terminal.
+            mock.patch("localmelo.__main__._on_a_terminal", return_value=True),
             mock.patch("sys.argv", ["melo", "--serve", "--reconfigure"]),
             mock.patch("localmelo.support.config.load", return_value=valid_cfg),
             mock.patch(
@@ -619,6 +623,8 @@ class TestReconfigure:
 
         with (
             mock.patch("localmelo.__main__._register_backends"),
+            # The wizard asks its questions only on a terminal.
+            mock.patch("localmelo.__main__._on_a_terminal", return_value=True),
             mock.patch("sys.argv", ["melo", "--serve", "--reconfigure"]),
             mock.patch("localmelo.support.config.load", return_value=valid_cfg),
             mock.patch(

@@ -188,10 +188,10 @@ def test_run_probes_reports_invalid_extra_body(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Setup reports the failure and asks whether to save; no traceback."""
-    with mock.patch("localmelo.support.onboard._ask", return_value="N") as ask:
+    with mock.patch("builtins.input", return_value="N") as ask:
         assert _run_probes(_invalid_extra_body_cfg()) is False
 
-    ask.assert_called_once()
+    ask.assert_called_once_with("  [s]ave anyway, [N]o [N]: ")
     out = capsys.readouterr().out
     assert "Probe failed: chat probe failed: [vllm] extra_body must not set" in out
     assert "config not saved" in out
@@ -255,10 +255,10 @@ def test_run_probes_reports_an_invalid_request_timeout(
     chat = _FakeChat()
     cfg = _timeout_cfg("probe-timeout-chat", chat, 0)
 
-    with mock.patch("localmelo.support.onboard._ask", return_value="N") as ask:
+    with mock.patch("builtins.input", return_value="N") as ask:
         assert _run_probes(cfg) is False
 
-    ask.assert_called_once()
+    ask.assert_called_once_with("  [s]ave anyway, [N]o [N]: ")
     out = capsys.readouterr().out
     assert (
         "Probe failed: chat probe failed: request_timeout_s must be a finite "

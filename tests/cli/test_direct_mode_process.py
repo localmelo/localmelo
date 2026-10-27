@@ -44,16 +44,31 @@ class FakeChatServer:
     """An OpenAI-compatible ``/chat/completions`` that replays queued replies.
 
     Once ``replies`` is empty, every reply is the final answer ``done``.
-    ``bodies`` keeps the body of every request, in order.
+    ``bodies`` keeps the body of every request, in order. ``GET /models``
+    lists ``models``.
     """
 
     def __init__(self) -> None:
         self.replies: list[dict[str, Any]] = []
         self.requests = 0
         self.bodies: list[dict[str, Any]] = []
+        self.models = ["fake-model"]
         server = self
 
         class Handler(BaseHTTPRequestHandler):
+            def do_GET(self) -> None:
+                if not self.path.endswith("/models"):
+                    self.send_error(404)
+                    return
+                body = json.dumps(
+                    {"object": "list", "data": [{"id": m} for m in server.models]}
+                ).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
             def do_POST(self) -> None:
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 server.bodies.append(json.loads(body))

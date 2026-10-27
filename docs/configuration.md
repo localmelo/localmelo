@@ -1,22 +1,81 @@
 # Configuration
 
-This page explains how localmelo connects to your model servers: the setup
-wizard, the config file, the supported backends, and the settings you can
-change.
+This page explains how localmelo connects to your model servers: the first
+run, the setup wizard, the config file, the supported backends, and the
+settings you can change.
+
+## First run
+
+In a terminal with no config file, `melo` asks two questions, saves the
+answers and opens the conversation loop:
+
+```text
+$ melo
+No model server answered on this machine (ports 8000, 8400, 11434, 30000).
+Model server URL [http://127.0.0.1:8000/v1]: http://127.0.0.1:8080/v1
+Models on http://127.0.0.1:8080/v1:
+  [1] nomic-embed-text
+  [2] Qwen3-8B-4bit
+  [3] Qwen3-32B-4bit
+Model [2]:
+✓ http://127.0.0.1:8080/v1 lists 3 models; using Qwen3-8B-4bit.
+Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+```
+
+- A server on this computer that lists a model on port 8000, 8400, 11434 or
+  30000 fills in the URL; one with a chat model comes first. Only `GET /v1/models` is sent, to find servers and
+  to list the models: no chat request.
+- It saves an OpenAI-compatible server as the `vllm` backend, with
+  `embedding_backend = "none"`, and keeps the file's other settings:
+
+  ```toml
+  chat_backend = "vllm"
+  embedding_backend = "none"
+
+  [vllm]
+  chat_url = "http://127.0.0.1:8080/v1"
+  chat_model = "Qwen3-8B-4bit"
+  ```
+
+- A server that does not answer, refuses the request without an API key,
+  or lists no models is named with the reason, and you can retry, start
+  without saving or quit. localmelo never asks for an API key for a local
+  server.
+- The [command-line reference](cli.md#first-run) has every prompt and
+  reason.
+
+For embeddings, a cloud API or another backend, use the wizard.
 
 ## Set up with the wizard
 
 ```bash
-melo --serve --reconfigure
+melo --reconfigure          # the wizard, then the conversation loop
+melo --serve --reconfigure  # the wizard, then the gateway
 ```
 
 The wizard asks for a chat backend, its URL and model, and an embedding
 backend; [Save a configuration](quickstart.md#save-a-configuration) lists the
 prompts. It sends a short test request to each server, saves the config
-file, and then starts the gateway. Press Ctrl+C to stop the gateway.
+file, and then opens the conversation loop or, with `--serve`, starts the
+gateway. Press Ctrl+C to stop the gateway.
 
-- `melo --reconfigure` does the same.
+- Each question offers the config file's current value in brackets: press
+  Enter to keep it. The embedding question offers `None` when no embedding
+  backend is set.
+- When the chat server's check fails, the wizard prints `Probe failed: …`
+  and asks `[r]etry, [s]ave anyway, [N]o [N]:`. `r` asks for the URL and
+  model again, with what you typed as the defaults; `s` saves anyway;
+  Enter or `N` saves nothing.
+- An HTTP 401 or 403 from a local server adds a note: localmelo sends no
+  API key to local servers. In oMLX, turn on
+  **Allow inference without API key**.
+- When the embedding server's check fails, the wizard saves with embedding
+  off (`embedding_backend = "none"`, no long-term memory) and says so.
 - `melo --serve` runs the wizard by itself when there is no config file.
+- Without a terminal the wizard reads its answers from stdin. With no
+  config file and no terminal, `melo --serve` exits with code 1 and one
+  line on stderr instead of waiting for answers that cannot come, as under
+  launchd.
 - Run the wizard again to change backends. It keeps the other settings it
   knows, such as `request_timeout_s` and `extra_body`, and rewrites the file
   in the current format; comments and unknown keys are dropped.
@@ -104,6 +163,9 @@ enable_thinking = false
 
 - `chat_model` is the model's id in oMLX's `GET /v1/models`: its folder
   name, or the alias set for it in oMLX.
+- [First run](#first-run) writes the `chat_backend`, `embedding_backend`,
+  `chat_url` and `chat_model` lines: run `melo` in a terminal with no
+  config file, while oMLX runs. Add the other lines by hand.
 - `request_timeout_s = 600` gives oMLX time to load the model when a
   request finds it unloaded; see [Chat request timeout](#chat-request-timeout).
 - The `extra_body` table turns off a Qwen3 model's thinking, which makes
@@ -290,6 +352,7 @@ chat_model = "Qwen/Qwen3-8B"
 |---|---|
 | `LOCALMELO_PERSIST_MEMORY` | Any non-empty value, even `0`, saves history and long-term memory in SQLite files. |
 | `LOCALMELO_MEMORY_DIR` | The directory for those files (default `~/.cache/localmelo/memory`). It is used exactly as given: `~` is not expanded. |
+| `LOCALMELO_DETECT_URLS` | The URLs that the [first run](#first-run) asks for a model list, comma-separated, in place of ports 8000, 8400, 11434 and 30000 of `127.0.0.1`. An empty value turns the search off. |
 | `LOCALMELO_THINKING_RETENTION_DAYS` | The days that `history.db` and the session store's `sessions.db` keep the model's reasoning (default 30): any number above 0, such as `7` or `0.5`. Any other value stops `melo` with exit code 2. See [Model calls](memory.md#model-calls). |
 | The variable that `api_key_env` names | The API key of a cloud backend, such as `OPENAI_API_KEY`. |
 

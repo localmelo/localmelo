@@ -1029,8 +1029,8 @@ class TestRequestTimeoutConfig:
             mock.patch.object(onboard, "_ask_choice", side_effect=[3, 5]),
             # Keep the saved [vllm] section as it is.
             mock.patch.dict(onboard._CHAT_SETUP, {"vllm": lambda cfg: True}),
-            # "Save config anyway?" is answered with its default, No.
-            mock.patch.object(onboard, "_ask", return_value="N") as ask,
+            # "[r]etry, [s]ave anyway, [N]o" is answered with its default, No.
+            mock.patch("builtins.input", return_value="") as ask,
             # No provider is built, so nothing is sent to the configured URL.
             mock.patch(
                 "localmelo.support.onboard_probe.get_backend",
@@ -1040,7 +1040,7 @@ class TestRequestTimeoutConfig:
             result = onboard.run_backend_setup()
 
         assert result is None
-        ask.assert_called_once_with("Save config anyway?", "N")
+        ask.assert_called_once_with("  [r]etry, [s]ave anyway, [N]o [N]: ")
         out = capsys.readouterr().out
         assert (
             "Probe failed: chat probe failed: request_timeout_s must be a finite "

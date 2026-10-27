@@ -9,6 +9,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A first run in a terminal: `melo` with no config file looks for a model
+  server on this computer, asks for its URL and for a model from the
+  server's list, saves them and opens the conversation loop. It sends only
+  `GET /v1/models`, to ports 8000, 8400, 11434 and 30000 of `127.0.0.1`
+  (`LOCALMELO_DETECT_URLS` replaces them); a server that cannot be used is
+  named with the reason, and you can retry, start without saving or quit
+  ([#52]).
 - A progress line in the terminal. While `melo "<task>"` runs with stderr
   on a terminal and text output, one dimmed line on stderr shows the step,
   the phase, the running tool and the time; once the task has run before
@@ -127,6 +134,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- `melo` without a task opens the conversation loop in a terminal, on the
+  saved backend, and prints the model and server first; it used to start
+  the gateway, which `melo --serve` still does. Without a terminal, bare
+  `melo` starts the gateway as before. `melo --base-url URL` and
+  `melo --chat-model NAME` without a task open the loop too, where they
+  used to be ignored; `--base-url` without `--chat-model` uses the first
+  chat model the server lists. `melo --reconfigure` opens the loop after
+  the wizard ([#52]).
+- The setup wizard offers the config file's values as its defaults, and
+  `None` for embeddings when none is set. A failed chat check can be
+  retried with the values you typed; a failed embedding check saves with
+  embedding off instead of cancelling the setup ([#52]).
 - A memory directory that localmelo creates gets mode 0700, and a new
   `history.db` mode 0600. The default directory is tightened to 0700 when it
   is open to other users ([#42]).
@@ -155,6 +174,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `melo --serve` with no config file and no terminal, as under launchd,
+  ended in an `EOFError` traceback, again every few seconds; it prints one
+  line and exits with code 1. Ctrl-D or Ctrl+C in the setup wizard prints
+  `Setup cancelled.` instead of a traceback ([#52]).
+- The config file escapes quotation marks and backslashes in URLs, model
+  names and other values; such a value made the file unreadable, so every
+  later `melo`, `melo --reconfigure` included, failed ([#52]).
+- An embedding URL that is not valid, such as a mistyped port, ended the
+  setup wizard with a traceback after the chat check passed; the config is
+  now saved with embedding off ([#52]).
+- `--base-url` and `--chat-model` were silently ignored with `--serve` and
+  `--daemon`; they are usage errors now ([#52]).
+- An HTTP 401 or 403 from a local server during setup says that localmelo
+  sends no API key to local servers (oMLX: "Allow inference without API
+  key") ([#52]).
 - In the `melo ""` loop, Backspace deletes whole characters: it no longer
   leaves part of a Chinese or other wide character on the screen, or in the
   line, which made the loop stop with a `UnicodeDecodeError`. The prompt is
@@ -215,3 +249,4 @@ earlier milestones.
 [#46]: https://github.com/localmelo/localmelo/pull/46
 [#50]: https://github.com/localmelo/localmelo/pull/50
 [#51]: https://github.com/localmelo/localmelo/pull/51
+[#52]: https://github.com/localmelo/localmelo/pull/52

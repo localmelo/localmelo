@@ -96,10 +96,38 @@ calls the run took, and `config` records the options it ran with. See
 
 ## Save a configuration
 
-A configuration file saves the backends, so that `melo "<task>"` and the
-gateway work without `--base-url`. The setup wizard writes it. For a cloud
-API, first run `export OPENAI_API_KEY="<your key>"` (or your vendor's
-variable) in this terminal: the wizard's test request uses that key.
+A configuration file saves the backends, so that `melo`, `melo "<task>"`
+and the gateway work without `--base-url`.
+
+For a local server, run `melo` in a terminal. With no configuration yet, it
+looks for a model server on this computer, asks for its URL (press Enter to
+accept the one it found) and for a model from the server's list, saves
+`~/.cache/localmelo/config.toml` and opens the conversation loop:
+
+```text
+$ melo
+Found a model server at http://127.0.0.1:11434/v1 (1 model).
+Model server URL [http://127.0.0.1:11434/v1]:
+✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
+Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+Model: qwen3:8b · http://127.0.0.1:11434/v1 (melo --reconfigure changes it)
+localmelo · local agent
+Enter a task to begin. Type /help for commands or /exit to quit.
+
+❯
+```
+
+Type a task, or `/exit` to leave. From then on, `melo` goes straight to the
+loop and `melo "<task>"` uses the saved server. It is saved as the `vllm`
+backend, the key for any OpenAI-compatible server, without embeddings; see
+[First run](configuration.md#first-run).
+
+### With the setup wizard
+
+The setup wizard also sets up an embedding server or a cloud API, and can
+start the gateway when it is done. For a cloud API, first run
+`export OPENAI_API_KEY="<your key>"` (or your vendor's variable) in this
+terminal: the wizard's test request uses that key.
 
 ```bash
 melo --serve --reconfigure
@@ -109,11 +137,11 @@ The wizard asks:
 
 | Prompt | What to enter |
 |---|---|
-| `Chat backend` | The number of your server type, such as `2` for Ollama. The default, `[1]`, is MLC. For another OpenAI-compatible server, choose vLLM (`3`). |
-| `Base URL` | Your server's URL. Press Enter to accept the default shown in brackets. |
+| `Chat backend` | The number of your server type, such as `2` for Ollama. The default is the saved backend, else `[1]`, MLC. For another OpenAI-compatible server, choose vLLM (`3`). |
+| `Base URL` | Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one. |
 | `Chat model name` | The model, such as `qwen3:8b`. |
 | `Start?` | Press Enter (yes) to continue. |
-| `Embedding backend` | `5` for `None (no long-term memory)` if you have no embedding server. |
+| `Embedding backend` | `5`, the default without a saved one, for `None (no long-term memory)` if you have no embedding server. |
 | `Embedding endpoint URL`, `Embedding model name` | Only asked when you chose an embedding backend. |
 
 For a cloud API, choose the vendor. The wizard then asks for
@@ -125,15 +153,20 @@ correct: the `ollama` backend uses Ollama's own API, not the
 OpenAI-compatible one.
 
 Next, the wizard sends a short test request to each server
-(`Probing backends ...`). If a server does not answer, it prints
-`Probe failed: …` and asks `Save config anyway? [N]`; pressing Enter saves
-nothing. On success it prints `Config saved to …`, the path of
+(`Probing backends ...`). If the chat server does not answer, it prints
+`Probe failed: …` and asks `[r]etry, [s]ave anyway, [N]o [N]:`; `r` asks for
+the URL and model again, and pressing Enter saves nothing. If only the
+embedding server fails, the wizard saves with embedding off and says so. On
+success it prints `Config saved to …`, the path of
 `~/.cache/localmelo/config.toml`, and then **starts the gateway** on
 `http://127.0.0.1:8401`. The gateway keeps running in this terminal.
+Without `--serve`, `melo --reconfigure` opens the conversation loop instead.
 
 ## Start the gateway
 
-From a second terminal, check the gateway and run a task through it:
+If you saved the configuration with `melo`, start the gateway with
+`melo --serve`; the wizard above starts it by itself. From a second
+terminal, check the gateway and run a task through it:
 
 ```bash
 curl http://127.0.0.1:8401/v1/health
@@ -153,8 +186,8 @@ The health check does not contact the model server; a task does. Open
 `http://127.0.0.1:8401/` in a browser for the web workspace (see
 [Interactive conversations](#interactive-conversations)).
 
-Press Ctrl+C in the first terminal to stop the gateway. Tasks now use the
-saved configuration:
+Press Ctrl+C in the first terminal to stop the gateway. Tasks use the saved
+configuration:
 
 ```bash
 melo "What is 6*7?"
@@ -164,17 +197,20 @@ To start the gateway again without the wizard, run `melo --serve`.
 
 ## Interactive conversations
 
-Give an empty task to enter a terminal conversation using the same agent across
-turns:
+Run `melo` without a task to enter a terminal conversation that keeps the
+same agent across turns:
 
 ```bash
-melo ""
-# Or use the exact model ID from an OpenAI-compatible server:
-melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID ""
+melo
+# Or talk to an OpenAI-compatible server that is not saved, with its first
+# model or the one you name:
+melo --base-url http://127.0.0.1:8000/v1
+melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 ```
 
-Use `/help` for commands and `/exit` or Ctrl-D to leave. Without the `""`,
-`melo` starts the gateway, as `melo --serve` does.
+Use `/help` for commands and `/exit` or Ctrl-D to leave. `melo ""` opens the
+same loop. Without a terminal, in a script or under launchd, `melo` alone
+starts the gateway, as `melo --serve` does.
 
 The web workspace at `http://127.0.0.1:8401/` supports model discovery, separate
 chat drafts, code formatting, cancellation, and responsive navigation. It does
@@ -245,13 +281,17 @@ use it instead of Ollama:
 
    oMLX loads the model on its first request, which can take a minute for a
    large model. If that request times out, add `--request-timeout 600`.
+   `melo --base-url http://127.0.0.1:8000/v1` without a task opens the
+   conversation loop on the first model oMLX lists.
 
-To make oMLX your default, run step 5 first, so that the model is loaded,
-then the wizard (`melo --serve --reconfigure`): choose vLLM (`3`) as the
-chat backend, enter `http://127.0.0.1:8000/v1` and the model id, and choose
-`5` (None) as the embedding backend unless oMLX also serves an embedding
-model. [Configuration](configuration.md#omlx) shows the file it saves and
-the table to add to turn off a Qwen3 model's thinking. In the web
+To make oMLX your default, run `melo` in a terminal before any configuration
+is saved: it finds oMLX on port 8000, lists its models and saves the one you
+pick. With a configuration saved already, run step 5 first, so that the
+model is loaded, then the wizard (`melo --reconfigure`): choose vLLM (`3`)
+as the chat backend, enter `http://127.0.0.1:8000/v1` and the model id, and
+choose `5` (None) as the embedding backend unless oMLX also serves an
+embedding model. [Configuration](configuration.md#omlx) shows the file they
+save and the table to add to turn off a Qwen3 model's thinking. In the web
 workspace, enter `http://127.0.0.1:8000/v1` as the Chat API URL, select
 Discover models and pick the model.
 

@@ -9,7 +9,10 @@ see [Offline retrieval](retrieval.md).
 
 ```text
 melo [options] "<task>"                      # run one task (direct mode)
-melo [--base-url URL] [--chat-model NAME] "" # conversation loop in the terminal
+melo                                         # conversation loop on the saved backend (in a terminal)
+melo --base-url URL [--chat-model NAME]      # conversation loop on this server
+melo [--base-url URL] [--chat-model NAME] "" # conversation loop, as before
+melo --reconfigure                           # run setup, then the conversation loop
 melo --serve [--host HOST] [--port PORT]     # start the gateway
 melo --serve --reconfigure                   # run setup, then start the gateway
 melo --daemon install|uninstall|status       # macOS background service
@@ -22,15 +25,16 @@ Quote the task. Several words without quotes are joined with spaces.
 | Command | What it does |
 |---|---|
 | `melo "<task>"` | Direct mode: runs one task, prints the result and exits. |
-| `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration. |
+| `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). |
 | `melo ""` (empty task) | Opens a conversation loop in the terminal: each line you type is a task for the same agent. `/help` lists the commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
-| `melo` (no task) | The same as `melo --serve`. |
-| `melo --reconfigure` | Runs the setup wizard, then starts the gateway (the same as `melo --serve --reconfigure`). |
+| `melo` (no task) | In a terminal, opens the same loop on the saved backend. With no saved backend it first asks for a model server and a model, and saves them; see [First run](#first-run). Without a terminal (in a script, through a pipe, under launchd) it starts the gateway, as `melo --serve` does. |
+| `melo --base-url URL` (no task) | Opens the loop on that server, with `--chat-model` or the first chat model the server lists; see [Without a task](#without-a-task). |
+| `melo --reconfigure` | In a terminal, runs the setup wizard, then opens the loop. Without a terminal it exits with code 1. |
 | `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](gateway.md#run-the-gateway-at-login-macos). |
 
 > [!NOTE]
-> This will change: a planned interactive CLI will open when you run `melo`
-> without a task (see the
+> A planned interactive CLI will replace this loop when you run `melo`
+> without a task, with live tool output, approvals and `/model` (see the
 > [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap)).
 
 In the `melo ""` loop, turns share one agent and its working memory, which
@@ -46,6 +50,93 @@ recalls earlier lines of this loop. A line that is not valid UTF-8 prints
 `melo: that line was not valid UTF-8; type it again.` and the loop asks
 again.
 
+### Without a task
+
+With no task, no `--serve` and no `--daemon`, `melo` opens the loop in a
+terminal (stdin and stdout both terminals), and anywhere when you give
+`--base-url` or `--chat-model`. Before
+its banner it prints the model and the server it talks to:
+
+```text
+Model: Qwen3-8B-4bit · http://127.0.0.1:8000/v1 (melo --reconfigure changes it)
+localmelo · local agent
+Enter a task to begin. Type /help for commands or /exit to quit.
+```
+
+It chooses the server in this order:
+
+1. `--reconfigure`: the setup wizard, then the backend it saved. Without a
+   task it cannot be combined with `--base-url`, which skips the config
+   file.
+2. `--base-url URL`: that server, without the config file. The model is
+   `--chat-model`, else the first model that `GET URL/models` lists,
+   skipping models whose id contains `embed` or `rerank` while another is
+   listed. A URL without `/v1` is listed at `URL/v1/models`, and when that
+   answers the loop uses `URL/v1` too. When the server does not answer the
+   list, or lists no model, melo warns on stderr and asks for the model
+   `default`:
+   `melo: could not list the models at URL (connection refused); asking for the model 'default' (--chat-model NAME picks one)`.
+   With no config file, in a terminal, it asks once
+   `Save URL · MODEL as the default backend? [Y/n]`; Enter saves it.
+3. The saved backend, with `--chat-model` in place of its model for this
+   run. Nothing is sent before your first task, so a server that is down
+   shows only when you send one.
+4. No saved backend, in a terminal: the first-run questions below. With no
+   saved backend and no terminal (possible only with `--chat-model`), melo
+   exits with code 1, as a task would.
+
+### First run
+
+In a terminal with no config file, `melo` asks for a model server and a
+model, saves them, and opens the loop. Later runs go straight to the loop.
+
+```text
+$ melo
+Found a model server at http://127.0.0.1:8000/v1 (1 model).
+Model server URL [http://127.0.0.1:8000/v1]:
+✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
+Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+Model: Qwen3-8B-4bit · http://127.0.0.1:8000/v1 (melo --reconfigure changes it)
+```
+
+- melo looks for a server on this computer with `GET /v1/models` on
+  `127.0.0.1` ports 8000 (vLLM, oMLX), 8400 (MLC), 11434 (Ollama) and 30000
+  (SGLang), and offers the first that lists a model. Press Enter to accept
+  the URL, or type another. Only the model list is requested: no chat
+  request, so a server does not load a model for it. A server that lists
+  a chat model comes first; one that lists only embedding or reranking
+  models comes next. A server that answered without a list is named, as
+  `A model server at URL answered, but HTTP 401: …`, and offered. When none
+  answers, it prints
+  `No model server answered on this machine (ports 8000, 8400, 11434, 30000).`
+  and offers `http://127.0.0.1:8000/v1`. `LOCALMELO_DETECT_URLS` replaces the
+  four URLs with a comma-separated list, and its first URL is then the one
+  offered; an empty value turns the search off.
+- A server that lists several models shows them as a numbered list and asks
+  `Model [N]:`; type a number or an id. The default skips embedding and
+  reranking models. A server that lists only such models is shown the same
+  way, with a line saying that chat needs a chat model.
+- The config file gets `chat_backend = "vllm"` (the key for any
+  OpenAI-compatible server), its `[vllm]` table's `chat_url` and
+  `chat_model`, and `embedding_backend = "none"`. Its other settings are
+  kept. For embeddings, a cloud API or another backend key, run
+  `melo --reconfigure`.
+- When the server cannot be used, melo says why, as
+  `✗ URL: connection refused.`, and asks
+  `[r]etry, [s]tart anyway, [q]uit [r]:`. `r` asks for the URL again, with
+  the one you typed as the default; `s` asks `Model name [default]:` and
+  opens the loop without saving (`Not saved: melo asks again next time.`);
+  `q` exits with code 0. The reasons are `connection refused`,
+  `no answer in 5 s`, `HTTP 401` or `HTTP 403` with
+  `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`,
+  another `HTTP` status (a redirect names its target, which melo does not
+  follow), `the reply is not a model list`, `the reply could not be read`,
+  `not a URL` and `it lists no models`.
+- An option is chosen by its first letter, so `s`, `start` and
+  `start anyway` are the same answer; another answer asks again.
+- Ctrl-D at a question prints `Setup cancelled.` and exits with code 0;
+  Ctrl+C prints the same and exits with 130.
+
 ## Options
 
 ### General
@@ -55,15 +146,17 @@ again.
 | `query` (positional) | not set | The task to run. Giving one selects direct mode; an empty one (`""`) opens the loop. |
 | `-h`, `--help` | | Show the help and exit. |
 | `--base-url URL` | not set | Send chat requests to this OpenAI-compatible server instead of the configured backend. |
-| `--chat-model NAME` | `default` with `--base-url`; else the configured model | The model to request from the `--base-url` server, or instead of the configured chat model. |
+| `--chat-model NAME` | with `--base-url`, `default` for a task and the server's first listed model without one; else the configured model | The model to request from the `--base-url` server, or instead of the configured chat model. |
 
 - `--base-url` is used exactly as given, so include `/v1`, as in
   `http://127.0.0.1:11434/v1`.
 - `--base-url` sends no API key, and it does not read the config file, so
   `extra_body` and `request_timeout_s` do not apply.
 - Without `--base-url`, `--chat-model` replaces the configured chat model for
-  this run; the config file is not changed. With `--serve`, or with no task
-  (`melo` alone), both are ignored.
+  this run; the config file is not changed.
+- Without a task, either option opens the conversation loop; see
+  [Without a task](#without-a-task). With `--serve` or `--daemon`, either
+  is a usage error: the gateway uses the config file.
 
 ### Direct mode
 
@@ -126,12 +219,21 @@ These options apply to a task run without `--serve`.
 | `--serve` | off | Start the gateway: the HTTP API and the web workspace. |
 | `--host HOST` | `127.0.0.1` | The address the gateway listens on. |
 | `--port PORT` | `8401` | The port the gateway listens on. |
-| `--reconfigure` | off | Run the setup wizard, then start the gateway. |
+| `--reconfigure` | off | Run the setup wizard, then start the gateway (with `--serve`) or open the conversation loop (without). Without a terminal it reads the answers from stdin. |
 | `--daemon install\|uninstall\|status` | not set | Manage the macOS background service; `install` also takes `--port`. |
 
 - The defaults of `--host` and `--port` come from the `[gateway]` table of
   the config file. The options change them for this run only.
 - `--host`, `--port` and `--reconfigure` are ignored when you give a task.
+- Where `melo` without a task opens the conversation loop, `--host` and
+  `--port` are usage errors; give `--serve` to start the gateway.
+- Without a terminal and with no config file, `melo --serve` and bare
+  `melo` print one line on stderr and exit with code 1, as under launchd:
+  `melo: no backend is configured; run melo --reconfigure in a terminal`.
+  `--reconfigure` still runs the wizard without a terminal and reads its
+  answers from stdin, so a script can pipe them in.
+- Ctrl-D at a wizard question prints `Setup cancelled.` and exits with
+  code 0; Ctrl+C prints the same and exits with 130.
 - The gateway has no authentication. Keep it on `127.0.0.1`; see
   [Keep the gateway private](gateway.md#keep-the-gateway-private).
 
@@ -157,6 +259,13 @@ These are usage errors:
 - a direct-mode option with `--serve` or without a task (`melo ""`
   included), reported as
   `only for direct mode (a query without --serve): --max-steps`;
+- `--base-url` or `--chat-model` with `--serve` or `--daemon`, reported as
+  `--base-url and --chat-model are for a task or the chat loop; --serve uses the config file (melo --reconfigure)`;
+- `--host` or `--port` where `melo` without a task opens the conversation
+  loop, reported as
+  `--host and --port are for --serve and --daemon; melo without a task opens the chat loop`;
+- `--reconfigure` with `--base-url` and no task, reported as
+  `--reconfigure sets up the config file, which --base-url does not use; give one of them`;
 - an MCP config file that cannot be read or is not valid;
 - an invalid `LOCALMELO_THINKING_RETENTION_DAYS`, also with `--serve` or
   `melo ""`, which prints its one `melo: error:` line without the usage
@@ -273,7 +382,7 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 | Code | Meaning |
 |---|---|
 | 0 | The run ended with status `completed`. |
-| 1 | The run ended as `crashed`; or `melo` stopped before the run because no backend is configured or the config file is not valid. |
+| 1 | The run ended as `crashed`; or `melo` stopped before the run because no backend is configured or the config file is not valid; or the setup wizard needed a terminal and had none. |
 | 2 | The run ended with any other status; or a usage error. |
 | 3 | The gateway could not start, for example because its port is in use. |
 | 129 | SIGHUP ended the run. |
@@ -281,7 +390,9 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 | 143 | SIGTERM ended the run. |
 
 129, 130 and 143 are what a shell reports for a process ended by that
-signal. In gateway mode, cancelling the setup wizard exits with 0.
+signal. Cancelling the setup wizard, or `q` at the first-run questions,
+exits with 0. Before the conversation loop opens, Ctrl-D at a setup
+question exits with 0 and Ctrl+C with 130, both after `Setup cancelled.`
 
 ## Signals
 
