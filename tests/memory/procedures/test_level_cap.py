@@ -16,7 +16,11 @@ from localmelo.melo.memory.procedures.template import (
     TemplateView,
 )
 from localmelo.melo.memory.procedures.trace import Trace
-from localmelo.melo.memory.procedures.tracker import shown_view, track
+from localmelo.melo.memory.procedures.tracker import (
+    progress_state,
+    shown_view,
+    track,
+)
 
 
 def view(level: int) -> TemplateView:
@@ -87,3 +91,17 @@ def test_a_capped_run_never_carries_a_bar() -> None:
             None,
         )
         assert state.state == ("running" if ended is None else "ended")
+
+
+def test_progress_state_is_track_without_its_guard(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(*args: object) -> None:
+        raise RuntimeError("tracker bug")
+
+    trace = Trace(clock=lambda: 0.0)
+    assert progress_state(view(1), trace) == track(view(1), trace)
+    monkeypatch.setattr(tracker, "_track", broken)
+    assert track(view(1), trace).level == 0  # the guard gives facts only
+    with pytest.raises(RuntimeError, match="tracker bug"):
+        progress_state(view(1), trace)

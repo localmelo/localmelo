@@ -320,6 +320,21 @@ def track(
         return _facts(trace, limits, ended)
 
 
+def progress_state(
+    view: TemplateView | None,
+    trace: Trace,
+    limits: Limits | None = None,
+    *,
+    ended: str | None = None,
+) -> ProgressState:
+    """:func:`track` without its guard: an exception inside propagates.
+
+    For a caller that stops asking once the tracker failed, as a run does:
+    an exception there ends the run's progress events.
+    """
+    return _track(view, trace, limits, ended)
+
+
 def _facts(trace: Trace, limits: Limits | None, ended: str | None) -> ProgressState:
     try:
         tests = None if trace.tests is None else trace.tests.as_dict()

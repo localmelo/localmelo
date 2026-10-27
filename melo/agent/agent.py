@@ -72,7 +72,11 @@ from localmelo.melo.memory.procedures.normalize import (
 from localmelo.melo.memory.procedures.store import RunFacts, harness_version
 from localmelo.melo.memory.procedures.template import TemplateView
 from localmelo.melo.memory.procedures.trace import Trace
-from localmelo.melo.memory.procedures.tracker import Limits, shown_view, track
+from localmelo.melo.memory.procedures.tracker import (
+    Limits,
+    progress_state,
+    shown_view,
+)
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.schema import (
     ANSWER_NOT_KEPT_LABEL,
@@ -752,8 +756,11 @@ class _RunState:
     # without a sink (see note). It builds no event and keeps no output.
     trace: Trace = dataclasses.field(default_factory=Trace)
     # Whether the trace still follows the run: false once updating it
-    # failed, which ends the run's progress events.
+    # failed, which ends the run's progress events and its learning.
     tracing: bool = True
+    # Whether the run still reports progress: false once the tracker
+    # failed, which ends the run's progress events only.
+    reporting: bool = True
     # The routine name the caller gave (run_task's routine), the folder the
     # run's tools work in, read at its start (None when that failed), and
     # the routine's key once it is needed (see Agent._routine_key).
@@ -808,10 +815,23 @@ class _RunState:
         *ended* is the run's status on the event that comes right before
         ``run.finished``. The level shown is capped by
         :func:`~localmelo.melo.memory.procedures.tracker.shown_view`.
+        Never raises: a failure of the tracker is logged at DEBUG and ends
+        the run's progress events, not the run or its learning.
         """
-        if self.tracing and self.events.reports_progress:
+        if not (self.tracing and self.reporting and self.events.reports_progress):
+            return
+        try:
             view = shown_view(self.view)
-            self.events.progress(track(view, self.trace, self.limits, ended=ended))
+            state = progress_state(view, self.trace, self.limits, ended=ended)
+        except Exception as exc:
+            self.reporting = False
+            logger.debug(
+                "The progress of task %s stopped: %s",
+                self.task_id,
+                _exception_text(exc),
+            )
+            return
+        self.events.progress(state)
 
 
 def _exception_text(exc: BaseException) -> str:

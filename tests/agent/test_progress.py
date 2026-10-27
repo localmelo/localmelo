@@ -448,6 +448,39 @@ async def test_a_trace_that_fails_ends_progress_for_the_run(
     assert all(r.exc_info is None for r in caplog.records if r.levelno > logging.DEBUG)
 
 
+async def test_a_tracker_that_fails_ends_progress_but_not_learning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    real = tracker._track
+    calls = 0
+
+    def flaky(*args: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("tracker bug")
+        return real(*args)
+
+    monkeypatch.setattr(tracker, "_track", flaky)
+    caplog.set_level(logging.DEBUG)
+    recorder = Recorder()
+    agent = make_agent(ScriptedLLM([read("/p/a.py"), read("/p/b.py"), answer("done")]))
+    result = await agent.run_task(QUERY, on_event=recorder, progress=True)
+    assert result.status == "completed"
+    # The first event came; the second failed, and none came after it.
+    assert recorder.types.count("run.progress") == 1
+    lines = [r for r in caplog.records if "tracker bug" in r.getMessage()]
+    assert len(lines) == 1 and lines[0].levelno == logging.DEBUG
+    assert all(r.exc_info is None for r in caplog.records if r.levelno > logging.DEBUG)
+    # The trace is sound, so the run is still learned.
+    episodes = [
+        row
+        for row in await agent.hippo.procedures.export_rows()
+        if row["table"] == "episodes"
+    ]
+    assert [(e["task_id"], e["n_tool"]) for e in episodes] == [(result.task_id, 2)]
+
+
 # ── The end, on every path ──────────────────────────────────────────────────
 
 
