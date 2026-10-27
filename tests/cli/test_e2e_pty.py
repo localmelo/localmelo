@@ -376,8 +376,9 @@ def test_yolo_runs_tools_without_asking(
     (tmp_path / "demo-project" / "notes.txt").write_text("x\n")
     term = melo("--yolo")
     term.see("Ask melo")
-    # The status bar's right edge (its last cell is drawn on its own).
-    assert "⚠ YOLO: no approval" in term.text()
+    # The status bar's right edge (its last cell is drawn on its own). It
+    # comes after the input box in the same drawing, so it is waited for.
+    term.see("⚠ YOLO: no approval")
     term.type("list the folder\r")
     term.see("The folder holds what")
     assert "Run a shell command?" not in term.text()
