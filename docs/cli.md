@@ -251,6 +251,9 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
   its next redraw, within a second.
 - **Signals.** SIGTERM, SIGHUP and Ctrl+C erase the line before `melo`
   stops.
+- **Paused output.** While the terminal's output is stopped (Ctrl+S), the
+  task goes on without the line and a signal still stops `melo`; the last
+  line drawn then stays on the screen.
 
 ## Exit codes
 

@@ -26,6 +26,7 @@ from typing import Any
 
 import pytest
 
+from localmelo.__main__ import SIGNAL_CLEANUP_S
 from localmelo.support.progress_line import ERASE
 from localmelo.tests.cli.test_direct_mode_process import (
     FakeChatServer,
@@ -87,6 +88,10 @@ class PtyReader:
         with self._lock:
             return b"".join(self._chunks).decode(errors="replace")
 
+    def type(self, keys: bytes) -> None:
+        """Type *keys* on the terminal's keyboard."""
+        os.write(self._master, keys)
+
     def finish(self) -> str:
         self._thread.join(timeout=10)
         return self.text()
@@ -108,8 +113,12 @@ def _melo_on_pty(
     *,
     color: bool = False,
     stderr_on_pty: bool = True,
+    typed: bytes = b"",
 ) -> Iterator[tuple[subprocess.Popen[bytes], PtyReader | None]]:
-    """Start melo with *args* and a query; yield it and the terminal's reader."""
+    """Start melo with *args* and a query; yield it and the terminal's reader.
+
+    *typed* is typed on the terminal's keyboard before melo starts.
+    """
     env = _env(tmp_path)
     env["TERM"] = "xterm-256color"
     env.pop("NO_COLOR", None)
@@ -117,6 +126,8 @@ def _melo_on_pty(
         env["NO_COLOR"] = "1"
     master, slave = os.openpty()
     _set_columns(slave, COLUMNS)
+    if typed:
+        os.write(master, typed)
     try:
         melo = subprocess.Popen(
             [
@@ -320,6 +331,42 @@ def test_sigterm_erases_the_line_before_melo_exits(
         if shell is not None and not _process_gone(shell):
             with contextlib.suppress(ProcessLookupError, PermissionError):
                 os.killpg(shell, signal.SIGKILL)
+
+
+# Ctrl+S and Ctrl+Q: a terminal stops and resumes its output (IXON).
+XOFF, XON = b"\x13", b"\x11"
+
+
+def test_sigterm_ends_melo_while_the_terminal_takes_no_output(
+    chat_server: FakeChatServer, tmp_path: Path
+) -> None:
+    """After Ctrl+S, the line fills the terminal's output queue (1 KiB on
+    macOS), and a write then waits until Ctrl+Q. The run goes on meanwhile,
+    and SIGTERM still ends melo within SIGNAL_CLEANUP_S."""
+    reads = []
+    for n in range(9):
+        (tmp_path / f"notes{n}.txt").write_text(f"note {n}\n")
+        reads.append(_tool_call("file_read", {"path": f"notes{n}.txt"}))
+    _queue(chat_server, [*reads, _tool_call("shell_exec", {"command": "sleep 30"})])
+    with _melo_on_pty(chat_server, tmp_path, ["read the notes"], typed=XOFF) as (
+        melo,
+        reader,
+    ):
+        assert reader is not None
+        try:
+            # Every step reached the model, with nothing drawn meanwhile.
+            assert _wait_until(
+                lambda: chat_server.requests >= 10, timeout_s=30
+            ), f"{chat_server.requests} requests"
+            assert reader.text() == ""
+            os.killpg(melo.pid, signal.SIGTERM)
+            started = time.monotonic()
+            melo.wait(timeout=SIGNAL_CLEANUP_S + 2)
+            assert time.monotonic() - started < SIGNAL_CLEANUP_S
+        finally:
+            with contextlib.suppress(OSError):  # EIO once melo has exited
+                reader.type(XON)
+        assert melo.returncode == -signal.SIGTERM
 
 
 # ── history.db ──────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ stream in memory with a clock the test sets.
 
 from __future__ import annotations
 
+import contextlib
 import gc
 import io
 import logging
@@ -566,17 +567,29 @@ class Clock:
 
 
 class Stream(io.StringIO):
-    """Keeps every write; ``fail`` makes writes raise OSError."""
+    """Keeps every write; ``fail`` makes writes raise OSError.
+
+    While ``resumed`` is clear, a write waits for it, as on a terminal
+    whose output was stopped with Ctrl+S until Ctrl+Q; ``waiting`` counts
+    the writes that wait.
+    """
 
     def __init__(self) -> None:
         super().__init__()
         self.writes: list[str] = []
         self.fail = False
         self.lock = threading.Lock()
+        self.resumed = threading.Event()
+        self.resumed.set()
+        self.waiting = 0
 
     def write(self, text: str) -> int:
         if self.fail:
             raise OSError(5, "Input/output error")
+        if not self.resumed.is_set():
+            with self.lock:
+                self.waiting += 1
+            self.resumed.wait()
         with self.lock:
             self.writes.append(text)
         return super().write(text)
@@ -794,6 +807,99 @@ def test_a_terminal_that_fails_stops_the_drawing(
     stream.fail = False
     line_.observe(_event("run.progress", 2, **payload(step=3)))
     assert stream.draws() == ["starting · 0s"]
+
+
+def test_a_draw_that_raises_stops_the_drawing_quietly() -> None:
+    def columns() -> int:
+        raise RuntimeError("no width")
+
+    stream = Stream()
+    line_ = ProgressLine(stream, interval_s=3600, columns=columns)
+    with mock.patch.object(threading, "excepthook") as excepthook:
+        line_.start()  # does not raise
+        assert not line_.active
+        line_.observe(_event("run.progress", 1, **payload(step=2)))
+        line_.close()
+    excepthook.assert_not_called()  # no traceback from the writer
+    assert stream.getvalue() == ""
+
+
+def test_events_never_wait_long_on_a_terminal_that_takes_no_output() -> None:
+    """After Ctrl+S, a write to the terminal waits until Ctrl+Q.
+
+    The run goes on meanwhile: its events wait for the line once, at most
+    DRAW_WAIT_S, and closing the line leaves it as it is.
+    """
+    stream = Stream()
+    line_ = ProgressLine(stream, interval_s=3600, columns=lambda: 200)
+    line_.start()
+    stream.resumed.clear()
+
+    def run() -> None:
+        for seq in range(1, 11):
+            line_.observe(_event("run.progress", seq, **payload(step=seq)))
+        line_.close()
+
+    runner = threading.Thread(target=run, daemon=True)
+    started = time.monotonic()
+    try:
+        runner.start()
+        runner.join(5)
+        assert not runner.is_alive(), "the run waits for the terminal"
+        assert time.monotonic() - started < pl.DRAW_WAIT_S + 1
+        assert not line_.active
+    finally:
+        stream.resumed.set()
+    # Once the terminal takes output again, the line is erased.
+    assert _wait_for(lambda: stream.getvalue().endswith(ERASE))
+    assert line_._thread is not None
+    line_._thread.join(5)
+    assert not line_._thread.is_alive()
+    assert stream.draws() == ["starting · 0s", "step 1 · 0s"]
+
+
+def test_closing_never_waits_long_on_a_terminal_that_takes_no_output() -> None:
+    """A redraw that waits for the terminal holds close() back a second at most."""
+    stream, clock = Stream(), Clock()
+    line_ = ProgressLine(stream, interval_s=0.01, clock=clock, columns=lambda: 200)
+    line_.start()
+    stream.resumed.clear()
+    clock.now += 1  # the next redraw shows a new time, and waits
+    closer = threading.Thread(target=line_.close, daemon=True)
+    try:
+        assert _wait_for(lambda: stream.waiting == 1)
+        started = time.monotonic()
+        closer.start()
+        closer.join(5)
+        assert not closer.is_alive(), "close() waits for the terminal"
+        assert time.monotonic() - started < pl.JOIN_TIMEOUT_S + 1
+    finally:
+        stream.resumed.set()
+    assert _wait_for(lambda: stream.getvalue().endswith(ERASE))
+    assert stream.draws() == ["starting · 0s", "starting · 1s"]
+
+
+def test_a_failed_write_leaves_nothing_in_the_streams_buffer() -> None:
+    """A write that fails leaves no bytes behind in the stream.
+
+    Python flushes sys.stderr at exit, and when that flush fails, the
+    exit status of a completed run becomes 120.
+    """
+    read_end, write_end = os.pipe()
+    os.close(read_end)  # the terminal is gone: a write fails (EPIPE)
+    stream = open(
+        write_end, "w", buffering=1, encoding="utf-8", errors="backslashreplace"
+    )
+    line_ = ProgressLine(stream, interval_s=3600, columns=lambda: 80)
+    try:
+        line_.start()
+        line_.observe(_event("run.progress", 1, **payload(step=2)))
+        assert not line_.active  # it stopped drawing
+        stream.flush()  # nothing left to write: does not raise
+    finally:
+        line_.close()
+        with contextlib.suppress(OSError):
+            stream.close()
 
 
 # ── Log records above the line ──────────────────────────────────────────────

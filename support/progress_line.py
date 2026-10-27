@@ -25,9 +25,11 @@ the end of a completed run.
 from __future__ import annotations
 
 import contextlib
+import itertools
 import logging
 import math
 import os
+import queue
 import threading
 import time
 import unicodedata
@@ -52,7 +54,11 @@ FALLBACK_COLUMNS: Final = 80
 BAR_CELLS: Final = 10
 # The highest percent a running bar shows (the tracker's cap).
 RUNNING_CAP_PERCENT: Final = 95
-# Seconds close() waits for the redraw thread to stop.
+# Seconds an event or a log record waits for the line to be drawn. After
+# Ctrl+S, a terminal takes no output once its queue is full, and a write
+# waits until Ctrl+Q: the run then waits here once, not for the terminal.
+DRAW_WAIT_S: Final = 1.0
+# Seconds close() waits for the line to be erased.
 JOIN_TIMEOUT_S: Final = 1.0
 
 # Marks of a step at level 1 and 2; a pending step at level 1 has none.
@@ -443,16 +449,24 @@ def terminal_columns(stream: TextIO) -> int:
 # ── The display ──
 
 
+# A request to the writer: its number, a record to write above the line
+# (None to draw the line only), and whether to erase the line and stop.
+_Request = tuple[int, str | None, bool]
+
+
 class ProgressLine:
     """Draws a run's progress line on *stream* until the run ends.
 
-    :meth:`observe` is the run's ``observe=`` sink. Each event redraws the
-    line, and a daemon thread redraws it once a second with the latest
-    state, so the timers advance also while ``python_exec`` code holds the
-    event loop. One lock orders every write of the line, the erase and the
-    log records written above it (see :meth:`start`), so they never mix.
-    A draw is :data:`ERASE` and the line, never a newline. ``run.finished``
-    or :meth:`close` erases the line for good.
+    :meth:`observe` is the run's ``observe=`` sink. One daemon thread, the
+    writer, does every write: the line, its erase and the log records
+    written above it (see :meth:`start`), in the order they are asked for,
+    so they never mix. It draws the line again on each event and once a
+    second with the latest state, so the timers advance also while
+    ``python_exec`` code holds the event loop. An event or a record waits
+    for its draw, but at most :data:`DRAW_WAIT_S`: a terminal whose output
+    was stopped (Ctrl+S) holds the writer, never the run, and SIGTERM can
+    still end it. A draw is :data:`ERASE` and the line, never a newline.
+    ``run.finished`` or :meth:`close` erases the line for good.
     """
 
     def __init__(
@@ -469,17 +483,26 @@ class ProgressLine:
         self._interval_s = interval_s
         self._clock = clock
         self._columns = columns or (lambda: terminal_columns(stream))
-        # Re-entrant: a record can reach the log handler on the thread that
-        # holds it, from a finalizer that garbage collection runs mid-draw.
+        # Held to read or change the flags below, never while writing.
+        # Re-entrant: a record can reach the log handler on a thread that
+        # holds it, from a finalizer that garbage collection runs there.
         self._lock = threading.RLock()
-        self._stop = threading.Event()
+        self._carried = threading.Condition(self._lock)
+        # What the writer is asked to do, in order (see _Request); put()
+        # is safe also from a finalizer.
+        self._requests: queue.SimpleQueue[_Request] = queue.SimpleQueue()
+        self._numbers = itertools.count(1)
+        self._done = 0  # the last request the writer carried out
+        self._stalled = False  # a write took longer than DRAW_WAIT_S
         self._thread: threading.Thread | None = None
         self._handler: _LineLogHandler | None = None
         self._run_started = clock()
+        # Set by the run's events, read by the writer.
         self._payload: Mapping[str, Any] | None = None
         self._tool: RunningTool | None = None
         self._started = False
         self._closed = False
+        # The writer's own: whether the line is on the screen, and its text.
         self._drawn = False
         self._last = ""
 
@@ -500,13 +523,13 @@ class ProgressLine:
                 return
             self._started = True
             self._run_started = self._clock()
-            self._draw_locked()
+            self._thread = threading.Thread(
+                target=self._write_requests, name="melo-progress", daemon=True
+            )
+        self._thread.start()
+        self._ask(None)
         self._handler = _LineLogHandler(self)
         logging.getLogger().addHandler(self._handler)
-        self._thread = threading.Thread(
-            target=self._redraw_every_interval, name="melo-progress", daemon=True
-        )
-        self._thread.start()
 
     def observe(self, event: AgentEvent) -> None:
         """The run's sink: follow *event* and redraw. Never raises."""
@@ -516,31 +539,31 @@ class ProgressLine:
             self._follow(event)
 
     def close(self) -> None:
-        """Erase the line and stop drawing it, for good. Idempotent."""
-        with self._lock:
-            self._stop.set()
-            if not self._closed:
-                self._closed = True
-                self._erase_locked()
+        """Erase the line and stop drawing it, for good. Idempotent.
+
+        Waits for the erase at most :data:`JOIN_TIMEOUT_S`, and not at all
+        once a write is known to wait for the terminal: the line is then
+        erased when the terminal takes output again, if melo still runs.
+        """
         handler, self._handler = self._handler, None
         if handler is not None:
             logging.getLogger().removeHandler(handler)
-        thread = self._thread
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(JOIN_TIMEOUT_S)
+        with self._lock:
+            if not self._closed:
+                self._closed = True
+                self._requests.put((next(self._numbers), None, True))
+            thread, stalled = self._thread, self._stalled
+        if thread is None or thread is threading.current_thread() or stalled:
+            return
+        thread.join(JOIN_TIMEOUT_S)
+        if thread.is_alive():
+            with self._lock:
+                self._stalled = True  # no later close() waits again
 
     def write_above(self, text: str) -> None:
-        """Write *text* and a newline on stderr, then the line below it again."""
-        with self._lock:
-            drawn = self._drawn
-            if drawn:
-                self._stream.write(ERASE)
-                self._drawn = False
-            self._stream.write(text + "\n")
-            if drawn and not self._closed:
-                self._draw_locked()
-            else:
-                self._stream.flush()
+        """Write *text* and a newline on the stream, above the line if drawn."""
+        if not self._ask(text):  # no line: write it as it is
+            self._write(text + "\n")
 
     # ── Internals ──
 
@@ -548,76 +571,148 @@ class ProgressLine:
         if event.type == "run.finished":
             self.close()
             return
-        with self._lock:
-            if self._closed:
-                return
-            data = event.data
-            if event.type == "run.progress":
-                self._payload = dict(data)
-            elif event.type == "tool.started":
-                self._tool = RunningTool(
-                    label=label_for(str(data.get("name") or ""), data.get("arguments")),
-                    started=self._clock(),
-                    call_id=str(data.get("call_id") or ""),
-                )
-            elif event.type == "tool.finished":
-                if self._tool is None or self._tool.call_id == str(
-                    data.get("call_id") or ""
-                ):
-                    self._tool = None
-            elif event.type == "step.started":
-                # The run.progress that follows says the same; this keeps
-                # the step right should the run's progress events stop.
-                self._payload = {
-                    **(self._payload or {}),
-                    "step": data.get("step"),
-                    "attempt": data.get("attempt"),
-                }
+        # Only the run's events change these, and the writer reads them
+        # whole, so they are set without the lock.
+        data = event.data
+        if event.type == "run.progress":
+            self._payload = dict(data)
+        elif event.type == "tool.started":
+            self._tool = RunningTool(
+                label=label_for(str(data.get("name") or ""), data.get("arguments")),
+                started=self._clock(),
+                call_id=str(data.get("call_id") or ""),
+            )
+        elif event.type == "tool.finished":
+            tool = self._tool
+            if tool is None or tool.call_id == str(data.get("call_id") or ""):
                 self._tool = None
-            elif event.type != "run.started":
-                return
-            self._draw_locked()
+        elif event.type == "step.started":
+            # The run.progress that follows says the same; this keeps the
+            # step right should the run's progress events stop.
+            self._payload = {
+                **(self._payload or {}),
+                "step": data.get("step"),
+                "attempt": data.get("attempt"),
+            }
+            self._tool = None
+        elif event.type != "run.started":
+            return
+        self._ask(None)
 
-    def _redraw_every_interval(self) -> None:
-        while not self._stop.wait(self._interval_s):
+    def _ask(self, record: str | None) -> bool:
+        """Have the writer draw the line, with *record* above it if given.
+
+        Waits until it did, at most :data:`DRAW_WAIT_S`, except on the
+        writer itself and once a write is known to take longer. False
+        when there is no writer to ask: before :meth:`start` or once closed.
+        """
+        with self._carried:
+            if not self._started or self._closed:
+                return False
+            number = next(self._numbers)
+            self._requests.put((number, record, False))
+            if self._stalled or threading.current_thread() is self._thread:
+                return True
+            deadline = time.monotonic() + DRAW_WAIT_S
+            while self._done < number and not self._stalled:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    self._stalled = True  # the terminal takes no output
+                    break
+                self._carried.wait(left)
+        return True
+
+    def _write_requests(self) -> None:
+        """The writer: carry out the requests, and redraw every interval."""
+        while True:
+            try:
+                batch = [self._requests.get(timeout=self._interval_s)]
+            except queue.Empty:
+                batch = []
+            with contextlib.suppress(queue.Empty):
+                while True:
+                    batch.append(self._requests.get_nowait())
             with self._lock:
-                if self._closed:
-                    return
-                self._draw_locked()
+                closing = self._closed or any(stop for _, _, stop in batch)
+            try:
+                going_on = self._carry_out(
+                    [record for _, record, _ in batch if record is not None],
+                    closing=closing,
+                )
+            except Exception:  # a display never fails a run, and logs nothing
+                going_on = False
+                with self._lock:
+                    self._closed = True
+            with self._carried:
+                self._done = max([self._done, *(number for number, _, _ in batch)])
+                self._stalled = False
+                self._carried.notify_all()
+            if not going_on:
+                return
 
-    def _draw_locked(self) -> None:
-        """Draw the line; the caller holds the lock."""
-        if self._closed:
-            return
-        # One cell short of the width, so the cursor never wraps a row.
-        width = self._columns() - 1
-        line = format_line(
-            self._payload,
-            self._tool,
-            self._clock(),
-            width,
-            run_started=self._run_started,
-            color=self._color,
-        )
-        if self._drawn and line == self._last:
-            return  # the terminal shows it already
+    def _carry_out(self, records: list[str], *, closing: bool) -> bool:
+        """Write *records* above the line, then draw it, or erase it if
+        *closing*, in one write. False once the writer is done for good."""
+        text, drawn, line = "", self._drawn, None
+        if records:
+            if drawn:
+                text += ERASE
+                drawn = False
+            text += "".join(record + "\n" for record in records)
+        if closing:
+            if drawn:
+                text += ERASE
+                drawn = False
+        else:
+            # One cell short of the width, so the cursor never wraps a row.
+            line = format_line(
+                self._payload,
+                self._tool,
+                self._clock(),
+                self._columns() - 1,
+                run_started=self._run_started,
+                color=self._color,
+            )
+            if not drawn or line != self._last:  # else the terminal shows it
+                text += ERASE + line
+            drawn = True
         try:
-            self._stream.write(ERASE + line)
-            self._stream.flush()
+            if text:
+                self._write(text)
         except (OSError, ValueError):  # the terminal is gone: stop drawing
-            self._closed = True
-            self._stop.set()
-            return
-        self._drawn = True
-        self._last = line
+            self._drawn = False
+            with self._lock:
+                self._closed = True
+            return False
+        self._drawn = drawn
+        if line is not None:
+            self._last = line
+        return not closing
 
-    def _erase_locked(self) -> None:
-        if not self._drawn:
+    def _write(self, text: str) -> None:
+        """Write *text* on the stream now; raises OSError or ValueError.
+
+        On a stream with a file, the stream is flushed and the bytes go to
+        the file itself: a write that fails or waits leaves nothing in the
+        stream's buffer and holds none of its locks, so flushing sys.stderr
+        at exit neither fails nor waits because of the line.
+        """
+        stream = self._stream
+        try:
+            fd = stream.fileno()
+        except (AttributeError, OSError, ValueError):  # no file: StringIO
+            stream.write(text)
+            stream.flush()
             return
-        self._drawn = False
-        with contextlib.suppress(OSError, ValueError):
-            self._stream.write(ERASE)
-            self._stream.flush()
+        data = memoryview(
+            text.encode(stream.encoding or "utf-8", stream.errors or "strict")
+        )
+        stream.flush()
+        while data:
+            written = os.write(fd, data)
+            if written <= 0:
+                raise OSError("the terminal took no output")
+            data = data[written:]
 
 
 class _LineLogHandler(logging.Handler):
