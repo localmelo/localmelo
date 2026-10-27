@@ -15,7 +15,13 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final
 
-from rich.console import Console, ConsoleOptions, RenderableType, RenderResult
+from rich.console import (
+    Console,
+    ConsoleOptions,
+    Group,
+    RenderableType,
+    RenderResult,
+)
 from rich.markdown import Heading, Markdown
 from rich.padding import Padding
 from rich.table import Table
@@ -51,6 +57,8 @@ LIMITED_TOOLS: Final = frozenset({"shell_exec", "python_exec"})
 LOG_PATH: Final = "~/.cache/localmelo/logs/cli.log"
 
 _HTTP_STATUS: Final = re.compile(r"failed with HTTP (\d{3})")
+# Markdown that starts a block: a fence, a heading, a list, a quote, a table.
+_BLOCK_START: Final = re.compile(r"\s*(```|~~~|#|[-*+] |\d+[.)] |>|\|)")
 _FAILED_WITH: Final = re.compile(r"failed: (\w+)")
 
 # The severity of each status that ended a run, for its status line.
@@ -108,7 +116,9 @@ def _marked(symbol: str, style: str, body: RenderableType) -> Table:
     """*body* after *symbol*, its later lines indented under the first."""
     grid = Table.grid(padding=(0, 1))
     grid.add_column(width=cells(symbol), no_wrap=True)
-    grid.add_column()
+    # Fold, not cut: a long word, a URL or a line of Chinese keeps every
+    # character.
+    grid.add_column(overflow="fold")
     grid.add_row(Text(symbol, style=style), body)
     return grid
 
@@ -514,9 +524,14 @@ class TurnRenderer:
             self.out.print(_marked(symbols.assistant, "", body))
         else:
             if answer:
-                self.out.print(
-                    _marked(symbols.assistant, "", markdown("Best effort: " + answer))
+                # Inline before a paragraph; on a line of its own before a
+                # block, which "Best effort: " in front would break.
+                effort: RenderableType = (
+                    Group(Text("Best effort:"), markdown(answer))
+                    if _BLOCK_START.match(answer)
+                    else markdown("Best effort: " + answer)
                 )
+                self.out.print(_marked(symbols.assistant, "", effort))
             # A run that crashes as it runs is a bug (cause run): an error.
             severe = result.status in _SEVERE
             mark = symbols.failed if severe else symbols.warn

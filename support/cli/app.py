@@ -61,7 +61,13 @@ from localmelo.support.cli.approvals import (
     session_warning,
 )
 from localmelo.support.cli.render import TurnRenderer, live_rows
-from localmelo.support.cli.text import cells, cut_cells, cut_middle, input_rows
+from localmelo.support.cli.text import (
+    cells,
+    cut_cells,
+    cut_middle,
+    input_rows,
+    wrap_words,
+)
 from localmelo.support.cli.theme import PT_STYLE, Symbols
 from localmelo.support.sessions.display import home_label
 
@@ -512,27 +518,87 @@ class InteractiveApp:
         return options
 
     def _panel_fragments(self) -> StyleAndTextTuples:
+        """The approval panel: every row wrapped, never cut, and fit to the screen.
+
+        What will run shows whole. On a terminal too short for the whole
+        panel, fewer body rows show, with ``… +n lines (v views all)``; then
+        the box goes, then the key line, so the options always show.
+        """
         pending = self._pending()
         if pending is None:
             return []
-        width = self.app.output.get_size().columns
+        size = self.app.output.get_size()
+        width = max(10, size.columns)
         symbols = self.symbols
-        boxed = width >= 40 and symbols.rule == "─"
-        inner = width - 4 if boxed else width - 2
-        text = panel_text(pending.request, exists=pending.exists, width=inner - 2)
-        body = text.body
-        shown = body if len(body) <= BODY_LINES else body[: BODY_LINES - 1]
-        lines: list[tuple[str, str]] = [("class:tool", text.header)]
-        lines += [("", "  " + line) for line in shown]
-        if len(shown) < len(body):
-            lines.append(
-                (
-                    "class:muted",
-                    f"{symbols.ellipsis} +{len(body) - len(shown)} lines (v views all)",
-                )
+
+        def wrapped(
+            style: str, line: str, room: int, indent: str = ""
+        ) -> list[tuple[str, str]]:
+            # Prose: a row that wraps does not start with a space.
+            first, *rest = wrap_words(line, room)
+            rest = wrap_words("".join(rest).lstrip(" "), room - cells(indent))
+            return [(style, first)] + [(style, indent + part) for part in rest if part]
+
+        options: list[tuple[str, str]] = []
+        for index, label in self._options(pending):
+            chosen = index == pending.selected and not pending.reason
+            mark = symbols.selection if chosen else " "
+            style = "class:accent" if index == pending.selected else ""
+            options += wrapped(style, f"{mark} {index + 1}. {label}", width, "     ")
+        keys: list[tuple[str, str]] = []
+        if not pending.reason:
+            if pending.offer_session:
+                where = home_label(pending.request.workspace_root or "")
+                for line in session_warning(pending.request.tool_name, where):
+                    options += wrapped("class:muted", "  " + line, width, "  ")
+            dot = f" {symbols.dot} "
+            line = dot.join(
+                [
+                    f"{symbols.arrows} select",
+                    "enter confirm",
+                    "1-3",
+                    "v view all",
+                    "esc stop the turn",
+                ]
             )
-        if text.escaped:
-            lines.append(("class:warn", f"{symbols.warn} {ESCAPED_WARNING}"))
+            keys = wrapped("class:muted", "  " + line, width, "  ")
+        # The rows the rest of the screen keeps: the status bar, the live
+        # area, a queued line, a hint and the reason field.
+        rows = size.rows - 1
+        rows -= sum(
+            (
+                self._live_visible(),
+                self.controller.queued is not None,
+                self._hint_visible(),
+                pending.reason,
+            )
+        )
+        boxed = width >= 40 and symbols.rule == "─"
+        while True:
+            inner = width - 4 if boxed else width
+            text = panel_text(pending.request, exists=pending.exists, width=inner - 2)
+            # The header holds a path: its rows keep every character.
+            head = [("class:tool", part) for part in wrap_words(text.header, inner)]
+            tail = (
+                wrapped("class:warn", f"{symbols.warn} {ESCAPED_WARNING}", inner)
+                if text.escaped
+                else []
+            )
+            fixed = (2 if boxed else 1) + len(head) + len(tail) + len(options)
+            room = rows - fixed - len(keys)
+            if room >= min(2, len(text.body)) or not (boxed or keys):
+                break
+            if boxed:
+                boxed = False
+            else:
+                keys = []
+        limit = max(1, min(BODY_LINES, room))
+        body = [("", "  " + line) for line in text.body]
+        if len(body) > limit:
+            hidden = len(body) - (limit - 1)
+            body = body[: limit - 1] + [
+                ("class:muted", f"{symbols.ellipsis} +{hidden} lines (v views all)")
+            ]
         out: StyleAndTextTuples = []
 
         def row(style: str, line: str) -> None:
@@ -540,50 +606,22 @@ class InteractiveApp:
             out.append(("", "\n"))
 
         if boxed:
-            title = f"─ {text.title} "
-            row(
-                "",
-                "╭"
-                + cut_cells(title, width - 2)
-                + "─" * max(0, width - 2 - cells(title))
-                + "╮",
-            )
-            for style, line in lines:
-                shown_line = cut_cells(line, inner, symbols.ellipsis)
+            title = cut_cells(f"─ {text.title} ", width - 2)
+            row("", "╭" + title + "─" * max(0, width - 2 - cells(title)) + "╮")
+            for style, line in head + body + tail:
+                shown = cut_cells(line, inner, symbols.ellipsis)
                 out.append(("", "│ "))
-                out.append((style, shown_line))
-                row("", " " * (inner - cells(shown_line)) + " │")
+                out.append((style, shown))
+                row("", " " * (inner - cells(shown)) + " │")
             row("", "╰" + "─" * (width - 2) + "╯")
         else:
-            row("class:question", text.title)
-            for style, line in lines:
-                row(style, cut_cells(line, width, symbols.ellipsis))
-        for index, label in self._options(pending):
-            mark = (
-                symbols.selection
-                if index == pending.selected and not pending.reason
-                else " "
-            )
-            style = "class:accent" if index == pending.selected else ""
-            row(
-                style,
-                cut_cells(f"{mark} {index + 1}. {label}", width, symbols.ellipsis),
-            )
-        if pending.reason:
-            out.pop()  # the reason field follows on its own row
-            return out
-        warning = session_warning(
-            pending.request.tool_name,
-            home_label(pending.request.workspace_root or "") or "the workspace",
-        )
-        if pending.offer_session:
-            for line in warning:
-                row("class:muted", cut_cells("  " + line, width, symbols.ellipsis))
-        dot = f" {symbols.dot} "
-        keys = dot.join(
-            ["↑↓ select", "enter confirm", "1-3", "v view all", "esc stop the turn"]
-        )
-        out.append(("class:muted", cut_cells("  " + keys, width, symbols.ellipsis)))
+            row("class:question", cut_cells(text.title, width, symbols.ellipsis))
+            for style, line in head + body + tail:
+                row(style, line)
+        for style, line in options + keys:
+            row(style, line)
+        if out:
+            out.pop()  # no newline after the last row
         return out
 
     def _reason_count(self) -> StyleAndTextTuples:

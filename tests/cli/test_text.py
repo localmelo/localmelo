@@ -13,6 +13,7 @@ from localmelo.support.cli.text import (
     input_rows,
     pad_cells,
     wrap_cells,
+    wrap_words,
 )
 from localmelo.support.cli.theme import ASCII, UNICODE, symbols_for, wants_no_color
 
@@ -157,3 +158,14 @@ def test_no_color_needs_a_value() -> None:
     assert wants_no_color({"NO_COLOR": "1"})
     assert not wants_no_color({"NO_COLOR": ""})
     assert not wants_no_color({})
+
+
+def test_wrap_words_breaks_after_a_space_and_keeps_every_character() -> None:
+    line = "Commands can reach files outside /home/me/demo-project."
+    rows = wrap_words(line, 30)
+    assert rows == ["Commands can reach files ", "outside /home/me/demo-project."]
+    assert "".join(rows) == line
+    path = "a/" * 20
+    assert wrap_words(path, 10) == ["a/" * 5] * 4
+    assert wrap_words("", 10) == [""]
+    assert all(cells(row) <= 7 for row in wrap_words("你好世界 再见朋友们好", 7))

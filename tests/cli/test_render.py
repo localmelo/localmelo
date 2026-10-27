@@ -684,3 +684,35 @@ def test_a_tool_name_from_the_model_is_cleaned() -> None:
 def test_model_ids_in_the_banner_are_cleaned() -> None:
     text = _banner(model=f"qwen{OSC_TITLE}3")
     assert "\x1b" not in text and "qwen3 · OpenAI-compatible" in text
+
+
+# ── Review fixes: long text wraps, every character kept ──
+
+LONG_ZH = "这个函数的问题在于它没有检查输入是否为空，所以当用户传入空列表时会抛出索引错误。建议在函数开头加一个检查。"
+LONG_URL = "https://example.com/" + "a1b2c3d4" * 12
+
+
+def _joined(text: str) -> str:
+    return "".join(text.split())
+
+
+def test_a_long_chinese_answer_and_a_long_url_wrap_whole() -> None:
+    text = Turn().finish(result=f"{LONG_ZH}\n\n{LONG_URL}").text()
+    assert "…" not in text.split("✻")[0]
+    assert LONG_ZH in _joined(text) and LONG_URL in _joined(text)
+
+
+def test_a_long_echo_wraps_whole() -> None:
+    out = RecordingOut(40)
+    TurnRenderer(out, symbols=UNICODE, backend=_backend).begin_turn(LONG_ZH)
+    assert LONG_ZH in _joined(out.text())
+
+
+def test_a_best_effort_keeps_its_code_block() -> None:
+    answer = "```python\ndef f(x):\n    return x * 2\n```\nThat should work."
+    text = Turn().finish("budget_exhausted", error="Max steps", result=answer).text()
+    lines = text.split("\n")
+    assert "● Best effort:" in lines
+    code = lines.index(next(line for line in lines if "def f(x):" in line))
+    assert lines[code + 1].strip() == "return x * 2"
+    assert lines[code + 1].index("return") > lines[code].index("def")

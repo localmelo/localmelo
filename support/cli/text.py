@@ -86,6 +86,23 @@ def wrap_cells(line: str, width: int) -> list[str]:
     return rows or [""]
 
 
+def wrap_words(line: str, width: int) -> list[str]:
+    """*line* in rows of at most *width* cells, broken after a space where one fits.
+
+    Every character is kept, as in :func:`wrap_cells`; a word longer than
+    a row is broken by cells.
+    """
+    rows: list[str] = []
+    while cells(line) > width:
+        row = take_cells(line, max(width, 2)) or line[0]
+        space = row.rfind(" ") + 1
+        if 0 < space < len(row) and line[len(row)] != " ":
+            row = row[:space]
+        rows.append(row)
+        line = line[len(row) :]
+    return rows + [line] if line or not rows else rows
+
+
 def pad_cells(text: str, width: int) -> str:
     """*text* with spaces after it up to *width* cells."""
     return text + " " * max(0, width - cells(text))

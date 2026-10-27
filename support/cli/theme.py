@@ -70,6 +70,7 @@ class Symbols:
     session: str
     image: str
     selection: str
+    arrows: str
     queued: str
     output_tokens: str  # a format with one {} for the count
     minus: str
@@ -94,6 +95,7 @@ UNICODE: Final = Symbols(
     session="◆",
     image="▪",
     selection="❯",
+    arrows="↑↓",
     queued="↳",
     output_tokens="↓ {} tokens",
     minus="−",
@@ -118,6 +120,7 @@ ASCII: Final = Symbols(
     session="=",
     image="#",
     selection=">",
+    arrows="up/down",
     queued=">>",
     output_tokens="{} tokens out",
     minus="-",

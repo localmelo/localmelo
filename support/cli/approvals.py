@@ -36,6 +36,8 @@ APPROVAL_KEY_GUARD_S: Final = 0.4
 REASON_MAX_CHARS: Final = 500
 # Lines of the panel's body before it is cut.
 BODY_LINES: Final = 8
+# The cells a line number takes in front of code: ``"   1 "``.
+NUMBER_CELLS: Final = 5
 
 ESCAPED_WARNING: Final = "The arguments contain control characters, shown escaped."
 
@@ -72,11 +74,26 @@ def _command_text(command: object) -> str:
     return str(command if command is not None else "")
 
 
-def _numbered(text: str) -> list[str]:
+def _lines(text: str) -> list[str]:
     lines = text.split("\n")
     if lines and lines[-1] == "":
         lines.pop()
-    return [f"{number:4} {line}" for number, line in enumerate(lines, 1)]
+    return lines
+
+
+def _numbered(lines: list[str], width: int) -> list[str]:
+    """*lines* numbered, each wrapped to *width* with its rest indented under it."""
+    room = width - NUMBER_CELLS
+    rows: list[str] = []
+    for number, line in enumerate(lines, 1):
+        first, *rest = wrap_cells(line, room)
+        rows.append(f"{number:4} {first}")
+        rows += [" " * NUMBER_CELLS + part for part in rest]
+    return rows
+
+
+def _wrapped(lines: list[str], width: int) -> list[str]:
+    return [row for line in lines for row in wrap_cells(line, width)]
 
 
 def panel_text(
@@ -101,7 +118,7 @@ def panel_text(
     tool = request.tool_name
     if tool == "shell_exec":
         command = shown(_command_text(arguments.get("command")))
-        body = [row for line in command.split("\n") for row in wrap_cells(line, width)]
+        body = _wrapped(command.split("\n"), width)
         return PanelText(
             "Run a shell command?", f"shell_exec · in {workspace}", body, escaped_any
         )
@@ -110,26 +127,27 @@ def panel_text(
         return PanelText(
             "Run Python code?",
             f"python_exec · in {workspace}",
-            _numbered(code),
+            _numbered(_lines(code), width),
             escaped_any,
         )
     if tool == "file_write":
         path = str(arguments.get("path") or "")
         content = str(arguments.get("content") or "")
-        lines = _numbered(shown(content))
+        lines = _lines(shown(content))
         where = shown(display_path(path, root))
         if exists:
             header = f"file_write  {where} · overwrites the file; no diff shown"
-            return PanelText("Change a file?", header, lines, escaped_any)
+            body = _numbered(lines, width)
+            return PanelText("Change a file?", header, body, escaped_any)
         count = len(lines)
         header = f"file_write  {where} · new file, {count} line" + (
             "" if count == 1 else "s"
         )
-        return PanelText("Write a new file?", header, lines, escaped_any)
+        body = _numbered(lines, width)
+        return PanelText("Write a new file?", header, body, escaped_any)
     text = json.dumps(dict(arguments), indent=2, ensure_ascii=False, default=str)
-    return PanelText(
-        f"Call {shown(tool)}?", shown(tool), shown(text).split("\n"), escaped_any
-    )
+    body = _wrapped(shown(text).split("\n"), width)
+    return PanelText(f"Call {shown(tool)}?", shown(tool), body, escaped_any)
 
 
 def session_warning(tool: str, workspace: str) -> list[str]:

