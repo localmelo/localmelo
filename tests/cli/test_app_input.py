@@ -1,0 +1,324 @@
+"""The terminal UI's keys and input box, driven through a pipe.
+
+Keys go in as a terminal sends them; the screen is read back with pyte.
+The session is a fake that records what the app asks of it.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import pytest
+from prompt_toolkit.completion import WordCompleter
+from prompt_toolkit.history import FileHistory
+
+from localmelo.support.cli.app import open_history
+from localmelo.support.cli.render import LiveState
+from localmelo.support.cli.text import cells
+from localmelo.tests.cli.ui_helpers import (
+    BACKSPACE,
+    CTRL_C,
+    CTRL_D,
+    CTRL_J,
+    ENTER,
+    ESC,
+    UP,
+    Driver,
+    FakeController,
+    running_app,
+)
+
+
+def _box(driver: Driver) -> list[str]:
+    """The rows between the input box's two rules."""
+    screen = driver.screen()
+    rules = [i for i, line in enumerate(screen) if line.startswith("──────")]
+    assert len(rules) >= 2, "\n".join(screen)
+    return screen[rules[0] + 1 : rules[1]]
+
+
+async def test_enter_sends_and_blank_drafts_are_not_sent() -> None:
+    controller = FakeController()
+    async with running_app(controller) as app:
+        app.type("   " + ENTER)
+        await app.settle()
+        assert controller.entered == [] and app.ui.buffer.text == "   "
+        app.type(BACKSPACE * 3 + "hello" + ENTER)
+        await app.wait(lambda: controller.entered == ["hello"])
+        assert app.ui.buffer.text == ""
+
+
+@pytest.mark.parametrize("newline", [ESC + ENTER, CTRL_J, "\\" + ENTER])
+async def test_new_line_keys_add_a_line(newline: str) -> None:
+    controller = FakeController()
+    async with running_app(controller) as app:
+        app.type("first" + newline)
+        await app.settle(0.5)
+        app.type("second" + ENTER)
+        await app.wait(lambda: controller.entered == ["first\nsecond"])
+
+
+async def test_backspace_deletes_whole_wide_characters() -> None:
+    async with running_app() as app:
+        app.type("你好世界" + BACKSPACE * 2)
+        await app.wait(lambda: app.ui.buffer.text == "你好")
+        app.type("世界abc" + BACKSPACE * 4)
+        await app.wait(lambda: app.ui.buffer.text == "你好世")
+        assert cells(app.ui.buffer.text) == 6
+        await app.wait(lambda: _box(app)[0].rstrip() == "› 你好世")
+
+
+async def test_a_character_split_across_writes_arrives_whole() -> None:
+    async with running_app() as app:
+        for byte in "你".encode():
+            app.pipe.send_bytes(bytes([byte]))
+            await app.settle(0.05)
+        await app.wait(lambda: app.ui.buffer.text == "你")
+
+
+async def test_wrapped_wide_text_shows_whole_and_shrinks_without_blank_rows() -> None:
+    async with running_app(columns=21) as app:
+        app.type("你" * 30)
+        await app.wait(lambda: app.ui.buffer.text == "你" * 30)
+        await app.settle()
+        box = _box(app)
+        assert box == [
+            "› " + "你" * 9,
+            "  " + "你" * 9,
+            "  " + "你" * 9,
+            "  " + "你" * 3,
+        ]
+        app.type(BACKSPACE * 10)
+        await app.wait(lambda: len(app.ui.buffer.text) == 20)
+        await app.settle()
+        box = _box(app)
+        assert box == ["› " + "你" * 9, "  " + "你" * 9, "  " + "你" * 2]
+        assert all(row.strip() for row in box)
+
+
+async def test_a_bracketed_paste_inserts_lines_and_sends_nothing() -> None:
+    controller = FakeController()
+    async with running_app(controller) as app:
+        app.type("\x1b[200~第一行\n第二行\x1b[201~")
+        await app.wait(lambda: app.ui.buffer.text == "第一行\n第二行")
+        await app.settle()
+        assert controller.entered == []
+        assert _box(app)[:2] == ["› 第一行", "  第二行"]
+
+
+async def test_enter_during_a_turn_queues_and_the_line_shows() -> None:
+    controller = FakeController(state="running")
+    async with running_app(controller) as app:
+        app.type("Then add a test" + ENTER)
+        await app.wait(lambda: controller.queued == "Then add a test")
+        await app.wait(
+            lambda: "↳ Queued for the next turn: Then add a test" in app.text()
+        )
+        app.type("another" + ENTER)
+        await app.wait(lambda: "One message is already queued" in app.text())
+        assert app.ui.buffer.text == "another"
+
+
+async def test_up_on_an_empty_draft_takes_the_queued_message_back() -> None:
+    controller = FakeController(state="running", queued="fix it")
+    async with running_app(controller) as app:
+        app.type(UP)
+        await app.wait(lambda: app.ui.buffer.text == "fix it")
+        assert controller.queued is None
+
+
+async def test_esc_stops_a_turn_and_does_nothing_when_idle() -> None:
+    controller = FakeController()
+    async with running_app(controller) as app:
+        app.type(ESC)
+        await app.settle(0.6)
+        assert controller.stops == 0
+        controller.state = "running"
+        app.type(ESC)
+        await app.wait(lambda: controller.stops == 1, timeout_s=3)
+        app.type(ESC)
+        await app.settle(0.6)
+        assert controller.stops == 1  # stopping: a second Esc does nothing
+
+
+async def test_esc_with_the_menu_open_closes_it_and_the_turn_runs_on() -> None:
+    controller = FakeController(state="running")
+    completer = WordCompleter(["/help", "/new"], sentence=True)
+    async with running_app(controller, completer=completer) as app:
+        app.type("/he")
+        await app.wait(lambda: app.ui.buffer.complete_state is not None)
+        app.type(ESC)
+        await app.wait(lambda: app.ui.buffer.complete_state is None, timeout_s=3)
+        await app.settle(0.6)
+        assert controller.stops == 0
+        assert app.ui.buffer.text == "/he"
+
+
+async def test_enter_on_a_partial_command_takes_the_first_completion() -> None:
+    controller = FakeController()
+    completer = WordCompleter(["/help", "/new"], sentence=True)
+    async with running_app(controller, completer=completer) as app:
+        app.type("/he")
+        await app.wait(lambda: app.ui.buffer.complete_state is not None)
+        app.type(ENTER)
+        await app.wait(lambda: controller.entered == ["/help"])
+
+
+async def test_ctrl_c_clears_the_draft_then_the_queue_then_stops() -> None:
+    controller = FakeController(state="running", queued="later")
+    async with running_app(controller) as app:
+        app.type("draft" + CTRL_C)
+        await app.wait(
+            lambda: app.ui.buffer.text == "" and "Draft cleared" in app.text()
+        )
+        app.type(CTRL_C)
+        await app.wait(lambda: controller.queued is None)
+        assert controller.stops == 0
+        app.type(CTRL_C)
+        await app.wait(lambda: controller.stops == 1)
+        await app.wait(lambda: "press ctrl+c again to quit" in app.text())
+        app.type(CTRL_C)  # stopping, within 2 s: quits
+        await app.wait(lambda: not app.ui.app.is_running)
+
+
+async def test_ctrl_c_twice_quits_when_idle_but_clearing_a_draft_does_not_arm_it() -> (
+    None
+):
+    async with running_app() as app:
+        app.type("draft" + CTRL_C)
+        await app.wait(lambda: app.ui.buffer.text == "")
+        app.type(CTRL_C)
+        await app.wait(lambda: "Press ctrl+c again to quit" in app.text())
+        assert app.ui.app.is_running
+        app.type(CTRL_C)
+        await app.wait(lambda: not app.ui.app.is_running)
+
+
+async def test_ctrl_c_after_two_seconds_asks_again() -> None:
+    now = [100.0]
+    async with running_app(clock=lambda: now[0]) as app:
+        app.type(CTRL_C)
+        await app.wait(lambda: "Press ctrl+c again to quit" in app.text())
+        now[0] += 2.5
+        app.type(CTRL_C)
+        await app.settle()
+        assert app.ui.app.is_running
+
+
+async def test_ctrl_d_quits_when_idle_deletes_with_text_and_hints_in_a_turn() -> None:
+    controller = FakeController(state="running")
+    async with running_app(controller) as app:
+        app.type("ab\x1b[D" + CTRL_D)  # left, then delete the b
+        await app.wait(lambda: app.ui.buffer.text == "a")
+        app.type(BACKSPACE + CTRL_D)
+        await app.wait(lambda: "esc stops it, /exit quits" in app.text())
+        assert app.ui.app.is_running
+        controller.state = "idle"
+        app.type(CTRL_D)
+        await app.wait(lambda: not app.ui.app.is_running)
+
+
+async def test_a_hint_keeps_the_draft() -> None:
+    controller = FakeController(state="stopping")
+    async with running_app(controller) as app:
+        app.type("next" + ENTER)
+        await app.wait(lambda: "enter sends once it has stopped" in app.text())
+        assert app.ui.buffer.text == "next"
+
+
+async def test_history_recalls_what_was_sent(tmp_path: Path) -> None:
+    history = open_history(str(tmp_path / "cli_history"))
+    controller = FakeController()
+    async with running_app(controller, history=history) as app:
+        app.type("first message" + ENTER)
+        app.type("second" + ENTER)
+        await app.wait(lambda: len(controller.entered) == 2)
+        # The buffer reloads the history when it draws next after Enter.
+        await app.settle()
+        app.type(UP + UP)
+        await app.wait(lambda: app.ui.buffer.text == "first message")
+        app.type(CTRL_C)
+        await app.wait(lambda: app.ui.buffer.text == "")
+        app.type("\x12first")  # ctrl+r
+        await app.wait(lambda: "first" in app.text() and "I-search" in app.text())
+        app.type(ENTER)
+        await app.wait(lambda: app.ui.buffer.text == "first message")
+    assert list(FileHistory(str(tmp_path / "cli_history")).load_history_strings()) == [
+        "second",
+        "first message",
+    ]
+
+
+async def test_a_question_takes_its_default_and_keeps_the_draft() -> None:
+    async with running_app() as app:
+        app.type("my draft")
+        await app.wait(lambda: app.ui.buffer.text == "my draft")
+        asking = asyncio.ensure_future(
+            app.ui.ask("Model server URL", "http://127.0.0.1:8000/v1")
+        )
+        await app.wait(
+            lambda: "Model server URL [http://127.0.0.1:8000/v1]:" in app.text()
+        )
+        assert app.ui.buffer.text == ""
+        app.type(ENTER)
+        await app.wait(asking.done)
+        assert asking.result() == "http://127.0.0.1:8000/v1"
+        assert app.ui.buffer.text == "my draft"
+        asking = asyncio.ensure_future(app.ui.ask("Model", "1"))
+        await app.wait(lambda: "Model [1]:" in app.text())
+        app.type("qwen" + ESC)
+        await app.wait(asking.done, timeout_s=3)
+        assert asking.result() is None
+
+
+async def test_the_status_bar_keeps_the_mode_in_the_last_column() -> None:
+    controller = FakeController(title="修复失败的测试")
+    async with running_app(controller, columns=60) as app:
+        await app.settle()
+        bar = app.screen()[-24:]
+        line = next(row for row in reversed(app.screen()) if row.strip())
+        assert line.endswith("ask") and cells(line) == 60, bar
+        assert "修复失败的测试" in line
+
+
+async def test_the_status_bar_cuts_the_title_first_when_narrow() -> None:
+    controller = FakeController(title="Fix the failing test in the parser")
+    async with running_app(controller, columns=40) as app:
+        await app.settle()
+        line = next(row for row in reversed(app.screen()) if row.strip())
+        assert line.startswith("  stub-model · ~/demo-project")
+        assert line.endswith("ask") and cells(line) == 40
+
+
+async def test_the_live_area_shows_the_spinner_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("LOCALMELO_SPINNER_FRAME", "3")
+    now = [50.0]
+    controller = FakeController(state="running")
+    async with running_app(controller, clock=lambda: now[0]) as app:
+        app.ui.renderer.live = LiveState(
+            activity="Thinking", started=44.0, step=4, output_tokens=412
+        )
+        app.ui.invalidate()
+        await app.wait(
+            lambda: "✶ Thinking… · step 4 · 6s · ↓ 412 tokens · esc to stop"
+            in app.text()
+        )
+
+
+def test_the_history_file_is_private_and_kept_under_a_size(tmp_path: Path) -> None:
+    path = tmp_path / "logs-and-history" / "cli_history"
+    open_history(str(path))
+    assert path.stat().st_mode & 0o777 == 0o600
+    with path.open("a", encoding="utf-8") as file:
+        for number in range(1_500):
+            file.write(f"\n# t\n+entry {number} " + "x" * 800 + "\n")
+    assert path.stat().st_size > 1_000_000
+    history = open_history(str(path))
+    entries = list(history.load_history_strings())
+    assert len(entries) == 1_000
+    assert entries[0].startswith("entry 1499 ") and entries[-1].startswith("entry 500 ")
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.stat().st_size < 1_000_000

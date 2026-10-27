@@ -289,6 +289,7 @@ FORBIDDEN: list[tuple[str, tuple[str, ...]]] = [
             "rich",
         ),
     ),
+    ("support/cli", ("localmelo.support.gateway", "fastapi", "uvicorn")),
     ("support/progress_line.py", ("prompt_toolkit", "rich")),
     ("support/backends", ("prompt_toolkit", "rich")),
 ]
