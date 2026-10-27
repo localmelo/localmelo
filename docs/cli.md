@@ -9,10 +9,10 @@ see [Offline retrieval](retrieval.md).
 
 ```text
 melo [options] "<task>"                      # run one task (direct mode)
-melo                                         # conversation loop on the saved backend (in a terminal)
-melo --base-url URL [--chat-model NAME]      # conversation loop on this server
-melo [--base-url URL] [--chat-model NAME] "" # conversation loop, as before
-melo --reconfigure                           # run setup, then the conversation loop
+melo [options]                               # the interactive UI (in a terminal)
+melo --base-url URL [--chat-model NAME]      # the interactive UI on this server
+melo [--base-url URL] [--chat-model NAME] "" # the plain conversation loop
+melo --reconfigure                           # run setup, then the interactive UI
 melo --serve [--host HOST] [--port PORT]     # start the gateway
 melo --serve --reconfigure                   # run setup, then start the gateway
 melo --daemon install|uninstall|status       # macOS background service
@@ -25,17 +25,12 @@ Quote the task. Several words without quotes are joined with spaces.
 | Command | What it does |
 |---|---|
 | `melo "<task>"` | Direct mode: runs one task, prints the result and exits. |
+| `melo` (no task) | Opens the [interactive UI](#the-interactive-ui) in a terminal, on the saved backend. With no saved backend it first asks for a model server and a model, and saves them; see [First run](#first-run). Without a terminal it exits with code 2 and says what to run instead. |
+| `melo --base-url URL` (no task) | Opens the interactive UI on that server, with `--chat-model` or the first chat model the server lists. |
+| `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI. Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
 | `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). |
-| `melo ""` (empty task) | Opens a conversation loop in the terminal: each line you type is a task for the same agent. `/help` lists the commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
-| `melo` (no task) | In a terminal, opens the same loop on the saved backend. With no saved backend it first asks for a model server and a model, and saves them; see [First run](#first-run). Without a terminal (in a script, through a pipe, under launchd) it starts the gateway, as `melo --serve` does. |
-| `melo --base-url URL` (no task) | Opens the loop on that server, with `--chat-model` or the first chat model the server lists; see [Without a task](#without-a-task). |
-| `melo --reconfigure` | In a terminal, runs the setup wizard, then opens the loop. Without a terminal it exits with code 1. |
+| `melo ""` (empty task) | Opens the plain conversation loop: each line you type is a task for the same agent, and only the answer prints. `/help` lists its commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
 | `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](gateway.md#run-the-gateway-at-login-macos). |
-
-> [!NOTE]
-> A planned interactive CLI will replace this loop when you run `melo`
-> without a task, with live tool output, approvals and `/model` (see the
-> [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap)).
 
 In the `melo ""` loop, turns share one agent and its working memory, which
 keeps each answer, so a turn sees the earlier ones. A turn that does not
@@ -50,45 +45,230 @@ recalls earlier lines of this loop. A line that is not valid UTF-8 prints
 `melo: that line was not valid UTF-8; type it again.` and the loop asks
 again.
 
-### Without a task
+## The interactive UI
 
-With no task, no `--serve` and no `--daemon`, `melo` opens the loop in a
-terminal (stdin and stdout both terminals), and anywhere when you give
-`--base-url` or `--chat-model`. Before
-its banner it prints the model and the server it talks to:
+`melo` without a task, in a terminal, opens a chat that shows its work as
+it happens: each tool call as it finishes, a spinner with the step and the
+time while the model works, and the answer as Markdown. What it prints
+stays in the terminal's scrollback; the input box and a status bar stay at
+the bottom.
 
 ```text
-Model: Qwen3-8B-4bit · http://127.0.0.1:8000/v1 (melo --reconfigure changes it)
-localmelo · local agent
-Enter a task to begin. Type /help for commands or /exit to quit.
+╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
+│ model      Qwen3-8B · vLLM · http://127.0.0.1:8000/v1                    │
+│ workspace  ~/demo-project                                                │
+│ tools      4 built-in (3 ask first)                                      │
+│ memory     no long-term memory (no embedding backend)                    │
+│ session    new                                                           │
+╰──────────────────────────────────────────────────────────────────────────╯
+  / commands · esc stop · ctrl+d quit
+
+› What is in this folder?
+
+✓ shell_exec  ls -1 · 0.1s · allowed
+  └ app.py
+    notes.txt
+    tests
+    … +1 lines
+● The folder holds app.py, notes.txt, tests and todo.md.
+✻ Worked for 6.2s · 1 tool call · ↓ 412 tokens
+
+────────────────────────────────────────────────────────────────────────────
+› Ask melo · / for commands
+────────────────────────────────────────────────────────────────────────────
+  Qwen3-8B · ~/demo-project · ctx 2.1k · What is in this folder?         ask
 ```
 
-It chooses the server in this order:
+It needs a terminal: stdin and stdout must both be terminals and `TERM`
+must not be `dumb`. Otherwise `melo` prints this on stderr and exits with
+code 2:
+
+```text
+melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
+  Run one task:      melo "your task"
+  Start the gateway: melo --serve
+```
+
+### Which model server
+
+The first of these that applies:
 
 1. `--reconfigure`: the setup wizard, then the backend it saved. Without a
-   task it cannot be combined with `--base-url`, which skips the config
-   file.
+   task it cannot be combined with `--base-url`.
 2. `--base-url URL`: that server, without the config file. The model is
    `--chat-model`, else the first model that `GET URL/models` lists,
    skipping models whose id contains `embed` or `rerank` while another is
    listed. A URL without `/v1` is listed at `URL/v1/models`, and when that
-   answers the loop uses `URL/v1` too. When the server does not answer the
-   list, or lists no model, melo warns on stderr and asks for the model
-   `default`:
-   `melo: could not list the models at URL (connection refused); asking for the model 'default' (--chat-model NAME picks one)`.
-   With no config file, in a terminal, it asks once
-   `Save URL · MODEL as the default backend? [Y/n]`; Enter saves it.
+   answers the UI uses `URL/v1` too. When the server does not answer the
+   list, or lists no model, the model is `default` and a warning under the
+   banner says why. With no config file it asks once
+   `Save URL · MODEL as the default backend? [Y/n]`; Enter saves it, as the
+   first run does.
 3. The saved backend, with `--chat-model` in place of its model for this
-   run. Nothing is sent before your first task, so a server that is down
-   shows only when you send one.
-4. No saved backend, in a terminal: the first-run questions below. With no
-   saved backend and no terminal (possible only with `--chat-model`), melo
-   exits with code 1, as a task would.
+   session. Nothing is checked before the UI opens: after the banner, melo
+   lists the server's models once (`GET /models`) and warns when the server
+   does not answer, or does not list the model:
+   `⚠ Cannot reach the model server at URL (connection refused). Start it, then send your message.`
+4. No saved backend: the [first-run](#first-run) questions, then the UI.
+
+The banner names the model and the server; when they are not the saved
+backend, a second line says where they come from (`from --base-url (not
+saved)`, `saved as the default`) and, when melo took the first of several
+models, `first of N; /model lists them`.
+
+### Keys
+
+| Key | What it does |
+|---|---|
+| Enter | Send the message. During a turn, queue it: it is sent when the turn completes. |
+| Alt+Enter, Ctrl+J, or `\` then Enter | A new line in the message. |
+| Esc | Close the completion menu; otherwise stop the turn. |
+| Ctrl+C | Close the menu, else clear the draft, else clear a queued message, else stop the turn; a second Ctrl+C within 2 seconds quits. |
+| Ctrl+D | Quit, when no turn runs and the draft is empty; with text, delete the character under the cursor. |
+| ↑ ↓ | Move between lines, then through earlier messages. On an empty draft during a turn, ↑ takes back the queued message. |
+| Ctrl+R | Search earlier messages. |
+| Tab | Complete a command. |
+| Ctrl+L | Clear the screen. |
+
+- **The queue.** One message waits at a time, shown as
+  `↳ Queued for the next turn: …`. When the turn ends any other way than
+  `completed` (stopped, failed), it goes back into the input box unsent.
+- **Stopping.** Esc stops the turn at once; the turn ends `cancelled` and
+  prints `■ Stopped`. After the answer has printed, melo spends up to 2
+  seconds recording the run's steps (see
+  [Procedural memory](procedures.md)); Esc then does nothing, and the next
+  message waits for it.
+- **History.** Messages and commands are kept in
+  `~/.cache/localmelo/cli_history` (mode 0600, the newest 1,000 once it
+  passes 1 MB), never the files' text. When that file cannot be opened,
+  the session keeps its history in memory and says so.
+
+### Commands
+
+Type `/` and the commands show under the input box with what each does;
+type more letters to narrow them, Tab or Enter to take one.
+
+| Command | What it does |
+|---|---|
+| `/help [command]` | The commands and keys, or one command's details. |
+| `/new` (also `/clear`) | Start a new session: the model forgets the conversation, and session grants end. |
+| `/model [name\|number]` | Alone: the current model, and the models the server lists. With a name, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
+| `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default. |
+| `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
+
+- `/new`, `/model` and `/backend` wait until the turn ends:
+  `/model is not available while a turn runs (esc stops it).`
+- Saving: `/model` keeps the configured backend and changes its model;
+  `/backend` saves the server as the `vllm` backend, with embedding off, as
+  the first run does. After `melo --base-url URL` whose save question was
+  answered `n`, they switch for this session only.
+- A model or server that does not start, or a server that does not answer,
+  leaves the current one in place:
+  `✗ Could not reach URL: connection refused. Still using URL.`
+- A message that starts with `/` and a known command's name is that
+  command; `/etc/hosts is broken` is a message. To send a message that
+  starts with a command's name, start it with a space.
+
+### A turn's output
+
+- **The spinner** shows what melo does (`Thinking`, `Running`,
+  `Waiting for your approval`), the step (`step 4`, never against
+  `--max-steps`), the attempt from the second one, the time, the output
+  tokens, and `esc to stop`. A running tool shows its own clock under it,
+  and for `shell_exec` and `python_exec` their limit:
+  `└ shell_exec  pytest -q tests · 0:25 of 10:00`.
+- **Tool calls** print one block each when they finish: `✓` ran, `✗`
+  failed, `⊘` blocked or denied, `◌` stopped or not run; the duration;
+  `exit N` when a command ran and exited with another code than 0 (`grep`
+  exits 1 without failing); how its approval ended; and up to 3 lines of
+  its output, then `… +N lines`. Escape sequences in the output are removed, so a tool
+  cannot move the cursor, set the title or write the clipboard.
+- **The answer** prints as Markdown after `●`. A run that did not complete
+  prints its best effort, the [status line](#output) and a hint, such as
+  `Is the model server running at URL?` for a server that does not answer.
+- Thinking excerpts, retry notices and reflections come in a later release.
+
+### Approvals
+
+`shell_exec`, `python_exec` and `file_write` run only once you answer. The
+panel takes the place of the input box, and your draft stays:
+
+```text
+╭─ Run a shell command? ───────────────────────────────────────────────────╮
+│ shell_exec · in ~/demo-project                                           │
+│   ls -1                                                                  │
+╰──────────────────────────────────────────────────────────────────────────╯
+❯ 1. Yes
+  2. Yes, and allow every shell_exec call in this session
+  3. No, and tell melo why
+  "Allow every" lets any shell command run without asking for the rest of this session.
+  Commands can reach files outside ~/demo-project.
+  ↑↓ select · enter confirm · 1-3 · v view all · esc stop the turn
+```
+
+- `1` allows this call, `2` allows the tool for the rest of the session,
+  and `3` opens a field for a reason (at most 500 characters) that the
+  model reads; Enter sends it. ↑ ↓ and Enter choose too. No letter answers,
+  and for 0.4 seconds after the panel opens only Esc and Ctrl+C act, so a
+  message you were typing cannot answer it.
+- Esc or Ctrl+C at the choices stops the turn, and a second Ctrl+C within
+  2 seconds quits; in the reason field, Esc goes back to the choices.
+- The command, the code or the file's new content shows exactly as it will
+  run, its long lines wrapped, never cut: control characters and the
+  characters that reorder or hide text show escaped (`\r`, `\x1b`,
+  `\u{202e}`), with a warning line, so nothing can hide in it.
+- The panel shows at most 8 lines of the body, fewer on a short terminal,
+  then `… +N lines (v views all)`; `v` prints the body in full above it.
+- `--yolo` runs every tool without asking, and the status bar says
+  `⚠ YOLO: no approvals`.
+
+### The workspace
+
+melo works in the current folder, or in `--workspace DIR`. File tools
+(`file_read`, `file_write`) stay in this folder. Commands and Python can
+reach other files, so melo asks first. The banner warns when the workspace
+is your home folder or `/`. `shell_exec` and `python_exec` stop after 10
+minutes in the UI (30 and 60 seconds for a task).
+
+### Chinese and other wide characters
+
+The input box edits by character and places text by terminal cell: Chinese
+and other wide characters type, delete and wrap whole, and deleting a
+wrapped message leaves no blank rows. Known limits:
+
+- A character built from several code points (an accent typed as a
+  combining mark, an emoji sequence such as 👩‍💻) takes one Backspace per
+  code point.
+- Ctrl+W deletes back to the last space, which in Chinese text without
+  spaces is the whole run.
+- Text that an input method (such as macOS Pinyin) is still composing is
+  drawn by the terminal, not by melo.
+
+### Terminal settings
+
+- The UI uses the 16 ANSI colors, so light and dark themes both work. Set
+  `NO_COLOR` to a non-empty value to turn the colors off.
+- On a terminal whose encoding is not UTF-8, or with `LOCALMELO_ASCII=1`,
+  melo draws ASCII stand-ins for its symbols (`>` for `›`, `...` for `…`).
+- melo rings the terminal's bell when an approval panel opens and when a
+  turn of 30 seconds or more ends; `LOCALMELO_BELL=0` turns it off.
+
+### Sessions and files
+
+Each `melo` starts a new session; the first message creates it. Sessions
+are kept in `~/.cache/localmelo/cli/sessions.db` (resuming them comes in a
+later release). The UI writes its log to `~/.cache/localmelo/logs/cli.log`
+(folder 0700, files 0600, 1 MB, two backups) and never prints a traceback
+on the screen; a problem shows as one dim line naming the log. A config
+file that is not valid TOML, or a log folder that cannot be made, stops
+`melo` with one `melo: …` line and exit code 1. Procedural
+memory follows [memory persistence](memory.md#keep-memory-between-runs), as
+for a task.
 
 ### First run
 
 In a terminal with no config file, `melo` asks for a model server and a
-model, saves them, and opens the loop. Later runs go straight to the loop.
+model, saves them, and opens the UI. Later runs go straight in.
 
 ```text
 $ melo
@@ -96,7 +276,6 @@ Found a model server at http://127.0.0.1:8000/v1 (1 model).
 Model server URL [http://127.0.0.1:8000/v1]:
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
-Model: Qwen3-8B-4bit · http://127.0.0.1:8000/v1 (melo --reconfigure changes it)
 ```
 
 - melo looks for a server on this computer with `GET /v1/models` on
@@ -125,7 +304,7 @@ Model: Qwen3-8B-4bit · http://127.0.0.1:8000/v1 (melo --reconfigure changes it)
   `✗ URL: connection refused.`, and asks
   `[r]etry, [s]tart anyway, [q]uit [r]:`. `r` asks for the URL again, with
   the one you typed as the default; `s` asks `Model name [default]:` and
-  opens the loop without saving (`Not saved: melo asks again next time.`);
+  opens the UI without saving (`Not saved: melo asks again next time.`);
   `q` exits with code 0. The reasons are `connection refused`,
   `no answer in 5 s`, `HTTP 401` or `HTTP 403` with
   `the server requires an API key; localmelo sends none to local servers (oMLX: "Allow inference without API key")`,
@@ -143,7 +322,7 @@ Model: Qwen3-8B-4bit · http://127.0.0.1:8000/v1 (melo --reconfigure changes it)
 
 | Option | Default | Description |
 |---|---|---|
-| `query` (positional) | not set | The task to run. Giving one selects direct mode; an empty one (`""`) opens the loop. |
+| `query` (positional) | not set | The task to run. Giving one selects direct mode; an empty one (`""`) opens the plain loop; none opens the interactive UI. |
 | `-h`, `--help` | | Show the help and exit. |
 | `--base-url URL` | not set | Send chat requests to this OpenAI-compatible server instead of the configured backend. |
 | `--chat-model NAME` | with `--base-url`, `default` for a task and the server's first listed model without one; else the configured model | The model to request from the `--base-url` server, or instead of the configured chat model. |
@@ -154,9 +333,9 @@ Model: Qwen3-8B-4bit · http://127.0.0.1:8000/v1 (melo --reconfigure changes it)
   `extra_body` and `request_timeout_s` do not apply.
 - Without `--base-url`, `--chat-model` replaces the configured chat model for
   this run; the config file is not changed.
-- Without a task, either option opens the conversation loop; see
-  [Without a task](#without-a-task). With `--serve` or `--daemon`, either
-  is a usage error: the gateway uses the config file.
+- Without a task, either option opens the interactive UI; see
+  [Which model server](#which-model-server). With `--serve` or `--daemon`,
+  either is a usage error: the gateway uses the config file.
 
 ### Direct mode
 
@@ -212,6 +391,24 @@ These options apply to a task run without `--serve`.
   from any folder. A blank name is a usage error. See
   [Procedural memory](procedures.md#how-it-works).
 
+### Interactive UI
+
+These options apply to `melo` without a task.
+
+| Option | Default | Description |
+|---|---|---|
+| `--workspace DIR` | the current folder | The folder melo works in; see [The workspace](#the-workspace). |
+| `--yolo` | off | Run every tool without asking for approval. |
+
+- The UI also takes `--max-steps`, `--attempt-policy`, `--reflection-gate`,
+  `--builtins`, `--memory`, `--memory-dir`, `--request-timeout` and the
+  `--embedding-*` options, for every turn of the session. `--tool-exposure`
+  (the UI offers every tool), `--timeout`, `--output-format`, `--progress`
+  and `--routine` are usage errors there, and so, for now, are
+  `--mcp-config` and `--mcp-only`.
+- `--workspace` that is not a folder exits with code 2:
+  `melo: --workspace: not a directory: DIR`.
+
 ### Gateway and setup
 
 | Option | Default | Description |
@@ -219,16 +416,16 @@ These options apply to a task run without `--serve`.
 | `--serve` | off | Start the gateway: the HTTP API and the web workspace. |
 | `--host HOST` | `127.0.0.1` | The address the gateway listens on. |
 | `--port PORT` | `8401` | The port the gateway listens on. |
-| `--reconfigure` | off | Run the setup wizard, then start the gateway (with `--serve`) or open the conversation loop (without). Without a terminal it reads the answers from stdin. |
+| `--reconfigure` | off | Run the setup wizard, then start the gateway (with `--serve`) or open the interactive UI (without). Without a terminal it reads the answers from stdin; without `--serve` it then exits. |
 | `--daemon install\|uninstall\|status` | not set | Manage the macOS background service; `install` also takes `--port`. |
 
 - The defaults of `--host` and `--port` come from the `[gateway]` table of
   the config file. The options change them for this run only.
 - `--host`, `--port` and `--reconfigure` are ignored when you give a task.
-- Where `melo` without a task opens the conversation loop, `--host` and
-  `--port` are usage errors; give `--serve` to start the gateway.
-- Without a terminal and with no config file, `melo --serve` and bare
-  `melo` print one line on stderr and exit with code 1, as under launchd:
+- Without a task, `--host` and `--port` are usage errors; give `--serve`
+  to start the gateway.
+- Without a terminal and with no config file, `melo --serve` prints one
+  line on stderr and exits with code 1, as under launchd:
   `melo: no backend is configured; run melo --reconfigure in a terminal`.
   `--reconfigure` still runs the wizard without a terminal and reads its
   answers from stdin, so a script can pipe them in.
@@ -256,14 +453,19 @@ These are usage errors:
   `--mcp-only` with `--builtins` or `--tool-exposure`, `--embedding-model`
   without `--embedding-base-url`, `--embedding-base-url` without
   `--base-url`;
-- a direct-mode option with `--serve` or without a task (`melo ""`
-  included), reported as
-  `only for direct mode (a query without --serve): --max-steps`;
+- a direct-mode option with `--serve` or with `melo ""`, reported as
+  `only for direct mode (a query without --serve): --max-steps`; without a
+  task, only those the interactive UI cannot use (`--tool-exposure`,
+  `--timeout`, `--output-format`, `--progress`, `--routine`);
+- `--mcp-config` or `--mcp-only` without a task, reported as
+  `--mcp-config and --mcp-only are not in the interactive UI yet; give them with a task (melo -- "<task>")`;
+- `--workspace` or `--yolo` with a task, `--serve` or `--daemon`, reported as
+  `only for the interactive UI (melo without a query, --serve or --daemon): --yolo`;
 - `--base-url` or `--chat-model` with `--serve` or `--daemon`, reported as
-  `--base-url and --chat-model are for a task or the chat loop; --serve uses the config file (melo --reconfigure)`;
-- `--host` or `--port` where `melo` without a task opens the conversation
-  loop, reported as
-  `--host and --port are for --serve and --daemon; melo without a task opens the chat loop`;
+  `--base-url and --chat-model are for a task or the interactive UI; --serve uses the config file (melo --reconfigure)`;
+- `--host` or `--port` without a task and without `--serve` or `--daemon`,
+  reported as
+  `--host and --port are for --serve and --daemon; bare melo opens the interactive UI`;
 - `--reconfigure` with `--base-url` and no task, reported as
   `--reconfigure sets up the config file, which --base-url does not use; give one of them`;
 - an MCP config file that cannot be read or is not valid;
@@ -382,8 +584,8 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 | Code | Meaning |
 |---|---|
 | 0 | The run ended with status `completed`. |
-| 1 | The run ended as `crashed`; or `melo` stopped before the run because no backend is configured or the config file is not valid; or the setup wizard needed a terminal and had none. |
-| 2 | The run ended with any other status; or a usage error. |
+| 1 | The run ended as `crashed`; or `melo` stopped before the run because no backend is configured or the config file is not valid; or the setup wizard needed a terminal and had none; or the interactive UI could not open its session file or start its agent. |
+| 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal, or `--workspace` is not a folder. |
 | 3 | The gateway could not start, for example because its port is in use. |
 | 129 | SIGHUP ended the run. |
 | 130 | Ctrl+C (SIGINT) ended the run. |
@@ -391,8 +593,10 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 
 129, 130 and 143 are what a shell reports for a process ended by that
 signal. Cancelling the setup wizard, or `q` at the first-run questions,
-exits with 0. Before the conversation loop opens, Ctrl-D at a setup
-question exits with 0 and Ctrl+C with 130, both after `Setup cancelled.`
+exits with 0. Before the interactive UI opens, Ctrl-D at a setup question
+exits with 0 and Ctrl+C with 130, both after `Setup cancelled.` Leaving the
+UI with `/exit`, Ctrl+D or Ctrl+C twice exits with 0, whatever its turns
+ended with.
 
 ## Signals
 
@@ -417,6 +621,11 @@ There are two exceptions:
 Ctrl+C (SIGINT) stops a run at once. `melo` prints a traceback, saves the task
 record as `crashed` with the error `CancelledError`, and a shell shows exit
 code 130.
+
+In the interactive UI, SIGTERM and SIGHUP (also a terminal window that
+closes) stop a running turn, which is recorded as `cancelled` with the
+error `Cancelled by SIGTERM`, close the tools within the same 8 seconds,
+and end `melo` by the signal. Ctrl+C there is a key (see [Keys](#keys)).
 
 ## Use `melo` in scripts
 

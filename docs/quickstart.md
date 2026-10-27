@@ -102,7 +102,7 @@ and the gateway work without `--base-url`.
 For a local server, run `melo` in a terminal. With no configuration yet, it
 looks for a model server on this computer, asks for its URL (press Enter to
 accept the one it found) and for a model from the server's list, saves
-`~/.cache/localmelo/config.toml` and opens the conversation loop:
+`~/.cache/localmelo/config.toml` and opens the interactive UI:
 
 ```text
 $ melo
@@ -110,17 +110,21 @@ Found a model server at http://127.0.0.1:11434/v1 (1 model).
 Model server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
-Model: qwen3:8b · http://127.0.0.1:11434/v1 (melo --reconfigure changes it)
-localmelo · local agent
-Enter a task to begin. Type /help for commands or /exit to quit.
-
-❯
+╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
+│ model      qwen3:8b · vLLM · http://127.0.0.1:11434/v1                   │
+│            saved as the default                                          │
+│ workspace  ~/demo-project                                                │
+│ tools      4 built-in (3 ask first)                                      │
+│ memory     no long-term memory (no embedding backend)                    │
+│ session    new                                                           │
+╰──────────────────────────────────────────────────────────────────────────╯
+  / commands · esc stop · ctrl+d quit
 ```
 
-Type a task, or `/exit` to leave. From then on, `melo` goes straight to the
-loop and `melo "<task>"` uses the saved server. It is saved as the `vllm`
-backend, the key for any OpenAI-compatible server, without embeddings; see
-[First run](configuration.md#first-run).
+Type a message and press Enter, or `/exit` to leave. From then on, `melo`
+goes straight in and `melo "<task>"` uses the saved server. It is saved as
+the `vllm` backend, the key for any OpenAI-compatible server, without
+embeddings; see [First run](configuration.md#first-run).
 
 ### With the setup wizard
 
@@ -160,7 +164,7 @@ embedding server fails, the wizard saves with embedding off and says so. On
 success it prints `Config saved to …`, the path of
 `~/.cache/localmelo/config.toml`, and then **starts the gateway** on
 `http://127.0.0.1:8401`. The gateway keeps running in this terminal.
-Without `--serve`, `melo --reconfigure` opens the conversation loop instead.
+Without `--serve`, `melo --reconfigure` opens the interactive UI instead.
 
 ## Start the gateway
 
@@ -197,8 +201,9 @@ To start the gateway again without the wizard, run `melo --serve`.
 
 ## Interactive conversations
 
-Run `melo` without a task to enter a terminal conversation that keeps the
-same agent across turns:
+Run `melo` without a task to chat in the terminal. Each tool call shows as
+it finishes, a spinner shows the step and the time while the model works,
+and the answer prints as Markdown:
 
 ```bash
 melo
@@ -208,9 +213,20 @@ melo --base-url http://127.0.0.1:8000/v1
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 ```
 
-Use `/help` for commands and `/exit` or Ctrl-D to leave. `melo ""` opens the
-same loop. Without a terminal, in a script or under launchd, `melo` alone
-starts the gateway, as `melo --serve` does.
+- Type `/` for the commands: `/model` lists the server's models and
+  switches to one, `/backend` switches to another server (both saved as the
+  default), `/new` starts over, `/exit` or Ctrl+D leaves.
+- melo asks before it runs a shell command, Python code or a file write:
+  press `1` to allow it, `2` to allow that tool for the session, `3` to
+  refuse and tell melo why. Esc stops a turn.
+- melo works in the current folder (`--workspace DIR` picks another): file
+  tools stay in it; commands and Python can reach other files, so melo asks
+  first.
+
+[The interactive UI](cli.md#the-interactive-ui) has the keys and the rest.
+`melo ""` opens the plain conversation loop of earlier releases. Without a
+terminal, `melo` alone exits with code 2; start the gateway with
+`melo --serve`.
 
 The web workspace at `http://127.0.0.1:8401/` supports model discovery, separate
 chat drafts, code formatting, cancellation, and responsive navigation. It does
@@ -218,7 +234,7 @@ not read the configuration file: enter your server's URL as the Chat API URL,
 such as `http://127.0.0.1:11434/v1` for Ollama, then select Discover models and
 pick a chat model. Other browser tabs on the same gateway see the same chats,
 and reloading the page brings them back. Chats last only while the gateway
-runs, and the `melo ""` loop's conversation is separate from the web chats.
+runs, and the terminal's conversations are separate from the web chats.
 
 ## Serve a model with oMLX
 
@@ -282,7 +298,7 @@ use it instead of Ollama:
    oMLX loads the model on its first request, which can take a minute for a
    large model. If that request times out, add `--request-timeout 600`.
    `melo --base-url http://127.0.0.1:8000/v1` without a task opens the
-   conversation loop on the first model oMLX lists.
+   interactive UI on the first model oMLX lists.
 
 To make oMLX your default, run `melo` in a terminal before any configuration
 is saved: it finds oMLX on port 8000, lists its models and saves the one you

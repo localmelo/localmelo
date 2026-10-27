@@ -7,7 +7,7 @@ settings you can change.
 ## First run
 
 In a terminal with no config file, `melo` asks two questions, saves the
-answers and opens the conversation loop:
+answers and opens the interactive UI:
 
 ```text
 $ melo
@@ -49,14 +49,14 @@ For embeddings, a cloud API or another backend, use the wizard.
 ## Set up with the wizard
 
 ```bash
-melo --reconfigure          # the wizard, then the conversation loop
+melo --reconfigure          # the wizard, then the interactive UI
 melo --serve --reconfigure  # the wizard, then the gateway
 ```
 
 The wizard asks for a chat backend, its URL and model, and an embedding
 backend; [Save a configuration](quickstart.md#save-a-configuration) lists the
 prompts. It sends a short test request to each server, saves the config
-file, and then opens the conversation loop or, with `--serve`, starts the
+file, and then opens the interactive UI or, with `--serve`, starts the
 gateway. Press Ctrl+C to stop the gateway.
 
 - Each question offers the config file's current value in brackets: press

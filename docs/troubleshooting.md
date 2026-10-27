@@ -176,7 +176,7 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 - **Cause:** after saving, the wizard starts the gateway, which keeps running.
 - **Fix:** nothing is wrong. Press Ctrl+C to stop the gateway;
   `melo "<task>"` then uses the saved configuration. Without `--serve`,
-  `melo --reconfigure` opens the conversation loop instead, which `/exit`
+  `melo --reconfigure` opens the interactive UI instead, which `/exit`
   ends.
 
 ### request_timeout_s has no effect
