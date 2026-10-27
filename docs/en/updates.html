@@ -72,7 +72,8 @@
           <li>an interactive CLI that opens when you run <code>melo</code> without a task and shows the agent's tool calls as they happen (today <code>melo</code> starts the gateway, and <code>melo &quot;&quot;</code> opens a plain conversation loop);</li>
           <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
           <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
-          <li>running several tasks at once on one local model server, with your conversation answered first.</li>
+          <li>running several tasks at once on one local model server, with your conversation answered first;</li>
+          <li>a progress display for tasks you run again and again, with their steps learned from earlier runs (a first run shows only facts, such as its step count).</li>
         </ul>
         <p>
           The maintainer's memory design, parts of which are not built yet, is
@@ -86,6 +87,19 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-2026-10-26-procedures">
+          <h3>Groundwork for a progress display</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/45">#45</a>
+          </p>
+          <ul>
+            <li>Procedural memory learns the steps of a task you run again and again, such as a test suite you fix every day. From earlier runs it keeps the kinds of tool calls they made, short labels, and how many steps and how long they took, never what the model said.</li>
+            <li>A first run is exploration and gets no estimate. Once a task has completed runs, a display can show what they took; a percent bar also needs runs that agree with each other and a model whose past estimates were close. On the benchmark runs measured so far, that check did not yet tell good estimates from poor ones clearly enough, so the planned progress display starts without the bar.</li>
+            <li><code>melo-procedures</code> learns these step templates from a <code>history.db</code> and replays the rules offline, so they are measured before anything is shown. Runs do not read or write procedural memory yet.</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-26-call-history">
           <h3>Every model call kept in history</h3>

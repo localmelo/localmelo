@@ -26,6 +26,7 @@
 - [How localmelo works](https://localmelo.github.io/localmelo/how-it-works.md): the run loop, reflection, memory and timeouts.
 - [Evaluations](https://localmelo.github.io/localmelo/evaluations.md): the controlled comparisons behind the defaults, such as the reflection gate (one model, 12 coding exercises).
 - [Offline retrieval](https://localmelo.github.io/localmelo/retrieval.md): `melo-retrieve`, which compares memory retrievers offline; runs do not use it.
+- [Procedural memory](https://localmelo.github.io/localmelo/procedures.md): `melo-procedures`, which learns the steps of recurring tasks from recorded runs and replays the progress rules offline; runs do not use it yet.
 - [Scheduler](https://localmelo.github.io/localmelo/scheduler.md): the scheduling policy core and its simulator, for maintainers; runs do not use it yet.
 - [Changelog](https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md): notable changes; there is no release yet, so all are under Unreleased.
 - [Repository](https://github.com/localmelo/localmelo): source code, issues and the contributing guide.

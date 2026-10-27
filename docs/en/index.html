@@ -146,7 +146,8 @@ source .venv/bin/activate</code></pre>
           <li>an interactive CLI that opens when you run <code>melo</code> without a task and shows the agent's tool calls as they happen (today <code>melo</code> starts the gateway, and <code>melo &quot;&quot;</code> opens a plain conversation loop);</li>
           <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
           <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
-          <li>running several tasks at once on one local model server, with your conversation answered first.</li>
+          <li>running several tasks at once on one local model server, with your conversation answered first;</li>
+          <li>a progress display for tasks you run again and again, with their steps learned from earlier runs (a first run shows only facts, such as its step count).</li>
         </ul>
         <p>See the <a href="./updates.html#roadmap">roadmap and updates</a> for the phases, their issues and dated changes.</p>
       </section>

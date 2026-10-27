@@ -27,7 +27,7 @@ uv run melo --help
 
 - `melo` lands in `.venv/bin/`, not on PATH. Below, `melo` means `uv run melo` in the clone, `uv run --project CLONE melo` elsewhere, or `CLONE/.venv/bin/melo` (for background jobs; see Gotchas). Scripts: `uv run [--project CLONE] python SCRIPT.py` or `CLONE/.venv/bin/python SCRIPT.py`. Under a temporary `HOME` prefer the `.venv/bin/` paths: `uv run` keeps its cache in `$HOME/.cache/uv` and may resolve and download again.
 - Python >= 3.11; the `gateway` extra (fastapi, uvicorn) is needed for `--serve`. A renamed clone or ZIP folder gives `ModuleNotFoundError: No module named 'localmelo'`.
-- Commands: `melo`, `melo-retrieve` (offline only). macOS tested; Linux untested; no Windows.
+- Commands: `melo`, `melo-retrieve` and `melo-procedures` (offline only). macOS tested; Linux untested; no Windows.
 
 ## Use it
 
@@ -185,13 +185,13 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 ## Status of features
 
 - Available: direct mode, the gateway, the `melo ""` loop, MCP stdio servers, the macOS background service.
-- Experimental: the Python API. Offline only (runs do not use them): `melo-retrieve` and its `bm25`, `llm`, `embedding` retrievers; the scheduler core in `support/scheduler/`. Python only, not used by `melo` or the gateway yet: sessions (`support/sessions/`).
-- Planned, not on main: an interactive CLI for bare `melo`; gateway sessions that survive a restart; the model's reasoning kept as memory notes and retrieved during runs; several tasks on one model server, the user's conversation first.
+- Experimental: the Python API. Offline only (runs do not use them): `melo-retrieve` and its `bm25`, `llm`, `embedding` retrievers; `melo-procedures` (`episodes`, `replay`, `export`, `forget`: step templates of recurring tasks learned from a `history.db`, for a future progress display); the scheduler core in `support/scheduler/`. Python only, not used by `melo` or the gateway yet: sessions (`support/sessions/`).
+- Planned, not on main: an interactive CLI for bare `melo`; gateway sessions that survive a restart; the model's reasoning kept as memory notes and retrieved during runs; several tasks on one model server, the user's conversation first; a progress display (no percent on a first run; facts and "last time" hints first, a percent bar only after replay evidence).
 
 ## Working on the code
 
 - The directory that holds `pyproject.toml` IS the package `localmelo` (`package-dir`: `localmelo = "."`): `melo/agent/agent.py` imports as `localmelo.melo.agent.agent`. Keep the clone named `localmelo`; never create `localmelo/localmelo/`.
-- `melo/` is the core (run loop, checks, executor, memory, contracts); `support/` holds backends, providers, gateway, MCP, config, wizard, `melo-retrieve`, scheduler. `melo/` does not import `support/` (exceptions: `tests/test_layering.py`).
+- `melo/` is the core (run loop, checks, executor, memory, contracts); `support/` holds backends, providers, gateway, MCP, config, wizard, `melo-retrieve`, `melo-procedures`, scheduler. `melo/` does not import `support/` (exceptions: `tests/test_layering.py`).
 - Setup: `uv sync --extra dev --extra gateway`. Tests: `uv run pytest -q --ignore=tests/smoke/test_backend_smoke.py` (that file sends a real chat request to any server on `127.0.0.1:11434` or `127.0.0.1:8400`; pre-commit hooks run it too).
 - Lint: `uv run ruff check .`, `uv run black --check .`, `uv run mypy .`. Web workspace JS (Node from `.nvmrc`): `node --test tests/gateway/*.mjs`.
 - Commits `[Area] Imperative summary`; PR titles add the type (`[Feature][Agent] ...`). Tests and docs (with `README.zh-CN.md`, `docs/zh-CN/`) in the same PR, in English ([CONTRIBUTING.md](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md)).
@@ -200,4 +200,4 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 
 - Use: [quickstart.md](quickstart.md), [cli.md](cli.md) ([exit codes](cli.md#exit-codes), [signals](cli.md#signals)), [run-results.md](run-results.md) ([retries](run-results.md#provider-errors-and-retries)), [python-api.md](python-api.md), [events.md](events.md), [sessions.md](sessions.md), [gateway.md](gateway.md) ([keep it private](gateway.md#keep-the-gateway-private)).
 - Setup: [configuration.md](configuration.md), [tools.md](tools.md) ([MCP config file](tools.md#mcp-config-file), [what the checks do](tools.md#what-the-checks-do)), [memory.md](memory.md), [troubleshooting.md](troubleshooting.md).
-- Background: [how-it-works.md](how-it-works.md), [evaluations.md](evaluations.md) (why `flags` is the default gate), [retrieval.md](retrieval.md), [scheduler.md](scheduler.md), [SECURITY.md](https://github.com/localmelo/localmelo/blob/main/SECURITY.md), [CHANGELOG.md](https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md).
+- Background: [how-it-works.md](how-it-works.md), [evaluations.md](evaluations.md) (why `flags` is the default gate), [retrieval.md](retrieval.md), [procedures.md](procedures.md), [scheduler.md](scheduler.md), [SECURITY.md](https://github.com/localmelo/localmelo/blob/main/SECURITY.md), [CHANGELOG.md](https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md).

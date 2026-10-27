@@ -455,6 +455,7 @@
           <li>Backends for Ollama, MLC LLM, vLLM, SGLang and four cloud APIs.</li>
           <li>Working memory, history and long-term memory, saved to SQLite when persistence is on; the saved history also keeps every model call with its reasoning, for 30 days by default.</li>
           <li><code>melo-retrieve</code>, which compares the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers offline. Runs do not use the retrievers yet.</li>
+          <li><code>melo-procedures</code>, which learns the steps of recurring tasks from a saved history and replays the rules of a planned progress display offline. Runs do not use procedural memory yet.</li>
           <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>). Runs and the gateway do not use it yet.</li>
         </ul>
         <p>What comes next is on the <a href="./updates.html#roadmap">roadmap</a>.</p>

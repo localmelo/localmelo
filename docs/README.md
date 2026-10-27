@@ -38,6 +38,9 @@ tools and memory on your own model server or a cloud API. The website is at
 - [Offline retrieval](retrieval.md): `melo-retrieve`, which compares memory
   retrievers and exports a run as a corpus: its options, formats, output and
   exit codes.
+- [Procedural memory](procedures.md): `melo-procedures`, which learns the
+  steps of recurring tasks from recorded runs and replays the progress rules
+  offline. Runs do not use it yet.
 
 ## Background
 

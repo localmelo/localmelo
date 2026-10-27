@@ -230,6 +230,7 @@
           <li>支持 Ollama、MLC LLM、vLLM、SGLang 和四个云端 API 的后端。</li>
           <li>工作记忆、历史记录和长期记忆；开启持久化后会保存到 SQLite，保存的历史记录还包括每次模型调用及其推理，默认保留 30 天。</li>
           <li><code>melo-retrieve</code>：离线比较 <code>bm25</code>、<code>llm</code> 和 <code>embedding</code> 三种记忆检索器。运行目前还不使用这些检索器。</li>
+          <li><code>melo-procedures</code>：从保存的历史记录中学习反复运行的任务的步骤，并离线重放计划中进度显示的规则。运行目前还不使用程序记忆。</li>
           <li>调度器的策略核心，以及离线测试它的模拟器（<code>support/scheduler/</code>）。运行和网关目前都还不使用它。</li>
         </ul>
         <p>接下来的计划见<a href="./updates.html#roadmap">路线图</a>。</p>
