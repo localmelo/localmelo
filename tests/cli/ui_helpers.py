@@ -113,6 +113,11 @@ class Driver:
     def text(self) -> str:
         return "\n".join(self.screen())
 
+    def cursor_hidden(self) -> bool:
+        screen = pyte.Screen(self.columns, self.rows)
+        pyte.Stream(screen).feed(self.written.getvalue())
+        return bool(screen.cursor.hidden)
+
     async def wait(self, check: Callable[[], bool], timeout_s: float = 5.0) -> None:
         deadline = time.monotonic() + timeout_s
         while not check():

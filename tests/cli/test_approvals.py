@@ -522,3 +522,22 @@ async def test_the_reason_typed_shows_on_a_narrow_terminal(
         await app.wait(lambda: "Reason: keep it" in app.text())
         app.type(ENTER)
         assert (await asyncio.wait_for(asking, 3)).reason == "keep it"
+
+
+async def test_the_panel_shows_no_cursor_but_the_reason_field_does(
+    now: list[float],
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(approver=approver, clock=lambda: now[0]) as app:
+        assert not app.cursor_hidden()  # the input box's cursor
+        asking = asyncio.ensure_future(approver.ask(_request()))
+        await app.wait(lambda: "Run a shell command?" in app.text())
+        await app.settle()
+        assert app.cursor_hidden()
+        now[0] += 1
+        app.type("3")
+        await app.wait(lambda: "Reason (optional" in app.text())
+        await app.settle()
+        assert not app.cursor_hidden()
+        app.type(ENTER)
+        await asyncio.wait_for(asking, 3)

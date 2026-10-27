@@ -388,7 +388,9 @@ class InteractiveApp:
         rule = Window(char=symbols.rule, height=1, style="class:rule")
         self.input_box = HSplit([rule, self.input_window, self.search, rule])
         self.panel_window = Window(
-            FormattedTextControl(self._panel_fragments, focusable=True),
+            FormattedTextControl(
+                self._panel_fragments, focusable=True, show_cursor=False
+            ),
             dont_extend_height=True,
         )
         self.reason = Buffer(multiline=False, on_text_changed=self._cap_reason)
