@@ -728,8 +728,11 @@ class _RunState:
 
     @property
     def interactive(self) -> bool:
-        """Whether a caller follows the run, with an event sink or a policy."""
-        return self.events.active or self.approval is not None
+        """Whether a caller follows the run, with ``on_event`` or a policy.
+
+        An observer (``observe``) does not make a run interactive.
+        """
+        return self.events.interactive or self.approval is not None
 
     def end(self, status: str, *, result: str = "", error: str = "") -> None:
         self.status = status
@@ -2191,6 +2194,7 @@ class Agent:
         *,
         on_event: EventSink | None = None,
         approval: ApprovalPolicy | None = None,
+        observe: EventSink | None = None,
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -2341,25 +2345,38 @@ class Agent:
         a policy was given. Without one, a tool that requires approval runs
         as any other does.
 
-        Before the run starts, ``TypeError`` is raised when *on_event* is
-        not callable or is a coroutine function, or when *approval* has no
-        ``async def decide``: no event is emitted, no task record is
-        written, and working memory is left as it is.
+        *observe*, when given in place of *on_event*, receives the same
+        events, but does not make the run interactive: a cancelled run
+        ends ``crashed``, as one without a sink does. A display that only
+        watches a run, such as a terminal's progress line, uses it.
+
+        Before the run starts, ``TypeError`` is raised when *on_event* or
+        *observe* is not callable or is a coroutine function, when both
+        are given, or when *approval* has no ``async def decide``: no event
+        is emitted, no task record is written, and working memory is left
+        as it is.
         """
         check_sink(on_event)
+        check_sink(observe, "observe")
+        if on_event is not None and observe is not None:
+            raise TypeError("pass on_event or observe, not both")
         _check_approval(approval)
         started = time.perf_counter()
         task = TaskRecord(query=query)
         run = _RunState(
             task_id=task.task_id,
-            events=_Emitter(on_event, task.task_id),
+            events=_Emitter(
+                on_event if observe is None else observe,
+                task.task_id,
+                interactive=observe is None,
+            ),
             approval=approval,
         )
         stats = self.chat.reset_stats()
         timeout_s = self.options.timeout_s
         deadline = asyncio.timeout(timeout_s)  # never expires when None
         # The retry notices of this run's model requests; only with a sink.
-        retries = RETRY_HOOK.set(run.events.retry) if on_event is not None else None
+        retries = RETRY_HOOK.set(run.events.retry) if run.events.active else None
         # Every response of this run's model requests becomes a row of
         # history's llm_calls table, when the history keeps model calls,
         # with or without a sink. Read at each run, so a history set after
@@ -3059,7 +3076,7 @@ class Agent:
         cancel the task that runs :meth:`run_task`, if one does, and await
         :meth:`close`. A run that the cancellation ends is recorded as
         ``crashed`` with *reason* as its error; an interactive run, one
-        with an event sink or an approval policy, ends ``cancelled``
+        with ``on_event`` or an approval policy, ends ``cancelled``
         instead, with *reason* as its error too, and its finalizer keeps
         to the same order and limit (see :meth:`run_task`). Before it
         saves its task record, it closes the tool providers, killing any

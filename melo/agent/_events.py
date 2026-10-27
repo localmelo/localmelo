@@ -45,21 +45,22 @@ NOTICE_MESSAGES: Mapping[str, str] = {
 RETRY_ERROR_CHARS = 200
 
 
-def check_sink(on_event: object) -> None:
+def check_sink(on_event: object, name: str = "on_event") -> None:
     """Raise ``TypeError`` unless *on_event* is ``None`` or a synchronous callable.
 
     A coroutine function, or an object whose ``__call__`` is one, is
-    refused: the run never awaits its sink.
+    refused: the run never awaits its sink. *name* is the keyword the
+    sink was given as, for the message.
     """
     if on_event is None:
         return
     if not callable(on_event):
-        raise TypeError("on_event must be a callable that takes an AgentEvent")
+        raise TypeError(f"{name} must be a callable that takes an AgentEvent")
     if inspect.iscoroutinefunction(on_event) or inspect.iscoroutinefunction(
         getattr(on_event, "__call__", None)  # noqa: B004 – reads __call__ itself
     ):
         raise TypeError(
-            "on_event must be synchronous: put events on a queue and consume "
+            f"{name} must be synchronous: put events on a queue and consume "
             "them in a task"
         )
 
@@ -86,11 +87,22 @@ class _Emitter:
     The emitter also keeps the run's position: the step and attempt of the
     latest ``step.started``, which the step's other events carry, and the
     clocks for the durations it reports.
+
+    *interactive* says whether the sink follows the run as its caller
+    does (``on_event``), which makes a cancellation end the run
+    ``cancelled``; an observer's sink (``observe``) is not interactive.
     """
 
-    def __init__(self, sink: EventSink | None = None, run_id: str = "") -> None:
+    def __init__(
+        self,
+        sink: EventSink | None = None,
+        run_id: str = "",
+        *,
+        interactive: bool = True,
+    ) -> None:
         self._sink = sink
         self._run_id = run_id
+        self._interactive = interactive
         self._seq = 0
         self._step = 0
         self._attempt = 0
@@ -106,8 +118,13 @@ class _Emitter:
 
     @property
     def active(self) -> bool:
-        """Whether the run has a sink."""
+        """Whether the run has a sink, a caller's or an observer's."""
         return self._sink is not None
+
+    @property
+    def interactive(self) -> bool:
+        """Whether the run has a sink that follows it as its caller does."""
+        return self._sink is not None and self._interactive
 
     # ── The catalogue ──
 

@@ -72,7 +72,18 @@ class BaseLLMProvider(ABC):
     and ``None``. Both are class attributes, so a wrapper that forwards
     attributes reads the defaults unless it copies them from the provider
     it wraps right after that provider's ``chat()`` returns.
+
+    :attr:`model` names the model the provider's requests go to; the
+    procedural store keeps step templates per model. The class default
+    ``""`` means unknown, and so does ``"default"``: a run on such a
+    provider shows past runs' facts but never a bar. A wrapper copies it
+    from the provider it wraps.
     """
+
+    # The id of the model this provider's requests go to, such as
+    # "qwen3-8b"; "" when unknown. Built-in providers set it on the
+    # instance from their configuration.
+    model: str = ""
 
     # The key of the response that the last successful chat() read the
     # reasoning (``Message.thinking``) from, such as "reasoning_content", or
