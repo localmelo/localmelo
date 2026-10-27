@@ -972,12 +972,13 @@ class Agent:
         self._active_runs = 0
 
         # Optional persistent memory backends: options.memory_dir, or the
-        # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History is
-        # SQLite whenever persistence is on; long-term only when memory is
-        # on and an embedding provider exists.
+        # LOCALMELO_PERSIST_MEMORY / LOCALMELO_MEMORY_DIR opt-in. History and
+        # the procedural store are SQLite whenever persistence is on;
+        # long-term only when memory is on and an embedding provider exists.
         self._memory_dir = _resolve_memory_dir(self.options)
         history_backend = None
         long_backend = None
+        procedures_backend = None
         if self._memory_dir is not None:
             from localmelo.melo.memory._sqlite import (
                 make_private_dir,
@@ -986,6 +987,7 @@ class Agent:
             )
             from localmelo.melo.memory.history.sqlite import SqliteHistory
             from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+            from localmelo.melo.memory.procedures.store import SqliteProcedures
 
             # Read first, so that a bad value raises before the directory is
             # created.
@@ -1006,6 +1008,10 @@ class Agent:
                 long_backend = SqliteLongTerm(
                     os.path.join(self._memory_dir, "long_term.db")
                 )
+            # Opened, and created, at its first use: a run's end.
+            procedures_backend = SqliteProcedures(
+                os.path.join(self._memory_dir, "procedures.db")
+            )
 
         # memory=False runs Hippo in its no-embedding mode, which is exactly
         # the documented behavior of that option: no long-term recall, no
@@ -1015,6 +1021,7 @@ class Agent:
             embedding=self._embedding if self.options.memory else None,
             history=history_backend,
             long=long_backend,
+            procedures=procedures_backend,
         )
         self.checker = Checker()
         self.executor = Executor(

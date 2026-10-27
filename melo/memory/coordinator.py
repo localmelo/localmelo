@@ -7,6 +7,7 @@ from typing import Any
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
 from localmelo.melo.memory.history import History
 from localmelo.melo.memory.long import LongTerm
+from localmelo.melo.memory.procedures.store import MemoryProcedures, Procedures
 from localmelo.melo.memory.short import WorkingMemory
 from localmelo.melo.memory.tools import ToolRegistry
 from localmelo.melo.schema import (
@@ -22,14 +23,17 @@ from localmelo.melo.schema import (
 
 
 class Hippo:
-    """Memory coordinator: working memory, long-term, history, and tool registry.
+    """Memory coordinator: working memory, long-term, history, procedures and tools.
 
     When ``embedding`` is None, long-term memory operations are silently
     skipped and the agent runs with working-memory context only.
 
-    Optional ``history`` and ``long`` parameters allow injecting persistent
-    backends (e.g. :class:`SqliteHistory`, :class:`SqliteLongTerm`).
-    When omitted the in-memory defaults are used.
+    Optional ``history``, ``long`` and ``procedures`` parameters allow
+    injecting persistent backends (e.g. :class:`SqliteHistory`,
+    :class:`SqliteLongTerm`, :class:`SqliteProcedures`). When omitted the
+    in-memory defaults are used. ``procedures`` is the procedural store,
+    the step templates that runs learn at their end; nothing in it reaches
+    a prompt.
     """
 
     def __init__(
@@ -41,6 +45,7 @@ class Hippo:
         *,
         history: History | None = None,
         long: LongTerm | None = None,
+        procedures: Procedures | None = None,
     ) -> None:
         self.embedding = embedding
         self._long_term_top_k = long_term_top_k
@@ -48,6 +53,9 @@ class Hippo:
         self.history = history if history is not None else History()
         self.working = WorkingMemory(max_len=short_term_max)
         self.long = long if long is not None else LongTerm()
+        self.procedures: Procedures = (
+            procedures if procedures is not None else MemoryProcedures()
+        )
         self.tools = ToolRegistry()
 
     @property
@@ -62,7 +70,7 @@ class Hippo:
         drops references and lets GC release file descriptors. This stays
         for callers that don't have an event loop available.
         """
-        for backend in (self.history, self.long):
+        for backend in (self.history, self.long, self.procedures):
             close_fn = getattr(backend, "close", None)
             if callable(close_fn):
                 close_fn()
@@ -73,7 +81,7 @@ class Hippo:
         Falls back to sync :meth:`close` semantics for backends that only
         expose ``close()``.
         """
-        for backend in (self.history, self.long):
+        for backend in (self.history, self.long, self.procedures):
             aclose_fn = getattr(backend, "aclose", None)
             if callable(aclose_fn):
                 await aclose_fn()

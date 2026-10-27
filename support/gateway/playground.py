@@ -17,6 +17,7 @@ from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMPro
 from localmelo.melo.memory._sqlite import thinking_retention_days
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+from localmelo.melo.memory.procedures.store import SqliteProcedures
 from localmelo.melo.schema import RunResult, answer_text, split_thinking
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
@@ -200,6 +201,7 @@ class SmokePlayground:
         # Read once, so every chat's history keeps reasoning as long.
         self._thinking_retention_days = thinking_retention_days()
         self._long_term_path = mem_dir / "long_term.db"
+        self._procedures_path = mem_dir / "procedures.db"
 
     def scenarios_payload(self) -> list[dict[str, Any]]:
         payload: list[dict[str, Any]] = []
@@ -327,6 +329,7 @@ class SmokePlayground:
         )
         if embedding:
             agent.hippo.long = SqliteLongTerm(self._long_term_path)
+        agent.hippo.procedures = SqliteProcedures(self._procedures_path)
 
         try:
             scenario_summary = await self._seed_memories(agent, scenario_id)
