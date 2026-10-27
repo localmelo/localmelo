@@ -14,7 +14,8 @@ You need:
 - A model server. This tutorial uses [Ollama](https://ollama.com): install
   it, start it, and pull a model with `ollama pull qwen3:8b`. Any server
   with an OpenAI-compatible API works too: use its `/v1` URL and its model
-  name in the commands below.
+  name in the commands below. On a Mac with Apple silicon, you can
+  [serve a model with oMLX](#serve-a-model-with-omlx) instead.
 
 ## Install
 
@@ -182,6 +183,73 @@ such as `http://127.0.0.1:11434/v1` for Ollama, then select Discover models and
 pick a chat model. Other browser tabs on the same gateway see the same chats,
 and reloading the page brings them back. Chats last only while the gateway
 runs, and the `melo ""` loop's conversation is separate from the web chats.
+
+## Serve a model with oMLX
+
+[oMLX](https://github.com/jundot/omlx) serves MLX models through an
+OpenAI-compatible API on a Mac with Apple silicon and macOS 15 or later. To
+use it instead of Ollama:
+
+1. Install oMLX with Homebrew:
+
+   ```bash
+   brew tap jundot/omlx https://github.com/jundot/omlx
+   brew install jundot/omlx/omlx
+   ```
+
+   The oMLX macOS app also installs the command, as `~/.omlx/bin/omlx`. Its
+   [README](https://github.com/jundot/omlx#install) has the other ways to
+   install it.
+
+2. Put each model in a folder of its own inside one models folder. oMLX
+   serves every subfolder that holds a model (a `config.json` and its
+   weights), and a subfolder's name is its model id. For example, with the
+   Hugging Face command line (`hf`, from `uv tool install huggingface_hub`):
+
+   ```bash
+   hf download mlx-community/Qwen3-8B-4bit --local-dir ~/models/Qwen3-8B-4bit
+   ```
+
+3. Start the server, and leave it running in its own terminal:
+
+   ```bash
+   omlx serve --model-dir ~/models
+   ```
+
+   It listens on `http://127.0.0.1:8000`; `--port` changes the port. oMLX
+   saves `--model-dir` and `--port` in `~/.omlx/settings.json` for later
+   runs. Keep the default host and do not set `--api-key`: localmelo sends
+   no API key to a local server. If requests fail with HTTP 401
+   (`API key required`), a key was set earlier, in oMLX's admin page or
+   with `OMLX_API_KEY`: turn on **Allow inference without API key** in the
+   admin page's settings, or unset `OMLX_API_KEY`.
+
+4. Check that the server lists the model:
+
+   ```bash
+   curl -s http://127.0.0.1:8000/v1/models
+   ```
+
+   The reply's `data` list holds an entry with `"id": "Qwen3-8B-4bit"`. It
+   can also list MLX models from your Hugging Face cache.
+
+5. Run a task with that id:
+
+   ```bash
+   melo --base-url http://127.0.0.1:8000/v1 --chat-model Qwen3-8B-4bit "What is 6*7?"
+   ```
+
+   oMLX loads the model on its first request, which can take a minute for a
+   large model. If that request times out, add `--request-timeout 600`.
+
+To make oMLX your default, run step 5 first, so that the model is loaded,
+then the wizard (`melo --serve --reconfigure`): choose vLLM (`3`) as the
+chat backend, enter `http://127.0.0.1:8000/v1` and the model id, and choose
+`5` (None) as the embedding backend unless oMLX also serves an embedding
+model. [Configuration](configuration.md#omlx) shows the file it saves and
+the table to add to turn off a Qwen3 model's thinking. In the web
+workspace, enter `http://127.0.0.1:8000/v1` as the Chat API URL, select
+Discover models and pick the model.
 
 ## Next steps
 
