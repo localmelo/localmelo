@@ -1149,7 +1149,7 @@ class SqliteProcedures(Procedures):
         conn = await aiosqlite.connect(self._db_path, timeout=busy_s)
         try:
             # A newer file is refused before anything is written to it.
-            await self._check_version(conn)
+            version = await self._check_version(conn)
             await prepare_connection(
                 conn,
                 _SCHEMA,
@@ -1160,7 +1160,10 @@ class SqliteProcedures(Procedures):
             # SQLite build's default: rows that forget removes, and the
             # cells that a template's status change frees.
             await conn.execute("PRAGMA secure_delete = ON")
-            await self._migrate(conn)
+            if version < SCHEMA_VERSION:
+                # A write only below the current version, so that opening a
+                # current file to read takes no write lock.
+                await self._migrate(conn)
         except asyncio.CancelledError:
             self._drop(conn)
             raise

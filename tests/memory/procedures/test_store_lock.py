@@ -75,3 +75,41 @@ async def test_closing_after_a_cut_short_write_does_not_wait_seconds(
     started = time.monotonic()
     await store.aclose()
     assert time.monotonic() - started < 1.5
+
+
+async def test_a_lookup_reads_a_current_file_while_another_writes(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "procedures.db"
+    writer = SqliteProcedures(path)
+    for _ in range(2):
+        await writer.learn(facts())
+    await writer.aclose()
+    holder = sqlite3.connect(path, timeout=0, isolation_level=None)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        reader = SqliteProcedures(path)
+        try:
+            # A new connection, at the current schema version: opening it
+            # takes no write lock, so the read is not refused.
+            view = await reader.lookup(facts().key, model="m", options={})
+        finally:
+            await reader.aclose()
+    finally:
+        holder.execute("ROLLBACK")
+        holder.close()
+    assert view is not None and view.version == 2
+
+
+async def test_an_old_file_is_still_brought_to_the_current_version(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "procedures.db"
+    sqlite3.connect(path).close()  # an empty file: user_version 0
+    store = SqliteProcedures(path)
+    try:
+        await store.export_rows()
+    finally:
+        await store.aclose()
+    with sqlite3.connect(path) as db:
+        assert db.execute("PRAGMA user_version").fetchone() == (1,)
