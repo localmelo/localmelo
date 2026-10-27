@@ -72,6 +72,11 @@ ITEM_MARKS: Final[Mapping[str, str]] = {
 # What is left out, in this order, while the line is too wide (section 7).
 DROP_ORDER: Final = ("past_times", "tests", "items", "attempt")
 
+# What a similar match's past facts and steps follow: they are another
+# routine's, a hint (spec section 5.4), so the line never says
+# "last time" for a task that has not run.
+SIMILAR_HINT: Final = "like a similar task:"
+
 
 @dataclass(frozen=True)
 class RunningTool:
@@ -222,7 +227,7 @@ class _Parts:
     past_steps: str | None  # "last time 6 steps", "past 5-8 steps"
     past_times: str | None  # "2m10s", "2-3 min", "past runs 2-3 min"
     items: str | None
-    items_title: str | None  # "last time:" at level 1
+    items_title: str | None  # "last time:" (or a similar match's) at level 1
     merge_past: bool  # one past run: the items follow its facts
 
     def compose(self, dropped: Sequence[str]) -> str:
@@ -269,8 +274,14 @@ def _items_text(items: Any, level: int) -> str | None:
     return SEPARATOR.join(shown) or None
 
 
-def _past_facts(past: Any, level: int) -> tuple[str | None, str | None, bool]:
-    """(steps text, times text, a single past run) from the payload's ``past``."""
+def _past_facts(
+    past: Any, level: int, *, similar: bool = False
+) -> tuple[str | None, str | None, bool]:
+    """(steps text, times text, a single past run) from the payload's ``past``.
+
+    *similar*: the facts are a similar task's, shown after
+    :data:`SIMILAR_HINT`.
+    """
     if not isinstance(past, Mapping):
         return None, None, False
     runs = _int(past.get("runs")) or 0
@@ -288,7 +299,7 @@ def _past_facts(past: Any, level: int) -> tuple[str | None, str | None, bool]:
         if steps is None:
             return None, None, False
         return (
-            f"last time {_steps(steps)}",
+            f"{SIMILAR_HINT if similar else 'last time'} {_steps(steps)}",
             None if wall is None else run_elapsed(wall),
             True,
         )
@@ -296,7 +307,10 @@ def _past_facts(past: Any, level: int) -> tuple[str | None, str | None, bool]:
     if lo_steps is None or hi_steps is None:
         return None, None, False
     lo, hi = _number(past.get("wall_lo_s")), _number(past.get("wall_hi_s"))
-    steps_text = f"past {_step_range(lo_steps, hi_steps)} steps"
+    steps_text = (
+        f"{SIMILAR_HINT if similar else 'past'} "
+        f"{_step_range(lo_steps, hi_steps)} steps"
+    )
     times = None if lo is None or hi is None else wall_range(lo, hi)
     return steps_text, times, False
 
@@ -373,10 +387,21 @@ def _parts(
         if passed is not None and total is not None:
             tests_text = f"tests {passed}/{total}"
 
+    basis = payload.get("basis")
+    similar = isinstance(basis, Mapping) and basis.get("match") == "similar"
     past_steps, past_times, single = (
-        _past_facts(payload.get("past"), level) if level >= 1 else (None, None, False)
+        _past_facts(payload.get("past"), level, similar=similar)
+        if level >= 1
+        else (None, None, False)
     )
     items = _items_text(payload.get("items"), level) if level >= 1 else None
+    items_title = None
+    if level == 1:
+        # A similar task's steps follow its facts, or carry the hint.
+        if not similar:
+            items_title = "last time:"
+        else:
+            items_title = "its steps:" if past_steps else SIMILAR_HINT
     return _Parts(
         head=head,
         attempt=f"attempt {attempt}" if attempt >= 2 else None,
@@ -386,7 +411,7 @@ def _parts(
         past_steps=past_steps,
         past_times=past_times,
         items=items,
-        items_title="last time:" if level == 1 else None,
+        items_title=items_title,
         merge_past=single and level == 1,
     )
 

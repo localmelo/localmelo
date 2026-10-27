@@ -237,6 +237,13 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
   `(×2)` marks a pattern that repeated. A percent bar is not shown in this
   release. The step count is never shown against `--max-steps`, which is a
   limit, not a plan.
+
+  A similar task's runs are a hint, so the line never says `last time` for
+  them; they follow `like a similar task:`, and its steps `its steps:`:
+
+  ```text
+  step 4 · Write (cycle 1) · 1m03s · like a similar task: 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
+  ```
 - **Past runs need persistence.** Each `melo` is a new process, and
   procedural memory stays in RAM unless memory is kept between runs. Run
   with `LOCALMELO_PERSIST_MEMORY=1` or `--memory-dir DIR` (see

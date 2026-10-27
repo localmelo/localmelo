@@ -14,6 +14,7 @@ import gc
 import io
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import Callable, Iterator, Mapping
@@ -349,6 +350,58 @@ def test_level_1_before_the_first_step_shows_what_to_expect() -> None:
         "starting · 0s · last time 6 steps, 2m10s: "
         "Read test_parser.py · Edit parser.py + pytest (×2) · git commit"
     )
+
+
+def _basis(match: str) -> dict[str, Any]:
+    return {
+        "routine_id": "a" * 32,
+        "template_id": "a" * 32 + ":0123456789ab",
+        "version": 1,
+        "match": match,
+        "model": "qwen3",
+    }
+
+
+SIMILAR = _basis("similar")
+
+
+def test_a_similar_tasks_past_is_a_hint() -> None:
+    """A similar match borrows another routine's steps and past facts.
+
+    This task never ran, so its line never says "last time" (spec 5.4).
+    """
+    assert line(level1(basis=SIMILAR)) == (
+        "step 4 · Write (cycle 1) · 1m03s · like a similar task: 6 steps, 2m10s: "
+        "Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit"
+    )
+    assert line(level1(basis=SIMILAR, past=dict(THREE_PAST_RUNS))) == (
+        "step 4 · Write (cycle 1) · 1m03s · like a similar task: 5-8 steps, "
+        "2-3 min · its steps: Read test_parser.py ✓ · "
+        "Edit parser.py + pytest (×2) ◐ · git commit"
+    )
+    assert line(level1(basis=SIMILAR, past=None)) == (
+        "step 4 · Write (cycle 1) · 1m03s · like a similar task: "
+        "Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit"
+    )
+    assert line(level1(basis=SIMILAR, items=None)) == (
+        "step 4 · Write (cycle 1) · 1m03s · like a similar task: 6 steps, 2m10s"
+    )
+
+
+@pytest.mark.parametrize("past", [ONE_PAST_RUN, THREE_PAST_RUNS])
+def test_a_similar_tasks_hint_is_never_left_out(past: dict[str, Any]) -> None:
+    data = level1(basis=SIMILAR, past=dict(past))
+    for width in range(1, 200):
+        text = line(data, width=width)
+        assert "last time" not in text
+        if re.search(r"\d steps?\b", text):  # a past step count is shown
+            assert "like a similar task: " in text, (width, text)
+
+
+@pytest.mark.parametrize("match", ["exact", "routine", None])
+def test_a_run_of_this_task_is_last_time(match: str | None) -> None:
+    basis = None if match is None else _basis(match)
+    assert "last time 6 steps, 2m10s: " in line(level1(basis=basis))
 
 
 def test_item_labels_cannot_write_escape_sequences() -> None:
