@@ -9,6 +9,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Runs learn the steps of recurring tasks. Each run that ends normally
+  records an episode in procedural memory, and a completed run appends a
+  new version of its routine's step template: in `procedures.db` in the
+  memory directory with persistence on, in RAM otherwise. In the Python
+  API, `run_task(..., progress=True)` with a sink adds `run.progress`
+  events (levels 0 and 1; the percent bar is off until replayed runs
+  support it), `observe=` watches a run without making it interactive,
+  `routine=` names a routine, and `BaseLLMProvider.model` names a chat
+  provider's model. The query text and labels procedural memory keeps
+  also mask URL passwords and the values of names such as `API_KEY` or
+  `password`, and `melo-procedures forget` leaves nothing of a forgotten
+  routine in the file. `melo` shows no progress yet. Request bodies, the
+  output, the JSON line, exit codes and history rows are unchanged
+  ([#46]).
 - Procedural memory (experimental), `localmelo.melo.memory.procedures`, and
   the offline `melo-procedures` command (`episodes`, `replay`, `export`,
   `forget`). From the runs in a `history.db` it learns the steps of a task
@@ -184,3 +198,4 @@ earlier milestones.
 [#41]: https://github.com/localmelo/localmelo/pull/41
 [#42]: https://github.com/localmelo/localmelo/pull/42
 [#45]: https://github.com/localmelo/localmelo/pull/45
+[#46]: https://github.com/localmelo/localmelo/pull/46

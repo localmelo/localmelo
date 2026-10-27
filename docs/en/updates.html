@@ -88,6 +88,19 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-27-run-steps">
+          <h3>Runs learn the steps of recurring tasks</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/46">#46</a>
+          </p>
+          <ul>
+            <li>Each run that ends normally now records what it did in procedural memory: the classes of its tool calls, short labels, its steps and its time. A run that completed also updates the step template of its task. With persistence on this goes to <code>procedures.db</code> in the memory directory; otherwise it stays in RAM.</li>
+            <li>A Python caller can follow a run with <code>run.progress</code> events (<code>progress=True</code>): the step, the phase and the test counts, and, for a task done before, what earlier runs took and their named steps. The percent bar stays off until replayed runs show that it is reliable.</li>
+            <li><code>melo</code> does not show progress yet; a line in the terminal comes next. Request bodies, the output, the JSON line, the exit codes and the history rows are unchanged.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-26-procedures">
           <h3>Groundwork for a progress display</h3>
           <p class="update-date">
