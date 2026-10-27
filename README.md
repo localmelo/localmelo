@@ -22,7 +22,9 @@ change before v0.1.0 (milestone due 2026-12-20).
 ## What it does
 
 - **Runs one task per command.** `melo "<task>"` works within a step budget,
-  reflects between attempts, and can have a time limit.
+  reflects between attempts, and can have a time limit. On a terminal, a
+  [progress line](docs/cli.md#progress-line) shows where the task stands,
+  and the steps of earlier runs once it repeats with memory kept.
 - **Uses tools.** Four built-in tools (`shell_exec`, `python_exec`,
   `file_read`, `file_write`) and the tools of MCP servers (stdio servers, in
   direct mode and the Python API).
@@ -167,9 +169,8 @@ Planned:
   (`bm25`, `llm`, `embedding`);
 - running several tasks at once on one local model server, with your
   conversation answered first;
-- a progress display for tasks you run again and again, with their steps
-  learned from earlier runs (a first run shows only facts, such as its step
-  count).
+- a percent bar on the progress line for tasks you run again and again,
+  off until their repeated runs pass the replay.
 
 ## Security
 
