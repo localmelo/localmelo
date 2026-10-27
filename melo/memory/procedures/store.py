@@ -1243,6 +1243,15 @@ class SqliteProcedures(Procedures):
             await conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return deleted
 
+    def close(self) -> None:
+        """Sync compatibility shim, as SqliteHistory's. Prefer :meth:`aclose`.
+
+        Drops the connection reference: aiosqlite then stops the
+        connection's worker thread, which would otherwise keep the process
+        from exiting, once the connection is collected.
+        """
+        self._conn = None
+
     async def aclose(self) -> None:
         """Close the connection, and wait for any closing in the background."""
         async with self._lock:

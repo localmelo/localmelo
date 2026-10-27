@@ -103,3 +103,13 @@ async def test_closing_the_agent_closes_the_store() -> None:
 
 def test_the_store_is_a_procedures_store() -> None:
     assert isinstance(Hippo().procedures, Procedures)
+
+
+async def test_hippo_close_drops_the_store_s_connection(tmp_path: Path) -> None:
+    # The sync shim, as for SqliteHistory and SqliteLongTerm: no await, the
+    # connection reference dropped.
+    store = SqliteProcedures(tmp_path / "procedures.db")
+    await store.export_rows()  # opens the connection
+    assert store._conn is not None
+    Hippo(procedures=store).close()  # should not raise
+    assert store._conn is None
