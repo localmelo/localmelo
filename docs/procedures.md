@@ -18,8 +18,9 @@ What a run may show from it comes as [`run.progress`](events.md#runprogress)
 events, to a Python caller that asks with `progress=True`; `melo` does not
 show progress yet. Level 2, the bar, is off in this release: replayed on
 recorded runs, the gate did not yet keep bad bars back by the margin it
-must (0.05) on both test sets, so a run shows at most level 1 until
-repeated runs of your own tasks pass the replay. `melo-procedures` replays
+must (0.05) on both test sets, so a run shows at most level 1 until a
+later release turns level 2 on, once a set of repeated runs passes the
+replay. `melo-procedures` replays
 the rules on recorded runs, so that they are measured before a run shows
 anything.
 
@@ -36,10 +37,12 @@ anything.
   few milliseconds and at most 2 seconds; a write that fails is skipped
   with one INFO line in the log. A run that is cancelled, or that ends
   after SIGTERM or SIGHUP, adds nothing.
-- The episode records the level the gate gives at the run's start, also
-  when that is level 2 and level 1 is shown, and, when the gate passed,
-  the error the bar would have had. A later release turns level 2 on from
-  this record.
+- The episode records the level the gate gives, also when that is level 2
+  and level 1 is shown, and, when the gate passed, the error the bar would
+  have had: evidence for turning level 2 on. The gate is the one the
+  run's start found when it asked for progress; otherwise, since such a
+  run reads nothing at its start, the one its routine's template gives
+  as the run ends.
 - `run_task(..., routine="name")` in Python makes runs one routine, named,
   in any folder and whatever their wording.
 
@@ -202,7 +205,6 @@ and the last three a bar (level 2), whose mean error over their steps was
 | `--spread S` | The gate's spread (default 0.5). |
 | `--drop` | The exploration drop: `conditional` (default), `off` or `unconditional`. |
 | `--stats` | The runs the statistics use: `completed` (default) or `normal`, which adds runs that ended `budget_exhausted`, `stuck` or `gate_stopped`. |
-
 | `--key-build` | Put each episode's localmelo version in its template's key. |
 
 `--arms`, `--drop` and `--stats` apply to `online` only; with `loo` or
