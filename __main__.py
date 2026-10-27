@@ -311,6 +311,20 @@ class _ExitSignals:
 # ── Direct mode: run ──
 
 
+def _enable_line_editing() -> None:
+    """Edit the loop's prompt with readline when stdin is a terminal.
+
+    Without it, the terminal's own Backspace removes one byte of a
+    multi-byte character, such as one of 你好, so the screen shows a
+    character that is gone, or input() fails to decode the line. Python
+    builds without readline keep the terminal's editing.
+    """
+    if not sys.stdin.isatty():
+        return
+    with contextlib.suppress(ImportError):
+        import readline  # noqa: F401  (input() uses it once imported)
+
+
 async def _prompt() -> str:
     """Read a terminal line without blocking signal handling in the event loop.
 
@@ -369,6 +383,7 @@ async def _run(
                 return EXIT_CRASHED  # not used: the process exits by the signal
             _report(outcome, output_format, version, out)
             return _exit_code(outcome.status)
+        _enable_line_editing()
         print("localmelo · local agent")
         print("Enter a task to begin. Type /help for commands or /exit to quit.")
         while True:
@@ -376,6 +391,12 @@ async def _run(
                 q = await _prompt()
             except (EOFError, KeyboardInterrupt):
                 break
+            except UnicodeDecodeError:
+                print(
+                    "melo: that line was not valid UTF-8; type it again.",
+                    file=sys.stderr,
+                )
+                continue
             command = q.strip().lower()
             if command in ("exit", "quit", "/exit", "/quit"):
                 break

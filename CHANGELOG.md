@@ -146,6 +146,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- In the `melo ""` loop, Backspace deletes whole characters: it no longer
+  leaves part of a Chinese or other wide character on the screen, or in the
+  line, which made the loop stop with a `UnicodeDecodeError`. The prompt is
+  edited with readline on a terminal, so the Up arrow recalls earlier lines
+  ([#50]).
 - A request that disconnects during a run no longer leaves its gateway
   session busy for good ([#35]).
 - Stopping the gateway closes the web workspace's model connections
@@ -199,3 +204,4 @@ earlier milestones.
 [#42]: https://github.com/localmelo/localmelo/pull/42
 [#45]: https://github.com/localmelo/localmelo/pull/45
 [#46]: https://github.com/localmelo/localmelo/pull/46
+[#50]: https://github.com/localmelo/localmelo/pull/50
