@@ -525,3 +525,25 @@ async def test_a_tall_draft_during_a_turn_keeps_the_live_rows() -> None:
         assert "esc to stop" in text and "of 10:00" in text  # both live rows
         assert "Queued for the next turn: queued one" in text
         assert any("line 15" in row for row in app.screen())
+
+
+@pytest.mark.parametrize(
+    ("typed", "completed"),
+    [
+        ("/model q\t", "/model qwen3-8b"),
+        ("/he\t", "/help"),
+        ("/mo\t", "/model"),
+        ("/\t", "/help"),
+        ("/\t\t", "/new"),
+    ],
+)
+async def test_tab_completes_at_once_before_the_menu_shows(
+    typed: str, completed: str
+) -> None:
+    controller = FakeController()
+    completer = SlashCompleter(lambda: LISTED)
+    async with running_app(controller, completer=completer) as app:
+        app.type(typed)  # Tab in the same keystrokes as the text
+        await app.wait(lambda: app.ui.buffer.text == completed)
+        app.type(ENTER)
+        await app.wait(lambda: controller.entered == [completed])

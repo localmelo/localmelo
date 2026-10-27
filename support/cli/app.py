@@ -24,8 +24,8 @@ from dataclasses import dataclass
 from typing import Final, Protocol, TextIO
 
 from prompt_toolkit.application import Application
-from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.completion import Completer, ThreadedCompleter
+from prompt_toolkit.buffer import Buffer, CompletionState
+from prompt_toolkit.completion import CompleteEvent, Completer, ThreadedCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition, has_focus, is_searching
 from prompt_toolkit.formatted_text import StyleAndTextTuples, to_formatted_text
@@ -364,6 +364,7 @@ class InteractiveApp:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.controller = controller
+        self._completer = completer
         self.renderer = renderer
         self.symbols = symbols
         self.approver = approver
@@ -942,6 +943,10 @@ class InteractiveApp:
         def _(event: KeyPressEvent) -> None:
             self._ctrl_d()
 
+        @kb.add("tab", filter=in_input)
+        def _(event: KeyPressEvent) -> None:
+            self._tab()
+
         # Not bound in this version (no suspend): Ctrl+Z inserts nothing.
         @kb.add("c-z", filter=in_input)
         def _(event: KeyPressEvent) -> None:
@@ -965,6 +970,30 @@ class InteractiveApp:
             pass
 
         return kb
+
+    def _tab(self) -> None:
+        """Tab: the next completion; before the menu shows, complete at once.
+
+        The menu's completions come from a thread while typing, and a Tab
+        pressed before they arrive was lost: the completer is asked here.
+        """
+        buffer = self.buffer
+        state = buffer.complete_state
+        if state is not None and state.completions:
+            buffer.complete_next()
+            return
+        if self._completer is None:
+            return
+        found = list(
+            self._completer.get_completions(
+                buffer.document, CompleteEvent(completion_requested=True)
+            )
+        )
+        if len(found) == 1:
+            buffer.apply_completion(found[0])
+        elif found:
+            buffer.complete_state = CompletionState(buffer.document, found)
+            buffer.go_to_completion(0)
 
     def _enter(self) -> None:
         buffer = self.buffer
