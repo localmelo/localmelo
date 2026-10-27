@@ -23,6 +23,8 @@ dependencies = [
     "aiosqlite>=0.19",
     "httpx>=0.27",
     "numpy>=1.26",
+    "prompt_toolkit>=3.0.52,<4",
+    "rich>=13.9",
 ]
 
 [project.optional-dependencies]
@@ -37,6 +39,7 @@ dev = [
     "pytest",
     "pytest-asyncio",
     "pre-commit",
+    "pyte",
 ]
 
 [project.scripts]
