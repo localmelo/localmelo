@@ -51,7 +51,7 @@ def test_file_tools_are_read_and_write_whatever_their_arguments() -> None:
     [
         "pytest -q",
         "python -m unittest",
-        "python transpose_test.py",
+        "python parser_test.py",
         "./verify.sh",
         "make check",
         "python -c 'assert f() == 1'",
