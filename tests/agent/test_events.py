@@ -526,6 +526,22 @@ class TestFields:
                 "usage",
                 "duration_s",
             },
+            "run.progress": {
+                "level",
+                "state",
+                "step",
+                "attempt",
+                "limits",
+                "phase",
+                "cycle",
+                "tests",
+                "items",
+                "fraction",
+                "expected_steps",
+                "past",
+                "off_reason",
+                "basis",
+            },
             "run.finished": {"result"},
         } == {name: set(keys) for name, keys in EVENT_FIELDS.items()}
 
@@ -547,7 +563,7 @@ class TestFields:
             steps_per_attempt=2,
         )
         agent.chat.retry_delays = (0.0, 0.0)
-        result = await agent.run_task("echo a", on_event=reflect)
+        result = await agent.run_task("echo a", on_event=reflect, progress=True)
         assert result.status == "completed"
         await check_guarantees(reflect, result, agent)
         assert reflect.notices() == ["retry", "empty_reply", "budget"]

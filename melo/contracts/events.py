@@ -60,6 +60,24 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "duration_s",
             }
         ),
+        "run.progress": frozenset(
+            {
+                "level",
+                "state",
+                "step",
+                "attempt",
+                "limits",
+                "phase",
+                "cycle",
+                "tests",
+                "items",
+                "fraction",
+                "expected_steps",
+                "past",
+                "off_reason",
+                "basis",
+            }
+        ),
         "run.finished": frozenset({"result"}),
     }
 )

@@ -12,7 +12,7 @@ import inspect
 import logging
 import time
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.events import AgentEvent, EventSink, json_safe_payload
@@ -30,6 +30,9 @@ from localmelo.melo.schema import (
     ToolCall,
     ToolResult,
 )
+
+if TYPE_CHECKING:
+    from localmelo.melo.memory.procedures.tracker import ProgressState
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +94,7 @@ class _Emitter:
     *interactive* says whether the sink follows the run as its caller
     does (``on_event``), which makes a cancellation end the run
     ``cancelled``; an observer's sink (``observe``) is not interactive.
+    *progress* says whether the caller asked for ``run.progress`` events.
     """
 
     def __init__(
@@ -99,10 +103,12 @@ class _Emitter:
         run_id: str = "",
         *,
         interactive: bool = True,
+        progress: bool = False,
     ) -> None:
         self._sink = sink
         self._run_id = run_id
         self._interactive = interactive
+        self._progress = progress
         self._seq = 0
         self._step = 0
         self._attempt = 0
@@ -125,6 +131,11 @@ class _Emitter:
     def interactive(self) -> bool:
         """Whether the run has a sink that follows it as its caller does."""
         return self._sink is not None and self._interactive
+
+    @property
+    def reports_progress(self) -> bool:
+        """Whether the run has a sink and its caller asked for progress."""
+        return self._sink is not None and self._progress
 
     # ── The catalogue ──
 
@@ -400,6 +411,16 @@ class _Emitter:
                 }
             ),
         )
+
+    def progress(self, state: ProgressState) -> None:
+        """Where the run stands: a ``run.progress`` event with *state*'s data.
+
+        Only when the caller asked for progress (see
+        :attr:`reports_progress`); the run computes *state* only then.
+        """
+        if self._sink is None or not self._progress:
+            return
+        self._emit("run.progress", lambda: json_safe_payload(state.as_dict()))
 
     def run_finished(self, result: RunResult) -> None:
         """The run's last event, with ``result.to_dict()`` whole.

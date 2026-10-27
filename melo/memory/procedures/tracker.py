@@ -23,7 +23,7 @@ import logging
 import math
 import statistics
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final
 
 from localmelo.melo.memory.procedures.classify import PASS_ANCHOR, TEST, WRITE
@@ -36,6 +36,13 @@ from localmelo.melo.memory.procedures.template import (
 from localmelo.melo.memory.procedures.trace import Trace, TraceCall
 
 logger = logging.getLogger(__name__)
+
+# Whether a running task may show level 2, the bar (section 6.1). Off
+# (decision L-19): the gate is still evaluated at a run's start and the
+# run's episode records the level it gives, but a run shows at most level
+# 1, until a set of repeated runs passes the replay's separation threshold
+# (section 10). The replay (melo-procedures) measures level 2 either way.
+LEVEL2_ENABLED = False
 
 RUNNING: Final = "running"
 OFF_TEMPLATE: Final = "off_template"
@@ -278,6 +285,19 @@ def _past(view: TemplateView) -> dict[str, Any]:
         "last_steps": stats.last_steps,
         "last_wall_s": stats.last_wall_s,
     }
+
+
+def shown_view(view: TemplateView | None) -> TemplateView | None:
+    """*view* as a running task may show it.
+
+    While :data:`LEVEL2_ENABLED` is off, a view of level 2 is shown at
+    level 1: past facts and named steps, no fraction, no expected length,
+    and no bar rule that takes the run off its template. Any other view
+    is returned as it is.
+    """
+    if view is None or view.level < 2 or LEVEL2_ENABLED:
+        return view
+    return replace(view, level=1, reason="level 2 is off")
 
 
 def track(
