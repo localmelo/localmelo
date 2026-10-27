@@ -157,4 +157,5 @@ def banner(
         lines.append(Text(warning, style="warn"))
     dot = symbols.dot
     lines.append(Text(f"  / commands {dot} esc stop {dot} ctrl+d quit", style="muted"))
+    lines.append(Text(""))
     return Group(*lines)

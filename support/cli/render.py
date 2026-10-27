@@ -243,7 +243,7 @@ class TurnRenderer:
                 f"\n{self.symbols.ellipsis} +{len(lines) - len(shown)} lines",
                 style="muted",
             )
-        self.out.print(Text(""), _marked(self.symbols.prompt, "accent", echo), Text(""))
+        self.out.print(_marked(self.symbols.prompt, "accent", echo), Text(""))
         self.live = LiveState(activity="Starting", started=self._clock())
         self._calls = {}
         self._previews = {}
@@ -296,6 +296,7 @@ class TurnRenderer:
                 )
             elif result is not None:
                 self._print_result(result, footer=False)
+        self.out.print(Text(""))
         self.live = None
 
     # ── Events ──
@@ -588,14 +589,15 @@ def live_rows(
     if live.finished:
         return [[("class:muted", cut_cells(f"Wrapping up{symbols.ellipsis}", width))]]
     if live.waiting:
-        mark, activity = symbols.warn, "Waiting for your approval"
+        # The panel below names its keys.
+        head, hint = f"{symbols.warn} Waiting for your approval", ""
     else:
         index = (
             frame if frame is not None else int((now - live.started) / SPINNER_FRAME_S)
         )
-        mark, activity = symbols.spinner[index % len(symbols.spinner)], live.activity
-    head = f"{mark} {activity}{symbols.ellipsis}"
-    hint = "" if activity == "Stopping" else "esc to stop"
+        mark = symbols.spinner[index % len(symbols.spinner)]
+        head = f"{mark} {live.activity}{symbols.ellipsis}"
+        hint = "" if live.activity == "Stopping" else "esc to stop"
     tokens = (
         symbols.output_tokens.format(format_tokens(live.output_tokens))
         if live.output_tokens

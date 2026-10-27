@@ -369,7 +369,7 @@ class TestUsageErrors:
                 "--embedding-base-url requires --base-url",
             ),
             (
-                ["--max-steps", "3"],
+                ["--serve", "--max-steps", "3"],
                 "only for direct mode (a query without --serve): --max-steps",
             ),
             (
@@ -383,7 +383,7 @@ class TestUsageErrors:
                 "--output-format",
             ),
             (
-                ["--request-timeout", "600"],
+                ["--serve", "--request-timeout", "600"],
                 "only for direct mode (a query without --serve): --request-timeout",
             ),
             (
@@ -391,7 +391,7 @@ class TestUsageErrors:
                 "only for direct mode (a query without --serve): --request-timeout",
             ),
             (
-                ["--reflection-gate", "utility"],
+                ["--serve", "--reflection-gate", "utility"],
                 "only for direct mode (a query without --serve): --reflection-gate",
             ),
             (

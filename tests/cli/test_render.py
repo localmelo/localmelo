@@ -203,7 +203,8 @@ def test_approval_tags(approval: dict[str, Any], tag: str) -> None:
         .text()
     )
     assert "file_write  todo.md (68 chars)" in text
-    assert text.split("\n")[3].endswith(tag)
+    header = next(line for line in text.split("\n") if "file_write  todo.md" in line)
+    assert header.endswith(tag)
 
 
 def test_a_denial_shows_its_reason() -> None:
@@ -526,7 +527,7 @@ def test_a_running_tool_shows_its_clock_and_limit() -> None:
 def test_waiting_and_wrapping_up() -> None:
     live = LiveState(activity="Thinking", started=97.0, step=1, waiting=True)
     assert live_rows(live, 100.0, 80, UNICODE)[0][0][1].startswith(
-        "⚠ Waiting for your approval… · step 1 · 3s"
+        "⚠ Waiting for your approval · step 1 · 3s"
     )
     live.finished = True
     assert live_rows(live, 100.0, 80, UNICODE) == [[("class:muted", "Wrapping up…")]]

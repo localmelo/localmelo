@@ -69,6 +69,14 @@ _DIRECT_FLAGS = {
     "routine": "--routine",
 }
 
+# Flags of the interactive UI (bare melo), by dest.
+_UI_FLAGS = {"workspace": "--workspace", "yolo": "--yolo"}
+
+# Direct-mode flags the interactive UI refuses: its Agents offer every tool,
+# an approval's wait would count toward a timeout, it has no machine output,
+# and it draws its own progress.
+_UI_REFUSED = ("tool_exposure", "timeout", "output_format", "progress", "routine")
+
 
 def _register_backends() -> None:
     """Ensure built-in backend adapters are registered.
@@ -639,13 +647,35 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         parser.error("--embedding-base-url requires --base-url")
     if (args.serve or args.daemon) and (args.base_url or args.chat_model):
         parser.error(
-            "--base-url and --chat-model are for a task or the chat loop; "
+            "--base-url and --chat-model are for a task or the interactive UI; "
             "--serve uses the config file (melo --reconfigure)"
         )
     if args.reconfigure and args.base_url and not args.query:
         parser.error(
             "--reconfigure sets up the config file, which --base-url does not use; "
             "give one of them"
+        )
+    # Bare melo, which opens the interactive UI; `melo ""` is direct mode.
+    interactive = not args.query and not args.serve and not args.daemon
+    ui_given = [
+        flag
+        for dest, flag in _UI_FLAGS.items()
+        if getattr(args, dest) not in (None, False)
+    ]
+    if ui_given and not interactive:
+        parser.error(
+            "only for the interactive UI (melo without a query, --serve or --daemon): "
+            + ", ".join(ui_given)
+        )
+    if interactive and (args.host is not None or args.port is not None):
+        parser.error(
+            "--host and --port are for --serve and --daemon; "
+            "bare melo opens the interactive UI"
+        )
+    if interactive and (args.mcp_config is not None or args.mcp_only):
+        parser.error(
+            "--mcp-config and --mcp-only are not in the interactive UI yet; "
+            'give them with a task (melo -- "<task>")'
         )
     # main() joins the words into the query, and an empty one (`melo ""`)
     # runs no task, so the direct-mode flags would have nothing to apply to.
@@ -655,6 +685,7 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             flag
             for dest, flag in _DIRECT_FLAGS.items()
             if getattr(args, dest) not in (None, False)
+            and (not interactive or dest in _UI_REFUSED)
         ]
         if given:
             parser.error(
@@ -818,6 +849,24 @@ def _build_parser() -> argparse.ArgumentParser:
         "folder and whatever the task's wording",
     )
 
+    interactive = parser.add_argument_group(
+        "interactive mode",
+        "Options for bare melo, which opens the interactive UI on a terminal. "
+        "It also takes --base-url, --chat-model, --max-steps, --attempt-policy, "
+        "--reflection-gate, --builtins, --memory, --memory-dir, "
+        "--request-timeout and the --embedding-* options.",
+    )
+    interactive.add_argument(
+        "--workspace",
+        metavar="DIR",
+        help="The folder melo works in (default: the current directory)",
+    )
+    interactive.add_argument(
+        "--yolo",
+        action="store_true",
+        help="Run every tool without asking for approval",
+    )
+
     # gateway mode
     parser.add_argument("--serve", action="store_true", help="Run as gateway server")
     parser.add_argument("--host", default=None, help="Gateway listen host")
@@ -873,11 +922,6 @@ def main() -> None:
     except ValueError as exc:
         parser.exit(EXIT_NOT_COMPLETED, f"{parser.prog}: error: {exc}\n")
 
-    # melo without a task: the `melo ""` loop when a model server is given or
-    # melo runs in a terminal; elsewhere the gateway, as before.
-    if not args.query and not args.serve and _opens_the_loop(args):
-        _prepare_the_loop(parser, args)
-
     # direct mode (no gateway): exit code 0 completed, 1 crashed, 2 otherwise
     if args.query and not args.serve:
         query = " ".join(args.query)
@@ -902,7 +946,20 @@ def main() -> None:
             raise SystemExit(code)
         return
 
-    # gateway mode: load or create config
+    # interactive mode: bare melo; --daemon has returned above. The UI's
+    # libraries are imported here only, never by direct mode.
+    if not args.serve:
+        options = _direct_options(parser, args)
+        if options.memory_dir is not None:
+            _make_memory_dir(options.memory_dir)
+        from localmelo.support.cli import run_interactive
+
+        code = run_interactive(args, parser=parser, options=options)
+        if code != EXIT_COMPLETED:
+            raise SystemExit(code)
+        return
+
+    # gateway mode (--serve): load or create config
     from localmelo.support import config
     from localmelo.support.onboard import run_backend_setup
 
@@ -940,7 +997,8 @@ def _on_a_terminal() -> bool:
     """Whether stdin and stdout are a terminal, where melo can ask questions.
 
     A closed stdin or stdout (None) is not one. ``TERM=dumb`` is: the
-    questions and the loop read plain lines.
+    questions read plain lines. (The interactive UI needs more; see
+    ``localmelo.support.cli.launch.ui_terminal``.)
     """
     return (
         sys.stdin is not None
@@ -975,108 +1033,6 @@ def _exit_without_setup() -> NoReturn:
         file=sys.stderr,
     )
     raise SystemExit(EXIT_CRASHED)
-
-
-def _opens_the_loop(args: argparse.Namespace) -> bool:
-    """Whether melo without a task opens the loop rather than the gateway."""
-    return bool(args.base_url or args.chat_model) or _on_a_terminal()
-
-
-def _prepare_the_loop(
-    parser: argparse.ArgumentParser, args: argparse.Namespace
-) -> None:
-    """Choose the model server for melo without a task, then open the loop.
-
-    In order: ``--reconfigure`` runs the setup wizard; ``--base-url`` is
-    used without the config, with ``--chat-model`` or else the first model
-    the server lists (and, on a terminal with no config, an offer to save
-    it); a configured backend is used as it is; with none, a terminal asks
-    for the server's URL and model and saves them. Sets ``args.query`` to
-    ``[""]``, so the direct branch runs the loop.
-    """
-    if args.host is not None or args.port is not None:
-        parser.error(
-            "--host and --port are for --serve and --daemon; "
-            "melo without a task opens the chat loop"
-        )
-    from localmelo.support import config, onboard
-
-    terminal = _on_a_terminal()
-    with _setup_questions():
-        if args.reconfigure:
-            if onboard.run_backend_setup() is None:
-                raise SystemExit(EXIT_COMPLETED)
-        elif args.base_url:
-            # Only a terminal with no config file offers to save; elsewhere
-            # the file is not read, as with a task.
-            offer = terminal and not config.load().is_configured
-            models: list[str] = []
-            if not args.chat_model or offer:
-                args.base_url, models = _listed_models(
-                    args.base_url, quiet=bool(args.chat_model)
-                )
-            if not args.chat_model:
-                from localmelo.support.backends.discovery import pick_model
-
-                args.chat_model = pick_model(models)
-            if offer and args.chat_model in models:
-                onboard.offer_to_save(args.base_url, args.chat_model)
-        elif terminal and not config.load().is_configured:
-            setup = onboard.run_first_setup()
-            if setup is None:
-                raise SystemExit(EXIT_COMPLETED)
-            if not setup.saved:
-                args.base_url = setup.url
-                args.chat_model = args.chat_model or setup.model
-    _print_the_loop_backend(args)
-    args.query = [""]
-
-
-def _listed_models(url: str, *, quiet: bool) -> tuple[str, list[str]]:
-    """The URL to chat with, and the models the server at *url* lists.
-
-    The listing asks ``<url>/models`` with ``/v1`` added when *url* lacks
-    it. When that answers, the URL with ``/v1`` is the one to chat with
-    too, so the listing, the Model line and the chat agree. Otherwise *url*
-    comes back as given, with no models. Unless *quiet*, a listing that
-    gives no model is reported on stderr.
-    """
-    from localmelo.support.backends import discovery
-    from localmelo.support.backends.openai_compat import normalize_url
-
-    try:
-        models = asyncio.run(discovery.list_models(discovery.OPENAI_COMPATIBLE, url))
-    except discovery.DiscoveryError as exc:
-        answered, models, reason = url, [], str(exc)
-    else:
-        answered, reason = normalize_url(url), "" if models else "it lists no models"
-    if reason and not quiet:
-        print(
-            f"melo: could not list the models at {url} ({reason}); "
-            "asking for the model 'default' (--chat-model NAME picks one)",
-            file=sys.stderr,
-        )
-    return answered, models
-
-
-def _print_the_loop_backend(args: argparse.Namespace) -> None:
-    """Say which model and server the loop talks to, before its banner."""
-    if args.base_url:
-        print(f"Model: {args.chat_model or 'default'} · {args.base_url}")
-        return
-    from localmelo.support import config
-
-    cfg = config.load()
-    if not cfg.is_configured:
-        return  # the agent's builder says so and exits
-    section = getattr(cfg, cfg.chat_backend, None)
-    model = args.chat_model or getattr(section, "chat_model", "")
-    where = (
-        getattr(section, "chat_url", "")
-        or getattr(section, "base_url", "")
-        or cfg.chat_backend
-    )
-    print(f"Model: {model} · {where} (melo --reconfigure changes it)")
 
 
 def _make_memory_dir(memory_dir: str) -> None:

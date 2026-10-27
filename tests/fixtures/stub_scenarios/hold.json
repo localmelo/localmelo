@@ -1,0 +1,4 @@
+{
+  "match": ["hold on"],
+  "replies": [{"hold": true, "then": {"content": "Done after the hold."}}]
+}

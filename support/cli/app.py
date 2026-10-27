@@ -109,7 +109,10 @@ class Controller(Protocol):
         ...
 
     def enter(self, text: str) -> str | None:
-        """Act on Enter with *text*: None when the draft was used, else a hint."""
+        """Act on Enter with *text*: None when the draft was used.
+
+        Otherwise the draft stays, with the hint returned shown (none for "").
+        """
         ...
 
     def stop(self) -> bool: ...
@@ -748,8 +751,9 @@ class InteractiveApp:
         if not text.strip():
             return
         hint = self.controller.enter(text)
-        if hint is not None:
-            self.hint(hint)
+        if hint is not None:  # the draft stays; "" shows no hint
+            if hint:
+                self.hint(hint)
             return
         buffer.reset(append_to_history=True)
 
@@ -801,9 +805,10 @@ class InteractiveApp:
             return
         state = self.controller.state
         if state in ("running", "switching"):
-            self.controller.stop()
-            self._last_ctrl_c = now
-            self.hint("Stopping… press ctrl+c again to quit")
+            # Not while the turn wraps up: the session says so itself.
+            if self.controller.stop():
+                self._last_ctrl_c = now
+                self.hint("Stopping… press ctrl+c again to quit")
             return
         if double:
             self.exit()

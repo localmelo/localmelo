@@ -1,0 +1,4 @@
+{
+  "models": ["nomic-embed-text", "chat-a", "chat-b"],
+  "replies": [{"content": "hello from the first run"}]
+}
