@@ -20,6 +20,7 @@ import os
 import signal
 import sys
 import time
+import tomllib
 from dataclasses import dataclass, replace
 from typing import Any, Final
 
@@ -219,8 +220,11 @@ def run_interactive(
             # A script can pipe the wizard's answers in; nothing opens after.
             try:
                 onboard.run_backend_setup()
-            except (EOFError, KeyboardInterrupt):
+            except EOFError:
                 print("\nSetup cancelled.")
+            except KeyboardInterrupt:
+                print("\nSetup cancelled.")
+                return 130
             return 0
         print(NO_TERMINAL, file=sys.stderr)
         return 2
@@ -236,9 +240,16 @@ def run_interactive(
     except KeyboardInterrupt:
         print("\nSetup cancelled.")
         return 130
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        print(f"melo: cannot read {config.CONFIG_PATH}: {exc}", file=sys.stderr)
+        return 1
     if isinstance(choice, int):
         return choice
-    log_path = configure_logging()
+    try:
+        log_path = configure_logging()
+    except OSError as exc:
+        print(f"melo: cannot open the log in {LOG_DIR}: {exc}", file=sys.stderr)
+        return 1
     from localmelo.support.cli.signals import exit_by_signal
 
     started = time.monotonic()
@@ -274,6 +285,7 @@ async def main_async(
 
     Returns the exit code and the signal that ended the session, if one did.
     """
+    from prompt_toolkit.history import History, InMemoryHistory
     from prompt_toolkit.output.vt100 import Vt100_Output
     from prompt_toolkit.patch_stdout import patch_stdout
     from rich.text import Text
@@ -370,6 +382,17 @@ async def main_async(
         )
         if choice.warning:
             out.print(Text(f"{symbols.warn} {choice.warning}", style="warn"))
+        history: History
+        try:
+            history = open_history(os.path.expanduser(HISTORY_FILE))
+        except OSError as exc:
+            history = InMemoryHistory()
+            out.print(
+                Text(
+                    f"{symbols.warn} The input history is not saved this time: {exc}",
+                    style="warn",
+                )
+            )
 
         def terminal_closed() -> None:
             loop.call_soon(signals.hangup)  # signals is set below
@@ -378,7 +401,7 @@ async def main_async(
             session,
             renderer,
             symbols=symbols,
-            history=open_history(os.path.expanduser(HISTORY_FILE)),
+            history=history,
             completer=SlashCompleter(lambda: session.models),
             input=terminal_input(sys.stdin, on_close=terminal_closed),
             output=output,

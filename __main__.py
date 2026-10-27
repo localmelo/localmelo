@@ -950,11 +950,12 @@ def main() -> None:
     # libraries are imported here only, never by direct mode.
     if not args.serve:
         options = _direct_options(parser, args)
-        if options.memory_dir is not None:
-            _make_memory_dir(options.memory_dir)
-        from localmelo.support.cli import run_interactive
+        from localmelo.support import cli as ui
 
-        code = run_interactive(args, parser=parser, options=options)
+        # Without a terminal the UI refuses: no folder is made for it.
+        if options.memory_dir is not None and ui.ui_terminal():
+            _make_memory_dir(options.memory_dir)
+        code = ui.run_interactive(args, parser=parser, options=options)
         if code != EXIT_COMPLETED:
             raise SystemExit(code)
         return

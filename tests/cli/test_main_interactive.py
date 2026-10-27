@@ -405,6 +405,7 @@ def test_a_memory_dir_that_cannot_be_one_exits_2_before_the_ui(
     afile.write_text("x")
     with (
         mock.patch("sys.argv", ["melo", "--memory-dir", str(afile)]),
+        mock.patch("localmelo.support.cli.ui_terminal", return_value=True),
         mock.patch("localmelo.support.cli.run_interactive") as ui,
         pytest.raises(SystemExit) as exc,
     ):
@@ -412,3 +413,17 @@ def test_a_memory_dir_that_cannot_be_one_exits_2_before_the_ui(
     assert exc.value.code == 2
     ui.assert_not_called()
     assert "argument --memory-dir: cannot use" in capsys.readouterr().err
+
+
+def test_without_a_terminal_the_memory_dir_is_not_made(tmp_path: Path) -> None:
+    folder = tmp_path / "memory"
+    with (
+        mock.patch("sys.argv", ["melo", "--memory-dir", str(folder)]),
+        mock.patch("localmelo.support.cli.ui_terminal", return_value=False),
+        mock.patch("localmelo.support.cli.run_interactive", return_value=2) as ui,
+        pytest.raises(SystemExit) as exc,
+    ):
+        cli.main()
+    assert exc.value.code == 2
+    ui.assert_called_once()
+    assert not folder.exists()

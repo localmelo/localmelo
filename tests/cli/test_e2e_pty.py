@@ -343,3 +343,16 @@ def test_sigterm_right_after_exit_ends_the_process_by_it(
     assert "Traceback" not in term.text()
     [turn] = _turns(tmp_path)
     assert (turn["status"], turn["cause"]) == ("cancelled", "user_stop")
+
+
+def test_a_history_file_that_cannot_be_opened_is_not_fatal(
+    melo: Callable[..., Melo], tmp_path: Path
+) -> None:
+    (tmp_path / ".cache" / "localmelo" / "cli_history").mkdir(parents=True)
+    term = melo()
+    term.see("Ask melo")
+    assert "The input history is not saved this time" in term.text()
+    assert "Traceback" not in term.text()
+    term.type("hello\r")
+    term.see("Hello! I am melo")
+    assert term.quit() == 0

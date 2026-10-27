@@ -269,6 +269,37 @@ def test_reconfigure_without_a_terminal_runs_the_wizard_then_exits_0(
     wizard.assert_called_once_with()
 
 
+@pytest.mark.parametrize(("raised", "code"), [(EOFError, 0), (KeyboardInterrupt, 130)])
+def test_leaving_the_wizard_without_a_terminal_starts_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    raised: type[BaseException],
+    code: int,
+) -> None:
+    with mock.patch("localmelo.support.onboard.run_backend_setup", side_effect=raised):
+        assert _run(monkeypatch, terminal=False, reconfigure=True) == code
+    assert capsys.readouterr().out == "\nSetup cancelled.\n"
+
+
+@pytest.mark.parametrize(
+    ("stdin", "stdout"), [(True, True), (False, True), (True, False)]
+)
+def test_the_ui_needs_both_stdin_and_stdout_on_a_terminal(
+    monkeypatch: pytest.MonkeyPatch, stdin: bool, stdout: bool
+) -> None:
+    class Stream:
+        def __init__(self, tty: bool) -> None:
+            self.tty = tty
+
+        def isatty(self) -> bool:
+            return self.tty
+
+    monkeypatch.setattr("sys.stdin", Stream(stdin))
+    monkeypatch.setattr("sys.stdout", Stream(stdout))
+    monkeypatch.setenv("TERM", "xterm-256color")
+    assert launch.ui_terminal() is (stdin and stdout)
+
+
 @pytest.mark.parametrize(
     ("term", "expected"), [("xterm-256color", True), ("dumb", False)]
 )
@@ -392,3 +423,34 @@ async def test_a_cancel_while_the_agent_starts_closes_the_store(
     finally:
         for opened in stores:  # an open store's thread would keep pytest alive
             await opened.aclose()
+
+
+def test_a_malformed_config_is_one_line_not_a_traceback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import tomllib
+
+    monkeypatch.setattr(
+        launch,
+        "choose_backend",
+        mock.MagicMock(side_effect=tomllib.TOMLDecodeError("Invalid value", "x=", 2)),
+    )
+    assert _run(monkeypatch, terminal=True) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("melo: cannot read ") and "Invalid value" in err
+    assert err.count("\n") == 1
+
+
+def test_a_log_folder_that_cannot_be_made_is_one_line(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    choice = Choice(backend=mock.MagicMock(), cfg=None)
+    monkeypatch.setattr(launch, "choose_backend", lambda args: choice)
+    monkeypatch.setattr(
+        launch,
+        "configure_logging",
+        mock.MagicMock(side_effect=FileExistsError(17, "File exists")),
+    )
+    assert _run(monkeypatch, terminal=True) == 1
+    err = capsys.readouterr().err
+    assert err.startswith("melo: cannot open the log in ") and err.count("\n") == 1
