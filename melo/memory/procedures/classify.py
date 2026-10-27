@@ -268,20 +268,35 @@ def _basename(arguments: Any) -> str:
     return os.path.basename(path.strip().rstrip("/\\")) or path.strip()
 
 
+def _lex(text: str) -> list[str] | None:
+    """*text*'s shell words, or ``None`` when shlex refuses it (an open quote)."""
+    try:
+        lexer = shlex.shlex(text, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        return list(lexer)
+    except ValueError:
+        return None
+
+
 def _command_words(command: str) -> list[str]:
     """The words of *command*'s first simple command after any ``cd``.
 
     Only the command's first :data:`LABEL_SOURCE_CHARS` characters are
     read: they hold its first commands, and shlex's cost stays small for
-    a command of a megabyte, such as a heredoc's content.
+    a command of a megabyte, such as a heredoc's content. When shlex
+    refuses them, often because the cut fell inside quotes, the first
+    line alone is read, and when it refuses that too, only that line's
+    text before its first quote, which holds nothing quoted. Raw text is
+    never split on whitespace: a word of a quoted secret, such as
+    ``PGPASSWORD='open sesame'``, would become the label.
     """
     command = command[:LABEL_SOURCE_CHARS]
-    try:
-        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-        lexer.whitespace_split = True
-        words = list(lexer)
-    except ValueError:
-        words = command.split()
+    words = _lex(command)
+    if words is None:
+        line = command.split("\n", 1)[0]
+        words = _lex(line)
+        if words is None:
+            words = _lex(re.split("[\"']", line, maxsplit=1)[0]) or []
     commands: list[list[str]] = [[]]
     for word in words:
         if word in _SEPARATORS or (word and set(word) <= set("&|;")):
