@@ -922,9 +922,12 @@ class InteractiveApp:
             buffer.insert_text("\n")
             return
         state = buffer.complete_state
-        if (
+        if state is not None and state.current_completion is not None:
+            # Tab or the arrows picked one: the draft holds it. (Cancelling
+            # the completion would put back what was typed.)
+            buffer.complete_state = None
+        elif (
             state is not None
-            and state.current_completion is None
             and state.completions
             and buffer.text.startswith("/")
             and " " not in buffer.text

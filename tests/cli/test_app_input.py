@@ -14,6 +14,7 @@ from prompt_toolkit.completion import WordCompleter
 from prompt_toolkit.history import FileHistory
 
 from localmelo.support.cli.app import StatusBar, open_history, status_fragments
+from localmelo.support.cli.completion import SlashCompleter
 from localmelo.support.cli.render import LiveState
 from localmelo.support.cli.text import cells
 from localmelo.tests.cli.ui_helpers import (
@@ -407,3 +408,31 @@ def test_a_closed_terminal_closes_the_input() -> None:
         assert reading.read_keys() == []
         assert reading.read_keys() == []
         assert reading.closed and closes == [True]  # told once
+
+
+# ── Enter takes the completion picked with Tab or the arrows ──
+
+LISTED = ["stub-model", "qwen3-8b", "llama-3.1"]
+
+
+@pytest.mark.parametrize(
+    ("typed", "keys", "entered"),
+    [
+        ("/he", "\t", "/help"),
+        ("/model q", "\t", "/model qwen3-8b"),
+        ("/model ll", "\x1b[B", "/model llama-3.1"),
+        ("/", "\x1b[B\x1b[B", "/new"),
+    ],
+)
+async def test_enter_takes_the_picked_completion(
+    typed: str, keys: str, entered: str
+) -> None:
+    controller = FakeController()
+    completer = SlashCompleter(lambda: LISTED)
+    async with running_app(controller, completer=completer) as app:
+        app.type(typed)
+        await app.wait(lambda: app.ui.buffer.complete_state is not None)
+        app.type(keys)
+        await app.wait(lambda: app.ui.buffer.text == entered)
+        app.type(ENTER)
+        await app.wait(lambda: controller.entered == [entered])

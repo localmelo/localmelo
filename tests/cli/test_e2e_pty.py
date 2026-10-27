@@ -418,3 +418,53 @@ def test_ascii_mode_prints_only_ascii(
     term.see("Hello! I am melo")
     assert term.quit() == 0
     term.output.decode("ascii")  # nothing else reached the terminal
+
+
+# ── Enter takes the completion picked with Tab or the arrows ──
+
+
+@pytest.fixture
+def listed(melo: Callable[..., Melo], tmp_path: Path, stub: StubServer) -> Melo:
+    """melo on a server that lists stub-model, qwen3-8b and llama-3.1."""
+    _configure(tmp_path, stub.base_url.replace("/v1", "/s/three_models/v1"))
+    return melo(configured=False)
+
+
+def test_tab_then_enter_runs_the_completed_command(listed: Melo) -> None:
+    listed.see("Ask melo")
+    listed.type("/he")
+    listed.see("Show commands and keys")
+    listed.type("\t")
+    time.sleep(0.3)
+    listed.type("\r")
+    listed.see("esc stop the turn · ctrl+c clear, stop or quit")
+    assert "Unknown command" not in listed.text()
+    assert listed.quit() == 0
+
+
+def test_tab_then_enter_switches_to_the_completed_model(
+    listed: Melo, tmp_path: Path
+) -> None:
+    listed.see("Ask melo")
+    time.sleep(0.5)  # the banner's check lists the models
+    listed.type("/model q")
+    listed.see("qwen3-8b")
+    listed.type("\t")
+    time.sleep(0.3)
+    listed.type("\r")
+    listed.see("Model: qwen3-8b (vLLM). Saved as the default.")
+    saved = (tmp_path / ".cache" / "localmelo" / "config.toml").read_text()
+    assert 'chat_model = "qwen3-8b"' in saved
+    assert listed.quit() == 0
+
+
+def test_arrows_then_enter_run_the_picked_command(listed: Melo) -> None:
+    listed.see("Ask melo")
+    listed.type("/")
+    listed.see("Start a new session")
+    listed.type("\x1b[B\x1b[B")  # /help, then /new
+    time.sleep(0.3)
+    listed.type("\r")
+    listed.see("─ New session ─")
+    assert "Unknown command" not in listed.text()
+    assert listed.quit() == 0
