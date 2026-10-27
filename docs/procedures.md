@@ -15,8 +15,11 @@ persistence off. Nothing here calls a model, reaches a prompt or changes a
 request.
 
 What a run may show from it comes as [`run.progress`](events.md#runprogress)
-events, to a Python caller that asks with `progress=True`; `melo` does not
-show progress yet. Level 2, the bar, is off in this release: replayed on
+events, to a Python caller that asks with `progress=True`, and as the
+[progress line](cli.md#progress-line) that `melo "<task>"` draws on a
+terminal: facts on a first run, then the steps and times of past runs. A
+direct run is a process of its own, so `melo` shows past runs only with
+persistence on. Level 2, the bar, is off in this release: replayed on
 recorded runs, the gate did not yet keep bad bars back by the margin it
 must (0.05) on both test sets, so a run shows at most level 1 until a
 later release turns level 2 on, once a set of repeated runs passes the
@@ -26,9 +29,10 @@ anything.
 
 ## What a run does
 
-- **At its start**, only when a Python caller asked for progress, the run
-  looks its routine up, once, for at most 1 second; without a template, or
-  if the lookup fails, it shows facts only (level 0).
+- **At its start**, only when progress was asked for (by a Python caller,
+  or by `melo` drawing its progress line), the run looks its routine up,
+  once, for at most 1 second; without a template, or if the lookup fails,
+  it shows facts only (level 0).
 - **During the run**, it keeps a trace in RAM: each step, and the class and
   label of each tool call. It keeps no tool output; a test call's last 400
   characters are read for its summary and dropped.
@@ -43,8 +47,8 @@ anything.
   run's start found when it asked for progress; otherwise, since such a
   run reads nothing at its start, the one its routine's template gives
   as the run ends.
-- `run_task(..., routine="name")` in Python makes runs one routine, named,
-  in any folder and whatever their wording.
+- `run_task(..., routine="name")` in Python, or `melo --routine name`,
+  makes runs one routine, named, in any folder and whatever their wording.
 
 ## How it works
 

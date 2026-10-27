@@ -12,7 +12,7 @@ import signal
 import subprocess
 import sys
 import threading
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, TextIO
 
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
     from localmelo.melo.contracts.providers import BaseEmbeddingProvider
     from localmelo.melo.contracts.tools import BaseToolProvider
     from localmelo.support.config import Config
+    from localmelo.support.progress_line import ProgressLine
 
 # Exit codes of a direct-mode run: completed, crashed, and every other status.
 EXIT_COMPLETED = 0
@@ -64,6 +65,8 @@ _DIRECT_FLAGS = {
     "output_format": "--output-format",
     "embedding_base_url": "--embedding-base-url",
     "embedding_model": "--embedding-model",
+    "progress": "--progress",
+    "routine": "--routine",
 }
 
 
@@ -254,13 +257,22 @@ class _ExitSignals:
 
     A signal that melo was started with ignored (``nohup`` ignores SIGHUP)
     stays ignored.
+
+    *before_exit*, when given, is called on the first signal before
+    anything else, and again right before the process exits by it: the
+    progress line uses it to erase itself (see :meth:`ProgressLine.close`).
     """
 
     def __init__(
-        self, agent: Agent, tool_providers: Sequence[BaseToolProvider] = ()
+        self,
+        agent: Agent,
+        tool_providers: Sequence[BaseToolProvider] = (),
+        *,
+        before_exit: Callable[[], object] | None = None,
     ) -> None:
         self._agent = agent
         self._tool_providers = tuple(tool_providers)
+        self._before_exit = before_exit
         self._previous: list[tuple[int, Any]] = []
         # The signal that ended the run, if one did.
         self.received: int | None = None
@@ -292,6 +304,7 @@ class _ExitSignals:
         if self.received is not None:
             return  # the clean-up is under way already
         self.received = signum
+        self._erase()
         self._agent.begin_exit(
             f"Cancelled by {signal.Signals(signum).name}",
             within_s=SIGNAL_CLEANUP_S - _SIGNAL_EXIT_MARGIN_S,
@@ -305,7 +318,13 @@ class _ExitSignals:
             with contextlib.suppress(Exception):
                 provider.kill()
         assert self.received is not None
+        self._erase()
         _exit_by_signal(self.received)
+
+    def _erase(self) -> None:
+        if self._before_exit is not None:
+            with contextlib.suppress(Exception):
+                self._before_exit()
 
 
 # ── Direct mode: run ──
@@ -355,6 +374,34 @@ async def _prompt() -> str:
     return await line
 
 
+async def _run_one(
+    agent: Agent,
+    query: str,
+    *,
+    progress: ProgressLine | None = None,
+    routine: str | None = None,
+) -> RunResult:
+    """Run one task, with *progress* drawn while it runs, if given.
+
+    Without *progress* the run starts as it always has: no sink and no
+    progress events. *routine*, when given, names the run's routine,
+    whether or not the line is drawn. The line is closed, and so erased,
+    before this returns or raises.
+    """
+    kwargs: dict[str, Any] = {}
+    if routine is not None:
+        kwargs["routine"] = routine
+    if progress is None:
+        return await agent.run_task(query, **kwargs)
+    progress.start()
+    try:
+        return await agent.run_task(
+            query, observe=progress.observe, progress=True, **kwargs
+        )
+    finally:
+        progress.close()
+
+
 async def _run(
     agent: Agent,
     query: str | None,
@@ -363,12 +410,15 @@ async def _run(
     version: str = "",
     exit_signals: _ExitSignals | None = None,
     out: TextIO | None = None,
+    progress: ProgressLine | None = None,
+    routine: str | None = None,
 ) -> int:
     """Run *query*, or with no query the interactive loop; return the exit code.
 
     One query is reported in *output_format* on *out* (see
     :func:`_report`), unless one of *exit_signals* arrived during the
-    run. The interactive loop prints text: each turn's result on stdout
+    run; *progress* and *routine* apply to it (see :func:`_run_one`).
+    The interactive loop prints text: each turn's result on stdout
     and, for a turn that did not complete, the status line on stderr,
     and goes on to the next turn.
     *exit_signals* is installed for the whole run, closing the agent
@@ -378,7 +428,7 @@ async def _run(
         exit_signals.install()
     try:
         if query:
-            outcome = await agent.run_task(query)
+            outcome = await _run_one(agent, query, progress=progress, routine=routine)
             if exit_signals is not None and exit_signals.received is not None:
                 return EXIT_CRASHED  # not used: the process exits by the signal
             _report(outcome, output_format, version, out)
@@ -424,16 +474,50 @@ async def _run(
                 exit_signals.uninstall()
 
 
+def _progress_line(
+    mode: str | None, query: str, output_format: str
+) -> ProgressLine | None:
+    """The progress line *mode* asks for (``--progress``), or None.
+
+    Only with ``auto`` (the default) for a task with text output, while
+    stderr is a terminal (not ``TERM=dumb``); see
+    :func:`~localmelo.support.progress_line.wants_line`.
+    """
+    if mode == "off" or not query or output_format != "text":
+        return None
+    from localmelo.support.progress_line import (
+        ProgressLine,
+        wants_color,
+        wants_line,
+        wants_wide_ambiguous,
+    )
+
+    stream = sys.stderr
+    if not wants_line(mode, query=query, output_format=output_format, stream=stream):
+        return None
+    return ProgressLine(
+        stream, color=wants_color(), wide_ambiguous=wants_wide_ambiguous()
+    )
+
+
 def _run_direct(
     agent: Agent,
     query: str,
     output_format: str,
     tool_providers: Sequence[BaseToolProvider] = (),
+    *,
+    progress: str | None = None,
+    routine: str | None = None,
 ) -> int:
     """Run *query*, or for an empty one the interactive loop; return the exit code.
 
     Stdout carries the report alone: what tools write to it during the
     run goes to stderr (see :func:`_stdout_for_the_report`).
+
+    *progress* is ``--progress`` (None for its default, ``auto``): a
+    progress line is drawn on stderr as :func:`_progress_line` says, and
+    erased before the report, on SIGTERM or SIGHUP, and on any exception.
+    *routine* is ``--routine``.
 
     A run ended by SIGTERM or SIGHUP does not return: the process exits by
     that signal (see :class:`_ExitSignals`), also when closing the agent
@@ -441,7 +525,10 @@ def _run_direct(
     """
     # Taken before the run, so the record names the code that was loaded.
     version = _localmelo_version() if output_format == "json" else ""
-    exit_signals = _ExitSignals(agent, tool_providers)
+    line = _progress_line(progress, query, output_format)
+    exit_signals = _ExitSignals(
+        agent, tool_providers, before_exit=None if line is None else line.close
+    )
     try:
         output = (
             _stdout_for_the_report() if query else contextlib.nullcontext(sys.stdout)
@@ -455,9 +542,13 @@ def _run_direct(
                     version=version,
                     exit_signals=exit_signals,
                     out=out,
+                    progress=line,
+                    routine=routine,
                 )
             )
     except BaseException as exc:
+        if line is not None:
+            line.close()  # before a traceback or the line below
         if exit_signals.received is None:
             if not query and isinstance(exc, KeyboardInterrupt):
                 _exit_by_signal(signal.SIGINT)
@@ -467,6 +558,8 @@ def _run_direct(
             print(f"melo: error while stopping: {_one_line(text)}", file=sys.stderr)
         code = EXIT_CRASHED  # not used: the signal ends the process below
     if exit_signals.received is not None:
+        if line is not None:
+            line.close()
         _exit_by_signal(exit_signals.received)
     return code
 
@@ -499,6 +592,12 @@ def _seconds(text: str) -> float:
 def _non_empty(text: str) -> str:
     if not text:
         raise argparse.ArgumentTypeError("must not be empty")
+    return text
+
+
+def _routine_name(text: str) -> str:
+    if not text.strip():
+        raise argparse.ArgumentTypeError("must not be blank")
     return text
 
 
@@ -695,6 +794,19 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="NAME",
         help="Embedding model name (with --embedding-base-url)",
     )
+    direct.add_argument(
+        "--progress",
+        choices=["auto", "off"],
+        help="Draw a progress line on stderr while the task runs: auto (default) "
+        "when stderr is a terminal and the output is text, or off",
+    )
+    direct.add_argument(
+        "--routine",
+        type=_routine_name,
+        metavar="NAME",
+        help="Learn and recall the task's steps as the routine NAME, in any "
+        "folder and whatever the task's wording",
+    )
 
     # gateway mode
     parser.add_argument("--serve", action="store_true", help="Run as gateway server")
@@ -763,7 +875,14 @@ def main() -> None:
         agent = _build_direct_mode_agent(
             args, options=options, tool_providers=tool_providers
         )
-        code = _run_direct(agent, query, args.output_format or "text", tool_providers)
+        code = _run_direct(
+            agent,
+            query,
+            args.output_format or "text",
+            tool_providers,
+            progress=args.progress,
+            routine=args.routine,
+        )
         if code != EXIT_COMPLETED:
             raise SystemExit(code)
         return

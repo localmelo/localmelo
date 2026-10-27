@@ -85,6 +85,8 @@ These options apply to a task run without `--serve`.
 | `--output-format text\|json` | `text` | Print the result as text, or the run record as one JSON line. |
 | `--embedding-base-url URL` | not set | An OpenAI-compatible embedding server for long-term memory. |
 | `--embedding-model NAME` | `default` | The model to request from the `--embedding-base-url` server. |
+| `--progress auto\|off` | `auto` | Draw a [progress line](#progress-line) on stderr while the task runs: `auto` when stderr is a terminal and the output is text, `off` never. |
+| `--routine NAME` | not set | Learn and recall this task's steps as the routine `NAME`, in any folder and whatever the task's wording. |
 
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
@@ -109,6 +111,13 @@ These options apply to a task run without `--serve`.
 - `--embedding-base-url` needs `--base-url`, and `--embedding-model` needs
   `--embedding-base-url`. Without `--base-url`, the configured embedding
   backend is used.
+- `--progress`: see [Progress line](#progress-line). `off` starts the run
+  exactly as `melo` without a terminal does.
+- `--routine`: without it, a task is known by its wording (dates and times
+  masked) and the folder it runs in. Runs given the same `NAME` are one
+  routine, so `--routine daily-mail` joins differently worded requests run
+  from any folder. A blank name is a usage error. See
+  [Procedural memory](procedures.md#how-it-works).
 
 ### Gateway and setup
 
@@ -139,7 +148,8 @@ melo: error: argument --max-steps: must be at least 1, got 0
 These are usage errors:
 
 - a value that is not valid, such as `--max-steps 0`, `--timeout 0`, an
-  unknown built-in tool name, or a `--memory-dir` that is a file;
+  unknown built-in tool name, a blank `--routine`, or a `--memory-dir` that
+  is a file;
 - options that cannot be combined: `--mcp-only` without `--mcp-config`,
   `--mcp-only` with `--builtins` or `--tool-exposure`, `--embedding-model`
   without `--embedding-base-url`, `--embedding-base-url` without
@@ -184,6 +194,79 @@ These are usage errors:
 - Warnings go to stderr, one line each.
 - A traceback appears only when the run ends as `crashed`, after Ctrl+C, or
   when the config file is not valid TOML.
+
+## Progress line
+
+With text output on a terminal, `melo "<task>"` shows where the task stands
+in one line on stderr. The line is redrawn on each step and tool call and
+every second, and erased before the result and the status line are
+printed, so it never remains in the scrollback:
+
+```text
+step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
+```
+
+- **When.** With `--progress auto`, the default, only when stderr is a
+  terminal, `TERM` is not `dumb` and the output is text. Nothing is drawn
+  with `--output-format json` (on a terminal or not), when stderr is a pipe
+  or a file (as in scripts and benchmarks), with `--progress off`, or in the
+  `melo ""` loop; the run then starts exactly as it would without the
+  option. Stdout is the same either way. While `melo` runs in the
+  background (`melo "<task>" &`, or Ctrl+Z then `bg`), the line is not
+  drawn, so it never covers the shell's prompt; it comes back with `fg`.
+- **First runs: facts.** `step 4` counts planning steps; `attempt 2` appears
+  from the second attempt on. The phase is read from the tool calls so far:
+  `Explore` (before the first edit), `Write` (editing), `Verify` (running
+  tests) or `Finishing` (after a test run passed), with `(cycle n)` from
+  the first test run after an edit, n counting such edit-then-test rounds.
+  Then the tool call under way and its time (`pytest 0:41`), the counts of
+  the last test summary seen (`tests 3/8`: passed of total), and the run's
+  time (`1m03s`).
+- **Repeated tasks: past runs too.** Once a task's
+  [routine](procedures.md#how-it-works) has completed before on this model
+  with the same options (or, as a hint, a similar task in the same folder
+  has), the line adds what those runs did, never a percent:
+
+  ```text
+  step 4 · Write (cycle 1) · 1m03s · last time 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit
+  step 4 · Write (cycle 1) · 1m03s · past 5-8 steps, 2-3 min · last time: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
+  ```
+
+  The steps are those of past runs: `✓` done, `◐` the current one, `–`
+  skipped, no mark for one not reached yet (this run need not do them all);
+  `(×2)` marks a pattern that repeated. A percent bar is not shown in this
+  release. The step count is never shown against `--max-steps`, which is a
+  limit, not a plan.
+
+  A similar task's runs are a hint, so the line never says `last time` for
+  them; they follow `like a similar task:`, and its steps `its steps:`:
+
+  ```text
+  step 4 · Write (cycle 1) · 1m03s · like a similar task: 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
+  ```
+- **Past runs need persistence.** Each `melo` is a new process, and
+  procedural memory stays in RAM unless memory is kept between runs. Run
+  with `LOCALMELO_PERSIST_MEMORY=1` or `--memory-dir DIR` (see
+  [Memory](memory.md#keep-memory-between-runs)); otherwise every run shows
+  facts only.
+- **Narrow terminals.** When the line is wider than the terminal, it leaves
+  out, in this order, the past runs' times, the test counts, the past
+  runs' named steps and the attempt, and then cuts the rest with `…`. In a
+  Chinese, Japanese or Korean locale (the first of `LC_ALL`, `LC_CTYPE`
+  and `LANG` that is set starts with `zh`, `ja` or `ko`), marks such as
+  `·` and `…` count two cells, as a terminal set to draw ambiguous-width
+  characters wide draws them, so the line never wraps there.
+- **Color.** The line is dim; set `NO_COLOR` to a non-empty value to draw
+  it plain.
+- **Warnings** print on a line of their own above it. Output that a tool
+  writes straight to the terminal, such as a program that `python_exec`
+  code starts without capturing its output, can overwrite the line until
+  its next redraw, within a second.
+- **Signals.** SIGTERM, SIGHUP and Ctrl+C erase the line before `melo`
+  stops.
+- **Paused output.** While the terminal's output is stopped (Ctrl+S), the
+  task goes on without the line and a signal still stops `melo`; the last
+  line drawn then stays on the screen.
 
 ## Exit codes
 
