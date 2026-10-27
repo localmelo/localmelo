@@ -98,3 +98,10 @@ def test_help_lists_the_commands_and_one_commands_details() -> None:
         in out.text()
     )
     assert find("quit") is find("exit")
+
+
+def test_an_alias_row_names_the_other_spelling() -> None:
+    assert _complete("/cl") == [("/clear", "/clear", "Start a new session (also /new)")]
+    assert _complete("/ne") == [("/new", "/new", "Start a new session (also /clear)")]
+    assert _complete("/q") == [("/quit", "/quit", "Quit (also /exit, ctrl+d)")]
+    assert _complete("/ex") == [("/exit", "/exit", "Quit (also /quit, ctrl+d)")]

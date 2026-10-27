@@ -36,7 +36,7 @@ class SlashCompleter(Completer):
                             usage,
                             start_position=-len(text),
                             display=f"{usage} {command.args}".rstrip(),
-                            display_meta=command.summary,
+                            display_meta=command.line(alias),
                         )
             return
         if name == "model":

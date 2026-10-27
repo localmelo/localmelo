@@ -29,14 +29,25 @@ class Command:
     summary: str
     # Runs during a turn: yes, no, or only without arguments ("show").
     during_turn: bool | Literal["show"]
+    keys: str = ""  # a key that does the same, named after the other spellings
+
+    def line(self, spelling: str = "") -> str:
+        """The summary for *spelling* (the name by default), naming the others.
+
+        ``/clear``'s row says ``(also /new)``, and ``/new``'s ``(also /clear)``.
+        """
+        spelling = spelling or self.name
+        others = [f"/{name}" for name in (self.name, *self.aliases) if name != spelling]
+        others += [self.keys] if self.keys else []
+        return f"{self.summary} (also {', '.join(others)})" if others else self.summary
 
 
 COMMANDS: Final[tuple[Command, ...]] = (
     Command("help", (), "[command]", "Show commands and keys", True),
-    Command("new", ("clear",), "", "Start a new session (also /clear)", False),
+    Command("new", ("clear",), "", "Start a new session", False),
     Command("model", (), "[name]", "Show, list or switch the model (saved)", False),
     Command("backend", (), "[url]", "Switch to another model server (saved)", False),
-    Command("exit", ("quit",), "", "Quit (also /quit, ctrl+d)", True),
+    Command("exit", ("quit",), "", "Quit", True, keys="ctrl+d"),
 )
 
 KEYS: Final = (
@@ -82,12 +93,12 @@ def help_text(topic: str = "", symbols: Symbols = UNICODE) -> RenderableType:
             command.during_turn
         ]
         usage = f"/{command.name} {command.args}".rstrip()
-        return Text(f"{usage}\n  {command.summary}\n  During a turn: {during}")
+        return Text(f"{usage}\n  {command.line()}\n  During a turn: {during}")
     lines: list[Text] = [Text("Commands", style="bold")]
     for command in COMMANDS:
         usage = f"/{command.name} {command.args}".rstrip()
         line = Text("  " + pad_cells(usage, 20) + "  ")
-        line.append(command.summary, style="muted")
+        line.append(command.line(), style="muted")
         lines.append(line)
     lines.append(Text("Input", style="bold"))
     lines += [Text("  " + in_symbols(keys, symbols), style="muted") for keys in KEYS]
