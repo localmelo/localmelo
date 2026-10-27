@@ -40,6 +40,11 @@ complete prints its status line on stderr, and the loop asks for the next task.
 loop with exit code 0; Ctrl+C ends it at once (a shell shows 130). The loop
 takes `--base-url` and `--chat-model`; the direct-mode options are usage
 errors with it. Its conversation is separate from the web workspace's chats.
+On a terminal the prompt is edited with readline: Backspace deletes a whole
+character, Chinese and other wide characters included, and the Up arrow
+recalls earlier lines of this loop. A line that is not valid UTF-8 prints
+`melo: that line was not valid UTF-8; type it again.` and the loop asks
+again.
 
 ## Options
 
