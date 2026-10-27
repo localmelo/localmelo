@@ -172,6 +172,7 @@ async def test_the_guard_ignores_keys_just_after_the_panel_opens() -> None:
     approver = TerminalApprover(clock=lambda: now[0])
     asking = asyncio.ensure_future(approver.ask(_request()))
     await asyncio.sleep(0.01)
+    assert APPROVAL_KEY_GUARD_S == 0.4
     assert approver.guarded()
     now[0] += APPROVAL_KEY_GUARD_S
     assert not approver.guarded()
@@ -451,3 +452,54 @@ def test_long_code_lines_wrap_under_their_number() -> None:
         "   2 print(x",
         "     )",
     ]
+
+
+# ── Review fixes: the panel's keys ──
+
+
+async def test_arrows_do_nothing_inside_the_guard(now: list[float]) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    async with running_app(approver=approver, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(_request()))
+        await app.wait(lambda: "Run a shell command?" in app.text())
+        app.type("\x1b[B")  # still browsing the history, say
+        await app.settle()
+        assert approver.pending is not None and approver.pending.selected == 0
+        now[0] += 1
+        app.type(ENTER)
+        assert await asyncio.wait_for(asking, 3) == ApprovalDecision(True)
+
+
+async def test_ctrl_c_at_the_choices_stops_the_turn_and_a_second_press_quits(
+    now: list[float],
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    controller = FakeController(state="running")
+    async with running_app(controller, approver=approver, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(_request()))
+        await app.wait(lambda: "Run a shell command?" in app.text())
+        app.type(CTRL_C)
+        await app.wait(lambda: controller.stops == 1)
+        await app.wait(lambda: "press ctrl+c again to quit" in app.text())
+        app.type(CTRL_C)
+        await app.wait(lambda: not app.ui.app.is_running)
+        asking.cancel()
+
+
+async def test_ctrl_c_in_an_empty_reason_goes_back_to_the_choices(
+    now: list[float],
+) -> None:
+    approver = TerminalApprover(clock=lambda: now[0])
+    controller = FakeController(state="running")
+    async with running_app(controller, approver=approver, clock=lambda: now[0]) as app:
+        asking = asyncio.ensure_future(approver.ask(_request()))
+        await app.wait(lambda: "Run a shell command?" in app.text())
+        now[0] += 1
+        app.type("3")
+        await app.wait(lambda: "Reason (optional" in app.text())
+        app.type(CTRL_C)
+        await app.wait(lambda: "Reason (optional" not in app.text())
+        assert "❯ 3. No, and tell melo why" in app.text() and controller.stops == 0
+        assert approver.pending is not None and not approver.pending.reason
+        app.type("1")
+        assert await asyncio.wait_for(asking, 3) == ApprovalDecision(True)

@@ -674,7 +674,7 @@ class InteractiveApp:
 
     def _move(self, step: int) -> None:
         pending = self._pending()
-        if pending is None:
+        if pending is None or self.approver is None or self.approver.guarded():
             return
         indexes = [index for index, _ in self._options(pending)]
         position = indexes.index(pending.selected) if pending.selected in indexes else 0
@@ -742,10 +742,13 @@ class InteractiveApp:
             self._view_all()
 
         @kb.add("escape", filter=choices, eager=True)
-        @kb.add("c-c", filter=choices)
         def _(event: KeyPressEvent) -> None:
             self.controller.stop()
             self.app.invalidate()
+
+        @kb.add("c-c", filter=choices | reason)
+        def _(event: KeyPressEvent) -> None:
+            self.ctrl_c()
 
         @kb.add("enter", filter=reason)
         def _(event: KeyPressEvent) -> None:
@@ -755,13 +758,6 @@ class InteractiveApp:
         @kb.add("escape", filter=reason, eager=True)
         def _(event: KeyPressEvent) -> None:
             self._back_to_choices()
-
-        @kb.add("c-c", filter=reason)
-        def _(event: KeyPressEvent) -> None:
-            if self.reason.text:
-                self.reason.reset()
-            else:
-                self._back_to_choices()
 
         return [kb]
 
@@ -855,17 +851,20 @@ class InteractiveApp:
         Only a press that stopped something or said "press ctrl+c again"
         arms the second press, so clearing a draft never quits.
         """
+        now = self._clock()
+        double = now - self._last_ctrl_c < DOUBLE_PRESS_S
         pending = self._pending()
         if pending is not None:
             if pending.reason and self.reason.text:
                 self.reason.reset()
             elif pending.reason:
                 self._back_to_choices()
-            else:
-                self.controller.stop()
+            elif double:
+                self.exit()
+            elif self.controller.stop():
+                self._last_ctrl_c = now
+                self.hint("Stopping… press ctrl+c again to quit")
             return
-        now = self._clock()
-        double = now - self._last_ctrl_c < DOUBLE_PRESS_S
         self._last_ctrl_c = -DOUBLE_PRESS_S
         buffer = self.buffer
         if buffer.complete_state is not None:
