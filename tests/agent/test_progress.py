@@ -257,10 +257,10 @@ async def test_one_past_run_gives_level_1(level2: bool) -> None:
         "steps_lo": 4,
         "steps_median": 4,
         "steps_hi": 4,
-        "wall_lo_s": first["past"]["wall_lo_s"],
-        "wall_hi_s": first["past"]["wall_hi_s"],
+        "wall_lo_s": 60.0,
+        "wall_hi_s": 60.0,
         "last_steps": 4,
-        "last_wall_s": first["past"]["last_wall_s"],
+        "last_wall_s": 60.0,
     }
     assert first["basis"]["match"] == "exact"
     assert first["basis"]["model"] == MODEL
