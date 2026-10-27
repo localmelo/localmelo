@@ -155,7 +155,7 @@ class CliSession:
             )
             if self._state != "idle" and not allowed:
                 return f"/{command.name} is not available while a turn runs (esc stops it)."
-            self.spawn(self._command(command.name, arguments))
+            self.spawn(self._run_command(command.name, arguments, text))
             return None
         if self._state == "idle":
             self.submit(text)
@@ -324,6 +324,20 @@ class CliSession:
             self._try_cancel(STOP_REASON, "user_stop")
 
     # ── Commands ──
+
+    async def _run_command(self, name: str, arguments: str, text: str) -> None:
+        """Echo the command as a message is echoed, run it, then a blank line.
+
+        ``/exit`` prints nothing.
+        """
+        if name == "exit":
+            await self._command(name, arguments)
+            return
+        self.renderer.echo(text)
+        try:
+            await self._command(name, arguments)
+        finally:
+            self.out.print(Text(""))
 
     async def _command(self, name: str, arguments: str) -> None:
         if name == "help":

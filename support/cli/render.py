@@ -247,8 +247,8 @@ class TurnRenderer:
 
     # ── A turn ──
 
-    def begin_turn(self, text: str) -> None:
-        """Echo *text* and start the live area."""
+    def echo(self, text: str) -> None:
+        """Print *text* after the prompt symbol, as it was sent (a command's echo)."""
         lines = text.splitlines() or [""]
         shown = lines[:ECHO_LINES]
         echo = Text()
@@ -261,7 +261,12 @@ class TurnRenderer:
                 f"\n{self.symbols.ellipsis} +{len(lines) - len(shown)} lines",
                 style="muted",
             )
-        self.out.print(_marked(self.symbols.prompt, "accent", echo), Text(""))
+        self.out.print(_marked(self.symbols.prompt, "accent", echo))
+
+    def begin_turn(self, text: str) -> None:
+        """Echo *text* and start the live area."""
+        self.echo(text)
+        self.out.print(Text(""))
         self.live = LiveState(activity="Starting", started=self._clock())
         self._calls = {}
         self._previews = {}

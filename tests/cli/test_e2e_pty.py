@@ -26,6 +26,7 @@ from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
+import pyte
 import pytest
 
 from localmelo.tests.cli.test_direct_mode_process import _env
@@ -468,3 +469,16 @@ def test_arrows_then_enter_run_the_picked_command(listed: Melo) -> None:
     listed.see("─ New session ─")
     assert "Unknown command" not in listed.text()
     assert listed.quit() == 0
+
+
+def test_a_command_is_echoed_in_the_scrollback(melo: Callable[..., Melo]) -> None:
+    term = melo()
+    term.see("Ask melo")
+    term.type("/help\r")
+    term.see("esc stop the turn · ctrl+c clear, stop or quit")
+    screen = pyte.Screen(100, 30)
+    pyte.Stream(screen).feed(term.output.decode("utf-8", "replace"))
+    rows = [row.rstrip() for row in screen.display]
+    echo = rows.index("› /help")
+    assert rows[echo - 1] == "" and rows[echo + 1] == "Commands", rows
+    assert term.quit() == 0

@@ -843,3 +843,35 @@ async def test_a_turn_that_could_not_run_gives_the_message_back(
     await setup.idle()
     sessions = await setup.store.list_sessions()
     assert [s.title for s in sessions] == ["second try"]
+
+
+# ── A command that runs is echoed, then its output ──
+
+
+async def test_a_command_that_runs_is_echoed_before_its_output(setup: Setup) -> None:
+    session = setup.session
+    session.enter("/model")
+    await _until(lambda: "/model NAME or /model N" in setup.out.text())
+    await setup.idle()
+    session.enter("/model m2")
+    await _until(lambda: "Saved as the default." in setup.out.text())
+    await setup.idle()
+    text = setup.out.text()
+    assert "› /model\nModel: m1 · " in text
+    assert "/model NAME or /model N switches and saves.\n\n› /model m2\n" in text
+    assert (
+        "› /model m2\nModel: m2 (OpenAI-compatible). Saved as the default.\n\n" in text
+    )
+
+
+async def test_a_refused_command_and_exit_are_not_echoed(setup: Setup) -> None:
+    session = setup.session
+    assert session.enter("/nope") == ""
+    setup.factory.scripts["m1"] = []
+    session.agent = await setup.factory.build()
+    session.enter("wait")
+    assert session.enter("/new") is not None  # refused during a turn
+    session.enter("/exit")
+    await _until(lambda: setup.app.exited)
+    text = setup.out.text()
+    assert "› /nope" not in text and "› /new" not in text and "› /exit" not in text
