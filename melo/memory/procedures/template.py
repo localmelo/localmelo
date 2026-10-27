@@ -385,8 +385,28 @@ def _anchors(episodes: Sequence[Episode]) -> tuple[tuple[str, float, float], ...
     return tuple(sorted(found, key=lambda anchor: anchor[1]))
 
 
+# The medoid compares at most an episode's first MEDOID_MAX_SEGMENTS
+# segments, and at most MEDOID_MAX_CELLS token pairs in all (the products
+# of two sequences' lengths, over each pair once): about 50 ms of pure
+# Python at 200 ns a pair. A run's end computes it inside asyncio.timeout,
+# which cannot interrupt CPU, so past the budget a version keeps its
+# parent's skeleton instead (see build_version).
+MEDOID_MAX_SEGMENTS: Final = 200
+MEDOID_MAX_CELLS: Final = 250_000
+
+
 def _tokens(episode: Episode) -> list[tuple[str, str | None]]:
-    return [(s.cls, s.target) for s in episode.segments]
+    return [(s.cls, s.target) for s in episode.segments[:MEDOID_MAX_SEGMENTS]]
+
+
+def medoid_cells(episodes: Sequence[Episode]) -> int:
+    """The token pairs :func:`medoid` compares for *episodes*."""
+    lengths = [min(len(e.segments), MEDOID_MAX_SEGMENTS) for e in episodes]
+    return sum(
+        lengths[i] * lengths[j]
+        for i in range(len(lengths))
+        for j in range(i + 1, len(lengths))
+    )
 
 
 def edit_distance(a: Sequence[Any], b: Sequence[Any]) -> int:
@@ -409,22 +429,23 @@ def edit_distance(a: Sequence[Any], b: Sequence[Any]) -> int:
 def medoid(episodes: Sequence[Episode]) -> Episode | None:
     """The episode with the least summed edit distance to the others.
 
-    The sequences compared are each episode's segments as (class, target)
-    tokens. Ties go to the latest episode, so a change of habit enters as
-    soon as it is as central as the old one.
+    The sequences compared are each episode's first
+    :data:`MEDOID_MAX_SEGMENTS` segments as (class, target) tokens, each
+    pair once. Ties go to the latest episode, so a change of habit enters
+    as soon as it is as central as the old one.
     """
     if not episodes:
         return None
     tokens = [_tokens(e) for e in episodes]
-    best: tuple[int, int] | None = None
-    for i, mine in enumerate(tokens):
-        total = sum(
-            edit_distance(mine, other) for j, other in enumerate(tokens) if j != i
-        )
-        if best is None or total <= best[0]:
-            best = (total, i)
-    assert best is not None
-    return episodes[best[1]]
+    totals = [0] * len(tokens)
+    for i in range(len(tokens)):
+        for j in range(i + 1, len(tokens)):
+            distance = edit_distance(tokens[i], tokens[j])
+            totals[i] += distance
+            totals[j] += distance
+    least = min(totals)
+    best = max(i for i, total in enumerate(totals) if total == least)
+    return episodes[best]
 
 
 def collapse(segments: Sequence[Segment], longest: int = 4) -> tuple[SkeletonItem, ...]:
@@ -495,15 +516,23 @@ def build_version(
     use (this run's included), oldest first. The statistics come from it
     (:func:`compute_stats`); the skeleton is its completed episodes'
     medoid, or the parent's skeleton unchanged when it came from a sleep
-    job.
+    job. When the medoid would compare more than :data:`MEDOID_MAX_CELLS`
+    token pairs, the parent's skeleton is kept, or a first version takes
+    its latest completed episode's.
     """
     stats = compute_stats(window, first_task_id, params)
     skeleton_source = "online"
+    completed = [e for e in window if e.completed]
     if parent is not None and "sleep" in (parent.source, parent.skeleton_source):
         skeleton, medoid_id = parent.skeleton, parent.medoid
         skeleton_source = "sleep"
+    elif parent is not None and medoid_cells(completed) > MEDOID_MAX_CELLS:
+        skeleton, medoid_id = parent.skeleton, parent.medoid
     else:
-        chosen = medoid([e for e in window if e.completed])
+        if medoid_cells(completed) > MEDOID_MAX_CELLS:
+            chosen: Episode | None = completed[-1]
+        else:
+            chosen = medoid(completed)
         skeleton = collapse(chosen.segments) if chosen is not None else ()
         medoid_id = chosen.task_id if chosen is not None else None
     return Template(
