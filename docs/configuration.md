@@ -83,6 +83,39 @@ localmelo only connects to a local server: you start and stop it yourself.
 `mlc`, `vllm` and `sglang` use the plain OpenAI-compatible API, so another
 OpenAI-compatible server works with any of them.
 
+### oMLX
+
+[oMLX](https://github.com/jundot/omlx) has an OpenAI-compatible API, so it
+uses the `vllm` backend. [Serve a model with oMLX](quickstart.md#serve-a-model-with-omlx)
+shows how to start it.
+
+```toml
+chat_backend = "vllm"
+embedding_backend = "none"
+request_timeout_s = 600
+
+[vllm]
+chat_url = "http://127.0.0.1:8000/v1"
+chat_model = "Qwen3-8B-4bit"
+
+[vllm.extra_body.chat_template_kwargs]
+enable_thinking = false
+```
+
+- `chat_model` is the model's id in oMLX's `GET /v1/models`: its folder
+  name, or the alias set for it in oMLX.
+- `request_timeout_s = 600` gives oMLX time to load the model when a
+  request finds it unloaded; see [Chat request timeout](#chat-request-timeout).
+- The `extra_body` table turns off a Qwen3 model's thinking, which makes
+  each step faster. Leave it out to keep thinking on. oMLX applies it unless
+  the model's settings in oMLX force `enable_thinking`.
+- For long-term memory, oMLX can also serve an embedding model from the
+  same directory: set `embedding_backend = "vllm"` and add
+  `embedding_url = "http://127.0.0.1:8000/v1"` and
+  `embedding_model = "<its folder name>"` to `[vllm]`. Keep `embedding` in
+  the folder name of a Qwen3-Embedding model, as in its repository name:
+  oMLX tells it from a chat model by that name.
+
 ### Ollama with embeddings
 
 ```toml

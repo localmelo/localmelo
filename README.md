@@ -28,8 +28,8 @@ change before v0.1.0 (milestone due 2026-12-20).
   direct mode and the Python API).
 - **Reports every run** as text or as one JSON line, with fixed exit codes,
   so scripts and benchmarks can rely on it.
-- **Connects to your models.** A model server you run (Ollama, MLC LLM, vLLM,
-  SGLang) or a cloud API (OpenAI, Anthropic, Google Gemini, NVIDIA).
+- **Connects to your models.** A model server you run (Ollama, oMLX, MLC LLM,
+  vLLM, SGLang) or a cloud API (OpenAI, Anthropic, Google Gemini, NVIDIA).
 - **Remembers.** Working memory during a run, a history of tasks and steps,
   long-term memory when an embedding server is configured, and procedural
   memory: what the runs of each recurring task did, recorded at every
