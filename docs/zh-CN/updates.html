@@ -63,7 +63,7 @@
         </div>
         <p>计划中：</p>
         <ul>
-          <li>交互式命令行：不带任务运行 <code>melo</code> 时打开，实时显示智能体的工具调用，运行前征求确认，并可用 <code>/model</code> 切换模型（目前 <code>melo</code> 在终端中打开一个简单的对话循环）；</li>
+          <li>交互式命令行的后续部分：回合运行时显示模型的思考和重试、审批中显示改动的 diff、可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
           <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
           <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
@@ -75,6 +75,21 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-27-interactive-ui">
+          <h3>终端里的交互式界面</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/53">#53</a>
+          </p>
+          <ul>
+            <li>在终端中不带任务运行 <code>melo</code>，现在会打开一个边做边显示的对话界面：横幅显示模型、工作区和工具；每个工具调用显示为一个块，附带输出的前几行；模型工作时，旋转指示显示当前步数和用时；答案按 Markdown 输出。它取代了下一条更新中的对话循环，<code>melo &quot;&quot;</code> 仍然打开那个循环。</li>
+            <li>输入 <code>/</code> 会列出命令及其说明。<code>/model</code> 和 <code>/backend</code> 切换模型和服务器，并保存为默认值（用 <code>--base-url</code> 打开的界面不保存）；<code>/new</code> 开始新的对话。</li>
+            <li>运行命令、Python 代码或写文件之前会先询问：允许这一次、在本次会话中允许这个工具，或者拒绝并说明原因。<code>--yolo</code> 跳过询问，<code>--workspace DIR</code> 指定文件工具只能在其中操作的文件夹。</li>
+            <li>中文和其他宽字符的输入、删除和换行都按整字处理。Esc 停止当前回合，上方向键调出之前的消息，Alt+Enter 或 Ctrl+J 换行。</li>
+            <li>没有终端时，<code>melo</code> 现在会提示应该运行什么，并以退出码 2 结束；请用 <code>melo --serve</code> 启动网关。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#the-interactive-ui">交互式界面（英文）</a>。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-27-first-run">
           <h3>输入 <code>melo</code> 即可开始对话</h3>

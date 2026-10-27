@@ -73,7 +73,7 @@
 
             <a class="node" id="n-cli" href="#c-cli" style="left:10px;top:40px;width:140px">
               <span class="node-title">Command line</span>
-              <span class="node-sub">melo · direct mode<br>conversation loop</span>
+              <span class="node-sub">melo · direct mode<br>interactive UI</span>
             </a>
             <a class="node" id="n-gateway" href="#c-gateway" style="left:10px;top:170px;width:140px">
               <span class="node-title">Gateway</span>
@@ -140,18 +140,37 @@
           The <code>melo</code> command. Given a task, it runs in direct mode:
           it builds one agent, runs the task, prints the result as text or as
           one JSON line, and exits with a code that tells how the run ended.
-          An empty task (<code>melo ""</code>) opens a conversation loop in
-          the terminal instead, where each turn sees the earlier answers.
-          Without a task it opens the same loop in a terminal, and starts the
-          gateway elsewhere; <code>--serve</code> always starts the gateway;
-          <code>--daemon</code> manages the macOS background service. With
+          Without a task, in a terminal, it opens the interactive UI: an
+          input box and a status bar stay at the bottom, and each turn prints
+          into the scrollback as it runs, with a block for each tool call, a
+          spinner with the step and the time, and the answer as Markdown. The
+          UI runs its turns on a session (stored in
+          <code>~/.cache/localmelo/cli/sessions.db</code>), asks in a panel
+          before <code>shell_exec</code>, <code>python_exec</code> and
+          <code>file_write</code> run, keeps the file tools in its workspace,
+          and saves the model and server that <code>/model</code> and
+          <code>/backend</code> pick to the config file (a session opened
+          with <code>--base-url</code> saves nothing). Without a terminal,
+          bare <code>melo</code> exits with code 2. An empty task
+          (<code>melo ""</code>) opens the plain conversation loop, where each
+          turn sees the earlier answers. <code>--serve</code> starts the
+          gateway; <code>--daemon</code> manages the macOS background service.
+          With
           <code>--base-url</code>, the agent talks to that server and the
           config file is not read; without it, the configured backends are
           used. <code>--chat-model</code> and <code>--request-timeout</code>
           set the chat model and the chat request timeout in both cases, and
           never change the config file.
         </p>
-        <p>Key files: <code>__main__.py</code>.</p>
+        <p>
+          Key files: <code>__main__.py</code>; the UI in
+          <code>support/cli/</code>: <code>launch.py</code> (the terminal
+          check, the workspace and the model server), <code>app.py</code> (the
+          input box and the keys), <code>session.py</code> (turns and
+          commands), <code>render.py</code> (tool blocks, the spinner and
+          answers) and <code>approvals.py</code>; and
+          <code>support/sessions/agents.py</code>.
+        </p>
 
         <h3 id="c-gateway">Gateway</h3>
         <p>
@@ -202,7 +221,7 @@
           lists its tools and registers them, as
           <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>, with the tool registry
           and the executor. MCP tools work in direct mode and the Python API,
-          not in gateway sessions. A server's <code>require_approval</code>
+          not in gateway sessions or the interactive UI. A server's <code>require_approval</code>
           makes calls of its tools, or of the tools it names, ask the run's
           approval policy first; a run without a policy, such as a direct run,
           runs them without asking.
@@ -288,7 +307,9 @@
           resolved again and refused if it changed in the meantime. Each
           tool runs with a time limit, which starts after the approval:
           <code>shell_exec</code> 30 seconds, <code>file_read</code> and <code>file_write</code> 60 seconds, an
-          MCP tool its server's <code>timeout</code>. Without a workspace root,
+          MCP tool its server's <code>timeout</code>. In the interactive UI,
+          <code>shell_exec</code> and <code>python_exec</code> get 10 minutes.
+          Without a workspace root,
           <code>python_exec</code> code runs inside localmelo and cannot be
           interrupted. A refusal, a denial, a time-out or an error comes back
           as the tool's error.
@@ -339,12 +360,13 @@
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">Offline retrieval</a>.
         </p>
         <p>
-          Sessions (experimental, Python API only) keep whole conversations in
+          Sessions (experimental) keep whole conversations in
           <code>sessions.db</code>: each turn is a stored row that ends exactly
           once with a status and a cause, the session's events are stored with
           it, and a window checkpoint lets a fresh agent resume where the last
           one stopped. The gateway's file and the terminal's file are separate.
-          <code>melo</code> and the gateway do not use sessions yet (code:
+          The interactive UI runs its turns on sessions, though it cannot
+          resume one yet; the gateway does not use them (code:
           <code>support/sessions/</code>). See
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/sessions.md">Sessions</a>.
         </p>
@@ -368,7 +390,7 @@
           <code>GET /v1/models</code>, asks for its URL and model and saves
           them. The setup wizard (<code>melo --reconfigure</code>) asks for
           every backend, sends a test request to each server, saves the file,
-          then opens the conversation loop, or with <code>--serve</code>
+          then opens the interactive UI, or with <code>--serve</code>
           starts the gateway. Direct mode and the gateway build their agents
           from this file.
         </p>
@@ -455,10 +477,10 @@
         <h2>What exists today</h2>
         <ul>
           <li>Direct mode with run options, nine run statuses, text or JSON output, and fixed exit codes.</li>
-          <li>A conversation loop in the terminal (<code>melo ""</code>).</li>
+          <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>; and the plain conversation loop (<code>melo ""</code>).</li>
           <li>Four built-in tools, and tools from local MCP servers in direct mode and the Python API.</li>
           <li>The Python API (experimental): run events, stopping a run, approval policies for tool calls, a workspace root for the file tools, and conversations that carry over between runs.</li>
-          <li>Sessions in the Python API (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>). <code>melo</code> and the gateway do not use them yet.</li>
+          <li>Sessions (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>). The interactive UI keeps its turns in them; the gateway does not use them yet.</li>
           <li>The gateway: the HTTP API, sessions, the web workspace, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
           <li>Backends for Ollama, MLC LLM, vLLM, SGLang and four cloud APIs.</li>
           <li>Working memory, history and long-term memory, saved to SQLite when persistence is on; the saved history also keeps every model call with its reasoning, for 30 days by default.</li>
