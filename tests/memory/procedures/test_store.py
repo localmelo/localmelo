@@ -513,7 +513,8 @@ async def test_the_file_mode_version_and_busy_timeout(
         assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
         live = await store._open()
         async with live.execute("PRAGMA busy_timeout") as cursor:
-            assert tuple(await cursor.fetchall()) == ((BUSY_TIMEOUT_MS,),)
+            assert tuple(await cursor.fetchall()) == ((500,),)
+        assert BUSY_TIMEOUT_MS == 500
         async with live.execute("PRAGMA journal_mode") as cursor:
             assert tuple(await cursor.fetchall()) == (("wal",),)
     finally:
@@ -613,7 +614,9 @@ async def test_a_cancelled_call_drops_the_connection_and_the_next_reopens(
     finally:
         blocker.execute("ROLLBACK")
         blocker.close()
-    result = await store.learn(runs(8))
+    # Bounded, so that a store that kept the stuck connection fails here
+    # instead of hanging.
+    result = await asyncio.wait_for(store.learn(runs(8)), timeout=10)
     assert result.version is not None and result.version.version == 2
     await store.aclose()
     assert not store._closing
@@ -633,7 +636,8 @@ async def test_a_locked_file_fails_after_the_busy_timeout(
         started = time.monotonic()
         with pytest.raises(sqlite3.OperationalError, match="locked"):
             await store.learn(runs(7))
-        assert 0.4 < time.monotonic() - started < 3
+        # busy_timeout is 500 ms.
+        assert 0.4 < time.monotonic() - started < 0.95
     finally:
         blocker.execute("ROLLBACK")
         blocker.close()
@@ -750,3 +754,64 @@ def test_segments_from_json_skips_infinite_numbers() -> None:
     assert [s.cls for s in segments_from_json(text)] == ["W"]
     with pytest.raises(ValueError):
         segments_from_json(text, strict=True)
+
+
+@pytest.mark.parametrize(
+    "column", ["stats_json", "skeleton_json", "params_json", "source_ids", "eval_json"]
+)
+async def test_a_legal_status_move_cannot_carry_a_content_change(
+    tmp_path: Path, runs: Runs, column: str
+) -> None:
+    path = tmp_path / "procedures.db"
+    store = SqliteProcedures(path)
+    await store.learn(runs(6))
+    await store.aclose()
+    with contextlib.closing(sqlite3.connect(path)) as conn:
+        with pytest.raises(sqlite3.IntegrityError, match="changes only its status"):
+            conn.execute(
+                f"UPDATE templates SET status = 'superseded', {column} = '{{}}' "
+                "WHERE status = 'active'"
+            )
+        conn.execute(
+            "UPDATE templates SET status = 'superseded' WHERE status = 'active'"
+        )
+
+
+@pytest.mark.parametrize(
+    ("evaluation", "decision"),
+    [
+        ({"bar_error": 0.10, "parent_bar_error": 0.10}, "rejected"),
+        ({"bar_error": 0.099, "parent_bar_error": 0.10, "cap_share": 0.05}, "active"),
+        ({"cap_share": 0.0501}, "rejected"),
+    ],
+)
+async def test_candidate_activation_boundaries(
+    store: Procedures, runs: Runs, evaluation: dict[str, float], decision: str
+) -> None:
+    await store.learn(runs(6))
+    await store.learn(runs(7))
+    active = await active_template(store)
+    await store.add_candidate(candidate(active, parent=2, **evaluation))
+    assert await store.decide_candidate(active.template_id, 3) == decision
+
+
+async def test_a_demoted_model_recovers_with_its_latest_scores(
+    store: Procedures, runs: Runs
+) -> None:
+    # Eight bad scores (about 0.27 each), then ten good ones: the oldest
+    # ten would still demote the model, the latest ten do not.
+    for i in range(8):
+        key = key_for_query(f"routine {i}", PLACE)
+        await store.learn(runs(4, key=key))
+        await store.learn(runs(4, key=key))
+        await store.learn(runs(16, "failed", key=key))
+    good = key_for_query("a steady routine", PLACE)
+    await store.learn(runs(5, key=good))
+    await store.learn(runs(5, key=good))
+    assert (await lookup(store, key=good)).reason == "model demoted"
+    for _ in range(10):
+        result = await store.learn(runs(5, key=good))
+        assert result.episode.shadow_bar_error is not None
+        assert result.episode.shadow_bar_error < 0.05
+    view = await lookup(store, key=good)
+    assert (view.level, view.reason) == (2, "")

@@ -857,3 +857,119 @@ def test_replay_refuses_infinite_numbers(
     path.write_text(json.dumps(row) + "\n", encoding="utf-8")
     code, _, err = run(capsys, "replay", str(path))
     assert code == 2 and err.startswith(f"melo-procedures: error: {path}:1: ")
+
+
+def reference_series(n: int, window: list[int]) -> tuple[list[float], bool]:
+    """Section 6.3's bar after each step of a run of *n* steps, and whether
+    the run outlasted *window* (the bar then freezes)."""
+    m = statistics.median(window)
+    shown, frozen, series = 0.0, False, []
+    for k in range(1, n + 1):
+        frozen = frozen or k > max(window)
+        if not frozen:
+            if k < m:
+                raw = k / m
+            else:
+                longer = [s - k for s in window if s > k]
+                raw = k / (k + statistics.median(longer)) if longer else k / (k + 1)
+            shown = min(CAP, max(shown, raw))
+        series.append(shown)
+    return series, frozen
+
+
+def test_online_summary_values_match_the_reference(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    jumps, longer, expected, caps, errors = [], [], [], [], []
+    for runs in fixture_groups():
+        for i, episode in enumerate(runs):
+            prior = [r for r in runs[:i] if r["status"] == "completed"]
+            if len(prior) < 2:
+                continue
+            first, window = runs[0], prior[-8:]
+            later = [r["steps"] for r in prior if r is not first]
+            if first in window and len(later) >= 2 and first["steps"] > max(later):
+                window = [r for r in window if r is not first]
+            steps = [r["steps"] for r in window]
+            if (max(steps) - min(steps)) / statistics.median(steps) > 0.5:
+                continue
+            n = episode["steps"]
+            series, frozen = reference_series(n, steps)
+            errors.append(
+                statistics.fmean(abs(s - k / n) for k, s in enumerate(series, 1))
+            )
+            caps.append(sum(s >= CAP for s in series) / n)
+            if episode["status"] == "completed":
+                jumps.append(1 - series[-1])
+            longer.append(frozen)
+            expected.append(1 / (len(steps) + 1))
+    code, out, _ = run(capsys, "replay", str(FIXTURE))
+    (summary,) = lines(out)
+    level2 = summary["level2"]
+    assert level2["runs"] == len(errors) == 4
+    assert level2["end_jump"] == pytest.approx(statistics.fmean(jumps), abs=1e-4)
+    assert level2["longer_rate"] == pytest.approx(statistics.fmean(longer), abs=1e-4)
+    assert level2["longer_expected"] == pytest.approx(
+        statistics.fmean(expected), abs=1e-4
+    )
+    assert level2["cap_share"] == pytest.approx(statistics.fmean(caps), abs=1e-4)
+    held_error = summary["held"]["bar_error"]
+    # The phase of 89% of the fixture's steps matches their calls.
+    assert summary["phase_agreement"] == pytest.approx(0.8918, abs=1e-4)
+    assert summary["thresholds"] == {
+        "bar_error": level2["bar_error"] <= 0.15,
+        "separation": held_error - level2["bar_error"] >= 0.05,
+        "backward_moves": True,
+        "cap_share": level2["cap_share"] <= 0.05,
+        "end_jump": level2["end_jump"] <= 0.30,
+        "longer_rate": level2["longer_rate"] <= level2["longer_expected"] + 0.05,
+        "phase_agreement": False,
+    }
+
+
+def test_episodes_take_the_step_total_from_the_result(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    write_history_sync(tmp_path / "history.db", CALLS, llm_calls=False)
+    code, out, err = run(
+        capsys,
+        "episodes",
+        "--history",
+        str(tmp_path),
+        "--result-json",
+        write_result(tmp_path, steps=7),
+    )
+    assert code == 0, err
+    assert lines(out)[1]["steps"] == 7
+
+
+@pytest.mark.parametrize("protocol", ["loo", "first-k"])
+def test_loo_and_first_k_honour_the_build_in_the_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], protocol: str
+) -> None:
+    rows = []
+    for number, line in enumerate(FIXTURE.read_text(encoding="utf-8").splitlines()):
+        row = json.loads(line)
+        if row["table"] == "episodes":
+            row["harness_version"] = f"build-{number // 12}"
+        rows.append(json.dumps(row))
+    path = tmp_path / "builds.jsonl"
+    path.write_text("\n".join(rows), encoding="utf-8")
+    args = ["replay", str(path), "--protocol", protocol, "--denominator", "dynamic"]
+    _, without, _ = run(capsys, *args)
+    _, within, _ = run(capsys, *args, "--key-build")
+    count = "runs" if protocol == "loo" else "shown"
+    before, after = lines(without)[0], lines(within)[0]
+    if protocol == "loo":
+        assert before["runs"] == 20 and after["runs"] < 20
+    else:
+        assert before[count]["runs"] + before["held"]["runs"] == 12
+        assert after[count].get("runs", 0) + after["held"].get("runs", 0) < 12
+
+
+def test_the_cap_threshold_is_5_percent(capsys: pytest.CaptureFixture[str]) -> None:
+    code, out, _ = run(capsys, "replay", str(FIXTURE), "--denominator", "median")
+    (summary,) = lines(out)
+    # The median bar sits at 95% for 27.5% of the fixture's level-2 steps.
+    assert summary["level2"]["cap_share"] == pytest.approx(0.275, abs=1e-4)
+    assert summary["thresholds"]["cap_share"] is False

@@ -126,6 +126,7 @@ def test_reflections_and_stuck_record_their_step() -> None:
     trace.reflection()
     trace.step(3, 2)
     trace.stuck()
+    trace.step(4, 2)
     trace.stuck()
     assert trace.reflections == [2]
     assert trace.stuck_at == 3
@@ -256,3 +257,48 @@ def test_a_rebuilt_segment_keeps_its_last_step_and_its_pass() -> None:
 def test_an_infinite_number_is_a_malformed_segment(bad: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         Segment.from_dict(bad)
+
+
+def test_only_test_calls_give_test_counts() -> None:
+    trace = Trace(clock=lambda: 0.0)
+    trace.step(1, 1)
+    trace.tool(
+        "shell_exec", {"command": "cat last_run.log"}, "success", "1 failed, 4 passed"
+    )
+    assert trace.calls[0].cls == "R"
+    assert trace.tests is None and trace.calls[0].tests is None
+
+
+def test_the_first_pass_step_is_the_first() -> None:
+    trace = Trace(clock=lambda: 0.0)
+    for k in (1, 2):
+        trace.step(k, 1)
+        trace.tool("shell_exec", {"command": "pytest"}, "success", "3 passed")
+    assert trace.first_pass_step == 1
+
+
+def test_a_segment_keeps_a_pass_and_its_first_attempt() -> None:
+    trace = Trace(clock=lambda: 0.0)
+    trace.step(1, 1)
+    trace.tool("shell_exec", {"command": "pytest"}, "success", "3 passed")
+    trace.reflection()
+    trace.step(2, 2)
+    trace.tool("shell_exec", {"command": "pytest"}, "success", "1 failed")
+    (segment,) = trace.segments()
+    assert segment.passed
+    assert segment.attempt == 1
+    assert segment.steps == (1, 2)
+
+
+def test_from_dict_cleans_the_label_and_target() -> None:
+    key = "sk-" + "a1B2c3D4e5F6g7H8i9J0k1L2"
+    segment = Segment.from_dict(
+        {
+            "cls": "R",
+            "label": f"Read {key} " + "x" * 100,
+            "target": key,
+            "steps": [1, 1],
+        }
+    )
+    assert segment.label.startswith("Read [redacted]") and len(segment.label) == 40
+    assert segment.target == "[redacted]"

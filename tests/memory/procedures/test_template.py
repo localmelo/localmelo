@@ -159,16 +159,18 @@ def test_compute_stats() -> None:
         ep("t1", 6, duration_s=100, first_pass_step=5),
         ep("t2", 8, duration_s=160, attempts=2, first_pass_step=6),
         ep("t3", 7, duration_s=130),
+        ep("t4", 7, duration_s=130, first_pass_step=1),
     ]
     stats = compute_stats(window, "t1", DEFAULT_PARAMS)
-    assert stats.n == 3
-    assert stats.steps == (6, 8, 7)
+    assert stats.n == 4
+    assert stats.steps == (6, 8, 7, 7)
     assert (stats.median, stats.lo, stats.hi) == (7.0, 6, 8)
     assert stats.spread == pytest.approx(2 / 7)
-    assert stats.cv == pytest.approx(0.1166, abs=1e-4)
+    assert stats.cv == pytest.approx(0.1010, abs=1e-4)
     assert stats.wall_s == (100.0, 130.0, 160.0)
-    assert stats.attempts_share == pytest.approx(1 / 3)
-    assert stats.tail_after_pass == 1.5
+    assert stats.attempts_share == pytest.approx(1 / 4)
+    # The tails after the first pass are 1, 2 and 6: the median, not the mean.
+    assert stats.tail_after_pass == 2.0
     assert stats.gate and stats.gate_reason == ""
     assert (stats.last_steps, stats.last_wall_s) == (7, 130.0)
 
@@ -291,6 +293,15 @@ def test_collapse_prefers_the_longest_coverage() -> None:
     segments = [seg("W", "a", 1), seg("T", "p", 2)] * 3
     (item,) = collapse(segments)
     assert item.repeat == 3 and item.cls == ("W", "T")
+    # Four repeats of (W, T) are not two of (W, T, W, T).
+    (item,) = collapse([seg("W", "a", 1), seg("T", "p", 2)] * 4)
+    assert item.repeat == 4 and item.label == "W a + T p"
+
+
+def test_a_collapsed_label_is_cut_to_40() -> None:
+    long = [seg("W", "a" * 30, 1), seg("T", "b" * 30, 2)] * 2
+    (item,) = collapse(long)
+    assert len(item.label) == 40
 
 
 def test_skeleton_item_matching() -> None:

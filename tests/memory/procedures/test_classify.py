@@ -117,7 +117,9 @@ def test_shell_reads(command: str) -> None:
     assert shell(command) == "R"
 
 
-@pytest.mark.parametrize("command", ["python run.py", "git status", "npm install"])
+@pytest.mark.parametrize(
+    "command", ["python run.py", "git status", "npm install", "python run.py 2>err.log"]
+)
 def test_other_shell_commands(command: str) -> None:
     assert shell(command) == "X"
 
@@ -132,6 +134,7 @@ def test_other_shell_commands(command: str) -> None:
         ("os.makedirs('d')", "W"),
         ("os.replace(a, b)", "W"),
         ("print(open('f').read())", "R"),
+        ("print(x)", "R"),
         ("import os; os.listdir('.')", "R"),
         ("for p in glob.glob('*.txt'): pass", "R"),
         ("x = 1 + 1", "X"),
@@ -171,6 +174,7 @@ def test_odd_arguments_never_raise() -> None:
         ("Ran 3 tests in 0.001s\n\nOK (skipped=1)", (2, 0, 0)),
         ("Ran 4 tests in 0.1s\n\nFAILED (failures=1, errors=1)", (2, 1, 1)),
         ("Ran 1 test in 0.1s\n\nFAILED (errors=1)", (0, 0, 1)),
+        ("Ran 5 tests in 0.1s\n\nFAILED (failures=1, skipped=2)", (2, 1, 0)),
     ],
 )
 def test_parse_test_summary(output: str, expected: tuple[int, int, int]) -> None:
@@ -275,7 +279,8 @@ def test_labels_are_redacted_and_cut() -> None:
     key = "sk-" + "a1B2c3D4e5F6g7H8i9J0k1L2"
     assert label_for("file_read", {"path": f"/tmp/{key}"}) == "Read [redacted]"
     long_name = "a" * 100 + ".py"
-    assert len(label_for("file_write", {"path": long_name})) == MAX_LABEL
+    assert MAX_LABEL == 40
+    assert len(label_for("file_write", {"path": long_name})) == 40
 
 
 def test_targets() -> None:
@@ -356,3 +361,9 @@ def test_odd_outputs_and_names_never_raise() -> None:
     assert label_for(5, {}) == "5"  # type: ignore[arg-type]
     assert label_for(None, {}) == "tool"  # type: ignore[arg-type]
     assert classify_call(None, {}) == "X"  # type: ignore[arg-type]
+
+
+def test_targets_are_redacted() -> None:
+    key = "sk-" + "a1B2c3D4e5F6g7H8i9J0k1L2"
+    args = {"path": f"/tmp/{key}"}
+    assert target_for("file_read", args, label_for("file_read", args)) == "[redacted]"

@@ -461,6 +461,13 @@ def test_the_shown_values_through_a_run_never_move_back() -> None:
                 trace.add(full.calls[index])
                 index += 1
                 shown.append(track(v, trace).fraction or 0.0)
+            # The reflections and the stuck notice that came in step k.
+            for _ in range(full.reflections.count(k)):
+                trace.reflection()
+                shown.append(track(v, trace).fraction or 0.0)
+            if full.stuck_at == k:
+                trace.stuck()
+                shown.append(track(v, trace).fraction or 0.0)
         shown.append(track(v, trace, ended="completed").fraction or 0.0)
         assert all(b >= a for a, b in zip(shown, shown[1:], strict=False))
 
@@ -492,3 +499,26 @@ def test_shadow_bar_error() -> None:
     assert shadow_bar_error(v, run(0), 0) is None
     # The trace may be shorter than the run: the last value holds.
     assert shadow_bar_error(v, run(2), 4) == pytest.approx((0.25 + 0.5) / 4)
+
+
+def test_a_reflection_or_stuck_notice_keeps_the_current_fraction() -> None:
+    v = view(8, 9)
+    for event in ("reflection", "stuck"):
+        trace = run(3)
+        before = track(v, trace).fraction
+        getattr(trace, event)()
+        after = track(v, trace)
+        assert after.state == "off_template"
+        assert after.fraction == before == pytest.approx(3 / 8.5)
+
+
+def test_a_call_matching_the_current_item_changes_nothing() -> None:
+    skeleton = (
+        SkeletonItem(("W", "T"), None, "Edit + pytest", 2),
+        SkeletonItem(("T",), "pytest", "pytest"),
+        SkeletonItem(("X",), "git", "git"),
+    )
+    trace = run(2, {1: [call(1, "W", "a.py")], 2: [call(2, "T", "pytest")]})
+    state = track(view(6, 8, skeleton=skeleton), trace)
+    assert state.items is not None
+    assert [item["state"] for item in state.items] == ["current", "pending", "pending"]

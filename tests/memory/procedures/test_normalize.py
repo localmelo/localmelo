@@ -86,6 +86,7 @@ def test_other_numbers_stay() -> None:
 
 def test_a_number_glued_to_a_date_is_not_a_date() -> None:
     assert normalize_query("id 2026-10-261") == "id 2026-10-261"
+    assert normalize_query("build 12026-10-26") == "build 12026-10-26"
 
 
 # ── keys ────────────────────────────────────────────────────────────────────
@@ -253,3 +254,12 @@ def test_secrets_are_redacted_before_the_query_is_lowercased() -> None:
     # The key still tells two secrets apart.
     other = aws.replace("EXAMPLE", "EXAMPLX")
     assert key_for_query(other, "/p").key != key_for_query(aws, "/p").key
+
+
+@pytest.mark.parametrize(
+    "query",
+    # Best ÷ self is 0.58 and 0.49 for these: below 0.6.
+    ["convert csv to json", "summarize unread mail please"],
+)
+def test_a_match_needs_best_over_self_of_0_6(query: str) -> None:
+    assert find_similar(query, ROUTINES) is None
