@@ -49,6 +49,9 @@ from localmelo.support.sessions.store import StoredEvent
 
 # Output lines a tool block shows under its header.
 BLOCK_LINES: Final = 3
+# A block header's last part that carries free text keeps this much room.
+FREE_TEXT_CELLS: Final = 24
+_FREE_TEXT_TAGS: Final = ("denied: ", "denied by policy: ", "blocked: ")
 # Lines of the user's message echoed.
 ECHO_LINES: Final = 6
 # Tools whose running line shows the session's time limit.
@@ -427,8 +430,10 @@ class TurnRenderer:
     ) -> Text:
         """``<symbol> <name>  <preview> · <meta> · ...``, cut to the width.
 
-        The preview gives way to the meta, except to a long last part (an
-        approval's reason, a block's), which is cut at the line's end.
+        The preview gives way to the meta, except to a long last part that
+        carries free text (a denial's reason, a block's error), which is cut
+        at the line's end; a fixed tag such as ``allowed by a session
+        grant`` always shows whole.
         """
         width = self.out.width
         name = plain(name)
@@ -437,7 +442,9 @@ class TurnRenderer:
         start = f"{symbol} {name}  "
         shown, _ = escape_arguments(" ".join(preview.split("\n")))
         fixed = sum(cells(dot + part) for part in meta[:-1])
-        last = min(cells(dot + meta[-1]), 24) if meta else 0
+        last = cells(dot + meta[-1]) if meta else 0
+        if meta and meta[-1].startswith(_FREE_TEXT_TAGS):
+            last = min(last, FREE_TEXT_CELLS)
         room = width - cells(start) - fixed - last
         head = Text(f"{symbol} ", style=style)
         head.append(name, style="tool")

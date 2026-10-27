@@ -756,3 +756,31 @@ def test_an_output_line_rich_measures_wider_is_not_wrapped() -> None:
     text = Turn(width=60).tool("shell_exec", "lint", output="⚠️ " * 40 + "END").text()
     [line] = [row for row in text.split("\n") if "⚠" in row]
     assert line.startswith("  └ ⚠")
+
+
+@pytest.mark.parametrize(
+    ("approval", "tag"),
+    [
+        (
+            {"allowed": True, "origin": "user", "remember": True},
+            "allowed for the session",
+        ),
+        ({"allowed": True, "origin": "session"}, "allowed by a session grant"),
+        ({"allowed": True, "origin": "policy"}, "auto-allowed"),
+        ({"allowed": False, "origin": "timeout"}, "not answered in time"),
+    ],
+)
+def test_a_long_preview_never_cuts_the_approval_tag(
+    approval: dict[str, Any], tag: str
+) -> None:
+    preview = "printf '" + "x" * 200 + "'"
+    text = Turn(width=100).tool("shell_exec", preview, approval=approval).text()
+    [header] = [line for line in text.split("\n") if "shell_exec" in line]
+    assert header.endswith(f" · {tag}") and cells(header) <= 100, header
+
+
+def test_a_long_denial_reason_is_still_cut_at_the_end() -> None:
+    approval = {"allowed": False, "origin": "user", "reason": "no " * 60}
+    text = Turn(width=100).tool("shell_exec", "rm -rf build", approval=approval).text()
+    [header] = [line for line in text.split("\n") if "shell_exec" in line]
+    assert "rm -rf build" in header and header.endswith("…") and cells(header) == 100
