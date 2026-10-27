@@ -159,6 +159,9 @@ type more letters to narrow them, Tab or Enter to take one.
 | `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default. |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
 
+- A command that runs is echoed in the scrollback as a message is
+  (`› /model 2`), followed by its output. A refused one is not, and
+  `/exit` prints nothing.
 - `/new`, `/model` and `/backend` are refused while a turn runs: the
   draft stays and the hint says
   `/model is not available while a turn runs (esc stops it).`; press Enter
