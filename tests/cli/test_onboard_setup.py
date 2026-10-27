@@ -558,3 +558,36 @@ def test_a_listed_model_id_survives_the_config_file(
     assert onboard.save_chat_server('http://h/v1?x="y"', model)
     saved = config.load()
     assert (saved.vllm.chat_url, saved.vllm.chat_model) == ('http://h/v1?x="y"', model)
+
+
+def test_a_server_saved_from_a_session_keeps_embedding_and_the_rest(
+    config_path: Path,
+) -> None:
+    cfg = config.Config(
+        chat_backend="sglang",
+        embedding_backend="sglang",
+        request_timeout_s=30,
+        sglang=config.LocalBackendConfig(
+            chat_url="http://127.0.0.1:30000/v1",
+            chat_model="old",
+            embedding_url="http://127.0.0.1:30000/v1",
+            embedding_model="embed-x",
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        ),
+        vllm=config.LocalBackendConfig(extra_body={"top_k": 20}),
+    )
+    config.save(cfg)
+    assert onboard.save_chat_server("http://h:9/v1", "new", keep_embedding=True)
+    saved = config.load()
+    assert (saved.chat_backend, saved.vllm.chat_url, saved.vllm.chat_model) == (
+        "vllm",
+        "http://h:9/v1",
+        "new",
+    )
+    assert saved.embedding_backend == "sglang" and saved.has_embedding
+    assert saved.sglang == cfg.sglang and saved.request_timeout_s == 30
+    assert saved.vllm.extra_body == {"top_k": 20}
+    assert saved.validate() == []
+    # The first run's save still turns embedding off.
+    assert onboard.save_chat_server("http://h:9/v1", "new")
+    assert config.load().embedding_backend == "none"

@@ -10,6 +10,7 @@ may (``/model``, ``/backend``).
 from __future__ import annotations
 
 import contextlib
+import copy
 import io
 from dataclasses import replace
 from typing import Final
@@ -82,6 +83,8 @@ class AgentFactory:
         # Whether /model and /backend save their choice as the default: not
         # for a --base-url session whose save question was answered no.
         self.saves = saves
+        # A configured session moved to a server /backend chose, not yet saved.
+        self._new_server = False
         self._live: list[Agent] = []
 
     @property
@@ -89,9 +92,13 @@ class AgentFactory:
         return self._options.memory
 
     async def build(self, model: str | None = None, *, url: str | None = None) -> Agent:
-        """A started Agent on the backend, with *model* and on *url* when given."""
+        """A started Agent on the backend, with *model* and on *url* when given.
+
+        A configured session keeps its config: on a new *url*, the Agent
+        runs on a copy of it as /backend saves it (see :meth:`use_url`).
+        """
         model = model or self.backend.model
-        if url is not None or self._cfg is None:
+        if self._cfg is None:
             agent = await build_session_agent(
                 cfg=None,
                 base_url=url or self.backend.base_url,
@@ -104,7 +111,7 @@ class AgentFactory:
             )
         else:
             agent = await build_session_agent(
-                cfg=self._cfg,
+                cfg=self._cfg if url is None else self._with_server(url, model),
                 base_url=None,
                 model=model,
                 workspace=self._workspace,
@@ -113,6 +120,20 @@ class AgentFactory:
             )
         self._live.append(agent)
         return agent
+
+    def _with_server(self, url: str, model: str) -> config.Config:
+        """The session's config with its chat on *url*, as /backend saves it.
+
+        Only the chat backend changes (``vllm``, the key for any
+        OpenAI-compatible server); embedding, the request timeout and the
+        ``[vllm]`` table's other values stay.
+        """
+        assert self._cfg is not None
+        cfg = copy.deepcopy(self._cfg)
+        cfg.chat_backend = "vllm"
+        cfg.vllm.chat_url = url
+        cfg.vllm.chat_model = model
+        return cfg
 
     async def close(self, agent: Agent) -> None:
         """Close *agent*, which this factory built."""
@@ -138,7 +159,11 @@ class AgentFactory:
 
     def use_url(self, url: str, model: str) -> None:
         """Talk to the server at *url* from now on, with *model*."""
-        self._cfg = None
+        if self._cfg is not None:
+            self._cfg = self._with_server(url, model)
+            self._new_server = True
+            self.backend = config_backend(self._cfg, model)
+            return
         self.backend = url_backend(
             url, model, source="saved" if self.saves else "--base-url"
         )
@@ -146,16 +171,27 @@ class AgentFactory:
     def save(self) -> str:
         """Save the backend as the default; ``""``, or why it was not saved.
 
-        A configured backend keeps its key and gets the new model; any other
-        server is saved as an OpenAI-compatible one (``chat_backend =
-        "vllm"``), with embedding off, as the first run saves it.
+        A configured backend keeps its key and gets the new model. A server
+        /backend chose in a configured session is saved as the ``vllm``
+        backend, the rest of the config kept; any other server is saved as
+        an OpenAI-compatible one with embedding off, as the first run saves
+        it.
         """
         backend = self.backend
         if not self.saves:
             return "not saved (--base-url)"
         captured = io.StringIO()
         try:
-            if backend.source == "config" and self._cfg is not None:
+            if self._new_server:
+                with contextlib.redirect_stdout(captured):
+                    saved = onboard.save_chat_server(
+                        backend.base_url, backend.model, keep_embedding=True
+                    )
+                if not saved:
+                    return captured.getvalue().strip() or "not saved"
+                self._new_server = False
+                return ""
+            if self._cfg is not None:
                 # The session keeps the server it uses; a config file that
                 # now names another one is not written over.
                 cfg = config.load()

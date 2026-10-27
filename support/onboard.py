@@ -357,17 +357,20 @@ def _choose_model(url: str, models: list[str]) -> str:
         print(f"  Type a number from 1 to {len(models)}, or a model id.")
 
 
-def save_chat_server(url: str, model: str) -> bool:
+def save_chat_server(url: str, model: str, *, keep_embedding: bool = False) -> bool:
     """Save *url* and *model* as the default chat backend; False if it failed.
 
-    Any OpenAI-compatible server is saved as the ``vllm`` backend, with
-    embedding off. The config's other values are kept.
+    Any OpenAI-compatible server is saved as the ``vllm`` backend. The
+    first run turns embedding off; with *keep_embedding* (a server chosen
+    in a configured session) the embedding backend stays. The config's
+    other values are kept.
     """
     cfg = config.load()
     cfg.chat_backend = "vllm"
     cfg.vllm.chat_url = url
     cfg.vllm.chat_model = model
-    cfg.embedding_backend = "none"
+    if not keep_embedding:
+        cfg.embedding_backend = "none"
     try:
         config.save(cfg)
     except (OSError, config.ConfigError) as exc:

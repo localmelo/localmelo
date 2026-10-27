@@ -688,3 +688,77 @@ async def test_model_on_a_server_that_cannot_list_switches_without_asking(
     await session.model("any-model")
     assert session.factory.backend.model == "any-model"
     assert "lists no model" not in setup.out.text()
+
+
+# ── /backend in a configured session keeps the rest of the config ──
+
+
+async def test_a_new_server_keeps_the_configs_embedding_and_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.support import config
+    from localmelo.support.cli import agents as agents_module
+    from localmelo.support.cli.agents import config_backend
+
+    path = tmp_path / "config.toml"
+    monkeypatch.setattr("localmelo.support.config.CONFIG_PATH", str(path))
+    monkeypatch.setattr("localmelo.support.config.CONFIG_DIR", str(tmp_path))
+    cfg = config.Config(
+        chat_backend="sglang",
+        embedding_backend="sglang",
+        request_timeout_s=2,
+        sglang=config.LocalBackendConfig(
+            chat_url=URL,
+            chat_model="m1",
+            embedding_url=URL,
+            embedding_model="embed-x",
+        ),
+        vllm=config.LocalBackendConfig(extra_body={"top_k": 20}),
+    )
+    config.save(cfg)
+    built: list[dict[str, Any]] = []
+
+    async def build_session_agent(**kwargs: Any) -> Any:
+        built.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(agents_module, "build_session_agent", build_session_agent)
+    factory = AgentFactory(
+        backend=config_backend(cfg, None),
+        cfg=cfg,
+        options=AgentOptions(),
+        workspace=str(tmp_path),
+    )
+    new_url = "http://127.0.0.1:19/v1"
+    await factory.build("m2", url=new_url)
+    factory.use_url(new_url, "m2")
+    assert factory.save() == ""
+    # The session's Agent runs on the config as it is saved.
+    [kwargs] = built
+    running = kwargs["cfg"]
+    assert kwargs["base_url"] is None and running is not cfg
+    assert (running.chat_backend, running.vllm.chat_url, running.vllm.chat_model) == (
+        "vllm",
+        new_url,
+        "m2",
+    )
+    assert running.embedding_backend == "sglang" and running.request_timeout_s == 2
+    assert running.vllm.extra_body == {"top_k": 20}
+    saved = config.load()
+    assert (saved.chat_backend, saved.vllm.chat_url, saved.vllm.chat_model) == (
+        "vllm",
+        new_url,
+        "m2",
+    )
+    assert saved.embedding_backend == "sglang" and saved.request_timeout_s == 2
+    assert cfg.chat_backend == "sglang"  # the startup config is not changed
+    assert factory.backend.base_url == new_url and factory.backend.model == "m2"
+    assert factory.backend.embedding == "sglang"
+    # A later /model on the new server saves its model only.
+    built.clear()
+    await factory.build("m3")
+    factory.use_model("m3")
+    assert factory.save() == ""
+    assert built[0]["cfg"].vllm.chat_url == new_url
+    assert config.load().vllm.chat_model == "m3"
+    assert config.load().embedding_backend == "sglang"
