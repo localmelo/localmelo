@@ -499,7 +499,7 @@ class TurnRenderer:
             lines = ["(no output)"]
         shown = lines[:BLOCK_LINES]
         width = max(1, self.out.width - 4)
-        body = Text()
+        body = Text(no_wrap=True, overflow="ellipsis")
         for number, line in enumerate(shown):
             prefix = f"  {self.symbols.connector} " if number == 0 else "    "
             if number:

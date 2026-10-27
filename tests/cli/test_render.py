@@ -749,3 +749,10 @@ def test_banner_values_wrap_under_themselves(width: int) -> None:
     assert body[tools + 1].startswith(" " * 11) or body[tools + 1].lstrip().startswith(
         "memory"
     )
+
+
+def test_an_output_line_rich_measures_wider_is_not_wrapped() -> None:
+    # "⚠️" is one cell for wcwidth, two for rich: the cut line must stay one row.
+    text = Turn(width=60).tool("shell_exec", "lint", output="⚠️ " * 40 + "END").text()
+    [line] = [row for row in text.split("\n") if "⚠" in row]
+    assert line.startswith("  └ ⚠")
