@@ -401,3 +401,14 @@ def test_every_command_a_hint_names_exists() -> None:
     }
     assert named, "no command found: the scan is broken"
     assert named <= set(commands.names()), named - set(commands.names())
+
+
+async def test_model_ids_from_the_server_cannot_act_on_the_terminal(
+    setup: Setup,
+) -> None:
+    setup.factory.listed = ["m1", "evil\x1b]0;PWNED\x1b\\model"]
+    await setup.session.model("")
+    await setup.session.model("missing\x1b[2J")
+    text = setup.out.text()
+    assert "\x1b" not in text and "PWNED" not in text
+    assert "2. evilmodel" in text

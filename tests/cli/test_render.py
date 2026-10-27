@@ -633,3 +633,54 @@ def test_no_color_keeps_bold_and_drops_colors() -> None:
     plain = TerminalOut(output, no_color=True).render(styled)
     assert "\x1b[31m" in colored
     assert not re.search(r"\x1b\[3\dm", plain) and "\x1b[1m" in plain
+
+
+# ── Review fixes: text from the model or the server never acts on the terminal ──
+
+OSC_TITLE = "\x1b]0;PWNED\x1b\\"
+OSC_CLIPBOARD = "\x1b]52;c;cm0gLXJmIH4=\x07"
+
+
+def test_an_answer_cannot_set_the_title_or_write_the_clipboard() -> None:
+    text = Turn().finish(result=f"Done.{OSC_TITLE}{OSC_CLIPBOARD} all good").text()
+    assert "\x1b" not in text and "PWNED" not in text
+    assert "● Done. all good" in text
+
+
+def test_a_best_effort_and_its_error_are_cleaned() -> None:
+    text = (
+        Turn(width=200)
+        .finish(
+            "provider_error",
+            error=f"POST /chat/completions failed with HTTP 400: \x1b[3J{OSC_TITLE}bad",
+            result=f"partial{OSC_TITLE}",
+        )
+        .text()
+    )
+    assert "\x1b" not in text
+    assert "failed with HTTP 400: bad" in text
+
+
+def test_a_tool_name_from_the_model_is_cleaned() -> None:
+    turn = Turn()
+    turn.tool(f"evil{OSC_TITLE}", "{}", status="error", error="Unknown tool")
+    turn.event(
+        "assistant.message",
+        step=1,
+        content="",
+        thinking="",
+        usage={},
+        duration_s=0.1,
+        tool_calls=[
+            {"id": "c9", "name": f"never{OSC_TITLE}", "arguments": {}, "preview": ""}
+        ],
+    )
+    turn.finish("cancelled")
+    text = turn.text()
+    assert "\x1b" not in text and "PWNED" not in text
+    assert "✗ evil  {}" in text and "◌ never" in text
+
+
+def test_model_ids_in_the_banner_are_cleaned() -> None:
+    text = _banner(model=f"qwen{OSC_TITLE}3")
+    assert "\x1b" not in text and "qwen3 · OpenAI-compatible" in text

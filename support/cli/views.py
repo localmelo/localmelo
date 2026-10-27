@@ -13,7 +13,7 @@ from rich.text import Text
 from localmelo.melo.schema import ToolInfo
 from localmelo.support.cli.text import cells, cut_cells, pad_cells
 from localmelo.support.cli.theme import Symbols
-from localmelo.support.sessions.display import home_label
+from localmelo.support.sessions.display import clean_output, home_label
 
 # Narrower than this, the banner's rows print without the box.
 BOX_MIN_COLUMNS: Final = 50
@@ -80,9 +80,11 @@ def memory_text(backend: BackendInfo, *, memory: bool) -> str:
 
 def model_rows(backend: BackendInfo) -> list[str]:
     """The banner's model row, and a second one when the model is not the config's."""
-    where = backend.base_url or backend.label
+    where = clean_output(backend.base_url or backend.label)
     first = " · ".join(
-        part for part in (backend.model, backend.label, backend.base_url) if part
+        clean_output(part)
+        for part in (backend.model, backend.label, backend.base_url)
+        if part
     )
     if backend.source == "config":
         return [first or where]
@@ -122,7 +124,7 @@ def banner(
             ("model" if number == 0 else "", text, "" if number == 0 else "muted")
         )
     rows += [
-        ("workspace", home_label(workspace), ""),
+        ("workspace", clean_output(home_label(workspace)), ""),
         ("tools", tools_text(tools), ""),
         ("memory", memory_text(backend, memory=memory), ""),
         ("session", "new", ""),

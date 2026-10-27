@@ -113,6 +113,11 @@ def _marked(symbol: str, style: str, body: RenderableType) -> Table:
     return grid
 
 
+def plain(text: str) -> str:
+    """*text* from the model or a server as one line, with nothing it could act on."""
+    return " ".join(clean_output(text).split())
+
+
 def approval_tag(status: str, approval: Mapping[str, Any] | None) -> str:
     """The short tag of how the approval of a call ended; ``""`` when not asked."""
     if not isinstance(approval, Mapping):
@@ -416,6 +421,7 @@ class TurnRenderer:
         approval's reason, a block's), which is cut at the line's end.
         """
         width = self.out.width
+        name = plain(name)
         dot = f" {self.symbols.dot} "
         meta = [part for part in meta if part]
         start = f"{symbol} {name}  "
@@ -500,6 +506,7 @@ class TurnRenderer:
     def _print_result(self, result: RunResult, *, footer: bool) -> None:
         symbols = self.symbols
         _, answer = split_thinking(result.result)
+        answer = clean_output(answer)
         if result.status == "completed":
             body: RenderableType = (
                 markdown(answer) if answer else Text("(no answer text)", style="muted")
@@ -514,7 +521,7 @@ class TurnRenderer:
             severe = result.status in _SEVERE
             mark = symbols.failed if severe else symbols.warn
             line = Text(
-                f"{mark} {status_line(result.status, result.error)}",
+                f"{mark} {status_line(result.status, plain(result.error))}",
                 style="error" if severe else "warn",
                 no_wrap=True,
                 overflow="ellipsis",
@@ -522,6 +529,7 @@ class TurnRenderer:
             line.truncate(self.out.width, overflow="ellipsis")
             self.out.print(line)
             hint = status_hint(result.status, result.error, self._backend())
+            hint = hint if hint is None else clean_output(hint)
             if hint:
                 self.out.print(Padding(Text(hint, style="muted"), (0, 0, 0, 2)))
         if footer:
@@ -622,7 +630,7 @@ def live_rows(
         if live.tool_limit_s:
             clock += f" of {tool_elapsed(live.tool_limit_s)}"
         preview, _ = escape_arguments(" ".join(live.preview.split("\n")))
-        start = f"  {symbols.connector} {live.tool}  "
+        start = f"  {symbols.connector} {plain(live.tool)}  "
         room = width - cells(start) - cells(dot + clock)
         shown = cut_cells(preview, room, symbols.ellipsis) if room >= 4 else ""
         line = cut_cells(start + shown + dot + clock, width, symbols.ellipsis)
