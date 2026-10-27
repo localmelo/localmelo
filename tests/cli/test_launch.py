@@ -324,3 +324,66 @@ def test_the_log_is_private(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
     files = sorted(path.parent.glob("cli.log*"))
     assert [file.name for file in files] == ["cli.log", "cli.log.1"]
     assert all(file.stat().st_mode & 0o777 == 0o600 for file in files)
+
+
+# ── Review fixes: whatever ends the session, the store closes ──
+
+
+async def test_a_cancel_while_the_agent_starts_closes_the_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import asyncio
+    import io
+
+    from prompt_toolkit.data_structures import Size
+    from prompt_toolkit.output.vt100 import Vt100_Output
+
+    from localmelo.support.cli.agents import AgentFactory, url_backend
+    from localmelo.support.sessions import store as store_module
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(
+        Vt100_Output,
+        "from_pty",
+        classmethod(
+            lambda cls, stdout, term=None: cls(
+                io.StringIO(), lambda: Size(24, 80), term="xterm"
+            )
+        ),
+    )
+    stores: list[store_module.SessionStore] = []
+
+    class Store(store_module.SessionStore):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            stores.append(self)
+
+    monkeypatch.setattr(store_module, "SessionStore", Store)
+    starting = asyncio.Event()
+
+    async def build(self: AgentFactory, *args: Any, **kwargs: Any) -> Any:
+        starting.set()
+        await asyncio.sleep(30)
+
+    monkeypatch.setattr(AgentFactory, "build", build)
+    choice = Choice(backend=url_backend(URL, "m", source="config"), cfg=None)
+    main = asyncio.ensure_future(
+        launch.main_async(
+            choice,
+            args=_args(),
+            options=AgentOptions(),
+            workspace=str(tmp_path),
+            log_path=str(tmp_path / "cli.log"),
+        )
+    )
+    try:
+        await asyncio.wait_for(starting.wait(), 10)
+        main.cancel()  # Ctrl+C: asyncio.run cancels the main task
+        with pytest.raises(asyncio.CancelledError):
+            await main
+        [store] = stores
+        with pytest.raises(store_module.SessionStoreError, match="closed"):
+            await store.list_sessions()
+    finally:
+        for opened in stores:  # an open store's thread would keep pytest alive
+            await opened.aclose()

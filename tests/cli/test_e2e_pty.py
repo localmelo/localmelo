@@ -50,6 +50,7 @@ class Melo:
         *,
         columns: int = 100,
         iutf8: bool | None = None,
+        nohup: bool = False,
     ) -> None:
         self.home = home
         self.workspace = home / "demo-project"
@@ -71,10 +72,11 @@ class Melo:
             env=env,
             cwd=self.workspace,
             start_new_session=True,
-            preexec_fn=lambda: fcntl.ioctl(0, termios.TIOCSCTTY, 0),
+            preexec_fn=lambda: _child_setup(nohup),
         )
         os.close(slave)
         self.output = b""
+        self._open = True
 
     def _read(self, timeout_s: float) -> bool:
         ready, _, _ = select.select([self._master], [], [], timeout_s)
@@ -119,11 +121,23 @@ class Melo:
                 self._read(0.05)
         return self.wait(5)
 
+    def hang_up(self) -> None:
+        """Close the terminal, as closing its window does."""
+        os.close(self._master)
+        self._open = False
+
     def close(self) -> None:
         if self.process.poll() is None:
             self.process.kill()
             self.process.wait(timeout=5)
-        os.close(self._master)
+        if self._open:
+            os.close(self._master)
+
+
+def _child_setup(nohup: bool) -> None:
+    fcntl.ioctl(0, termios.TIOCSCTTY, 0)
+    if nohup:
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
 
 @pytest.fixture(scope="module")
@@ -287,3 +301,45 @@ def test_with_no_config_a_url_is_offered_and_declining_saves_nothing(
     assert "from --base-url (not saved)" in term.text()
     assert term.quit() == 0
     assert not (tmp_path / ".cache" / "localmelo" / "config.toml").exists()
+
+
+# ── Review fixes: whatever ends the session, it closes and melo exits ──
+
+
+def test_a_closed_terminal_under_nohup_takes_the_hangup_path(
+    melo: Callable[..., Melo], tmp_path: Path
+) -> None:
+    term = melo(nohup=True)
+    term.see("Ask melo")
+    term.type("hold on\r")
+    term.see("esc to stop")
+    term.hang_up()
+    assert term.process.wait(timeout=20) == -signal.SIGHUP
+    [turn] = _turns(tmp_path)
+    assert (turn["status"], turn["cause"], turn["error"]) == (
+        "cancelled",
+        "shutdown",
+        "Cancelled by SIGHUP",
+    )
+
+
+@pytest.mark.parametrize("delay_s", [0.0, 0.01, 0.05])
+def test_sigterm_right_after_exit_ends_the_process_by_it(
+    melo: Callable[..., Melo], tmp_path: Path, delay_s: float
+) -> None:
+    term = melo()
+    term.see("Ask melo")
+    term.type("hold on\r")
+    term.see("esc to stop")
+    term.type("/exit\r")
+    # The app has ended and the turn has stopped; the session closes.
+    term.see("■ Stopped")
+    time.sleep(delay_s)
+    term.process.send_signal(signal.SIGTERM)
+    # It exits by the signal, or with 0 when it had already finished
+    # closing; never 1 with a traceback, as when the signal cancelled melo's
+    # own task.
+    assert term.wait() in (-signal.SIGTERM, 0), term.text()
+    assert "Traceback" not in term.text()
+    [turn] = _turns(tmp_path)
+    assert (turn["status"], turn["cause"]) == ("cancelled", "user_stop")

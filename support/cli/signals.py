@@ -63,8 +63,9 @@ class ExitSignals:
     """Handles SIGTERM and SIGHUP in the running loop (see the module docstring).
 
     *shutdown* starts the session's shutdown with a reason; *end_app* ends
-    the app, or the main task while the app is not up yet; *on_hangup*
-    stops all drawing, since the terminal is gone.
+    the app when it still runs (the caller then awaits
+    :attr:`shutting_down`); *on_hangup* stops all drawing, since the
+    terminal is gone.
     """
 
     def __init__(
@@ -84,6 +85,8 @@ class ExitSignals:
         self._installed: list[int] = []
         self.received: int | None = None
         self.shutting_down: asyncio.Future[Any] | None = None
+        # Set when the first signal (or a hangup) arrives.
+        self.arrived = asyncio.Event()
 
     def install(self) -> None:
         loop = asyncio.get_running_loop()
@@ -109,6 +112,7 @@ class ExitSignals:
         if self.received is not None:
             return
         self.received = signum
+        self.arrived.set()
         name = signal.Signals(signum).name
         if signum == getattr(signal, "SIGHUP", None):
             self._on_hangup()

@@ -34,6 +34,8 @@ LOG_FILE: Final = "cli.log"
 HISTORY_FILE: Final = "~/.cache/localmelo/cli_history"
 # At most one line on screen for errors that go to the log, per this many seconds.
 SCREEN_ERRORS_S: Final = 5.0
+# After a signal or a hangup, how long the app gets to end on its own.
+APP_END_S: Final = 1.0
 
 NO_TERMINAL: Final = (
     "melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).\n"
@@ -268,7 +270,7 @@ async def main_async(
     from rich.text import Text
 
     from localmelo.support.cli.agents import AgentFactory
-    from localmelo.support.cli.app import InteractiveApp, open_history
+    from localmelo.support.cli.app import InteractiveApp, open_history, terminal_input
     from localmelo.support.cli.approvals import TerminalApprover
     from localmelo.support.cli.completion import SlashCompleter
     from localmelo.support.cli.output import TerminalOut
@@ -311,122 +313,138 @@ async def main_async(
     logging.getLogger().addHandler(_ScreenErrors(show_error))
 
     store = SessionStore(writer="cli")
+    factory: AgentFactory | None = None
     try:
-        await store.open()
-    except SessionStoreError as exc:
-        print(f"melo: {exc}", file=sys.stderr)
-        return 1, None
-    factory = AgentFactory(
-        backend=choice.backend,
-        cfg=choice.cfg,
-        options=options,
-        workspace=workspace,
-        embedding_base_url=args.embedding_base_url,
-        embedding_model=args.embedding_model,
-        request_timeout_s=args.request_timeout,
-        saves=choice.saves,
-    )
-    try:
-        agent = await factory.build()
-    except Exception as exc:
-        print(f"melo: could not start the agent: {exc}", file=sys.stderr)
-        await store.aclose()
-        return 1, None
+        try:
+            await store.open()
+        except SessionStoreError as exc:
+            print(f"melo: {exc}", file=sys.stderr)
+            return 1, None
+        factory = AgentFactory(
+            backend=choice.backend,
+            cfg=choice.cfg,
+            options=options,
+            workspace=workspace,
+            embedding_base_url=args.embedding_base_url,
+            embedding_model=args.embedding_model,
+            request_timeout_s=args.request_timeout,
+            saves=choice.saves,
+        )
+        try:
+            agent = await factory.build()
+        except Exception as exc:
+            print(f"melo: could not start the agent: {exc}", file=sys.stderr)
+            return 1, None
 
-    renderer = TurnRenderer(out, symbols=symbols, backend=lambda: factory.backend)
-    approver = TerminalApprover()
-    session = CliSession(
-        store=store,
-        factory=factory,
-        agent=agent,
-        renderer=renderer,
-        approver=approver,
-        mode="yolo" if args.yolo else "ask",
-        out=out,
-    )
-    out.print(
-        banner(
-            version=localmelo_version(),
-            backend=factory.backend,
-            workspace=agent.workspace_root or workspace,
-            tools=agent.list_tools(),
-            memory=factory.memory,
-            yolo=args.yolo,
-            width=out.width,
+        renderer = TurnRenderer(out, symbols=symbols, backend=lambda: factory.backend)
+        approver = TerminalApprover()
+        session = CliSession(
+            store=store,
+            factory=factory,
+            agent=agent,
+            renderer=renderer,
+            approver=approver,
+            mode="yolo" if args.yolo else "ask",
+            out=out,
+        )
+        out.print(
+            banner(
+                version=localmelo_version(),
+                backend=factory.backend,
+                workspace=agent.workspace_root or workspace,
+                tools=agent.list_tools(),
+                memory=factory.memory,
+                yolo=args.yolo,
+                width=out.width,
+                symbols=symbols,
+            )
+        )
+        if choice.warning:
+            out.print(Text(f"{symbols.warn} {choice.warning}", style="warn"))
+
+        def terminal_closed() -> None:
+            loop.call_soon(signals.hangup)  # signals is set below
+
+        ui = InteractiveApp(
+            session,
+            renderer,
             symbols=symbols,
+            history=open_history(os.path.expanduser(HISTORY_FILE)),
+            completer=SlashCompleter(lambda: session.models),
+            input=terminal_input(sys.stdin, on_close=terminal_closed),
+            output=output,
+            approver=approver,
+            no_color=no_color,
         )
-    )
-    if choice.warning:
-        out.print(Text(f"{symbols.warn} {choice.warning}", style="warn"))
-    ui = InteractiveApp(
-        session,
-        renderer,
-        symbols=symbols,
-        history=open_history(os.path.expanduser(HISTORY_FILE)),
-        completer=SlashCompleter(lambda: session.models),
-        output=output,
-        approver=approver,
-        no_color=no_color,
-    )
-    session.attach(ui)
-    main_task = asyncio.current_task()
-    restore = save_terminal()
+        session.attach(ui)
+        restore = save_terminal()
 
-    def end_app() -> None:
-        # The app ends on its own; before it runs, the main task is cancelled.
-        if ui.app.is_running and not ui.app.is_done:
-            ui.exit()
-        elif main_task is not None:
-            main_task.cancel()
-
-    signals = ExitSignals(
-        factory,
-        shutdown=lambda reason: session.shutdown(reason, cause="shutdown"),
-        end_app=end_app,
-        on_hangup=out.detach,
-        restore_terminal=restore,
-    )
-    signals.install()
-    if not choice.checked and factory.listable():
-        session.spawn(session.check_server())
-    try:
-        with patch_stdout(raw=True):
-            await ui.run()
-    except EOFError:
-        signals.hangup()  # the terminal closed
-    except OSError:
-        if signals.received is None:
-            raise
-        logging.getLogger(__name__).debug(
-            "Drawing after a hangup failed", exc_info=True
+        signals = ExitSignals(
+            factory,
+            shutdown=lambda reason: session.shutdown(reason, cause="shutdown"),
+            end_app=ui.exit,
+            on_hangup=out.detach,
+            restore_terminal=restore,
         )
-    except asyncio.CancelledError:
-        if signals.received is None:
-            raise
-    # The app is gone: Ctrl+C now says "Closing…", and a second one ends melo
-    # at once, killing the tool providers.
-    presses = [0]
+        signals.install()
+        if not choice.checked and factory.listable():
+            session.spawn(session.check_server())
+        app = asyncio.ensure_future(ui.run())
+        arrived = asyncio.ensure_future(signals.arrived.wait())
+        try:
+            with patch_stdout(raw=True):
+                await asyncio.wait({app, arrived}, return_when=asyncio.FIRST_COMPLETED)
+                # A signal or a hangup ends the app; on a terminal that is
+                # gone prompt_toolkit can wait forever for its own drawing,
+                # so the app gets a moment, then is left behind.
+                if not app.done():
+                    await asyncio.wait({app}, timeout=APP_END_S)
+                if not app.done():
+                    app.cancel()
+                    await asyncio.wait({app}, timeout=APP_END_S)
+            arrived.cancel()
+            if app.done() and not app.cancelled():
+                app.result()
+        except EOFError:
+            signals.hangup()  # the terminal closed
+        except OSError:
+            # Reading or drawing failed: the terminal is gone, with or without
+            # a SIGHUP (nohup ignores it).
+            logging.getLogger(__name__).info("The terminal failed", exc_info=True)
+            signals.hangup()
+        # The app is gone: Ctrl+C now says "Closing…", and a second one ends melo
+        # at once, killing the tool providers.
+        presses = [0]
 
-    def on_sigint() -> None:
-        presses[0] += 1
-        if presses[0] == 1:
-            out.print(Text("Closing…", style="muted"))
-            return
-        for agent in factory.live_agents():
-            for provider in agent._tool_providers:
-                with contextlib.suppress(Exception):
-                    provider.kill()
-        os._exit(130)
+        def on_sigint() -> None:
+            presses[0] += 1
+            if presses[0] == 1:
+                out.print(Text("Closing…", style="muted"))
+                return
+            for agent in factory.live_agents():
+                for provider in agent._tool_providers:
+                    with contextlib.suppress(Exception):
+                        provider.kill()
+            os._exit(130)
 
-    with contextlib.suppress(NotImplementedError, RuntimeError):
-        loop.add_signal_handler(signal.SIGINT, on_sigint)
-    try:
-        if signals.shutting_down is not None:
-            await signals.shutting_down
-        else:
-            await session.shutdown(STOP_REASON, cause="user_stop")
-    finally:
-        signals.uninstall()
         with contextlib.suppress(NotImplementedError, RuntimeError):
-            loop.remove_signal_handler(signal.SIGINT)
-    return 0, signals.received
+            loop.add_signal_handler(signal.SIGINT, on_sigint)
+        try:
+            if signals.shutting_down is not None:
+                await signals.shutting_down
+            else:
+                await session.shutdown(STOP_REASON, cause="user_stop")
+        finally:
+            signals.uninstall()
+            with contextlib.suppress(NotImplementedError, RuntimeError):
+                loop.remove_signal_handler(signal.SIGINT)
+        return 0, signals.received
+    finally:
+        # Whatever ended the session (a signal, a closed terminal, Ctrl+C
+        # while the Agent starts), nothing stays open: the store's thread
+        # would keep the process alive.
+        if factory is not None:
+            for live in factory.live_agents():
+                with contextlib.suppress(Exception):
+                    await factory.close(live)
+        await store.aclose()

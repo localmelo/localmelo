@@ -15,11 +15,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import os
+import select
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Final, Protocol
+from typing import Final, Protocol, TextIO
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
@@ -189,6 +191,45 @@ class _Placeholder(Processor):
             if text:
                 return Transformation([*ti.fragments, ("class:placeholder", text)])
         return Transformation(ti.fragments)
+
+
+def terminal_input(stdin: TextIO, on_close: Callable[[], None] | None = None) -> Input:
+    """The app's input on *stdin* (POSIX); *on_close* runs once when it closes.
+
+    prompt_toolkit reads EIO as an interrupted read (a resize), so after a
+    hangup the input would never close; and an app whose terminal is gone
+    may never end on its own. The caller learns of the close here.
+    """
+    from prompt_toolkit.input.posix_utils import PosixStdinReader
+    from prompt_toolkit.input.vt100 import Vt100Input
+
+    class ClosingReader(PosixStdinReader):
+        def read(self, count: int = 1024) -> str:
+            if self.closed:
+                return ""
+            try:
+                if not select.select([self.stdin_fd], [], [], 0)[0]:
+                    return ""
+                data = os.read(self.stdin_fd, count)
+            except OSError as exc:
+                if exc.errno in (errno.EIO, errno.EBADF, errno.ENXIO):
+                    self._close()  # the terminal is gone
+                return ""
+            if not data:
+                self._close()
+                return ""
+            return self._stdin_decoder.decode(data)
+
+        def _close(self) -> None:
+            self.closed = True
+            if on_close is not None:
+                on_close()
+
+    reading = Vt100Input(stdin)
+    reading.stdin_reader = ClosingReader(
+        reading.stdin_reader.stdin_fd, encoding=stdin.encoding or "utf-8"
+    )
+    return reading
 
 
 def open_history(path: str) -> FileHistory:

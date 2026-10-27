@@ -322,3 +322,24 @@ def test_the_history_file_is_private_and_kept_under_a_size(tmp_path: Path) -> No
     assert entries[0].startswith("entry 1499 ") and entries[-1].startswith("entry 500 ")
     assert path.stat().st_mode & 0o777 == 0o600
     assert path.stat().st_size < 1_000_000
+
+
+def test_a_closed_terminal_closes_the_input() -> None:
+    # prompt_toolkit reads EIO as a resize: the app would wait forever.
+    import os
+    import tty
+
+    from localmelo.support.cli.app import terminal_input
+
+    master, slave = os.openpty()
+    tty.setraw(slave)  # as while the app runs
+    closes: list[bool] = []
+    with os.fdopen(slave, "r", encoding="utf-8", closefd=True) as stdin:
+        reading = terminal_input(stdin, on_close=lambda: closes.append(True))
+        os.write(master, b"hi")
+        assert reading.read_keys()[0].data == "h"
+        assert closes == []
+        os.close(master)
+        assert reading.read_keys() == []
+        assert reading.read_keys() == []
+        assert reading.closed and closes == [True]  # told once
