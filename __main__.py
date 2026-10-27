@@ -485,12 +485,19 @@ def _progress_line(
     """
     if mode == "off" or not query or output_format != "text":
         return None
-    from localmelo.support.progress_line import ProgressLine, wants_color, wants_line
+    from localmelo.support.progress_line import (
+        ProgressLine,
+        wants_color,
+        wants_line,
+        wants_wide_ambiguous,
+    )
 
     stream = sys.stderr
     if not wants_line(mode, query=query, output_format=output_format, stream=stream):
         return None
-    return ProgressLine(stream, color=wants_color())
+    return ProgressLine(
+        stream, color=wants_color(), wide_ambiguous=wants_wide_ambiguous()
+    )
 
 
 def _run_direct(

@@ -177,6 +177,21 @@ def test_dim_unless_no_color(tty: TtyStream, monkeypatch: pytest.MonkeyPatch) ->
     assert tty.getvalue().startswith(ERASE + DIM + "starting · 0s")
 
 
+@pytest.mark.parametrize(
+    ("lang", "wide"), [("zh_CN.UTF-8", True), ("en_US.UTF-8", False)]
+)
+def test_ambiguous_width_follows_the_locale(
+    tty: TtyStream, monkeypatch: pytest.MonkeyPatch, lang: str, wide: bool
+) -> None:
+    monkeypatch.delenv("LC_ALL", raising=False)
+    monkeypatch.delenv("LC_CTYPE", raising=False)
+    monkeypatch.setenv("LANG", lang)
+    with tty.installed():
+        line = cli._progress_line(None, "q", "text")
+    assert line is not None
+    assert line._wide_ambiguous is wide
+
+
 def test_the_line_is_erased_before_the_status_line(
     tty: TtyStream, capsys: pytest.CaptureFixture[str]
 ) -> None:

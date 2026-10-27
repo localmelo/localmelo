@@ -244,7 +244,11 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
   facts only.
 - **Narrow terminals.** When the line is wider than the terminal, it leaves
   out, in this order, the past runs' times, the test counts, the past
-  runs' named steps and the attempt, and then cuts the rest with `…`.
+  runs' named steps and the attempt, and then cuts the rest with `…`. In a
+  Chinese, Japanese or Korean locale (the first of `LC_ALL`, `LC_CTYPE`
+  and `LANG` that is set starts with `zh`, `ja` or `ko`), marks such as
+  `·` and `…` count two cells, as a terminal set to draw ambiguous-width
+  characters wide draws them, so the line never wraps there.
 - **Color.** The line is dim; set `NO_COLOR` to a non-empty value to draw
   it plain.
 - **Warnings** print on a line of their own above it. Output that a tool

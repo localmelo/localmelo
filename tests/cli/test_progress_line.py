@@ -500,6 +500,80 @@ def test_no_color(environ: dict[str, str], color: bool) -> None:
     assert pl.wants_color(environ) is color
 
 
+# The line's own glyphs that are East Asian Ambiguous: a terminal may draw
+# each in two cells.
+AMBIGUOUS_GLYPHS = "·…◐–○×▓"
+
+
+def test_the_lines_own_glyphs_are_ambiguous_width() -> None:
+    for glyph in AMBIGUOUS_GLYPHS:
+        assert pl.char_width(glyph) == 1
+        assert pl.char_width(glyph, wide_ambiguous=True) == 2
+    assert pl.char_width("✓", wide_ambiguous=True) == 1  # not ambiguous
+    assert pl.char_width("测", wide_ambiguous=True) == 2
+    assert pl.char_width("\u0301", wide_ambiguous=True) == 0  # combining
+
+
+@pytest.mark.parametrize("width", range(0, 14))
+def test_cut_to_width_with_wide_ambiguous_glyphs_never_overflows(width: int) -> None:
+    text = "Read ·×·.py"
+    cut = pl.cut_to_width(text, width, wide_ambiguous=True)
+    assert pl.display_width(cut, wide_ambiguous=True) <= width
+
+
+def test_a_line_cut_with_wide_ambiguous_glyphs_fits_them_drawn_wide() -> None:
+    """With ambiguous characters drawn wide, a line cut as if they were not
+    is a few cells wider than the terminal: the row wraps, and the next
+    erase clears only the last row, leaving the rest above it."""
+    items = [
+        {"label": "Read a_rather_long_module_name.py", "state": "done"},
+        {"label": "Edit parser.py", "state": "current", "repeat": 2},
+        {"label": "pytest", "state": "skipped"},
+    ]
+    data = level2(items=items, off_reason="longer")
+    for width in range(10, 160):
+        text = format_line(
+            data, PYTEST_41S, 100.0, width, run_started=37.0, wide_ambiguous=True
+        )
+        assert pl.display_width(text, wide_ambiguous=True) <= width, (width, text)
+    # Without the option, the line is as before.
+    assert format_line(data, PYTEST_41S, 100.0, 60, run_started=37.0) == (
+        line(data, tool=PYTEST_41S, width=60)
+    )
+
+
+@pytest.mark.parametrize(
+    ("environ", "wide"),
+    [
+        ({"LANG": "zh_CN.UTF-8"}, True),
+        ({"LANG": "en_US.UTF-8", "LC_CTYPE": "ja_JP.UTF-8"}, True),
+        ({"LANG": "en_US.UTF-8", "LC_ALL": "ko_KR.UTF-8"}, True),
+        ({"LANG": "zh_TW.Big5", "LC_ALL": "C"}, False),  # LC_ALL first
+        ({"LANG": "zh_CN.UTF-8", "LC_ALL": ""}, True),  # empty is unset
+        ({"LANG": "en_US.UTF-8"}, False),
+        ({}, False),
+    ],
+)
+def test_wide_ambiguous_in_a_chinese_japanese_or_korean_locale(
+    environ: dict[str, str], wide: bool
+) -> None:
+    assert pl.wants_wide_ambiguous(environ) is wide
+
+
+def test_the_display_counts_ambiguous_glyphs_as_asked() -> None:
+    stream = Stream()
+    line_ = ProgressLine(
+        stream, interval_s=3600, columns=lambda: 41, wide_ambiguous=True
+    )
+    line_.start()
+    try:
+        line_.observe(_event("run.progress", 1, **level1(step=5)))
+        last = stream.draws()[-1]
+        assert pl.display_width(last, wide_ambiguous=True) <= 40
+    finally:
+        line_.close()
+
+
 # ── When to draw ────────────────────────────────────────────────────────────
 
 

@@ -125,29 +125,36 @@ def wall_range(lo: float, hi: float) -> str:
     return f"{low_min} min" if low_min == high_min else f"{low_min}-{high_min} min"
 
 
-def char_width(char: str) -> int:
-    """Terminal cells of *char*: 2 for wide and full-width, 0 for combining."""
+def char_width(char: str, *, wide_ambiguous: bool = False) -> int:
+    """Terminal cells of *char*: 2 for wide and full-width, 0 for combining.
+
+    With *wide_ambiguous*, East Asian Ambiguous characters, such as the
+    line's own ``·`` and ``…``, count 2 as well (see
+    :func:`wants_wide_ambiguous`).
+    """
     if unicodedata.combining(char):
         return 0
-    return 2 if unicodedata.east_asian_width(char) in ("W", "F") else 1
+    wide = ("W", "F", "A") if wide_ambiguous else ("W", "F")
+    return 2 if unicodedata.east_asian_width(char) in wide else 1
 
 
-def display_width(text: str) -> int:
+def display_width(text: str, *, wide_ambiguous: bool = False) -> int:
     """Terminal cells of *text* (see :func:`char_width`)."""
-    return sum(char_width(char) for char in text)
+    return sum(char_width(char, wide_ambiguous=wide_ambiguous) for char in text)
 
 
-def cut_to_width(text: str, width: int) -> str:
+def cut_to_width(text: str, width: int, *, wide_ambiguous: bool = False) -> str:
     """*text* in at most *width* cells, ending with ``…`` when it was cut."""
-    if display_width(text) <= width:
+    if display_width(text, wide_ambiguous=wide_ambiguous) <= width:
         return text
-    if width <= 0:
+    mark = char_width("…", wide_ambiguous=wide_ambiguous)
+    if width < mark:
         return ""
     kept: list[str] = []
     used = 0
     for char in text:
-        cells = char_width(char)
-        if used + cells > width - 1:
+        cells = char_width(char, wide_ambiguous=wide_ambiguous)
+        if used + cells > width - mark:
             break
         kept.append(char)
         used += cells
@@ -392,26 +399,28 @@ def format_line(
     *,
     run_started: float,
     color: bool = False,
+    wide_ambiguous: bool = False,
 ) -> str:
     """The progress line for the latest ``run.progress`` *payload*.
 
     *payload* is that event's data, or None before the first one;
     *current_tool* the call under way, if any; *now* and *run_started*
-    are clock readings in seconds. The line fits *width* cells: past
-    times, tests, items and the attempt are left out in that order
-    (section 7), and what still does not fit is cut with ``…``. With
-    *color*, the line is dim. It holds no newline and no erase.
+    are clock readings in seconds. The line fits *width* cells, counted
+    as :func:`char_width` says with *wide_ambiguous*: past times, tests,
+    items and the attempt are left out in that order (section 7), and
+    what still does not fit is cut with ``…``. With *color*, the line is
+    dim. It holds no newline and no erase.
     """
     parts = _parts(payload, current_tool, now, run_started)
     budget = max(1, width)
     dropped: list[str] = []
     line = parts.compose(dropped)
     for part in DROP_ORDER:
-        if display_width(line) <= budget:
+        if display_width(line, wide_ambiguous=wide_ambiguous) <= budget:
             break
         dropped.append(part)
         line = parts.compose(dropped)
-    line = cut_to_width(line, budget)
+    line = cut_to_width(line, budget, wide_ambiguous=wide_ambiguous)
     return f"{DIM}{line}{RESET}" if color else line
 
 
@@ -446,6 +455,29 @@ def wants_color(environ: Mapping[str, str] | None = None) -> bool:
     """Dim text unless ``NO_COLOR`` is set to a non-empty value (no-color.org)."""
     environ = os.environ if environ is None else environ
     return not environ.get("NO_COLOR")
+
+
+# Locales (language codes) whose terminals often draw East Asian Ambiguous
+# characters in two cells.
+WIDE_AMBIGUOUS_LANGUAGES: Final = ("zh", "ja", "ko")
+
+
+def wants_wide_ambiguous(environ: Mapping[str, str] | None = None) -> bool:
+    """Whether to count East Asian Ambiguous characters two cells wide.
+
+    A terminal can draw them, among them the line's own ``·``, ``…``,
+    ``◐`` and ``▓``, in two cells: an option in iTerm2 and Terminal.app,
+    common with Chinese, Japanese and Korean. In such a locale (the first
+    of ``LC_ALL``, ``LC_CTYPE`` and ``LANG`` that is set), they count two:
+    where the terminal draws them in one, a cut line ends a few cells
+    short, rather than wrapping where it draws them in two.
+    """
+    environ = os.environ if environ is None else environ
+    for name in ("LC_ALL", "LC_CTYPE", "LANG"):
+        locale = environ.get(name)
+        if locale:
+            return locale.lower().startswith(WIDE_AMBIGUOUS_LANGUAGES)
+    return False
 
 
 def terminal_columns(stream: TextIO) -> int:
@@ -503,9 +535,11 @@ class ProgressLine:
         interval_s: float = REDRAW_INTERVAL_S,
         clock: Callable[[], float] = time.monotonic,
         columns: Callable[[], int] | None = None,
+        wide_ambiguous: bool = False,
     ) -> None:
         self._stream = stream
         self._color = color
+        self._wide_ambiguous = wide_ambiguous
         self._interval_s = interval_s
         self._clock = clock
         self._columns = columns or (lambda: terminal_columns(stream))
@@ -704,6 +738,7 @@ class ProgressLine:
                 self._columns() - 1,
                 run_started=self._run_started,
                 color=self._color,
+                wide_ambiguous=self._wide_ambiguous,
             )
             if not drawn or line != self._last:  # else the terminal shows it
                 text += ERASE + line
