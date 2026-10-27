@@ -2530,8 +2530,12 @@ class Agent:
             )
             try:
                 async with deadline:
-                    await self._look_up(run, query)
-                    run.report_progress()
+                    try:
+                        await self._look_up(run, query)
+                    finally:
+                        # Also when a timeout or a stop cuts the lookup
+                        # short: the first run.progress follows run.started.
+                        run.report_progress()
                     await self.hippo.save_task(task)
                     try:
                         await self._ensure_tools()
