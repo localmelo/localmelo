@@ -119,7 +119,10 @@ class Melo:
         still wraps up, and Ctrl+D then only says that a turn is running."""
         deadline = time.monotonic() + timeout_s
         while self.process.poll() is None and time.monotonic() < deadline:
-            self.type(b"\x04")
+            try:
+                self.type(b"\x04")
+            except OSError:
+                break  # melo exited and closed the terminal (EIO on macOS)
             for _ in range(10):
                 self._read(0.05)
         return self.wait(5)
