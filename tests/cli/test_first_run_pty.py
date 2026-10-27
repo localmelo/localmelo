@@ -41,6 +41,12 @@ def _melo(home: Path, server: FakeChatServer) -> Terminal:
     return term
 
 
+def _exit_code(term: Terminal) -> int:
+    """melo's exit code; it closes the terminal a moment before it exits."""
+    term.wait(30)
+    return term.process.wait(timeout=30)
+
+
 def _text(term: Terminal) -> str:
     return _ESCAPES.sub(b"", term.output).decode().replace("\r\n", "\n")
 
@@ -63,7 +69,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
         term.type(b"hi\r")
         assert term.read_until(lambda out: b"Worked for" in out, 30), term.output
         term.type(b"/exit\r")
-        assert term.wait(30) == 0, term.output
+        assert _exit_code(term) == 0, term.output
     finally:
         term.close()
 
@@ -82,7 +88,7 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     try:
         assert term.read_until(lambda out: READY in out, 30), term.output
         term.type(b"/exit\r")
-        assert term.wait(30) == 0, term.output
+        assert _exit_code(term) == 0, term.output
     finally:
         term.close()
     text = _text(term)
