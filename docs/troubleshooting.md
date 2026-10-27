@@ -91,12 +91,26 @@ or use --base-url to connect to an OpenAI-compatible endpoint.
 melo: no backend is configured; run melo --reconfigure in a terminal
 ```
 
-- **Cause:** `melo --serve`, or `melo` without a terminal, found no config
-  file, and the setup wizard cannot ask its questions without a terminal.
-  Under launchd this line goes to the gateway's error log. `melo` exits
-  with code 1.
+- **Cause:** `melo --serve` found no config file, and the setup wizard
+  cannot ask its questions without a terminal. Under launchd this line
+  goes to the gateway's error log. `melo` exits with code 1.
 - **Fix:** run `melo` or `melo --reconfigure` once in a terminal, then
   start the gateway again.
+
+### The interactive UI needs a terminal
+
+```text
+melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
+  Run one task:      melo "your task"
+  Start the gateway: melo --serve
+```
+
+- **Cause:** bare `melo` opens the interactive UI, which needs stdin and
+  stdout to be a terminal and `TERM` not to be `dumb`: here one of them was
+  a pipe or a file (a script, `melo | tee`), or `TERM=dumb`. `melo` exits
+  with code 2.
+- **Fix:** run `melo "<task>"` for one task, or `melo --serve` for the
+  gateway, or run `melo` in a real terminal.
 
 ### A model server cannot be used at the first run
 

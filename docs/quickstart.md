@@ -215,7 +215,8 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 
 - Type `/` for the commands: `/model` lists the server's models and
   switches to one, `/backend` switches to another server (both saved as the
-  default), `/new` starts over, `/exit` or Ctrl+D leaves.
+  default, except in a `melo --base-url` session), `/new` starts over,
+  `/exit` or Ctrl+D leaves.
 - melo asks before it runs a shell command, Python code or a file write:
   press `1` to allow it, `2` to allow that tool for the session, `3` to
   refuse and tell melo why. Esc stops a turn.

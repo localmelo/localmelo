@@ -127,12 +127,15 @@ models, `first of N; /model lists them`.
 | Ctrl+D | Quit, when no turn runs and the draft is empty; with text, delete the character under the cursor. |
 | ↑ ↓ | Move between lines, then through earlier messages. On an empty draft during a turn, ↑ takes back the queued message. |
 | Ctrl+R | Search earlier messages. |
-| Tab | Complete a command. |
+| Tab | Complete a command or a listed model; ↑ ↓ pick in the menu, and Enter takes the one picked. |
 | Ctrl+L | Clear the screen. |
+| Ctrl+Z | Nothing (melo does not suspend in this version). |
 
 - **The queue.** One message waits at a time, shown as
   `↳ Queued for the next turn: …`. When the turn ends any other way than
   `completed` (stopped, failed), it goes back into the input box unsent.
+  A message whose turn could not run at all
+  (`✗ The turn could not run: …`) goes back too, in front of it.
 - **Stopping.** Esc stops the turn at once; the turn ends `cancelled` and
   prints `■ Stopped`. After the answer has printed, melo spends up to 2
   seconds recording the run's steps (see
@@ -152,22 +155,40 @@ type more letters to narrow them, Tab or Enter to take one.
 |---|---|
 | `/help [command]` | The commands and keys, or one command's details. |
 | `/new` (also `/clear`) | Start a new session: the model forgets the conversation, and session grants end. |
-| `/model [name\|number]` | Alone: the current model, and the models the server lists. With a name, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
+| `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
 | `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default. |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
 
-- `/new`, `/model` and `/backend` wait until the turn ends:
-  `/model is not available while a turn runs (esc stops it).`
-- Saving: `/model` keeps the configured backend and changes its model;
-  `/backend` saves the server as the `vllm` backend, with embedding off, as
-  the first run does. After `melo --base-url URL` whose save question was
-  answered `n`, they switch for this session only.
-- A model or server that does not start, or a server that does not answer,
-  leaves the current one in place:
+- `/new`, `/model` and `/backend` are refused while a turn runs: the
+  draft stays and the hint says
+  `/model is not available while a turn runs (esc stops it).`; press Enter
+  again once the turn ends.
+- `/model` switches only among the models the server lists. A name it
+  does not list is refused, with nothing switched or saved:
+  `✗ URL lists no model named 'NAME'. /model lists them.`; so is a number
+  outside the list: `✗ Type a number from 1 to N, or a model id.` Only
+  when there is no list (the server does not answer, or a cloud API)
+  does `/model NAME` switch to it anyway, after
+  `⚠ Could not list the models (REASON); switching anyway.` when the
+  server did not answer.
+- Saving: `/model` keeps the configured backend and changes its model.
+  `/backend` saves the server as the `vllm` backend (`chat_backend`,
+  `[vllm] chat_url` and `chat_model`) and keeps the rest of the config:
+  embedding, `request_timeout_s` and `extra_body`; the session runs on
+  the config as saved. In a `melo --base-url URL` session they switch for
+  this session only, unless melo asked `Save URL · MODEL as the default
+  backend?` (only when there is no config file yet) and you answered yes.
+  After `s` (start anyway) at the first run's questions, `/model` and
+  `/backend` save the server, as the first run would have.
+- A model that does not start leaves the current one in place
+  (`✗ Could not start NAME: …`). `/backend` keeps the current server when
+  the new one does not answer or lists no models:
   `✗ Could not reach URL: connection refused. Still using URL.`
-- A message that starts with `/` and a known command's name is that
-  command; `/etc/hosts is broken` is a message. To send a message that
-  starts with a command's name, start it with a space.
+- A message that starts with `/` and a lowercase name, then a space or
+  its end, is a command; an unknown name prints
+  `Unknown command /NAME. /help lists the commands.` and keeps the draft.
+  `/etc/hosts is broken` is a message. To send a message that starts like
+  a command, start it with a space.
 
 ### A turn's output
 
@@ -181,8 +202,9 @@ type more letters to narrow them, Tab or Enter to take one.
   failed, `⊘` blocked or denied, `◌` stopped or not run; the duration;
   `exit N` when a command ran and exited with another code than 0 (`grep`
   exits 1 without failing); how its approval ended; and up to 3 lines of
-  its output, then `… +N lines`. Escape sequences in the output are removed, so a tool
-  cannot move the cursor, set the title or write the clipboard.
+  its output, then `… +N lines` (a single line left prints instead).
+  Escape sequences in the output are removed, so a tool cannot move the
+  cursor, set the title or write the clipboard.
 - **The answer** prints as Markdown after `●`. A run that did not complete
   prints its best effort, the [status line](#output) and a hint, such as
   `Is the model server running at URL?` for a server that does not answer.
@@ -257,7 +279,10 @@ wrapped message leaves no blank rows. Known limits:
 
 Each `melo` starts a new session; the first message creates it. Sessions
 are kept in `~/.cache/localmelo/cli/sessions.db` (resuming them comes in a
-later release). The UI writes its log to `~/.cache/localmelo/logs/cli.log`
+later release): every turn, with your message, the answer and each tool
+call with its output. `~/.cache/localmelo/cli_history` keeps your
+messages. Both are plain text (mode 0600), not encrypted. The UI writes
+its log to `~/.cache/localmelo/logs/cli.log`
 (folder 0700, files 0600, 1 MB, two backups) and never prints a traceback
 on the screen; a problem shows as one dim line naming the log. A config
 file that is not valid TOML, or a log folder that cannot be made, stops
@@ -384,7 +409,7 @@ These options apply to a task run without `--serve`.
   `--embedding-base-url`. Without `--base-url`, the configured embedding
   backend is used.
 - `--progress`: see [Progress line](#progress-line). `off` starts the run
-  exactly as `melo` without a terminal does.
+  exactly as a task run without a terminal does.
 - `--routine`: without it, a task is known by its wording (dates and times
   masked) and the folder it runs in. Runs given the same `NAME` are one
   routine, so `--routine daily-mail` joins differently worded requests run

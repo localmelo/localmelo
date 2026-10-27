@@ -157,8 +157,8 @@ conversations are separate from the web chats.
   turn; a message typed meanwhile is sent when the turn completes.
 - Type `/` for the commands, each with a line saying what it does:
   `/model` lists the server's models and switches to one, `/backend`
-  switches to another server (both saved as the default), `/new` starts
-  over, `/help`, `/exit`.
+  switches to another server (both saved as the default, except in a
+  `melo --base-url` session), `/new` starts over, `/help`, `/exit`.
 - Before a shell command, Python code or a file write, a panel asks: allow
   once, allow that tool for the session, or refuse and tell melo why.
   `--yolo` skips it.
@@ -221,9 +221,9 @@ Planned:
 > sites send through your browser. See [SECURITY.md](SECURITY.md) and
 > [What the checks do](docs/tools.md#what-the-checks-do).
 
-The experimental [Python API](docs/python-api.md) can ask for approval before
-a tool runs and keep the file tools inside one directory; direct mode and the
-gateway do neither. Memory and session files are not encrypted; see
+The interactive UI and the experimental [Python API](docs/python-api.md) ask
+for approval before a tool runs and keep the file tools inside one folder;
+direct mode and the gateway do neither. Memory and session files are not encrypted; see
 [Privacy](docs/memory.md#privacy).
 
 ## Getting help

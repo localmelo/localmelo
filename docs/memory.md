@@ -260,9 +260,10 @@ planning and reflection requests alike. The history in RAM keeps none.
 
 ## Sessions
 
-The session store of the Python API ([Sessions](sessions.md)) keeps
-conversations in its own files, apart from `history.db`. No command uses it
-yet; the files appear once a program opens a store.
+The session store ([Sessions](sessions.md)) keeps conversations in its own
+files, apart from `history.db`. Bare `melo` opens
+`~/.cache/localmelo/cli/sessions.db` at its first message; the gateway does
+not use a store yet.
 
 ```text
 ~/.cache/localmelo/gateway/sessions.db   the gateway's sessions
@@ -375,6 +376,11 @@ that directory instead.
   values.
 - Images that tools return are stored only as references: the MIME type, the
   SHA-256 digest and the size, never the image itself.
+- The interactive UI keeps every turn, with its tool calls and output, in
+  `~/.cache/localmelo/cli/sessions.db`, and your messages in
+  `~/.cache/localmelo/cli_history` (both `0600`, plain text, not
+  encrypted); `~/.cache/localmelo/logs/cli.log` records request URLs and
+  errors.
 - The files are as private as your home directory. To remove them, see
   [Reset memory](#reset-memory).
 - The gateway's web workspace always saves the history and procedural
