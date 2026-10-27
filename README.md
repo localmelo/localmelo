@@ -4,19 +4,24 @@
 
 # localmelo
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+<p align="center">
+  <a href="https://localmelo.github.io/localmelo/"><img alt="Website: localmelo.github.io" src="https://img.shields.io/badge/website-localmelo.github.io-D9822B?style=for-the-badge&labelColor=1F2A44"></a>
+  <a href="docs/quickstart.md"><img alt="Quickstart" src="https://img.shields.io/badge/quickstart-start_here-2A9D8F?style=for-the-badge&labelColor=1F2A44"></a>
+  <a href="docs/README.md"><img alt="Documentation" src="https://img.shields.io/badge/docs-guides_%C2%B7_reference-3B6EA8?style=for-the-badge&labelColor=1F2A44"></a>
+  <a href="README.zh-CN.md"><img alt="简体中文" src="https://img.shields.io/badge/lang-%E4%B8%AD%E6%96%87-C8372D?style=for-the-badge&labelColor=1F2A44"></a>
+  <br>
+  <a href="https://localmelo.github.io/localmelo/en/updates.html#roadmap"><img alt="Status: pre-alpha, v0.1.0 due 2026-12-20" src="https://img.shields.io/badge/status-pre--alpha_%C2%B7_v0.1.0_due_2026--12--20-C0562B?style=for-the-badge&labelColor=1F2A44"></a>
+  <a href="pyproject.toml"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=for-the-badge&labelColor=1F2A44&logo=python&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-4C9A2A?style=for-the-badge&labelColor=1F2A44"></a>
+  <a href="docs/llms.txt"><img alt="For AI agents: llms.txt" src="https://img.shields.io/badge/for_agents-llms.txt-7B4FA0?style=for-the-badge&labelColor=1F2A44"></a>
+</p>
 
 A local personal agent that runs tasks with tools and memory on your own model server or a cloud API.
 Use it to run agent tasks from the shell, from scripts and benchmarks (each
 run gives one JSON line and a fixed exit code), or over HTTP.
 
-[Website](https://localmelo.github.io/localmelo/) ·
-[Quickstart](docs/quickstart.md) ·
-[Documentation](docs/README.md) ·
-[Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap)
-
-**Status:** pre-alpha. Running tasks from the command line (direct mode) and
-the HTTP gateway work today. Commands, the HTTP API and the Python API may
+**Status:** pre-alpha. Running tasks from the command line (direct mode), the
+interactive chat in the terminal and the HTTP gateway work today. Commands, the HTTP API and the Python API may
 change before v0.1.0 (milestone due 2026-12-20).
 
 ## What it does
