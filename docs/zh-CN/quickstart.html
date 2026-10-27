@@ -170,13 +170,13 @@ brew install jundot/omlx/omlx</code></pre>
           </li>
           <li>
             <p>启动服务器，并让它在单独的终端里一直运行：</p>
-            <pre><code>omlx serve --model-dir ~/models</code></pre>
-            <p>它监听 <code>http://127.0.0.1:8000</code>，<code>--port</code> 可以换端口。oMLX 会把 <code>--model-dir</code> 和 <code>--port</code> 保存到 <code>~/.omlx/settings.json</code>，供以后启动时使用。保持默认的主机地址，不要设置 <code>--api-key</code>：localmelo 不会向本地服务器发送 API 密钥。如果请求返回 HTTP 401（<code>API key required</code>），说明之前在 oMLX 的管理页面或用 <code>OMLX_API_KEY</code> 设置过密钥：在管理页面的设置里打开 <strong>Allow inference without API key</strong>，或取消 <code>OMLX_API_KEY</code>。</p>
+            <pre><code>omlx serve --model-dir ~/models --port 8000</code></pre>
+            <p>它监听 <code>http://127.0.0.1:8000</code>。oMLX 会把 <code>--model-dir</code> 和 <code>--port</code> 保存到自己的 <code>settings.json</code>（默认在 <code>~/.omlx</code> 下），之后不写这些参数时就用保存的值，所以以前保存过的端口会覆盖默认的 8000；写上 <code>--port</code> 就不会有这个问题。保持默认的主机地址，不要设置 <code>--api-key</code>：localmelo 不会向本地服务器发送 API 密钥。如果请求返回 HTTP 401（<code>API key required</code>），说明之前在 oMLX 的管理页面或用 <code>OMLX_API_KEY</code> 设置过密钥：在管理页面的设置里打开 <strong>Allow inference without API key</strong>，或取消 <code>OMLX_API_KEY</code>。</p>
           </li>
           <li>
             <p>确认服务器列出了这个模型：</p>
-            <pre><code>curl -s http://127.0.0.1:8000/v1/models</code></pre>
-            <p>返回的 <code>data</code> 列表里有一项 <code>"id": "Qwen3-8B-4bit"</code>。它也可能列出你 Hugging Face 缓存里的 MLX 模型。</p>
+            <pre><code>curl -sS http://127.0.0.1:8000/v1/models</code></pre>
+            <p>返回的 <code>data</code> 列表里有一项 <code>"id": "Qwen3-8B-4bit"</code>。它也可能列出你 Hugging Face 缓存里的 MLX 模型。如果显示 <code>Failed to connect</code>，说明这个端口上没有服务在监听：看一下 oMLX 启动日志里的端口。如果显示 <code>API key required</code>，说明设置过密钥：见第 3 步。</p>
           </li>
           <li>
             <p>用这个 ID 运行一个任务：</p>

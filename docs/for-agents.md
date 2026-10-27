@@ -40,7 +40,7 @@ echo $?   # 0 completed; 1 crashed (JSON line) or no/invalid config (no JSON lin
 ```
 
 - `--base-url` is used verbatim (include `/v1`): no config file, no API key, a 120 s chat request timeout unless `--request-timeout`; `--chat-model` defaults to `default`. Cloud APIs need the config file.
-- oMLX (Apple silicon, macOS 15+): `omlx serve --model-dir DIR` (each subfolder of DIR with a `config.json` is a model; its folder name, or an alias set in oMLX, is the model id), then `--base-url http://127.0.0.1:8000/v1 --chat-model ID`; in the config file it is the `vllm` backend. oMLX must accept requests without an API key (no `--api-key`, no key from its admin page or `OMLX_API_KEY`, or "Allow inference without API key" on): localmelo sends none to local servers, and HTTP 401 means a key is set.
+- oMLX (Apple silicon, macOS 15+): `omlx serve --model-dir DIR --port 8000` (a port saved in oMLX's settings.json wins when `--port` is left out; each subfolder of DIR with a `config.json` is a model; its folder name, or an alias set in oMLX, is the model id), then `--base-url http://127.0.0.1:8000/v1 --chat-model ID`; in the config file it is the `vllm` backend. oMLX must accept requests without an API key (no `--api-key`, no key from its admin page or `OMLX_API_KEY`, or "Allow inference without API key" on): localmelo sends none to local servers, and HTTP 401 means a key is set.
 - Without `--base-url`: the config file; `--chat-model` and `--request-timeout` override it for the run. No config: exit 1, `No backend configured`.
 - Drop `--builtins none` to give the model the four built-in tools. Quote the task.
 - Direct-mode flags (first value is the default):
