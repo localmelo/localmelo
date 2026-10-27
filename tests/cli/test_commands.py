@@ -29,7 +29,17 @@ def test_commands_parse(text: str, parsed: tuple[str | None, str, str]) -> None:
 
 
 @pytest.mark.parametrize(
-    "text", ["/etc/hosts is broken", "hello /help", "/Help", "/", "/2fa codes"]
+    "text",
+    [
+        "/etc/hosts is broken",
+        "hello /help",
+        "/Help",
+        "/",
+        "/2fa codes",
+        " /help me",
+        " /exit",
+        "\t/new",
+    ],
 )
 def test_messages_are_not_commands(text: str) -> None:
     assert parse_command(text) is None

@@ -58,9 +58,11 @@ def find(name: str) -> Command | None:
 def parse_command(text: str) -> tuple[Command | None, str, str] | None:
     """``(command, name, arguments)`` for a command; None for a message.
 
-    An unknown name gives ``(None, name, arguments)``.
+    An unknown name gives ``(None, name, arguments)``. A draft that starts
+    with a space or a tab is a message, so a message can start like a
+    command.
     """
-    match = _COMMAND.match(text.strip())
+    match = _COMMAND.match(text.rstrip())
     if match is None:
         return None
     name, arguments = match.group(1), (match.group(2) or "").strip()
