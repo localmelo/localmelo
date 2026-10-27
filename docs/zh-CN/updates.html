@@ -67,7 +67,7 @@
           <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
           <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
-          <li>反复运行的任务的进度显示，步骤从之前的运行中学到（第一次运行只显示步数这类事实）。</li>
+          <li>进度行上的百分比进度条，用于反复运行的任务；在重放证明它可靠之前保持关闭。</li>
         </ul>
         <p>维护者撰写的记忆设计见<a href="./memory-design.html">记忆设计</a>页，其中部分内容尚未实现。</p>
       </section>
@@ -75,6 +75,19 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-27-progress-line">
+          <h3>终端里的进度行</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/51">#51</a>
+          </p>
+          <ul>
+            <li>在终端里运行 <code>melo &quot;&lt;task&gt;&quot;</code> 时，stderr 上会有一行暗色的进度，显示当前步数、阶段、正在运行的工具和用时；输出答案之前会擦掉。</li>
+            <li>如果这个任务以前在保留记忆（<code>--memory-dir</code>）时运行过，进度行还会显示上一次运行用了多少步、多长时间以及它的步骤；来自相似任务的会单独标明。<code>--routine NAME</code> 可以把措辞不同的同一任务归到一起。</li>
+            <li>进度行不会折行，在后台运行时不画，也不会拖慢运行，即使终端暂停了输出。<code>--progress off</code> 可以关掉它。管道、文件、<code>--output-format json</code> 和退出码都没有变化。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#progress-line">进度行（英文）</a>。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-27-run-steps">
           <h3>运行会学习反复执行的任务的步骤</h3>
@@ -85,7 +98,7 @@
           <ul>
             <li>每次正常结束的运行都会把自己做了什么记进程序记忆：工具调用的类型、简短的标签、步数和用时。成功完成的运行还会更新所属任务的步骤模板。开启持久化时写入记忆目录里的 <code>procedures.db</code>，否则只留在内存中。</li>
             <li>Python 调用方可以通过 <code>run.progress</code> 事件（<code>progress=True</code>）跟踪一次运行：当前第几步、处在哪个阶段、测试通过了几个；如果这个任务以前做过，还有之前的运行用了多少步、多长时间，以及它们的具名步骤。在重放结果证明百分比进度条足够可靠之前，进度条保持关闭。</li>
-            <li><code>melo</code> 目前还不显示进度，下一步会在终端里加一行进度。请求体、输出、JSON 行、退出码和历史记录的行都没有变化。</li>
+            <li>请求体、输出、JSON 行、退出码和历史记录的行都没有变化。</li>
           </ul>
         </article>
 

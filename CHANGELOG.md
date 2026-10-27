@@ -9,6 +9,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A progress line in the terminal. While `melo "<task>"` runs with stderr
+  on a terminal and text output, one dimmed line on stderr shows the step,
+  the phase, the running tool and the time; once the task has run before
+  with memory kept, it adds what the last run took and its steps (or a
+  similar task's, marked as such). The line is erased before the answer,
+  draws nothing in the background, never wraps, and never holds up the
+  run. `--progress off` turns it off, and `--routine NAME` groups
+  differently worded runs of one task. Pipes, files, `--output-format json`
+  and the benchmark harness see no change ([#51]).
 - Runs learn the steps of recurring tasks. Each run that ends normally
   records an episode in procedural memory, and a completed run appends a
   new version of its routine's step template: in `procedures.db` in the
@@ -20,7 +29,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   provider's model. The query text and labels procedural memory keeps
   also mask URL passwords and the values of names such as `API_KEY` or
   `password`, and `melo-procedures forget` leaves nothing of a forgotten
-  routine in the file. `melo` shows no progress yet. Request bodies, the
+  routine in the file. Request bodies, the
   output, the JSON line, exit codes and history rows are unchanged
   ([#46]).
 - Procedural memory (experimental), `localmelo.melo.memory.procedures`, and
@@ -205,3 +214,4 @@ earlier milestones.
 [#45]: https://github.com/localmelo/localmelo/pull/45
 [#46]: https://github.com/localmelo/localmelo/pull/46
 [#50]: https://github.com/localmelo/localmelo/pull/50
+[#51]: https://github.com/localmelo/localmelo/pull/51

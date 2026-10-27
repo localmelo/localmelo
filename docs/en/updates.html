@@ -73,7 +73,7 @@
           <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
           <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
-          <li>a progress display for tasks you run again and again, with their steps learned from earlier runs (a first run shows only facts, such as its step count).</li>
+          <li>a percent bar on the progress line for tasks you run again and again, off until their repeated runs pass the replay.</li>
         </ul>
         <p>
           The maintainer's memory design, parts of which are not built yet, is
@@ -88,6 +88,19 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-27-progress-line">
+          <h3>A progress line in the terminal</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/51">#51</a>
+          </p>
+          <ul>
+            <li>While <code>melo &quot;&lt;task&gt;&quot;</code> runs on a terminal, one dimmed line on stderr shows the step, the phase, the running tool and the time. It is erased before the answer.</li>
+            <li>When the task has run before with memory kept (<code>--memory-dir</code>), the line adds what the last run took and its steps; a similar task's runs are marked as such. <code>--routine NAME</code> groups differently worded runs of one task.</li>
+            <li>The line never wraps, draws nothing in the background, and never holds up the run, even when the terminal's output is paused. <code>--progress off</code> turns it off. Pipes, files, <code>--output-format json</code> and the exit codes are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#progress-line">Progress line</a>.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-27-run-steps">
           <h3>Runs learn the steps of recurring tasks</h3>
           <p class="update-date">
@@ -97,7 +110,7 @@
           <ul>
             <li>Each run that ends normally now records what it did in procedural memory: the classes of its tool calls, short labels, its steps and its time. A run that completed also updates the step template of its task. With persistence on this goes to <code>procedures.db</code> in the memory directory; otherwise it stays in RAM.</li>
             <li>A Python caller can follow a run with <code>run.progress</code> events (<code>progress=True</code>): the step, the phase and the test counts, and, for a task done before, what earlier runs took and their named steps. The percent bar stays off until replayed runs show that it is reliable.</li>
-            <li><code>melo</code> does not show progress yet; a line in the terminal comes next. Request bodies, the output, the JSON line, the exit codes and the history rows are unchanged.</li>
+            <li>Request bodies, the output, the JSON line, the exit codes and the history rows are unchanged.</li>
           </ul>
         </article>
 
