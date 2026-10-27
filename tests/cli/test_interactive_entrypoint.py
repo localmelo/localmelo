@@ -1,9 +1,9 @@
 """The plain loop behind `melo ""`, and what bare `melo` starts.
 
-`melo "<task>"` runs the task (direct mode), `melo ""` opens the plain
-loop, and bare `melo` and `melo --reconfigure` set up a backend when
-needed, then start the gateway. The direct-mode flags apply to a task
-only.
+`melo "<task>"` runs the task (direct mode) and `melo ""` opens the plain
+loop. Bare `melo` and `melo --reconfigure` open the loop too on a terminal
+(after the setup they need); without one, bare `melo` starts the gateway.
+The direct-mode flags apply to a task only.
 """
 
 from __future__ import annotations
@@ -127,10 +127,11 @@ def test_a_provider_error_keeps_the_loop_usable(
     assert err == "melo: run ended with status provider_error: HTTP 503\n"
 
 
-def test_bare_melo_starts_the_configured_gateway() -> None:
+def test_bare_melo_without_a_terminal_starts_the_configured_gateway() -> None:
     cfg = _config()
     with (
         mock.patch("sys.argv", ["melo"]),
+        mock.patch.object(cli, "_on_a_terminal", return_value=False),
         mock.patch("localmelo.support.config.load", return_value=cfg),
         mock.patch("localmelo.support.onboard.run_backend_setup") as setup,
         mock.patch.object(cli, "_start_gateway") as gateway,
@@ -142,38 +143,204 @@ def test_bare_melo_starts_the_configured_gateway() -> None:
     build.assert_not_called()
 
 
-def test_bare_melo_sets_up_a_backend_first_when_none_is_configured() -> None:
-    new_cfg = _config()
+def test_bare_melo_on_a_terminal_opens_the_loop_on_the_configured_backend(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    agent = _agent()
     with (
         mock.patch("sys.argv", ["melo"]),
-        mock.patch("localmelo.support.config.load", return_value=Config()),
+        mock.patch.object(cli, "_on_a_terminal", return_value=True),
+        mock.patch("localmelo.support.config.load", return_value=_config()),
+        mock.patch("localmelo.support.onboard.run_backend_setup") as setup,
+        mock.patch("localmelo.support.onboard.run_first_setup") as first,
+        mock.patch.object(cli, "_start_gateway") as gateway,
+        mock.patch.object(cli, "_build_direct_mode_agent", return_value=agent) as build,
+        mock.patch("builtins.input", side_effect=["6*7", "/exit"]),
+    ):
+        cli.main()
+    setup.assert_not_called()
+    first.assert_not_called()
+    gateway.assert_not_called()
+    agent.run_task.assert_awaited_once_with("6*7")
+    assert build.call_args.args[0].query == [""]
+    assert build.call_args.kwargs["options"] == AgentOptions(record_answers=True)
+    out = capsys.readouterr().out
+    assert out.startswith(
+        "Model: configured-model · http://127.0.0.1:8500/v1 "
+        "(melo --reconfigure changes it)\nlocalmelo · local agent\n"
+    )
+
+
+def test_bare_melo_on_a_terminal_asks_for_a_server_when_none_is_configured() -> None:
+    from localmelo.support.onboard import FirstSetup
+
+    agent = _agent()
+    saved = FirstSetup(url="http://127.0.0.1:8500/v1", model="m", saved=True)
+    with (
+        mock.patch("sys.argv", ["melo"]),
+        mock.patch.object(cli, "_on_a_terminal", return_value=True),
+        mock.patch("localmelo.support.config.load", side_effect=[Config(), _config()]),
+        mock.patch("localmelo.support.onboard.run_backend_setup") as setup,
         mock.patch(
-            "localmelo.support.onboard.run_backend_setup", return_value=new_cfg
-        ) as setup,
+            "localmelo.support.onboard.run_first_setup", return_value=saved
+        ) as first,
+        mock.patch.object(cli, "_start_gateway") as gateway,
+        mock.patch.object(cli, "_build_direct_mode_agent", return_value=agent) as build,
+        mock.patch("builtins.input", side_effect=["/exit"]),
+    ):
+        cli.main()
+    first.assert_called_once_with()
+    setup.assert_not_called()
+    gateway.assert_not_called()
+    # Saved: the loop reads the config, as every later `melo` does.
+    assert build.call_args.args[0].base_url is None
+
+
+def test_a_server_started_anyway_is_used_without_the_config() -> None:
+    from localmelo.support.onboard import FirstSetup
+
+    agent = _agent()
+    unsaved = FirstSetup(url="http://127.0.0.1:8500/v1", model="m", saved=False)
+    with (
+        mock.patch("sys.argv", ["melo"]),
+        mock.patch.object(cli, "_on_a_terminal", return_value=True),
+        mock.patch("localmelo.support.config.load", return_value=Config()),
+        mock.patch("localmelo.support.onboard.run_first_setup", return_value=unsaved),
+        mock.patch.object(cli, "_build_direct_mode_agent", return_value=agent) as build,
+        mock.patch("builtins.input", side_effect=["/exit"]),
+    ):
+        cli.main()
+    args = build.call_args.args[0]
+    assert (args.base_url, args.chat_model) == ("http://127.0.0.1:8500/v1", "m")
+
+
+@pytest.mark.parametrize(
+    ("raised", "code"), [(EOFError, 0), (KeyboardInterrupt, 130), (None, 0)]
+)
+def test_leaving_the_first_run_questions_starts_nothing(
+    capsys: pytest.CaptureFixture[str], raised: type[BaseException] | None, code: int
+) -> None:
+    first = (
+        mock.patch("localmelo.support.onboard.run_first_setup", side_effect=raised)
+        if raised is not None
+        else mock.patch("localmelo.support.onboard.run_first_setup", return_value=None)
+    )
+    with (
+        mock.patch("sys.argv", ["melo"]),
+        mock.patch.object(cli, "_on_a_terminal", return_value=True),
+        mock.patch("localmelo.support.config.load", return_value=Config()),
+        first,
         mock.patch.object(cli, "_start_gateway") as gateway,
         mock.patch.object(cli, "_build_direct_mode_agent") as build,
+        pytest.raises(SystemExit) as exc,
+    ):
+        cli.main()
+    assert exc.value.code == code
+    gateway.assert_not_called()
+    build.assert_not_called()
+    if raised is not None:
+        assert capsys.readouterr().out == "\nSetup cancelled.\n"
+
+
+def test_reconfigure_on_a_terminal_runs_the_wizard_then_opens_the_loop() -> None:
+    agent = _agent()
+    with (
+        mock.patch("sys.argv", ["melo", "--reconfigure"]),
+        mock.patch.object(cli, "_on_a_terminal", return_value=True),
+        mock.patch("localmelo.support.config.load", return_value=_config("new")),
+        mock.patch(
+            "localmelo.support.onboard.run_backend_setup", return_value=_config("new")
+        ) as setup,
+        mock.patch.object(cli, "_start_gateway") as gateway,
+        mock.patch.object(cli, "_build_direct_mode_agent", return_value=agent),
+        mock.patch("builtins.input", side_effect=["/exit"]),
     ):
         cli.main()
     setup.assert_called_once_with()
-    gateway.assert_called_once_with(new_cfg)
+    gateway.assert_not_called()
+
+
+def test_reconfigure_cancelled_on_a_terminal_starts_nothing() -> None:
+    with (
+        mock.patch("sys.argv", ["melo", "--reconfigure"]),
+        mock.patch.object(cli, "_on_a_terminal", return_value=True),
+        mock.patch("localmelo.support.onboard.run_backend_setup", return_value=None),
+        mock.patch.object(cli, "_start_gateway") as gateway,
+        mock.patch.object(cli, "_build_direct_mode_agent") as build,
+        pytest.raises(SystemExit) as exc,
+    ):
+        cli.main()
+    assert exc.value.code == 0
+    gateway.assert_not_called()
     build.assert_not_called()
 
 
-def test_reconfigure_runs_the_wizard_then_starts_the_gateway() -> None:
-    new_cfg = _config("new-model")
+@pytest.mark.parametrize("argv", [["melo"], ["melo", "--serve"]])
+def test_no_config_and_no_terminal_exits_with_one_line(
+    capsys: pytest.CaptureFixture[str], argv: list[str]
+) -> None:
     with (
-        mock.patch("sys.argv", ["melo", "--reconfigure"]),
+        mock.patch("sys.argv", argv),
+        mock.patch.object(cli, "_on_a_terminal", return_value=False),
+        mock.patch("localmelo.support.config.load", return_value=Config()),
+        mock.patch("localmelo.support.onboard.run_backend_setup") as setup,
+        mock.patch.object(cli, "_start_gateway") as gateway,
+        pytest.raises(SystemExit) as exc,
+    ):
+        cli.main()
+    assert exc.value.code == 1
+    setup.assert_not_called()
+    gateway.assert_not_called()
+    assert capsys.readouterr() == (
+        "",
+        "melo: no backend is configured; run melo --reconfigure in a terminal\n",
+    )
+
+
+@pytest.mark.parametrize(
+    "argv", [["melo", "--reconfigure"], ["melo", "--serve", "--reconfigure"]]
+)
+def test_reconfigure_without_a_terminal_reads_its_answers_then_starts_the_gateway(
+    argv: list[str],
+) -> None:
+    """As on main: a script can pipe the wizard's answers in."""
+    new_cfg = _config("new")
+    with (
+        mock.patch("sys.argv", argv),
+        mock.patch.object(cli, "_on_a_terminal", return_value=False),
         mock.patch("localmelo.support.config.load", return_value=_config()),
         mock.patch(
             "localmelo.support.onboard.run_backend_setup", return_value=new_cfg
         ) as setup,
         mock.patch.object(cli, "_start_gateway") as gateway,
-        mock.patch.object(cli, "_build_direct_mode_agent") as build,
     ):
         cli.main()
     setup.assert_called_once_with()
     gateway.assert_called_once_with(new_cfg)
-    build.assert_not_called()
+
+
+@pytest.mark.parametrize(("raised", "code"), [(EOFError, 0), (KeyboardInterrupt, 130)])
+@pytest.mark.parametrize(
+    "argv", [["melo", "--serve"], ["melo", "--serve", "--reconfigure"]]
+)
+def test_leaving_the_gateways_wizard_prints_one_line(
+    capsys: pytest.CaptureFixture[str],
+    argv: list[str],
+    raised: type[BaseException],
+    code: int,
+) -> None:
+    with (
+        mock.patch("sys.argv", argv),
+        mock.patch.object(cli, "_on_a_terminal", return_value=True),
+        mock.patch("localmelo.support.config.load", return_value=Config()),
+        mock.patch("localmelo.support.onboard.run_backend_setup", side_effect=raised),
+        mock.patch.object(cli, "_start_gateway") as gateway,
+        pytest.raises(SystemExit) as exc,
+    ):
+        cli.main()
+    assert exc.value.code == code
+    gateway.assert_not_called()
+    assert capsys.readouterr() == ("\nSetup cancelled.\n", "")
 
 
 def test_an_explicit_task_keeps_priority_over_reconfigure() -> None:
