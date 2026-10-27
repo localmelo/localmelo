@@ -154,15 +154,26 @@ def cut_to_width(text: str, width: int) -> str:
     return "".join(kept) + "…"
 
 
+# Format characters that join or part the glyphs around them, as in a
+# family emoji (man, ZWJ, woman, ZWJ, girl): kept by printable(). Each
+# counts as one cell, so a terminal that joins them shows a line narrower
+# than counted, never wider.
+JOINERS: Final = frozenset("\u200c\u200d")
+
+
+def _unprintable(char: str) -> bool:
+    return char not in JOINERS and unicodedata.category(char).startswith("C")
+
+
 def printable(text: str) -> str:
     """*text* on one line, with control and format characters as ``?``.
 
     Labels name files and programs, and a file name may hold escape
     sequences or bidirectional controls that would rewrite the terminal.
+    The zero-width joiner and non-joiner (:data:`JOINERS`) are kept.
     """
     return "".join(
-        "?" if unicodedata.category(char).startswith("C") else char
-        for char in " ".join(text.split())
+        "?" if _unprintable(char) else char for char in " ".join(text.split())
     )
 
 

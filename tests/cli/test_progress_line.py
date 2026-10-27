@@ -227,6 +227,13 @@ def test_printable_replaces_control_and_format_characters() -> None:
     assert pl.printable("a\nb\tc") == "a b c"
 
 
+def test_printable_keeps_the_joiners_of_emoji_sequences() -> None:
+    family = "\U0001f468\u200d\U0001f469\u200d\U0001f467"  # one emoji, joined
+    assert pl.printable(f"Read {family}.txt") == f"Read {family}.txt"
+    assert pl.printable("a\u200cb") == "a\u200cb"  # zero-width non-joiner
+    assert pl.printable("a\u202eb\u2066c\u200bd") == "a?b?c?d"  # the rest go
+
+
 # ── Level 0: facts ──────────────────────────────────────────────────────────
 
 
