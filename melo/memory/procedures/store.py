@@ -1156,6 +1156,10 @@ class SqliteProcedures(Procedures):
                 busy_timeout_ms=BUSY_TIMEOUT_MS,
                 locked_retry_s=busy_s,
             )
+            # Every connection overwrites what it deletes, whatever the
+            # SQLite build's default: rows that forget removes, and the
+            # cells that a template's status change frees.
+            await conn.execute("PRAGMA secure_delete = ON")
             await self._migrate(conn)
         except asyncio.CancelledError:
             self._drop(conn)
@@ -1225,17 +1229,17 @@ class SqliteProcedures(Procedures):
                 raise
 
     async def forget(self, routine_id: str | None = None) -> int:
-        """As :meth:`Procedures.forget`, overwriting what it deletes.
+        """As :meth:`Procedures.forget`, leaving nothing of what it deletes.
 
-        ``secure_delete`` zeroes the deleted rows' content, and a WAL
-        checkpoint moves the change into the database file.
+        ``secure_delete`` (on for every connection) zeroes the deleted rows;
+        ``VACUUM`` then rebuilds the file, so no free page keeps an older
+        copy of a row, such as a superseded template's; and a ``TRUNCATE``
+        checkpoint empties the WAL.
         """
-        async with self._lock:
-            conn = await self._open()
-            await conn.execute("PRAGMA secure_delete = ON")
         deleted = await super().forget(routine_id)
         async with self._lock:
             conn = await self._open()
+            await conn.execute("VACUUM")
             await conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         return deleted
 

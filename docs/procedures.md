@@ -268,7 +268,9 @@ melo-procedures forget (--routine ID | --all) [--db FILE | --memory-dir DIR]
 `export` prints every row of a `procedures.db` as a JSON line: the
 `table`, then the row's columns by name, JSON columns as text. `forget`
 deletes one routine with its episodes and templates, or every row, prints
-`{"deleted": <rows>}`, and overwrites what it deleted in the file. Both read
+`{"deleted": <rows>}`, and rebuilds the file (`VACUUM`), so that neither it
+nor its `-wal` keeps any copy of what was deleted. Run it while no
+localmelo process is running. Both read
 `procedures.db` in `--memory-dir`, else in `LOCALMELO_MEMORY_DIR`, else in
 `~/.cache/localmelo/memory`; neither creates it.
 
