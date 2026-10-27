@@ -45,17 +45,23 @@ def config_backend(cfg: config.Config, model: str | None) -> BackendInfo:
 
 
 def url_backend(
-    url: str, model: str | None, *, source: str, listed: int = 0
+    url: str, model: str | None, *, source: str, listed: int = 0, embedding: str = ""
 ) -> BackendInfo:
-    """A server at *url* that is not the config's."""
+    """A server at *url* that is not the config's; *embedding* names its memory's."""
     return BackendInfo(
         key=discovery.OPENAI_COMPATIBLE,
         label=URL_LABEL,
         model=model or "default",
         base_url=url,
+        embedding=embedding,
         source=source,
         listed=listed,
     )
+
+
+def url_embedding(base_url: str | None, model: str | None) -> str:
+    """How the banner names ``--embedding-base-url``'s server; ``""`` without one."""
+    return f"{URL_LABEL} · {model or 'default'}" if base_url else ""
 
 
 class AgentFactory:
@@ -165,7 +171,10 @@ class AgentFactory:
             self.backend = config_backend(self._cfg, model)
             return
         self.backend = url_backend(
-            url, model, source="saved" if self.saves else "--base-url"
+            url,
+            model,
+            source="saved" if self.saves else "--base-url",
+            embedding=self.backend.embedding,
         )
 
     def save(self) -> str:

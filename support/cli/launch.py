@@ -84,7 +84,7 @@ def _configured(cfg: config.Config, model: str | None) -> Choice | int:
 
 def _with_url(args: argparse.Namespace) -> Choice:
     """``--base-url``: the model from the flag or the server's list; maybe saved."""
-    from localmelo.support.cli.agents import url_backend
+    from localmelo.support.cli.agents import url_backend, url_embedding
 
     url: str = args.base_url
     offer = not config.load().is_configured
@@ -110,7 +110,11 @@ def _with_url(args: argparse.Namespace) -> Choice:
         )
     picked = len(models) if not args.chat_model and len(models) > 1 else 0
     backend = url_backend(
-        url, model, source="saved" if saved else "--base-url", listed=picked
+        url,
+        model,
+        source="saved" if saved else "--base-url",
+        listed=picked,
+        embedding=url_embedding(args.embedding_base_url, args.embedding_model),
     )
     return Choice(
         backend,

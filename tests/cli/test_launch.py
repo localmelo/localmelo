@@ -454,3 +454,39 @@ def test_a_log_folder_that_cannot_be_made_is_one_line(
     assert _run(monkeypatch, terminal=True) == 1
     err = capsys.readouterr().err
     assert err.startswith("melo: cannot open the log in ") and err.count("\n") == 1
+
+
+def test_a_base_url_with_an_embedding_server_shows_long_term_memory() -> None:
+    from localmelo.support.cli.views import memory_text
+
+    faked = Faked(cfg=_configured(), listed=["chat-a"])
+    choice = _choice(
+        faked.choose(
+            base_url=URL,
+            chat_model="chat-a",
+            embedding_base_url=URL,
+            embedding_model="nomic-embed-text",
+        )
+    )
+    assert choice.backend.embedding == "OpenAI-compatible · nomic-embed-text"
+    assert (
+        memory_text(choice.backend, memory=True)
+        == "long-term memory · OpenAI-compatible · nomic-embed-text"
+    )
+    plain = _choice(Faked(cfg=_configured(), listed=["chat-a"]).choose(base_url=URL))
+    assert plain.backend.embedding == ""
+
+
+def test_a_new_server_keeps_the_sessions_embedding_server() -> None:
+    from localmelo.support.cli.agents import AgentFactory, url_backend
+
+    factory = AgentFactory(
+        backend=url_backend(URL, "m", source="--base-url", embedding="E · e"),
+        cfg=None,
+        options=AgentOptions(),
+        workspace="/tmp",
+        embedding_base_url=URL,
+        embedding_model="e",
+    )
+    factory.use_url("http://127.0.0.1:19/v1", "n")
+    assert factory.backend.embedding == "E · e"
