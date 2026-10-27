@@ -762,3 +762,84 @@ async def test_a_new_server_keeps_the_configs_embedding_and_timeout(
     assert built[0]["cfg"].vllm.chat_url == new_url
     assert config.load().vllm.chat_model == "m3"
     assert config.load().embedding_backend == "sglang"
+
+
+# ── Text given back to the input box ──
+
+
+async def test_a_queued_message_comes_back_with_the_cursor_after_it(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    setup.factory.scripts["m1"] = []
+    session.agent = await setup.factory.build()
+    session.enter("wait for it")
+    await _until(
+        lambda: session.runner is not None and session.runner.current_turn is not None
+    )
+    session.enter("queued one")
+    session.stop()
+    await setup.idle()
+    buffer = setup.app.buffer
+    assert (buffer.text, buffer.cursor_position) == ("queued one", len("queued one"))
+    buffer.insert_text("ZZ")
+    assert buffer.text == "queued oneZZ"
+
+
+async def test_a_queued_message_comes_back_before_the_draft_where_it_was(
+    setup: Setup,
+) -> None:
+    session = setup.session
+    setup.factory.scripts["m1"] = []
+    session.agent = await setup.factory.build()
+    session.enter("wait for it")
+    await _until(
+        lambda: session.runner is not None and session.runner.current_turn is not None
+    )
+    session.enter("queued one")
+    buffer = setup.app.buffer
+    buffer.insert_text("hello")
+    buffer.cursor_position = 2  # he|llo
+    session.stop()
+    await setup.idle()
+    assert buffer.text == "queued one\nhello"
+    buffer.insert_text("ZZ")
+    assert buffer.text == "queued one\nheZZllo"
+
+
+async def test_a_turn_that_could_not_run_gives_the_message_back(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+    import sqlite3
+
+    session = setup.session
+    calls: list[str] = []
+    real_run_turn = SessionRunner.run_turn
+
+    async def locked(self: SessionRunner, text: str, **kwargs: Any) -> Any:
+        calls.append(text)
+        if len(calls) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return await real_run_turn(self, text, **kwargs)
+
+    monkeypatch.setattr(SessionRunner, "run_turn", locked)
+    caplog.set_level(logging.INFO)
+    session.enter("my important message")
+    assert session.title == "my important message"
+    await setup.idle()
+    buffer = setup.app.buffer
+    assert buffer.text == "my important message"
+    assert buffer.cursor_position == len("my important message")
+    text = setup.out.text()
+    assert "✗ The turn could not run: OperationalError: database is locked" in text
+    assert "Your message is back in the input box." in text
+    # Logged, but below the level that prints a ⚠ line on the screen.
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert any("could not run" in r.getMessage() for r in caplog.records)
+    # The next message names the session: no row was written for the first.
+    session.enter("second try")
+    assert session.title == "second try"
+    await setup.idle()
+    sessions = await setup.store.list_sessions()
+    assert [s.title for s in sessions] == ["second try"]

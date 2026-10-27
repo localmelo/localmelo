@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable, Coroutine
 from typing import Any, Final, Literal
 
+from prompt_toolkit.document import Document
 from rich.text import Text
 
 from localmelo.melo.agent import Agent
@@ -205,8 +206,8 @@ class CliSession:
         """Send *text* as the next turn (idle only)."""
         self._state = "running"
         self._stop_wanted = self._stop_landed = False
-        if self.runner is None:
-            self.title = title_from_text(text)
+        if self.runner is None or self.runner.session_id is None:
+            self.title = title_from_text(text)  # no session row yet
         self.renderer.begin_turn(text)
         self._work = self.spawn(self._turn(text))
 
@@ -239,7 +240,8 @@ class CliSession:
         except SessionBusyError as exc:
             error = exc
         except Exception as exc:
-            logger.exception("The turn could not run")
+            # The ✗ line says it on the screen; an ERROR would add a ⚠ line.
+            logger.warning("The turn could not run", exc_info=True)
             error = exc
         # A second stop can make run_turn return while the runner still
         # finishes the turn: the next message must not meet it.
@@ -256,18 +258,38 @@ class CliSession:
         if self._closed:
             return  # the session shuts down: a queued message is not sent
         queued = self.take_queued()
-        if queued is None:
-            return
-        if result is not None and result.status == "completed" and error is None:
+        completed = result is not None and result.status == "completed"
+        if queued is not None and completed and error is None:
             self.submit(queued)
-        elif self.app is not None:
-            buffer = self.app.buffer
-            buffer.text = queued + ("\n" + buffer.text if buffer.text else "")
-            self.out.print(
-                self._text(
-                    "Your queued message is back in the input box.", style="muted"
-                )
+            return
+        # A turn that could not run gives its message back, then the queued one.
+        back = [part for part in (text if error else None, queued) if part]
+        if not back or self.app is None:
+            return
+        self._give_back("\n".join(back))
+        if error and queued:
+            line = "Your message and the queued one are back in the input box."
+        elif error:
+            line = "Your message is back in the input box."
+        else:
+            line = "Your queued message is back in the input box."
+        self.out.print(self._text(line, style="muted"))
+
+    def _give_back(self, text: str) -> None:
+        """Put *text* in front of the draft; the cursor stays where it was.
+
+        In an empty draft the cursor goes after *text*, so what is typed
+        next follows it.
+        """
+        assert self.app is not None
+        buffer = self.app.buffer
+        draft = buffer.document
+        if draft.text:
+            buffer.document = Document(
+                text + "\n" + draft.text, len(text) + 1 + draft.cursor_position
             )
+        else:
+            buffer.document = Document(text, len(text))
 
     def stop(self, reason: str = STOP_REASON) -> bool:
         """Stop the turn or the switch, once; Esc and Ctrl+C."""
