@@ -12,6 +12,7 @@ from localmelo.support.cli.text import (
     expand_tabs,
     input_rows,
     pad_cells,
+    wrap_cells,
 )
 from localmelo.support.cli.theme import ASCII, UNICODE, symbols_for, wants_no_color
 
@@ -59,6 +60,12 @@ def test_cut_middle_keeps_the_last_part_of_a_path() -> None:
     assert cut.endswith("/demo-project") and "…" in cut and cells(cut) <= 20
     assert cut_middle("~/short", 20) == "~/short"
     assert cells(cut_middle("~/" + "x" * 40, 10)) <= 10
+
+
+def test_wrap_cells_keeps_every_character() -> None:
+    assert wrap_cells("ab  cd", 3) == ["ab ", " cd"]
+    assert wrap_cells("你好世界", 5) == ["你好", "世界"]
+    assert wrap_cells("", 5) == [""]
 
 
 def test_pad_cells_counts_wide_characters() -> None:

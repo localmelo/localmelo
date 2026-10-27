@@ -17,6 +17,7 @@ from prompt_toolkit.input import PipeInput, create_pipe_input
 from prompt_toolkit.output.vt100 import Vt100_Output
 
 from localmelo.support.cli.app import InteractiveApp, StatusBar
+from localmelo.support.cli.approvals import TerminalApprover
 from localmelo.support.cli.output import RecordingOut
 from localmelo.support.cli.render import TurnRenderer
 from localmelo.support.cli.theme import UNICODE
@@ -132,6 +133,7 @@ async def running_app(
     rows: int = 24,
     history: History | None = None,
     completer: Completer | None = None,
+    approver: TerminalApprover | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> AsyncIterator[Driver]:
     written = io.StringIO()
@@ -148,6 +150,7 @@ async def running_app(
             symbols=UNICODE,
             history=history,
             completer=completer,
+            approver=approver,
             input=pipe,
             output=output,
             clock=clock,

@@ -70,6 +70,22 @@ def cut_middle(text: str, width: int, ellipsis: str = "…") -> str:
     return take_cells(head, room) + ellipsis + tail
 
 
+def wrap_cells(line: str, width: int) -> list[str]:
+    """*line* in rows of at most *width* cells, every character kept.
+
+    No whitespace is collapsed or dropped, unlike ``textwrap``: what a
+    command will run must show whole.
+    """
+    rows: list[str] = []
+    while line:
+        row = take_cells(line, max(width, 2))
+        if not row:  # a character wider than the row: it takes one alone
+            row = line[0]
+        rows.append(row)
+        line = line[len(row) :]
+    return rows or [""]
+
+
 def pad_cells(text: str, width: int) -> str:
     """*text* with spaces after it up to *width* cells."""
     return text + " " * max(0, width - cells(text))

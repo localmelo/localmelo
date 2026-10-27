@@ -37,6 +37,7 @@ from prompt_toolkit.layout import (
     FormattedTextControl,
     HSplit,
     Layout,
+    VSplit,
     Window,
 )
 from prompt_toolkit.layout.controls import BufferControl
@@ -48,10 +49,21 @@ from prompt_toolkit.layout.processors import (
 )
 from prompt_toolkit.output import ColorDepth, Output
 from prompt_toolkit.widgets import SearchToolbar
+from rich.text import Text
 
+from localmelo.support.cli.approvals import (
+    BODY_LINES,
+    ESCAPED_WARNING,
+    REASON_MAX_CHARS,
+    PendingApproval,
+    TerminalApprover,
+    panel_text,
+    session_warning,
+)
 from localmelo.support.cli.render import TurnRenderer, live_rows
 from localmelo.support.cli.text import cells, cut_cells, cut_middle, input_rows
 from localmelo.support.cli.theme import PT_STYLE, Symbols
+from localmelo.support.sessions.display import home_label
 
 # Seconds between redraws of the live area while the session is busy.
 TICK_S: Final = 0.12
@@ -207,12 +219,14 @@ class InteractiveApp:
         completer: Completer | None = None,
         input: Input | None = None,
         output: Output | None = None,
+        approver: TerminalApprover | None = None,
         no_color: bool = False,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.controller = controller
         self.renderer = renderer
         self.symbols = symbols
+        self.approver = approver
         self._clock = clock
         self._hint = ""
         self._hint_until = 0.0
@@ -243,6 +257,29 @@ class InteractiveApp:
         )
         rule = Window(char=symbols.rule, height=1, style="class:rule")
         self.input_box = HSplit([rule, self.input_window, self.search, rule])
+        self.panel_window = Window(
+            FormattedTextControl(self._panel_fragments, focusable=True),
+            dont_extend_height=True,
+        )
+        self.reason = Buffer(multiline=False, on_text_changed=self._cap_reason)
+        self.reason_window = Window(
+            BufferControl(self.reason),
+            height=1,
+            get_line_prefix=lambda lineno, wrap: [
+                ("class:muted", "  Reason (optional, enter sends): ")
+            ],
+        )
+        self.reason_row = VSplit(
+            [
+                self.reason_window,
+                Window(
+                    FormattedTextControl(self._reason_count),
+                    width=lambda: Dimension.exact(len(f"{REASON_MAX_CHARS}") * 2 + 2),
+                ),
+            ]
+        )
+        if approver is not None:
+            approver.on_change = self._approval_changed
         body = HSplit(
             [
                 ConditionalContainer(
@@ -422,15 +459,229 @@ class InteractiveApp:
             self.controller.status_bar(), width, self.symbols.ellipsis
         )
 
+    # ── The approval panel ──
+
+    def _pending(self) -> PendingApproval | None:
+        return None if self.approver is None else self.approver.pending
+
     def _panel_open(self) -> bool:
-        """Whether a panel replaces the input box (approvals add one)."""
-        return False
+        """Whether the approval panel replaces the input box."""
+        return self._pending() is not None
 
     def _panels(self) -> list[ConditionalContainer]:
-        return []
+        reason_open = Condition(
+            lambda: (pending := self._pending()) is not None and pending.reason
+        )
+        return [
+            ConditionalContainer(
+                HSplit(
+                    [
+                        self.panel_window,
+                        ConditionalContainer(self.reason_row, filter=reason_open),
+                    ]
+                ),
+                filter=Condition(self._panel_open),
+            )
+        ]
+
+    def _approval_changed(self) -> None:
+        """The panel opened or closed: move the focus, freeze the spinner."""
+        pending = self._pending()
+        live = self.renderer.live
+        if live is not None:
+            live.waiting = pending is not None
+        if pending is not None:
+            self.reason.reset()
+            with contextlib.suppress(ValueError):
+                self.app.layout.focus(self.panel_window)
+            self.bell()
+        else:
+            with contextlib.suppress(ValueError):
+                self.app.layout.focus(self.input_window)
+        self.app.invalidate()
+
+    def _options(self, pending: PendingApproval) -> list[tuple[int, str]]:
+        tool = pending.request.tool_name
+        options = [(0, "Yes")]
+        if pending.offer_session:
+            options.append((1, f"Yes, and allow every {tool} call in this session"))
+        options.append((2, "No, and tell melo why"))
+        return options
+
+    def _panel_fragments(self) -> StyleAndTextTuples:
+        pending = self._pending()
+        if pending is None:
+            return []
+        width = self.app.output.get_size().columns
+        symbols = self.symbols
+        boxed = width >= 40 and symbols.rule == "─"
+        inner = width - 4 if boxed else width - 2
+        text = panel_text(pending.request, exists=pending.exists, width=inner - 2)
+        body = text.body
+        shown = body if len(body) <= BODY_LINES else body[: BODY_LINES - 1]
+        lines: list[tuple[str, str]] = [("class:tool", text.header)]
+        lines += [("", "  " + line) for line in shown]
+        if len(shown) < len(body):
+            lines.append(
+                (
+                    "class:muted",
+                    f"{symbols.ellipsis} +{len(body) - len(shown)} lines (v views all)",
+                )
+            )
+        if text.escaped:
+            lines.append(("class:warn", f"{symbols.warn} {ESCAPED_WARNING}"))
+        out: StyleAndTextTuples = []
+
+        def row(style: str, line: str) -> None:
+            out.append((style, line))
+            out.append(("", "\n"))
+
+        if boxed:
+            title = f"─ {text.title} "
+            row(
+                "",
+                "╭"
+                + cut_cells(title, width - 2)
+                + "─" * max(0, width - 2 - cells(title))
+                + "╮",
+            )
+            for style, line in lines:
+                shown_line = cut_cells(line, inner, symbols.ellipsis)
+                out.append(("", "│ "))
+                out.append((style, shown_line))
+                row("", " " * (inner - cells(shown_line)) + " │")
+            row("", "╰" + "─" * (width - 2) + "╯")
+        else:
+            row("class:question", text.title)
+            for style, line in lines:
+                row(style, cut_cells(line, width, symbols.ellipsis))
+        for index, label in self._options(pending):
+            mark = (
+                symbols.selection
+                if index == pending.selected and not pending.reason
+                else " "
+            )
+            style = "class:accent" if index == pending.selected else ""
+            row(
+                style,
+                cut_cells(f"{mark} {index + 1}. {label}", width, symbols.ellipsis),
+            )
+        if pending.reason:
+            out.pop()  # the reason field follows on its own row
+            return out
+        warning = session_warning(
+            pending.request.tool_name,
+            home_label(pending.request.workspace_root or "") or "the workspace",
+        )
+        if pending.offer_session:
+            for line in warning:
+                row("class:muted", cut_cells("  " + line, width, symbols.ellipsis))
+        dot = f" {symbols.dot} "
+        keys = dot.join(
+            ["↑↓ select", "enter confirm", "1-3", "v view all", "esc stop the turn"]
+        )
+        out.append(("class:muted", cut_cells("  " + keys, width, symbols.ellipsis)))
+        return out
+
+    def _reason_count(self) -> StyleAndTextTuples:
+        return [("class:muted", f" {len(self.reason.text)}/{REASON_MAX_CHARS}")]
+
+    def _cap_reason(self, buffer: Buffer) -> None:
+        if len(buffer.text) > REASON_MAX_CHARS:
+            buffer.document = Document(buffer.text[:REASON_MAX_CHARS])
+
+    def _move(self, step: int) -> None:
+        pending = self._pending()
+        if pending is None:
+            return
+        indexes = [index for index, _ in self._options(pending)]
+        position = indexes.index(pending.selected) if pending.selected in indexes else 0
+        pending.selected = indexes[(position + step) % len(indexes)]
+        self.app.invalidate()
+
+    def _choose(self, index: int) -> None:
+        pending = self._pending()
+        if pending is None or self.approver is None or self.approver.guarded():
+            return
+        if index == 0:
+            self.approver.answer("once")
+        elif index == 1:
+            self.approver.answer("session")
+        elif index == 2:
+            pending.selected = 2
+            pending.reason = True
+            self.app.layout.focus(self.reason_window)
+            self.app.invalidate()
+
+    def _back_to_choices(self) -> None:
+        pending = self._pending()
+        if pending is not None:
+            pending.reason = False
+            self.reason.reset()
+            self.app.layout.focus(self.panel_window)
+            self.app.invalidate()
+
+    def _view_all(self) -> None:
+        pending = self._pending()
+        if pending is None or self.approver is None or self.approver.guarded():
+            return
+        text = panel_text(
+            pending.request, exists=pending.exists, width=self.renderer.out.width - 2
+        )
+        self.renderer.out.print(Text("\n".join([text.header, *text.body])))
 
     def _panel_bindings(self) -> list[KeyBindings]:
-        return []
+        kb = KeyBindings()
+        choices = has_focus(self.panel_window)
+        reason = has_focus(self.reason)
+
+        for number in (1, 2, 3):
+
+            @kb.add(str(number), filter=choices)
+            def _(event: KeyPressEvent, index: int = number - 1) -> None:
+                self._choose(index)
+
+        @kb.add("up", filter=choices)
+        def _(event: KeyPressEvent) -> None:
+            self._move(-1)
+
+        @kb.add("down", filter=choices)
+        def _(event: KeyPressEvent) -> None:
+            self._move(1)
+
+        @kb.add("enter", filter=choices)
+        def _(event: KeyPressEvent) -> None:
+            pending = self._pending()
+            if pending is not None:
+                self._choose(pending.selected)
+
+        @kb.add("v", filter=choices)
+        def _(event: KeyPressEvent) -> None:
+            self._view_all()
+
+        @kb.add("escape", filter=choices, eager=True)
+        @kb.add("c-c", filter=choices)
+        def _(event: KeyPressEvent) -> None:
+            self.controller.stop()
+            self.app.invalidate()
+
+        @kb.add("enter", filter=reason)
+        def _(event: KeyPressEvent) -> None:
+            if self.approver is not None:
+                self.approver.answer("deny", self.reason.text)
+
+        @kb.add("escape", filter=reason, eager=True)
+        def _(event: KeyPressEvent) -> None:
+            self._back_to_choices()
+
+        @kb.add("c-c", filter=reason)
+        def _(event: KeyPressEvent) -> None:
+            if self.reason.text:
+                self.reason.reset()
+            else:
+                self._back_to_choices()
+
+        return [kb]
 
     # ── Keys ──
 
@@ -521,6 +772,15 @@ class InteractiveApp:
         Only a press that stopped something or said "press ctrl+c again"
         arms the second press, so clearing a draft never quits.
         """
+        pending = self._pending()
+        if pending is not None:
+            if pending.reason and self.reason.text:
+                self.reason.reset()
+            elif pending.reason:
+                self._back_to_choices()
+            else:
+                self.controller.stop()
+            return
         now = self._clock()
         double = now - self._last_ctrl_c < DOUBLE_PRESS_S
         self._last_ctrl_c = -DOUBLE_PRESS_S
