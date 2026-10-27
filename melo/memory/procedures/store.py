@@ -1141,12 +1141,21 @@ class SqliteProcedures(Procedures):
             if not self._create and not os.path.exists(self._db_path):
                 raise FileNotFoundError(f"{self._db_path} does not exist")
             create_private_file(self._db_path)
-        conn = await aiosqlite.connect(self._db_path)
+        # The store waits BUSY_TIMEOUT_MS for another writer from its first
+        # statement on, also while it creates the schema: a statement still
+        # waiting when a caller's bound cancels the call holds up closing
+        # the connection, and so the process's exit.
+        busy_s = BUSY_TIMEOUT_MS / 1000
+        conn = await aiosqlite.connect(self._db_path, timeout=busy_s)
         try:
             # A newer file is refused before anything is written to it.
             await self._check_version(conn)
-            await prepare_connection(conn, _SCHEMA)
-            await conn.execute(f"PRAGMA busy_timeout={BUSY_TIMEOUT_MS}")
+            await prepare_connection(
+                conn,
+                _SCHEMA,
+                busy_timeout_ms=BUSY_TIMEOUT_MS,
+                locked_retry_s=busy_s,
+            )
             await self._migrate(conn)
         except asyncio.CancelledError:
             self._drop(conn)

@@ -34,28 +34,44 @@ _PRAGMAS: tuple[str, ...] = (
 LOCKED_RETRY_S: Final = 5.0
 
 
-async def apply_pragmas(conn: aiosqlite.Connection) -> None:
-    """Apply the standard PRAGMA set on a freshly opened connection."""
+async def apply_pragmas(
+    conn: aiosqlite.Connection, *, busy_timeout_ms: int | None = None
+) -> None:
+    """Apply the standard PRAGMA set on a freshly opened connection.
+
+    *busy_timeout_ms* replaces the set's busy timeout of 5,000 ms.
+    """
     for stmt in _PRAGMAS:
+        if busy_timeout_ms is not None and stmt.startswith("PRAGMA busy_timeout"):
+            stmt = f"PRAGMA busy_timeout={int(busy_timeout_ms)}"
         await conn.execute(stmt)
 
 
-async def prepare_connection(conn: aiosqlite.Connection, schema: str) -> None:
+async def prepare_connection(
+    conn: aiosqlite.Connection,
+    schema: str,
+    *,
+    busy_timeout_ms: int | None = None,
+    locked_retry_s: float | None = None,
+) -> None:
     """Apply the PRAGMAs and create *schema* on a freshly opened connection.
 
     Connections that open one file at the same time can get ``database is
     locked`` at once, without waiting for the busy timeout: when one
     switches the file to WAL, or when a schema read cannot become a write
     because another connection wrote first. Both steps can run again, so
-    they do, after a short wait, until :data:`LOCKED_RETRY_S` has passed;
-    then the last error is raised. Any other error is raised at once.
+    they do, after a short wait, until *locked_retry_s* (by default
+    :data:`LOCKED_RETRY_S`) has passed; then the last error is raised. Any
+    other error is raised at once. *busy_timeout_ms* replaces the PRAGMAs'
+    busy timeout (see :func:`apply_pragmas`).
     """
     loop = asyncio.get_running_loop()
-    deadline = loop.time() + LOCKED_RETRY_S
+    retry_s = LOCKED_RETRY_S if locked_retry_s is None else locked_retry_s
+    deadline = loop.time() + retry_s
     delay = 0.01
     while True:
         try:
-            await apply_pragmas(conn)
+            await apply_pragmas(conn, busy_timeout_ms=busy_timeout_ms)
             await conn.executescript(schema)
             await conn.commit()
             return
