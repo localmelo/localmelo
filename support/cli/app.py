@@ -28,7 +28,8 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, ThreadedCompleter
 from prompt_toolkit.document import Document
 from prompt_toolkit.filters import Condition, has_focus, is_searching
-from prompt_toolkit.formatted_text import StyleAndTextTuples
+from prompt_toolkit.formatted_text import StyleAndTextTuples, to_formatted_text
+from prompt_toolkit.formatted_text.utils import fragment_list_to_text
 from prompt_toolkit.history import FileHistory, History
 from prompt_toolkit.input import Input
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent, merge_key_bindings
@@ -42,7 +43,11 @@ from prompt_toolkit.layout import (
     VSplit,
     Window,
 )
-from prompt_toolkit.layout.controls import BufferControl
+from prompt_toolkit.layout.controls import (
+    BufferControl,
+    GetLinePrefixCallable,
+    UIContent,
+)
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.layout.processors import (
     Processor,
@@ -50,6 +55,7 @@ from prompt_toolkit.layout.processors import (
     TransformationInput,
 )
 from prompt_toolkit.output import ColorDepth, Output
+from prompt_toolkit.search import SearchState
 from prompt_toolkit.widgets import SearchToolbar
 from rich.text import Text
 
@@ -67,6 +73,7 @@ from localmelo.support.cli.text import (
     cells,
     cut_cells,
     cut_middle,
+    drawn_cells,
     input_rows,
     wrap_words,
 )
@@ -193,6 +200,67 @@ class _Placeholder(Processor):
         return Transformation(ti.fragments)
 
 
+class _InputControl(BufferControl):
+    """The input box's control: a line's height is counted as it is drawn.
+
+    prompt_toolkit's own count divides a line's width by the columns,
+    which misses the cell a wide character leaves empty at a row's end; a
+    tall draft then scrolls its cursor's rows out of the box.
+    """
+
+    def create_content(
+        self, width: int, height: int, preview_search: bool = False
+    ) -> UIContent:
+        content = super().create_content(width, height, preview_search)
+        cache: dict[tuple[int, int, int | None], int] = {}
+
+        def height_for_line(
+            lineno: int,
+            width: int,
+            get_line_prefix: GetLinePrefixCallable | None,
+            slice_stop: int | None = None,
+        ) -> int:
+            key = (lineno, width, slice_stop)
+            if key not in cache:
+                text = fragment_list_to_text(content.get_line(lineno))[:slice_stop]
+                cache[key] = line_height(text, lineno, width, get_line_prefix)
+            return cache[key]
+
+        content.get_height_for_line = height_for_line  # type: ignore[method-assign]
+        return content
+
+
+def line_height(
+    text: str,
+    lineno: int,
+    width: int,
+    get_line_prefix: GetLinePrefixCallable | None,
+) -> int:
+    """The rows *text*, line *lineno* of the input box, takes at *width*."""
+    if width <= 0:
+        return 10**8
+
+    def prefix(wrap: int) -> int:
+        if get_line_prefix is None:
+            return 0
+        return cells(
+            fragment_list_to_text(to_formatted_text(get_line_prefix(lineno, wrap)))
+        )
+
+    x = prefix(0)
+    rows = 1 + (max(x, 1) - 1) // width  # a prompt wider than the box wraps
+    x -= (rows - 1) * width
+    for char in text:
+        size = drawn_cells(char)
+        if x + size > width:
+            x = prefix(rows)
+            rows += 1
+            if x >= width:
+                return 10**8
+        x += size
+    return rows
+
+
 def terminal_input(stdin: TextIO, on_close: Callable[[], None] | None = None) -> Input:
     """The app's input on *stdin* (POSIX); *on_close* runs once when it closes.
 
@@ -294,7 +362,7 @@ class InteractiveApp:
         )
         self.search = SearchToolbar()
         self.input_window = Window(
-            BufferControl(
+            _InputControl(
                 self.buffer,
                 search_buffer_control=self.search.control,
                 input_processors=[_Placeholder(self._placeholder)],
@@ -459,9 +527,29 @@ class InteractiveApp:
     def _input_height(self) -> Dimension:
         columns = self.app.output.get_size().columns
         rows = input_rows(
-            self.buffer.text, cells(self._prompt()), PREFIX_CELLS, columns
+            self._shown_text(), cells(self._prompt()), PREFIX_CELLS, columns
         )
         return Dimension.exact(rows)
+
+    def _shown_text(self) -> str:
+        """The draft, or during Ctrl+R the history entry the box previews."""
+        control = self.input_window.content
+        assert isinstance(control, BufferControl)
+        search = control.search_buffer_control
+        if (
+            search is None
+            or not search.buffer.text
+            or self.app.layout.search_target_buffer_control is not control
+        ):
+            return self.buffer.text
+        state = control.search_state
+        return self.buffer.document_for_search(
+            SearchState(
+                text=search.buffer.text,
+                direction=state.direction,
+                ignore_case=state.ignore_case,
+            )
+        ).text
 
     def _live_visible(self) -> bool:
         return self.renderer.live is not None or self.controller.activity is not None

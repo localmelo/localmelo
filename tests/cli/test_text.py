@@ -169,3 +169,39 @@ def test_wrap_words_breaks_after_a_space_and_keeps_every_character() -> None:
     assert wrap_words(path, 10) == ["a/" * 5] * 4
     assert wrap_words("", 10) == [""]
     assert all(cells(row) <= 7 for row in wrap_words("你好世界 再见朋友们好", 7))
+
+
+@pytest.mark.parametrize(
+    "char",
+    [
+        "؜",  # ARABIC LETTER MARK, a bidi control
+        "᠎",
+        " ",
+        " ",
+        "­",
+        "⁪",
+        "￹",
+        "￻",
+        "͏",
+        "ᅟ",
+        "ㅤ",
+    ],
+)
+def test_every_invisible_or_reordering_character_is_escaped(char: str) -> None:
+    escaped, changed = escape_arguments(f"rm -rf ~/{char}build")
+    assert changed and char not in escaped
+    assert f"\\u{{{ord(char):04x}}}" in escaped
+
+
+def test_input_rows_measures_control_characters_as_they_are_drawn() -> None:
+    # prompt_toolkit draws a tab as ^I and U+0085 as <85>.
+    pasted = "name\tage\tcity\tcountry\temail\tphone\tEND"
+    assert input_rows(pasted, 2, 2, 40) == 2
+    assert input_rows("\x85" * 10, 2, 2, 40) == 2
+
+
+def test_input_rows_after_a_prompt_exactly_as_wide_as_the_terminal() -> None:
+    # The draft then starts on the next row, after the 2-cell prefix.
+    assert input_rows("x" * 38, 40, 2, 40) == 3
+    assert input_rows("", 40, 2, 40) == 2
+    assert input_rows("x" * 37, 39, 2, 40) == 2

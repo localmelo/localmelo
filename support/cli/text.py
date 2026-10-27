@@ -7,8 +7,10 @@ wide character that does not fit whole is left out, never split.
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Final
 
+from prompt_toolkit.layout.screen import Char
 from prompt_toolkit.utils import get_cwidth
 
 # Rows the input box grows to before it scrolls.
@@ -16,14 +18,11 @@ INPUT_MAX_ROWS: Final = 10
 
 TAB_CELLS: Final = 4
 
-# Format characters that reorder or hide text, shown escaped in arguments.
-_FORMAT_RANGES: Final = (
-    (0x200B, 0x200F),
-    (0x202A, 0x202E),
-    (0x2060, 0x2069),
-    (0xFEFF, 0xFEFF),
-    (0xE0000, 0xE007F),
-)
+# Characters that reorder or hide text, shown escaped in arguments: every
+# format character (bidi controls, zero-width ones, tags), the line and
+# paragraph separators, and the invisible fillers.
+_HIDING_CATEGORIES: Final = frozenset({"Cf", "Zl", "Zp"})
+_FILLERS: Final = frozenset({0x034F, 0x115F, 0x1160, 0x3164, 0xFFA0})
 
 _NAMED_ESCAPES: Final = {"\r": "\\r", "\t": "\\t", "\x1b": "\\x1b"}
 
@@ -113,6 +112,12 @@ def expand_tabs(text: str) -> str:
     return text.expandtabs(TAB_CELLS)
 
 
+def drawn_cells(char: str) -> int:
+    """The cells prompt_toolkit draws *char* in: a tab is ``^I``, U+0085 ``<85>``."""
+    shown = Char.display_mappings.get(char)
+    return get_cwidth(char if shown is None else shown)
+
+
 def input_rows(
     text: str,
     prompt_cells: int,
@@ -125,7 +130,8 @@ def input_rows(
 
     The draft is walked as prompt_toolkit draws it: the prompt takes
     *prompt_cells* on the first row, and every other row, a new line or a
-    wrapped one, starts with *prefix_cells*; a character that does not fit
+    wrapped one, starts with *prefix_cells*; a control character takes the
+    cells of how it is drawn (``^I``); a character that does not fit
     the rest of a row, a wide one included, starts the next row; and each
     line ends with one cell for the cursor. prompt_toolkit's own count
     divides a line's width by the columns, which misses the cell a wide
@@ -138,11 +144,13 @@ def input_rows(
         x = prefix_cells
         rows += 1
         if number == 0:
-            # A prompt wider than the terminal wraps too.
-            rows += prompt_cells // columns
-            x = prompt_cells % columns
+            # A prompt wider than the terminal wraps too; one that fills
+            # its last row exactly puts the draft on the next.
+            full = (max(prompt_cells, 1) - 1) // columns
+            rows += full
+            x = prompt_cells - full * columns
         for char in line + " ":
-            size = get_cwidth(char)
+            size = drawn_cells(char)
             if x + size > columns:
                 rows += 1
                 x = prefix_cells
@@ -158,7 +166,7 @@ def _escaped(char: str) -> str | None:
         return _NAMED_ESCAPES[char]
     if char != "\n" and (code < 0x20 or 0x7F <= code <= 0x9F):
         return f"\\x{code:02x}"
-    if any(lo <= code <= hi for lo, hi in _FORMAT_RANGES):
+    if code in _FILLERS or unicodedata.category(char) in _HIDING_CATEGORIES:
         return f"\\u{{{code:04x}}}"
     return None
 
@@ -167,8 +175,9 @@ def escape_arguments(text: str) -> tuple[str, bool]:
     """*text* with every control and hiding character shown as an escape.
 
     Nothing is dropped: C0 and C1 controls but ``\\n`` read ``\\r``,
-    ``\\t``, ``\\x1b`` or ``\\xNN``, and the format characters that reorder
-    or hide text, and Unicode's tag characters, read ``\\u{...}``. The
+    ``\\t``, ``\\x1b`` or ``\\xNN``, and the characters that reorder or
+    hide text (format characters, Unicode's tags among them, the line and
+    paragraph separators, and the invisible fillers) read ``\\u{...}``. The
     second value says whether anything was escaped. A command that runs
     must be shown whole: ``sh #\\rls`` would otherwise read ``ls``.
     """

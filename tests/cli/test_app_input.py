@@ -331,6 +331,37 @@ def test_the_history_file_is_private_and_kept_under_a_size(tmp_path: Path) -> No
     assert path.stat().st_size < 1_000_000
 
 
+async def test_ctrl_r_shows_a_long_match_whole() -> None:
+    from prompt_toolkit.history import InMemoryHistory
+
+    history = InMemoryHistory()
+    entry = "fix the parser\nthen run the tests\nand update the changelog"
+    history.append_string(entry)
+    async with running_app(history=history, columns=40) as app:
+        await app.settle()
+        app.type("\x12parser")  # ctrl+r
+        await app.wait(lambda: "I-search" in app.text())
+        await app.settle()
+        box = _box(app)
+        assert "  then run the tests" in box and "  and update the changelog" in box
+        app.type(ENTER)
+        await app.wait(lambda: app.ui.buffer.text == entry)
+
+
+@pytest.mark.parametrize(("columns", "count"), [(21, 120), (31, 201), (41, 441)])
+async def test_a_tall_chinese_draft_scrolls_to_its_cursor(
+    columns: int, count: int
+) -> None:
+    text = "一二三四五六七八九十" * (count // 10) + "终"
+    async with running_app(columns=columns, rows=30) as app:
+        app.ui.buffer.text = text
+        app.ui.buffer.cursor_position = len(text)
+        await app.settle()
+        box = _box(app)
+        assert len(box) == 10
+        assert "终" in box[-1] or "终" in box[-2], box
+
+
 def test_a_closed_terminal_closes_the_input() -> None:
     # prompt_toolkit reads EIO as a resize: the app would wait forever.
     import os
