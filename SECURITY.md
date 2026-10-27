@@ -26,13 +26,17 @@ those tools can do.
   commands, and `python_exec` runs Python code inside the localmelo process.
   `file_read` and `file_write` reach any file you can: no directory
   restriction is active. This holds in direct mode and the gateway, and in
-  the Python API unless an agent sets the options below.
+  the Python API unless an agent sets the options below. The interactive UI
+  (bare `melo`) keeps the file tools inside its workspace, the current
+  folder or `--workspace DIR`.
 - **Approvals apply only with a policy.** In the Python API, an approval
   policy passed to `Agent.run_task` decides whether each call of
   `shell_exec`, `python_exec`, `file_write` and other tools marked as
   requiring approval may run. It is asked after every other check, and a
   policy that fails denies the call. Without a policy, as in direct mode and
-  the gateway, these tools run without asking.
+  the gateway, these tools run without asking. The interactive UI asks in
+  its approval panel before each such call, unless it was started with
+  `--yolo`.
 - **The fence applies only with a workspace root.**
   `AgentOptions(workspace_root=DIR)` keeps `file_read` and `file_write`
   inside that directory: paths are resolved before the check, a symlink
@@ -83,9 +87,11 @@ those tools can do.
   query and its tool calls' labels (file and program names), with key
   shapes, bearer tokens, one-time codes, URL passwords and the values of
   `NAME=value` secrets masked; see [Privacy](docs/memory.md#privacy).
-- **Sessions.** The session store of the Python API
-  ([Sessions](docs/sessions.md)) keeps transcripts and tool output in
-  `sessions.db` as plain text, its window checkpoints included, in `0600`
+- **Sessions.** The session store ([Sessions](docs/sessions.md)), which the
+  interactive UI uses for every turn in `~/.cache/localmelo/cli/sessions.db`
+  (its messages also go to `cli_history`), keeps transcripts and tool
+  output in `sessions.db` as plain text, its window checkpoints included, in
+  `0600`
   files inside `0700` directories. The stored answers and checkpoints pass
   only the minimal redaction of events: well-known key shapes, bearer tokens
   and one-time codes; anything else stays as written. A withdrawn message

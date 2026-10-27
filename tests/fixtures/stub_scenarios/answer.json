@@ -1,0 +1,5 @@
+{
+  "models": ["stub-model"],
+  "match": ["hello"],
+  "replies": [{"content": "Hello! I am **melo**, running on a stub model."}]
+}

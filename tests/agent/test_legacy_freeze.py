@@ -72,8 +72,9 @@ BASE_OPTIONS = [
 ]
 
 # Options added after R1, each by a stage whose spec calls for it: P3's
-# progress line (progress_spec.md section 11, "New flags only").
-LATER_OPTIONS = ["--progress", "--routine"]
+# progress line (progress_spec.md section 11, "New flags only") and U2a.1's
+# interactive UI (u2_spec.md section 1, "Flags").
+LATER_OPTIONS = ["--progress", "--routine", "--workspace", "--yolo"]
 
 
 def _openai_reply(content: str = "", call: bool = False) -> dict[str, Any]:

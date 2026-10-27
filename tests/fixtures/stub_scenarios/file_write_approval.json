@@ -1,0 +1,7 @@
+{
+  "match": ["write the notes"],
+  "replies": [
+    {"tool_calls": [{"name": "file_write", "arguments": {"path": "notes.txt", "content": "remember the milk\n"}}]},
+    {"content": "I wrote notes.txt."}
+  ]
+}

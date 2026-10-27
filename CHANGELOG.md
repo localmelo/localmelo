@@ -9,9 +9,25 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- An interactive UI in the terminal: `melo` without a task opens a chat
+  that shows its work as it happens. A banner names the model, the
+  workspace and the tools; each tool call prints as a block with the first
+  lines of its output, a spinner shows the step and the time while the
+  model works, and the answer prints as Markdown. `/` completes the
+  commands with their descriptions: `/help`, `/new`, `/model` (one of
+  the models the server lists), `/backend` and `/exit`; `/model` and
+  `/backend` save the choice to the config file, except in a `--base-url`
+  session. `shell_exec`,
+  `python_exec` and `file_write` ask first (yes, allow for the session, or
+  no with a reason); `--yolo` runs them without asking, and
+  `--workspace DIR` sets the folder the file tools stay in. The input box
+  edits Chinese and other wide characters whole, recalls earlier messages
+  (↑↓, Ctrl+R) and makes a new line with Alt+Enter or Ctrl+J; Esc stops a
+  turn. Sessions are kept in `~/.cache/localmelo/cli/sessions.db`;
+  resuming them comes later ([#53]).
 - A first run in a terminal: `melo` with no config file looks for a model
   server on this computer, asks for its URL and for a model from the
-  server's list, saves them and opens the conversation loop. It sends only
+  server's list, saves them and opens the chat. It sends only
   `GET /v1/models`, to ports 8000, 8400, 11434 and 30000 of `127.0.0.1`
   (`LOCALMELO_DETECT_URLS` replaces them); a server that cannot be used is
   named with the reason, and you can retry, start without saving or quit
@@ -134,14 +150,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
-- `melo` without a task opens the conversation loop in a terminal, on the
-  saved backend, and prints the model and server first; it used to start
-  the gateway, which `melo --serve` still does. Without a terminal, bare
-  `melo` starts the gateway as before. `melo --base-url URL` and
-  `melo --chat-model NAME` without a task open the loop too, where they
-  used to be ignored; `--base-url` without `--chat-model` uses the first
-  chat model the server lists. `melo --reconfigure` opens the loop after
-  the wizard ([#52]).
+- `melo` without a task, in a terminal, opens the interactive UI on the
+  saved backend; it used to start the gateway, which `melo --serve` still
+  does. `melo --base-url URL` and `melo --chat-model NAME` without a task
+  open it too, where they used to be ignored; `--base-url` without
+  `--chat-model` uses the first chat model the server lists.
+  `melo --reconfigure` opens it after the wizard ([#52], [#53]).
+- Without a terminal (stdin and stdout must be TTYs and `TERM` not
+  `dumb`), bare `melo` says what to run instead and exits with code 2;
+  `melo --reconfigure` runs the wizard and exits. The UI takes the run
+  options, such as `--max-steps` and `--memory-dir`, for every turn;
+  without a task, `--tool-exposure`, `--timeout`, `--output-format`,
+  `--progress`, `--routine`, `--mcp-config` and `--mcp-only` are usage
+  errors, and with a task, `--workspace` and `--yolo` are. `melo ""`
+  keeps the plain conversation loop ([#53]).
 - The setup wizard offers the config file's values as its defaults, and
   `None` for embeddings when none is set. A failed chat check can be
   retried with the values you typed; a failed embedding check saves with
@@ -250,3 +272,4 @@ earlier milestones.
 [#50]: https://github.com/localmelo/localmelo/pull/50
 [#51]: https://github.com/localmelo/localmelo/pull/51
 [#52]: https://github.com/localmelo/localmelo/pull/52
+[#53]: https://github.com/localmelo/localmelo/pull/53

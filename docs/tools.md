@@ -19,7 +19,9 @@ cut.
 This is how the built-in tools work in direct mode and the gateway. In the
 Python API, an agent with a workspace root keeps the file tools inside a
 directory and runs `shell_exec` and `python_exec` there (see
-[With a workspace root](#with-a-workspace-root)).
+[With a workspace root](#with-a-workspace-root)). The interactive UI (bare
+`melo`) runs with its workspace as the root and asks before each
+`shell_exec`, `python_exec` and `file_write` call, unless `--yolo`.
 
 ## Choose the built-in tools
 
@@ -175,8 +177,9 @@ The checks are guardrails, not a sandbox:
   process.
 - With a workspace root, `shell_exec` and `python_exec` still reach any
   file you can: only the file tools are kept inside the root.
-- Approvals apply only to a run with an approval policy. Direct mode and the
-  gateway have none.
+- Approvals apply only to a run with an approval policy, and in the
+  interactive UI (unless `--yolo`). Direct mode, `melo ""` and the gateway
+  have none.
 - The command blocklist is easy to get around.
 
 To limit what a task can do, use `--builtins none` or a subset of tools,

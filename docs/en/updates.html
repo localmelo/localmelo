@@ -69,7 +69,7 @@
         </div>
         <p>Planned:</p>
         <ul>
-          <li>an interactive CLI that opens when you run <code>melo</code> without a task and shows the agent's tool calls as they happen, asks before it runs them and switches models with <code>/model</code> (today <code>melo</code> in a terminal opens a plain conversation loop);</li>
+          <li>the interactive CLI's next parts: the model's thinking and retries as a turn runs, diffs in approvals, sessions you can resume (<code>melo -c</code>, <code>melo -r</code>), attached files and shell commands;</li>
           <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
           <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
@@ -87,6 +87,21 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-2026-10-27-interactive-ui">
+          <h3>An interactive UI in the terminal</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/53">#53</a>
+          </p>
+          <ul>
+            <li>In a terminal, <code>melo</code> without a task now opens a chat that shows its work: a banner with the model, the workspace and the tools, each tool call as a block with the first lines of its output, a spinner with the step and the time while the model works, and the answer as Markdown. It replaces the conversation loop of the next entry; <code>melo &quot;&quot;</code> keeps that loop.</li>
+            <li>Type <code>/</code> to see the commands and what they do. <code>/model</code> and <code>/backend</code> switch the model and the server, and save them as the default (a session opened with <code>--base-url</code> saves nothing); <code>/new</code> starts a new conversation.</li>
+            <li>Commands, Python and file writes ask first: allow once, allow the tool for the session, or say no with a reason. <code>--yolo</code> skips the questions, and <code>--workspace DIR</code> sets the folder the file tools stay in.</li>
+            <li>Chinese and other wide characters type, delete and wrap whole. Esc stops a turn, the Up arrow recalls earlier messages, and Alt+Enter or Ctrl+J starts a new line.</li>
+            <li>Without a terminal, <code>melo</code> now says what to run instead and exits with code 2; <code>melo --serve</code> starts the gateway. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#the-interactive-ui">The interactive UI</a>.</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-27-first-run">
           <h3>Type <code>melo</code> to start a conversation</h3>

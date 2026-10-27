@@ -1,0 +1,48 @@
+{
+  "format_duration": [
+    [0, "0.0s"],
+    [0.04, "0.0s"],
+    [0.4, "0.4s"],
+    [6.46, "6.4s"],
+    [9.99, "9.9s"],
+    [10, "10s"],
+    [12.7, "12s"],
+    [123, "2m03s"],
+    [3720, "1h02m"],
+    [-1, "0.0s"]
+  ],
+  "format_tokens": [
+    [0, "0"],
+    [412, "412"],
+    [999, "999"],
+    [1000, "1.0k"],
+    [3450, "3.4k"],
+    [9999, "9.9k"],
+    [10000, "10k"],
+    [61999, "61k"],
+    [999999, "999k"],
+    [1000000, "1.0M"],
+    [1250000, "1.2M"]
+  ],
+  "status_line": [
+    ["budget_exhausted", "Max steps reached", "melo: run ended with status budget_exhausted: Max steps reached"],
+    ["provider_error", "POST /chat/completions failed:\n  ConnectError:   refused", "melo: run ended with status provider_error: POST /chat/completions failed: ConnectError: refused"],
+    ["failed", "", "melo: run ended with status failed: no error message"],
+    ["failed", "   \n", "melo: run ended with status failed: no error message"]
+  ],
+  "clean_output": [
+    ["plain\ttext\n", "plain\ttext\n"],
+    ["a\r\nb\r\n", "a\nb\n"],
+    ["10%\r50%\r100%\ndone", "100%\ndone"],
+    ["\u001b[31mred\u001b[0m", "red"],
+    ["x\u001b]52;c;aGVsbG8=\u0007y", "xy"],
+    ["x\u001b]0;title\u001b\\y", "xy"],
+    ["\u001bPq#0;2;0;0;0\u001b\\z", "z"],
+    ["a\u001b(Bb", "ab"],
+    ["a\u001b7b\u001b8c", "abc"],
+    ["a\u009b2Jb", "ab"],
+    ["bell\u0007 nul\u0000 del\u007f", "bell nul del"],
+    ["tag󠁁󠁿 end", "tag end"],
+    ["\u001b[2K\rprogress 50%\rprogress 100%", "progress 100%"]
+  ]
+}

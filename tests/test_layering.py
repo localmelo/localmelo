@@ -7,6 +7,10 @@ count, and an import of any form does: plain, relative or through
 matched by module, name and the scope they sit in rather than by line:
 ``Config``, imported only for type checking, and ``get_backend``, imported
 inside ``_providers_from_config`` when an Agent is built from a Config.
+
+The same walk checks a table of other rules (:data:`FORBIDDEN`): the
+terminal UI's libraries stay out of the core, the sessions and the model
+listing, and the sessions and the UI stay clear of the gateway.
 """
 
 from __future__ import annotations
@@ -42,8 +46,14 @@ ALLOWED: list[Found] = [
 ]
 
 
+def _is_under(module: str, prefixes: tuple[str, ...]) -> bool:
+    return any(
+        module == prefix or module.startswith(f"{prefix}.") for prefix in prefixes
+    )
+
+
 def _is_support(module: str) -> bool:
-    return module == SUPPORT or module.startswith(f"{SUPPORT}.")
+    return _is_under(module, (SUPPORT,))
 
 
 def _is_type_checking(test: ast.expr) -> bool:
@@ -52,15 +62,16 @@ def _is_type_checking(test: ast.expr) -> bool:
     return isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
 
 
-class _SupportImports(ast.NodeVisitor):
-    """Collects the imports of localmelo.support in one module's AST.
+class _ImportsOf(ast.NodeVisitor):
+    """Collects the imports of the modules under *prefixes* in one module's AST.
 
     *package* is the package that the module's relative imports start
     from. Each import found is ``(module, name, scopes)``.
     """
 
-    def __init__(self, package: str) -> None:
+    def __init__(self, package: str, prefixes: tuple[str, ...] = (SUPPORT,)) -> None:
         self.package = package
+        self.prefixes = prefixes
         self.scopes: list[str] = []
         self.found: list[tuple[str, str, tuple[str, ...]]] = []
 
@@ -92,15 +103,18 @@ class _SupportImports(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef) -> None:
         self._visit_in(f"class {node.name}", node.body)
 
+    def _matches(self, module: str) -> bool:
+        return _is_under(module, self.prefixes)
+
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
-            if _is_support(alias.name):
+            if self._matches(alias.name):
                 self._add(alias.name, "")
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         module = self._absolute(node)
         for alias in node.names:
-            if _is_support(module) or _is_support(f"{module}.{alias.name}"):
+            if self._matches(module) or self._matches(f"{module}.{alias.name}"):
                 self._add(module, alias.name)
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -116,7 +130,7 @@ class _SupportImports(ast.NodeVisitor):
             if (
                 isinstance(first, ast.Constant)
                 and isinstance(first.value, str)
-                and _is_support(first.value)
+                and self._matches(first.value)
             ):
                 self._add(first.value, "")
         self.generic_visit(node)
@@ -130,32 +144,50 @@ class _SupportImports(ast.NodeVisitor):
         return ".".join([*base, node.module] if node.module else base)
 
 
-def support_imports(
-    source: str, module: str, *, is_package: bool = False
+def imports_of(
+    source: str,
+    module: str,
+    prefixes: tuple[str, ...],
+    *,
+    is_package: bool = False,
 ) -> list[tuple[str, str, tuple[str, ...]]]:
-    """The imports of localmelo.support in *source*, the code of *module*."""
-    visitor = _SupportImports(module if is_package else module.rpartition(".")[0])
+    """The imports of the modules under *prefixes* in *source*, the code of *module*."""
+    package = module if is_package else module.rpartition(".")[0]
+    visitor = _ImportsOf(package, prefixes)
     visitor.visit(ast.parse(source))
     return visitor.found
 
 
-def _core_imports() -> list[Found]:
+def support_imports(
+    source: str, module: str, *, is_package: bool = False
+) -> list[tuple[str, str, tuple[str, ...]]]:
+    """The imports of localmelo.support in *source*, the code of *module*."""
+    return imports_of(source, module, (SUPPORT,), is_package=is_package)
+
+
+def _imports_under(path: Path, prefixes: tuple[str, ...]) -> list[Found]:
+    """The imports of *prefixes* in every module at *path*, a file or a directory."""
     found: list[Found] = []
-    for path in sorted(CORE_DIR.rglob("*.py")):
-        relative = path.relative_to(PACKAGE_DIR)
+    files = [path] if path.is_file() else sorted(path.rglob("*.py"))
+    for file in files:
+        relative = file.relative_to(PACKAGE_DIR)
         parts = list(relative.with_suffix("").parts)
         is_package = parts[-1] == "__init__"
         if is_package:
             parts.pop()
         module = ".".join(["localmelo", *parts])
-        source = path.read_text(encoding="utf-8")
+        source = file.read_text(encoding="utf-8")
         found.extend(
             (relative.as_posix(), imported, name, scopes)
-            for imported, name, scopes in support_imports(
-                source, module, is_package=is_package
+            for imported, name, scopes in imports_of(
+                source, module, prefixes, is_package=is_package
             )
         )
     return found
+
+
+def _core_imports() -> list[Found]:
+    return _imports_under(CORE_DIR, (SUPPORT,))
 
 
 def test_the_core_imports_from_support_only_what_predates_the_rule() -> None:
@@ -238,3 +270,68 @@ def test_core_imports_and_text_about_support_are_not_imports_of_it() -> None:
         'NOTE = "from localmelo.support import config"\n'
     )
     assert support_imports(source, MODULE) == []
+
+
+# ── The table: what each part of the package never imports ──
+
+# A path under the package (a directory or one module) and the modules it
+# must not import. The core's imports of localmelo.support are the test
+# above, with its two exceptions.
+FORBIDDEN: list[tuple[str, tuple[str, ...]]] = [
+    ("melo", ("prompt_toolkit", "rich")),
+    (
+        "support/sessions",
+        (
+            "localmelo.support.gateway",
+            "localmelo.support.cli",
+            "fastapi",
+            "prompt_toolkit",
+            "rich",
+        ),
+    ),
+    ("support/cli", ("localmelo.support.gateway", "fastapi", "uvicorn")),
+    ("support/progress_line.py", ("prompt_toolkit", "rich")),
+    ("support/backends", ("prompt_toolkit", "rich")),
+]
+
+
+@pytest.mark.parametrize(
+    ("path", "prefixes"), FORBIDDEN, ids=[path for path, _ in FORBIDDEN]
+)
+def test_no_part_imports_what_the_table_forbids(
+    path: str, prefixes: tuple[str, ...]
+) -> None:
+    where = PACKAGE_DIR / path
+    assert where.exists(), f"{path} is not in the package: the table is out of date"
+    assert _imports_under(where, prefixes) == []
+
+
+@pytest.mark.parametrize(
+    ("source", "prefixes", "found"),
+    [
+        ("import rich.console", ("rich",), [("rich.console", "", ())]),
+        (
+            "from prompt_toolkit import Application",
+            ("prompt_toolkit",),
+            [("prompt_toolkit", "Application", ())],
+        ),
+        ("import richer", ("rich",), []),
+        (
+            "def f():\n    from fastapi import FastAPI\n",
+            ("fastapi",),
+            [("fastapi", "FastAPI", ("def f",))],
+        ),
+        (
+            "from ..gateway import playground",
+            ("localmelo.support.gateway",),
+            [("localmelo.support.gateway", "playground", ())],
+        ),
+    ],
+    ids=["submodule", "from_import", "prefix_of_a_name", "in_a_function", "relative"],
+)
+def test_the_table_finds_third_party_and_relative_imports(
+    source: str,
+    prefixes: tuple[str, ...],
+    found: list[tuple[str, str, tuple[str, ...]]],
+) -> None:
+    assert imports_of(source, "localmelo.support.sessions.store", prefixes) == found

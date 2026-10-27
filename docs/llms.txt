@@ -3,14 +3,14 @@
 > localmelo is a local personal agent that runs tasks with tools (shell, Python, files, MCP servers) and memory on a model server the user runs (any OpenAI-compatible server, Ollama) or on a cloud API (OpenAI, Anthropic, Google Gemini, NVIDIA). It offers the `melo` command, which returns a fixed exit code per run and prints one JSON line with `--output-format json`, an experimental Python API, and an HTTP gateway on 127.0.0.1. It is pre-alpha: interfaces may change before v0.1.0.
 
 - Install from a clone named `localmelo` with Python 3.11+: `uv sync --extra gateway`, then run `uv run melo` in the clone (`melo` is not on PATH). MIT license. localmelo never downloads, starts or serves models.
-- One task: `melo --base-url http://127.0.0.1:8000/v1 --chat-model MODEL --output-format json --timeout 300 "TASK"`; exit 0 completed, 1 crashed or a configuration error, 2 any other status or a usage error. Bare `melo` in a terminal opens a conversation loop (a first run asks for a model server and model and saves them); without a TTY it starts the gateway. Agents: do not run bare `melo` in a pty under the user's HOME.
+- One task: `melo --base-url http://127.0.0.1:8000/v1 --chat-model MODEL --output-format json --timeout 300 "TASK"`; exit 0 completed, 1 crashed or a configuration error, 2 any other status or a usage error. Bare `melo` in a terminal opens the interactive UI (a first run asks for a model server and model and saves them; tool calls shown live, approvals, `/model`, `/backend`); without a TTY it exits 2. `melo --serve` starts the gateway. Agents: do not run bare `melo` in a pty under the user's HOME, and use direct mode in scripts.
 - Tools run with the user's permissions and no sandbox. The gateway has no authentication and must stay on 127.0.0.1.
 
 ## Docs
 
 - [localmelo for agents](https://localmelo.github.io/localmelo/for-agents.md): the one page an agent needs: install, CLI, Python API, HTTP, results, config, tools, memory, gotchas and rules.
 - [Quickstart](https://localmelo.github.io/localmelo/quickstart.md): install, run a first task, save a configuration and start the gateway.
-- [Command-line reference](https://localmelo.github.io/localmelo/cli.md): `melo` modes, every option, output, exit codes and signals.
+- [Command-line reference](https://localmelo.github.io/localmelo/cli.md): `melo` modes, the interactive UI (keys, commands, approvals), every option, output, exit codes and signals.
 - [Run results](https://localmelo.github.io/localmelo/run-results.md): run statuses, the fields of the JSON line and `RunResult`, and retries.
 - [Python API](https://localmelo.github.io/localmelo/python-api.md): `Agent`, `AgentOptions`, `RunResult`, stopping a run, approval policies and the workspace root.
 - [Events](https://localmelo.github.io/localmelo/events.md): the events a Python run reports, their order, fields and rules.

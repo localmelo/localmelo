@@ -1,12 +1,17 @@
 """Bare `melo` on a real terminal: the first run's questions, then straight in.
 
 The model server is a fake on a free port, which the first run finds
-through LOCALMELO_DETECT_URLS; HOME is a temporary directory.
+through LOCALMELO_DETECT_URLS; HOME is a temporary directory. After the
+questions, the interactive UI opens; a later `melo` opens it at once.
 """
 
 from __future__ import annotations
 
+import fcntl
+import re
+import struct
 import sys
+import termios
 from pathlib import Path
 
 import pytest
@@ -16,16 +21,34 @@ from localmelo.tests.cli.test_direct_mode_process import (
     _env,
     chat_server,  # noqa: F401  (a fixture)
 )
-from localmelo.tests.cli.test_loop_line_editing import PROMPT, Terminal
+from localmelo.tests.cli.test_loop_line_editing import Terminal
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="POSIX terminals")
+
+# The input box's placeholder: the UI is up and waits for a message.
+READY = b"Ask melo"
+_ESCAPES = re.compile(
+    rb"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[()][0-9A-B]|\x1b[=>78]"
+)
 
 
 def _melo(home: Path, server: FakeChatServer) -> Terminal:
     env = _env(home)
     env["LOCALMELO_DETECT_URLS"] = server.base_url
     env["TERM"] = "xterm-256color"  # whatever terminal runs the tests
-    return Terminal([sys.executable, "-I", "-m", "localmelo"], env, home)
+    term = Terminal([sys.executable, "-I", "-m", "localmelo"], env, home)
+    fcntl.ioctl(term._master, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+    return term
+
+
+def _exit_code(term: Terminal) -> int:
+    """melo's exit code; it closes the terminal a moment before it exits."""
+    term.wait(30)
+    return term.process.wait(timeout=30)
+
+
+def _text(term: Terminal) -> str:
+    return _ESCAPES.sub(b"", term.output).decode().replace("\r\n", "\n")
 
 
 def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
@@ -42,18 +65,19 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
         term.type(b"\r")
         assert term.read_until(lambda out: b"Model [2]: " in out, 30), term.output
         term.type(b"3\r")
-        assert term.read_until(lambda out: PROMPT in out, 30), term.output
+        assert term.read_until(lambda out: READY in out, 30), term.output
         term.type(b"hi\r")
-        assert term.read_until(lambda out: out.count(PROMPT) >= 2, 30), term.output
+        assert term.read_until(lambda out: b"Worked for" in out, 30), term.output
         term.type(b"/exit\r")
-        assert term.wait(30) == 0, term.output
+        assert _exit_code(term) == 0, term.output
     finally:
         term.close()
 
-    text = term.output.decode().replace("\r\n", "\n")
+    text = _text(term)
     assert f"Found a model server at {url} (3 models).\n" in text
     assert f"✓ {url} lists 3 models; using chat-b.\n" in text
-    assert f"Model: chat-b · {url} (melo --reconfigure changes it)\n" in text
+    assert f"chat-b · vLLM · {url}" in text
+    assert "saved as the default" in text
     assert chat_server.bodies[0]["model"] == "chat-b"
     saved = (tmp_path / ".cache" / "localmelo" / "config.toml").read_text()
     assert 'chat_backend = "vllm"' in saved
@@ -62,11 +86,11 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     chat_server.models = []  # the second run lists nothing and asks nothing
     term = _melo(tmp_path, chat_server)
     try:
-        assert term.read_until(lambda out: PROMPT in out, 30), term.output
+        assert term.read_until(lambda out: READY in out, 30), term.output
         term.type(b"/exit\r")
-        assert term.wait(30) == 0, term.output
+        assert _exit_code(term) == 0, term.output
     finally:
         term.close()
-    text = term.output.decode().replace("\r\n", "\n")
-    assert text.startswith(f"Model: chat-b · {url} (melo --reconfigure changes it)\n")
+    text = _text(term)
+    assert f"chat-b · vLLM · {url}" in text
     assert "Model server URL" not in text

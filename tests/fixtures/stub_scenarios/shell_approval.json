@@ -1,0 +1,7 @@
+{
+  "match": ["list the folder"],
+  "replies": [
+    {"tool_calls": [{"name": "shell_exec", "arguments": {"command": "ls -1"}}]},
+    {"content": "The folder holds what `ls -1` printed."}
+  ]
+}

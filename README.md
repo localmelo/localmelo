@@ -25,6 +25,9 @@ change before v0.1.0 (milestone due 2026-12-20).
   reflects between attempts, and can have a time limit. On a terminal, a
   [progress line](docs/cli.md#progress-line) shows where the task stands,
   and the steps of earlier runs once it repeats with memory kept.
+- **Chats in the terminal.** `melo` opens an interactive UI that shows each
+  tool call as it finishes and the answer as Markdown, asks before it runs
+  a command or writes a file, and switches models with `/model`.
 - **Uses tools.** Four built-in tools (`shell_exec`, `python_exec`,
   `file_read`, `file_write`) and the tools of MCP servers (stdio servers, in
   direct mode and the Python API).
@@ -99,9 +102,9 @@ clone. To update or uninstall localmelo, see
 
    With no configuration yet, it finds the model server on this computer
    (Ollama on port 11434 here), asks you to confirm its URL and to pick a
-   model from its list, saves `~/.cache/localmelo/config.toml` and opens a
-   conversation loop: type a task, or `/exit` to leave. From then on, `melo`
-   goes straight to the loop and `melo "<task>"` uses the saved server.
+   model from its list, saves `~/.cache/localmelo/config.toml` and opens the
+   interactive UI: type a message, or `/exit` to leave. From then on, `melo`
+   goes straight in and `melo "<task>"` uses the saved server.
 
    For an embedding server or a cloud API, run the setup wizard instead,
    which also starts the gateway. For a cloud API, first run
@@ -126,8 +129,8 @@ with the wizard's choices and a first request to the HTTP API.
 | Command | What it does |
 |---|---|
 | `melo "<task>"` | Runs one task, prints the result and exits. |
-| `melo` (in a terminal) | Opens a conversation loop on the saved model server, after asking for one the first time. `/help` lists its commands; `/exit` leaves. `melo ""` does the same. |
-| `melo --serve` | Starts the gateway: the HTTP API and the web workspace at `http://127.0.0.1:8401/`. Without a terminal, `melo` alone does the same. |
+| `melo` (in a terminal) | Opens the interactive UI on the saved model server, after asking for one the first time; see [Interactive CLI](#interactive-cli). |
+| `melo --serve` | Starts the gateway: the HTTP API and the web workspace at `http://127.0.0.1:8401/`. |
 
 To hold a conversation with oMLX or another OpenAI-compatible server without
 a saved configuration, on its first model or the one you name:
@@ -141,8 +144,30 @@ In the web workspace, enter your server's URL, pick one of its models and
 create a chat. You can keep several chats, search them, read answers rendered
 as Markdown and stop a run. Chats last only as long as the gateway process,
 and the workspace is for your own computer only; see
-[Web workspace](docs/gateway.md#web-workspace). The terminal loop's
-conversation is separate from the web chats.
+[Web workspace](docs/gateway.md#web-workspace). The terminal's
+conversations are separate from the web chats.
+
+## Interactive CLI
+
+`melo` without a task, in a terminal, opens a chat:
+
+- While a turn runs, a spinner shows the step and the time, and each tool
+  call prints as it finishes, with its command or file, its first lines of
+  output and its duration. The answer prints as Markdown. Esc stops the
+  turn; a message typed meanwhile is sent when the turn completes.
+- Type `/` for the commands, each with a line saying what it does:
+  `/model` lists the server's models and switches to one, `/backend`
+  switches to another server (both saved as the default, except in a
+  `melo --base-url` session), `/new` starts over, `/help`, `/exit`.
+- Before a shell command, Python code or a file write, a panel asks: allow
+  once, allow that tool for the session, or refuse and tell melo why.
+  `--yolo` skips it.
+- It works in the current folder (`--workspace DIR` picks another): file
+  tools stay in it; commands and Python can reach other files.
+- Chinese and other wide characters type, delete and wrap correctly.
+
+The [Command-line reference](docs/cli.md#the-interactive-ui) has the keys
+and the details. `melo ""` keeps the plain loop of earlier releases.
 
 ## Documentation
 
@@ -174,9 +199,9 @@ its phases and the dated updates.
 
 Planned:
 
-- an interactive CLI, in place of today's conversation loop, that shows the
-  agent's tool calls as they happen, asks before it runs them and switches
-  models with `/model`;
+- the interactive CLI's next parts: the model's thinking and retries as a
+  turn runs, diffs in approvals, sessions you can resume (`melo -c`,
+  `melo -r`), attached files and shell commands;
 - conversations that survive a gateway restart, with the agent's work shown
   live in the web workspace;
 - keeping the model's reasoning as memory notes, with switchable retrieval
@@ -196,9 +221,9 @@ Planned:
 > sites send through your browser. See [SECURITY.md](SECURITY.md) and
 > [What the checks do](docs/tools.md#what-the-checks-do).
 
-The experimental [Python API](docs/python-api.md) can ask for approval before
-a tool runs and keep the file tools inside one directory; direct mode and the
-gateway do neither. Memory and session files are not encrypted; see
+The interactive UI and the experimental [Python API](docs/python-api.md) ask
+for approval before a tool runs and keep the file tools inside one folder;
+direct mode and the gateway do neither. Memory and session files are not encrypted; see
 [Privacy](docs/memory.md#privacy).
 
 ## Getting help

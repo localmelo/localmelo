@@ -1,0 +1,4 @@
+{
+  "models": ["stub-model", "qwen3-8b", "llama-3.1"],
+  "replies": [{"content": "An answer from the listed model."}]
+}
