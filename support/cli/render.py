@@ -497,7 +497,8 @@ class TurnRenderer:
         ]
         if not "".join(lines).strip():
             lines = ["(no output)"]
-        shown = lines[:BLOCK_LINES]
+        # A single line left prints instead of the "+1 lines" marker.
+        shown = lines if len(lines) <= BLOCK_LINES + 1 else lines[:BLOCK_LINES]
         width = max(1, self.out.width - 4)
         body = Text(no_wrap=True, overflow="ellipsis")
         for number, line in enumerate(shown):
