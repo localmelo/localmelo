@@ -202,7 +202,9 @@ def bar_series(view: TemplateView, trace: Trace) -> tuple[list[float], str | Non
 
     Entry k − 1 is the fraction shown after step k started, from what
     happened before that event. The off reason, if any, is the first
-    thing that took the run off the template, up to now.
+    thing that took the run off the template, up to now. A stuck notice
+    is checked before a reflection: at the step where both come, the
+    notice came first and caused the reflection.
     """
     stats = view.stats
     params = view.params
@@ -217,10 +219,10 @@ def bar_series(view: TemplateView, trace: Trace) -> tuple[list[float], str | Non
     series: list[float] = []
     for k in range(1, trace.step_number + 1):
         if off is None:
-            if not retry_expected and any(0 < at < k for at in reflections):
-                off = RETRYING
-            elif stuck_at is not None and stuck_at < k:
+            if stuck_at is not None and stuck_at < k:
                 off = STUCK
+            elif not retry_expected and any(0 < at < k for at in reflections):
+                off = RETRYING
             elif k > longest:
                 off = LONGER
         if off is None:
@@ -238,10 +240,10 @@ def bar_series(view: TemplateView, trace: Trace) -> tuple[list[float], str | Non
         series.append(shown)
     if off is None:
         step = trace.step_number
-        if not retry_expected and any(at >= max(step, 1) for at in reflections):
-            off = RETRYING
-        elif stuck_at is not None:
+        if stuck_at is not None:
             off = STUCK
+        elif not retry_expected and any(at >= max(step, 1) for at in reflections):
+            off = RETRYING
     return series, off
 
 
