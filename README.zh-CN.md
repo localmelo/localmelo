@@ -4,13 +4,21 @@
 
 # localmelo
 
-[English](README.md) | [简体中文](README.zh-CN.md)
+<p align="center">
+  <a href="https://localmelo.github.io/localmelo/zh-CN/index.html"><img alt="网站：localmelo.github.io" src="https://img.shields.io/badge/%E7%BD%91%E7%AB%99-localmelo.github.io-D9822B?style=for-the-badge&labelColor=1F2A44"></a>
+  <a href="https://localmelo.github.io/localmelo/zh-CN/quickstart.html"><img alt="快速开始" src="https://img.shields.io/badge/%E5%BF%AB%E9%80%9F%E5%BC%80%E5%A7%8B-%E4%BB%8E%E8%BF%99%E9%87%8C%E5%BC%80%E5%A7%8B-2A9D8F?style=for-the-badge&labelColor=1F2A44"></a>
+  <a href="docs/README.md"><img alt="文档（英文）" src="https://img.shields.io/badge/%E6%96%87%E6%A1%A3-%E8%8B%B1%E6%96%87-3B6EA8?style=for-the-badge&labelColor=1F2A44"></a>
+  <a href="README.md"><img alt="English" src="https://img.shields.io/badge/lang-English-C8372D?style=for-the-badge&labelColor=1F2A44"></a>
+  <br>
+  <a href="https://localmelo.github.io/localmelo/zh-CN/updates.html#roadmap"><img alt="状态：早期预览版，v0.1.0 计划于 2026-12-20" src="https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E6%97%A9%E6%9C%9F%E9%A2%84%E8%A7%88_%C2%B7_v0.1.0_%E8%AE%A1%E5%88%92_2026--12--20-C0562B?style=for-the-badge&labelColor=1F2A44"></a>
+  <a href="pyproject.toml"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-3776AB?style=for-the-badge&labelColor=1F2A44&logo=python&logoColor=white"></a>
+  <a href="LICENSE"><img alt="许可证：MIT" src="https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-MIT-4C9A2A?style=for-the-badge&labelColor=1F2A44"></a>
+  <a href="docs/llms.txt"><img alt="给 AI 智能体：llms.txt" src="https://img.shields.io/badge/%E7%BB%99%E6%99%BA%E8%83%BD%E4%BD%93-llms.txt-7B4FA0?style=for-the-badge&labelColor=1F2A44"></a>
+</p>
 
 一个本地个人智能体：在你自己的模型服务器或云端 API 上，借助工具和记忆完成任务。你可以在命令行、脚本和基准测试中用它运行任务（每次运行输出一行 JSON 和固定的退出码），也可以通过 HTTP 调用它。
 
-[网站](https://localmelo.github.io/localmelo/zh-CN/index.html) · [快速开始](https://localmelo.github.io/localmelo/zh-CN/quickstart.html) · [文档（英文）](docs/README.md) · [路线图](https://localmelo.github.io/localmelo/zh-CN/updates.html#roadmap)
-
-**状态**：早期预览版（pre-alpha）。在命令行中运行任务（直接模式）和 HTTP 网关现在已经可以使用。在 v0.1.0（里程碑计划于 2026-12-20 完成）之前，命令、HTTP API 和 Python API 都可能变化。
+**状态**：早期预览版（pre-alpha）。在命令行中运行任务（直接模式）、终端里的交互式对话和 HTTP 网关现在已经可以使用。在 v0.1.0（里程碑计划于 2026-12-20 完成）之前，命令、HTTP API 和 Python API 都可能变化。
 
 ## 功能
 
