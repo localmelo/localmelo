@@ -457,3 +457,29 @@ async def test_a_question_does_not_walk_the_message_history() -> None:
         assert asking.result() == "http://h/v1"
         app.type(UP)  # at the input box, history again
         await app.wait(lambda: app.ui.buffer.text == "/backend")
+
+
+async def test_ctrl_z_does_nothing_in_the_input_box() -> None:
+    controller = FakeController()
+    async with running_app(controller) as app:
+        app.type("abc\x1a")
+        await app.settle()
+        assert app.ui.buffer.text == "abc"
+        app.type(ENTER)
+        await app.wait(lambda: controller.entered == ["abc"])
+
+
+def test_control_characters_never_push_the_mode_off_the_status_bar() -> None:
+    bar = StatusBar("stub-model", "~/demo-project", "ctx 120", "abc\x1a\x1b[2J", "ask")
+    line = "".join(fragment[1] for fragment in status_fragments(bar, 70, "…"))
+    assert line.endswith("ask") and cells(line) == 70, line
+    assert "abc^Z^[[2J" in line and "\x1a" not in line
+
+
+async def test_control_characters_in_the_queued_line_and_the_hint_are_spelled() -> None:
+    controller = FakeController(state="running", queued="one\x1atwo")
+    async with running_app(controller, columns=40) as app:
+        app.ui.hint("hint\x07here")
+        await app.settle()
+        assert "Queued for the next turn: one^Ztwo" in app.text()
+        assert "hint^Ghere" in app.text()

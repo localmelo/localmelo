@@ -112,6 +112,18 @@ def expand_tabs(text: str) -> str:
     return text.expandtabs(TAB_CELLS)
 
 
+def shown(text: str) -> str:
+    """*text* with each control character spelled as prompt_toolkit draws it.
+
+    A pasted ``\\x1a`` reads ``^Z`` and U+0085 ``<85>``, so the cells
+    counted for a line are the cells it takes on the screen.
+    """
+    mappings = Char.display_mappings
+    return "".join(
+        mappings.get(char, char) if char != "\xa0" else char for char in text
+    )
+
+
 def drawn_cells(char: str) -> int:
     """The cells prompt_toolkit draws *char* in: a tab is ``^I``, U+0085 ``<85>``."""
     shown = Char.display_mappings.get(char)

@@ -12,6 +12,7 @@ from localmelo.support.cli.text import (
     expand_tabs,
     input_rows,
     pad_cells,
+    shown,
     wrap_cells,
     wrap_words,
 )
@@ -205,3 +206,9 @@ def test_input_rows_after_a_prompt_exactly_as_wide_as_the_terminal() -> None:
     assert input_rows("x" * 38, 40, 2, 40) == 3
     assert input_rows("", 40, 2, 40) == 2
     assert input_rows("x" * 37, 39, 2, 40) == 2
+
+
+def test_shown_spells_control_characters_as_they_are_drawn() -> None:
+    assert shown("abc\x1a") == "abc^Z"
+    assert shown("a\tb\x85") == "a^Ib<85>"
+    assert cells(shown("abc\x1a")) == 5 and shown("plain 中文") == "plain 中文"

@@ -75,6 +75,7 @@ from localmelo.support.cli.text import (
     cut_middle,
     drawn_cells,
     input_rows,
+    shown,
     wrap_words,
 )
 from localmelo.support.cli.theme import PT_STYLE, Symbols, in_symbols
@@ -153,6 +154,15 @@ def status_fragments(
     room back), then the model is cut. Every cut counts cells, and no
     part is left as a bare ellipsis.
     """
+    # Control characters (a pasted ^Z) count the cells they are drawn in.
+    bar = StatusBar(
+        model=shown(bar.model),
+        workspace=shown(bar.workspace),
+        context=shown(bar.context),
+        title=shown(bar.title),
+        mode=shown(bar.mode),
+        mode_style=bar.mode_style,
+    )
     mode = cut_cells(bar.mode, max(1, width - 3), ellipsis)
     room = width - 2 - cells(mode) - 1
     model, context, title = bar.model, bar.context, bar.title
@@ -597,7 +607,7 @@ class InteractiveApp:
         queued = self.controller.queued or ""
         first = queued.split("\n", 1)[0]
         width = self.app.output.get_size().columns
-        text = f"{self.symbols.queued} Queued for the next turn: {first}"
+        text = f"{self.symbols.queued} Queued for the next turn: {shown(first)}"
         return [("class:muted", cut_cells(text, width, self.symbols.ellipsis))]
 
     def _hint_visible(self) -> bool:
@@ -606,7 +616,10 @@ class InteractiveApp:
     def _hint_fragments(self) -> StyleAndTextTuples:
         width = self.app.output.get_size().columns
         return [
-            ("class:hint", cut_cells("  " + self._hint, width, self.symbols.ellipsis))
+            (
+                "class:hint",
+                cut_cells("  " + shown(self._hint), width, self.symbols.ellipsis),
+            )
         ]
 
     def _status_fragments(self) -> StyleAndTextTuples:
@@ -907,6 +920,11 @@ class InteractiveApp:
         @kb.add("c-d", filter=in_input & empty)
         def _(event: KeyPressEvent) -> None:
             self._ctrl_d()
+
+        # Not bound in this version (no suspend): Ctrl+Z inserts nothing.
+        @kb.add("c-z", filter=in_input)
+        def _(event: KeyPressEvent) -> None:
+            pass
 
         @kb.add("up", filter=in_input & empty & queued)
         def _(event: KeyPressEvent) -> None:
