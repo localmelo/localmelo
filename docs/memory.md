@@ -95,6 +95,8 @@ run.
   ```
 
 - `long_term.db` is created with the default file mode, usually 0644.
+- `procedures.db` holds [procedural memory](procedures.md). Runs do not
+  create it yet; only code that opens `SqliteProcedures` does.
 - The gateway's web workspace keeps its own files in
   `~/.cache/localmelo/playground/`. Its `history.db` keeps the model's
   reasoning for the same number of days, and clears older reasoning when a

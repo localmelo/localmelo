@@ -9,6 +9,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Procedural memory (experimental), `localmelo.melo.memory.procedures`, and
+  the offline `melo-procedures` command (`episodes`, `replay`, `export`,
+  `forget`). From the runs in a `history.db` it learns the steps of a task
+  you run again and again: the classes of its tool calls, short labels, step
+  counts and times, never the model's text. Templates are versioned and kept
+  in `procedures.db`. `replay` measures the rules of a planned progress
+  display on recorded runs. Runs, the gateway and the Python API do not use
+  it yet ([#45]).
 - With persistence on, `history.db` keeps every reply of the model with its
   reasoning, in a new `llm_calls` table: one row per planning or reflection
   reply, with its kind, outcome, step, tool calls, token usage and duration,
@@ -175,3 +183,4 @@ earlier milestones.
 [#40]: https://github.com/localmelo/localmelo/pull/40
 [#41]: https://github.com/localmelo/localmelo/pull/41
 [#42]: https://github.com/localmelo/localmelo/pull/42
+[#45]: https://github.com/localmelo/localmelo/pull/45

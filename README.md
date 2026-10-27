@@ -164,7 +164,10 @@ Planned:
 - keeping the model's reasoning as memory notes, with switchable retrieval
   (`bm25`, `llm`, `embedding`);
 - running several tasks at once on one local model server, with your
-  conversation answered first.
+  conversation answered first;
+- a progress display for tasks you run again and again, with their steps
+  learned from earlier runs (a first run shows only facts, such as its step
+  count).
 
 ## Security
 

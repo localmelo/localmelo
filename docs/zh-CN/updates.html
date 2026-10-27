@@ -66,7 +66,8 @@
           <li>交互式命令行：不带任务运行 <code>melo</code> 时打开，并实时显示智能体的工具调用（目前 <code>melo</code> 会启动网关，<code>melo &quot;&quot;</code> 打开一个简单的对话循环）；</li>
           <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
           <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
-          <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话。</li>
+          <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
+          <li>反复运行的任务的进度显示，步骤从之前的运行中学到（第一次运行只显示步数这类事实）。</li>
         </ul>
         <p>维护者撰写的记忆设计见<a href="./memory-design.html">记忆设计</a>页，其中部分内容尚未实现。</p>
       </section>
@@ -74,6 +75,19 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-26-procedures">
+          <h3>进度显示的基础</h3>
+          <p class="update-date">
+            <time datetime="2026-10-26">2026-10-26</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/45">#45</a>
+          </p>
+          <ul>
+            <li>程序记忆会学习你反复运行的任务的步骤，比如每天都要修的一套测试。它从之前的运行中保存工具调用的类型、简短的标签，以及步数和用时，从不保存模型说的话。</li>
+            <li>第一次运行是探索，不做估计。任务有了完成的运行之后，显示可以给出之前的运行用了多少步、多长时间；百分比进度条还要求这些运行彼此一致，并且模型过去的估计足够准确。在目前测量过的基准运行上，这项检查还不能足够清楚地区分好的估计和差的估计，所以计划中的进度显示先不带进度条。</li>
+            <li><code>melo-procedures</code> 从 <code>history.db</code> 学习这些步骤模板，并离线重放这些规则：先测量，再显示。运行目前既不读取也不写入程序记忆。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-26-call-history">
           <h3>历史记录保存每次模型调用</h3>
