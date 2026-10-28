@@ -524,12 +524,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   match gets no item source, so "Done." no longer cites an unrelated
   "no harm done" record. This fills `provenance.source_ids` for facts
   copied from an earlier tool result and for the digest built from them;
-  another task's records are never used ([#NN]).
+  another task's records are never used ([#103]).
 - The model-facing recall header no longer carries the retrieval latency:
   it is `(retriever bm25)`, not `(retriever bm25, 12 ms)`. Identical runs
   now produce identical prompt bytes, so a block kept in the window does
   not break the prefix cache. `ms` remains in `llm_calls.recall_json`, the
-  `recall` event and `memory_stats` ([#NN]).
+  `recall` event and `memory_stats` ([#103]).
 - A thought chunk of an attempt is now superseded at the attempt boundary
   together with that attempt's notes, so a chunk recalled later renders
   with the `(superseded)` marker and names its attempt instead of passing
@@ -723,3 +723,4 @@ earlier milestones.
 [#97]: https://github.com/localmelo/localmelo/pull/97
 [#100]: https://github.com/localmelo/localmelo/pull/100
 [#101]: https://github.com/localmelo/localmelo/pull/101
+[#103]: https://github.com/localmelo/localmelo/pull/103
