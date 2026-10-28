@@ -32,8 +32,10 @@ def _with_builtins(
     checker: Checker | None = None, workspace_root: str | None = None
 ) -> Executor:
     hippo = Hippo()
-    executor = Executor(hippo, checker or Checker(), workspace_root=workspace_root)
-    register_builtins(executor, hippo)
+    executor = Executor(
+        hippo, checker or Checker(mode="interactive"), workspace_root=workspace_root
+    )
+    register_builtins(executor, hippo, mode="interactive")
     return executor
 
 
@@ -195,7 +197,10 @@ async def test_the_run_goes_on_after_a_wrong_type() -> None:
             Message(role="assistant", content="done"),
         ]
     )
-    agent = Agent(llm=llm, options=AgentOptions(tool_exposure="all"))
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(tool_exposure="all", builtins=frozenset({"shell_exec"})),
+    )
     try:
         result = await agent.run_task("list the files")
     finally:

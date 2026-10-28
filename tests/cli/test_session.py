@@ -58,7 +58,8 @@ class FakeFactory(AgentFactory):
         super().__init__(
             backend=url_backend(URL, "m1", source="saved"),
             cfg=None,
-            options=AgentOptions(memory=memory),
+            # The UI's own surface, as launch.py sets it.
+            options=AgentOptions(memory=memory, mode="interactive"),
             workspace=str(root),
         )
         self.root = root
@@ -71,7 +72,9 @@ class FakeFactory(AgentFactory):
         model = model or self.backend.model
         if model in self.fail:
             raise RuntimeError("the model is not loaded")
-        agent = await started_agent(self.root, ScriptedLLM(self.scripts.get(model, [])))
+        agent = await started_agent(
+            self.root, ScriptedLLM(self.scripts.get(model, [])), mode="interactive"
+        )
         agent._llm.model = model
         self._live.append(agent)
         return agent

@@ -152,6 +152,10 @@ def make_agent(
 ) -> Agent:
     """An agent with the stand-in tools, offered on every step, and no waits."""
     options.setdefault("builtins", frozenset())
+    # The stand-in tools are registered by hand below, shell_exec among
+    # them; interactive mode is the one whose policy lets an exec tool run
+    # without it being named in `builtins` (P13b).
+    options.setdefault("mode", "interactive")
     options.setdefault("tool_exposure", "all")
     agent = Agent(llm=llm, options=AgentOptions(**options))
     tools = tools or Tools()
