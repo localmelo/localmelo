@@ -366,7 +366,7 @@ melo "What is 6*7?"
   that is not a number above 0 stops `melo` before it runs anything; see
   [Usage errors](cli.md#usage-errors).
 - Recalling long-term memory in a later process needs persistence, memory on
-  and an earlier admitted entry. In `legacy`, the persistent long-term store
+  and an earlier stored entry. In `legacy`, the persistent long-term store
   also needs an embedding backend. Explicit reasoning modes can persist
   text-only entries without one and find them with BM25. In explicit modes,
   recall must be enabled and include the `long` kind; `drop` and `replay`
@@ -386,8 +386,8 @@ To set an embedding model, see [Set up an embedding model](embedding.md).
 ```text
 ~/.cache/localmelo/memory/
   history.db      tasks, steps and model calls
-  long_term.db    long-term memory, when memory is on and an embedding backend
-                  is configured or the reasoning mode is not legacy
+  long_term.db    long-term memory, when memory is on and either an embedding
+                  backend is configured or the reasoning mode is not legacy
   procedures.db   procedural memory, written at the end of every run
 ```
 
