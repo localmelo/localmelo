@@ -64,19 +64,23 @@ def test_chinese_residence(text: str, value: str, polarity: str, changed: bool) 
     assert (assertion.polarity, assertion.changed) == (polarity, changed)
 
 
-def test_shared_attributes_without_one_identity_do_not_link() -> None:
-    pairs = [
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
         (
             "Riverside concert at the Old Mill on 2026-05-02 doors at 18:00.",
             "Harbor concert at the Old Mill on 2026-05-02 doors at 21:00.",
         ),
         ("小王住在北京。", "小李住在北京。"),
-    ]
-    for first, second in pairs:
-        left, right = parse_assertion(first), parse_assertion(second)
-        assert left is not None and right is not None
-        assert left.predicate_key == right.predicate_key
-        assert left.subject_key != right.subject_key
+    ],
+)
+def test_shared_attributes_without_one_identity_do_not_link(
+    first: str, second: str
+) -> None:
+    left, right = parse_assertion(first), parse_assertion(second)
+    assert left is not None and right is not None
+    assert left.predicate_key == right.predicate_key
+    assert left.subject_key != right.subject_key
 
 
 def test_event_without_venue_is_not_linked() -> None:

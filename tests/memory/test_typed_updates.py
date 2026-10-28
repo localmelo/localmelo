@@ -166,3 +166,43 @@ async def test_concurrent_sqlite_writers_compare_inside_transaction(
     finally:
         await first.aclose()
         await second.aclose()
+
+
+@pytest.mark.parametrize("sqlite", [False, True])
+async def test_one_active_negation_conflicts_and_keeps_both(
+    tmp_path: Path, sqlite: bool
+) -> None:
+    store: LongTerm = SqliteLongTerm(tmp_path / "long.db") if sqlite else LongTerm()
+    try:
+        first, action = await apply(store, "Mina lives in Paris.", 10, "a")
+        assert first is not None and action == "NEW"
+        second, action = await apply(store, "Mina does not live in Paris.", 20, "b")
+        assert second is not None and action == "CONFLICT"
+        active = await store.active_entries()
+        assert [entry.id for entry in active] == [first, second]
+        assert [entry.status for entry in active] == ["active", "active"]
+    finally:
+        if isinstance(store, SqliteLongTerm):
+            await store.aclose()
+
+
+@pytest.mark.parametrize("sqlite", [False, True])
+async def test_shared_date_different_subjects_stay_unlinked(
+    tmp_path: Path, sqlite: bool
+) -> None:
+    store: LongTerm = SqliteLongTerm(tmp_path / "long.db") if sqlite else LongTerm()
+    texts = (
+        "Riverside concert at the Old Mill on 2026-05-02 doors at 18:00.",
+        "Harbor concert at the Old Mill on 2026-05-02 doors at 21:00.",
+    )
+    try:
+        for name, text in zip(("a", "b"), texts, strict=True):
+            entry_id, action = await apply(store, text, 10, name)
+            assert entry_id is not None and action == "NEW"
+        active = await store.active_entries()
+        assert [entry.text for entry in active] == list(texts)
+        subjects = {entry.provenance["assertion"]["subject_key"] for entry in active}
+        assert len(subjects) == 2
+    finally:
+        if isinstance(store, SqliteLongTerm):
+            await store.aclose()

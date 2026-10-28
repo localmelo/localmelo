@@ -16,14 +16,14 @@ from localmelo.melo.schema import CandidateItem, MemoryCandidate, TaskRecord
 
 
 def candidate(
-    name: str, text: str, evidence: str | None, time: float
+    name: str, text: str, evidence: str | None, time: float, task: str = "task"
 ) -> MemoryCandidate:
     return MemoryCandidate(
         candidate_id=name,
         source="reasoning_note",
         text=text,
         remember_by="rule",
-        task_id="task",
+        task_id=task,
         created_at=time,
         remember=True,
         items=(CandidateItem(text, (name,), evidence=evidence),),
@@ -237,13 +237,78 @@ async def test_t4_reader_sees_newer_unlinked_doors_first(tmp_path: Path) -> None
         await agent.close()
 
 
-async def test_t4_unlinked_evidence_is_kept_without_false_link() -> None:
+@pytest.mark.parametrize("sqlite", [False, True])
+async def test_gate_keeps_near_duplicate_different_content_unlinked(
+    tmp_path: Path, sqlite: bool
+) -> None:
+    store: LongTerm = SqliteLongTerm(tmp_path / "long.db") if sqlite else LongTerm()
+    hippo = Hippo(long=store, typed_assertions=True)
+    shared = [f"token{index}" for index in range(9)]
+    texts = (" ".join([*shared, "alpha"]), " ".join([*shared, "beta"]))
+    try:
+        actions = []
+        for name, text in zip(("a", "b"), texts, strict=True):
+            hippo.propose(MemoryCandidate(name, "digest", text, "rule", "task"))
+            actions.append((await hippo.admit(name, "rehearsal"))[0].action)
+        assert actions == ["NEW", "NEW"]
+        assert {entry.text for entry in await store.active_entries()} == set(texts)
+    finally:
+        if isinstance(store, SqliteLongTerm):
+            await store.aclose()
+
+
+async def test_user_and_source_entries_keep_wall_time_for_recall_order() -> None:
+    from localmelo.melo.agent.agent import _RunState
+    from localmelo.tests.agent.test_recall_loop import FakeLLM, _agent, _options
+
+    agent = _agent(
+        FakeLLM(),
+        _options(reasoning="compress", retriever="bm25", typed_assertions=True),
+    )
+    try:
+        await agent.hippo.save_task(
+            TaskRecord(query="Mina lives in Paris.", task_id="facts")
+        )
+        user_text = "Mina lives in Paris."
+        agent.hippo.propose(
+            MemoryCandidate(
+                "u",
+                "user",
+                user_text,
+                "rule",
+                "facts",
+                created_at=1_790_000_000.0,
+                remember=True,
+            )
+        )
+        assert (await agent.hippo.admit("u", "user_statement"))[0].action == "NEW"
+        source_text = "Mina moved to Rome."
+        agent.hippo.propose(
+            candidate(
+                "f1",
+                source_text,
+                record("f1", source_text, "2026-05-02T19:10:00-04:00", "date"),
+                1_790_000_100.0,
+                "facts",
+            )
+        )
+        assert (await agent.hippo.admit("f1", "rehearsal"))[0].action == "CONFLICT"
+        _, block, _ = await agent._run_recall(
+            "start", "Where does Mina live?", _RunState(task_id="reader")
+        )
+        assert block.index(user_text) < block.index(source_text)
+    finally:
+        await agent.close()
+
+
+@pytest.mark.parametrize("field", ["timestamp", "date"])
+async def test_t4_unlinked_evidence_is_kept_without_false_link(field: str) -> None:
     store = LongTerm()
     hippo = Hippo(long=store, typed_assertions=True)
     old = "Static Bloom concert at the Paradise Lot on Saturday 2026-04-11, doors at 20:00."
     new = "Doors pushed to 9 tonight, the opener cancelled!"
     for name, text, observed in [("F1", old, 10), ("F3", new, 20)]:
-        hippo.propose(candidate(name, text, record(name, text), observed))
+        hippo.propose(candidate(name, text, record(name, text, field=field), observed))
         assert (await hippo.admit(name, "rehearsal"))[0].action == "NEW"
     entries = await store.active_entries()
     assert len(entries) == 2

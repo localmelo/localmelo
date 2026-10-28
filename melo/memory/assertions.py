@@ -143,19 +143,35 @@ def decide_assertion(
     )
     if same:
         return "IGNORE", entry_id, "duplicate typed assertion"
-    incoming_order = incoming.get("observed_at")
-    previous_order = other.get("observed_at")
+    incoming_order = _decision_order(incoming)
+    previous_order = _decision_order(other)
     if (
         incoming.get("changed") is True
         and len(matching) == 1
-        and isinstance(incoming_order, (int, float))
-        and not isinstance(incoming_order, bool)
-        and isinstance(previous_order, (int, float))
-        and not isinstance(previous_order, bool)
-        and incoming_order > previous_order > 0
+        and incoming_order is not None
+        and previous_order is not None
+        and incoming_order[0] == previous_order[0]
+        and incoming_order[1] > previous_order[1]
     ):
         return "UPDATE", entry_id, "ordered explicit change"
     return "CONFLICT", entry_id, "different or unordered typed assertion"
+
+
+def _decision_order(assertion: dict[str, Any]) -> tuple[str, float] | None:
+    """The order two assertions can share: per-task user counter or source epoch.
+
+    A user statement's counter and a source record's timestamp are different
+    clocks, so an assertion from one is never ordered against the other.
+    """
+    for kind, name in (("user", "user_order"), ("source", "observed_at")):
+        value = assertion.get(name)
+        if (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and value > 0
+        ):
+            return kind, float(value)
+    return None
 
 
 def parse_assertion(text: str, *, source_date: date | None = None) -> Assertion | None:

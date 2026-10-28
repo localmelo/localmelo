@@ -15,6 +15,7 @@ from localmelo.melo.memory.assertions import (
     verified_record,
 )
 from localmelo.melo.memory.hippo import (
+    EXACT_DUPLICATE_REASON,
     SIGNALS,
     CandidateItem,
     HippoPolicy,
@@ -404,7 +405,8 @@ class Hippo:
                     typed = parsed.to_dict()
                     if candidate.source == "user":
                         self._user_order += 1
-                        typed["observed_at"] = float(self._user_order)
+                        typed["user_order"] = float(self._user_order)
+                        typed["observed_at"] = candidate.created_at
                     else:
                         typed["observed_at"] = record_observed_at(item.evidence or "")
                         if source_date is not None:
@@ -460,7 +462,7 @@ class Hippo:
                 )
                 and not (
                     decision.action == "IGNORE"
-                    and decision.reason.rstrip().endswith("duplicate")
+                    and decision.reason == EXACT_DUPLICATE_REASON
                 )
             ):
                 decision = replace(

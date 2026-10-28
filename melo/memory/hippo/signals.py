@@ -8,6 +8,7 @@ sees a tool result, a note, a recall block or an assistant message.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -273,6 +274,7 @@ def _user_candidate(
             **(provenance or {}),
             "task_id": task_id,
         },
+        created_at=time.time(),
         remember=True,
     )
 

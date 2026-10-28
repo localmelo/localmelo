@@ -24,6 +24,10 @@ from localmelo.melo.memory.notes import (
 
 ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE")
 
+# Only identical text may be dropped; near-duplicates with different
+# content stay distinct (T112R finding 4, lead decision 1).
+EXACT_DUPLICATE_REASON = "exact duplicate"
+
 # A short fact is noise: fewer than this many normalised characters.
 MIN_FACT_CHARS = 20
 
@@ -611,12 +615,17 @@ def decide(
             or target.overlap >= 0.9
             or target.cosine >= 0.95
         ):
+            exact = normalise(other_text) == folded
             return PolicyDecision(
                 action="IGNORE",
                 kind=kind,
                 subject=subject,
                 target_id=target_id,
-                reason=f"overlap {target.overlap:.2f}; duplicate",
+                reason=(
+                    EXACT_DUPLICATE_REASON
+                    if exact
+                    else f"overlap {target.overlap:.2f}; near-duplicate"
+                ),
                 overlap=target.overlap,
                 cosine=target.cosine,
             )
