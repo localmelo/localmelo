@@ -785,6 +785,9 @@ class SessionRunner:
             )
         if outcome is None:
             turn.fallback = RunResult(task_id=turn.run_id, status=status, error=error)
+            # The result column carries the reason too: a caller that reads the
+            # saved turn (instead of turn.finished) must see why it ended.
+            result = turn.fallback.to_dict()
         end: dict[str, Any] = {
             "session_id": info.session_id,
             "turn": info.turn,
