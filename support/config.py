@@ -113,6 +113,9 @@ class AgentConfig:
     replay_turns: int | None = None  # None: every turn in scope
     note_writer: str = "auto"  # auto | heuristic (compress modes)
     tool_env: list[str] = field(default_factory=list)  # extra inherited variable names
+    context_window: int | None = None
+    output_reserve: int | None = None
+    safety_margin: int | None = None
 
 
 @dataclass
@@ -352,6 +355,43 @@ class Config:
             isinstance(turns, bool) or not isinstance(turns, int) or turns < 1
         ):
             errors.append(f"[agent] replay_turns must be an int >= 1, got {turns!r}")
+        budget = (
+            self.agent.context_window,
+            self.agent.output_reserve,
+            self.agent.safety_margin,
+        )
+        for name, value in zip(
+            ("context_window", "output_reserve", "safety_margin"), budget, strict=True
+        ):
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 1
+            ):
+                errors.append(
+                    f"[agent] {name} must be a positive integer, got {value!r}"
+                )
+        if any(value is not None for value in budget) and any(
+            value is None for value in budget
+        ):
+            missing = [
+                name
+                for name, value in zip(
+                    ("context_window", "output_reserve", "safety_margin"),
+                    budget,
+                    strict=True,
+                )
+                if value is None
+            ]
+            errors.append("[agent] context budget is missing " + ", ".join(missing))
+        if all(
+            isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in budget
+        ):
+            window, reserve, margin = budget
+            assert window is not None and reserve is not None and margin is not None
+            if window - reserve - margin <= 0:
+                errors.append(
+                    "[agent] context_window - output_reserve - safety_margin "
+                    "must be positive"
+                )
         names: object = self.agent.tool_env
         if not isinstance(names, list) or any(
             not isinstance(name, str)
@@ -828,6 +868,9 @@ def save(cfg: Config) -> None:
         or cfg.agent.replay_turns is not None
         or cfg.agent.note_writer != "auto"
         or cfg.agent.tool_env
+        or cfg.agent.context_window is not None
+        or cfg.agent.output_reserve is not None
+        or cfg.agent.safety_margin is not None
     ):
         lines.append("[agent]")
         lines.append(f"reasoning = {_toml_string(cfg.agent.reasoning)}")
@@ -837,6 +880,10 @@ def save(cfg: Config) -> None:
             lines.append(f"note_writer = {_toml_string(cfg.agent.note_writer)}")
         if cfg.agent.tool_env:
             lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
+        for name in ("context_window", "output_reserve", "safety_margin"):
+            value = getattr(cfg.agent, name)
+            if value is not None:
+                lines.append(f"{name} = {_toml_value(value)}")
         lines.append("")
 
     if cfg.memory != MemoryConfig():
