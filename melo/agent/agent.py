@@ -999,6 +999,13 @@ class _RunState:
     # The task's tool-result records, for a later note's items (T62): the
     # results still in the window and the rest, both newest first, bounded.
     source_log: SourceRecordLog = dataclasses.field(default_factory=SourceRecordLog)
+    # The current attempt's executed calls and their checked results, for
+    # its digest (T76): files written and the last check. Only the compress
+    # modes fill it, and it is cleared at the attempt's start and after its
+    # digest.
+    attempt_calls: list[tuple[ToolCall, ToolResult]] = dataclasses.field(
+        default_factory=list
+    )
     # Rehearsal signals: restated, acted and cited.
     rehearsed: dict[str, int] = dataclasses.field(
         default_factory=lambda: {"restated": 0, "acted": 0, "cited": 0}
@@ -1679,7 +1686,9 @@ class Agent:
         with a result missing or extra, or a tool message without its call,
         is dropped with a WARNING. Working memory evicts its oldest units
         as usual. Returns the number of messages kept; ``[]`` clears the
-        conversation.
+        conversation. Explicit reasoning modes split a legacy inline
+        thinking block in the loaded copies; the caller's messages are
+        unchanged, and prompt-cap fitting can strip thinking before facts.
 
         Raises ``RuntimeError`` during a run, and ``TypeError``, before
         anything is cleared, for an item that is not a
@@ -1693,11 +1702,17 @@ class Agent:
                 raise TypeError(
                     f"load_conversation takes Message objects, got {type(msg).__name__}"
                 )
+        loaded = copy.deepcopy(loaded)
+        if self.options.reasoning != "legacy":
+            # Normalize legacy checkpoints once, before prompt-cap fitting
+            # tracks canonical message identities and strips thinking.
+            loaded = [
+                _split_inline_reasoning(msg) if msg.role == "assistant" else msg
+                for msg in loaded
+            ]
         working = self.hippo.working
         working.clear_all()
-        for unit in group_turns(
-            copy.deepcopy(loaded), empty_prefix=working.empty_prefix
-        ):
+        for unit in group_turns(loaded, empty_prefix=working.empty_prefix):
             head = unit[0]
             if head.role == "assistant" and head.tool_calls:
                 if _answers_every_call(head, unit[1:]):
@@ -2608,6 +2623,8 @@ class Agent:
             task_id=task_id,
             attempt=run.attempts,
             step=run.steps,
+            calls=run.attempt_calls,
+            root=run.place or "",
         )
         note = dataclasses.replace(
             note,
@@ -3498,6 +3515,7 @@ class Agent:
             if isinstance(path, str) and path.strip():
                 run.recent_path = path
         if self._notes_mode:
+            run.attempt_calls.append((call, result))
             await self._rehearse_acted(call, result, run, exit_codes or ())
         return result, cut
 
@@ -4266,6 +4284,7 @@ class Agent:
         """
         fingerprints: list[tuple[str, str, str]] = []
         reflections = self.hippo.working.get_reflections() or None
+        run.attempt_calls.clear()
 
         for step in range(budget):
             # Retrieval + tool resolution + boundary checks
@@ -5534,6 +5553,7 @@ class Agent:
             if not self._notes_mode:
                 return
             self._build_digest(query, failure_type, run, task.task_id)
+            run.attempt_calls.clear()
             self.hippo.working.notes.supersede_attempt(run.attempts)
 
         for attempt_id in range(opts.max_attempts):
@@ -5662,6 +5682,7 @@ class Agent:
         )
         if self._notes_mode:
             self._build_digest(query, failure_type, run, task.task_id)
+            run.attempt_calls.clear()
             self.hippo.working.notes.supersede_attempt(run.attempts)
         if not run.running:
             return

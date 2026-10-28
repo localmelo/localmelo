@@ -13,6 +13,7 @@ import contextlib
 import copy
 import io
 import os
+from collections.abc import Mapping
 from dataclasses import replace
 from typing import Any, Final
 
@@ -93,6 +94,8 @@ class AgentFactory:
         embedding_base_url: str | None = None,
         embedding_model: str | None = None,
         request_timeout_s: float | None = None,
+        reasoning_field: str | None = None,
+        retrieval_extra_body: Mapping[str, Any] | None = None,
         mcp_config: str | None = None,
         mcp_source: str = "",
         mcp_servers: list[Any] | None = None,
@@ -105,6 +108,12 @@ class AgentFactory:
         self._embedding_base_url = embedding_base_url
         self._embedding_model = embedding_model
         self._request_timeout_s = request_timeout_s
+        self._reasoning_field = reasoning_field
+        self._retrieval_extra_body = (
+            copy.deepcopy(dict(retrieval_extra_body))
+            if retrieval_extra_body is not None
+            else None
+        )
         # The MCP servers file, where it came from, and why MCP is off after
         # a server failed to start.
         self.mcp_config = mcp_config
@@ -145,6 +154,9 @@ class AgentFactory:
             agent = await self._build(
                 model, url, self.mcp_config if self.mcp_error is None else None
             )
+        except ValueError:
+            # An invalid mode/provider pair is not an MCP startup failure.
+            raise
         except Exception as exc:
             if self.mcp_config is None or self.mcp_error is not None:
                 raise
@@ -167,6 +179,8 @@ class AgentFactory:
                 embedding_base_url=self._embedding_base_url,
                 embedding_model=self._embedding_model,
                 request_timeout_s=self._request_timeout_s,
+                reasoning_field=self._reasoning_field,
+                retrieval_extra_body=self._retrieval_extra_body,
                 mcp_config=mcp_config,
             )
         cfg = self._cfg
@@ -179,6 +193,8 @@ class AgentFactory:
             workspace=self._workspace,
             options=self._options,
             request_timeout_s=self._request_timeout_s,
+            reasoning_field=self._reasoning_field,
+            retrieval_extra_body=self._retrieval_extra_body,
             mcp_config=mcp_config,
         )
 

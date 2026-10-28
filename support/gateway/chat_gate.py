@@ -1572,10 +1572,10 @@ class ChatGate:
 class GatedLLM(BaseLLMProvider):
     """A chat provider that submits each request to *client*'s gate (R18).
 
-    It forwards attributes other than the three the base class documents
-    through ``__getattr__``; ``model``, ``last_reasoning_key`` and
-    ``last_usage`` are copied from the inner provider right after each
-    successful ``chat()``, with no await in between.
+    It forwards attributes through ``__getattr__``, except those with base
+    class defaults: replay capabilities and request-kind overrides are
+    copied at construction; ``model``, ``last_reasoning_key`` and
+    ``last_usage`` are copied again after each successful ``chat()``.
     """
 
     def __init__(self, inner: BaseLLMProvider, client: SessionClient) -> None:
@@ -1588,6 +1588,9 @@ class GatedLLM(BaseLLMProvider):
             else ""
         )
         self.last_usage = _int_usage(inner.last_usage)
+        self.reasoning_field = inner.reasoning_field
+        self.requires_reasoning_replay = inner.requires_reasoning_replay
+        self.extra_body_by_kind = inner.extra_body_by_kind
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)

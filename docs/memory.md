@@ -11,7 +11,8 @@ page.
 
 | To | Do this |
 |---|---|
-| Keep each reply as a short note (no recall yet) | `melo --reasoning compress "<task>"` |
+| Keep each reply as a short note with default recall | `melo --reasoning compress "<task>"` |
+| Use short notes and BM25 recall throughout an interactive chat | `melo --reasoning compress --retriever bm25 --note-writer heuristic` |
 | Keep memory between runs | `export LOCALMELO_PERSIST_MEMORY=1` |
 | Choose the directory | `export LOCALMELO_MEMORY_DIR=…` (default `~/.cache/localmelo/memory`) |
 | Keep the memory of one run in a directory | `melo --memory-dir ~/melo-memory "<task>"` |
@@ -81,8 +82,10 @@ transpose in transpose.py … outcome: completed") is kept.
 
 - The notes, drafts and digests live in a **note store** beside the
   conversation window, in RAM, as long as the agent: one direct run, one
-  `melo ""` loop, one interactive UI session or one Python-API `Agent`.
-  The gateway keeps `legacy` in this release, so its sessions have none.
+  `melo ""` loop, one interactive UI session, one console session or one
+  Python-API `Agent`. Console sessions default to `legacy` (no notes), but
+  use the compress mode when `[agent] reasoning` explicitly selects it.
+  The legacy `/v1` API remains unchanged.
   The store holds at most 300 documents or 300,000 characters. Window
   eviction does not evict notes. Each entry has a short alias (`n4`,
   `d1`, `g1`) that a prompt uses.
@@ -96,10 +99,19 @@ transpose in transpose.py … outcome: completed") is kept.
 - Notes are **rehearsed** when a later note restates their facts, when a
   successful tool call acts on a path or command they name, or when a
   reflection cites them in `used_notes`. A rehearsed note feeds the
-  attempt's **digest**: the task, the outcome, the facts, the observed
-  lines and the open questions, at most 1,500 characters. An unrehearsed
-  note stays out of it. The attempt's notes and thought chunks are
-  superseded after its digest.
+  attempt's **digest**: the task's first sentence or heading, the outcome,
+  the files the attempt's successful `file_write` calls wrote (at most six,
+  workspace-relative, then `+N`), the last check the attempt ran with its
+  result, the facts, up to three decisions, the observed lines and the open
+  questions, at most 1,500 characters. The check is a `shell_exec` or
+  `python_exec` whose command or code runs tests or the program; its result
+  is the test counts, the exit code or its last output line. An observed
+  line whose result is empty or only a boolean, `None`, an exit code or
+  punctuation is left out, so it cannot enter a digest or make one a
+  rehearsal candidate. An unrehearsed note stays out of it. Over the limit,
+  open questions drop first, then observed lines, decisions, facts and
+  files, then the task is shortened; the outcome and the verification stay.
+  The attempt's notes and thought chunks are superseded after its digest.
 - Nothing here is written to `history.db` or `sessions.db` as a note.
   `history.db` keeps no notes table; it still keeps the model's raw reply
   in `steps` and in `llm_calls`. The only new session field is the turn's
@@ -111,8 +123,14 @@ transpose in transpose.py … outcome: completed") is kept.
   summaries is off in those modes too.
 - The Python API's `Agent.notes()` and `Agent.load_notes()` read and
   replace the store in RAM; they are internal and experimental.
-- In the session store, `resume()` does not read `turns.note` yet: it loads
-  the conversation as before.
+- On session resume the current process's reasoning mode wins, not the
+  mode stored on old outcomes. `pairs` restores user/answer pairs with no
+  old thinking. `window` restores the checkpoint's retained, redacted
+  thinking and can replay it in replay modes; `drop` and `compress` remove
+  both its thinking field and any legacy inline copy from request copies.
+  The stored window is not destroyed. Neither resume path rebuilds the
+  RAM-only note store from `turns.note`; a window can still contain the
+  model's original `<note>` text. See [Resume](sessions.md#resume).
 
 ## Recall in the loop
 
