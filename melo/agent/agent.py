@@ -72,12 +72,21 @@ from localmelo.melo.executor import (
 )
 from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
+from localmelo.melo.memory.hippo import (
+    KINDS,
+    SIGNALS,
+    MemoryDecision,
+    classify_user_text,
+    user_candidates,
+)
 from localmelo.melo.memory.notes import (
     NOTE_MAX_DECIDED,
     NOTE_MAX_FOUND,
     NOTE_SHOWN_CHARS,
     Draft,
     ReasoningNote,
+    candidate_items,
+    candidate_text,
     digest_note,
     draft_title,
     extract_draft,
@@ -85,6 +94,7 @@ from localmelo.melo.memory.notes import (
     note_from_reply,
     note_title,
     path_spans,
+    reflection_candidate_text,
     render_digest,
     render_draft_block,
     render_note,
@@ -150,6 +160,7 @@ from localmelo.melo.schema import (
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
     ImagePart,
+    MemoryCandidate,
     Message,
     ReflectionDecision,
     ReflectionEntry,
@@ -1030,6 +1041,19 @@ class _RunState:
     pending_recalls: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     pending_recall_records: list[RecallRecord] = dataclasses.field(default_factory=list)
     pending_shown: set[str] = dataclasses.field(default_factory=set)
+    # R6-lite: the run's user request, its last digest and final reflection,
+    # and the admission counters (see memory_stats on RunResult).
+    task_text: str = ""
+    remember_request: bool = False
+    final_digest: MemoryCandidate | None = None
+    final_reflection: MemoryCandidate | None = None
+    admitted: dict[str, int] = dataclasses.field(
+        default_factory=lambda: {signal: 0 for signal in SIGNALS}
+    )
+    written: dict[str, int] = dataclasses.field(
+        default_factory=lambda: {kind: 0 for kind in KINDS}
+    )
+    ignored: int = 0
     # R5's recall counters (see memory_stats on RunResult).
     recalls: int = 0
     recalls_by_trigger: dict[str, int] = dataclasses.field(
@@ -1429,7 +1453,11 @@ class Agent:
                 os.path.join(self._memory_dir, "history.db"),
                 thinking_retention_days=retention_days,
             )
-            if self._embedding and self.options.memory:
+            # In legacy the file exists only with an embedding provider,
+            # exactly as before; the explicit modes add a text-only store.
+            if self.options.memory and (
+                self._embedding is not None or self.options.reasoning != "legacy"
+            ):
                 long_backend = SqliteLongTerm(
                     os.path.join(self._memory_dir, "long_term.db")
                 )
@@ -1448,6 +1476,9 @@ class Agent:
             long=long_backend,
             procedures=procedures_backend,
             short_term_empty_prefix=self.options.reasoning != "legacy",
+            memory=self.options.memory,
+            admit_on_outcome=self.options.admit_on_outcome,
+            keep_decision_text=self.options.keep_decision_text,
         )
         self.checker = Checker()
         self.executor = Executor(
@@ -2174,6 +2205,109 @@ class Agent:
         run.redactions += int(payload.metadata.get("redactions", 0) or 0)
         return str(payload.text)
 
+    def _memory_provenance(
+        self,
+        run: _RunState,
+        *,
+        note: ReasoningNote | None = None,
+        calls: Sequence[ToolCall] = (),
+    ) -> dict[str, Any]:
+        """The provenance a candidate records about the turn that made it."""
+        paths: list[str] = []
+        commands: list[str] = []
+        for call in calls:
+            for name in self._touched_names(call):
+                bucket = paths if path_spans(name) else commands
+                if name not in bucket:
+                    bucket.append(name)
+        source_ids = list(note.source_ids) if note is not None else []
+        return {
+            "task_id": run.task_id,
+            "session_id": "",
+            "step": run.steps,
+            "attempt": run.attempts,
+            "call_seq": self._last_call_seq(),
+            "task_text": run.task_text[:300],
+            "paths": paths,
+            "commands": commands,
+            "source_ids": source_ids,
+            "note_id": note.note_id if note is not None else "",
+        }
+
+    def _propose_note_candidate(
+        self,
+        note: ReasoningNote,
+        run: _RunState,
+        calls: Sequence[ToolCall] = (),
+    ) -> None:
+        """Stage a rememberable note's items for long-term memory."""
+        if not note.remember or not (note.found or note.decided):
+            return
+        candidate = MemoryCandidate(
+            candidate_id=note.note_id,
+            source="reasoning_note",
+            text=candidate_text(note),
+            remember_by=note.remember_by or "rule",
+            task_id=run.task_id,
+            session_id="",
+            provenance=self._memory_provenance(run, note=note, calls=calls),
+            created_at=note.created_at,
+            remember=True,
+            items=candidate_items(note),
+        )
+        self.hippo.propose(candidate)
+
+    def _drain_decisions(
+        self, decisions: Sequence[MemoryDecision], run: _RunState
+    ) -> None:
+        """Count the decisions an admission made and emit one event each."""
+        for decision in decisions:
+            if decision.refused:
+                run.candidates_refused += 1
+                continue
+            run.redactions += decision.redactions
+            run.admitted[decision.admitted_by] = (
+                run.admitted.get(decision.admitted_by, 0) + 1
+            )
+            if decision.action == "IGNORE":
+                run.ignored += 1
+            else:
+                run.written[decision.kind] = run.written.get(decision.kind, 0) + 1
+            run.events.memory(
+                candidate_id=decision.candidate_id,
+                action=decision.action,
+                kind=decision.kind,
+                admitted_by=decision.admitted_by,
+                entry_id=decision.entry_id,
+            )
+
+    def _propose_reflection(
+        self, entry: ReflectionEntry, run: _RunState, *, note_id: str = ""
+    ) -> None:
+        """Stage the final reflection, with its next directions and open questions."""
+        candidate_id = note_id or new_record_id()
+        candidate = MemoryCandidate(
+            candidate_id=candidate_id,
+            source="reflection",
+            text=reflection_candidate_text(entry),
+            remember_by="rule",
+            task_id=run.task_id,
+            session_id="",
+            provenance={
+                "task_id": run.task_id,
+                "session_id": "",
+                "step": run.steps,
+                "attempt": run.attempts,
+                "task_text": run.task_text[:300],
+                "source_ids": [],
+                "note_id": candidate_id,
+            },
+            created_at=time.time(),
+            remember=True,
+        )
+        run.final_reflection = candidate
+        self.hippo.propose(candidate)
+
     def _store_note(
         self,
         note: ReasoningNote,
@@ -2181,6 +2315,7 @@ class Agent:
         *,
         source: str,
         drafts: Sequence[str] = (),
+        calls: Sequence[ToolCall] = (),
     ) -> NoteStoreEntry | None:
         """Check and store one note; emit its ``note`` event."""
         text = render_note(note, executor=True)
@@ -2224,6 +2359,8 @@ class Agent:
             remember=note.remember,
             stage=entry.stage,
         )
+        if source == "reasoning_note":
+            self._propose_note_candidate(note, run, calls)
         return entry
 
     def _store_draft(self, draft: Draft, run: _RunState) -> NoteStoreEntry | None:
@@ -2247,7 +2384,7 @@ class Agent:
         self.hippo.working.notes.supersede_drafts(draft.target, keep=entry.alias)
         return entry
 
-    def _prepare_note_turn(
+    async def _prepare_note_turn(
         self,
         response: Message,
         step: _InflightStep,
@@ -2291,10 +2428,14 @@ class Agent:
         )
         aliases = [] if draft_entry is None else [draft_entry.alias]
         note_entry = self._store_note(
-            note, run, source="reasoning_note", drafts=aliases
+            note,
+            run,
+            source="reasoning_note",
+            drafts=aliases,
+            calls=[call for call, _result in pairs],
         )
         if note_entry is not None:
-            self._restate(note, run)
+            await self._restate(note, run)
         note_text = "" if note_entry is None else note_entry.text
         if step.has_model_note:
             content = response.content
@@ -2422,9 +2563,22 @@ class Agent:
             remember=True,
             stage=entry.stage,
         )
+        candidate = MemoryCandidate(
+            candidate_id=note.note_id,
+            source="digest",
+            text=checked,
+            remember_by="rule",
+            task_id=task_id,
+            session_id="",
+            provenance=self._memory_provenance(run, note=note),
+            created_at=note.created_at,
+            remember=True,
+        )
+        run.final_digest = candidate
+        self.hippo.propose(candidate)
         return checked
 
-    def _restate(self, note: ReasoningNote, run: _RunState) -> bool:
+    async def _restate(self, note: ReasoningNote, run: _RunState) -> bool:
         """Compact *note*'s new items into an older note with the same facts.
 
         A later note whose ``found`` or ``decided`` items match an existing
@@ -2476,6 +2630,9 @@ class Agent:
                 return False
             self.hippo.working.notes.touch(entry.alias, use=True, stage="rehearsed")
             run.rehearsed["restated"] += 1
+            self._propose_note_candidate(updated, run)
+            decisions = await self.hippo.admit(updated.note_id, "rehearsal")
+            self._drain_decisions(decisions, run)
             return True
         return False
 
@@ -2547,7 +2704,7 @@ class Agent:
                 return True
             start = index + 1
 
-    def _rehearse_acted(
+    async def _rehearse_acted(
         self,
         call: ToolCall,
         result: ToolResult,
@@ -2572,8 +2729,10 @@ class Agent:
             note.stage = "rehearsed"
             self.hippo.working.notes.touch(entry.alias, stage="rehearsed")
             run.rehearsed["acted"] += 1
+            decisions = await self.hippo.admit(note.note_id, "rehearsal")
+            self._drain_decisions(decisions, run)
 
-    def _cite_notes(self, aliases: Sequence[str], run: _RunState) -> None:
+    async def _cite_notes(self, aliases: Sequence[str], run: _RunState) -> None:
         """Mark the notes a reflection cited in ``used_notes`` as rehearsed."""
         for alias in aliases:
             entry = self.hippo.working.notes.get(alias)
@@ -2583,6 +2742,9 @@ class Agent:
                 entry.note.stage = "rehearsed"
             self.hippo.working.notes.touch(alias, use=True, stage="rehearsed")
             run.rehearsed["cited"] += 1
+            if entry.note is not None:
+                decisions = await self.hippo.admit(entry.note.note_id, "rehearsal")
+                self._drain_decisions(decisions, run)
 
     @staticmethod
     def _used_notes(content: str, flags: bool) -> list[str]:
@@ -3235,7 +3397,7 @@ class Agent:
             if isinstance(path, str) and path.strip():
                 run.recent_path = path
         if self._notes_mode:
-            self._rehearse_acted(call, result, run, exit_codes or ())
+            await self._rehearse_acted(call, result, run, exit_codes or ())
         return result, cut
 
     async def _do_memorize(
@@ -3314,7 +3476,7 @@ class Agent:
         content = response.content
         thinking = response.thinking
         if self._notes_mode:
-            content, thinking, note_entry, draft_entry = self._prepare_note_turn(
+            content, thinking, note_entry, draft_entry = await self._prepare_note_turn(
                 response, step, list(zip(calls, kept, strict=True)), run
             )
             assistant_msg, tool_msgs = self._checked_tool_turn(
@@ -3830,6 +3992,7 @@ class Agent:
                     self.chat.stats.reasoning_chars += len(response.thinking)
             if replies is not None:
                 replies.append(response)
+        reflection_note_id = ""
         if run is not None:
             run.reflection_thinking = response.thinking
             readable = (
@@ -3838,8 +4001,10 @@ class Agent:
                 else _holds_reflection_object(response.content)
             )
             if self._notes_mode and readable:
-                self._cite_notes(self._used_notes(response.content, flags), run)
-                self._store_reflection_note(response, task, run)
+                await self._cite_notes(self._used_notes(response.content, flags), run)
+                reflection_entry = self._store_reflection_note(response, task, run)
+                if reflection_entry is not None and reflection_entry.note is not None:
+                    reflection_note_id = reflection_entry.note.note_id
         if flags:
             data = _find_reflection(response.content)
             if data is None:
@@ -3849,6 +4014,8 @@ class Agent:
             )
             entry = _fit_reflection(entry, MAX_REFLECTION_CHARS)
             decision.tried_memory = entry
+            if run is not None:
+                self._propose_reflection(entry, run, note_id=reflection_note_id)
             return entry, decision
         entry, decision = self._parse_reflection(
             response.content, attempt_id, failure_type
@@ -3859,6 +4026,8 @@ class Agent:
             decision.recommended_action = "decompose"
             note = f" (reflection budget exceeded: {size} > {MAX_REFLECTION_CHARS})"
             decision.rationale = (decision.rationale or "") + note
+        if run is not None:
+            self._propose_reflection(entry, run, note_id=reflection_note_id)
         return entry, decision
 
     @staticmethod
@@ -4049,7 +4218,7 @@ class Agent:
                         )
                         entry = self._store_note(note, run, source="reasoning_note")
                         if entry is not None:
-                            self._restate(note, run)
+                            await self._restate(note, run)
                     run.answer_thinking = response.thinking
                     run.end("completed", result=rest)
                     return step + 1, ""
@@ -4346,6 +4515,7 @@ class Agent:
         task = TaskRecord(query=query)
         run = _RunState(
             task_id=task.task_id,
+            task_text=query,
             events=_Emitter(
                 on_event if observe is None else observe,
                 task.task_id,
@@ -4398,6 +4568,24 @@ class Agent:
                     self.hippo.working.append(query_msg)
                     run.task_query_msg = query_msg
                     run.query_in_memory = True
+                    if self.options.reasoning != "legacy":
+                        # Only the user's own text gives a user signal; a
+                        # stated fact is admitted at once, a bare request
+                        # covers the run at flush.
+                        signals = classify_user_text(query)
+                        for candidate in user_candidates(
+                            query,
+                            task_id=run.task_id,
+                            provenance={"task_text": run.task_text[:300]},
+                        ):
+                            self.hippo.propose(candidate)
+                            decisions = await self.hippo.admit(
+                                candidate.candidate_id, "user_statement"
+                            )
+                            self._drain_decisions(decisions, run)
+                        run.remember_request = signals.remember and not (
+                            signals.states_facts
+                        )
                     if self.options.attempt_policy == "none":
                         await self._run_single_attempt(task, query, run)
                     else:
@@ -4425,7 +4613,7 @@ class Agent:
             except BaseException as exc:
                 if run.interactive and _is_cancellation(exc):
                     # A caller stopped a run that it follows.
-                    self._on_cancelled(query, run, exc)
+                    await self._on_cancelled(query, run, exc)
                 else:
                     if (
                         isinstance(exc, asyncio.CancelledError)
@@ -4662,8 +4850,17 @@ class Agent:
                 )
             if self.options.reasoning != "legacy":
                 # R4 gates the promotion too: the explicit modes write
-                # nothing unchecked to long-term memory (R6-lite adds
-                # their own path through the candidate boundary).
+                # nothing unchecked to long-term memory. R6-lite's flush
+                # admits the run's candidates through the boundary and
+                # policy; its failure is logged, never raised.
+                if run.final_digest is not None:
+                    run.final_digest.provenance["final_status"] = run.status
+                decisions = await self.hippo.flush(
+                    run_request=run.remember_request,
+                    digest=run.final_digest,
+                    final_reflection=run.final_reflection,
+                )
+                self._drain_decisions(decisions, run)
                 self.hippo.working.clear_reflections()
             else:
                 bound = asyncio.timeout(PROMOTION_TIMEOUT_S)
@@ -4740,7 +4937,7 @@ class Agent:
 
     # ── Cancelled interactive runs ──
 
-    def _on_cancelled(
+    async def _on_cancelled(
         self, query: str, run: _RunState, exc: asyncio.CancelledError
     ) -> None:
         """End *run*, an interactive run that a cancellation stopped.
@@ -4763,7 +4960,7 @@ class Agent:
         if run.inflight is None:
             return
         try:
-            self._close_interrupted_step(run.inflight, run.waiting_call_id, run)
+            await self._close_interrupted_step(run.inflight, run.waiting_call_id, run)
         except Exception:
             # Logged, not raised: nothing may take the cancellation's place.
             logger.exception(
@@ -4785,7 +4982,7 @@ class Agent:
             return message
         return CANCELLED_ERROR
 
-    def _close_interrupted_step(
+    async def _close_interrupted_step(
         self, step: _InflightStep, waiting_call_id: str, run: _RunState
     ) -> None:
         """Answer every call of *step* and append the step to working memory.
@@ -4814,7 +5011,7 @@ class Agent:
         step.closed = closed
         cut_before = [*step.cut_before, *[0] * (len(calls) - returned)]
         if self._notes_mode:
-            content, thinking, _note_entry, draft_entry = self._prepare_note_turn(
+            content, thinking, _note_entry, draft_entry = await self._prepare_note_turn(
                 step.response,
                 step,
                 list(zip(calls, closed, strict=True)),
@@ -5077,6 +5274,9 @@ class Agent:
                 "retrieve_completion_tokens": run.retrieve_completion_tokens,
                 "thought_chunks": run.thought_chunks,
                 "recall_log": list(run.recall_log),
+                "admitted": dict(run.admitted),
+                "written": dict(run.written),
+                "ignored": run.ignored,
             }
         return RunResult(
             task_id=task.task_id,
@@ -5124,6 +5324,8 @@ class Agent:
             config["recall_kinds"] = sorted(self._effective_kinds)
             config["recall_placement"] = opts.recall_placement
             config["recall_min_score"] = opts.recall_min_score
+            config["admit_on_outcome"] = opts.admit_on_outcome
+            config["keep_decision_text"] = opts.keep_decision_text
         return config
 
     async def _run_reflective_attempts(

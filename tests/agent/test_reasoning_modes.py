@@ -275,6 +275,20 @@ async def test_drop_equals_legacy_on_the_wire() -> None:
         "retrieve_completion_tokens": 0,
         "thought_chunks": 0,
         "recall_log": [],
+        "admitted": {
+            "rehearsal": 0,
+            "user_request": 0,
+            "user_statement": 0,
+            "outcome": 0,
+            "sleep": 0,
+        },
+        "written": {
+            "semantic": 0,
+            "episodic": 0,
+            "profile": 0,
+            "reflection": 0,
+        },
+        "ignored": 0,
     }
     assert drop_result.config["reasoning"] == "drop"
     assert "reasoning_chars" in drop_result.usage

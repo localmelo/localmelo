@@ -58,6 +58,9 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "stage",
             }
         ),
+        "memory": frozenset(
+            {"candidate_id", "action", "kind", "admitted_by", "entry_id"}
+        ),
         "recall": frozenset(
             {
                 "step",

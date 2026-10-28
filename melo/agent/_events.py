@@ -241,6 +241,35 @@ class _Emitter:
             ),
         )
 
+    def memory(
+        self,
+        *,
+        candidate_id: str,
+        action: str,
+        kind: str,
+        admitted_by: str,
+        entry_id: int | None,
+    ) -> None:
+        """One admission decision was committed to the decision log.
+
+        No text and no ids beyond the entry id: the decision log is the
+        audit surface, and the event is its summary. The CLI ignores it.
+        """
+        if self._sink is None:
+            return
+        self._emit(
+            "memory",
+            lambda: json_safe_payload(
+                {
+                    "candidate_id": candidate_id,
+                    "action": action,
+                    "kind": kind,
+                    "admitted_by": admitted_by,
+                    "entry_id": entry_id,
+                }
+            ),
+        )
+
     def recall(self, record: RecallRecord) -> None:
         """A recall block entered a request (R5).
 
