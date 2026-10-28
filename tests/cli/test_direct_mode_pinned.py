@@ -14,8 +14,13 @@ so that combination is a usage error, not a traceback. R6-lite's two memory
 flags and their config fallback change them a fourth. P5 moved ``--workspace``
 into direct mode, so ``_direct_options`` resolves and checks the folder and
 sets ``workspace_root``; it has a new hash. The other pinned functions are
-unchanged. ``_check_args``,
-which carries the refusals, is not pinned.
+unchanged. P13b's loop notice (`shell_exec` is off; `--builtins all` turns
+it on) moved ``_run`` again, so it has a new hash, and ``_parse_builtins``
+is pinned here for the first time: it now returns every built-in explicitly
+for ``--builtins all``, which is what keeps the old direct-mode tool set
+available. T65b's review fixes name ``melo "" --builtins all`` in the notice,
+so ``_run`` has a new hash again. The other pinned functions are unchanged.
+``_check_args``, which carries the refusals, is not pinned.
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ MAIN = Path(__file__).resolve().parents[2] / "__main__.py"
 
 PINNED = {
     "_run_direct": "945c0b4e897fac4b5005cef2758eb30587477c13f0adee6b456647d11a334551",
-    "_run": "26aef333d2f590b16732d8df08e187f41e2f54ad20f6bbd941972770b16f0117",
+    "_run": "dd9090b183a95ce694a5dc1cea414b70f088705e2d63de911cdc2320d483b626",
     "_run_one": "0c323f5d879739c205efe3ac0c71d651be2496721b68437ac30c93c6b6f70f31",
     "_report": "5ce2d43919e8bea8c5cfdb9689acd104e4bf65d2a8c377d9913f25b2cd909ecf",
     "_status_line": "51cf6b34fa09e121214b0a06e29e74d3d7d38d68b8e19ba5c68b0809abc1821b",
@@ -43,6 +48,7 @@ PINNED = {
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
     "_direct_options": "8dfc68c99329cdfcd18f490be57160210143efa2402bfde409a1bc64e4c53b59",
+    "_parse_builtins": "fe4a7f24ab1f970fc094ebb737d29a9bec9de742165ae68743a312496dd98877",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",
     "_enable_line_editing": "dbabe09864704ee4e435380ce32e19234ce0a3cafb072a7cc39cf053a9904b07",

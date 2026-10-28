@@ -23,11 +23,11 @@
       "max_attempts": 5,
       "reflection_gate": "flags",
       "tool_exposure": "retrieve",
+      "mode": "python",
       "builtins": [
         "file_read",
         "file_write",
-        "python_exec",
-        "shell_exec"
+        "python_exec"
       ],
       "memory": true,
       "memory_dir": "<memory_dir>",
@@ -36,7 +36,6 @@
         "file_read",
         "file_write",
         "python_exec",
-        "shell_exec",
         "stock_price",
         "weather"
       ]
@@ -48,7 +47,6 @@
         "file_read",
         "file_write",
         "python_exec",
-        "shell_exec",
         "weather"
       ],
       "messages": [
@@ -71,7 +69,6 @@
         "file_read",
         "file_write",
         "python_exec",
-        "shell_exec",
         "weather"
       ],
       "messages": [
@@ -114,7 +111,6 @@
         "file_read",
         "file_write",
         "python_exec",
-        "shell_exec",
         "stock_price",
         "weather"
       ],

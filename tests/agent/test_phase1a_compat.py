@@ -485,11 +485,19 @@ def _completed_after_tools_retrieve() -> Scenario:
     )
 
 
+ALL_BUILTINS = frozenset({"file_read", "file_write", "python_exec", "shell_exec"})
+
+
 def _completed_after_tools_all() -> Scenario:
     return Scenario(
         status="completed",
         query="Check the weather in Oslo and save it to notes.txt.",
-        options={"tool_exposure": "all"},
+        options={
+            "tool_exposure": "all",
+            # P13b leaves shell_exec out of direct and python defaults; this
+            # scenario names every built-in so the legacy run still runs it.
+            "builtins": ALL_BUILTINS,
+        },
         providers=[WeatherTools()],
         embedding=False,
         replies=[
@@ -715,7 +723,7 @@ def _timeout() -> Scenario:
     return Scenario(
         status="timeout",
         query="Wait for the build to finish.",
-        options={"timeout_s": 1.0},
+        options={"timeout_s": 1.0, "builtins": ALL_BUILTINS},
         replies=[_tool_calls(("shell_exec", {"command": "sleep 30"}))],
     )
 

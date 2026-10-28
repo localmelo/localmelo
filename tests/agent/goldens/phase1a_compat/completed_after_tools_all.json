@@ -23,6 +23,7 @@
       "max_attempts": 5,
       "reflection_gate": "flags",
       "tool_exposure": "all",
+      "mode": "python",
       "builtins": [
         "file_read",
         "file_write",
