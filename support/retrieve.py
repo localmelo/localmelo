@@ -725,11 +725,21 @@ def _store_file(target: str) -> str:
     return str(path / LONG_TERM_FILE if path.is_dir() else path)
 
 
+def _missing_in_directory(target: str) -> bool:
+    """Whether *target* is a directory with no ``long_term.db`` yet.
+
+    A directory the run has not written to is an empty store, not a usage
+    error (T59); a path that is not a directory keeps one.
+    """
+    path = Path(target)
+    return path.is_dir() and not (path / LONG_TERM_FILE).is_file()
+
+
 def _export_store(target: str) -> int:
     """Print the active entries of the store at *target*, then a count on stderr."""
     path = _store_file(target)
     try:
-        entries = read_export_entries(path)
+        entries = [] if _missing_in_directory(target) else read_export_entries(path)
     except FileNotFoundError:
         raise _InputError(f"{path}: No such file or directory") from None
     except LongTermSchemaError as exc:
@@ -749,7 +759,7 @@ def _export_decisions(target: str) -> int:
     """Print the decision rows at *target*, in ``seq`` order, with a count."""
     path = _store_file(target)
     try:
-        rows = read_export_decisions(path)
+        rows = [] if _missing_in_directory(target) else read_export_decisions(path)
     except FileNotFoundError:
         raise _InputError(f"{path}: No such file or directory") from None
     except LongTermSchemaError as exc:

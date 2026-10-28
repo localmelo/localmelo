@@ -564,7 +564,11 @@ The bench's T4 reader reads `text` and `provenance.source_ids`. A count goes
 to stderr. The file is opened read-only: a v0 file is read with its legacy
 columns and the legacy derivation (a reflection by `metadata.type`, otherwise
 episodic/step_summary) and is **not** migrated; a file from a newer version is
-one line on stderr and exit 2; a missing file is the same.
+one line on stderr and exit 2. A directory with no `long_term.db` yet — a
+bench directory whose run wrote nothing — is an empty store: no line on
+stdout, `exported 0 active entries from DIR/long_term.db` on stderr, and
+exit 0, so a bench script need not test for the file first. A path that is
+not a directory keeps the missing-file error: one line and exit 2.
 
 ### `--export-decisions`
 
@@ -578,7 +582,9 @@ One JSON line per decision row, in `seq` order:
 ```
 
 `source_ids` is the parsed array, and `text` is `null` unless the run had
-`--keep-decision-text`. A v0 file has no decisions table and prints none.
+`--keep-decision-text`. A v0 file has no decisions table and prints none; a
+directory with no `long_term.db` prints none and exits 0, with
+`exported 0 decisions from DIR/long_term.db` on stderr.
 
 ### `--route`
 

@@ -77,6 +77,7 @@ from localmelo.melo.memory.hippo import (
     SIGNALS,
     MemoryDecision,
     classify_user_text,
+    request_candidates,
     user_candidates,
 )
 from localmelo.melo.memory.notes import (
@@ -4664,9 +4665,10 @@ class Agent:
                     run.task_query_msg = query_msg
                     run.query_in_memory = True
                     if self.options.reasoning != "legacy":
-                        # Only the user's own text gives a user signal; a
-                        # stated fact is admitted at once, a bare request
-                        # covers the run at flush.
+                        # Only the user's own text gives a user signal: a
+                        # direct statement is admitted at once, while the
+                        # fact a remember request carries is staged and
+                        # admitted with the digest at flush (T59).
                         signals = classify_user_text(query)
                         for candidate in user_candidates(
                             query,
@@ -4687,9 +4689,22 @@ class Agent:
                                 candidate.candidate_id, "user_statement"
                             )
                             self._drain_decisions(decisions, run)
-                        run.remember_request = signals.remember and not (
-                            signals.states_facts
-                        )
+                        for candidate in request_candidates(
+                            query,
+                            task_id=run.task_id,
+                            provenance={
+                                "task_text": run.task_text[:300],
+                                "source_ids": [],
+                            },
+                        ):
+                            checked = self._checked_candidate_text(
+                                candidate.text, "user", run
+                            )
+                            if checked is None:
+                                continue
+                            candidate.text = checked
+                            self.hippo.propose(candidate)
+                        run.remember_request = signals.remember
                     if self.options.attempt_policy == "none":
                         await self._run_single_attempt(task, query, run)
                     else:

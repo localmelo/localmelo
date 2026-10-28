@@ -9,6 +9,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A remember request (`Remember that …`, `记住…`) now also stores the fact
+  it carries after the marker, admitted by `user_request` beside the run's
+  episodic digest, instead of only the digest. The fact is classified as
+  `semantic` unless it is first-person (`profile`), and the redaction,
+  meta-noun and question rules apply to it; a to-do such as "remember to
+  buy milk" still stores no fact ([#NN]).
 - R6-lite's typed long-term store: `long_term.db` migrates in place to
   `user_version` 1 with `kind`, `source`, `status`, `admitted_by`,
   provenance, task/session ids, links and uses beside the text and vector,
@@ -489,6 +495,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A thought chunk of an attempt is now superseded at the attempt boundary
+  together with that attempt's notes, so a chunk recalled later renders
+  with the `(superseded)` marker and names its attempt instead of passing
+  for the current attempt's thinking ([#NN]).
+- `melo-retrieve --export-store DIR` and `--export-decisions DIR` print
+  zero entries and exit 0 when the directory has no `long_term.db` yet,
+  instead of failing with "No such file"; a path that is not a directory
+  keeps the missing-file usage error ([#NN]).
 - A thought chunk recalled with `--recall-kinds thought` no longer replays
   the reply that produced it: its alias stays with that step's turn, so
   step recall and the `recall` tool return it only after the turn left the
