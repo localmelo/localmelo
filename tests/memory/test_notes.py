@@ -1489,6 +1489,35 @@ def test_written_test_file_passes_and_failed_checks_do_not() -> None:
     assert digest_note("q", calls=calls).verified == ""
 
 
+@pytest.mark.parametrize(
+    ("code", "matched"),
+    [
+        ("import proverb", True),
+        ("from proverb import recite; print(recite(['nail']))", True),
+        ('import importlib; importlib.import_module("proverb")', True),
+        ("import proverby", False),
+        ("from proverby import recite", False),
+        ('import importlib; importlib.import_module("proverby")', False),
+        ('print("import proverb")', False),
+    ],
+)
+def test_digest_written_module_import(code: str, matched: bool, tmp_path: Path) -> None:
+    write = ToolCall(
+        "file_write", {"path": str(tmp_path / "proverb.py"), "content": "x"}
+    )
+    run = ToolCall("python_exec", {"code": code})
+    calls = [
+        (write, ToolResult("file_write", "written")),
+        (run, ToolResult("python_exec", "pass")),
+    ]
+    digest = digest_note("q", calls=calls, root=str(tmp_path))
+    assert bool(digest.verified) is matched
+    if matched:
+        assert digest.verified == "python import proverb -> pass"
+    calls[-1] = (run, ToolResult("python_exec", "Traceback (most recent call last):"))
+    assert not digest_note("q", calls=calls, root=str(tmp_path)).verified
+
+
 def test_digest_has_no_verified_without_a_check() -> None:
     write = ToolCall("file_write", {"path": "a.py", "content": "x"})
     digest = digest_note(

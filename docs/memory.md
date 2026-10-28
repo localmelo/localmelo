@@ -104,8 +104,8 @@ transpose in transpose.py … outcome: completed") is kept.
   `file_write` calls wrote (at most six, workspace-relative, then `+N`),
   the last passing check, the facts, up to three decisions, observed lines
   and open questions, at most 1,500 characters. A check is a `shell_exec` or
-  `python_exec` that runs a test runner or references a file written earlier
-  in this attempt. Failed checks and trivial imports are not verification;
+  `python_exec` that runs a test runner, references a file written earlier
+  in this attempt, or imports its Python module. Failed checks and trivial imports are not verification;
   a later failing check clears the earlier verification. Test runners need a
   positive test summary or a zero exit marker. An observed
   line whose result is empty or only a boolean, `None`, an exit code or

@@ -19,6 +19,7 @@ Nothing here calls a model or touches the agent loop.
 
 from __future__ import annotations
 
+import ast
 import calendar
 import hashlib
 import json
@@ -1463,12 +1464,50 @@ def _call_text(call: ToolCall) -> str:
     return ""
 
 
+def _written_import(text: str, written: Sequence[str], root: str) -> str:
+    """Name a written workspace module imported by Python code, if any."""
+    modules = set()
+    for path in written:
+        relative = _workspace_relative(path, root)
+        if relative.endswith(".py") and not os.path.isabs(relative):
+            parts = relative[:-3].split("/")
+            if all(part.isidentifier() for part in parts):
+                modules.add(".".join(parts))
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return ""
+    for node in ast.walk(tree):
+        names: list[str] = []
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names = [node.module]
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id == "importlib"
+            and node.func.attr == "import_module"
+            and node.args
+            and isinstance(node.args[0], ast.Constant)
+            and isinstance(node.args[0].value, str)
+        ):
+            names = [node.args[0].value]
+        for name in names:
+            if name in modules:
+                return name
+    return ""
+
+
 def _is_check(call: ToolCall, written: Sequence[str], root: str) -> bool:
     """A test runner or code naming a file written earlier in this attempt."""
     text = _call_text(call)
     if not text.strip():
         return False
     if _TEST_RUNNER_RE.search(text):
+        return True
+    if call.tool_name == "python_exec" and _written_import(text, written, root):
         return True
     for path in written:
         relative = _workspace_relative(path, root)
@@ -1522,6 +1561,7 @@ def _digest_verified(calls: Sequence[tuple[ToolCall, ToolResult]], root: str) ->
     """The last check, only when it passed."""
     written: list[str] = []
     last: tuple[ToolCall, ToolResult] | None = None
+    last_module = ""
     for call, result in calls:
         if call.tool_name == "file_write" and not result.error.strip():
             path = _string_argument(call, "path")
@@ -1529,6 +1569,12 @@ def _digest_verified(calls: Sequence[tuple[ToolCall, ToolResult]], root: str) ->
                 written.append(path)
         if _is_check(call, written, root):
             last = (call, result)
+            last_module = (
+                _written_import(_call_text(call), written, root)
+                if call.tool_name == "python_exec"
+                and not _TEST_RUNNER_RE.search(_call_text(call))
+                else ""
+            )
     if last is None:
         return ""
     call, result = last
@@ -1545,7 +1591,8 @@ def _digest_verified(calls: Sequence[tuple[ToolCall, ToolResult]], root: str) ->
         re.I | re.S,
     ):
         return ""
-    return f"{_check_command(last[0])} -> {_check_result(last[1])}"
+    command = f"python import {last_module}" if last_module else _check_command(call)
+    return f"{command} -> {_check_result(result)}"
 
 
 def digest_note(
