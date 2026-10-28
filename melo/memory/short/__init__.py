@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import itertools
 from collections import deque
 from collections.abc import Iterable, Sequence
@@ -137,6 +138,39 @@ class WorkingMemory:
                 self._buf.popleft()
             dropped += size
         return dropped
+
+    def strip_thinking(self, count: int) -> int:
+        """Clear the thinking of the *count* oldest units of the buffer.
+
+        Only an assistant message's ``thinking`` is cleared; its content,
+        calls and results stay, so the unit is not dropped. Returns the
+        number of messages changed. The newest unit always stays, as in
+        :meth:`drop_oldest_units`: a window with one unit changes nothing.
+        """
+        changed = 0
+        index = 0
+        for _ in range(count):
+            if index >= len(self._buf):
+                break
+            size = self._unit_size_at(index)
+            if size >= len(self._buf) - index:
+                break  # only the newest unit is left
+            for offset in range(index, index + size):
+                msg = self._buf[offset]
+                if msg.role == "assistant" and msg.thinking:
+                    self._buf[offset] = dataclasses.replace(msg, thinking="")
+                    changed += 1
+            index += size
+        return changed
+
+    def _unit_size_at(self, start: int) -> int:
+        """Messages in the unit that starts at *start* (see :func:`group_turns`)."""
+        unit = [self._buf[start]]
+        for msg in itertools.islice(self._buf, start + 1, None):
+            if not _joins(unit, msg):
+                break
+            unit.append(msg)
+        return len(unit)
 
     def _evict(self) -> None:
         while len(self._buf) > self._max_len:

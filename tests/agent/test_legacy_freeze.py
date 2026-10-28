@@ -196,6 +196,9 @@ def test_run_result_and_message_keep_their_fields() -> None:
         "usage",
         "duration_s",
         "config",
+        # R2 adds the replay counters; a legacy result omits the key from
+        # to_dict(), but the dataclass field itself is always there.
+        "memory_stats",
     ]
     assert [f.name for f in dataclasses.fields(Message)] == [
         "role",
