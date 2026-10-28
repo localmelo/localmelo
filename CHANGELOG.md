@@ -9,6 +9,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Tools have a permission tier, and an approval policy asks by tier rather
+  than by a fixed list of names. The built-ins keep their tiers (`file_read`
+  read, `file_write` write, `shell_exec` and `python_exec` exec), and a
+  provided tool's raw MCP `annotations` are kept on `ToolDef.annotations`
+  and read cautiously: `openWorldHint` gives network, `readOnlyHint` gives
+  read unless `destructiveHint` contradicts it, and anything else gives
+  write. So an unannotated MCP tool now asks in a run with a policy, while
+  `require_approval` only adds caution. The terminal approval panel names
+  the tier in its header, `ToolInfo.tier` and `ApprovalRequest.tier` report
+  it, and `--yolo` still means no policy, not read-only ([#NN]).
 - A session runner can ask its turns for progress events, and the progress
   line's past facts are available alone. `SessionRunner(..., progress=True)`
   asks each turn's run for `run.progress` and stores it with the turn; the
