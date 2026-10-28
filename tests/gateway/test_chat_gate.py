@@ -13,7 +13,7 @@ from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
 )
-from localmelo.melo.schema import Message, ToolDef
+from localmelo.melo.schema import Message, RunResult, ToolDef
 from localmelo.support.gateway import chat_gate
 from localmelo.support.gateway.chat_gate import (
     ChatGate,
@@ -21,6 +21,7 @@ from localmelo.support.gateway.chat_gate import (
     GatedLLM,
     _trace_source,
 )
+from localmelo.support.gateway.playground import SmokePlayground
 from localmelo.support.scheduler import REASONS, Clock
 from localmelo.support.scheduler.sim.trace import SCHEMA, read_trace
 
@@ -169,6 +170,40 @@ async def test_off_copies_model_usage_and_reasoning_key_after_a_call() -> None:
     await gate.close()
 
 
+async def test_off_leaves_the_run_timeout_line_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.support.gateway import playground
+
+    manager = SmokePlayground(memory_dir=tmp_path, policy="off")
+    monkeypatch.setattr(manager, "_build_llm_provider", lambda *args: FakeLLM())
+    try:
+        payload = await manager.create_session(
+            chat_url="http://127.0.0.1:8000/v1", chat_model="Qwen-27B", adapter="omlx"
+        )
+        session_id = str(payload["session_id"])
+
+        async def run_task(query: str, **kwargs: Any) -> RunResult:
+            return RunResult(task_id="t", status="completed", result="hi")
+
+        monkeypatch.setattr(manager._sessions[session_id].agent, "run_task", run_task)
+        seen: list[tuple[object, float | None]] = []
+        original = playground.asyncio.wait_for
+
+        async def spy(awaitable: Any, timeout: float | None = None) -> Any:
+            seen.append((awaitable, timeout))
+            return await original(awaitable, timeout)
+
+        monkeypatch.setattr(playground.asyncio, "wait_for", spy)
+        await manager.run(session_id, "hello")
+        assert len(seen) == 1
+        awaitable, timeout = seen[0]
+        assert timeout == 600.0
+        assert isinstance(awaitable, asyncio.Future)
+    finally:
+        await manager.close_all()
+
+
 # ── Admissibility (R11-R15) ──
 
 
@@ -313,6 +348,28 @@ async def test_an_embedding_is_logged_with_kind_embed_and_counts_in_flight(
     traces = read_trace(gate._log.path)  # type: ignore[arg-type]
     assert traces[0].calls[0].kind == "embed"
     assert traces[0].calls[0].status == "ok"
+
+
+async def test_an_embedding_does_not_open_a_chat_task() -> None:
+    gate = ChatGate(policy="fcfs", n_srv=2)
+    embedding = gate.submit("only-an-embedding", kind="embed")
+    assert admitted(embedding)
+    assert gate._state.tasks == ()
+    await gate.close()
+
+
+async def test_a_focused_embedding_is_never_held() -> None:
+    gate = ChatGate(policy="fcfs", n_srv=1)
+    gate.focus("focused")
+    holder = gate.submit("focused", kind="plan")
+    assert admitted(holder)
+    embedding = gate.submit("focused", kind="embed")
+    # A full server holds a planning call, never an embedding (R14). The
+    # lane path would hold it, so it is submitted as a chat call.
+    assert embedding.meta.session_kind == "chat"
+    assert admitted(embedding)
+    assert not any(a.startswith(("orphan_call", "lane_answer")) for a in gate.alarms)
+    await gate.close()
 
 
 async def test_an_embedding_after_the_last_chat_call_is_admitted_and_not_an_orphan() -> (
@@ -569,6 +626,10 @@ async def test_close_cancels_pending_futures_and_closes_the_log(tmp_path: Path) 
     # A write after close is a silent no-op, and a second close is too.
     gate._log.write({"not": "a line"})
     await gate.close()
+    # A call submitted after shutdown is admitted, not left pending.
+    late = gate.submit("c")
+    assert late.future is None
+    finish(gate, late)
     finish(gate, holder)
 
 

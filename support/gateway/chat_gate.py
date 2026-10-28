@@ -26,7 +26,7 @@ import re
 import shutil
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -117,6 +117,18 @@ def _default_clock() -> Clock:
         mono_us=round(time.monotonic() * 1_000_000),
         wall_us=round(time.time() * 1_000_000),
     )
+
+
+def _int_usage(usage: object) -> dict[str, int] | None:
+    """*usage* as a dict of ints, else ``None`` (R18's copy rule)."""
+    if not isinstance(usage, dict):
+        return None
+    if not all(
+        isinstance(key, str) and isinstance(value, int) and not isinstance(value, bool)
+        for key, value in usage.items()
+    ):
+        return None
+    return dict(usage)
 
 
 def _usage_tokens(
@@ -418,7 +430,9 @@ class ChatGate:
         level = self.level(session_id)
         source = self.level_source(session_id)
         planning = call_kind in _CHAT_KINDS
-        session_kind = "front" if session_id == self._focus else "chat"
+        # Only a planning call can be a lane call: an embedding or a
+        # retrieval is never held (R14), and S1's lane path would hold it.
+        session_kind = "front" if planning and session_id == self._focus else "chat"
         meta = CallMeta(
             session_id=session_id,
             call_id=f"{session_id}:{index}",
@@ -435,31 +449,35 @@ class ChatGate:
         )
         call = GateCall(meta)
         self._calls[meta.call_id] = call
-        if self.policy == "off":
-            # Observation only: the call is never pending, so admit_s is submit_s.
+        if self.policy == "off" or self._closed:
+            # Observation only (or already shut down): the call is never
+            # pending, so admit_s is submit_s and nothing can hang on it.
             meta.admitted_mono_us = now.mono_us
             return call
 
         call.future = asyncio.get_running_loop().create_future()
         events: list[Event] = []
-        current = self._task(session_id)
-        if current is None:
-            events.append(
-                TaskAdded(
-                    Task(
-                        task_id=session_id,
-                        kind="chat",
-                        origin="user",
-                        level=level,
-                        level_source=cast(LevelSource, source),
-                        phase="running",
-                        created_mono_us=now.mono_us,
-                        created_wall_us=now.wall_us,
+        if planning:
+            # Only a chat call opens (or reopens) the chat's task; an
+            # embedding or a retrieval is taskless in S1 (section 4.2).
+            current = self._task(session_id)
+            if current is None:
+                events.append(
+                    TaskAdded(
+                        Task(
+                            task_id=session_id,
+                            kind="chat",
+                            origin="user",
+                            level=level,
+                            level_source=cast(LevelSource, source),
+                            phase="running",
+                            created_mono_us=now.mono_us,
+                            created_wall_us=now.wall_us,
+                        )
                     )
                 )
-            )
-        elif is_terminal(current.phase):
-            events.append(TaskUpdated(session_id, (("phase", "running"),)))
+            elif is_terminal(current.phase):
+                events.append(TaskUpdated(session_id, (("phase", "running"),)))
         events.append(
             CallSubmitted(
                 Call(
@@ -585,6 +603,39 @@ class ChatGate:
         self._hold_start.pop(session_id, None)
         self._held_reason.pop(session_id, None)
         return start
+
+    def forget(self, session_id: str) -> None:
+        """Drop a closed chat's bookkeeping once it has no live call.
+
+        The policy's ``State`` has no event that removes a task, and a
+        finished task would otherwise be cleaned and scanned on every later
+        transition of a long-running gateway. Closing is only allowed while
+        the chat is idle, so its task is terminal and its calls are gone.
+        """
+        for mapping in (
+            self._levels,
+            self._counts,
+            self._first_submit,
+            self._last_end,
+            self._turn_start,
+            self._held_total_us,
+            self._hold_start,
+            self._held_reason,
+            self._reason_by_task,
+        ):
+            mapping.pop(session_id, None)
+        if self._closed or self.policy == "off":
+            return
+        if any(c.meta.session_id == session_id for c in self._calls.values()):
+            return
+        self._state = replace(
+            self._state,
+            tasks=tuple(t for t in self._state.tasks if t.task_id != session_id),
+            calls=tuple(c for c in self._state.calls if c.task_id != session_id),
+            recent_admits=tuple(
+                x for x in self._state.recent_admits if x != session_id
+            ),
+        )
 
     async def close(self) -> None:
         """Cancel pending futures and close the log; a second close is a no-op."""
@@ -817,9 +868,7 @@ class GatedLLM(BaseLLMProvider):
             if isinstance(inner.last_reasoning_key, str)
             else ""
         )
-        self.last_usage = (
-            dict(inner.last_usage) if isinstance(inner.last_usage, dict) else None
-        )
+        self.last_usage = _int_usage(inner.last_usage)
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)
@@ -859,8 +908,7 @@ class GatedLLM(BaseLLMProvider):
             if isinstance(self.inner.last_reasoning_key, str)
             else ""
         )
-        usage = self.inner.last_usage
-        self.last_usage = dict(usage) if isinstance(usage, dict) else None
+        self.last_usage = _int_usage(self.inner.last_usage)
 
     async def close(self) -> None:
         await self.inner.close()

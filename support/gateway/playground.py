@@ -585,6 +585,7 @@ class SmokePlayground:
             )
         self._sessions.pop(session_id, None)
         await session.agent.close()
+        self._gate.forget(session_id)
         return True
 
     async def close_all(self) -> None:
@@ -660,6 +661,7 @@ class SmokePlayground:
             if session is not None:
                 with contextlib.suppress(Exception):
                     await session.agent.close()
+                self._gate.forget(sid)
 
     async def _evict_oldest(self) -> None:
         if not self._sessions:
@@ -671,3 +673,4 @@ class SmokePlayground:
         self._sessions.pop(oldest.session_id, None)
         with contextlib.suppress(Exception):
             await oldest.agent.close()
+        self._gate.forget(oldest.session_id)

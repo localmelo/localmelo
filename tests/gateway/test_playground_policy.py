@@ -166,36 +166,6 @@ async def test_off_leaves_the_page_payload_as_before(
 # ── The 600 s clock (R17) ──
 
 
-async def test_off_leaves_the_run_timeout_line_unchanged(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from localmelo.support.gateway import playground
-
-    manager, _ = make_manager(tmp_path, monkeypatch, policy="off")
-    try:
-        session_id = await create(manager)
-
-        async def run_task(query: str, **kwargs: Any) -> RunResult:
-            return RunResult(task_id="t", status="completed", result="hi")
-
-        monkeypatch.setattr(manager._sessions[session_id].agent, "run_task", run_task)
-        seen: list[tuple[object, float | None]] = []
-        original = playground.asyncio.wait_for
-
-        async def spy(awaitable: Any, timeout: float | None = None) -> Any:
-            seen.append((awaitable, timeout))
-            return await original(awaitable, timeout)
-
-        monkeypatch.setattr(playground.asyncio, "wait_for", spy)
-        await manager.run(session_id, "hello")
-        assert len(seen) == 1
-        awaitable, timeout = seen[0]
-        assert timeout == 600.0
-        assert isinstance(awaitable, asyncio.Future)
-    finally:
-        await manager.close_all()
-
-
 async def test_a_hold_does_not_trip_the_run_timeout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -396,6 +366,39 @@ async def test_the_playground_reads_the_scheduler_config(
         assert response["answer"] == "Hello"
         assert manager._gate.call_log_path is not None
         assert manager._gate.call_log_path.is_file()
+    finally:
+        await manager.close_all()
+
+
+async def test_a_closed_chat_is_forgotten_from_the_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager, _ = make_manager(tmp_path, monkeypatch, policy="fcfs", n_srv=2)
+    try:
+        session_id = await create(manager)
+        assert (await manager.run(session_id, "hello"))["answer"] == "Hello"
+        assert any(t.task_id == session_id for t in manager._gate._state.tasks)
+        assert await manager.close(session_id)
+        assert not any(t.task_id == session_id for t in manager._gate._state.tasks)
+        assert manager._gate.level(session_id) == 2
+    finally:
+        await manager.close_all()
+
+
+async def test_call_log_false_disables_the_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.support.gateway import playground
+
+    monkeypatch.setattr(playground, "_DEFAULT_MEMORY_DIR", tmp_path / "memory")
+    cfg = _scheduler_cfg(tmp_path / "scheduler")
+    cfg.scheduler.call_log = False
+    app = FastAPI()
+    webapp.mount(app, cfg)
+    manager = app.state.smoke_playground
+    try:
+        assert manager._gate.call_log_path is None
+        assert not (tmp_path / "scheduler").exists()
     finally:
         await manager.close_all()
 
