@@ -633,8 +633,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - Gateway and console sessions no longer offer `shell_exec`: both run in the
   new `gateway` tool mode, which registers `file_read`, `file_write` and
-  `python_exec` only, because neither surface has an approval policy to ask
-  before a command runs. `AgentOptions` gains `mode` (`direct`,
+  `python_exec` only: `/v1` and the workspace have no approval policy, and
+  the console's approvals arrive over the same unauthenticated loopback API,
+  so any local process could approve its own request. `AgentOptions` gains `mode` (`direct`,
   `interactive`, `gateway` or `python`; `python` is the API default) and the
   CLI sets its own surface's mode; the interactive UI keeps `shell_exec`
   behind its existing approval panel, and direct mode is unchanged in this

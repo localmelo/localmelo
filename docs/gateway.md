@@ -299,8 +299,8 @@ The web workspace works apart from the HTTP API above:
 - Each chat's agent uses the gateway's default run options (the three
   built-in tools `file_read`, `file_write` and `python_exec`, and no MCP
   tools), except that it keeps its answers. A chat can therefore run Python
-  code and read and write files, but not shell commands: `shell_exec` is
-  not offered.
+  code and read and write files; the `shell_exec` tool is not offered, so
+  there is no direct shell command (Python code can still start a process).
 - It keeps up to 12 chats and closes those idle for 2 hours when creating a
   chat. At capacity, an idle chat is replaced only after preparation succeeds;
   if all chats are busy, creation fails with HTTP 409.

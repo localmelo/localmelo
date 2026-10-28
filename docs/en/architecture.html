@@ -214,8 +214,10 @@
           the config file: it lists the models of a server whose URL you
           enter, and keeps up to 12 chats of its own, with search, a draft for
           each chat, and Stop, which ends the run as <code>cancelled</code>.
-          Each chat has its own agent, with the four built-in tools and its
-          own working memory. All chats save to one history and, with an
+          Each chat has its own agent, with the three built-in tools
+          <code>file_read</code>, <code>file_write</code> and
+          <code>python_exec</code> (no <code>shell_exec</code>) and its own
+          working memory. All chats save to one history and, with an
           embedding model, one long-term memory, in
           <code>~/.cache/localmelo/playground/</code>. Chats last while the
           gateway runs, but creating a chat closes those idle for 2 hours
@@ -368,8 +370,9 @@
           The four built-in tools are <code>shell_exec</code>,
           <code>python_exec</code>, <code>file_read</code> and
           <code>file_write</code>. A gateway or console session gets three:
-          its mode leaves <code>shell_exec</code> out, because it has no
-          approval policy to ask. Direct mode gives the tools no
+          its mode leaves <code>shell_exec</code> out: the gateway has no
+          approval policy, and the console's approvals arrive over the same
+          unauthenticated loopback API. Direct mode gives the tools no
           workspace root, and the gateway never does, so file tools reach any
           file you can; a direct run's <code>--workspace DIR</code> sets the
           same root as the Python API below. In the Python
