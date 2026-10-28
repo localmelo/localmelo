@@ -193,8 +193,9 @@ or `step_summary` (a legacy row). `status` is `active`, `superseded` or
 entry `superseded`; `conflicted` is reserved for the sleep pipeline.
 `admitted_by` is the signal that wrote the entry, or empty for a legacy row.
 `provenance` carries the task and session, the step and attempt, the run's
-text, the paths and commands the turn touched, and the record ids the item
-came from (`source_ids`). The session id is `""` in direct mode, which does
+text, the paths and commands the turn touched, the record ids the item came
+from (`source_ids`), and the candidate id and item index. Every one of those
+texts is redacted and bounded before the write. The session id is `""` in direct mode, which does
 not thread one; the gateway does not thread its own id into the run yet. A
 search returns the legacy metadata merged with these columns, so an older
 reader still sees the same text and metadata.
