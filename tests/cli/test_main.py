@@ -508,6 +508,83 @@ class TestGatewayMode:
         assert f"  Web UI:  http://{shown}:5000/\n" in out
         mock_start.assert_called_once_with(cfg)
 
+    def test_serve_allow_unconfigured_skips_setup_and_validation(self) -> None:
+        """melo --serve --allow-unconfigured starts without config or TTY."""
+        empty_cfg = Config(chat_backend="", embedding_backend="")
+        mock_start = mock.MagicMock()
+
+        with (
+            mock.patch("localmelo.__main__._register_backends"),
+            mock.patch("localmelo.__main__._on_a_terminal", return_value=False),
+            mock.patch("sys.argv", ["melo", "--serve", "--allow-unconfigured"]),
+            mock.patch("localmelo.support.config.load", return_value=empty_cfg),
+            mock.patch("localmelo.support.onboard.run_backend_setup") as mock_setup,
+            mock.patch("localmelo.__main__._start_gateway", mock_start),
+        ):
+            from localmelo.__main__ import main
+
+            main()
+
+        mock_setup.assert_not_called()
+        mock_start.assert_called_once_with(empty_cfg)
+        assert getattr(empty_cfg, "_allow_unconfigured", False) is True
+
+    def test_start_gateway_forwards_allow_unconfigured(self) -> None:
+        cfg = Config(chat_backend="", embedding_backend="")
+        cfg._allow_unconfigured = True
+        mock_start = mock.MagicMock()
+        gateway = mock.MagicMock(start_gateway=mock_start)
+
+        with (
+            mock.patch.dict(sys.modules, {"localmelo.support.gateway": gateway}),
+            mock.patch("builtins.print"),
+        ):
+            from localmelo.__main__ import _start_gateway
+
+            _start_gateway(cfg)
+
+        mock_start.assert_called_once_with(cfg, allow_unconfigured=True)
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            ["melo", "--allow-unconfigured"],
+            ["melo", "--allow-unconfigured", "hello"],
+            ["melo", "--serve", "--reconfigure", "--allow-unconfigured"],
+        ],
+    )
+    def test_allow_unconfigured_rejected_outside_plain_serve(
+        self, argv: list[str]
+    ) -> None:
+        with (
+            mock.patch("localmelo.__main__._register_backends"),
+            mock.patch("sys.argv", argv),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            from localmelo.__main__ import main
+
+            main()
+
+        assert exc_info.value.code == 2
+
+    def test_serve_allow_unconfigured_still_rejects_bad_port(self) -> None:
+        empty_cfg = Config(chat_backend="", embedding_backend="")
+        with (
+            mock.patch("localmelo.__main__._register_backends"),
+            mock.patch(
+                "sys.argv",
+                ["melo", "--serve", "--allow-unconfigured", "--port", "99999"],
+            ),
+            mock.patch("localmelo.support.config.load", return_value=empty_cfg),
+            mock.patch("builtins.print"),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            from localmelo.__main__ import main
+
+            main()
+
+        assert exc_info.value.code == 1
+
 
 class TestConfigValidationFailure:
     """Bad config -> error on stderr, exit 1."""

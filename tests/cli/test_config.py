@@ -1190,3 +1190,67 @@ class TestSchedulerConfig:
         loaded = load()
         assert loaded.scheduler.lock_gate == "wait"
         assert not hasattr(loaded.scheduler, "lock_future")
+
+
+class TestGatewayWorkspaceAndAtomicSave:
+    def test_gateway_workspace_round_trips(self, config_path: Path) -> None:
+        cfg = _timeout_cfg()
+        cfg.gateway.workspace = "~/demo-project"
+        save(cfg)
+        assert 'workspace = "~/demo-project"' in config_path.read_text(encoding="utf-8")
+        loaded = load()
+        assert loaded.gateway.workspace == "~/demo-project"
+        cfg.gateway.workspace = ""
+        save(cfg)
+        assert config_path.read_text(encoding="utf-8") == _SAVED_BEFORE_REQUEST_TIMEOUT
+
+    def test_every_string_field_round_trips_quotes_backslashes_brackets_and_non_bmp(
+        self, config_path: Path
+    ) -> None:
+        tricky = 'a"b\\c]d\U0001f680\x7f'
+        cfg = Config(
+            chat_backend="vllm",
+            embedding_backend="ollama",
+            mcp_config=tricky,
+            vllm=LocalBackendConfig(
+                chat_url=tricky,
+                chat_model=tricky,
+                embedding_url=tricky,
+                embedding_model=tricky,
+            ),
+            openai=CloudVendorConfig(
+                api_key_env=tricky,
+                chat_model=tricky,
+                base_url=tricky,
+            ),
+            gateway=GatewayConfig(port=8401, host=tricky, workspace=tricky),
+        )
+        save(cfg)
+        loaded = load()
+        assert loaded.mcp_config == tricky
+        assert loaded.vllm.chat_url == tricky
+        assert loaded.vllm.chat_model == tricky
+        assert loaded.vllm.embedding_url == tricky
+        assert loaded.vllm.embedding_model == tricky
+        assert loaded.openai.api_key_env == tricky
+        assert loaded.openai.chat_model == tricky
+        assert loaded.openai.base_url == tricky
+        assert loaded.gateway.host == tricky
+        assert loaded.gateway.workspace == tricky
+
+    def test_save_replaces_atomically_and_leaves_old_file_on_failure(
+        self, config_path: Path
+    ) -> None:
+        save(_timeout_cfg())
+        before = config_path.read_bytes()
+        changed = _timeout_cfg(900)
+        with (
+            mock.patch(
+                "localmelo.support.config.os.replace",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            save(changed)
+        assert config_path.read_bytes() == before
+        assert list(config_path.parent.glob("*.tmp")) == []

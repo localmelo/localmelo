@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
 import re
+import tempfile
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -73,6 +75,7 @@ class CloudVendorConfig:
 class GatewayConfig:
     port: int = 8401
     host: str = "127.0.0.1"
+    workspace: str = ""
 
 
 @dataclass
@@ -139,6 +142,7 @@ class Config:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    _allow_unconfigured: bool = field(default=False, repr=False, compare=False)
 
     @property
     def is_configured(self) -> bool:
@@ -643,6 +647,8 @@ def save(cfg: Config) -> None:
     lines.append("[gateway]")
     lines.append(f"port = {cfg.gateway.port}")
     lines.append(f"host = {_toml_string(cfg.gateway.host)}")
+    if cfg.gateway.workspace:
+        lines.append(f"workspace = {_toml_string(cfg.gateway.workspace)}")
     lines.append("")
 
     if (
@@ -677,12 +683,23 @@ def save(cfg: Config) -> None:
 
     # TOML files are UTF-8. Encode before opening the file, so text that
     # cannot be encoded (a str holding a lone surrogate) fails the save
-    # without truncating the existing config.
+    # without truncating the existing config. Write a temporary file in
+    # CONFIG_DIR and move it into place with os.replace so a concurrent
+    # load() never reads half a file and a failed write leaves the old file.
     text = "\n".join(lines)
     try:
         data = text.encode("utf-8")
     except UnicodeEncodeError as exc:
         bad = exc.object[exc.start : exc.end]
         raise ConfigError(f"Cannot write {bad!r} to TOML: {exc.reason}") from exc
-    with open(CONFIG_PATH, "wb") as f:
-        f.write(data)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".config.toml.", suffix=".tmp", dir=CONFIG_DIR
+    )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp_path, CONFIG_PATH)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise
