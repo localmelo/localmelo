@@ -10,6 +10,7 @@ from localmelo.melo.memory.notes import (
     NOTE_MAX_FACTS,
     ReasoningNote,
     candidate_items,
+    is_meta_claim,
     note_from_reply,
 )
 from localmelo.melo.schema import CandidateItem, ToolCall, ToolResult
@@ -49,6 +50,7 @@ def test_a_bullet_reply_stores_its_facts_and_their_records() -> None:
 
 def test_a_meta_claim_is_ignored_with_a_reason() -> None:
     claims = [
+        "I've read and remembered all of Jamie's records.",
         "I've read and remembered all of Jamie's records from today "
         "(2026-04-06), including event details, people, places, dates, "
         "and financial amounts.",
@@ -100,6 +102,68 @@ def test_a_slash_date_matches_an_iso_record_and_not_a_bare_number() -> None:
         source_records=[plumber],
     )
     assert [candidate.source_ids for candidate in candidate_items(only_plumber)] == [()]
+
+
+def test_a_digest_with_a_task_line_is_content() -> None:
+    # T68b: a digest's task line and its outcome are content even when the
+    # sentence reads like a completion claim (no dates or amounts at all).
+    text = "task: transpose() … outcome: completed"
+    assert not is_meta_claim(text)
+    decision = decide(text, kind="episodic", source="digest", provenance={}, active=[])
+    assert decision.action == "NEW", decision.reason
+
+
+def test_a_claim_that_names_a_file_or_function_is_content() -> None:
+    for text in (
+        "I've read transpose.py and remembered everything about Jamie's records.",
+        "I've read transpose() and remembered everything about Jamie's records.",
+        "I've read `transpose_matrix` and remembered all of Jamie's records.",
+    ):
+        assert not is_meta_claim(text)
+        decision = decide(
+            text, kind="episodic", source="reasoning_note", provenance={}, active=[]
+        )
+        assert decision.action == "NEW", (text, decision.reason)
+
+
+def test_an_outcome_admitted_completed_digest_is_exempt_from_the_meta_filter() -> None:
+    text = "I've read and remembered all of Jamie's records."
+    decision = decide(
+        text,
+        kind="episodic",
+        source="digest",
+        provenance={"final_status": "completed"},
+        active=[],
+        admitted_by="outcome",
+    )
+    assert decision.action == "NEW", decision.reason
+    not_completed = decide(
+        text,
+        kind="episodic",
+        source="digest",
+        provenance={"final_status": "budget_exhausted"},
+        active=[],
+        admitted_by="outcome",
+    )
+    assert not_completed.action == "IGNORE"
+    assert "meta claim" in not_completed.reason
+
+
+def test_an_aider_final_digest_is_admitted_as_a_user_request_digest() -> None:
+    text = (
+        "task: Implement transpose in transpose.py so the tests in "
+        "transpose_test.py pass\noutcome: completed"
+    )
+    for admitted_by in ("", "user_request", "outcome"):
+        decision = decide(
+            text,
+            kind="episodic",
+            source="digest",
+            provenance={"final_status": "completed"},
+            active=[],
+            admitted_by=admitted_by,
+        )
+        assert decision.action == "NEW", (admitted_by, decision.reason)
 
 
 def test_a_fenced_code_block_is_not_a_fact() -> None:

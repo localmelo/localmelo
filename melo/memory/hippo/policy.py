@@ -482,6 +482,29 @@ def _entry_created(entry: Any) -> float:
     return float(value or 0.0)
 
 
+def _meta_filter_applies(
+    text: str,
+    *,
+    source: str,
+    admitted_by: str,
+    provenance: Mapping[str, Any],
+) -> bool:
+    """Whether the meta filter may drop *text* at this boundary.
+
+    A digest admitted by ``outcome`` for a completed run is never filtered:
+    the end of a completed task is exactly the episode that signal exists
+    to keep. A digest with a ``task:`` line is content anyway (see
+    :func:`~localmelo.melo.memory.notes.is_meta_claim`).
+    """
+    if (
+        admitted_by == "outcome"
+        and source == "digest"
+        and str(provenance.get("final_status") or "") == "completed"
+    ):
+        return False
+    return is_meta_claim(text)
+
+
 def decide(
     text: str,
     *,
@@ -490,6 +513,7 @@ def decide(
     provenance: Mapping[str, Any],
     active: Sequence[Any],
     embedding: Sequence[float] | None = None,
+    admitted_by: str = "",
 ) -> PolicyDecision:
     """Compare one item with the active entries of *kind* and pick an action."""
     folded = normalise(text)
@@ -497,7 +521,9 @@ def decide(
     item_key = _item_key(provenance)
     subject = subjects(text, kind, task_text=task_text, item_key=item_key)
     content = content_tokens(text)
-    if is_meta_claim(text):
+    if _meta_filter_applies(
+        text, source=source, admitted_by=admitted_by, provenance=provenance
+    ):
         return PolicyDecision(
             action="IGNORE",
             kind=kind,
@@ -627,6 +653,7 @@ class HippoPolicy:
         provenance: Mapping[str, Any],
         active: Sequence[Any],
         embedding: Sequence[float] | None = None,
+        admitted_by: str = "",
     ) -> PolicyDecision:
         return decide(
             text,
@@ -635,6 +662,7 @@ class HippoPolicy:
             provenance=provenance,
             active=active,
             embedding=embedding,
+            admitted_by=admitted_by,
         )
 
 

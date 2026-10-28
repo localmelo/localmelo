@@ -69,7 +69,10 @@ explicit `<note>` may also list up to 12 `found` items. A reply that only
 reports the agent's own work ("The session is complete.", "I've read and
 remembered all of the records…") is not stored as a fact: the policy ignores
 it with the reason `meta claim about the agent's own work`, even when the
-claim names a date or a person.
+claim names a date or a person. A `task:` line, or a file, path or function
+name, marks a text as content and is never filtered this way, so an
+Aider-style final digest ("task: Implement transpose in transpose.py …
+outcome: completed") is kept.
 
 - The notes, drafts and digests live in a **note store** beside the
   conversation window, in RAM, as long as the agent: one direct run, one
@@ -245,7 +248,9 @@ own `source_ids`; when it has records and none matches, the item gets none.
 A digest's ids are the union of its notes' ids and the records behind their
 items. A completion or self-work claim with no fact beyond its frame is
 `IGNORE`d with the reason `meta claim about the agent's own work`, whether it
-comes from a note or from a digest.
+comes from a note or from a digest. A `task:` line, a file, path or function
+name makes the text content instead. A final digest admitted by `outcome`
+for a completed run is exempt from this filter entirely.
 
 Nothing is written without a signal:
 
@@ -254,7 +259,7 @@ Nothing is written without a signal:
 | `rehearsal` | A restatement, a successful call that acted on the note's path or command, or a reflection's `used_notes`. | That candidate, at once. A second admission of the unchanged candidate writes nothing. |
 | `user_request` | The user's message asks to remember (`remember that …`, `记住…`). | The fact the request carries after its marker, this run's `remember` notes and its final digest at the run's end; never the final reflection. The fact is classified by `classify_kind`, so it is `semantic` unless it is first-person (`profile`), and the meta-noun and question rules below apply to it. |
 | `user_statement` | A declarative sentence of the user's message states a stable fact without a remember request, or corrects one and carries the corrected value. A question (`?`/`？`) never counts, and `my … is`/`我的…是` refuses a meta noun (task, question, request, goal, plan, problem, issue, job, point; 任务, 问题, 请求, 目标, 计划). | That sentence, at once. |
-| `outcome` | The end of the run, only with `--admit-on-outcome on`. | The final attempt digest, with the terminal status in its provenance; never the final reflection. |
+| `outcome` | The end of the run, only with `--admit-on-outcome on`. | The final attempt digest, with the terminal status in its provenance; never the final reflection. For a completed run the digest is exempt from the meta-claim filter. |
 | `sleep` | Reserved for the sleep pipeline's probe gate. | Nothing in v1. |
 
 Only the user's own text gives a user signal: a tool result, a note, a recall

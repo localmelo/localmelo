@@ -1793,6 +1793,23 @@ _META_RE = re.compile(
 )
 _META_SEPARATORS = ("—", "–", ":", ";")
 
+# A digest's task line, and a file, path, function or code identifier, mark
+# a text as content: it is not only a claim about the agent's own work.
+_TASK_LINE_RE = re.compile(r"(?im)^[ \t]*(?:[-*+•]\s*)?task\s*:")
+_FUNCTION_CALL_RE = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\(")
+_UNDERSCORE_IDENT_RE = re.compile(r"(?<![A-Za-z0-9_])[A-Za-z_]\w*_\w+(?![A-Za-z0-9_])")
+_CODE_SPAN_RE = re.compile(r"`[^`\n]*[A-Za-z_][^`\n]*`")
+
+
+def _names_code(text: str) -> bool:
+    """Whether *text* names a file, path, function or code identifier."""
+    return bool(
+        path_spans(text)
+        or _FUNCTION_CALL_RE.search(text)
+        or _UNDERSCORE_IDENT_RE.search(text)
+        or _CODE_SPAN_RE.search(text)
+    )
+
 
 def _is_meta_sentence(sentence: str) -> bool:
     """Whether one sentence only reports the agent's own reading or completion."""
@@ -1812,15 +1829,22 @@ def _is_meta_sentence(sentence: str) -> bool:
 
 
 def is_meta_claim(text: str) -> bool:
-    """Whether *text* is only a completion or self-work claim, and no fact.
+    """Whether *text* is only a completion or self-work claim, and no content.
 
-    "I've read and remembered all of Jamie's records from today
-    (2026-04-06)…" is meta even though it names a date and a person; the
-    date and the name belong to the frame, not to a fact. A sentence that
+    A text with a ``task:`` line or a file, path, function or code
+    identifier is content, never a meta claim: an Aider-style final digest
+    ("task: Implement transpose in transpose.py … outcome: completed")
+    carries no dates or amounts, and its task line alone keeps it.
+
+    A claim about the agent's own work is meta even when it names a date
+    or a person belonging to its frame: "I've read and remembered all of
+    Jamie's records from today (2026-04-06)…" is meta. A sentence that
     also carries an amount, a time, an identifier, or a fact after a
     ``:``, ``—`` or ``;`` is not meta, and a text with any non-meta
     sentence is not a meta claim.
     """
+    if _TASK_LINE_RE.search(text) or _names_code(text):
+        return False
     sentences = split_sentences(text)
     return bool(sentences) and all(
         _is_meta_sentence(sentence) for _offset, sentence in sentences

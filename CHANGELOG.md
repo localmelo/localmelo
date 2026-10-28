@@ -522,7 +522,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   A completion or self-work claim ("The session is complete.", "I've read
   and remembered all of Jamie's records…") is not admitted as a fact; the
   policy `IGNORE`s it with the reason `meta claim about the agent's own
-  work`, for a note and for the episodic digest. Strong keys are now a date
+  work`, for a note and for the episodic digest. A `task:` line, or a file,
+  path or function name, marks the text as content instead, and a final
+  digest admitted by `--admit-on-outcome on` for a completed run is exempt
+  from this filter, so an Aider-style outcome digest with no dates or
+  amounts is still stored. Strong keys are now a date
   (ISO, `m/d`, `April 9`, normalised so `4/9` matches `2026-04-09`), a time
   with a colon or am/pm, an amount with a currency or unit, an identifier of
   three or more characters with a digit, a number of three or more digits,
