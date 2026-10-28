@@ -631,6 +631,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- Gateway and console sessions no longer offer `shell_exec`: both run in the
+  new `gateway` tool mode, which registers `file_read`, `file_write` and
+  `python_exec` only, because neither surface has an approval policy to ask
+  before a command runs. `AgentOptions` gains `mode` (`direct`,
+  `interactive`, `gateway` or `python`; `python` is the API default) and the
+  CLI sets its own surface's mode; the interactive UI keeps `shell_exec`
+  behind its existing approval panel, and direct mode is unchanged in this
+  release. The six-pattern command blocklist now applies to direct mode
+  only: the Python API's `python` mode, like the interactive UI, asks the
+  caller's approval policy about every `exec` call instead of matching the
+  command's spelling, and a call with no policy runs as before. A gateway or
+  console session cannot be given `shell_exec` by the default set; an
+  explicit `AgentOptions(builtins=…)` still names it, and the checker then
+  refuses the call in `gateway` mode with the mode and `--builtins all` in
+  the reason ([#NN]).
 - Secrets no longer stay in stored memory. `tasks.query` and `tasks.result`,
   `steps.thought`, a tool call's arguments and a tool result's output and
   error, and the text long-term memory keeps (each step's summary and the

@@ -315,7 +315,7 @@
         <ul>
           <li>before a planning request: the prompt may hold at most 100,000 characters, and the list of offered tools must be valid;</li>
           <li>after it: each tool call in the reply needs a name and an id of its own;</li>
-          <li>before a tool runs: <code>shell_exec</code> refuses six destructive command patterns;</li>
+          <li>before a tool runs: in direct mode, <code>shell_exec</code> refuses six destructive command patterns; every other mode uses the tool's tier and the mode's policy;</li>
           <li>after a tool runs: output longer than 50,000 characters is cut;</li>
           <li>before a memory write: its size is limited;</li>
           <li>before an event reaches Python code: API keys of well-known shapes, bearer tokens and one-time codes in a model reply's text are replaced with <code>[redacted]</code>;</li>
@@ -367,7 +367,9 @@
         <p>
           The four built-in tools are <code>shell_exec</code>,
           <code>python_exec</code>, <code>file_read</code> and
-          <code>file_write</code>. Direct mode gives them no
+          <code>file_write</code>. A gateway or console session gets three:
+          its mode leaves <code>shell_exec</code> out, because it has no
+          approval policy to ask. Direct mode gives the tools no
           workspace root, and the gateway never does, so file tools reach any
           file you can; a direct run's <code>--workspace DIR</code> sets the
           same root as the Python API below. In the Python

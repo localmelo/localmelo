@@ -234,8 +234,11 @@ makes larger requests: leave out `session_id` for an unrelated task.
 - Creating a session also closes the sessions that have been idle for more
   than 1 hour.
 - Each session's agent uses the config file's backends and the default run
-  options (all four built-in tools and no MCP tools), except that it keeps
-  its answers (`AgentOptions(record_answers=True)`).
+  options (three built-in tools, `file_read`, `file_write` and
+  `python_exec`, and no MCP tools), except that it keeps its answers
+  (`AgentOptions(record_answers=True, mode="gateway")`). A session does not
+  offer `shell_exec`: the gateway has no approval policy, so there is no one
+  to ask.
 - When `LOCALMELO_PERSIST_MEMORY` is set for the gateway, all sessions save
   to the same SQLite files; see [Memory](memory.md#keep-memory-between-runs).
 
@@ -267,8 +270,8 @@ the same; the reason is the scheduler's own code (`Resources`, `Priority`,
 not count against the 600-second active-time bound.
 
 Stop cancels the run. A model request in flight is abandoned, although the
-model server may finish computing it, and a running `shell_exec` command or
-`python_exec` child is killed with its process group. `python_exec` code runs
+model server may finish computing it, and a running `python_exec` child is
+killed with its process group. `python_exec` code runs
 in a child process, so the gateway keeps answering other requests while it
 runs. See [Tools and MCP](tools.md) for the tools' limits. The task is saved
 with the status `cancelled`, and the chat takes the next message once that
@@ -293,9 +296,11 @@ The web workspace works apart from the HTTP API above:
   answers HTTP 409 `{"error": "GPU lock held by <holder>; …"}` without sending
   an embedding or keeping a half-built chat. A create without seeding makes no
   model call and proceeds.
-- Each chat's agent uses the default run options (all four built-in tools
-  and no MCP tools), except that it keeps its answers. A chat can therefore
-  run shell commands and Python code, and read and write files.
+- Each chat's agent uses the gateway's default run options (the three
+  built-in tools `file_read`, `file_write` and `python_exec`, and no MCP
+  tools), except that it keeps its answers. A chat can therefore run Python
+  code and read and write files, but not shell commands: `shell_exec` is
+  not offered.
 - It keeps up to 12 chats and closes those idle for 2 hours when creating a
   chat. At capacity, an idle chat is replaced only after preparation succeeds;
   if all chats are busy, creation fails with HTTP 409.

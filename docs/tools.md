@@ -7,7 +7,7 @@ from MCP servers, which tools each step offers, and what the checks do.
 
 | Tool | What it does | Limits |
 |---|---|---|
-| `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. Six destructive command patterns are refused. |
+| `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. A gateway or console session does not offer it. In direct mode, six destructive command patterns are refused. |
 | `python_exec` | Runs Python code in a child process and returns what it prints. | Killed with every process it started after 60 seconds. `sys.exit()` ends only the child. |
 | `file_read` | Reads a text file. | Any file your account can read. |
 | `file_write` | Writes text to a file, creating or replacing it. | Any file your account can write. |
@@ -188,9 +188,12 @@ Before a tool runs, localmelo checks the call:
   also have the type the tool declares; a call such as `shell_exec` with a
   list for `command` is refused with
   `Arguments for shell_exec: 'command' must be of type string, not array`.
-- `shell_exec`, the `exec` built-in that takes a command line, refuses
-  commands that match one of six patterns: `rm -rf /`, `mkfs`, `dd if=`, a
-  fork bomb, `shutdown` and `reboot`.
+- In direct mode, `shell_exec` refuses commands that match one of six
+  patterns: `rm -rf /`, `mkfs`, `dd if=`, a fork bomb, `shutdown` and
+  `reboot`. The other modes use the tier and the mode instead: the gateway
+  does not offer the tool, and the interactive UI and a Python run with a
+  policy ask about every `exec` call (see
+  [Permission tiers](#permission-tiers)).
 - With a workspace root, the path of `file_read` and `file_write` must be
   inside it (see [With a workspace root](#with-a-workspace-root)).
 - With an approval policy, a tool whose tier is not `read`, or that is
@@ -221,7 +224,9 @@ The checks are guardrails, not a sandbox:
 - Approvals apply only to a run with an approval policy, and in the
   interactive UI (unless `--yolo`). Direct mode, `melo ""` and the gateway
   have none.
-- The command blocklist is easy to get around.
+- In direct mode, the command blocklist is easy to get around. A gateway
+  or console session offers no shell at all; the interactive UI and a
+  Python policy ask rather than match.
 
 To limit what a task can do, use `--builtins none` or a subset of tools,
 `--mcp-only`, a container or virtual machine, or a separate user account.
@@ -244,6 +249,15 @@ The built-ins are fixed by name: `file_read` is `read`, `file_write` is
 `write`, and `shell_exec` and `python_exec` are `exec`. The table wins over a
 tool's own claims, so a provided or custom tool that reuses a built-in's name
 inherits that tier.
+
+The mode decides which built-ins are offered at all. A gateway or console
+session runs in `gateway` mode and gets `file_read`, `file_write` and
+`python_exec`; `shell_exec` is not registered, so the model never sees it.
+The interactive UI and the Python API keep all four (`interactive` and
+`python` mode; the UI always asks before an `exec` call, and a Python run
+asks when it has a policy). Direct mode is `direct` and, in this release,
+still keeps all four and its six-pattern blocklist. `AgentOptions(builtins=…)`
+or `--builtins` always wins over the mode's default set.
 
 Every other tool's tier comes from the MCP `annotations` object that the
 server lists with it, read cautiously:
@@ -319,12 +333,15 @@ without the flag and the gateway never set a workspace root.
 
 A run started in Python with `approval=policy` asks the policy before each
 call of a built-in or provided tool whose tier is not `read` (see
-[Permission tiers](#permission-tiers)): the built-ins `shell_exec`,
-`python_exec` and `file_write`, and a provided or MCP tool that is `write`,
-`exec` or `network`. That includes an MCP tool with no annotations, which is
-`write`. A tool is also asked about when it is explicitly marked: a provided
-tool with `requires_approval=True`, a custom tool whose `register` call sets
-it, or the tools of an MCP server that sets `require_approval` (see
+[Permission tiers](#permission-tiers)): the built-ins it offers
+(`shell_exec`, `python_exec` and `file_write` in the default `python` mode),
+a provided or MCP tool that is `write`, `exec` or `network`, including an MCP
+tool with no annotations, which is `write`. The interactive UI always has
+such a policy, unless `--yolo`; direct mode and the gateway have none. A
+gateway session therefore does not offer `shell_exec` at all: there is no
+one to ask. A tool is also asked about when it is explicitly marked: a
+provided tool with `requires_approval=True`, a custom tool whose `register`
+call sets it, or the tools of an MCP server that sets `require_approval` (see
 [Approve tool calls](python-api.md#approve-tool-calls)). A custom tool's
 tier is only a label: it asks when its `register` call sets the mark.
 
