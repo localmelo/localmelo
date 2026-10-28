@@ -20,7 +20,7 @@ from localmelo.melo.checker import Checker, GatewayIngressPayload, SessionTransi
 from localmelo.support import config
 from localmelo.support.gateway.auth import COOKIE_TTL, GatewayAuth
 from localmelo.support.gateway.console import Console, ConsoleOptions
-from localmelo.support.gateway.guard import LoopbackGuard, is_loopback
+from localmelo.support.gateway.guard import LoopbackGuard, app_instance, is_loopback
 from localmelo.support.gateway.session import SessionBusyError, SessionManager
 
 logger = logging.getLogger("localmelo.gateway")
@@ -49,6 +49,9 @@ class GatewayServer:
         if not is_loopback(self.host):
             raise ValueError("The gateway must listen on a loopback address.")
         self.auth = GatewayAuth()
+        # The per-launch identifier the macOS app passes to its child; empty
+        # for a gateway the user started directly.
+        self.instance = app_instance()
 
         # SessionManager now builds providers from Config directly
         self.sessions = SessionManager(
@@ -85,7 +88,12 @@ class GatewayServer:
             options=self._console_options(console_options),
         )
         self.console.mount(self.app)
-        self.app.add_middleware(LoopbackGuard, port=self.port, auth=self.auth)
+        self.app.add_middleware(
+            LoopbackGuard,
+            port=self.port,
+            auth=self.auth,
+            instance=self.instance,
+        )
 
     def _console_options(self, options: ConsoleOptions | None) -> ConsoleOptions:
         """*options*, with the workspace page's gate when it built one.
@@ -153,7 +161,7 @@ class GatewayServer:
         async def login(body: dict[str, Any]) -> Response:
             code = body.get("code")
             cookie = (
-                self.auth.consume_login(code, self.port)
+                self.auth.consume_login(code, self.port, instance=self.instance)
                 if isinstance(code, str)
                 else None
             )
