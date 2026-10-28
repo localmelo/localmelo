@@ -33,9 +33,12 @@ class QuietAgent:
         pass
 
 
-def build(tmp_path: Path, *, host: str = "127.0.0.1") -> GatewayServer:
+def build(
+    tmp_path: Path, *, host: str = "127.0.0.1", playground: bool = False
+) -> GatewayServer:
     cfg = make_cfg()
     cfg.gateway.host = host
+    cfg._enable_playground = playground
     return GatewayServer(
         cfg,
         console_options=ConsoleOptions(
@@ -139,7 +142,7 @@ def test_v1_close_is_byte_identical(tmp_path: Path) -> None:
 
 
 def test_v1_playground_routes_are_byte_identical(tmp_path: Path) -> None:
-    server = build(tmp_path)
+    server = build(tmp_path, playground=True)
     client = TestClient(
         server.app,
         base_url="http://127.0.0.1:8401",
