@@ -48,10 +48,11 @@ again.
 ## The interactive UI
 
 `melo` without a task, in a terminal, opens a chat that shows its work as
-it happens: each tool call as it finishes, a spinner with the step and the
-time while the model works, and the answer as Markdown. What it prints
-stays in the terminal's scrollback; the input box and a status bar stay at
-the bottom.
+it happens: the model's thinking, each tool call as it finishes, notices
+and reflections, and a live area with the step, the phase, the running
+tool and the run's progress facts while the model works. The answer
+prints as Markdown. What it prints stays in the terminal's scrollback; the
+input box and a status bar stay at the bottom.
 
 ```text
 ╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
@@ -155,6 +156,10 @@ type more letters to narrow them, Tab or Enter to take one.
 |---|---|
 | `/help [command]` | The commands and keys, or one command's details. |
 | `/new` (also `/clear`) | Start a new session: the model forgets the conversation, and session grants end. |
+| `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's summary and whole rationale; without an argument, flips it. |
+| `/thinking [on\|off]` | The thinking excerpt on (the default) or off, leaving only `Thought for 1.2s`; without an argument, flips it. |
+| `/expand [turn.call]` | A tool call's whole output or error: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
+| `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
 | `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
 | `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default (as `ollama` when the server answers like Ollama, else `vllm`). |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
@@ -196,23 +201,40 @@ type more letters to narrow them, Tab or Enter to take one.
 
 ### A turn's output
 
-- **The spinner** shows what melo does (`Thinking`, `Running`,
-  `Waiting for your approval`), the step (`step 4`, never against
-  `--max-steps`), the attempt from the second one, the time, the output
-  tokens, and `esc to stop`. A running tool shows its own clock under it,
-  and for `shell_exec` and `python_exec` their limit:
-  `└ shell_exec  pytest -q tests · 0:25 of 10:00`.
+- **The live area.** The first row names what melo does (`Starting`,
+  `Thinking`, `Running`, `Waiting for your approval`, `Retrying in 4s`,
+  `Reflecting`, `Wrapping up`, `Stopping`), then the run's facts: the step
+  (`step 4`, never against `--max-steps`), the attempt from the second
+  one, the phase with its cycle, the tests seen, and the time; the output
+  tokens and `esc to stop` follow. When the line is narrow the hint goes
+  first, then the tokens, and the facts are cut with `…`. The second row
+  is the running tool, its own clock, and for `shell_exec` and
+  `python_exec` their limit: `└ shell_exec  pytest -q tests · 0:25 of
+  10:00`. On a session's first turn, a third row shows the past runs the
+  progress line would: `last time 6 steps, 2m10s: Run ls ✓ · Read app.py
+  ✓`.
+- **Thinking.** `✻ Thought for 1.2s`, then the first 3 rows of the
+  thinking (40 with `/verbose`, none with `/thinking off`), wrapped to
+  the width. An intermediate message prints as Markdown after `●`; the
+  last one is held and prints only when it differs from the final answer.
 - **Tool calls** print one block each when they finish: `✓` ran, `✗`
   failed, `⊘` blocked or denied, `◌` stopped or not run; the duration;
   `exit N` when a command ran and exited with another code than 0 (`grep`
   exits 1 without failing); how its approval ended; and up to 3 lines of
-  its output, then `… +N lines` (a single line left prints instead).
-  Escape sequences in the output are removed, so a tool cannot move the
-  cursor, set the title or write the clipboard.
+  its output (20 with `/verbose`), then `… +N lines (/expand T.C)` (a
+  single line left prints instead). `/verbose` adds the call's arguments
+  and images print as `▪ image/png · 312 KB · not shown`. Escape
+  sequences in the output are removed, so a tool cannot move the cursor,
+  set the title or write the clipboard.
+- **Notices and reflections.** `↻` marks a retry, with its delay counting
+  down in the live area; `·` an empty reply; `⚠` a stuck or spent-budget
+  notice. A reflection prints as `✻ Reflected after attempt 1: continue ·
+  Read the test before editing. (2.3s)`; `/verbose` adds its summary and
+  whole rationale, and `asked twice` when it was; an unreadable one says
+  whether the run continues.
 - **The answer** prints as Markdown after `●`. A run that did not complete
   prints its best effort, the [status line](#output) and a hint, such as
   `Is the model server running at URL?` for a server that does not answer.
-- Thinking excerpts, retry notices and reflections come in a later release.
 
 ### Approvals
 

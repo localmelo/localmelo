@@ -63,7 +63,7 @@
         </div>
         <p>计划中：</p>
         <ul>
-          <li>交互式命令行的后续部分：回合运行时显示模型的思考和重试、审批中显示改动的 diff、可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
+          <li>交互式命令行的后续部分：审批中显示改动的 diff、可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
           <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
           <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
@@ -75,6 +75,18 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-27-turn-work">
+          <h3>回合的工作实时可见</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time>
+          </p>
+          <ul>
+            <li>交互式界面现在会把回合的每个事件画出来：模型的思考（<code>Thought for 1.2s</code> 加一段摘录）、中间文本、与最终答案不同的最后一条消息、带倒计时的重试、空回复/卡住/步数预算通知，以及反思（包括读不出来的反思）。</li>
+            <li>实时区域显示本回合的进度事实（步数、尝试、阶段和轮次、测试、用时）、正在运行的工具的计时和时限；会话的第一个回合还会用一行暗色文字显示上次运行做了什么，措辞与直接模式的进度行一致。</li>
+            <li>新增命令：<code>/verbose</code> 显示更长的摘录、工具参数和 20 行输出；<code>/thinking</code> 关闭思考摘录；<code>/expand</code> 打印某个工具调用的完整输出；<code>/progress</code> 显示实时区域依据的进度事实。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-27-interactive-ui">
           <h3>终端里的交互式界面</h3>

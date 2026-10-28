@@ -105,7 +105,7 @@ source .venv/bin/activate</code></pre>
         <div class="link-grid">
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">
             <strong>Run tasks</strong>
-            <span>Run one task per command, within a step budget, with reflection between attempts and an optional time limit, or chat in the terminal with <code>melo</code>: it shows each tool call as it finishes and asks before it runs a command or writes a file.</span>
+            <span>Run one task per command, within a step budget, with reflection between attempts and an optional time limit, or chat in the terminal with <code>melo</code>: it shows the model's thinking, each tool call and the run's progress as they happen, and asks before it runs a command or writes a file.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">
             <strong>Tools and MCP</strong>
@@ -143,7 +143,7 @@ source .venv/bin/activate</code></pre>
         <p>The v0.1.0 milestone is due 2026-12-20.</p>
         <p>Planned:</p>
         <ul>
-          <li>the interactive CLI's next parts: the model's thinking and retries as a turn runs, diffs in approvals, sessions you can resume (<code>melo -c</code>, <code>melo -r</code>), attached files and shell commands;</li>
+          <li>the interactive CLI's next parts: diffs in approvals, sessions you can resume (<code>melo -c</code>, <code>melo -r</code>), attached files and shell commands;</li>
           <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
           <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
