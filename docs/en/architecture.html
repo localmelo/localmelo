@@ -233,15 +233,7 @@
           while their conversations are kept).
         </p>
         <p>
-          The gateway has no authentication. When it listens on
-          <code>localhost</code> or a loopback address, such as the default
-          <code>127.0.0.1:8401</code>, it refuses requests whose
-          <code>Host</code> is not <code>127.0.0.1</code>,
-          <code>localhost</code> or <code>[::1]</code> with its port (HTTP
-          421), and requests to its API that web pages at another origin send
-          through your browser (HTTP 403). No web page can show it in a
-          frame. On any other host, such as <code>0.0.0.0</code>, it makes
-          none of these checks and logs a warning when it starts.
+          The gateway requires a bearer token or browser session and refuses non-loopback binds. Run <code>melo --gateway-login</code> in a terminal for a one-use link. A token holder can act as you; same-user processes are not isolated, and browser cookies are not isolated by localhost port.
         </p>
         <p>
           Key files: <code>support/gateway/__init__.py</code>,
@@ -410,7 +402,7 @@
         </p>
 
         <h3 id="c-memory">Memory</h3>
-        <p>In compress modes, heuristic notes can extract up to 12 keyed facts from a visible reply without a note block, and an explicit note can also hold 12. Questions, options, plans and negated or cancelled statements are not positive facts; a claim about the agent's own work is filtered unless a keyed content clause follows it; source matching scores typed keys, rejects conflicts and leaves ties and unmatched items unsourced; CJK-only keys are not extracted. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">reasoning notes</a>.</p>
+        <p>In compress modes, heuristic notes can extract up to 12 facts, including a bounded set of English negative and Chinese residence or cancellation statements, kept verbatim. Matching a negative assertion requires its full text in the record, and conflicting event times reject a match. Extraction and attribution are heuristic; similar assertions of opposite detected polarity are kept as conflicts, while structured supersession is not yet implemented. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">reasoning notes</a>.</p>
         <p>
           Working memory holds the conversation of a run or a gateway session:
           the last 20 messages, in RAM. History records every task and step

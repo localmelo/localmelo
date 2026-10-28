@@ -336,7 +336,7 @@ async def test_history_gets_the_same_calls_in_the_same_order(tmp_path: Path) -> 
 def test_no_new_flag_and_the_same_exit_codes() -> None:
     """R1 adds no flag: the options are R1's base and those of later stages."""
     assert sorted(cli._build_parser()._option_string_actions) == sorted(
-        BASE_OPTIONS + LATER_OPTIONS
+        BASE_OPTIONS + LATER_OPTIONS + ["--gateway-login", "--gateway-rotate-token"]
     )
     ui_or_help = {
         "--yolo",

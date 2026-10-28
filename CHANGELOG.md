@@ -7,6 +7,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
+### Security
+
+- Gateway authentication is in progress: loopback-only binding, a private bearer
+  token for API clients, and a one-use terminal sign-in link for browser sessions.
+  Existing unauthenticated API clients must migrate; see the gateway guide.
+  Same-user processes and localhost services on other ports remain outside the
+  isolation guarantee. Playground and lifecycle hardening are separate work. ([#136])
+
 ### Fixed
 
 - Correct the API v2 response formats and tools example, and update the bilingual
@@ -23,6 +31,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - Direct workers can read a brief file and emit a versioned JSON result or an
   NDJSON event stream; inbox steering remains future work. ([#NN])
+
+- Heuristic notes retain a bounded set of explicit English negative and Chinese
+  residence/cancellation assertions, and item attribution rejects conflicting
+  event times, rejects opposing detected polarity and requires the full negative
+  assertion ([#137]). Similar opposing assertions are retained as conflicts;
+  structured polarity-aware supersession is not yet implemented.
+
 - Worker park integration fences held provider and approval delivery, persists
   pause intent and evidence-based cards, releases cleanly parked worker slots,
   and re-asks withdrawn approvals on resume. Failed park writes retry and can
@@ -948,3 +963,5 @@ earlier milestones.
 [#132]: https://github.com/localmelo/localmelo/pull/132
 [#133]: https://github.com/localmelo/localmelo/pull/133
 [#135]: https://github.com/localmelo/localmelo/pull/135
+[#136]: https://github.com/localmelo/localmelo/pull/136
+[#137]: https://github.com/localmelo/localmelo/pull/137

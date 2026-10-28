@@ -115,6 +115,7 @@ def _client(server: GatewayServer) -> TestClient:
     return TestClient(
         server.app,
         base_url=f"http://127.0.0.1:{server.port}",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
         raise_server_exceptions=False,
     )
 
@@ -339,6 +340,7 @@ async def test_delete_busy_session_returns_409_and_keeps_it() -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=server.app),
         base_url=f"http://127.0.0.1:{server.port}",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
     ) as client:
         run = asyncio.create_task(
             client.post(
@@ -494,6 +496,7 @@ async def test_cancelled_request_returns_session_to_idle() -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=server.app),
         base_url=f"http://127.0.0.1:{server.port}",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
     ) as client:
         request = asyncio.create_task(
             client.post(

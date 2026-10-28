@@ -430,7 +430,8 @@ def _without_fences(text: str) -> str:
 # "e.g." or "i.e.". Their word boundary is an ASCII one, so "例如e.g. "
 # holds the abbreviation too.
 _SENTENCE_END_RE = re.compile(
-    r"[。！？]|[!?](?=\s)|(?a:(?<!\be\.g)(?<!\bi\.e))\.(?=\s)", re.IGNORECASE
+    r"[。！？]|[!?](?=\s|[一-鿿])|(?a:(?<!\be\.g)(?<!\bi\.e))\.(?=\s|[一-鿿])",
+    re.IGNORECASE,
 )
 _LIST_MARKER_RE = re.compile(r"(?:[-*•]|\d+[.)])(?:\s+|$)")
 
@@ -661,7 +662,33 @@ _NEGATION_MARKERS = _english(
     r"no\s+longer",
     r"cancel+ed",
     r"cancel+ing",
+    r"\w+n['’]t",
+    "cannot",
 )
+_CJK_NEGATION = re.compile(
+    r"不再|取消|没有|不是|不在|未(?=在|举行|完成|开始|参加|发生)|没(?=在|有|能|去|来|做)"
+)
+
+
+def has_negative_assertion(text: str) -> bool:
+    """Conservative polarity signal for admission and source matching, not a parser."""
+    return bool(_NEGATION_MARKERS.search(text) or _CJK_NEGATION.search(text))
+
+
+_CJK_ASSERTION = re.compile(
+    r"^[一-鿿]{2,12}(?:已取消|取消了|不再住在[一-鿿]{2,12}|住在[一-鿿]{2,12}|"
+    r"(?:不在|未在)[^?？!！。]{1,80}举行(?:，[^?？!！。]{0,80})?)[。.!！]?$"
+)
+_EN_NEGATIVE_ASSERTION = re.compile(
+    r"^[A-Za-z][^?？!！]*\b(?:is not|are not|was not|were not|does not|did not|"
+    r"\w+n['’]t|no longer|was cancelled|was canceled|is cancelled|is canceled)\b[^?？!！]*[!！]?$",
+    re.IGNORECASE,
+)
+_UNCERTAIN_ASSERTION = re.compile(
+    r"\b(?:if|unless|whether|when|may(?!\s+\d{1,2}(?:st|nd|rd|th)?\b)|might|could|not only|not\s+(?:not|cancel+ed))\b|如果|假如|是否|不但|不仅|可能|也许",
+    re.IGNORECASE,
+)
+_QUOTED = re.compile(r"""["“”‘’]|'[^']+\x27""")
 
 
 def _is_plan(sentence: str) -> bool:
@@ -669,9 +696,21 @@ def _is_plan(sentence: str) -> bool:
 
 
 def _eligible_fact(sentence: str) -> bool:
-    return not (
-        _is_open(sentence) or _is_plan(sentence) or _NEGATION_MARKERS.search(sentence)
-    )
+    if (
+        _is_open(sentence)
+        or _is_plan(sentence)
+        or _UNCERTAIN_ASSERTION.search(sentence)
+    ):
+        return False
+    if _NEGATION_MARKERS.search(sentence):
+        return (
+            len(sentence) <= NOTE_ITEM_CHARS
+            and not _QUOTED.search(sentence)
+            and bool(_EN_NEGATIVE_ASSERTION.fullmatch(sentence))
+        )
+    if _CJK_NEGATION.search(sentence):
+        return bool(_CJK_ASSERTION.fullmatch(sentence))
+    return True
 
 
 # ── Calls and results ──
@@ -1163,8 +1202,9 @@ def _factual_lines(text: str) -> list[str]:
                 for part in parts
             ]
         for part in parts:
-            if _eligible_fact(part) and any(
-                not _ITEM_CJK_RE.fullmatch(key) for key in _strong_keys(part)
+            if _eligible_fact(part) and (
+                _CJK_ASSERTION.fullmatch(part)
+                or any(not _ITEM_CJK_RE.fullmatch(key) for key in _strong_keys(part))
             ):
                 items.append(part)
     return items
@@ -2303,6 +2343,21 @@ def _item_score(keys: _ItemKeys, text: str) -> int:
     ):
         return 0
     typed = _typed_keys(text)
+    item_times = {key for key in keys.strong if key.startswith("time:")}
+    # A mail's sent timestamp is not the time of its subject event.
+    try:
+        record = json.loads(text)
+    except (ValueError, RecursionError):
+        record = None
+    time_text = text
+    if isinstance(record, dict):
+        time_text = " ".join(
+            str(record.get(field) or "")
+            for field in ("body", "text", "notes", "start", "end")
+        )
+    record_times = _time_keys(time_text)
+    if item_times and record_times and item_times.isdisjoint(record_times):
+        return 0
     item_phones = {key for key in keys.strong if key.startswith("phone:")}
     record_phones = {key for key in typed if key.startswith("phone:")}
     if item_phones and record_phones and item_phones.isdisjoint(record_phones):
@@ -2353,7 +2408,16 @@ def _item_source_ids(item: str, records: Sequence[tuple[str, str]]) -> list[str]
     best_id = ""
     best_score = 0
     tied = False
+    # Shared dates or names alone cannot establish a denial.
+    negative = has_negative_assertion(item)
+    assertion = _collapse(item).lower().rstrip(".。!！ ")
     for record_id, text in records:
+        # Opposite polarity is not evidence, in either direction. This is
+        # deliberately conservative for records with several statements.
+        if negative != has_negative_assertion(text):
+            continue
+        if negative and assertion not in _collapse(text).lower():
+            continue
         score = _item_score(keys, text)
         if score > best_score:
             best_id, best_score, tied = record_id, score, False
