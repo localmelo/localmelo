@@ -534,8 +534,11 @@ A database that has the table is read as follows:
 ## The typed long-term store
 
 Three modes read or write the typed `long_term.db` of R6-lite. Each is
-mutually exclusive with the evaluation flags and with `--export-run`, and none
-contacts a model. The same store is what [recall in the loop](memory.md#recall-in-the-loop)
+mutually exclusive with the evaluation flags other than the model ones and
+with `--export-run`, and none contacts a model: `--base-url`, `--chat-model`,
+`--embedding-base-url`, `--embedding-model`, `--retrieval-timeout` and
+`--retrieval-extra-body` are accepted and ignored, so a bench script can pass
+the same flags everywhere. The same store is what [recall in the loop](memory.md#recall-in-the-loop)
 reads at `start`, and what `--export-store` shows the bench. `DIR` may be a memory directory (the file is
 `long_term.db`) or the file itself.
 

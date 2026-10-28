@@ -66,6 +66,16 @@ _FACT_PATTERNS: tuple[re.Pattern[str], ...] = (
 )
 _QUESTION_END = ("?", "？")
 
+# A meta sentence is not a stable fact about the user (T53R finding 6):
+# "my task is …" and "我的任务是…" describe the work, not the person.
+_META_NOUNS = frozenset(
+    {"task", "question", "request", "goal", "plan", "problem", "issue", "job", "point"}
+)
+_META_NOUNS_CJK = ("任务", "问题", "请求", "目标", "计划")
+_MY_IS = re.compile(r"\bmy\b([^.\n]{0,80}?)\bis\b", re.IGNORECASE)
+_MY_IS_CJK = re.compile(r"我的([^。\n]{0,40}?)是")
+_MY_MARKERS = ("my … is", "我的…是")
+
 
 @dataclass(frozen=True)
 class UserSignals:
@@ -94,28 +104,62 @@ def _matches(text: str, marker: str) -> bool:
     return marker in text
 
 
+def _is_meta_statement(text: str) -> bool:
+    """Whether a ``my … is`` sentence names the work, not the person."""
+    for match in _MY_IS.finditer(text):
+        if set(re.findall(r"[a-z]+", match.group(1).lower())) & _META_NOUNS:
+            return True
+    for match in _MY_IS_CJK.finditer(text):
+        if any(noun in match.group(1) for noun in _META_NOUNS_CJK):
+            return True
+    return False
+
+
+def _declarative(text: str) -> bool:
+    return not text.rstrip().endswith(_QUESTION_END)
+
+
 def _states_a_fact(text: str) -> bool:
     """Whether one sentence states a stable first-person fact."""
-    if text.rstrip().endswith(_QUESTION_END):
+    if not _declarative(text) or _is_meta_statement(text):
         return False
     return any(pattern.search(text) for pattern in _FACT_PATTERNS)
 
 
+def _states_a_statement_marker(text: str) -> bool:
+    """Whether *text* carries a statement marker that is not a meta sentence."""
+    if _is_meta_statement(text):
+        return any(
+            _matches(text, marker)
+            for marker in USER_STATEMENT_MARKERS
+            if marker not in _MY_MARKERS
+        )
+    return any(_matches(text, marker) for marker in USER_STATEMENT_MARKERS)
+
+
 def classify_user_text(text: str) -> UserSignals:
-    """The remember request and the fact sentences of one user message."""
-    remember = any(_matches(text, marker) for marker in REMEMBER_MARKERS)
+    """The remember request and the fact sentences of one user message.
+
+    Every marker needs a declarative sentence: a question never asks the
+    store to remember and never states a fact (T53R finding 6). ``my … is``
+    and ``我的…是`` also refuse a meta noun, because a task, question or
+    plan is not a stable fact.
+    """
+    remember = False
     facts: list[str] = []
     for _offset, sentence in split_sentences(text):
         stripped = sentence.strip()
-        if not stripped:
+        if not stripped or not _declarative(stripped):
             continue
-        stated = any(_matches(stripped, marker) for marker in USER_STATEMENT_MARKERS)
-        if not stated and remember:
+        sentence_remember = any(
+            _matches(stripped, marker) for marker in REMEMBER_MARKERS
+        )
+        remember = remember or sentence_remember
+        stated = _states_a_statement_marker(stripped)
+        if not stated and sentence_remember:
             # "remember that my birthday is ..." carries its fact after the
-            # marker; "remember to buy milk" and a question carry none.
-            stated = any(
-                _matches(stripped, marker) for marker in REMEMBER_MARKERS
-            ) and _states_a_fact(stripped)
+            # marker; "remember to buy milk" carries none.
+            stated = _states_a_fact(stripped)
         if stated and stripped not in facts:
             facts.append(stripped)
     return UserSignals(remember=remember, facts=tuple(facts))

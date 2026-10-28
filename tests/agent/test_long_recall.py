@@ -244,3 +244,134 @@ async def test_an_embedding_agent_still_recalls_text_only_entries() -> None:
     assert [text for text, _score, _meta in rows] == [
         "the deployment checklist is owned by Alice"
     ]
+
+
+class CatalogAwareLLM(FakeLLM):
+    """Answers a retrieve request with m1 only when the catalog names the fact."""
+
+    async def chat(self, messages: list[Any], tools: list[Any] | None = None) -> Any:
+        from localmelo.melo.schema import Message
+
+        text = "\n".join(message.content for message in messages if message.content)
+        if "<memory>" in text:
+            self.requests.append(messages)
+            ids = '{"ids": ["m1"]}' if "NECTAR-42" in text else '{"ids": []}'
+            return Message("assistant", ids)
+        return await super().chat(messages, tools)
+
+
+@pytest.mark.asyncio
+async def test_default_auto_start_selects_a_long_entry_by_its_text(
+    tmp_path: Path,
+) -> None:
+    server = CatalogAwareLLM(_answer("done"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            retriever="auto",
+            max_steps=1,
+        ),
+    )
+    await _seed(
+        agent,
+        [("the Bluebird launch code is NECTAR-42", "semantic", "user", "t-a")],
+    )
+    result = await agent.run_task("What is the Bluebird launch code?")
+    await agent.close()
+    assert result.status == "completed"
+    assert len(server.requests) >= 2
+    catalog = "\n".join(
+        message.content for message in server.requests[0] if message.content
+    )
+    assert "NECTAR-42" in catalog
+    planning = "\n".join(
+        message.content for message in server.requests[-1] if message.content
+    )
+    assert "NECTAR-42" in planning
+
+
+@pytest.mark.asyncio
+async def test_an_embedding_agent_recalls_a_text_only_entry_at_start(
+    tmp_path: Path,
+) -> None:
+    # T53R finding 3: recall_long tags a text-only row as BM25, so the
+    # cosine floor must not drop it in Agent._long_docs/_run_recall either.
+    class FakeEmbedding:
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            return [[1.0, 0.0] for _text in texts]
+
+        async def close(self) -> None:
+            pass
+
+    server = FakeLLM(_answer("done"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            retriever="auto",
+            max_steps=1,
+        ),
+        embedding=FakeEmbedding(),
+    )
+    await _seed(
+        agent,
+        [("the deployment checklist is owned by Alice", "semantic", "user", "t-a")],
+    )
+    result = await agent.run_task("deployment checklist for the release")
+    await agent.close()
+    assert result.status == "completed"
+    prompt = "\n".join(
+        message.content for message in server.requests[-1] if message.content
+    )
+    assert "Alice" in prompt
+
+
+@pytest.mark.asyncio
+async def test_a_legacy_run_continues_without_a_newer_long_store(
+    tmp_path: Path, caplog: Any
+) -> None:
+    # T53R finding 5: a newer localmelo wrote the file. The Agent logs one
+    # WARNING and runs without long-term memory instead of crashing.
+    import logging
+    import sqlite3
+
+    memory = tmp_path / "memory"
+    memory.mkdir()
+    path = memory / "long_term.db"
+    conn = sqlite3.connect(path)
+    conn.execute(
+        "CREATE TABLE long_term (id INTEGER PRIMARY KEY, text TEXT, "
+        "vector BLOB, metadata TEXT)"
+    )
+    conn.execute("PRAGMA user_version = 2")
+    conn.commit()
+    conn.close()
+
+    class FakeEmbedding:
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            return [[1.0, 0.0] for _text in texts]
+
+        async def close(self) -> None:
+            pass
+
+    server = FakeLLM(_answer("done"))
+    agent = _agent(
+        server,
+        _options(reasoning="legacy", memory_dir=str(memory), max_steps=1),
+        embedding=FakeEmbedding(),
+    )
+    with caplog.at_level(logging.WARNING, logger="localmelo.melo.memory.coordinator"):
+        result = await agent.run_task("deployment checklist for the release")
+    await agent.close()
+    assert result.status == "completed"
+    warnings = [
+        record
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and "Long-term memory is off" in record.getMessage()
+    ]
+    assert len(warnings) == 1
+    assert "schema version 2" in warnings[0].getMessage()

@@ -777,28 +777,26 @@ async def test_the_block_is_fitted_with_the_recorded_latency() -> None:
     assert "2345 ms" in block
 
 
-async def test_the_long_search_asks_the_store_for_two_rows() -> None:
+async def test_the_long_search_asks_the_store_for_the_pool() -> None:
     from localmelo.melo.agent.agent import _RunState
+    from localmelo.melo.memory.recall import LONG_POOL
 
     agent = _agent(
         FakeLLM(),
         _options(reasoning="compress", retriever="embedding", max_steps=1),
         embedding=FakeEmbedding(),
     )
-    await agent.hippo.long.add(
-        "a memory", [1.0, 0.0], {"task_id": "t-old", "created_at": 1.0}
-    )
-    search = mock.AsyncMock(
-        return_value=[("a memory", 0.9, {"task_id": "t-old", "created_at": 1.0})]
-    )
+    rows = [("a memory", 0.9, {"id": 1, "task_id": "t-old", "created_at": 1.0})]
+    recall = mock.AsyncMock(return_value=rows)
     try:
-        with mock.patch.object(agent.hippo.long, "search", search):
+        with mock.patch.object(agent.hippo, "recall_long", recall):
             docs = await agent._long_docs("q", _RunState(task_id="current"))
     finally:
         await agent.close()
     assert [doc.text for doc in docs] == ["a memory"]
-    assert search.await_args is not None
-    assert search.await_args.kwargs["top_k"] == 2
+    assert recall.await_args is not None
+    # R5 asked for two rows; R6's typed recall asks for a pool and keeps two.
+    assert recall.await_args.kwargs["pool"] == LONG_POOL
 
 
 async def test_long_candidates_are_the_two_best_not_the_two_oldest() -> None:

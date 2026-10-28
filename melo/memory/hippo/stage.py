@@ -47,6 +47,10 @@ class StagedCandidates:
     def get(self, candidate_id: str) -> MemoryCandidate | None:
         return self._items.get(candidate_id)
 
+    def drop(self, candidate_id: str) -> None:
+        """Forget one staged candidate; nothing happens for an unknown id."""
+        self._items.pop(candidate_id, None)
+
     def all(self) -> list[MemoryCandidate]:
         return list(self._items.values())
 

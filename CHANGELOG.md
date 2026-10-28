@@ -16,7 +16,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (restatement, a successful call it acted on, a cited note), a user
   request or statement, or `--admit-on-outcome on` for the final digest;
   the policy picks `NEW`, `UPDATE`, `RELATED`, `CONFLICT` or `IGNORE`, and
-  every stored text passes the candidate boundary and `redact_secrets`.
+  every stored text, provenance included, passes the candidate boundary and
+  `redact_secrets` (with its task text, paths and commands bounded). A long
+  entry's llm catalog line carries a bounded text snippet, a BM25 row is
+  exempt from the cosine floor, two items of one note stay two entries, a
+  restatement merges the new note's records and supersedes its candidate, a
+  newer file keeps a legacy run alive with one WARNING, a user signal needs
+  a declarative, non-meta sentence, `call me` is a profile, and the three
+  store modes accept and ignore model flags.
   `--keep-decision-text` keeps a decision's text beside its hash, and the
   `[memory]` table saves the outcome default. The `start` recall reads
   active entries of other tasks of every kind, by cosine or BM25, with

@@ -151,9 +151,9 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `notes`, `notes_model`, `notes_heuristic` | Notes stored in the compress modes, and how many the model and the heuristic wrote. `notes` counts reflections too. |
 | `note_chars` | Characters of the checked note texts this run stored (a restatement that grows an earlier note is not counted again). |
 | `drafts`, `drafts_written` | Drafts stored, and how many a write covered. |
-| `candidates` | Documents offered to the candidate boundary. |
+| `candidates` | Texts offered to the candidate boundary: each document (a note, a draft, a digest, a reflection, a user text, a recall block) and each candidate item that passes it again. |
 | `remember_model`, `remember_heuristic` | Notes whose `remember` flag the model or the heuristic set. |
-| `candidates_refused` | Documents the boundary or the note store refused. |
+| `candidates_refused` | Texts the boundary or the note store refused, counted like `candidates`. |
 | `redactions` | Secret spans the boundary replaced. |
 | `rehearsed` | `{"restated": n, "acted": n, "cited": n}`: how often each rehearsal signal fired. |
 | `digests` | Attempt digests stored. |

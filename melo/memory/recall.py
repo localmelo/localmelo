@@ -385,7 +385,9 @@ def docs_from_entries(
     ``doc_id`` is ``long:<entry id>`` (R6-lite), so two identical texts stay
     two docs and a hit joins back to the store. Rows that are not active,
     whose ``metadata["task_id"]`` is in *exclude_task_ids*, or whose score is
-    under *min_score*, are left out. The rest are ordered by
+    under *min_score* are left out; a row tagged ``retrieval: bm25`` has no
+    absolute floor, because *min_score* is a cosine floor (T53R finding 3).
+    The rest are ordered by
     ``(created_at, entry id)``, so appending an entry never renumbers an old
     one while the store only grows.
     """
@@ -399,9 +401,11 @@ def docs_from_entries(
         task_id = meta.get("task_id")
         if isinstance(task_id, str) and task_id in excluded:
             continue
-        # Long vectors are stored as float32, so an exact floor can read a
-        # little under itself; a tolerance keeps "0.35 is kept" true.
-        if score < min_score - 1e-6:
+        # The floor is a cosine floor: a row that BM25 scored has no
+        # absolute one (T53R finding 3). Long vectors are stored as
+        # float32, so an exact floor can read a little under itself; a
+        # tolerance keeps "0.35 is kept" true.
+        if meta.get("retrieval") != "bm25" and score < min_score - 1e-6:
             continue
         kept.append((text, score, meta))
     kept.sort(

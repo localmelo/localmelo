@@ -297,8 +297,27 @@ async def test_update_supersedes_and_a_missing_target_becomes_new(
         )
         assert action == "NEW"
         assert (await store.active_entries())[-1].id == third
+        assert (await store.decisions())[-1]["target_id"] is None
     finally:
         await store.aclose()
+
+
+async def test_the_in_memory_store_clears_the_target_of_a_downgraded_update() -> None:
+    # T53R finding 12: the SQLite twin clears target_id when UPDATE becomes
+    # NEW, so the in-memory twin must do the same.
+    store = LongTerm()
+    await _apply(store, "I live in Berlin", kind="profile")
+    _entry_id, action = await _apply(
+        store,
+        "I live in Rome",
+        kind="profile",
+        action="UPDATE",
+        target_id=999,
+    )
+    assert action == "NEW"
+    row = (await store.decisions())[-1]
+    assert row["action"] == "NEW"
+    assert row["target_id"] is None
 
 
 async def test_search_returns_the_metadata_merged_with_the_typed_columns(

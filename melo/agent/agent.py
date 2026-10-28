@@ -1799,12 +1799,11 @@ class Agent:
             logger.info("Long-term recall of task %s failed: %s", run.task_id, exc)
             return []
         # The cosine floor applies only to an embedding score; BM25 has no
-        # absolute floor (R5's decision).
-        min_score = self.options.recall_min_score if self.hippo.embedding else 0.0
+        # absolute floor, and docs_from_entries reads each row's retriever.
         docs = docs_from_entries(
             rows,
             exclude_task_ids={run.task_id},
-            min_score=min_score,
+            min_score=self.options.recall_min_score,
         )
         # Keep the two best by score, then order and alias them by creation
         # time so an appended entry never renumbers an old one.
@@ -1946,9 +1945,9 @@ class Agent:
                 hits = self._hits_from_result(result, task_docs, k=limit_k)
             for doc in long_docs:
                 score = float(doc.meta.get("score") or 0.0)
-                # The floor is a cosine floor; BM25 has no absolute one.
+                # The floor is a cosine floor; a BM25-scored row has none.
                 if (
-                    self.hippo.embedding is not None
+                    doc.meta.get("retrieval") != "bm25"
                     and score < self.options.recall_min_score - 1e-6
                 ):
                     continue
@@ -2232,11 +2231,12 @@ class Agent:
     def _checked_candidate_text(
         self, text: str, source: str, run: _RunState
     ) -> str | None:
-        """A candidate text through the boundary, without counting a document.
+        """A candidate text through the boundary, counted as one boundary check.
 
         The note or draft it comes from was counted when it entered its own
         store; this pass is the one R6-lite requires before a candidate is
-        staged, so the policy never compares raw text.
+        staged, so the policy never compares raw text. ``candidates`` counts
+        boundary checks, not documents (T53R finding 11).
         """
         run.candidates += 1
         check = self.checker.check_memory_candidate(
@@ -2664,10 +2664,26 @@ class Agent:
                 if key not in old_keys and len(decided) < NOTE_MAX_DECIDED:
                     decided.append(item)
                     old_keys.add(key)
+            source_ids = list(older.source_ids)
+            for source_id in note.source_ids:
+                if source_id not in source_ids:
+                    source_ids.append(source_id)
+            source_records = list(older.source_records)
+            seen = {record_id for record_id, _text in source_records}
+            for record in note.source_records:
+                if record[0] not in seen:
+                    source_records.append(record)
+                    seen.add(record[0])
+            remember = older.remember or note.remember
+            remember_by = older.remember_by if older.remember else note.remember_by
             updated = dataclasses.replace(
                 older,
                 found=found,
                 decided=decided,
+                source_ids=source_ids,
+                source_records=source_records,
+                remember=remember,
+                remember_by=remember_by,
                 stage="rehearsed",
                 uses=older.uses + 1,
                 last_used_at=time.time(),
@@ -2681,6 +2697,9 @@ class Agent:
                 return False
             self.hippo.working.notes.touch(entry.alias, use=True, stage="rehearsed")
             run.rehearsed["restated"] += 1
+            # The new note's candidate is superseded by the merged one; a
+            # request would otherwise be able to admit both (T53R finding 8).
+            self.hippo.staged.drop(note.note_id)
             self._propose_note_candidate(updated, run)
             decisions = await self.hippo.admit(updated.note_id, "rehearsal")
             self._drain_decisions(decisions, run)

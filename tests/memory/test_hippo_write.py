@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -169,12 +170,86 @@ async def test_a_secret_is_stored_redacted_and_counted() -> None:
     store = LongTerm()
     hippo = Hippo(long=store)
     key = "sk-" + "a" * 24
-    hippo.propose(_candidate(f"I use the api key {key} for the deployment"))
+    hippo.propose(
+        _candidate(
+            f"I use the api key {key} for the deployment",
+            provenance={
+                "task_text": f"deploy with {key}",
+                "paths": [f"/tmp/{key}.pem"],
+                "commands": [f"curl -H 'Authorization: Bearer {key}'"],
+            },
+        )
+    )
     decisions = await hippo.admit("n1", "rehearsal")
     assert decisions[0].redactions == 1
     entry = (await store.active_entries())[0]
     assert key not in entry.text
     assert "[redacted]" in entry.text
+    # T53R finding 2: the provenance is stored in the same row, so its
+    # texts are redacted too (and bounded).
+    assert key not in json.dumps(entry.provenance)
+    assert entry.provenance["task_text"] == "deploy with [redacted]"
+    assert entry.provenance["paths"] == ["/tmp/[redacted].pem"]
+    assert entry.provenance["commands"][0].endswith("Bearer [redacted]'")
+
+
+async def test_a_provenance_text_is_bounded_before_it_is_stored() -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    hippo.propose(
+        _candidate(
+            "the deployment checklist is owned by Alice",
+            provenance={
+                "task_text": "t" * 500,
+                "paths": ["p" * 500],
+                "commands": ["c" * 500],
+            },
+        )
+    )
+    await hippo.admit("n1", "rehearsal")
+    entry = (await store.active_entries())[0]
+    assert len(entry.provenance["task_text"]) == 300
+    assert entry.provenance["paths"] == ["p" * 300]
+    assert entry.provenance["commands"] == ["c" * 300]
+
+
+async def test_two_ordinary_items_of_one_note_both_stay() -> None:
+    # T53R finding 4: both are episodic and share the note, but they are
+    # two traces; the second must not supersede the first.
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    candidate = _candidate(
+        "two events",
+        items=(
+            CandidateItem("the build is green after the fix", ()),
+            CandidateItem("the tests are slow on the new runner", ()),
+        ),
+    )
+    hippo.propose(candidate)
+    decisions = await hippo.admit("n1", "rehearsal")
+    assert [decision.action for decision in decisions] == ["NEW", "NEW"]
+    assert {entry.text for entry in await store.active_entries()} == {
+        "the build is green after the fix",
+        "the tests are slow on the new runner",
+    }
+
+
+async def test_a_restatement_of_the_same_item_updates_it() -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    first = "the deployment is green after the fix"
+    hippo.propose(
+        _candidate(first, items=(CandidateItem(first, ()),)),
+    )
+    await hippo.admit("n1", "rehearsal")
+    updated = "the deployment failed on the second runner"
+    hippo.propose(
+        _candidate(updated, items=(CandidateItem(updated, ()),)),
+        # The same candidate id and item index: a restatement, not a new fact.
+    )
+    decisions = await hippo.admit("n1", "rehearsal")
+    assert [decision.action for decision in decisions] == ["UPDATE"]
+    assert [entry.text for entry in await store.active_entries()] == [updated]
 
 
 async def test_a_failed_write_is_logged_and_flush_does_not_raise(

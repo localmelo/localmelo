@@ -46,6 +46,36 @@ def _redacted_text(text: str) -> str:
     return redact_secrets(text)[0]
 
 
+# Provenance is stored beside the entry, so every text it carries is bounded
+# and redacted like the entry text (P4, T53R finding 2).
+PROVENANCE_TEXT_CHARS = 300
+PROVENANCE_LIST_MAX = 20
+
+
+def _bounded_provenance(provenance: dict[str, Any]) -> dict[str, Any]:
+    """*provenance* with its texts redacted and bounded, for the store.
+
+    The policy compares the raw ``task_text`` first; this runs just before
+    the write, so a candidate's route (the Agent or ``--route``) cannot
+    leave a secret in ``provenance_json``.
+    """
+    clean = dict(provenance)
+    task_text, _task_redactions = redact_secrets(str(provenance.get("task_text") or ""))
+    clean["task_text"] = task_text[:PROVENANCE_TEXT_CHARS]
+    for key in ("paths", "commands"):
+        values = provenance.get(key) or ()
+        if isinstance(values, (list, tuple)):
+            values = values[:PROVENANCE_LIST_MAX]
+        else:
+            values = ()
+        clean[key] = [
+            redact_secrets(value)[0][:PROVENANCE_TEXT_CHARS]
+            for value in values
+            if isinstance(value, str)
+        ]
+    return clean
+
+
 def _redacted_value(value: Any) -> Any:
     """A tool argument with the secrets of its text replaced.
 
@@ -270,10 +300,15 @@ class Hippo:
         if to_working:
             self.working.append(Message(role=role, content=text))
 
-        if self.embedding:
+        if self.embedding and not self._store_broken:
             stored = _redacted_text(text)
-            emb = await self.embedding.embed([stored])
-            await self.long.add(text=stored, embedding=emb[0], metadata=metadata or {})
+            try:
+                emb = await self.embedding.embed([stored])
+                await self.long.add(
+                    text=stored, embedding=emb[0], metadata=metadata or {}
+                )
+            except LongTermSchemaError as exc:
+                self._disable_store(exc)
 
     # ── R6-lite: admission ──
 
@@ -294,7 +329,12 @@ class Hippo:
             return []
         items = candidate.items or (CandidateItem(candidate.text),)
         decisions: list[MemoryDecision] = []
-        for item in items:
+        for index, item in enumerate(items):
+            item_provenance = {
+                **candidate.provenance,
+                "candidate_id": candidate.candidate_id,
+                "item_index": index,
+            }
             task_text = str(candidate.provenance.get("task_text") or "")
             kind = classify_kind(
                 item.text, source=candidate.source, task_text=task_text
@@ -343,7 +383,7 @@ class Hippo:
                     checked,
                     kind=kind,
                     source=candidate.source,
-                    provenance=candidate.provenance,
+                    provenance=item_provenance,
                     active=active,
                 )
             except Exception as exc:  # malformed stored data or a policy bug
@@ -355,10 +395,9 @@ class Hippo:
                     kind=kind,
                     source=candidate.source,
                     admitted_by=signal,
-                    provenance={
-                        **candidate.provenance,
-                        "source_ids": list(source_ids),
-                    },
+                    provenance=_bounded_provenance(
+                        {**item_provenance, "source_ids": list(source_ids)}
+                    ),
                     task_id=candidate.task_id,
                     session_id=candidate.session_id,
                     created_at=candidate.created_at,
@@ -491,14 +530,20 @@ class Hippo:
         try:
             if await self.long.count_entries() == 0:
                 return []
+            # Each row is tagged with the retriever that scored it, so the
+            # cosine floor never drops a BM25 row (T53R finding 3).
             if self.embedding is not None:
                 vectors = await self.embedding.embed([query])
-                rows = await self.long.search_embedding(
+                raw_rows = await self.long.search_embedding(
                     vectors[0],
                     top_k=pool,
                     kinds=kinds,
                     exclude_task_ids=exclude_task_ids,
                 )
+                rows = [
+                    (text, score, {**meta, "retrieval": "embedding"})
+                    for text, score, meta in raw_rows
+                ]
                 # R6-lite's typed writes are text-only, so the embedding
                 # search cannot see them; the BM25 rows fill the pool.
                 text_rows = await self.long.search_text(
@@ -507,18 +552,23 @@ class Hippo:
                     kinds=kinds,
                     exclude_task_ids=exclude_task_ids,
                 )
-                seen = {row[2].get("id") for row in rows}
-                rows = [
-                    *rows,
-                    *(row for row in text_rows if row[2].get("id") not in seen),
-                ][:pool]
-            else:
-                rows = await self.long.search_text(
-                    query,
-                    top_k=pool,
-                    kinds=kinds,
-                    exclude_task_ids=exclude_task_ids,
+                seen = {row[2].get("id") for row in raw_rows}
+                rows.extend(
+                    (text, score, {**meta, "retrieval": "bm25"})
+                    for text, score, meta in text_rows
+                    if meta.get("id") not in seen
                 )
+                rows = rows[:pool]
+            else:
+                rows = [
+                    (text, score, {**meta, "retrieval": "bm25"})
+                    for text, score, meta in await self.long.search_text(
+                        query,
+                        top_k=pool,
+                        kinds=kinds,
+                        exclude_task_ids=exclude_task_ids,
+                    )
+                ]
             return [
                 (text, score, {**meta, "retrieval_rank": rank})
                 for rank, (text, score, meta) in enumerate(rows, start=1)
@@ -568,17 +618,20 @@ class Hippo:
 
         for entry in reflections:
             text = _redacted_text(self._format_reflection_for_long(entry))
-            if text.strip():
-                emb = await self.embedding.embed([text])
-                await self.long.add(
-                    text=text,
-                    embedding=emb[0],
-                    metadata={
-                        "task_id": task_id,
-                        "attempt_id": entry.attempt_id,
-                        "type": "reflection",
-                    },
-                )
+            if text.strip() and not self._store_broken:
+                try:
+                    emb = await self.embedding.embed([text])
+                    await self.long.add(
+                        text=text,
+                        embedding=emb[0],
+                        metadata={
+                            "task_id": task_id,
+                            "attempt_id": entry.attempt_id,
+                            "type": "reflection",
+                        },
+                    )
+                except LongTermSchemaError as exc:
+                    self._disable_store(exc)
         self.working.clear_reflections()
 
     @staticmethod
@@ -606,7 +659,16 @@ class Hippo:
             return []
 
         query_emb = await self.embedding.embed([query])
-        long_results = await self.long.search(query_emb[0], top_k=self._long_term_top_k)
+        try:
+            long_results = await self.long.search(
+                query_emb[0], top_k=self._long_term_top_k
+            )
+        except LongTermSchemaError as exc:
+            # A newer localmelo wrote this file: one WARNING, then the run
+            # continues without long-term memory (Requirement 4, T53R
+            # finding 5). The legacy path had no catch at all.
+            self._disable_store(exc)
+            return []
         return [
             Message(role="system", content=f"[memory] {text}")
             for text, _score, _meta in long_results

@@ -200,8 +200,11 @@ class LongTerm:
                 raise ValueError(f"Unknown long-term {name}: {value!r}")
         target = self._find(target_id) if target_id is not None else None
         if action == "UPDATE" and (target is None or target.status != "active"):
+            # The SQLite twin clears the target on this downgrade; the two
+            # stores must answer the same decision row (T53R finding 12).
             action = "NEW"
             target = None
+            target_id = None
         if action == "IGNORE":
             if target is not None:
                 target.uses += 1

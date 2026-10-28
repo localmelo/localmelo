@@ -199,6 +199,53 @@ async def test_the_memory_event_has_its_five_fields(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_keep_decision_text_stores_the_checked_text(tmp_path: Path) -> None:
+    # T53R finding 10: no end-to-end test covered --keep-decision-text.
+    (tmp_path / "list_ops.py").write_text("def append(a, b):\n    return a + b\n")
+    server = FakeLLM(
+        _note_reply("list_ops.py returns the wrong list from its append helper"),
+        _call("file_read", {"path": "list_ops.py"}),
+        _answer("done"),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_read"}),
+            max_steps=3,
+            keep_decision_text=True,
+        ),
+    )
+    await agent.run_task("q")
+    await agent.close()
+    entries = await _entries(tmp_path)
+    decisions = read_export_decisions(str(tmp_path / "memory" / "long_term.db"))
+    assert decisions[0]["text"] == entries[0]["text"]
+    assert decisions[0]["text_sha256"]
+
+
+@pytest.mark.asyncio
+async def test_a_meta_sentence_makes_no_profile_entry(tmp_path: Path) -> None:
+    # T53R finding 6, end to end: a task-shaped prompt is not a fact.
+    server = FakeLLM(_answer("done"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            max_steps=1,
+        ),
+    )
+    await agent.run_task("My task is to fix the build. My question is how do I deploy?")
+    await agent.close()
+    entries = await _entries(tmp_path)
+    assert all(entry["kind"] != "profile" for entry in entries)
+    assert all(entry["admitted_by"] != "user_statement" for entry in entries)
+
+
+@pytest.mark.asyncio
 async def test_a_tool_result_never_becomes_a_user_fact(tmp_path: Path) -> None:
     (tmp_path / "profile.json").write_text(
         json.dumps({"record_id": "r1", "note": "my birthday is 12 May 1990"}) + "\n"
@@ -314,3 +361,30 @@ async def test_memory_false_still_writes_and_recalls_nothing(tmp_path: Path) -> 
     await agent.run_task("Remember my birthday is 12 May 1990 and I like tea.")
     await agent.close()
     assert not (tmp_path / "memory" / "long_term.db").exists()
+
+
+@pytest.mark.asyncio
+async def test_twenty_runs_through_the_agent_keep_the_growth_bound(
+    tmp_path: Path,
+) -> None:
+    # T53R finding 10: the stability slice opened the store directly, never
+    # through 20 Agent sessions. The spec's D11 bound: at most 3 entries per
+    # run on average, and no run more than 8.
+    memory = tmp_path / "memory"
+    counts: list[int] = []
+    for run in range(20):
+        server = FakeLLM(_answer("done"))
+        agent = _agent(
+            server,
+            _options(
+                reasoning="compress",
+                memory_dir=str(memory),
+                max_steps=1,
+            ),
+        )
+        await agent.run_task(f"Remember that my project codename is Bluebird{run}.")
+        await agent.close()
+        counts.append(len(await _entries(tmp_path)))
+    deltas = [counts[0], *(counts[i] - counts[i - 1] for i in range(1, len(counts)))]
+    assert max(deltas) <= 8
+    assert sum(deltas) / len(deltas) <= 3

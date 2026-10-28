@@ -115,6 +115,19 @@ _EVALUATION_FLAGS = {
     "--embedding-model": "embedding_model",
 }
 
+# The model flags reach a server only in an evaluation; the store modes and
+# --route accept and ignore them (Requirement 12, T53R finding 9).
+_MODEL_FLAGS = frozenset(
+    {
+        "--base-url",
+        "--chat-model",
+        "--retrieval-timeout",
+        "--retrieval-extra-body",
+        "--embedding-base-url",
+        "--embedding-model",
+    }
+)
+
 _T = TypeVar("_T")
 
 
@@ -355,8 +368,11 @@ def _check_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> N
     if new_modes:
         if len(new_modes) > 1:
             parser.error(f"{' and '.join(new_modes)} cannot be combined")
-        if given:
-            parser.error(f"{new_modes[0]} cannot be combined with {', '.join(given)}")
+        unrelated = [flag for flag in given if flag not in _MODEL_FLAGS]
+        if unrelated:
+            parser.error(
+                f"{new_modes[0]} cannot be combined with {', '.join(unrelated)}"
+            )
         if args.route is not None and args.memory_dir is None:
             parser.error("--route needs --memory-dir")
         if args.route is None and args.memory_dir is not None:

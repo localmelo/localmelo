@@ -178,7 +178,7 @@ stores an empty vector and is found by the in-process BM25 index. In
 |---|---|---|
 | `semantic` | A fact about a named third party (person, place, organization, event), usually an attribute such as an address or a date. | `user`, `reasoning_note` |
 | `episodic` | What happened in this task: a note's ordinary item, every digest. | `reasoning_note`, `digest` |
-| `profile` | A fact the user states about themselves (first person: I/my/we/our; 我/我的/我们). Only a user message gives it. | `user` |
+| `profile` | A fact the user states about themselves (first person: I/my/we/our; 我/我的/我们; `call me`/`叫我`). Only a user message gives it. | `user` |
 | `reflection` | A reflection: the attempt summary, what failed, the evidence, what to avoid, the next directions and the open questions. | `reflection` |
 
 `source` is one of `reasoning_note`, `digest`, `reflection`, `user`, `sleep`
@@ -188,8 +188,10 @@ entry `superseded`; `conflicted` is reserved for the sleep pipeline.
 `admitted_by` is the signal that wrote the entry, or empty for a legacy row.
 `provenance` carries the task and session, the step and attempt, the run's
 text, the paths and commands the turn touched, and the record ids the item
-came from (`source_ids`). A search returns the legacy metadata merged with
-these columns, so an older reader still sees the same text and metadata.
+came from (`source_ids`). The session id is `""` in direct mode, which does
+not thread one; the gateway does not thread its own id into the run yet. A
+search returns the legacy metadata merged with these columns, so an older
+reader still sees the same text and metadata.
 
 Nothing is written without a signal:
 
@@ -197,7 +199,7 @@ Nothing is written without a signal:
 |---|---|---|
 | `rehearsal` | A restatement, a successful call that acted on the note's path or command, or a reflection's `used_notes`. | That candidate, at once. A second admission of the unchanged candidate writes nothing. |
 | `user_request` | The user's message asks to remember, and states no fact. | This run's `remember` notes and its final digest at the run's end; never the final reflection. |
-| `user_statement` | A sentence of the user's message states a stable fact, or corrects one and carries the corrected value. | That sentence, at once. |
+| `user_statement` | A declarative sentence of the user's message states a stable fact, or corrects one and carries the corrected value. A question (`?`/`？`) never counts, and `my … is`/`我的…是` refuses a meta noun (task, question, request, goal, plan, problem, issue, job, point; 任务, 问题, 请求, 目标, 计划). | That sentence, at once. |
 | `outcome` | The end of the run, only with `--admit-on-outcome on`. | The final attempt digest, with the terminal status in its provenance; never the final reflection. |
 | `sleep` | Reserved for the sleep pipeline's probe gate. | Nothing in v1. |
 
@@ -205,7 +207,8 @@ Only the user's own text gives a user signal: a tool result, a note, a recall
 block or an assistant message never does, and a note's first-person item is
 never a profile entry. The candidate boundary runs again with target `long`
 before the write: a refused item writes no entry and no decision. Every text
-written is redacted by `redact_secrets` first.
+written, including the provenance's task text, paths and commands, is redacted
+by `redact_secrets` and bounded first.
 
 The policy compares the item with the active entries of its kind and picks
 one action:
@@ -213,6 +216,10 @@ one action:
 | Action | Rule | Write |
 |---|---|---|
 | `IGNORE` | A short fact (under 20 normalised characters), a fact that names only this task's files, or a duplicate (normalised equality, text overlap >= 0.9, or cosine >= 0.95). | No entry; a duplicate target's `uses` grows. |
+
+An episodic item's subject is its candidate plus its item index, so two
+different items of one note are two entries; a restatement re-proposes the
+same candidate and item order, so it stays an `UPDATE`.
 | `UPDATE` | Same subject and a compatible value, or a change marker (`moved`, `now`, `搬到` and so on). | A new entry that supersedes the old one; the old one becomes `superseded`. |
 | `CONFLICT` | Same subject, values that contradict, and no change marker. | A new active entry linked to the old one; both stay recallable. |
 | `RELATED` | A different subject with text overlap >= 0.35 or cosine >= 0.75. | A new active entry linked to the old one. |

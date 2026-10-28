@@ -292,7 +292,13 @@ def classify_kind(
         return "episodic"
     if source == "user":
         if first_person is None:
-            first_person = _first_person(folded)
+            # "call me" is a profile predicate even though "me" is not in
+            # _first_person (T53R finding 7).
+            first_person = (
+                _first_person(folded)
+                or _has_phrase(folded, "call me")
+                or "叫我" in folded
+            )
         return "profile" if first_person else "semantic"
     if source == "reasoning_note":
         if _first_person(folded):
@@ -341,12 +347,21 @@ def subjects(
     kind: str,
     *,
     task_text: str = "",
+    item_key: str = "",
 ) -> tuple[str, ...]:
-    """The comparison subject of one text of *kind*."""
+    """The comparison subject of one text of *kind*.
+
+    An episodic item's subject is item-local: its candidate id and index
+    (T53R finding 4). Two different items of one note therefore both stay,
+    while a restatement re-proposes the same candidate with the same item
+    order, so its item keeps the subject and is an ``UPDATE``.
+    """
     if kind == "profile":
         return _profile_subject(normalise(text))
     if kind == "semantic":
         return _semantic_subject(text)
+    if item_key:
+        return ("item", item_key)
     return ("task", normalise(task_text))
 
 
@@ -417,6 +432,15 @@ def _entry_text(entry: Any) -> str:
     return str(getattr(entry, "text", ""))
 
 
+def _item_key(provenance: Mapping[str, Any]) -> str:
+    """``<candidate id>:<item index>`` for an item-local episodic subject."""
+    candidate_id = provenance.get("candidate_id")
+    item_index = provenance.get("item_index")
+    if isinstance(candidate_id, str) and candidate_id and isinstance(item_index, int):
+        return f"{candidate_id}:{item_index}"
+    return ""
+
+
 def _entry_subject(entry: Any, kind: str) -> tuple[str, ...]:
     provenance = (
         entry.get("provenance")
@@ -424,9 +448,11 @@ def _entry_subject(entry: Any, kind: str) -> tuple[str, ...]:
         else getattr(entry, "provenance", {})
     )
     task_text = ""
+    item_key = ""
     if isinstance(provenance, Mapping):
         task_text = str(provenance.get("task_text") or "")
-    return subjects(_entry_text(entry), kind, task_text=task_text)
+        item_key = _item_key(provenance)
+    return subjects(_entry_text(entry), kind, task_text=task_text, item_key=item_key)
 
 
 def _entry_vector(entry: Any) -> Sequence[float] | None:
@@ -468,7 +494,8 @@ def decide(
     """Compare one item with the active entries of *kind* and pick an action."""
     folded = normalise(text)
     task_text = str(provenance.get("task_text") or "")
-    subject = subjects(text, kind, task_text=task_text)
+    item_key = _item_key(provenance)
+    subject = subjects(text, kind, task_text=task_text, item_key=item_key)
     content = content_tokens(text)
     if len(folded) < MIN_FACT_CHARS:
         return PolicyDecision(

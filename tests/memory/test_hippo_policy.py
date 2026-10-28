@@ -165,6 +165,8 @@ def test_a_third_party_address_is_semantic_and_a_user_fact_is_profile() -> None:
         == "semantic"
     )
     assert classify_kind("my birthday is 12 May", source="user") == "profile"
+    assert classify_kind("Call me Alice from now on.", source="user") == "profile"
+    assert classify_kind("以后叫我 Alice。", source="user") == "profile"
     # A note's first-person item is never a profile: a note is tool output.
     assert classify_kind("my birthday is 12 May", source="reasoning_note") == "episodic"
     assert (

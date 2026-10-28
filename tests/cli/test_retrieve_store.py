@@ -73,7 +73,10 @@ def _candidates(path: Path, rows: list[dict[str, Any]]) -> str:
 
 
 def _lines(capsys: pytest.CaptureFixture[str]) -> list[dict[str, Any]]:
-    out = capsys.readouterr()
+    return _lines_from(capsys.readouterr())
+
+
+def _lines_from(out: Any) -> list[dict[str, Any]]:
     return [json.loads(line) for line in out.out.splitlines() if line]
 
 
@@ -114,6 +117,22 @@ def test_the_route_scratch_store_exports_what_it_wrote(
     ]
     assert rows[0]["status"] == "active"
     assert rows[0]["supersedes"] == 1
+
+
+def test_route_redacts_the_provenance_and_the_export_shows_it(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    key = "sk-" + "a" * 24
+    directory = tmp_path / "m"
+    row = {**CANDIDATES[0], "task_text": f"deploy with {key}"}
+    candidates = _candidates(tmp_path / "c.jsonl", [row])
+    assert retrieve.main(["--route", candidates, "--memory-dir", str(directory)]) == 0
+    capsys.readouterr()
+    assert retrieve.main(["--export-store", str(directory)]) == 0
+    out = capsys.readouterr()
+    assert key not in out.out
+    rows = _lines_from(out)
+    assert rows[0]["provenance"]["task_text"] == "deploy with [redacted]"
 
 
 def test_export_decisions_prints_seq_order_and_text_null_by_default(
@@ -213,6 +232,42 @@ def test_the_three_modes_are_mutually_exclusive(
         == 2
     )
     assert "cannot be combined" in capsys.readouterr().err
+
+
+def test_the_new_modes_accept_and_ignore_model_flags(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # T53R finding 9 / Requirement 12: no model flag is needed or refused.
+    directory = tmp_path / "m"
+    candidates = _candidates(tmp_path / "c.jsonl", CANDIDATES[:1])
+    model_flags = [
+        "--base-url",
+        "http://127.0.0.1:8000/v1",
+        "--chat-model",
+        "qwen",
+        "--embedding-base-url",
+        "http://127.0.0.1:8000/v1",
+        "--embedding-model",
+        "embed",
+        "--retrieval-timeout",
+        "5",
+    ]
+    assert (
+        retrieve.main(
+            [
+                "--route",
+                candidates,
+                "--memory-dir",
+                str(directory),
+                *model_flags,
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    assert retrieve.main(["--export-store", str(directory), *model_flags]) == 0
+    capsys.readouterr()
+    assert retrieve.main(["--export-decisions", str(directory), *model_flags]) == 0
 
 
 def test_export_run_refuses_memory_dir(
