@@ -11,8 +11,9 @@ person, an event stream and a read-only change feed.
 > Sessions are part of the Python API, which is experimental and may change
 > before v0.1.0. The interactive UI (bare `melo`) keeps its conversations
 > here, in `~/.cache/localmelo/cli/sessions.db`; direct mode, `melo ""` and
-> the gateway's `/v1` API do not use sessions yet. The planned web console
-> will keep its conversations here too.
+> the gateway's `/v1` API do not use sessions yet. The web console reads the
+> gateway's own file, `~/.cache/localmelo/gateway/sessions.db`, for its
+> [API v2](api.md) reads.
 
 ## Run a conversation
 
