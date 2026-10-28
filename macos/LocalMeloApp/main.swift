@@ -15,6 +15,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var timer: Timer?
     private var deadline = Date()
     private var stopping = false
+    private var quitPending = false
     private var ready = false
     private var checking = false
     // Instance collision check, not authentication against another local process.
@@ -150,11 +151,11 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         process.standardOutput = logHandle
         process.standardError = logHandle
         process.terminationHandler = { [weak self] process in
-            DispatchQueue.main.async { [weak self] in
+            RunLoop.main.perform(inModes: [.default, .modalPanel]) { [weak self] in
                 guard let self = self else { return }
                 self.timer?.invalidate()
                 self.tearDownWebView()
-                guard !self.stopping else { return }
+                guard !self.stopping, !self.quitPending else { return }
                 self.listenerPIDs { pids in
                     let holders = (pids ?? []).filter { $0 != process.processIdentifier }
                     let detail = holders.isEmpty ? "" : " Port \(self.port) is held by process \(holders.map(String.init).joined(separator: ", "))."
@@ -264,6 +265,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             waitForChild(child, application: sender)
             return .terminateLater
         }
+        if quitPending { return .terminateCancel }
+        quitPending = true
         var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/health")!)
         request.timeoutInterval = 2
         URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
@@ -273,8 +276,14 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                let sessions = object["sessions"] as? [String: Any] {
                 running = sessions["running"] as? Int
             }
-            DispatchQueue.main.async {
+            RunLoop.main.perform(inModes: [.default, .modalPanel]) {
                 guard let self = self else { sender.reply(toApplicationShouldTerminate: false); return }
+                guard child.isRunning else {
+                    self.stopping = true
+                    self.tearDownWebView()
+                    sender.reply(toApplicationShouldTerminate: true)
+                    return
+                }
                 // Always ask: a turn can start while the health request is in flight.
                 do {
                     let alert = NSAlert()
@@ -285,7 +294,16 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                     alert.addButton(withTitle: "Quit and Stop")
                     alert.addButton(withTitle: "Cancel")
                     guard alert.runModal() == .alertFirstButtonReturn else {
-                        sender.reply(toApplicationShouldTerminate: false)
+                        self.quitPending = false
+                        if !child.isRunning {
+                            self.tearDownWebView()
+                            sender.reply(toApplicationShouldTerminate: false)
+                            DispatchQueue.main.async {
+                                self.fail("The gateway exited while the quit confirmation was open.")
+                            }
+                        } else {
+                            sender.reply(toApplicationShouldTerminate: false)
+                        }
                         return
                     }
                 }
@@ -301,11 +319,15 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private func waitForChild(_ child: Process, application: NSApplication) {
         DispatchQueue.global().async {
             child.waitUntilExit()
-            DispatchQueue.main.async { application.reply(toApplicationShouldTerminate: true) }
+            RunLoop.main.perform(inModes: [.default, .modalPanel]) {
+                application.reply(toApplicationShouldTerminate: true)
+            }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+        let timeout = Timer(timeInterval: 8, repeats: false) { _ in
             if child.isRunning { kill(child.processIdentifier, SIGKILL) }
         }
+        RunLoop.main.add(timeout, forMode: .default)
+        RunLoop.main.add(timeout, forMode: .modalPanel)
     }
 
     private func fail(_ text: String) {
