@@ -184,32 +184,47 @@ class TestConstruction:
 
 
 class TestBuiltinSelection:
-    def test_all_builtins_by_default(self) -> None:
+    def test_the_python_default_matches_direct(self) -> None:
         agent = Agent(llm=FakeLLM())
-        assert _tool_names(agent) == builtin_names()
-        assert set(agent.executor._callables) == builtin_names()
+        expected = builtin_names() - {"shell_exec"}
+        assert _tool_names(agent) == expected
+        assert set(agent.executor._callables) == expected
+        assert agent._run_config()["mode"] == "python"
 
-    def test_direct_mode_keeps_every_builtin_in_p13a(self) -> None:
-        agent = Agent(llm=FakeLLM(), options=AgentOptions(mode="direct"))
-        assert _tool_names(agent) == builtin_names()
-        # P13a's direct JSON line has no `mode` key yet.
-        assert "mode" not in agent._run_config()
-
-    def test_the_gateway_mode_registers_no_shell(self) -> None:
-        agent = Agent(llm=FakeLLM(), options=AgentOptions(mode="gateway"))
+    @pytest.mark.parametrize("mode", ["direct", "python", "gateway"])
+    def test_a_mode_without_an_approver_registers_no_shell(self, mode: str) -> None:
+        agent = Agent(llm=FakeLLM(), options=AgentOptions(mode=mode))  # type: ignore[arg-type]
         expected = builtin_names() - {"shell_exec"}
         assert _tool_names(agent) == expected
         assert set(agent.executor._callables) == expected
         config = agent._run_config()
+        assert config["mode"] == mode
         assert config["builtins"] == sorted(expected)
         assert config["tools"] == sorted(expected)
+
+    def test_the_interactive_default_keeps_shell(self) -> None:
+        agent = Agent(llm=FakeLLM(), options=AgentOptions(mode="interactive"))
+        assert _tool_names(agent) == builtin_names()
+        assert agent._run_config()["mode"] == "interactive"
 
     def test_an_explicit_set_wins_over_the_mode(self) -> None:
         agent = Agent(
             llm=FakeLLM(),
-            options=AgentOptions(mode="gateway", builtins=frozenset({"shell_exec"})),
+            options=AgentOptions(mode="direct", builtins=frozenset({"shell_exec"})),
         )
         assert _tool_names(agent) == {"shell_exec"}
+        assert agent._run_config()["builtins"] == ["shell_exec"]
+
+    def test_builtins_all_restores_the_old_direct_set(self) -> None:
+        agent = Agent(
+            llm=FakeLLM(),
+            options=AgentOptions(mode="direct", builtins=frozenset(builtin_names())),
+        )
+        assert _tool_names(agent) == builtin_names()
+        config = agent._run_config()
+        assert config["mode"] == "direct"
+        assert config["builtins"] == sorted(builtin_names())
+        assert config["tools"] == sorted(builtin_names())
 
     @pytest.mark.parametrize(
         "selected",

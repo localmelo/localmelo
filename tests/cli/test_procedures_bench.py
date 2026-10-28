@@ -82,6 +82,8 @@ def _melo(
             server.base_url,
             "--chat-model",
             "fake-model",
+            "--builtins",
+            "all",
             "--output-format",
             output_format,
             QUERY,

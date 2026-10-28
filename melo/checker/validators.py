@@ -7,7 +7,6 @@ from collections import Counter
 from dataclasses import replace
 
 from localmelo.melo.checker.payloads import (
-    ExecutorRequest,
     ExecutorResultPayload,
     GatewayIngressPayload,
     MemoryCandidatePayload,
@@ -47,16 +46,6 @@ ALLOWED_IMAGE_MIME_TYPES = frozenset(
 MAX_IMAGE_BYTES = 20 * 1024 * 1024  # decoded size per image
 MAX_IMAGES_PER_RESULT = 8
 MAX_IMAGES_PER_MEMORY_WRITE = MAX_IMAGES_PER_RESULT
-
-BLOCKED_COMMANDS = [
-    r"\brm\s+-rf\s+/",
-    r"\bmkfs\b",
-    r"\bdd\s+if=",
-    r":\(\)\s*\{.*\}\s*;",
-    r"\bshutdown\b",
-    r"\breboot\b",
-]
-_BLOCKED_RE = [re.compile(p) for p in BLOCKED_COMMANDS]
 
 
 # ── Gateway ingress ──
@@ -140,44 +129,6 @@ def validate_tool_resolution(result: ToolResolutionResult) -> ValidationResult:
                 reason=f"Duplicate resolved tool: {name!r}",
             )
         seen.add(name)
-
-    return ValidationResult(allowed=True)
-
-
-# ── Executor request ──
-
-
-def validate_executor_request(request: ExecutorRequest) -> ValidationResult:
-    if not request.tool_name or not request.tool_name.strip():
-        return ValidationResult(
-            allowed=False, reason="Executor request must specify a tool_name"
-        )
-
-    if request.tool_def_name is None:
-        return ValidationResult(
-            allowed=False,
-            reason=f"Unknown tool: {request.tool_name} (no matching tool_def)",
-        )
-
-    if request.tool_name != request.tool_def_name:
-        return ValidationResult(
-            allowed=False,
-            reason=f"Tool name mismatch: call={request.tool_name!r} vs def={request.tool_def_name!r}",
-        )
-
-    # Block dangerous shell commands
-    if request.tool_name == "shell_exec":
-        cmd = request.arguments.get("command", "")
-        if not isinstance(cmd, str):
-            return ValidationResult(
-                allowed=False, reason="shell_exec command must be a string"
-            )
-        for pattern in _BLOCKED_RE:
-            if pattern.search(cmd):
-                return ValidationResult(
-                    allowed=False,
-                    reason=f"Blocked command: {cmd[:100]}",
-                )
 
     return ValidationResult(allowed=True)
 

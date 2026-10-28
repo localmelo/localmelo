@@ -248,6 +248,7 @@ async def test_run_result_config_keeps_its_keys(tmp_path: Path) -> None:
         "max_attempts",
         "reflection_gate",
         "tool_exposure",
+        "mode",
         "builtins",
         "memory",
         "memory_dir",

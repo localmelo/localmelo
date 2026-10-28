@@ -140,6 +140,10 @@ def _melo_on_pty(
                 chat_server.base_url,
                 "--tool-exposure",
                 "all",
+                # The fake server's runs call shell_exec, which direct mode
+                # no longer offers by default (P13b).
+                "--builtins",
+                "all",
                 *args,
             ],
             stdin=subprocess.DEVNULL,
