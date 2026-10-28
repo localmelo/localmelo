@@ -55,7 +55,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `Waiting: Reservation`. `lock_self` is an exact holder (or `holder:run`);
   unreadable and stale locks are foreign, and localmelo never writes,
   renames or removes a lock. Direct runs, the CLI and `/v1/agent/run` are
-  unchanged and read neither source ([#NN]).
+  unchanged and read neither source ([#76]).
 - Tools have a permission tier, and an approval policy asks by tier rather
   than by a fixed list of names. The built-ins keep their tiers (`file_read`
   read, `file_write` write, `shell_exec` and `python_exec` exec), and a
@@ -452,3 +452,4 @@ earlier milestones.
 [#72]: https://github.com/localmelo/localmelo/pull/72
 [#74]: https://github.com/localmelo/localmelo/pull/74
 [#75]: https://github.com/localmelo/localmelo/pull/75
+[#76]: https://github.com/localmelo/localmelo/pull/76
