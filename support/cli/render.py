@@ -887,7 +887,10 @@ def _wrapped_paragraphs(text: str, width: int) -> list[str]:
         paragraphs.append(" ".join(current))
     rows: list[str] = []
     for paragraph in paragraphs:
-        rows.extend(wrap_words(paragraph, max(2, width)))
+        # A wrap can land on a space, which would then lead the next row.
+        rows.extend(
+            row.strip() for row in wrap_words(paragraph, max(2, width)) if row.strip()
+        )
     return rows
 
 

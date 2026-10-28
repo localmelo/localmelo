@@ -1296,3 +1296,20 @@ def test_a_stale_turn_takes_its_status_from_turn_finished() -> None:
     )
     assert "melo: run ended with status crashed" in text
     assert "melo stopped before this turn finished" in text
+
+
+def test_a_wrapped_thinking_row_never_starts_with_a_space() -> None:
+    # The reply's line breaks are joined into one paragraph; at this width
+    # the wrap boundary falls on a space, which must not lead the next row.
+    thinking = (
+        "app.py is the single script. Reading it shows what the project does\n"
+        "and whether it needs data.\nThe tests will say which behaviour matters."
+    )
+    text = _message(
+        Turn(width=100),
+        thinking=thinking,
+        tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}],
+    ).text()
+    rows = [row for row in text.split("\n") if row.startswith("  ")]
+    assert len(rows) >= 2, text
+    assert not any(row.startswith("   ") for row in rows), rows
