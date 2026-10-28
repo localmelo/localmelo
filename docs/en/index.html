@@ -121,7 +121,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">
             <strong>Memory</strong>
-            <span>Keep working memory, a history of tasks and steps, and long-term memory with an embedding server, saved to SQLite when you turn persistence on.</span>
+            <span>Keep working memory, a history of tasks and steps, and long-term memory with an embedding server, saved to SQLite when you turn persistence on, and forget a task's memory or all of it from Python.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md">
             <strong>Python API <span class="tag experimental">Experimental</span></strong>
@@ -158,7 +158,8 @@ source .venv/bin/activate</code></pre>
           <p>
             <strong>Tools run with your account's permissions, and there is no
             sandbox.</strong> The model can run shell commands and Python code,
-            and read or write any file you can. The gateway has no
+            and read or write any file you can. New memory files are created
+            readable only by you (mode 0600). The gateway has no
             authentication, so keep it on <code>127.0.0.1</code> (the default):
             there it refuses requests to its API that web pages at other
             sites send through your browser.
