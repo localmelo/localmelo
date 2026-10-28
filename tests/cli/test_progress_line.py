@@ -352,40 +352,65 @@ def test_level_1_before_the_first_step_shows_what_to_expect() -> None:
     )
 
 
-def _basis(match: str) -> dict[str, Any]:
+def _basis(match: str, title: str | None = None) -> dict[str, Any]:
     return {
         "routine_id": "a" * 32,
         "template_id": "a" * 32 + ":0123456789ab",
         "version": 1,
         "match": match,
         "model": "qwen3",
+        "title": title,
     }
 
 
-SIMILAR = _basis("similar")
+SIMILAR = _basis("similar", title="Fix the parser tests")
 
 
 def test_a_similar_tasks_past_is_a_hint() -> None:
     """A similar match borrows another routine's steps and past facts.
 
-    This task never ran, so its line never says "last time" (spec 5.4).
+    This task never ran, so its line never says "last time" (spec 5.4);
+    it names the routine the steps are from (spec 5.4, P3 follow-up).
     """
     assert line(level1(basis=SIMILAR)) == (
-        "step 4 · Write (cycle 1) · 1m03s · like a similar task: 6 steps, 2m10s: "
-        "Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit"
+        "step 4 · Write (cycle 1) · 1m03s · like Fix the parser tests: 6 steps, "
+        "2m10s: Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit"
     )
     assert line(level1(basis=SIMILAR, past=dict(THREE_PAST_RUNS))) == (
-        "step 4 · Write (cycle 1) · 1m03s · like a similar task: 5-8 steps, "
+        "step 4 · Write (cycle 1) · 1m03s · like Fix the parser tests: 5-8 steps, "
         "2-3 min · its steps: Read test_parser.py ✓ · "
         "Edit parser.py + pytest (×2) ◐ · git commit"
     )
     assert line(level1(basis=SIMILAR, past=None)) == (
-        "step 4 · Write (cycle 1) · 1m03s · like a similar task: "
+        "step 4 · Write (cycle 1) · 1m03s · like Fix the parser tests: "
         "Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit"
     )
     assert line(level1(basis=SIMILAR, items=None)) == (
-        "step 4 · Write (cycle 1) · 1m03s · like a similar task: 6 steps, 2m10s"
+        "step 4 · Write (cycle 1) · 1m03s · like Fix the parser tests: 6 steps, 2m10s"
     )
+
+
+def test_a_similar_match_without_a_title_keeps_the_generic_hint() -> None:
+    assert line(level1(basis=_basis("similar"))) == (
+        "step 4 · Write (cycle 1) · 1m03s · like a similar task: 6 steps, 2m10s: "
+        "Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit"
+    )
+
+
+def test_a_similar_tasks_title_cannot_write_escape_sequences() -> None:
+    basis = _basis("similar", title="Fix \x1b]0;pwned\x07 tests")
+    text = line(level1(basis=basis))
+    assert "\x1b" not in text and "\x07" not in text
+    assert "like Fix ?]0;pwned? tests: " in text
+
+
+def test_a_long_similar_title_is_cut_to_the_terminal_width() -> None:
+    basis = _basis("similar", title="Fix the parser tests and the formatter next")
+    data = level1(basis=basis)
+    for width in range(10, 200):
+        text = line(data, width=width)
+        assert pl.display_width(text) <= width, (width, text)
+    assert line(data, width=40).endswith("…")
 
 
 @pytest.mark.parametrize("past", [ONE_PAST_RUN, THREE_PAST_RUNS])
@@ -395,7 +420,7 @@ def test_a_similar_tasks_hint_is_never_left_out(past: dict[str, Any]) -> None:
         text = line(data, width=width)
         assert "last time" not in text
         if re.search(r"\d steps?\b", text):  # a past step count is shown
-            assert "like a similar task: " in text, (width, text)
+            assert "like Fix the parser tests: " in text, (width, text)
 
 
 @pytest.mark.parametrize("match", ["exact", "routine", None])
@@ -804,6 +829,29 @@ def test_a_run_drawn_from_start_to_finish(
     text = stream.getvalue()
     assert text.endswith(ERASE)  # erased at the end
     assert "\n" not in text  # never a newline
+
+
+def test_a_tool_call_with_an_argv_array_is_labelled_by_its_program(
+    display: tuple[ProgressLine, Stream, Clock],
+) -> None:
+    """The tool refuses a command sent as an argv array; the line still names
+    the program instead of the arguments' JSON (P3 follow-up)."""
+    line_, stream, clock = display
+    line_.start()
+    line_.observe(_event("run.started", 1))
+    line_.observe(_event("run.progress", 2, **payload()))
+    line_.observe(
+        _event(
+            "tool.started",
+            3,
+            step=0,
+            call_id="c1",
+            name="shell_exec",
+            arguments={"command": ["git", "status", "--short"]},
+            preview="{",
+        )
+    )
+    assert stream.draws()[-1] == "starting · git status 0:00 · 0s"
 
 
 def test_the_tool_timer_and_the_run_timer_advance_between_events() -> None:

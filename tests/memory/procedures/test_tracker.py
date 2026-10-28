@@ -265,6 +265,7 @@ def test_level_1_shows_past_facts_and_items_but_no_percent() -> None:
         "version": 3,
         "match": "exact",
         "model": "m",
+        "title": None,
     }
 
 

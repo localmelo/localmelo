@@ -431,4 +431,11 @@ def test_view_of() -> None:
         "version": 1,
         "match": "exact",
         "model": "m",
+        "title": None,
     }
+    # A similar match carries the routine's title into the display's basis
+    # (P3 follow-up): the line names whose steps these are.
+    similar = view_of(
+        template, match="similar", model="m", model_scores=[], title="Fix the parser"
+    )
+    assert similar.level == 1 and similar.basis()["title"] == "Fix the parser"

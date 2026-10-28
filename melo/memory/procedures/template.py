@@ -587,12 +587,15 @@ class TemplateView:
     title: str | None = None
 
     def basis(self) -> dict[str, Any]:
+        """Which memory the display rests on; ``title`` names a similar
+        match's routine (``None`` otherwise)."""
         return {
             "routine_id": self.routine_id,
             "template_id": self.template_id,
             "version": self.version,
             "match": self.match,
             "model": self.model,
+            "title": self.title,
         }
 
 

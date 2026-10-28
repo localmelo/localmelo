@@ -124,6 +124,9 @@ A call's label names it without its arguments' content: `Read parser.py`,
 the query a routine keeps, pass a minimal redaction (see
 [Privacy](memory.md#privacy)) and are cut to 40 characters. A shell label is
 read from the command's first 2,000 characters, never from inside quotes.
+A `shell_exec` command sent as an argv array, a list of strings (the tool
+refuses it), is first joined into one command text with `shlex.join`, so
+its class and label come from its words too.
 
 ## The store
 
