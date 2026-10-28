@@ -38,8 +38,18 @@ from localmelo.melo.schema import (
     ToolDef,
     ToolResult,
 )
-from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
-from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+from localmelo.support.providers.llm.ollama_chat import (
+    OllamaNativeChat,
+)
+from localmelo.support.providers.llm.ollama_chat import (
+    _tool_def_to_openai as _ollama_tool_def,
+)
+from localmelo.support.providers.llm.openai_compat import (
+    OpenAICompatLLM,
+)
+from localmelo.support.providers.llm.openai_compat import (
+    _tool_def_to_openai as _openai_tool_def,
+)
 
 # ── Schema: tool call ids ──────────────────────────────────────────────────
 
@@ -170,6 +180,32 @@ def _echo_def(name: str = "echo") -> ToolDef:
             "required": ["text"],
         },
     )
+
+
+def test_annotations_do_not_reach_a_request_body() -> None:
+    # A ToolDef with annotations serializes exactly as one without: the
+    # request body the model server reads does not change.
+    plain = _echo_def()
+    annotated = ToolDef(
+        name=plain.name,
+        description=plain.description,
+        parameters=plain.parameters,
+        annotations={"readOnlyHint": True, "openWorldHint": False, "title": "Echo"},
+    )
+    body = {
+        "type": "function",
+        "function": {
+            "name": "echo",
+            "description": "echo text back",
+            "parameters": {
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+        },
+    }
+    assert _openai_tool_def(annotated) == body == _openai_tool_def(plain)
+    assert _ollama_tool_def(annotated) == body == _ollama_tool_def(plain)
 
 
 def _agent(

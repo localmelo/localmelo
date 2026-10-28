@@ -187,39 +187,66 @@ class AllowAndRecord:
 
 
 class TestRequireApproval:
-    async def test_the_named_tools_ask_the_policy(
+    async def test_an_unannotated_tool_asks_the_policy(
         self, log_path: Path, created: list[StdioMcpClient]
     ) -> None:
-        llm = FakeLLM(
-            [
-                _call("mcp__fake__echo", {"text": "hello"}),
-                _call("mcp__fake__cwd", {}),
-                _answer("done"),
-            ]
-        )
-        server = fake_server_config(log_path, require_approval=["echo"])
+        llm = FakeLLM([_call("mcp__fake__echo", {"text": "hello"}), _answer("done")])
+        server = fake_server_config(log_path)
         agent, _ = _mcp_agent(llm, [server], created)
         policy = AllowAndRecord()
         try:
             result = await agent.run_task("say hello", approval=policy)
-            marked = [
-                name
-                for name in FAKE_TOOL_NAMES
-                if agent.executor.requires_approval(name)
-            ]
         finally:
             await agent.close()
 
         assert result.status == "completed"
-        assert marked == ["mcp__fake__echo"]
-        # Only echo asked, with the exposed name and the model's arguments.
+        # No requirement, no annotation: write, so it asks.
         [request] = policy.requests
-        assert (request.tool_name, dict(request.arguments), request.preview) == (
+        assert (request.tool_name, dict(request.arguments), request.tier) == (
             "mcp__fake__echo",
             {"text": "hello"},
-            '{"text":"hello"}',
+            "write",
         )
-        assert [call["name"] for call in _tool_calls(log_path)] == ["echo", "cwd"]
+        assert [call["name"] for call in _tool_calls(log_path)] == ["echo"]
+
+    async def test_a_read_only_annotation_does_not_ask(
+        self, log_path: Path, created: list[StdioMcpClient]
+    ) -> None:
+        llm = FakeLLM([_call("mcp__fake__cwd", {}), _answer("done")])
+        server = fake_server_config(log_path)
+        agent, _ = _mcp_agent(llm, [server], created)
+        policy = AllowAndRecord()
+        try:
+            result = await agent.run_task("where am I", approval=policy)
+            [cwd] = [
+                tool for tool in agent.list_tools() if tool.name == "mcp__fake__cwd"
+            ]
+            assert (cwd.tier, cwd.requires_approval) == ("read", False)
+        finally:
+            await agent.close()
+
+        assert result.status == "completed"
+        assert policy.requests == []
+        assert [call["name"] for call in _tool_calls(log_path)] == ["cwd"]
+
+    async def test_require_approval_forces_a_read_only_tool_to_ask(
+        self, log_path: Path, created: list[StdioMcpClient]
+    ) -> None:
+        llm = FakeLLM([_call("mcp__fake__cwd", {}), _answer("done")])
+        server = fake_server_config(log_path, require_approval=["cwd"])
+        agent, _ = _mcp_agent(llm, [server], created)
+        policy = AllowAndRecord()
+        try:
+            result = await agent.run_task("where am I", approval=policy)
+        finally:
+            await agent.close()
+
+        assert result.status == "completed"
+        # require_approval only adds caution: a read tool still asks when
+        # it is named, and the panel can show that it is read.
+        [request] = policy.requests
+        assert (request.tool_name, request.tier) == ("mcp__fake__cwd", "read")
+        assert [call["name"] for call in _tool_calls(log_path)] == ["cwd"]
 
     async def test_a_denied_call_never_reaches_the_server(
         self, log_path: Path, created: list[StdioMcpClient]

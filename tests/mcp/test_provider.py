@@ -14,7 +14,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.checker import Checker
+from localmelo.melo.checker import Checker, tier_of
 from localmelo.melo.contracts.tools import ProvidedTool
 from localmelo.melo.executor import Executor
 from localmelo.melo.executor.models import (
@@ -153,6 +153,29 @@ class TestStart:
         assert echo.definition.semantic_tags == ["fake", "echo"]
         assert {tool.timeout_ms for tool in tools} == {7500.0}
         assert provider.clients == created
+
+    async def test_annotations_reach_the_tool_definition(
+        self, tools: dict[str, ProvidedTool]
+    ) -> None:
+        assert tools["mcp__fake__cwd"].definition.annotations == {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+        }
+        assert tools["mcp__fake__echo"].definition.annotations == {}
+
+    async def test_a_read_only_tool_exposes_read(
+        self, tools: dict[str, ProvidedTool]
+    ) -> None:
+        checker = Checker()
+        assert checker.tier(tools["mcp__fake__cwd"].definition) == "read"
+        assert tier_of(tools["mcp__fake__cwd"].definition) == "read"
+
+    async def test_an_unannotated_tool_exposes_write(
+        self, tools: dict[str, ProvidedTool]
+    ) -> None:
+        checker = Checker()
+        assert checker.tier(tools["mcp__fake__echo"].definition) == "write"
+        assert tier_of(tools["mcp__fake__echo"].definition) == "write"
 
     async def test_missing_description_gets_a_fallback(self, log_path: Path) -> None:
         provider = McpToolProvider(
