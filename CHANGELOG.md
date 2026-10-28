@@ -647,7 +647,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   console session cannot be given `shell_exec` by the default set; an
   explicit `AgentOptions(builtins=…)` still names it, and the checker then
   refuses the call in `gateway` mode with the mode and `--builtins all` in
-  the reason ([#NN]).
+  the reason ([#104]).
 - Secrets no longer stay in stored memory. `tasks.query` and `tasks.result`,
   `steps.thought`, a tool call's arguments and a tool result's output and
   error, and the text long-term memory keeps (each step's summary and the
@@ -741,3 +741,4 @@ earlier milestones.
 [#100]: https://github.com/localmelo/localmelo/pull/100
 [#101]: https://github.com/localmelo/localmelo/pull/101
 [#103]: https://github.com/localmelo/localmelo/pull/103
+[#104]: https://github.com/localmelo/localmelo/pull/104
