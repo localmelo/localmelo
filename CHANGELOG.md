@@ -69,7 +69,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   process group and start time before releasing a child, tool-provider starts
   and arbitrary-code tool entries mark capture incomplete, and a task-store
   outage retries for up to 10 seconds before refusing that one call. Resume
-  stays fenced and nothing reads the evidence yet. [#NN]
+  stays fenced and nothing reads the evidence yet. [#166]
 - Scheduler component v4 adds dormant process capture state, identity checks
   and a gated subprocess primitive; worker behavior and Resume are unchanged. [#158]
 
@@ -1048,3 +1048,4 @@ earlier milestones.
 [#162]: https://github.com/localmelo/localmelo/pull/162
 [#164]: https://github.com/localmelo/localmelo/pull/164
 [#165]: https://github.com/localmelo/localmelo/pull/165
+[#166]: https://github.com/localmelo/localmelo/pull/166
