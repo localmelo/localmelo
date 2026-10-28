@@ -35,6 +35,7 @@ from localmelo.support.config import (  # noqa: E402
     LocalBackendConfig,
 )
 from localmelo.support.gateway import GatewayServer  # noqa: E402
+from localmelo.support.gateway.chat_gate import ChatGate  # noqa: E402
 from localmelo.support.gateway.console import ConsoleOptions  # noqa: E402
 from localmelo.support.gateway.guard import LoopbackGuard, is_loopback  # noqa: E402
 from localmelo.support.gateway.session import AgentLike, SessionManager  # noqa: E402
@@ -208,7 +209,13 @@ def _build_gateway(
         ),
         gateway=GatewayConfig(port=port, host=host),
     )
-    server = GatewayServer(cfg, console_options=ConsoleOptions(probe=QuietProbe()))
+    server = GatewayServer(
+        cfg,
+        console_options=ConsoleOptions(
+            probe=QuietProbe(),
+            gate=ChatGate(policy="off", call_log_dir=None),
+        ),
+    )
     sessions = RecordingSessions()
     server.sessions = sessions
     client = TestClient(

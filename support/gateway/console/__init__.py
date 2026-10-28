@@ -283,6 +283,9 @@ class Console:
         try:
             await self.sessions.close_all()
         finally:
+            # Every live call leaves its one line; the log's files close.
+            with contextlib.suppress(Exception):
+                await self.gate.close()
             try:
                 await self.hub.aclose()
             finally:

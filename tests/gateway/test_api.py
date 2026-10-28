@@ -19,6 +19,8 @@ from localmelo.support.config import (  # noqa: E402
     LocalBackendConfig,
 )
 from localmelo.support.gateway import GatewayServer  # noqa: E402
+from localmelo.support.gateway.chat_gate import ChatGate  # noqa: E402
+from localmelo.support.gateway.console import ConsoleOptions  # noqa: E402
 from localmelo.support.gateway.session import SessionManager  # noqa: E402
 
 # ---------------------------------------------------------------------------
@@ -90,8 +92,13 @@ def _build_server(
 
     cfg = _test_cfg()
 
+    options = ConsoleOptions(
+        # A gate with no call log: a test must not write the user's
+        # ~/.cache/localmelo/scheduler.
+        gate=ChatGate(policy="off", call_log_dir=None),
+    )
     with patch("localmelo.support.gateway.webapp.mount", lambda app, cfg=None: None):
-        server = GatewayServer(cfg)
+        server = GatewayServer(cfg, console_options=options)
 
     # Replace the real SessionManager with our fake
     server.sessions = sessions

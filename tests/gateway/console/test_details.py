@@ -94,8 +94,8 @@ async def test_forgetting_a_grant_takes_it_back(tmp_path: Path) -> None:
 
         forgotten = await client.delete(f"/api/sessions/{session_id}/grants/file_write")
 
-        assert forgotten.status_code == 200
-        assert forgotten.json() == {"grants": []}
+        assert forgotten.status_code == 204
+        assert forgotten.content == b""
         detail = (await client.get(f"/api/sessions/{session_id}")).json()
         assert detail["grants"] == [] and detail["granted_at"] == {}
         listed = (await client.get(f"/api/sessions/{session_id}/tools")).json()
@@ -115,7 +115,7 @@ async def test_forgetting_an_unknown_grant_is_404(tmp_path: Path) -> None:
         assert response.json()["error"]["code"] == "not_found"
 
 
-async def test_forgetting_every_grant_is_200_even_without_any(
+async def test_forgetting_every_grant_is_204_even_without_any(
     tmp_path: Path,
 ) -> None:
     async with console_with(tmp_path, answer("hello")) as (_console, client, _):
@@ -124,8 +124,8 @@ async def test_forgetting_every_grant_is_200_even_without_any(
 
         response = await client.delete(f"/api/sessions/{session_id}/grants")
 
-        assert response.status_code == 200
-        assert response.json() == {"grants": []}
+        assert response.status_code == 204
+        assert response.content == b""
 
 
 # ── Memory ──

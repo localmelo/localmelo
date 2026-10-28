@@ -809,3 +809,99 @@ async def test_a_creates_key_is_found_without_a_session_id(tmp_path: Path) -> No
             await client.get(f"/api/sessions/{session_id}/submissions/create-key-1")
         ).json()
         assert by_session["submission"]["turn_id"] == body["turn_id"]
+
+
+async def test_a_cancel_during_a_slow_create_withdraws_its_key(
+    tmp_path: Path,
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def build(
+        settings: Any, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Any:
+        entered.set()
+        await release.wait()
+        return await started_agent(Path(workspace), ScriptedLLM([answer("hello")]))
+
+    console = Console(
+        make_cfg(),
+        port=PORT,
+        options=ConsoleOptions(
+            store_path=str(tmp_path / "sessions.db"),
+            builder=build,
+            probe=FakeProbe(),
+            gate=quiet_gate(),
+        ),
+    )
+    await console.start()
+    app = FastAPI()
+    console.mount(app)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url=f"http://127.0.0.1:{PORT}",
+        ) as client:
+            creating = asyncio.create_task(
+                client.post(
+                    "/api/sessions",
+                    json={
+                        "turn": {"text": "hello", "client_request_id": "slow-key"},
+                        **_workspace(tmp_path),
+                    },
+                )
+            )
+            await entered.wait()
+            withdrew = await client.post(
+                "/api/submissions/slow-key/cancel", json={"text": "hello"}
+            )
+            assert withdrew.status_code == 200
+            assert withdrew.json()["submission"]["state"] == "withdrawn"
+
+            release.set()
+            response = await creating
+
+        # The key was withdrawn while the Agent started: the turn is
+        # refused, not written over the withdrawal.
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "submission_withdrawn"
+        assert await console.store.list_sessions() == []
+    finally:
+        await console.aclose()
+
+
+async def test_a_stop_for_an_unregistered_turn_lands_when_it_registers(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "ws" / "todo.md"
+    async with console_with(
+        tmp_path,
+        tool_call("file_write", {"path": str(target), "content": "# TODO"}),
+        answer("done"),
+    ) as (console, client, _):
+        body = await _create(
+            client, tmp_path, "Write the todo file", client_request_id="late-key"
+        )
+        session_id, turn_id = body["session"]["id"], body["turn_id"]
+        [pending] = await _wait_pending(client, session_id)
+
+        # The window a create has: the turn is accepted and running, the
+        # registry has not registered its session yet.
+        real = console.sessions.find_turn
+        console.sessions.find_turn = lambda _turn_id: None  # type: ignore[method-assign]
+        try:
+            response = await client.post(
+                "/api/submissions/late-key/cancel",
+                json={"text": "Write the todo file"},
+            )
+        finally:
+            console.sessions.find_turn = real
+
+        assert response.status_code == 202
+        assert response.json()["cancelling"] is True
+        entry = console.sessions.get(session_id)
+        assert entry is not None
+        console.sessions._apply_deferred_cancel(entry, turn_id)
+        turn = await _wait_turn(client, session_id)
+        assert (turn["status"], turn["cause"]) == ("cancelled", "user_stop")
+        assert pending["request_id"]  # the card was withdrawn by the stop

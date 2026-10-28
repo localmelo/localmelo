@@ -1635,9 +1635,15 @@ class SessionStore:
             self._check_writable()
             async with self._transaction(conn, "begin_turn") as stored:
                 now = self._clock()
-                # 1. The key decides before the lease.
+                # 1. The key decides before the lease. A create's key is
+                # judged in the create scope, where step 8 stores it: a
+                # withdrawal recorded while the session's Agent started must
+                # answer here, not collide with the insert below.
                 if client_request_id is not None:
-                    found = await self._submission(conn, session_id, client_request_id)
+                    lookup = (
+                        None if new_session is not None or create_scope else session_id
+                    )
+                    found = await self._submission(conn, lookup, client_request_id)
                     check_submission(found, user_text)
                 # 2. The session.
                 if new_session is not None:

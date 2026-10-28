@@ -14,7 +14,7 @@ import os
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Query
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from localmelo.melo.schema import SHORT_TERM_MAX, Message, ToolInfo
 from localmelo.support.sessions import display
@@ -84,11 +84,6 @@ def _state(console: Console, session_id: str) -> str:
     return "open" if entry.agent is not None else "paused"
 
 
-def _grants(console: Console, session_id: str) -> list[str]:
-    entry = console.sessions.get(session_id)
-    return [] if entry is None else sorted(entry.policy.allowed_tools)
-
-
 def _mcp_label(console: Console) -> str:
     path = getattr(console.cfg, "mcp_config", "") or ""
     if not path:
@@ -119,21 +114,21 @@ def add_routes(app: FastAPI, console: Console) -> None:
         )
 
     @app.delete("/api/sessions/{session_id}/grants/{tool}")
-    async def forget_grant(session_id: str, tool: str) -> JSONResponse:
+    async def forget_grant(session_id: str, tool: str) -> Response:
         console.require_store()
         await _require_session(console, session_id)
         entry = console.sessions.get(session_id)
         if entry is None or tool not in entry.policy.allowed_tools:
             raise ApiError(404, "not_found", "This tool has no session grant.")
         console.sessions.forget_grant(session_id, tool)
-        return JSONResponse(content={"grants": _grants(console, session_id)})
+        return Response(status_code=204)
 
     @app.delete("/api/sessions/{session_id}/grants")
-    async def forget_grants(session_id: str) -> JSONResponse:
+    async def forget_grants(session_id: str) -> Response:
         console.require_store()
         await _require_session(console, session_id)
         console.sessions.forget_grant(session_id)
-        return JSONResponse(content={"grants": []})
+        return Response(status_code=204)
 
     @app.get("/api/sessions/{session_id}/memory")
     async def session_memory(session_id: str) -> JSONResponse:

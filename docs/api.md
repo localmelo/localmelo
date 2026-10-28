@@ -516,15 +516,11 @@ Take back one session grant, so the tool asks again next time.
 curl -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/shell_exec
 ```
 
-```json
-{"grants": []}
-```
-
-- 200 with the grants that remain; both `grants` and `granted_at` of
+- 204 with no body; both `grants` and `granted_at` of
   `GET /api/sessions/{id}` drop it.
 - 404 `not_found` when the session is not open or the tool has no grant.
   `DELETE /api/sessions/{id}/grants` without a tool forgets every grant and
-  answers 200 `{"grants": []}`, whether or not the session is open.
+  answers 204, whether or not the session is open.
 
 ## GET /api/sessions/{id}/memory
 

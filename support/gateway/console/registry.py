@@ -51,6 +51,9 @@ from localmelo.support.sessions.submissions import check_submission
 
 from .errors import ApiError
 
+# What a Stop from the console says, and the cause it records.
+STOP_REASON = "Stopped from the web console"
+
 if TYPE_CHECKING:
     from localmelo.support.config import Config
 
@@ -190,6 +193,8 @@ class ConsoleSessions:
         # One lock per client_request_id while a keyed create runs, so a
         # retried create makes one session.
         self._create_locks: dict[str, asyncio.Lock] = {}
+        # Stops that arrived for a turn a create had not registered yet.
+        self._deferred_cancels: set[str] = set()
         self._closed = False
 
     # ── Reading ──
@@ -218,6 +223,23 @@ class ConsoleSessions:
             lock = SessionLock()
             self._locks[session_id] = lock
         return lock
+
+    def defer_cancel(self, turn_id: str) -> None:
+        """Ask for a turn to stop once it is registered.
+
+        A cancel by key can find a turn accepted while its create is still
+        building it; the create applies this when it registers. A turn that
+        never registers leaves its id here, so the set is bounded.
+        """
+        if len(self._deferred_cancels) >= 64:
+            self._deferred_cancels.clear()
+        self._deferred_cancels.add(turn_id)
+
+    def _apply_deferred_cancel(self, entry: OpenSession, turn_id: str) -> None:
+        if turn_id not in self._deferred_cancels:
+            return
+        self._deferred_cancels.discard(turn_id)
+        entry.runner.cancel(STOP_REASON, cause="user_stop", turn_id=turn_id)
 
     def find_turn(self, turn_id: str) -> OpenSession | None:
         """The open session whose running turn is *turn_id*, or ``None``."""
@@ -612,6 +634,31 @@ class ConsoleSessions:
         # The row comes before the Agent: the scheduler gate tags every call
         # with the session id, so the id must exist before the first one.
         info = await self._store.create_session(model=model, workspace=path)
+        # Under the session's lock, so a turn started on the new row by
+        # another client waits until this create has registered it.
+        async with self.lock(info.id):
+            return await self._fill_new(
+                info,
+                settings,
+                path,
+                typed,
+                composed,
+                client_request_id,
+                has_turn=first is not None,
+            )
+
+    async def _fill_new(
+        self,
+        info: SessionInfo,
+        settings: Config,
+        path: str,
+        typed: str | None,
+        composed: str | None,
+        client_request_id: str | None,
+        *,
+        has_turn: bool,
+    ) -> tuple[OpenSession, TurnInfo | None]:
+        """Build the Agent of a new row, start its first turn and register it."""
         try:
             # MCP is deferred (U3 decision 5 B): the builder gets no config.
             agent = await self._build_agent(settings, path, None, info.id)
@@ -634,7 +681,7 @@ class ConsoleSessions:
             ask=runner.observe(self._timed_ask(info.id, granted_at))
         )
         turn: TurnInfo | None = None
-        if first is not None:
+        if has_turn:
             try:
                 turn = await runner.start_turn(
                     composed or "",
@@ -668,6 +715,8 @@ class ConsoleSessions:
             last_used=self._clock(),
         )
         self._sessions[session_id] = entry
+        if turn is not None:
+            self._apply_deferred_cancel(entry, turn.id)
         return entry, turn
 
     async def start_turn(
