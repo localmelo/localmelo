@@ -187,6 +187,7 @@ class RecoveryStore:
         expected_generation: int | None,
         expected_operation_id: str | None,
         expected_execution_id: str | None = None,
+        _capture: bool = False,
     ) -> RecoveryLaunch:
         """Fence one launch; retries do not grant another execution permit.
 
@@ -198,6 +199,8 @@ class RecoveryStore:
         if expected_execution_id is not None:
             _text(expected_execution_id, "expected_execution_id")
         _guard(expected_generation, expected_operation_id)
+        if not isinstance(_capture, bool):
+            raise ValueError("capture flag must be boolean")
         acquired = False
         data = {
             "execution_id": execution_id,
@@ -205,6 +208,8 @@ class RecoveryStore:
             "generation": expected_generation,
             "previous": expected_operation_id,
         }
+        if _capture:
+            data["capture"] = True
         encoded = _request(data)
         async with self.store.component_event_transaction("recovery_start") as (
             conn,
@@ -278,6 +283,15 @@ class RecoveryStore:
                     operation_id=expected_operation_id,
                     create=True,
                 )
+                await conn.execute(
+                    "UPDATE recovery_capture SET active = 0 WHERE task_id = ?",
+                    (task_id,),
+                )
+                if _capture:
+                    await conn.execute(
+                        "INSERT INTO recovery_capture VALUES (?, ?, 1, 1, 1)",
+                        (task_id, execution_id),
+                    )
                 await conn.execute(
                     "UPDATE recovery_provenance SET first_start = 'started', execution_id = ?, unsafe_resume = 1 WHERE task_id = ?",
                     (execution_id, task_id),
@@ -609,6 +623,133 @@ class RecoveryStore:
                     "state": data["outcome"],
                     "reason": data["reason"],
                 },
+            )
+
+    async def capture_complete(self, task_id: str, *, execution_id: str) -> bool:
+        """Missing capture state is unknown, never proof of completeness."""
+        _text(execution_id, "execution_id")
+        async with self.store.component_transaction("capture_get") as conn:
+            row = await _one(
+                conn,
+                "SELECT complete AND trusted FROM recovery_capture WHERE task_id = ? AND execution_id = ?",
+                (task_id, execution_id),
+            )
+            return bool(row and row[0])
+
+    async def mark_capture_incomplete(
+        self,
+        task_id: str,
+        *,
+        execution_id: str,
+        expected_generation: int | None,
+        expected_operation_id: str | None,
+    ) -> None:
+        """Irreversibly mark this execution incomplete before an untracked call."""
+        await self._capture_change(
+            task_id, execution_id, expected_generation, expected_operation_id
+        )
+
+    async def _capture_change(
+        self,
+        task_id: str,
+        execution_id: str,
+        generation: int | None,
+        previous: str | None,
+    ) -> None:
+        _text(execution_id, "execution_id")
+        _guard(generation, previous)
+        async with self.store.component_transaction("capture_change") as conn:
+            current = await _one(
+                conn,
+                "SELECT t.state FROM tasks t JOIN recovery_capture c ON c.task_id = t.task_id WHERE t.task_id = ? AND c.execution_id = ? AND c.active = 1 AND NOT EXISTS (SELECT 1 FROM recovery_operations r WHERE r.task_id = t.task_id AND r.kind = 'recovery' AND r.phase = 'prepared')",
+                (task_id, execution_id),
+            )
+            if not current or current[0] != "running":
+                raise TaskConflictError("capture execution is not current and running")
+            new_generation = await compare_park_identity(
+                conn,
+                task_id,
+                expected_generation=generation,
+                expected_operation_id=previous,
+                operation_id=previous,
+                create=True,
+            )
+            assert new_generation is not None
+            await self._advance_start_receipt(
+                conn, task_id, execution_id, generation, previous, new_generation
+            )
+            await conn.execute(
+                "UPDATE recovery_capture SET complete = 0 WHERE task_id = ? AND execution_id = ?",
+                (task_id, execution_id),
+            )
+
+    @staticmethod
+    async def _advance_start_receipt(
+        conn: Any,
+        task_id: str,
+        execution_id: str,
+        old_generation: int | None,
+        previous: str | None,
+        generation: int,
+    ) -> None:
+        await conn.execute(
+            "UPDATE recovery_operations SET generation = ? WHERE task_id = ? AND kind = 'start' AND phase = 'committed' AND task_state = 'running' AND generation IS ? AND pending_operation_id IS ? AND json_extract(request, '$.execution_id') = ?",
+            (generation, task_id, old_generation, previous, execution_id),
+        )
+
+    async def record_captured_process(
+        self,
+        task_id: str,
+        *,
+        execution_id: str,
+        pgid: int,
+        leader_pid: int,
+        boot_id: str,
+        start_token: str,
+        expected_generation: int | None,
+        expected_operation_id: str | None,
+    ) -> None:
+        """CAS-record the gated process identity before releasing its child."""
+        for value, name in (
+            (execution_id, "execution_id"),
+            (boot_id, "boot_id"),
+            (start_token, "start_token"),
+        ):
+            _text(value, name)
+        _guard(expected_generation, expected_operation_id)
+        if any(
+            isinstance(n, bool) or not isinstance(n, int) or n <= 0
+            for n in (pgid, leader_pid)
+        ):
+            raise ValueError("process IDs must be positive integers")
+        async with self.store.component_transaction("capture_process") as conn:
+            current = await _one(
+                conn,
+                "SELECT t.state FROM tasks t JOIN recovery_capture c ON c.task_id = t.task_id WHERE t.task_id = ? AND c.execution_id = ? AND c.active = 1 AND NOT EXISTS (SELECT 1 FROM recovery_operations r WHERE r.task_id = t.task_id AND r.kind = 'recovery' AND r.phase = 'prepared')",
+                (task_id, execution_id),
+            )
+            if not current or current[0] != "running":
+                raise TaskConflictError("capture execution is not current and running")
+            new_generation = await compare_park_identity(
+                conn,
+                task_id,
+                expected_generation=expected_generation,
+                expected_operation_id=expected_operation_id,
+                operation_id=expected_operation_id,
+                create=True,
+            )
+            assert new_generation is not None
+            await self._advance_start_receipt(
+                conn,
+                task_id,
+                execution_id,
+                expected_generation,
+                expected_operation_id,
+                new_generation,
+            )
+            await conn.execute(
+                "INSERT OR IGNORE INTO recovery_processes VALUES (?, ?, ?, ?, ?, ?)",
+                (task_id, execution_id, pgid, leader_pid, boot_id, start_token),
             )
 
     async def processes(

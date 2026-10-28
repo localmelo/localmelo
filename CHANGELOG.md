@@ -36,6 +36,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Scheduler component v4 adds dormant process capture state, identity checks
+  and a gated subprocess primitive; worker behavior and Resume are unchanged. [#NN]
+
 - Startup recovery classifies task rows without replay, retains pending pause
   and reconciles execution-linked terminal results. Recovered tasks with
   uncertain history remain fenced until controlled recovery is wired; Stop is
