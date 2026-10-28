@@ -74,8 +74,8 @@ resume or a terminal outcome. Missing provenance and missing process records
 are unknown, not proof that a task never ran or that its processes are gone.
 The internal legacy-adoption seam records explicit orphan-risk confirmation but
 does not itself queue or launch a task. Process capture has no completeness
-proof. The existing gateway startup behavior is unchanged; runtime recovery,
-process verification and user-facing confirmation arrive in later work.
+proof. Startup classification uses the recovery journal; process verification,
+controlled restart scheduling and user-facing confirmation remain later work.
 
 A task row's id is its `kind="task"` session's id. `create_task()` writes the
 session, the task, its first `priority_events` row and a `sched_log` row in
@@ -146,9 +146,18 @@ A retention sweep discards terminal gate identities whose task rows have
 passed the retention cutoff, even though the rows remain available for
 inspection; forgetting alone does not discard an identity.
 
-Rows survive gateway restart, but startup marks surviving nonterminal tasks
-failed with `gateway restarted; recovery arrives in S3b`. Full recovery is
-deferred. A repeat `request_key` only returns the existing task. Workspace
+Rows survive gateway restart. Startup preserves terminal tasks and proved
+never-started queued or parked tasks, and interrupts uncertain tasks without
+replaying them. An already-started parked task retains its recorded card; an
+uncertain task without usable evidence stays without a card. An execution-linked
+committed run outcome can be reconciled without rerunning it. Pending pause intent
+and its priority snapshot survive interruption. Recovered tasks with uncertain
+history are fenced from resume and priority changes; Stop remains available.
+Proved-never-started runnable queued tasks can start after a durable launch fence
+and workspace validation; ordinary creation does not yet enable this proof.
+Orphan verification and informed Resume are later
+work; a missing process record is not proof that a process has stopped.
+A repeat `request_key` only returns the existing task. Workspace
 validity is checked at creation and again at run or resume; a folder that
 becomes invalid fails the task with `invalid_workspace`. Deadlines are rejected
 and service, wait and tool accounting is deferred. Pause requests P5 and
