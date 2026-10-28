@@ -512,6 +512,18 @@ class TestFields:
                 "approval",
                 "exit_code",
             },
+            "note": {
+                "step",
+                "attempt",
+                "note_id",
+                "kind",
+                "source",
+                "text",
+                "chars",
+                "drafts",
+                "remember",
+                "stage",
+            },
             "notice": {"kind", "message", "step", "attempt", "detail"},
             "reflection.started": {"attempt", "failure_type"},
             "reflection": {
@@ -577,10 +589,31 @@ class TestFields:
         assert result.status == "stuck"
         await check_guarantees(stuck, result, agent)
         assert stuck.notices() == ["stuck"]
+        # R4's compress mode emits the note event, for the notes and the
+        # attempt digest.
+        compress = Recorder()
+        agent = _agent(
+            ScriptedLLM(
+                [
+                    _echo("a", content="<note>plan: echo a</note>"),
+                    _answer("The test passed because the fix works."),
+                ]
+            ),
+            reasoning="compress",
+        )
+        result = await agent.run_task("echo a", on_event=compress)
+        assert result.status == "completed"
+        await check_guarantees(compress, result, agent, usage_matches=False)
+        assert {event.data["kind"] for event in compress.of("note")} == {
+            "step",
+            "answer",
+            "digest",
+        }
 
-        seen = {event.type for event in reflect.events + stuck.events}
+        events = reflect.events + stuck.events + compress.events
+        seen = {event.type for event in events}
         assert seen == set(EVENT_FIELDS)
-        for event in reflect.events + stuck.events:
+        for event in events:
             assert set(event.data) == EVENT_FIELDS[event.type]
         details = {
             event.data["kind"]: set(event.data["detail"])

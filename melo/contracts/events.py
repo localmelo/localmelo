@@ -44,6 +44,20 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "exit_code",
             }
         ),
+        "note": frozenset(
+            {
+                "step",
+                "attempt",
+                "note_id",
+                "kind",
+                "source",
+                "text",
+                "chars",
+                "drafts",
+                "remember",
+                "stage",
+            }
+        ),
         "notice": frozenset({"kind", "message", "step", "attempt", "detail"}),
         "reflection.started": frozenset({"attempt", "failure_type"}),
         "reflection": frozenset(

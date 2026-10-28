@@ -11,6 +11,7 @@ This module imports nothing from ``melo.agent`` or ``support/``.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import logging
 import re
@@ -38,6 +39,7 @@ _ALIAS_PREFIX = {"note": "n", "draft": "d", "digest": "g", "thought": "t"}
 _RECALL_SPAN_RE = re.compile(
     re.escape(RECALL_START) + r".*?" + re.escape(RECALL_END), re.DOTALL
 )
+_NOTE_BLOCK_RE = re.compile(r"<note>.*?(?:</note>|\Z)", re.IGNORECASE | re.DOTALL)
 
 
 @dataclasses.dataclass
@@ -95,8 +97,8 @@ class NoteStore:
     # ── Reading ──
 
     def entries(self) -> list[NoteStoreEntry]:
-        """Copies of every entry, in creation order."""
-        return [dataclasses.replace(entry) for entry in self._entries]
+        """Deep copies of every entry, in creation order."""
+        return copy.deepcopy(self._entries)
 
     def __len__(self) -> int:
         return len(self._entries)
@@ -195,13 +197,31 @@ class NoteStore:
     def replace_text(
         self, alias: str, text: str, note: ReasoningNote | None = None
     ) -> bool:
-        """Replace the checked text (and note) of *alias*; ``False`` if unknown."""
+        """Replace the checked text (and note) of *alias*.
+
+        ``False`` for an unknown alias, or when the replacement would pass
+        a cap even after evicting in the usual order; the entry is then
+        left as it was. A growing replacement can evict other entries,
+        never the entry itself.
+        """
         entry = self.get(alias)
         if entry is None:
             return False
+        old_text, old_note = entry.text, entry.note
         entry.text = text
         if note is not None:
             entry.note = note
+        self._evict_until_fits(0, extra_entries=0, exclude=alias)
+        if len(self._entries) + 0 > self._max_entries or (
+            self.chars() > self._max_chars
+        ):
+            entry.text, entry.note = old_text, old_note
+            self.refused += 1
+            logger.debug(
+                "Refused a restatement of %s: the store would pass its caps",
+                alias,
+            )
+            return False
         return True
 
     def supersede_attempt(self, attempt: int) -> int:
@@ -252,15 +272,25 @@ class NoteStore:
         """
         self.clear()
         kept = 0
+        seen: set[str] = set()
         for entry in entries:
-            copy = dataclasses.replace(entry)
-            self._remember_alias(copy.alias)
+            copied = copy.deepcopy(entry)
+            if not copied.alias or copied.alias in seen:
+                self.refused += 1
+                logger.debug(
+                    "Refused a loaded %s entry: its alias %r is empty or used",
+                    copied.kind,
+                    copied.alias,
+                )
+                continue
+            seen.add(copied.alias)
+            self._remember_alias(copied.alias)
             if len(self._entries) + 1 > self._max_entries or (
-                self.chars() + len(copy.text) > self._max_chars
+                self.chars() + len(copied.text) > self._max_chars
             ):
                 self.refused += 1
                 continue
-            self._entries.append(copy)
+            self._entries.append(copied)
             kept += 1
         return kept
 
@@ -290,19 +320,23 @@ class NoteStore:
         rehearsed = [
             e
             for e in self._entries
-            if e.kind in ("note", "digest") and e.stage != "fresh"
+            if e.kind == "digest" or (e.kind == "note" and e.stage != "fresh")
         ]
         return thoughts, retired_drafts, fresh_notes, rehearsed
 
-    def _evict_until_fits(self, incoming: int) -> None:
+    def _evict_until_fits(
+        self, incoming: int, *, extra_entries: int = 1, exclude: str = ""
+    ) -> None:
         for group in self._evict_groups():
-            if len(self._entries) + 1 <= self._max_entries and (
+            if len(self._entries) + extra_entries <= self._max_entries and (
                 self.chars() + incoming <= self._max_chars
             ):
                 return
             for entry in sorted(group, key=self._lru_key):
+                if entry.alias == exclude:
+                    continue
                 self._entries.remove(entry)
-                if len(self._entries) + 1 <= self._max_entries and (
+                if len(self._entries) + extra_entries <= self._max_entries and (
                     self.chars() + incoming <= self._max_chars
                 ):
                     return
@@ -319,9 +353,10 @@ def strip_note_spans(
 
     In a compress-mode step the tool-hint scan must not read the harness's
     own note text as a hint: a note that names a tool would otherwise
-    offer it. Each stored note's checked text is removed from an
-    assistant message's content, and a tool message loses the text
-    between :data:`~localmelo.melo.memory.notes.RECALL_START` and
+    offer it. Each stored note's checked text and every raw ``<note>``
+    block are removed from an assistant message's content, and a tool
+    message loses the text between
+    :data:`~localmelo.melo.memory.notes.RECALL_START` and
     :data:`~localmelo.melo.memory.notes.RECALL_END`. Messages the scan
     would not change are returned as they are.
     """
@@ -330,6 +365,7 @@ def strip_note_spans(
     for message in messages:
         content = message.content
         if message.role == "assistant":
+            content = _NOTE_BLOCK_RE.sub("", content)
             for text in note_texts:
                 content = content.replace(text, "")
             content = content.strip()

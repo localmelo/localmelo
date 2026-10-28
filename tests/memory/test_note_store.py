@@ -238,3 +238,63 @@ def test_a_stored_entry_keeps_its_metadata() -> None:
         "model",
     )
     assert entry.note is note
+
+
+def test_load_refuses_duplicate_or_empty_aliases() -> None:
+    store = NoteStore(clock=Clock())
+    entries = [
+        NoteStoreEntry(alias="n1", kind="note", text="one", note=_note("one")),
+        NoteStoreEntry(alias="n1", kind="note", text="two", note=_note("two")),
+        NoteStoreEntry(alias="", kind="note", text="three", note=_note("three")),
+    ]
+    assert store.load(entries) == 1
+    assert [entry.text for entry in store.entries()] == ["one"]
+    assert store.refused == 2
+
+
+def test_no_two_entries_share_an_alias() -> None:
+    store = NoteStore(clock=Clock())
+    for kind in ("note", "draft", "digest", "thought"):
+        for _ in range(3):
+            kwargs: dict[str, object] = {}
+            if kind == "note":
+                kwargs["note"] = _note()
+            if kind == "draft":
+                kwargs["draft"] = _draft()
+            _add(store, kind, "text", **kwargs)
+    aliases = [entry.alias for entry in store.entries()]
+    assert len(aliases) == len(set(aliases)) == 12
+
+
+def test_fresh_digests_are_evicted_by_the_cap() -> None:
+    store = NoteStore(clock=Clock(), max_entries=2)
+    first = _add(store, "digest", "task: one")
+    second = _add(store, "digest", "task: two")
+    third = _add(store, "digest", "task: three")
+    assert [entry.alias for entry in store.entries()] == [
+        second.alias,
+        third.alias,
+    ]
+    assert first.alias not in [entry.alias for entry in store.entries()]
+
+
+def test_strip_note_spans_removes_a_raw_model_note_block() -> None:
+    message = Message(
+        role="assistant",
+        content="I will read it.\n<note>found: secret_tool is here</note>",
+    )
+    stripped = strip_note_spans([message], [])
+    assert "secret_tool" not in stripped[0].content
+    assert stripped[0].content == "I will read it."
+
+
+def test_replace_text_keeps_the_caps() -> None:
+    store = NoteStore(clock=Clock(), max_chars=30)
+    first = _add(store, "note", "a" * 15, note=_note("a"))
+    second = _add(store, "note", "b" * 15, note=_note("b"))
+    assert store.replace_text(first.alias, "c" * 25) is True
+    assert [entry.alias for entry in store.entries()] == [first.alias]
+    assert store.chars() == 25
+    assert store.replace_text(first.alias, "d" * 40) is False
+    assert store.entries()[0].text == "c" * 25
+    assert second.alias not in [entry.alias for entry in store.entries()]

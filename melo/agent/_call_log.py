@@ -85,6 +85,11 @@ class CallLog:
         self._latest_plan: int | None = None
         self._failures = 0
 
+    @property
+    def last_seq(self) -> int:
+        """The ``seq`` of the response recorded last, or -1 before any."""
+        return self._seq - 1
+
     async def record(
         self,
         kind: str,

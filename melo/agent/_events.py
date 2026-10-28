@@ -199,6 +199,47 @@ class _Emitter:
 
         self._emit("assistant.message", build)
 
+    def note(
+        self,
+        *,
+        step: int,
+        attempt: int,
+        note_id: str,
+        kind: str,
+        source: str,
+        text: str,
+        chars: int,
+        drafts: Sequence[str],
+        remember: bool,
+        stage: str,
+    ) -> None:
+        """A note entered the working-memory note store.
+
+        *text* is the checked text (already redacted and sanitized), so it
+        passes no further redaction; *chars* is its length and *drafts*
+        the aliases of the reply's drafts. The CLI ignores the event until
+        U2 draws a plan line.
+        """
+        if self._sink is None:
+            return
+        self._emit(
+            "note",
+            lambda: json_safe_payload(
+                {
+                    "step": step,
+                    "attempt": attempt,
+                    "note_id": note_id,
+                    "kind": kind,
+                    "source": source,
+                    "text": text,
+                    "chars": chars,
+                    "drafts": list(drafts),
+                    "remember": remember,
+                    "stage": stage,
+                }
+            ),
+        )
+
     def tool_started(self, call: ToolCall) -> None:
         if self._sink is None:
             return
