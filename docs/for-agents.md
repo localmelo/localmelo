@@ -116,7 +116,7 @@ kill -TERM $GW; wait $GW   # exit 143 once runs in flight end; SIGKILL after you
 
 - `POST /v1/agent/run` with `Content-Type: application/json` and `{"query": str, "session_id"?: str}`: 200 `{"result", "session_id"}`; 400 `{"error"}`; 422 `{"detail": [...]}` (non-object body or no JSON content type); 500 `{"error", "session_id"}`.
 - `GET /v1/health`: `{"status": "ok", "uptime" (s), "sessions": {"active", "busy", "max": 50}, "chat_backend", "embedding_backend"}`.
-- `GET /v1/sessions`: `{"sessions": [{"session_id", "status": "idle" or "running", "idle_seconds", "created_at" (Unix time, float), "is_busy"}]}`. `DELETE /v1/sessions/{id}`: 200 `{"closed": id}`; 404 `{"error": "session not found"}`.
+- `GET /v1/sessions`: `{"sessions": [{"session_id", "status": "idle" or "running", "idle_seconds", "created_at" (Unix time, float), "is_busy"}]}`. `DELETE /v1/sessions/{id}`: 200 `{"closed": id}`; 409 `{"error", "session_id"}` while a task runs (the session and the task are left alone); 404 `{"error": "session not found"}`.
 - `query`: non-empty, at most 100,000 characters. `session_id`: `^[a-zA-Z0-9_-]{1,64}$`; omit it for a new one (12 hex characters); an unknown id creates that session.
 - The POST blocks until the run ends (no streaming) and the gateway sets no time limit: give the client a deadline (`curl --max-time`).
 - 200 means the run finished, not that it completed; there is no status field (an empty answer is `"result": "[STATUS] ERROR"`). For the status, use the CLI with `--output-format json`.
@@ -181,7 +181,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 - A non-string `session_id` gets a plain-text HTTP 500; omit it or send `null` for a new session.
 - One `Agent` per concurrent task: `run_task` has no overlap guard (runs share working memory and counters).
 - `ollama` backend: `result` can start with a `<think>...</think>` block.
-- Gateway: `python_exec` runs inside the gateway process and blocks every request until it returns. `DELETE` on a busy session crashes its run and any request waiting on it (200, `[crashed] ...`).
+- Gateway: `python_exec` runs inside the gateway process and blocks every request until it returns. `DELETE` on a session running a task: 409 `{"error", "session_id"}`, and the run goes on; `/v1/agent` has no cancel route (the web workspace's cancel is for its own chats). At shutdown every session is closed, a busy one included, and a task still running then ends as `crashed`.
 - Stopping: `&` jobs from a non-interactive shell ignore SIGINT; send SIGTERM. Direct mode exits 143 within 8 s; the gateway exits 143 only after its runs in flight finish (no time limit): SIGKILL it after your own deadline.
 - Under `uv run`, `$!` is uv: SIGTERM reaches melo, SIGKILL does not (the gateway keeps listening). In scripts start `.venv/bin/melo`, or SIGKILL the child (`pkill -KILL -f 'melo --serve --port PORT'`).
 - `--daemon install` takes `--port` but not `--host`, gets no shell env vars (no cloud keys), and its KeepAlive restarts a killed gateway: use `--daemon uninstall`.

@@ -21,6 +21,7 @@ from localmelo.melo.memory.procedures.store import SqliteProcedures
 from localmelo.melo.schema import RunResult, answer_text, split_thinking
 from localmelo.support.backends.discovery import parse_model_ids
 from localmelo.support.backends.openai_compat import normalize_url
+from localmelo.support.gateway.session import SessionBusyError
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
@@ -81,10 +82,6 @@ async def _stopped(
     _stop(task, message)
     await asyncio.wait({task})
     return None if task.cancelled() else task.result()
-
-
-class SessionBusyError(RuntimeError):
-    """The requested action would interrupt an active session."""
 
 
 def _normalize_input_url(url: str) -> str:

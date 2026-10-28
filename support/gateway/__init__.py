@@ -18,7 +18,7 @@ except ImportError as e:
 from localmelo.melo.checker import Checker, GatewayIngressPayload, SessionTransition
 from localmelo.support import config
 from localmelo.support.gateway.guard import LoopbackGuard, is_loopback
-from localmelo.support.gateway.session import SessionManager
+from localmelo.support.gateway.session import SessionBusyError, SessionManager
 
 logger = logging.getLogger("localmelo.gateway")
 
@@ -178,7 +178,13 @@ class GatewayServer:
 
         @app.delete("/v1/sessions/{session_id}")
         async def close_session(session_id: str) -> JSONResponse:
-            closed = await self.sessions.close(session_id)
+            try:
+                closed = await self.sessions.close(session_id)
+            except SessionBusyError as e:
+                return JSONResponse(
+                    status_code=409,
+                    content={"error": str(e), "session_id": session_id},
+                )
             if not closed:
                 return JSONResponse(
                     status_code=404,

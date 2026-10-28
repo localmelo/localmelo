@@ -208,6 +208,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `DELETE /v1/sessions/{id}` no longer closes a session whose task is still
+  running: it answers 409 with the gateway's error body
+  (`{"error", "session_id"}`) and leaves the task and the session alone;
+  idle sessions close as before. The `/v1/agent` API still has no cancel
+  route, so a caller waits for the task. Stopping the gateway still closes
+  every session, a busy one included, and a task still running then ends as
+  `crashed` ([#NN]).
 - A `shell_exec` command no longer inherits melo's standard input: it reads
   `/dev/null` in every mode. A shell whose stdin was a pty that was not
   melo's controlling terminal took that pty as its controlling terminal at

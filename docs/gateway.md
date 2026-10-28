@@ -166,13 +166,18 @@ curl -X DELETE http://127.0.0.1:8401/v1/sessions/demo123
 ```
 
 The answer is HTTP 200 with `{"closed": "demo123"}`, or HTTP 404 with
-`{"error": "session not found"}`.
+`{"error": "session not found"}`. A session whose task is still running is
+left alone: the answer is HTTP 409 with the same error body as a refused run,
+`{"error": "Session demo123 is running a task; wait for it to finish before closing it.", "session_id": "demo123"}`,
+and the task goes on. `is_busy` in [GET /v1/sessions](#get-v1sessions)
+shows which sessions are busy.
 
-Closing a busy session closes its agent: the running task and any request
-waiting for the session end as `crashed`, still with HTTP 200 and the result
-`[crashed] RuntimeError: Cannot send a request, as the client has been closed.`
-Close only idle sessions; `is_busy` in [GET /v1/sessions](#get-v1sessions)
-shows which ones are busy.
+The `/v1/agent` API has no route that stops a run, so wait for it to finish
+and close the session after. The web workspace's cancel route,
+`POST /v1/playground/session/{id}/cancel`, stops a chat of the web workspace
+only ([Web workspace](#web-workspace)); it does not reach an `/v1/agent` run.
+Stopping the gateway still closes every session, a busy one included; see
+[Stop the gateway](#stop-the-gateway).
 
 ## Sessions
 
@@ -291,3 +296,9 @@ melo --daemon uninstall
 - In its terminal, press Ctrl+C.
 - For the background service, run `melo --daemon uninstall`. A plain `kill`
   does not help: launchd starts the gateway again.
+
+Stopping closes every session, a session running a task included: if one is
+still busy, its agent is closed and the task ends as `crashed`. SIGTERM
+normally waits for runs in flight first, so they finish before the sessions
+close. A `DELETE` request no longer closes a busy session: it returns 409
+until the task ends.
