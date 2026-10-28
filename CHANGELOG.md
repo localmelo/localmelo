@@ -21,7 +21,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (`415 unsupported_media_type`), UTF-8/lone-surrogate validation, the
   console's Content-Security-Policy on `/api` and baseline security headers
   on every response; and `melo --serve --allow-unconfigured` so the gateway
-  can boot before a backend is configured ([#NN]).
+  can boot before a backend is configured ([#106]).
 - Terminal session commands: `/title [text]` shows or sets a title, including
   before the first message; `/undo` forgets the latest finished turn and
   keeps its typed history without reversing file changes (a committed undo
@@ -755,3 +755,4 @@ earlier milestones.
 [#101]: https://github.com/localmelo/localmelo/pull/101
 [#103]: https://github.com/localmelo/localmelo/pull/103
 [#104]: https://github.com/localmelo/localmelo/pull/104
+[#106]: https://github.com/localmelo/localmelo/pull/106
