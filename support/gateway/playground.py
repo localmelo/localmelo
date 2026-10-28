@@ -41,7 +41,9 @@ from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbe
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
-_DEFAULT_MEMORY_DIR = Path("~/.cache/localmelo/playground").expanduser()
+# The default store of a playground's own memories, as a ``~`` string so it
+# resolves when a playground opens one: a test's temporary HOME then applies.
+_DEFAULT_MEMORY_DIR = "~/.cache/localmelo/playground"
 
 _SCENARIOS_PATH = (
     Path(__file__).resolve().parents[2] / "tests" / "smoke" / "data" / "scenarios.json"
@@ -203,7 +205,7 @@ class SmokePlayground:
 
         # Share persisted memories, but let each agent own its connections.
         # Closing one session must not close resources used by another run.
-        mem_dir = Path(memory_dir) if memory_dir else _DEFAULT_MEMORY_DIR
+        mem_dir = Path(memory_dir or _DEFAULT_MEMORY_DIR).expanduser()
         mem_dir.mkdir(parents=True, exist_ok=True)
         self._history_path = mem_dir / "history.db"
         # Read once, so every chat's history keeps reasoning as long.
