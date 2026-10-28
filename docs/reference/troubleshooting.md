@@ -36,7 +36,7 @@ ModuleNotFoundError: No module named 'localmelo'
 - **Cause:** the clone's directory is not named `localmelo`, for example a
   renamed folder or a ZIP download unpacked as `localmelo-main`.
 - **Fix:** rename the directory to `localmelo` and install again, as in
-  [Install](../quickstart.md#install).
+  [Install](../start/quickstart.md#install).
 
 ### Gateway requires fastapi and uvicorn
 
@@ -56,7 +56,7 @@ error: externally-managed-environment
 - **Cause:** pip will not install into the Python of your system or of
   Homebrew.
 - **Fix:** create a virtual environment first, as in
-  [Install with pip](../quickstart.md#install-with-pip), or use uv.
+  [Install with pip](../start/quickstart.md#install-with-pip), or use uv.
 
 ### FileNotFoundError when the gateway starts
 
@@ -67,7 +67,7 @@ FileNotFoundError: [Errno 2] No such file or directory: '…/localmelo/tests/smo
 - **Cause:** an older build omitted this required data file from its wheel.
   Current builds package it along with the web workspace's assets.
 - **Fix:** update and reinstall localmelo as described in
-  [Update localmelo](../configuration.md#update-localmelo). An editable source
+  [Update localmelo](../guides/configure.md#update-localmelo). An editable source
   install with `pip install -e ".[gateway]"` also includes the file.
 
 ## Setup and configuration
@@ -82,7 +82,7 @@ or use --base-url to connect to an OpenAI-compatible endpoint.
 - **Cause:** there is no config file, and the command has no `--base-url`.
   `melo` exits with code 1.
 - **Fix:** run `melo` in a terminal, which asks for a model server and
-  saves it (see [First run](../cli.md#first-run)), or save a configuration
+  saves it (see [First run](../guides/terminal.md#first-run)), or save a configuration
   with `melo --serve --reconfigure`, or add `--base-url` and `--chat-model`.
 
 ### No backend is configured; run melo --reconfigure in a terminal
@@ -155,7 +155,7 @@ melo: error: LOCALMELO_THINKING_RETENTION_DAYS must be a number of days greater 
 - **Fix:** set a number of days, such as
   `export LOCALMELO_THINKING_RETENTION_DAYS=7`, or run
   `unset LOCALMELO_THINKING_RETENTION_DAYS` for the default of 30. See
-  [Model calls](../memory.md#model-calls).
+  [Model calls](memory.md#model-calls).
 
 ### TOMLDecodeError
 
@@ -182,11 +182,11 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 - **Fix:** list the server's models with `curl -sS <url>/v1/models`, use an
   id it lists, and check that a `POST /v1/embeddings` with that id returns a
   non-empty `data[0].embedding`. Then run `melo --reconfigure` again. See
-  [Set up an embedding model](../embedding.md#check-the-server).
+  [Set up an embedding model](../guides/embedding.md#check-the-server).
 - **Recall is empty after changing the model:** the old vectors have
   another dimension and are skipped. Restore the old model, or stop
   localmelo, remove `~/.cache/localmelo/memory/long_term.db*` and let the
-  store fill again. See [What changes](../embedding.md#what-changes).
+  store fill again. See [What changes](../guides/embedding.md#what-changes).
 
 ### Probe failed
 
@@ -218,7 +218,7 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 - **Cause:** the key is below a `[table]` line, where localmelo does not
   read it.
 - **Fix:** move it to the top of the file, before the first table. See
-  [Chat request timeout](../configuration.md#chat-request-timeout).
+  [Chat request timeout](configuration.md#chat-request-timeout).
 
 ## Runs that do not complete
 
@@ -282,7 +282,7 @@ melo: run ended with status budget_exhausted: Max steps reached
 - **Cause:** the run used all its steps without a final answer.
 - **Fix:** raise `--max-steps`, or make the task smaller. To see what the
   steps did, keep the run's history with `--memory-dir` and
-  [inspect it](../memory.md#inspect-memory).
+  [inspect it](../guides/memory.md#inspect-memory).
 
 ### stuck
 

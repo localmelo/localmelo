@@ -43,7 +43,7 @@ shows, and the `recall` tool lets the model ask for more. Every block is
 delimited, framed as data and checked by the candidate boundary, and the
 first request that carries one records it in `history.db`'s
 `llm_calls.recall_json`. `legacy` keeps its own path unchanged. See
-[Recall in the loop](../memory.md#recall-in-the-loop).
+[Recall in the loop](memory.md#recall-in-the-loop).
 
 ## Reflection
 
@@ -65,7 +65,7 @@ run ends as `gate_stopped`. With `--reflection-gate utility`, the behavior
 before that option, the reflection must also estimate that the gain of
 another attempt outweighs its cost and the risk of repeating itself: a
 utility score computed from its own estimates must reach 0.1.
-[Evaluations](../evaluations.md#reflection-gate) compares the two gates and runs
+[Evaluations](../project/evaluations.md#reflection-gate) compares the two gates and runs
 without reflection on coding exercises.
 
 More about reflections:
@@ -82,14 +82,14 @@ More about reflections:
   four actions, is asked for once more. If the second reply holds none
   either, the next attempt starts without a new reflection, or the run ends
   as `budget_exhausted` when none can start; see
-  [Run results](../run-results.md#statuses).
+  [Run results](../reference/run-results.md#statuses).
 
 ## Tools in each step
 
 Each step offers the model a list of tools, and only those tools can run in
 that step. By default the list holds every built-in tool plus the few other
 tools that match the task or that the model has already called in this
-conversation. See [How tools are offered](../tools.md#how-tools-are-offered).
+conversation. See [How tools are offered](../reference/tools.md#how-tools-are-offered).
 
 ## Memory in the loop
 
@@ -99,8 +99,8 @@ to the task. After each tool call, the step is recorded in history and, with
 an embedding backend, summarized into long-term memory, which also receives
 the run's latest reflection when the run ends. Also when the run ends, what
 it did (its step counts and the classes and labels of its tool calls) is
-recorded in [procedural memory](../procedures.md), which no prompt includes.
-See [How memory works](../memory.md#how-memory-works) for the limits and the
+recorded in [procedural memory](procedures.md), which no prompt includes.
+See [How memory works](memory.md#how-memory-works) for the limits and the
 exact behavior.
 
 In the explicit modes, a reply's note, the attempt digest and the reflection
@@ -113,7 +113,7 @@ and records one action (`NEW`, `UPDATE`, `RELATED`, `CONFLICT` or `IGNORE`)
 in the store's decision log. The text passes the candidate boundary with
 target `long`, so every stored text is redacted first. `legacy` keeps its
 old path: a step summary and the reflection promotion, unchanged. See
-[Long-term memory](../memory.md#long-term-memory).
+[Long-term memory](../reference/memory.md#long-term-memory).
 
 ## Timeouts
 
@@ -126,13 +126,13 @@ Three limits apply at different levels:
   written must finish within the timeout; a slow thinking model may need
   more. A server that sends keep-alive bytes while it generates never times
   out. A request that times out is retried twice. See
-  [Chat request timeout](../configuration.md#chat-request-timeout).
+  [Chat request timeout](../reference/configuration.md#chat-request-timeout).
 - **Tool time limits.** `shell_exec` 30 seconds, `python_exec` 60 seconds,
   `file_read` and `file_write` 60 seconds, MCP tools their server's
   `timeout`. `shell_exec` and `python_exec` run in a child process with a
   process group, which a timeout or a cancellation kills; the interactive
   UI gives them 10 minutes. See
-  [Work in a directory](../python-api.md#work-in-a-directory) for the Python
+  [Work in a directory](../guides/python.md#work-in-a-directory) for the Python
   API's `tool_timeout_s`.
 - **Run time limit** (`--timeout`). It is the only limit on a whole run. When
   it expires, the run ends as `timeout`.

@@ -32,7 +32,7 @@ Details:
   `empty replies`.
 - **`gate_stopped`.** The reflection chose `stop` or `decompose`, or its
   decision to continue did not pass the continuation gate (see
-  [Reflection](../how-it-works.md#reflection)). `result` holds the reflection's
+  [Reflection](../concepts/how-it-works.md#reflection)). `result` holds the reflection's
   best effort, if any, and `error` its reason, or `Stopped after attempt <n>`
   when it gave none. With `--reflection-gate utility`, an unreadable
   reflection stops the run too, and so does one over the size limit unless
@@ -69,10 +69,10 @@ Details:
 - **`crashed`.** The error is `<ExceptionType>: <message>`, and the
   traceback is logged. Ctrl+C ends a run as `crashed` with the error
   `CancelledError`, and SIGTERM or SIGHUP with `Cancelled by SIGTERM` or
-  `Cancelled by SIGHUP`. See [Signals](../cli.md#signals).
+  `Cancelled by SIGHUP`. See [Signals](cli.md#signals).
 - **`cancelled`.** Only for an interactive run whose task was cancelled: one
   started with `on_event` or `approval` in the Python API (see
-  [Stop a run](../python-api.md#stop-a-run)), or a web workspace chat stopped
+  [Stop a run](../guides/python.md#stop-a-run)), or a web workspace chat stopped
   with Stop or by its 600-second limit. The gateway runs each web chat with
   an event sink (see [Web workspace](../gateway.md#web-workspace)). `result` is
   empty, and `error` is the reason: the reason given to `Agent.begin_exit`
@@ -82,12 +82,12 @@ Details:
   direct mode, the `melo ""` loop and `POST /v1/agent/run` never report
   `cancelled`.
 
-[How localmelo works](../how-it-works.md) explains attempts, reflection and the
+[How localmelo works](../concepts/how-it-works.md) explains attempts, reflection and the
 continuation gate.
 
 ### A session turn's cause
 
-A turn of a [session](../sessions.md) ends with one of these statuses too, and
+A turn of a [session](sessions.md) ends with one of these statuses too, and
 with a `cause` that says what ended it:
 
 | `cause` | What ended the turn | Status |
@@ -201,7 +201,7 @@ second try may succeed:
 - The error names the request and, when the server answered, gives the HTTP
   status and the first 500 characters of the response body, for example
   `POST /chat/completions failed with HTTP 500: <html> …`.
-- Each attempt waits the full [chat request timeout](../configuration.md#chat-request-timeout).
+- Each attempt waits the full [chat request timeout](configuration.md#chat-request-timeout).
   A server that sends nothing therefore ends the run after about
   3 × the timeout + 5 seconds: about 365 seconds with the default of
   120 seconds.
@@ -213,12 +213,12 @@ second try may succeed:
 ## Where results appear
 
 - **Command line:** the result and the status line, or the JSON line. See
-  [Output](../cli.md#output).
+  [Output](cli.md#output).
 - **Gateway:** `POST /v1/agent/run` answers HTTP 200 with `result`: the
   answer or best effort, or `[<status>] <error>` when that is empty. The
   status is not reported otherwise. See [HTTP API](../gateway.md#http-api).
 - **Python:** `Agent.run_task()` returns a `RunResult`, and the
   `run.finished` event carries it too. See
-  [Python API](../python-api.md#results) and [Events](../events.md#runfinished).
+  [Python API](python-api.md#results) and [Events](events.md#runfinished).
 - **History:** each run's task record is saved with its status. See
-  [Task records](../memory.md#task-records).
+  [Task records](memory.md#task-records).

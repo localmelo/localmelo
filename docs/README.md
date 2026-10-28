@@ -6,72 +6,53 @@ tools and memory on your own model server or a cloud API. The website is at
 
 ## Start here
 
-- [Quickstart](quickstart.md): install localmelo, run a first task, save a
+- [Quickstart](start/quickstart.md): install localmelo, run a first task, save a
   configuration and start the gateway.
-- [localmelo for agents](for-agents.md): one compact page for AI coding
-  agents and LLM tools, indexed by [llms.txt](llms.txt). People can skip it.
+- [localmelo for agents](for-agents.md): a compact entry for coding agents and
+  LLM tools, indexed by [llms.txt](llms.txt).
 
 ## Guides
 
-- [Configuration](configuration.md): the setup wizard, the config file,
-  backends, API keys, timeouts and environment variables, and how to update
-  or uninstall localmelo.
-- [Set up an embedding model](embedding.md): what long-term memory needs,
-  the probe, and the Ollama, oMLX, vLLM, SGLang and MLC commands.
-- [Tools and MCP](tools.md): the built-in tools, MCP servers, which tools a
-  step offers, and what the checks do.
-- [Gateway and HTTP API](gateway.md): the HTTP API, sessions, the web
-  workspace, and running the gateway at login on macOS.
-- [API v2](api.md): the web console's `/api`: health, sessions, turns, the
-  event stream, blobs, submission lookups, the writes that run and approve
-  a turn, and its tools, grants, memory and runs.
-- [Memory](memory.md): what localmelo remembers, and how to keep, inspect and
-  reset it.
-- [Troubleshooting](troubleshooting.md): error messages and how to fix them.
+- [Interactive terminal](guides/terminal.md): chats, commands, approvals and sessions.
+- [Configure localmelo](guides/configure.md) and
+  [model servers](guides/model-servers.md): setup, backends and maintenance.
+- [Set up an embedding model](guides/embedding.md): servers and connection checks.
+- [Tools and MCP](guides/tools-mcp.md): selection, configuration and approvals.
+- [Gateway and HTTP API](gateway.md): startup, security, sessions and the workspace.
+- [API client](guides/api-client.md): create and follow a console session.
+- [Python examples](guides/python.md) and [sessions](guides/sessions.md).
+- [Memory](guides/memory.md): persistence, inspection, reset and privacy.
+- [Offline retrieval](guides/offline-retrieval.md) and
+  [scheduler](guides/scheduler.md): evaluation and simulation workflows.
+- [Troubleshooting](reference/troubleshooting.md): errors and fixes.
 
 ## Reference
 
-- [Command-line reference](cli.md): modes, options, output, exit codes and
-  signals.
-- [Run results](run-results.md): statuses, the run record, and retries.
-- [Python API](python-api.md): `Agent`, `AgentOptions` and `RunResult`,
-  stopping a run, approval policies and the workspace root.
-- [Events](events.md): the events a run reports to Python code, their order,
-  fields and rules.
-- [Sessions](sessions.md): conversations kept in SQLite, their turns, message
-  ids, restarts and resume.
-- [Offline retrieval](retrieval.md): `melo-retrieve`, which compares memory
-  retrievers and exports a run as a corpus: its options, formats, output and
-  exit codes.
-- [Procedural memory](procedures.md): the steps of recurring tasks, which
-  every run records at its end and which `run.progress` events report, and
-  `melo-procedures`, which replays the progress rules offline.
+- [Command line](reference/cli.md), [configuration](reference/configuration.md)
+  and [run results](reference/run-results.md).
+- [Python API](reference/python-api.md), [events](reference/events.md) and
+  [sessions](reference/sessions.md).
+- [API v2](reference/api-v2.md), [tools](reference/tools.md) and
+  [memory](reference/memory.md).
+- [Offline retrieval](reference/retrieval.md),
+  [procedures](reference/procedures.md) and [scheduler](reference/scheduler.md).
 
 ## Background
 
-- [How localmelo works](how-it-works.md): the run loop, reflection, memory
-  and timeouts.
-- [Evaluations](evaluations.md): the controlled comparisons behind the
-  defaults, such as the reflection gate, with their conditions and limits.
-- [Scheduler](scheduler.md): the scheduling policy core and its simulator,
-  for maintainers and the benchmark; the gateway's web chats are gated by
-  it, while direct runs and the CLI are not.
+- [How localmelo works](concepts/how-it-works.md): the run loop and reflection.
+- [Memory](concepts/memory.md), [retrieval](concepts/retrieval.md) and
+  [procedural memory](concepts/procedures.md): how the components work.
+- [Evaluations](project/evaluations.md): comparisons and their conditions.
 - [Architecture](https://localmelo.github.io/localmelo/en/architecture.html)
-  (website): how the parts fit together.
-- [Memory design](https://localmelo.github.io/localmelo/en/memory-design.html)
-  (website): the maintainer's memory design, parts of which are not built
-  yet.
-- [Roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap)
-  (website): plans and dated updates.
+  and [memory design](https://localmelo.github.io/localmelo/en/memory-design.html)
+  (website); [roadmap](https://localmelo.github.io/localmelo/en/updates.html#roadmap).
 
 ## Project
 
 - [Developer guide](https://localmelo.github.io/localmelo/en/developers.html)
-  (website): the repository layout, the development setup, the tests and
-  checks, and how to add a backend, a built-in tool or a check.
+  (website): repository layout, development, tests and contributions.
 - [Contributing](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md)
-- [Maintaining the docs](maintaining.md): the layout, publishing,
-  translation rules and glossary
+- [Maintaining the docs](project/documentation.md): layout and publishing
 - [Security policy](https://github.com/localmelo/localmelo/blob/main/SECURITY.md)
 - [Changelog](https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md)
 - [License](https://github.com/localmelo/localmelo/blob/main/LICENSE)

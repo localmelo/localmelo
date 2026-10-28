@@ -59,7 +59,7 @@ completed
 
 A run with `on_event` or an approval policy is an *interactive* run. That
 matters only when the run is cancelled: it then ends as `cancelled` instead
-of `crashed` (see [Stop a run](../python-api.md#stop-a-run)).
+of `crashed` (see [Stop a run](../guides/python.md#stop-a-run)).
 
 To watch a run without making it interactive, pass the function as
 `observe` instead. It receives the same events, but a cancelled run ends as
@@ -176,7 +176,7 @@ asyncio.run(main())
 - `query`: the task.
 - `max_steps`: the step budget of the run.
 - `workspace_root`: the agent's workspace root, or `null`; see
-  [Work in a directory](../python-api.md#work-in-a-directory).
+  [Work in a directory](../guides/python.md#work-in-a-directory).
 - `approval`: `true` when the run has an approval policy.
 
 ### step.started
@@ -216,7 +216,7 @@ The redaction runs on the whole text, before it is clipped, and only for a
 run with a sink. Working memory, the requests a run sends, the `RunResult`
 and `run.finished` keep the text as the model wrote it, while history
 stores its tasks and steps with the same redaction, and its model calls
-too (see [Model calls](../memory.md#model-calls)).
+too (see [Model calls](memory.md#model-calls)).
 
 ### tool.started
 
@@ -269,7 +269,7 @@ The number of `tool.started` events is `RunResult.n_tool`.
   decision's
   (`user`, `session`, `policy` or `timeout`), `error` when the policy failed,
   or `withdrawn` when the run was cancelled while the policy decided. See
-  [Approve tool calls](../python-api.md#approve-tool-calls).
+  [Approve tool calls](../guides/python.md#approve-tool-calls).
 - `exit_code`: the exit status of the child process that `shell_exec` or
   `python_exec` ran; a negative value `-N` means that signal `N` ended it. It
   is `null` for every other tool, for a call whose child never started, and
@@ -319,7 +319,7 @@ ignores it.
 | `stuck` | An attempt ends because the same tool calls or errors repeated. | `The same tool calls or errors repeated; the attempt ends.` | `{}` |
 | `budget` | An attempt ends because it used its steps. | `The attempt used its step budget.` | `{}` |
 | `empty_reply` | The model gave an empty reply, and localmelo asks it to continue. A second empty reply in a row ends the run as `failed` instead, with no notice. | `The model returned an empty reply; asking it to continue.` | `{"count": <empty replies in a row>}` |
-| `retry` | A model request failed and is sent again after a delay; see [Provider errors and retries](../run-results.md#provider-errors-and-retries). | `Model request failed; retrying in <delay> s: <the first 200 characters of the error>` | `{"request_attempt", "delay_s", "status_code"}` |
+| `retry` | A model request failed and is sent again after a delay; see [Provider errors and retries](run-results.md#provider-errors-and-retries). | `Model request failed; retrying in <delay> s: <the first 200 characters of the error>` | `{"request_attempt", "delay_s", "status_code"}` |
 
 `step` and `attempt` are those of the latest `step.started`.
 
@@ -381,8 +381,8 @@ is in `memory_stats.recall_log` and, with its item text, in
   recording the replies in history, which can wait up to 5 seconds while
   another process writes to `history.db`.
 
-See [Reflection](../how-it-works.md#reflection) and
-[Run results](../run-results.md#statuses).
+See [Reflection](../concepts/how-it-works.md#reflection) and
+[Run results](run-results.md#statuses).
 
 ### run.progress
 
@@ -390,9 +390,9 @@ Where the run stands, for a progress display. It comes only when
 `run_task` gets `progress=True` and a sink. A session turn's sink is its
 runner's, so the turn stores and forwards `run.progress` events only when
 its `SessionRunner` was built with `progress=True` (see
-[Sessions](../sessions.md#run-a-conversation)). Every key is always present,
+[Sessions](../guides/sessions.md#run-a-conversation)). Every key is always present,
 `null` where it is unknown. What it shows rests on the run's routine, as
-[procedural memory](../procedures.md) remembers it on this model with these
+[procedural memory](../concepts/procedures.md) remembers it on this model with these
 options:
 
 | Key | Meaning |
@@ -401,7 +401,7 @@ options:
 | `state` | `running`, then `ended` on the event right before `run.finished`. |
 | `step`, `attempt` | Those of the latest `step.started`; 0 before the first step. |
 | `limits` | `{max_steps, steps_per_attempt, max_attempts, timeout_s}`: the run's budgets, `null` where the run has none (the attempt limits with `attempt_policy="none"`). `max_steps` is a budget, not the expected length. |
-| `phase`, `cycle` | `Explore`, `Write`, `Verify` or `Finishing`, from the classes of the run's tool calls (see [Classes and phases](../procedures.md#classes-and-phases)), and the number of tests after a write; `null` and 0 before the first call. |
+| `phase`, `cycle` | `Explore`, `Write`, `Verify` or `Finishing`, from the classes of the run's tool calls (see [Classes and phases](../concepts/procedures.md#classes-and-phases)), and the number of tests after a write; `null` and 0 before the first call. |
 | `tests` | `{passed, failed, total}` from the latest pytest or unittest summary in a test call's output, or `null`. |
 | `items` | Level 1: the routine's named steps, each `{label, state, repeat}`, `state` being `done`, `current`, `pending` or `skipped`; they tick forward only. `null` at level 0. |
 | `fraction`, `expected_steps` | Always `null` in this release. |
@@ -532,7 +532,7 @@ returned.
 
 ## Session events
 
-A [session](../sessions.md) stores the events of each turn, the run's events
+A [session](sessions.md) stores the events of each turn, the run's events
 above, between two events of its own, and adds a few for the session. Each
 stored event has a global `id`, the `session_id` and the `turn`, and its
 `event` is the envelope of `to_dict()`; a session event has `"seq": null`
@@ -553,10 +553,10 @@ and `"run_id": ""`.
   `session.updated` events may not have this key; clients must tolerate its
   absence.
 - `client_request_id` is the message id of the turn's
-  [submission](../sessions.md#message-ids-and-submissions), or `null`.
+  [submission](sessions.md#message-ids-and-submissions), or `null`.
 - `cause` says what ended the turn: `run`, `user_stop`, `closed`,
   `shutdown`, `crash`, `takeover` or `park`; see
-  [Turns, statuses and causes](../sessions.md#turns-statuses-and-causes).
+  [Turns, statuses and causes](sessions.md#turns-statuses-and-causes).
 - `outcome` is `allowed`, `denied` or `withdrawn`. `origin` is the
   decision's, as in `tool.finished`'s `approval`: `user`, `session`,
   `policy` or `timeout`; `error` when the ask failed; or `withdrawn` when

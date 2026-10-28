@@ -148,7 +148,12 @@ def check_fragment_mapping(
     assert not extra, f"{alias}: unexpected historical anchors {sorted(extra)}"
     for fragment, destination in mapping.items():
         target, sep, anchor = destination.partition("#")
-        assert sep and fragment and anchor == fragment, (alias, fragment, destination)
+        assert (
+            sep
+            and fragment
+            and anchor
+            and (anchor == fragment or fragment in RETIRED_FRAGMENTS.get(alias, set()))
+        ), (alias, fragment, destination)
         assert (
             safe_path(target) and target.startswith(prefix) and target.endswith(".html")
         ), alias
@@ -229,6 +234,45 @@ def test_historical_fragments_survive_page_moves() -> None:
             assert (
                 target_anchor in target_ids
             ), f"{source}#{anchor}: missing {destination}"
+
+
+def test_entry_point_document_links() -> None:
+    prefixes = (
+        ("https://localmelo.github.io/localmelo/", ROOT / "docs"),
+        ("https://github.com/localmelo/localmelo/blob/main/", ROOT),
+    )
+    for name in (
+        "README.md",
+        "README.zh-CN.md",
+        "docs/README.md",
+        "docs/llms.txt",
+        "docs/for-agents.md",
+    ):
+        source = ROOT / name
+        _, links = inventory(source.read_text(), source.suffix)
+        for link in links:
+            base = source.parent
+            value = link
+            for prefix, root in prefixes:
+                if link.startswith(prefix):
+                    base, value = root, link.removeprefix(prefix)
+                    break
+            else:
+                if urlsplit(link).scheme or link.startswith("//"):
+                    continue
+            parsed = urlsplit(value)
+            target = (base / unquote(parsed.path)).resolve() if parsed.path else source
+            if not target.is_relative_to(ROOT / "docs") or target.suffix not in {
+                ".md",
+                ".txt",
+            }:
+                continue
+            assert target.is_file(), f"{name}: missing {link}"
+            if parsed.fragment:
+                anchors, _ = inventory(target.read_text(), target.suffix)
+                assert (
+                    unquote(parsed.fragment) in anchors
+                ), f"{name}: missing anchor {link}"
 
 
 def test_manifest_schema_and_inventory() -> None:

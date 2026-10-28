@@ -32,7 +32,7 @@ estimates to reach 0.1. They also differ in two other cases:
   keeps its decision; `utility` ends the run, unless the reflection chose
   `done`.
 
-See [Reflection](../how-it-works.md#reflection).
+See [Reflection](../concepts/how-it-works.md#reflection).
 
 The comparison measures these differences together. It does not say how much
 each one contributes.

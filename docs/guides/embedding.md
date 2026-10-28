@@ -8,7 +8,7 @@ already serves.
 
 With an embedding backend, a run writes short summaries and reflections to
 long-term memory and recalls the closest entries on each step; see
-[Memory](../memory.md#what-localmelo-remembers). Without one, long-term memory
+[Memory](../concepts/memory.md#what-localmelo-remembers). Without one, long-term memory
 is inert: nothing is recalled and nothing is written.
 
 Embedding recall itself is planned, not part of this setup. The retriever
@@ -101,7 +101,7 @@ embedding_url = "http://127.0.0.1:8000/v1"
 embedding_model = "Qwen3-Embedding-0.6B"
 ```
 
-See [oMLX](../configuration.md#omlx) for the rest of that setup.
+See [oMLX](model-servers.md#omlx) for the rest of that setup.
 
 ## vLLM
 
@@ -173,7 +173,7 @@ embedding_url = "http://127.0.0.1:11434"
 embedding_model = "nomic-embed-text"
 ```
 
-See [Mix backends](../configuration.md#mix-backends).
+See [Mix backends](model-servers.md#mix-backends).
 
 ## What changes
 
@@ -187,7 +187,7 @@ See [Mix backends](../configuration.md#mix-backends).
   dimension differs from the new model's is skipped, so old entries stop
   ranking instead of breaking recall. To reclaim the space, stop localmelo
   and remove `~/.cache/localmelo/memory/long_term.db*`; see
-  [Reset memory](../memory.md#reset-memory).
+  [Reset memory](memory.md#reset-memory).
 - The web workspace has its own embedding selector; this setting does not
   change it. See [the web workspace](../gateway.md#web-workspace).
 
@@ -197,10 +197,10 @@ See [Mix backends](../configuration.md#mix-backends).
 - Once `/status` is available, its `memory` row comes from the same text.
 - Run a task that uses a tool, end it, then run a related task: the second
   run recalls the first if persistence is on. See
-  [Keep memory between runs](../memory.md#keep-memory-between-runs).
+  [Keep memory between runs](memory.md#keep-memory-between-runs).
 - To measure a model on your own corpus, use
   `melo-retrieve --retriever embedding …`; see
-  [Offline retrieval](../retrieval.md).
+  [Offline retrieval](../reference/retrieval.md).
 
 ## Troubleshooting
 
@@ -214,4 +214,4 @@ See [Mix backends](../configuration.md#mix-backends).
   dimension and are skipped. Restore the old model, or remove
   `long_term.db*` and let it fill again.
 
-More errors: [Troubleshooting](../troubleshooting.md#an-embedding-model-cannot-be-used).
+More errors: [Troubleshooting](../reference/troubleshooting.md#an-embedding-model-cannot-be-used).
