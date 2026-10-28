@@ -239,7 +239,9 @@ def add_routes(app: FastAPI, console: Console) -> None:
         records = (
             await _store_call(
                 console,
-                console.worker_history.workers(limit=1, query="", session_id=session_id),
+                console.worker_history.workers(
+                    limit=1, query="", session_id=session_id
+                ),
             )
             if worker
             else []

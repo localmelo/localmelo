@@ -223,7 +223,7 @@ async def test_worker_filters_and_cursor_over_200(
     ]
     assert [row["id"] for row in filtered["sessions"]] == expected_filtered
     assert filtered["next_cursor"] is None
-    paged = []
+    paged: list[str] = []
     next_cursor = None
     while True:
         params = {

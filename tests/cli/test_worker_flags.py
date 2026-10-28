@@ -45,7 +45,9 @@ def test_worker_flags_are_explicit() -> None:
 
 
 def test_import_mode_runs_without_configuration(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     log = tmp_path / "log.jsonl"
