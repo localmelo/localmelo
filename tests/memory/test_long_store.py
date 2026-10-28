@@ -99,6 +99,16 @@ async def test_task_filtered_search_uses_the_full_corpus_scores(
             await reopened.aclose()
 
 
+async def test_in_memory_filtered_search_indexes_its_rows() -> None:
+    store = SqliteLongTerm(":memory:")
+    try:
+        await _apply(store, "Berlin is the capital", kind="semantic")
+        rows = await store.search_text("Berlin", kinds=["semantic"])
+        assert [text for text, _score, _meta in rows] == ["Berlin is the capital"]
+    finally:
+        await store.aclose()
+
+
 async def test_add_keeps_its_signature_and_writes_the_legacy_defaults(
     tmp_path: Path,
 ) -> None:

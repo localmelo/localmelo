@@ -155,6 +155,58 @@ async def test_same_task_survives_top_twenty_and_is_counted(tmp_path: Path) -> N
 
 
 @pytest.mark.asyncio
+async def test_a_stronger_cross_task_digest_passes_the_ratio(tmp_path: Path) -> None:
+    class FakeEmbedding:
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            return [[1.0, 0.0] for _text in texts]
+
+        async def close(self) -> None:
+            pass
+
+    server = FakeLLM(_answer("done"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            retriever="embedding",
+            max_steps=1,
+        ),
+        embedding=FakeEmbedding(),
+    )
+    query = "transpose matrix"
+    for name, text, vector, key, task_id in (
+        ("same", "same task marker", [0.8, 0.6], digest_task_key(query), "earlier"),
+        ("cross", "cross task marker", [1.0, 0.0], "", "other"),
+    ):
+        await agent.hippo.long.apply(
+            text=text,
+            kind="episodic",
+            source="digest",
+            admitted_by="outcome",
+            provenance={"task_key": key},
+            task_id=task_id,
+            session_id="",
+            created_at=1.0,
+            embedding=vector,
+            action="NEW",
+            target_id=None,
+            reason="seed",
+            source_ids=[],
+            keep_text=False,
+            candidate_id=name,
+        )
+    result = await agent.run_task(query)
+    await agent.close()
+    prompt = _prompt(server)
+    assert "same task marker" in prompt
+    assert "cross task marker" in prompt  # 1.0 >= 1.1 * 0.8
+    assert result.memory_stats is not None
+    assert result.memory_stats["recall_same_task"] >= 1
+    assert result.memory_stats["recall_cross_task"] >= 1
+
+
+@pytest.mark.asyncio
 async def test_a_superseded_entry_is_never_recalled(tmp_path: Path) -> None:
     server = FakeLLM(_answer("done"))
     agent = _agent(

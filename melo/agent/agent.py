@@ -2725,11 +2725,11 @@ class Agent:
             remember=True,
             stage=entry.stage,
         )
-        task_line = next(
-            (line[6:] for line in checked.splitlines() if line.startswith("task: ")), ""
-        )
         provenance = self._memory_provenance(run, note=note)
-        provenance["task_key"] = digest_task_key(task_line)
+        # Key the digest by the run's task, the same input recall hashes: the
+        # checked text may have escaped a role token or cut a long plan, and a
+        # key read from it would no longer match this run's task.
+        provenance["task_key"] = digest_task_key(query)
         candidate = MemoryCandidate(
             candidate_id=note.note_id,
             source="digest",

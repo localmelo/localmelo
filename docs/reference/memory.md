@@ -24,10 +24,12 @@ page.
 ## Digest recall
 
 A digest is eligible for long-term admission only when its checked text has a
-nonempty `files:` or `verified:` line. Its normalized, redacted task line is
-hashed into its provenance; a hash is not a privacy guarantee against guessing.
-Digests with no key, including old entries, are cross-task. The first meaningful
-sentence is bounded, so distinct tasks with the same task line can share a key.
+nonempty `files:` or `verified:` line. An admitted digest stores a hash of its
+run's normalized, redacted task line in its provenance, so a sanitized or
+truncated rendered line cannot change the key; a hash is not a privacy guarantee
+against guessing. Digests with no key, including old entries, are cross-task.
+The first meaningful sentence is bounded, so distinct tasks with the same task
+line can share a key.
 
 Within the long-term candidate pool, same-task episodic digests rank first. The
 store also searches for the best matching same-task digests beyond that pool.

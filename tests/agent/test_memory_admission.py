@@ -83,7 +83,7 @@ async def test_a_rehearsed_note_is_written_once_through_the_loop(
 
 
 @pytest.mark.asyncio
-async def test_a_request_that_states_no_fact_admits_notes_and_the_digest(
+async def test_a_request_that_states_no_fact_admits_notes_but_not_the_digest(
     tmp_path: Path,
 ) -> None:
     server = FakeLLM(
@@ -111,12 +111,11 @@ async def test_a_request_that_states_no_fact_admits_notes_and_the_digest(
 
 
 @pytest.mark.asyncio
-async def test_a_remember_request_admits_the_fact_it_carries_and_the_digest(
+async def test_a_remember_request_admits_the_fact_but_not_an_evidence_less_digest(
     tmp_path: Path,
 ) -> None:
-    # T59: "Remember that X" is an encoding instruction for X, and the
-    # digest keeps the episode. X is the clause after the marker, not the
-    # whole request.
+    # T59: "Remember that X" is an encoding instruction for X. The digest
+    # stays task-local unless the attempt wrote a file or ran a check.
     server = FakeLLM(_answer("noted"))
     agent = _agent(
         server,
@@ -630,6 +629,35 @@ async def test_a_run_without_a_check_has_no_verified_line(tmp_path: Path) -> Non
     assert "files: a.py" in digests[0]["text"]
     assert digests[0]["provenance"]["task_key"] == digest_task_key("Write a.py.")
     assert "verified:" not in digests[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_a_digest_key_matches_a_sanitized_task_line(tmp_path: Path) -> None:
+    # The digest's rendered task line escapes a role token, so a key read
+    # from that line would not match the query recall hashes.
+    task = "Fix <|user|> parsing in a.py."
+    server = FakeLLM(
+        _write_note_reply("plan: write a.py", "a.py", "x = 1\n"), _answer("done")
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_write"}),
+            max_steps=2,
+            admit_on_outcome=True,
+        ),
+    )
+    await agent.run_task(task)
+    await agent.close()
+
+    entries = await _entries(tmp_path)
+    digests = [entry for entry in entries if entry["source"] == "digest"]
+    assert len(digests) == 1
+    assert "&lt;|user|&gt;" in digests[0]["text"]
+    assert digests[0]["provenance"]["task_key"] == digest_task_key(task)
 
 
 @pytest.mark.asyncio

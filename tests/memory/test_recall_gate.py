@@ -1,7 +1,11 @@
 import pytest
 
 from localmelo.melo.agent.options import AgentOptions
-from localmelo.melo.memory.recall_gate import digest_task_key, gate_long_docs
+from localmelo.melo.memory.recall_gate import (
+    digest_has_evidence,
+    digest_task_key,
+    gate_long_docs,
+)
 from localmelo.melo.memory.retrieval.base import Doc
 
 
@@ -39,6 +43,21 @@ def test_warm_gate_prioritizes_same_and_requires_comparable_stronger_cross() -> 
     assert [d.doc_id for d in kept] == ["long:same", "long:cross"]
 
 
+def test_a_cross_task_digest_below_the_ratio_is_dropped() -> None:
+    # Cap 2 leaves room, so only the ratio can drop the cross digest.
+    docs = [doc("same", 10.0, "key"), doc("just-under", 10.999)]
+    assert [
+        d.doc_id for d in gate_long_docs(docs, "key", ratio=1.1, cap=2, cold=1)
+    ] == ["long:same"]
+    docs.append(doc("at-threshold", 11.0))
+    assert [
+        d.doc_id for d in gate_long_docs(docs, "key", ratio=1.1, cap=2, cold=1)
+    ] == [
+        "long:same",
+        "long:at-threshold",
+    ]
+
+
 def test_cold_gate_and_unknown_keys() -> None:
     docs = [doc("first", 5), doc("second", 4)]
     assert [
@@ -46,6 +65,23 @@ def test_cold_gate_and_unknown_keys() -> None:
     ] == ["long:first"]
     assert gate_long_docs(docs, "key", ratio=1.1, cap=1, cold=0) == []
     assert gate_long_docs(docs, "", ratio=1.1, cap=0, cold=1) == []
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("task: x\nfiles: a.py", True),
+        ("task: x\nverified: pytest passed", True),
+        ("task: x\nfiles:   ", False),
+        ("task: x\nverified:", False),
+        ("task: x\nfound: files: a.py", False),
+        ("task: x\noutcome: completed", False),
+    ],
+)
+def test_digest_evidence_needs_a_nonempty_files_or_verified_line(
+    text: str, expected: bool
+) -> None:
+    assert digest_has_evidence(text) is expected
 
 
 def test_general_memories_bypass_digest_gate() -> None:

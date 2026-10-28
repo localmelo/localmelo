@@ -460,7 +460,7 @@ async def test_missing_item_sources_fall_back_to_candidate_sources() -> None:
     assert decisions[0].source_ids == ("r1",)
 
 
-async def test_completed_outcome_exempts_a_bare_meta_digest() -> None:
+async def test_a_bare_meta_digest_keeps_the_policy_exemption_but_is_refused() -> None:
     store = LongTerm()
     hippo = Hippo(long=store, admit_on_outcome=True)
     text = "I've read and remembered all of Jamie's records."
