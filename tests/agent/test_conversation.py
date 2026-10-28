@@ -680,7 +680,6 @@ class TestStartAndTools:
             "file_read": ("builtin", False),
             "file_write": ("builtin", True),
             "python_exec": ("builtin", True),
-            "shell_exec": ("builtin", True),
             "weather": ("provided", True),
         }
         [weather] = [tool for tool in tools if tool.name == "weather"]
@@ -697,7 +696,6 @@ class TestStartAndTools:
             "file_read": "read",
             "file_write": "write",
             "python_exec": "exec",
-            "shell_exec": "exec",
             "weather": "write",
         }
         # A copy: changing it does not change the registered tool.

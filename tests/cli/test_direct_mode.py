@@ -57,6 +57,7 @@ def _agent(*outcomes: RunResult) -> mock.MagicMock:
     agent = mock.MagicMock()
     agent.run_task = mock.AsyncMock(side_effect=list(outcomes))
     agent.close = mock.AsyncMock()
+    agent.options = AgentOptions(mode="direct")
     return agent
 
 
@@ -170,7 +171,8 @@ class TestFlags:
         )
 
     @pytest.mark.parametrize(
-        ("value", "builtins"), [("all", None), ("none", frozenset())]
+        ("value", "builtins"),
+        [("all", frozenset(builtin_names())), ("none", frozenset())],
     )
     def test_builtins_all_and_none(
         self, value: str, builtins: frozenset[str] | None
@@ -879,6 +881,8 @@ class TestInteractive:
         assert out == (
             "localmelo · local agent\n"
             "Enter a task to begin. Type /help for commands or /exit to quit.\n"
+            "shell_exec is off in this loop; start melo with --builtins all "
+            "to turn it on.\n"
             "\nsecond answer\n"
         )
         assert err == "melo: run ended with status provider_error: HTTP 500\n"
@@ -890,6 +894,16 @@ class TestInteractive:
             assert asyncio.run(cli._run(agent, None)) == cli.EXIT_COMPLETED
         agent.run_task.assert_not_awaited()
         agent.close.assert_awaited_once()
+
+    def test_the_notice_is_not_printed_when_shell_exec_is_on(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        agent = _agent()
+        agent.options = AgentOptions(mode="direct", builtins=frozenset({"shell_exec"}))
+        with mock.patch("builtins.input", side_effect=EOFError):
+            assert asyncio.run(cli._run(agent, None)) == cli.EXIT_COMPLETED
+        out, _ = capsys.readouterr()
+        assert "shell_exec is off" not in out
 
 
 # ── SIGTERM and SIGHUP ──────────────────────────────────────────────────────

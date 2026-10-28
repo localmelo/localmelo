@@ -336,7 +336,7 @@ class TestMultiCallExecution:
         second = _planning_calls(llm)[1]["messages"]
         assert_protocol_valid(second)
         results = {m.tool_call_id: m.content for m in second if m.role == "tool"}
-        assert results[calls[0].id].startswith("Error: Blocked")
+        assert results[calls[0].id].startswith("Error: Tool not found")
         assert results[calls[1].id].startswith("Error: Tool not found")
         assert results[calls[2].id] == "still runs"
 

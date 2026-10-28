@@ -268,6 +268,8 @@ def test_a_signal_stops_the_run_and_everything_it_started(
             str(memory_dir),
             "--tool-exposure",
             "all",
+            "--builtins",
+            "all",
             "--output-format",
             output_format,
             "run the command",

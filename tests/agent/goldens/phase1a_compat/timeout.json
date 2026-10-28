@@ -19,19 +19,14 @@
       "max_attempts": 5,
       "reflection_gate": "flags",
       "tool_exposure": "retrieve",
+      "mode": "python",
       "builtins": [
-        "file_read",
-        "file_write",
-        "python_exec",
         "shell_exec"
       ],
       "memory": true,
       "memory_dir": "<memory_dir>",
       "timeout_s": 1.0,
       "tools": [
-        "file_read",
-        "file_write",
-        "python_exec",
         "shell_exec"
       ]
     }
@@ -39,9 +34,6 @@
   "requests": [
     {
       "tools": [
-        "file_read",
-        "file_write",
-        "python_exec",
         "shell_exec"
       ],
       "messages": [

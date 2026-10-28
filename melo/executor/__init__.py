@@ -41,11 +41,12 @@ def register_builtins(
     """Register built-in tools with the executor and hippo.
 
     *names* selects the built-ins to register: ``None`` registers the
-    default set of *mode* (all four for ``python``, the same as before this
-    argument existed, and for ``direct`` in this release; the gateway's set leaves
-    ``shell_exec`` out), an empty collection none. An explicit collection
-    always wins, whatever the mode. An unknown name raises ``ValueError``
-    before anything is registered.
+    default set of *mode* (``file_read``, ``file_write`` and ``python_exec``
+    for ``direct``, ``gateway`` and ``python``; ``shell_exec`` too for
+    ``interactive``, whose panel asks before an ``exec`` call runs), an
+    empty collection none. An explicit collection always wins, whatever the
+    mode, so ``--builtins all`` gives ``shell_exec`` in direct mode too. An
+    unknown name raises ``ValueError`` before anything is registered.
 
     The tools whose tier is not read are registered as requiring approval
     (the names in :data:`APPROVAL_BUILTINS`): a call of one asks the

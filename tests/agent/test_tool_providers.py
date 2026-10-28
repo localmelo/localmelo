@@ -11,9 +11,9 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.checker import DEFAULT_BUILTINS
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
-from localmelo.melo.executor import builtin_names
 from localmelo.melo.schema import Message, TaskRecord, ToolCall, ToolDef
 
 # ── Fakes ───────────────────────────────────────────────────────────────────
@@ -214,15 +214,17 @@ class TestSetup:
         result = await agent.run_task("q")
 
         provided = {"slow_tool", "quick_tool"}
-        assert {t.name for t in agent.hippo.list_tools()} == builtin_names() | provided
+        assert {t.name for t in agent.hippo.list_tools()} == DEFAULT_BUILTINS[
+            "python"
+        ] | provided
         assert provided <= set(agent.executor._callables)
         # A provider's timeout_ms is registered with the executor; without
         # one, the executor's default applies.
         assert agent.executor._timeouts_ms.get("slow_tool") == 1500.0
         assert "quick_tool" not in agent.executor._timeouts_ms
         # config.tools lists every registered tool; builtins only built-ins.
-        assert result.config["tools"] == sorted(builtin_names() | provided)
-        assert result.config["builtins"] == sorted(builtin_names())
+        assert result.config["tools"] == sorted(DEFAULT_BUILTINS["python"] | provided)
+        assert result.config["builtins"] == sorted(DEFAULT_BUILTINS["python"])
 
     @pytest.mark.asyncio
     async def test_a_provided_tool_runs_through_the_agent(self) -> None:
@@ -287,13 +289,13 @@ class TestSetupErrors:
     @pytest.mark.asyncio
     async def test_a_name_taken_by_a_builtin(self) -> None:
         llm = FakeLLM([_answer("never sent")])
-        provider = FakeToolProvider("p", ["mine", "shell_exec"])
+        provider = FakeToolProvider("p", ["mine", "file_read"])
         agent = _agent(llm, [provider])
-        builtin = agent.hippo.get_tool("shell_exec")
-        builtin_fn = agent.executor._callables["shell_exec"]
+        builtin = agent.hippo.get_tool("file_read")
+        builtin_fn = agent.executor._callables["file_read"]
 
         result = await agent.run_task("q")
-        error = "Provided tool 'shell_exec' collides with a registered tool"
+        error = "Provided tool 'file_read' collides with a registered tool"
         assert (result.status, result.result, result.error) == (
             "setup_error",
             "",
@@ -307,10 +309,10 @@ class TestSetupErrors:
         )
         assert llm.calls == []
         # Nothing was registered or replaced, and the provider is closed.
-        assert agent.hippo.get_tool("shell_exec") is builtin
-        assert agent.executor._callables["shell_exec"] is builtin_fn
+        assert agent.hippo.get_tool("file_read") is builtin
+        assert agent.executor._callables["file_read"] is builtin_fn
         assert agent.hippo.get_tool("mine") is None
-        assert result.config["tools"] == sorted(builtin_names())
+        assert result.config["tools"] == sorted(DEFAULT_BUILTINS["python"])
         assert (provider.starts, provider.closes, provider.running) == (1, 1, False)
         # The task row is saved with the status; the query never reached
         # working memory.

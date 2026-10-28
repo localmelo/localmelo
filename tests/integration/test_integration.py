@@ -1175,8 +1175,8 @@ class TestThreeWayBoundary:
 
     @pytest.mark.asyncio
     async def test_blocked_command_produces_error_in_step_record(self) -> None:
-        """A blocked shell command flows through Agent -> Executor -> Checker
-        and the step record must contain the 'Blocked' error."""
+        """An unoffered shell command flows through Agent -> Executor and the
+        step record must contain the refusal, so the destructive call cannot run."""
         llm = FakeLLM()
         llm.responses.append(
             Message(
@@ -1198,7 +1198,8 @@ class TestThreeWayBoundary:
         steps = await agent.hippo.history.get_steps(tasks[0].task_id)
         assert len(steps) == 1
         assert steps[0].tool_result is not None
-        assert "Blocked" in steps[0].tool_result.error
+        assert "shell_exec" in steps[0].tool_result.error
+        assert "not found in registry" in steps[0].tool_result.error
 
         await agent.close()
 

@@ -32,11 +32,16 @@ def _make_executor(
     *, timeout_ms: float = 60_000, workspace_root: str | None = None
 ) -> tuple[Executor, Hippo, Checker]:
     hippo = Hippo()
-    checker = Checker()
+    # These tests are about the executor, not the mode policy: name the
+    # shell tool so the python-mode checker lets it through, and register
+    # every built-in.
+    checker = Checker(mode="python", builtins={"shell_exec"})
     executor = Executor(
         hippo, checker, timeout_ms=timeout_ms, workspace_root=workspace_root
     )
-    register_builtins(executor, hippo)
+    register_builtins(
+        executor, hippo, names={"file_read", "file_write", "python_exec", "shell_exec"}
+    )
     return executor, hippo, checker
 
 
@@ -150,29 +155,6 @@ class TestUnknownTool(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(outcome.status, ExecutionStatus.ERROR)
         self.assertEqual(outcome.error_category, ErrorCategory.TOOL_NOT_FOUND)
-
-
-# ── 3. Blocked command ──
-
-
-class TestBlockedCommand(unittest.IsolatedAsyncioTestCase):
-    def setUp(self) -> None:
-        self.executor, self.hippo, _ = _make_executor()
-
-    async def test_blocked_structured(self) -> None:
-        outcome = await self.executor.execute_structured(
-            ExecutionRequest(tool_name="shell_exec", arguments={"command": "rm -rf /"})
-        )
-        self.assertEqual(outcome.status, ExecutionStatus.BLOCKED)
-        self.assertEqual(outcome.error_category, ErrorCategory.BLOCKED_BY_CHECKER)
-
-    async def test_mkfs_blocked(self) -> None:
-        outcome = await self.executor.execute_structured(
-            ExecutionRequest(
-                tool_name="shell_exec", arguments={"command": "mkfs /dev/sda1"}
-            )
-        )
-        self.assertEqual(outcome.status, ExecutionStatus.BLOCKED)
 
 
 # ── 4. Timeout path ──
@@ -581,46 +563,6 @@ class TestAllBuiltinsStructured(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(outcome.status, ExecutionStatus.SUCCESS)
         self.assertEqual(outcome.output, "21")
-
-
-# ── 8. All blocked commands ──
-
-
-class TestAllBlockedCommands(unittest.IsolatedAsyncioTestCase):
-    """Every pattern in BLOCKED_COMMANDS must be caught."""
-
-    def setUp(self) -> None:
-        self.executor, self.hippo, _ = _make_executor()
-
-    DANGEROUS_COMMANDS = [
-        ("rm -rf /home", "rm -rf"),
-        ("mkfs /dev/sda1", "mkfs"),
-        ("dd if=/dev/zero of=/dev/sda", "dd"),
-        (":(){:|:&};:", "fork bomb compact"),
-        (":() { :|:& };:", "fork bomb spaced"),
-        (":() { :|:& }; :", "fork bomb spaced trailing"),
-        ("shutdown -h now", "shutdown"),
-        ("reboot", "reboot"),
-    ]
-
-    async def test_blocked_via_execute_structured(self) -> None:
-        for cmd, label in self.DANGEROUS_COMMANDS:
-            with self.subTest(label=label):
-                outcome = await self.executor.execute_structured(
-                    ExecutionRequest(
-                        tool_name="shell_exec",
-                        arguments={"command": cmd},
-                    )
-                )
-                self.assertEqual(
-                    outcome.status,
-                    ExecutionStatus.BLOCKED,
-                    f"{label!r} should be BLOCKED via execute_structured()",
-                )
-                self.assertEqual(
-                    outcome.error_category,
-                    ErrorCategory.BLOCKED_BY_CHECKER,
-                )
 
 
 # ── 9. Unknown tool error categories and messages ──

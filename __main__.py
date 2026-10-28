@@ -22,6 +22,7 @@ from localmelo.melo.agent.options import (
     ReasoningMode,
     reasoning_refusal,
 )
+from localmelo.melo.checker import builtin_set_for
 from localmelo.melo.executor import builtin_names
 from localmelo.melo.memory.recall import (
     RECALL_K_MAX,
@@ -485,6 +486,13 @@ async def _run(
         _enable_line_editing()
         print("localmelo · local agent")
         print("Enter a task to begin. Type /help for commands or /exit to quit.")
+        if "shell_exec" not in builtin_set_for(
+            agent.options.mode, agent.options.builtins
+        ):
+            print(
+                "shell_exec is off in this loop; start melo with --builtins all "
+                "to turn it on."
+            )
         while True:
             try:
                 q = await _prompt()
@@ -653,9 +661,9 @@ def _routine_name(text: str) -> str:
 def _parse_builtins(
     parser: argparse.ArgumentParser, text: str
 ) -> frozenset[str] | None:
-    """``all`` (None: every built-in), ``none`` or comma-separated names."""
+    """``all`` (every built-in, named explicitly), ``none`` or a name list."""
     if text == "all":
-        return None
+        return frozenset(builtin_names())
     if text == "none":
         return frozenset()
     names = [name.strip() for name in text.split(",")]
@@ -776,7 +784,7 @@ def _check_recall_args(
     if recall_at and "tool" in recall_at:
         if args.mcp_only:
             parser.error("argument --recall-at: tool is not available with --mcp-only")
-        if args.builtins is not None:
+        if args.builtins is not None and args.builtins != "all":
             names = _parse_builtins(parser, args.builtins)
             if names is not None and "recall" not in names:
                 parser.error(
@@ -830,7 +838,11 @@ def _check_effective_recall(
     if options.recall_at and "tool" in options.recall_at:
         if getattr(args, "mcp_only", False):
             parser.error("argument --recall-at: tool is not available with --mcp-only")
-        if options.builtins is not None and "recall" not in options.builtins:
+        if (
+            options.builtins is not None
+            and "recall" not in options.builtins
+            and getattr(args, "builtins", None) != "all"
+        ):
             parser.error("argument --recall-at tool: --builtins must include recall")
         if options.retriever == "off":
             parser.error(
@@ -1351,8 +1363,8 @@ def main() -> None:
     if args.query and not args.serve:
         query = " ".join(args.query)
         options = _direct_options(parser, args)
-        # The surface is known here: direct mode keeps its default set and
-        # its six-pattern blocklist through P13a.
+        # The surface is known here: direct mode has no approver, so its
+        # default set leaves shell_exec out (--builtins all names it).
         options = dataclasses.replace(options, mode="direct")
         if not query:
             # The loop keeps its answers, so each turn sees the earlier ones; a

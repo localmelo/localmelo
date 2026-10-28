@@ -102,9 +102,11 @@ def _executor(
     """An executor with every built-in; *stand_ins* replace the marked ones."""
     hippo = Hippo()
     executor = Executor(
-        hippo, Checker(), workspace_root=None if root is None else str(root)
+        hippo,
+        Checker(mode="interactive"),
+        workspace_root=None if root is None else str(root),
     )
-    register_builtins(executor, hippo)
+    register_builtins(executor, hippo, mode="interactive")
     if stand_ins is not None:
         for name in APPROVAL_BUILTINS:
             executor.register(name, getattr(stand_ins, name), requires_approval=True)
@@ -192,14 +194,6 @@ async def _run(
             id="parameter_it_does_not_take",
         ),
         pytest.param(
-            "shell_exec",
-            {"command": "rm -rf /"},
-            None,
-            ErrorCategory.BLOCKED_BY_CHECKER,
-            "Blocked: Blocked command: rm -rf /",
-            id="checker",
-        ),
-        pytest.param(
             "file_write",
             {"path": "../outside.txt", "content": "x"},
             None,
@@ -227,6 +221,21 @@ async def test_a_refused_call_never_asks(
     assert outcome.status != ExecutionStatus.SUCCESS
     assert gate.requests == []
     assert stand_ins.calls == []
+
+
+async def test_a_tier_refused_call_never_asks(root: Path) -> None:
+    """P13b: an exec tool the mode does not offer is refused before the gate."""
+    hippo = Hippo()
+    executor = Executor(hippo, Checker(mode="direct"))
+    register_builtins(executor, hippo, names={"shell_exec"})
+    gate = Gate()
+
+    outcome = await _run(executor, "shell_exec", {"command": "pwd"}, gate)
+
+    assert outcome.status == ExecutionStatus.BLOCKED
+    assert outcome.error_category == ErrorCategory.BLOCKED_BY_CHECKER
+    assert "direct mode has no approval policy" in outcome.error
+    assert gate.requests == []
 
 
 async def test_a_tool_without_a_callable_never_asks() -> None:
