@@ -95,8 +95,9 @@ transpose in transpose.py … outcome: completed") is kept.
   otherwise they use a neutral label rather than the first line of code.
   Python tool writes are not inferred as `files` from code or workspace changes.
   The result shows test counts or an exit code when available, and otherwise
-  `completed` rather than arbitrary tool output. Test runners need a
-  positive test summary or a zero exit marker. An observed
+  `completed` rather than arbitrary tool output. A digest may have neither
+  `files` nor `verified` when it has no observable write or eligible check.
+  Test runners need a positive test summary or a zero exit marker. An observed
   line whose result is empty or only a boolean, `None`, an exit code or
   punctuation is left out, so it cannot enter a digest or make one a
   rehearsal candidate. An unrehearsed note stays out of it. Over the limit,

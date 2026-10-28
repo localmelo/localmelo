@@ -1598,14 +1598,15 @@ def _python_check_command(code: str) -> str:
         if owner.id == "unittest" and node.func.attr in ("main", "TextTestRunner"):
             return "python unittest"
         if owner.id == "pytest" and node.func.attr == "main":
-            args = node.args[0] if node.args else next(
-                (kw.value for kw in node.keywords if kw.arg == "args"), None
+            args = (
+                node.args[0]
+                if node.args
+                else next((kw.value for kw in node.keywords if kw.arg == "args"), None)
             )
             if isinstance(args, (ast.List, ast.Tuple)):
                 for arg in args.elts:
-                    if (
-                        not isinstance(arg, ast.Constant)
-                        or not isinstance(arg.value, str)
+                    if not isinstance(arg, ast.Constant) or not isinstance(
+                        arg.value, str
                     ):
                         break
                     target = arg.value
@@ -1618,14 +1619,14 @@ def _python_check_command(code: str) -> str:
                     break
             return "python pytest"
         if owner.id == "runpy" and node.func.attr == "run_path" and node.args:
-            path = node.args[0]
+            script = node.args[0]
             if (
-                isinstance(path, ast.Constant)
-                and isinstance(path.value, str)
-                and path.value.endswith(".py")
-                and _safe_check_target(path.value)
+                isinstance(script, ast.Constant)
+                and isinstance(script.value, str)
+                and script.value.endswith(".py")
+                and _safe_check_target(script.value)
             ):
-                return f"python runpy {os.path.basename(path.value)}"
+                return f"python runpy {os.path.basename(script.value)}"
     return "python check"
 
 
