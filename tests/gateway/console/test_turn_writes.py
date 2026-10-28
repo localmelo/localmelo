@@ -871,7 +871,7 @@ async def test_a_cancel_during_a_slow_create_withdraws_its_key(
 
 
 async def test_a_stop_for_an_unregistered_turn_lands_when_it_registers(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     target = tmp_path / "ws" / "todo.md"
     async with console_with(
@@ -887,15 +887,15 @@ async def test_a_stop_for_an_unregistered_turn_lands_when_it_registers(
 
         # The window a create has: the turn is accepted and running, the
         # registry has not registered its session yet.
-        real = console.sessions.find_turn
-        console.sessions.find_turn = lambda _turn_id: None  # type: ignore[method-assign]
-        try:
+        def _not_registered(turn_id: str) -> None:
+            return None
+
+        with monkeypatch.context() as patch:
+            patch.setattr(console.sessions, "find_turn", _not_registered)
             response = await client.post(
                 "/api/submissions/late-key/cancel",
                 json={"text": "Write the todo file"},
             )
-        finally:
-            console.sessions.find_turn = real
 
         assert response.status_code == 202
         assert response.json()["cancelling"] is True
