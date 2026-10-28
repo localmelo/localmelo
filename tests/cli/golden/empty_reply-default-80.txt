@@ -1,0 +1,7 @@
+› What do my notes say?
+
+  No approvals for this turn (--yolo).
+· The model returned an empty reply; asking it to continue.
+● Here is the answer: buy milk.
+✻ Worked for 0.1s · 0 tool calls · ↓ 14 tokens
+

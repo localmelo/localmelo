@@ -1,0 +1,18 @@
+› Call the check.
+
+  No approvals for this turn (--yolo).
+◌ ?  {} · not run
+⚠ melo: run ended with status failed: Response check failed: Empty tool name in…
+  A check stopped the run (the reason is above); try another model.
+✻ Worked for 0.1s · 0 tool calls · ↓ 4 tokens
+
+› Say it again.
+
+  No approvals for this turn (--yolo).
+· The model returned an empty reply; asking it to continue.
+✻ Thought for 0.1s
+  hmm
+⚠ melo: run ended with status failed: empty replies
+  The model returned only empty replies; try another model.
+✻ Worked for 0.1s · 0 tool calls
+

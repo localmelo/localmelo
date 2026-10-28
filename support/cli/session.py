@@ -208,7 +208,8 @@ class CliSession:
         self._stop_wanted = self._stop_landed = False
         if self.runner is None or self.runner.session_id is None:
             self.title = title_from_text(text)  # no session row yet
-        self.renderer.begin_turn(text)
+        first_turn = self.runner is None or self.runner.session_id is None
+        self.renderer.begin_turn(text, first_turn=first_turn)
         self._work = self.spawn(self._turn(text))
 
     async def _ask(self, request: ApprovalRequest) -> ApprovalDecision:
@@ -229,6 +230,7 @@ class CliSession:
                     workspace=self.agent.workspace_root,
                 ),
                 on_event=self.renderer.on_event,
+                progress=True,
             )
         runner = self.runner
         result: RunResult | None = None
