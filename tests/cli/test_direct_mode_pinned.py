@@ -13,14 +13,14 @@ after a replay-requiring backend converts ``compress`` to ``compress+replay``,
 so that combination is a usage error, not a traceback. R6-lite's two memory
 flags and their config fallback change them a fourth. P5 moved ``--workspace``
 into direct mode, so ``_direct_options`` resolves and checks the folder and
-sets ``workspace_root``; it has a new hash. The other pinned functions are
-unchanged. P13b's loop notice (`shell_exec` is off; `--builtins all` turns
-it on) moved ``_run`` again, so it has a new hash, and ``_parse_builtins``
-is pinned here for the first time: it now returns every built-in explicitly
-for ``--builtins all``, which is what keeps the old direct-mode tool set
-available. T65b's review fixes name ``melo "" --builtins all`` in the notice,
-so ``_run`` has a new hash again. The other pinned functions are unchanged.
-``_check_args``, which carries the refusals, is not pinned.
+sets ``workspace_root``; it has a new hash. R2b's names-only ``[agent] tool_env``
+config inheritance changes only ``_build_direct_mode_agent``; URL sessions and
+default options stay unchanged. P13b's loop notice (``shell_exec`` is off;
+``--builtins all`` turns it on) moved ``_run`` again, and ``_parse_builtins``
+is pinned for the first time: it returns every built-in explicitly for
+``--builtins all``. T65b's review fixes name ``melo "" --builtins all`` in
+the notice, so ``_run`` has a new hash again. The other pinned functions are
+unchanged. ``_check_args``, which carries the refusals, is not pinned.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "13c8a21a02214d729cb283df94f25da39ca004206a3669205f7a75442c06d5e4",
+    "_build_direct_mode_agent": "99852a989998a7ef7b9094fde8902b881a06673873821454745d780c5de7c791",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",

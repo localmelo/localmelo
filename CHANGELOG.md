@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Reasoning and recall options now work in the interactive UI, including
+  `--reasoning-field` and `--retrieval-extra-body`; explicit flags override
+  `[agent]`/`[retrieval]` defaults. Console sessions honor the configured
+  reasoning mode (default `legacy`) without changing legacy `/v1`. Session
+  replay uses the retained window; pairs resume without old thinking,
+  while checkpoint resume can replay retained, redacted thinking using the
+  current process's mode. Scheduler wrappers preserve replay capabilities;
+  rejected mode switches keep the old Agent and MCP state and close new
+  providers; successful switches retain the RAM-only notes/drafts.
+  Explicit-mode requests also remove legacy inline thinking
+  copies after resume without changing the stored window ([#115]).
+- `[agent] tool_env` names extra environment variables inherited by
+  shell/Python tools in config-backed direct runs, the UI and console.
+  Names are validated and missing variables skipped; only names are saved.
+  SSH-agent and proxy access are explicit capability grants; defaults and
+  `--base-url` runs/sessions expose nothing new ([#115]).
+
 - The gateway's `sessions.db` can hold the scheduler's `scheduler` component
   version 1: `tasks`, `task_deps`, `priority_events`, `questions`,
   `sched_rules`, `sched_log` and `idle_windows` are created in one
@@ -836,3 +853,4 @@ earlier milestones.
 [#111]: https://github.com/localmelo/localmelo/pull/111
 [#113]: https://github.com/localmelo/localmelo/pull/113
 [#114]: https://github.com/localmelo/localmelo/pull/114
+[#115]: https://github.com/localmelo/localmelo/pull/115

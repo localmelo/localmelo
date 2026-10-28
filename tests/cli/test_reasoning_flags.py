@@ -549,17 +549,14 @@ def test_a_serve_conflict_wins_over_the_reasoning_field(
     assert "are for a task or the interactive UI" in _error_line(capsys)
 
 
-def test_the_interactive_ui_refuses_the_reasoning_field(
+def test_the_interactive_ui_accepts_the_reasoning_field(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     parser = cli._build_parser()
-    with pytest.raises(SystemExit) as exc:
-        cli._check_args(parser, parser.parse_args(["--reasoning-field", "auto"]))
-    assert exc.value.code == 2
-    assert _error_line(capsys) == (
-        "melo: error: --reasoning-field is not in the interactive UI yet; "
-        'give it with a task (melo -- "<task>")'
-    )
+    args = parser.parse_args(["--reasoning-field", "auto"])
+    cli._check_args(parser, args)
+    assert args.reasoning_field == "auto"
+    assert capsys.readouterr().err == ""
 
 
 # ── R4: compress modes and the note writer ──

@@ -21,14 +21,17 @@ import signal
 import sys
 import time
 import tomllib
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from typing import Any, Final
 
 from localmelo.melo.agent import AgentOptions
+from localmelo.melo.agent.options import reasoning_refusal
 from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.cli.views import BackendInfo
+from localmelo.support.sessions.agents import configured_session_options
 
 LOG_DIR: Final = "~/.cache/localmelo/logs"
 LOG_FILE: Final = "cli.log"
@@ -214,6 +217,7 @@ def run_interactive(
     *,
     parser: argparse.ArgumentParser,
     options: AgentOptions,
+    validate_options: Callable[[AgentOptions], None] | None = None,
 ) -> int:
     """Open the terminal UI for bare melo; return the exit code.
 
@@ -250,6 +254,57 @@ def run_interactive(
         return 1
     if isinstance(choice, int):
         return choice
+    explicit = {
+        name
+        for name in (
+            "reasoning",
+            "replay_turns",
+            "note_writer",
+            "retriever",
+            "recall_at",
+            "recall_k",
+            "recall_kinds",
+            "recall_placement",
+            "recall_min_score",
+        )
+        if getattr(args, name, None) is not None
+    }
+    try:
+        options = configured_session_options(choice.cfg, options, explicit=explicit)
+    except (ValueError, config.ConfigError) as exc:
+        parser.error(str(exc))
+    if (
+        getattr(args, "reasoning_field", None) is not None
+        and choice.backend.key == "ollama"
+    ):
+        parser.error(
+            "argument --reasoning-field: the ollama backend always reads and sends the thinking field"
+        )
+    section = (
+        None
+        if choice.cfg is None
+        else getattr(choice.cfg, choice.cfg.chat_backend, None)
+    )
+    field = getattr(args, "reasoning_field", None)
+    if field is None:
+        field = (
+            "thinking"
+            if choice.backend.key == "ollama"
+            else getattr(section, "reasoning_field", None)
+        )
+    required = bool(getattr(section, "requires_reasoning_replay", False))
+    effective_mode = options.reasoning
+    if effective_mode == "compress" and required:
+        effective_mode = "compress+replay"
+    if refusal := reasoning_refusal(effective_mode, field, required):
+        parser.error("argument --reasoning: " + refusal)
+    if validate_options is not None:
+        validate_options(replace(options, reasoning=effective_mode))
+    if options.retriever == "embedding":
+        if not choice.backend.embedding:
+            parser.error("argument --retriever: embedding needs an embedding provider")
+        if not options.memory:
+            parser.error("argument --retriever: embedding needs --memory on")
     # Step 4: the MCP config, --mcp-config first, else the config file's key.
     requested = getattr(args, "mcp_config", None)
     mcp_config = requested or config.load().mcp_config or None
@@ -380,6 +435,8 @@ async def main_async(
             embedding_base_url=args.embedding_base_url,
             embedding_model=args.embedding_model,
             request_timeout_s=args.request_timeout,
+            reasoning_field=getattr(args, "reasoning_field", None),
+            retrieval_extra_body=getattr(args, "retrieval_extra_body", None),
             mcp_config=mcp_config,
             mcp_source=mcp_source,
             mcp_servers=mcp_servers,

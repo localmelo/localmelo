@@ -6,6 +6,7 @@ import asyncio
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -364,7 +365,7 @@ async def test_terminal_or_invalid_target_does_not_demote_live_p0() -> None:
         {"wait_reason": "bogus"},
     ],
 )
-async def test_register_task_rejects_invalid_fields(changes: dict[str, object]) -> None:
+async def test_register_task_rejects_invalid_fields(changes: dict[str, Any]) -> None:
     gate = ChatGate(policy="class")
     with pytest.raises(ValueError):
         gate.register_task(replace(task(), **changes))

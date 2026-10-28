@@ -543,7 +543,7 @@ These options apply to a task run without `--serve`.
 | `--recall-kinds LIST` | all but `thought` | A comma list of `note`, `draft`, `thought`, `digest`, `reflection` and `long`. |
 | `--recall-placement tool\|message` | `tool` | Where a step block goes: appended to the last tool result, or in its own user message. `message` is refused in `replay` and `compress+replay`. |
 | `--recall-min-score F` | `0.35` | The cosine floor for embedding and long-term cosine hits, from 0 to 1. It is inert for the task-local `bm25` and `llm` ranking and for a long-term row that only BM25 scored. |
-| `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. It is a provider setting, not a `config` key. The interactive UI refuses it for now, like `--reasoning-field`: use it with a task. |
+| `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. Available for a task or the interactive UI with `llm`/`auto` outside `legacy`; never saved to the config file. |
 | `--admit-on-outcome on\|off` | `off` | R6-lite: at the run's end, admit only the final attempt digest, with the terminal status in its provenance; off writes nothing unless a signal admits something. Accepted and inert in `legacy`, and accepted in the interactive UI. |
 | `--keep-decision-text` | off | R6-lite: also store the checked text of each admission decision; the SHA-256 is always kept. An evaluation switch and refused in the interactive UI. |
 
@@ -651,8 +651,8 @@ These options apply to a task run without `--serve`.
   `compress+replay`; in `legacy`, `drop` and `compress` the wire is as if
   no field were set. The `ollama`
   backend fixes its field to `thinking`, so the flag is a usage error
-  there. The interactive UI refuses the flag until it applies it (R2b);
-  direct mode is the only place it works now.
+  there. The same rule applies in the interactive UI, including after a
+  backend switch.
 
 ### Interactive UI
 
@@ -666,14 +666,26 @@ These options apply to `melo` without a task.
 
 - The UI also takes `--workspace`, `--max-steps`, `--attempt-policy`,
   `--reflection-gate`, `--builtins`, `--memory`, `--memory-dir`,
-  `--request-timeout`, `--reasoning`, `--replay-turns`, `--note-writer`,
-  `--retriever`, `--recall-*` and the `--embedding-*` options, for every
-  turn of the session. It accepts `compress` and `compress+replay` but
-  draws nothing for the notes yet. The UI does not yet apply `[agent]`;
-  use direct mode for that. `--tool-exposure` (the UI offers every tool),
-  `--timeout`, `--output-format`, `--progress`, `--routine`,
-  `--reasoning-field` and `--retrieval-extra-body` are usage errors there;
-  `--mcp-config` and `--mcp-only` are accepted.
+  `--request-timeout`, `--reasoning`, `--reasoning-field`, `--replay-turns`,
+  `--note-writer`, `--retriever`, `--recall-*`, `--retrieval-extra-body` and
+  the `--embedding-*` options, for every turn of the session. Explicit flags
+  win over the saved `[agent]` and `[retrieval]` defaults; retrieval settings
+  stay inert in `legacy`, and explicit retrieval flags there are errors.
+  A `--base-url` session takes these values from flags, not saved defaults.
+  `--tool-exposure` (the UI offers every tool), `--timeout`,
+  `--output-format`, `--progress`, `--routine` and `--keep-decision-text`
+  are usage errors; `--mcp-config` and `--mcp-only` are accepted.
+- For example, `melo --reasoning compress --retriever bm25 --note-writer heuristic`
+  starts a session with short notes and recall. There is no `/reasoning`
+  command: choose the mode when starting the process. `/model` and `/backend`
+  keep the mode, full conversation and RAM-only notes/drafts. A provider that requires replay
+  refuses a `drop` session without changing its model, conversation or MCP
+  state; `compress` on such a provider runs as `compress+replay`.
+- Session replay covers the retained conversation window, not only the
+  current task. On resume, `pairs` restores answers without thinking;
+  `window` can replay the checkpoint's retained, redacted thinking. The
+  current process's mode wins over the mode recorded on old turns. Neither
+  path reconstructs the RAM-only note store. See [Resume](sessions.md#resume).
 - `--workspace` is expanded and resolved here too, and a path that is not a
   folder gives the same one-line usage error as with a task; see
   [Usage errors](#usage-errors).
@@ -765,12 +777,6 @@ These are usage errors:
   `argument --reasoning: this backend requires reasoning replay, so drop is not possible: use replay or compress+replay`;
 - `--reasoning-field` with the `ollama` backend, reported as
   `argument --reasoning-field: the ollama backend always reads and sends the thinking field`;
-- `--reasoning-field` with bare `melo`, whose interactive UI does not apply it
-  yet, reported as
-  `--reasoning-field is not in the interactive UI yet; give it with a task (melo -- "<task>")`;
-- `--retrieval-extra-body` with bare `melo`, whose interactive UI does not
-  apply it yet, reported as
-  `--retrieval-extra-body is not in the interactive UI yet; give it with a task (melo -- "<task>")`;
 - an MCP config file that cannot be read or is not valid;
 - an invalid `LOCALMELO_THINKING_RETENTION_DAYS`, also with `--serve` or
   `melo ""`, which prints its one `melo: error:` line without the usage

@@ -461,29 +461,25 @@ def test_a_reserved_extra_body_field_is_a_usage_error(
         assert needle in capsys.readouterr().err
 
 
-def test_the_interactive_ui_refuses_the_extra_body(
+def test_the_interactive_ui_accepts_the_extra_body(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     parser = cli._build_parser()
-    with pytest.raises(SystemExit) as exc:
-        cli._check_args(
-            parser,
-            parser.parse_args(
-                [
-                    "--reasoning",
-                    "compress",
-                    "--retriever",
-                    "llm",
-                    "--retrieval-extra-body",
-                    '{"chat_template_kwargs": {"enable_thinking": false}}',
-                ]
-            ),
-        )
-    assert exc.value.code == 2
-    assert _error_line(capsys) == (
-        "melo: error: --retrieval-extra-body is not in the interactive UI yet; "
-        'give it with a task (melo -- "<task>")'
+    args = parser.parse_args(
+        [
+            "--reasoning",
+            "compress",
+            "--retriever",
+            "llm",
+            "--retrieval-extra-body",
+            '{"chat_template_kwargs": {"enable_thinking": false}}',
+        ]
     )
+    cli._check_args(parser, args)
+    assert args.retrieval_extra_body == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
+    assert capsys.readouterr().err == ""
 
 
 def test_builtins_recall_without_the_tool_trigger_is_a_usage_error(
