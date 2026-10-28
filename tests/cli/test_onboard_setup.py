@@ -174,6 +174,7 @@ def test_a_first_run_offers_the_servers_embedding_model(
         "Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]: ",
     ]
     probe.assert_awaited_once()
+    assert probe.await_args is not None
     probed = probe.await_args.args[0]
     assert (
         probed.embedding_backend,

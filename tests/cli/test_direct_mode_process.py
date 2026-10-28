@@ -72,6 +72,7 @@ class FakeChatServer:
             def do_POST(self) -> None:
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
                 payload = json.loads(body)
+                answer: dict[str, Any]
                 if self.path.endswith("/embeddings"):
                     # The first run's probe of a listed embedding model.
                     answer = {"data": [{"embedding": [0.0, 1.0]}]}
