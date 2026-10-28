@@ -274,7 +274,7 @@ def execute(
             flush=True,
         )
     elif cmd == "list":
-        print("ID  LEVEL  STATE  TITLE", file=out)
+        rows = [("ID", "LEVEL", "STATE", "TITLE")]
         for task in data["tasks"]:
             if not isinstance(task, dict):
                 raise ClientError("gateway returned an invalid task response")
@@ -282,10 +282,19 @@ def execute(
             title = task.get("title") or (
                 spec.get("title", "") if isinstance(spec, dict) else ""
             )
-            print(
-                f"{_safe(task.get('task_id', ''))}  {_level_label(task)}  {_safe(task.get('state', ''))}  {_safe(title)}",
-                file=out,
+            rows.append(
+                (
+                    _safe(task.get("task_id", "")),
+                    _level_label(task),
+                    _safe(task.get("state", "")),
+                    _safe(title),
+                )
             )
+        # Pad every column but the last, so the table lines up.
+        widths = [max(len(row[i]) for row in rows) for i in range(3)]
+        for row in rows:
+            cells = [row[i].ljust(widths[i]) for i in range(3)]
+            print("  ".join([*cells, row[3]]).rstrip(), file=out)
         out.flush()
     else:
         task = data["task"]

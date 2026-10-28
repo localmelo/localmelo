@@ -234,8 +234,9 @@ def test_human_output_strips_terminal_control_sequences() -> None:
             )
             == 0
         )
+    # Columns are padded to the widest cell, so the header lines up with the row.
     assert output.getvalue() == (
-        "ID  LEVEL  STATE  TITLE\n" "abc  not recorded  queued  ?[2JTask\n"
+        "ID   LEVEL         STATE   TITLE\n" "abc  not recorded  queued  ?[2JTask\n"
     )
     assert chr(27) not in output.getvalue()
 
