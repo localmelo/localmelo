@@ -90,6 +90,15 @@ async def start_blocked(
     return task, stopped
 
 
+async def test_the_workspace_agent_offers_no_shell_exec(
+    manager: SmokePlayground,
+) -> None:
+    sid = await create(manager)
+    names = {tool.name for tool in manager._sessions[sid].agent.list_tools()}
+    assert "shell_exec" not in names
+    assert {"file_read", "file_write", "python_exec"} <= names
+
+
 async def test_transcript_can_be_recovered_after_reload(
     manager: SmokePlayground,
 ) -> None:

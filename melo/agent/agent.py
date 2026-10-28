@@ -48,6 +48,7 @@ from localmelo.melo.checker.payloads import (
     MemoryWritePayload,
     ToolResolutionResult,
 )
+from localmelo.melo.checker.policy import builtin_set_for
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
@@ -66,7 +67,6 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor import (
     TOOL_EXIT_CODE,
     Executor,
-    builtin_names,
     call_preview,
     register_builtins,
 )
@@ -1492,7 +1492,7 @@ class Agent:
             admit_on_outcome=self.options.admit_on_outcome,
             keep_decision_text=self.options.keep_decision_text,
         )
-        self.checker = Checker()
+        self.checker = Checker(mode=self.options.mode)
         self.executor = Executor(
             self.hippo, self.checker, workspace_root=workspace_root
         )
@@ -1553,6 +1553,7 @@ class Agent:
             self.executor,
             self.hippo,
             names=names,
+            mode=self.options.mode,
             workspace_root=workspace_root,
             tool_timeout_s=self.options.tool_timeout_s,
             tool_env=self.options.tool_env,
@@ -1560,7 +1561,7 @@ class Agent:
         # The names of the built-ins registered above (see list_tools), and
         # R5's recall tool when its trigger is on. It is not a builtin_names()
         # member, so register_builtins never registers it.
-        self._builtin_names = builtin_names() if names is None else names
+        self._builtin_names = builtin_set_for(self.options.mode, names)
         if "tool" in self._plan.enabled():
             self.hippo.register_tool(RECALL_TOOL_DEF)
             self.executor.register(
@@ -5446,7 +5447,7 @@ class Agent:
     def _run_config(self) -> dict[str, Any]:
         """The effective configuration that ``RunResult.config`` reports."""
         opts = self.options
-        builtins = builtin_names() if opts.builtins is None else opts.builtins
+        builtins = builtin_set_for(opts.mode, opts.builtins)
         config: dict[str, Any] = {
             "max_steps": opts.max_steps,
             "attempt_policy": opts.attempt_policy,

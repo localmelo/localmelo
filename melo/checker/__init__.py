@@ -10,6 +10,12 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
     ValidationResult,
 )
+from localmelo.melo.checker.policy import (
+    DEFAULT_BUILTINS,
+    ToolMode,
+    builtin_set_for,
+    mode_requires_approval,
+)
 from localmelo.melo.checker.tiers import (
     BUILTIN_TIERS,
     tier_of,
@@ -20,14 +26,18 @@ from localmelo.melo.schema import ToolTier
 __all__ = [
     "BUILTIN_TIERS",
     "Checker",
+    "DEFAULT_BUILTINS",
     "ExecutorRequest",
     "ExecutorResultPayload",
     "GatewayIngressPayload",
     "MemoryWritePayload",
     "SessionTransition",
+    "ToolMode",
     "ToolResolutionResult",
     "ToolTier",
     "ValidationResult",
+    "builtin_set_for",
+    "mode_requires_approval",
     "tier_of",
     "tier_requires_approval",
 ]

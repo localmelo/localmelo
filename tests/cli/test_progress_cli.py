@@ -107,7 +107,7 @@ def test_the_routine_reaches_the_run() -> None:
     ran = _main("--routine", "daily", "q")
     assert ran.code == 0
     ran.agent.run_task.assert_awaited_once_with("q", routine="daily")
-    assert ran.options == AgentOptions()
+    assert ran.options == AgentOptions(mode="direct")
 
 
 @pytest.mark.parametrize("argv", [[], ["--progress", "auto"], ["--progress", "off"]])

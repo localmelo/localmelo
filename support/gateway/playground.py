@@ -410,7 +410,9 @@ class SmokePlayground:
         )
         # Each chat keeps its answers, so a follow-up sees them (#37's option).
         agent = Agent(
-            llm=llm, embedding=embedding, options=AgentOptions(record_answers=True)
+            llm=llm,
+            embedding=embedding,
+            options=AgentOptions(record_answers=True, mode="gateway"),
         )
 
         await agent.hippo.aclose()

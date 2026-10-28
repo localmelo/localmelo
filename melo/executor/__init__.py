@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 
+from localmelo.melo.checker.policy import ToolMode, builtin_set_for
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.executor.builtins import (
     APPROVAL_BUILTINS,
@@ -32,14 +33,18 @@ def register_builtins(
     hippo: object,
     names: Collection[str] | None = None,
     *,
+    mode: ToolMode = "python",
     workspace_root: str | None = None,
     tool_timeout_s: float | None = None,
     tool_env: Mapping[str, str] | None = None,
 ) -> None:
     """Register built-in tools with the executor and hippo.
 
-    *names* selects the built-ins to register: ``None`` registers all of
-    them, an empty collection none. An unknown name raises ``ValueError``
+    *names* selects the built-ins to register: ``None`` registers the
+    default set of *mode* (all four for ``python``, the same as before this
+    argument existed, and for ``direct`` in this release; the gateway's set leaves
+    ``shell_exec`` out), an empty collection none. An explicit collection
+    always wins, whatever the mode. An unknown name raises ``ValueError``
     before anything is registered.
 
     The tools whose tier is not read are registered as requiring approval
@@ -70,15 +75,14 @@ def register_builtins(
     ``TMPDIR``) with *tool_env* on top, so a secret in the agent's
     environment reaches no tool unless *tool_env* names it.
     """
-    selected = None if names is None else set(names)
-    if selected is not None:
-        known = builtin_names()
-        unknown = selected - known
-        if unknown:
-            raise ValueError(
-                f"Unknown built-in tools: {', '.join(sorted(unknown))} "
-                f"(known: {', '.join(sorted(known))})"
-            )
+    selected = builtin_set_for(mode, names)
+    known = builtin_names()
+    unknown = selected - known
+    if unknown:
+        raise ValueError(
+            f"Unknown built-in tools: {', '.join(sorted(unknown))} "
+            f"(known: {', '.join(sorted(known))})"
+        )
     if tool_timeout_s is not None and not workspace_root:
         raise ValueError("tool_timeout_s needs a workspace_root")
     rooted = (
@@ -90,19 +94,20 @@ def register_builtins(
     )
     with_env = builtins_with_env(tool_env) if tool_env else {}
     for tool_def, phase1a_fn in BUILTINS:
-        if selected is None or tool_def.name in selected:
-            if tool_def.name in rooted:
-                fn, timeout_ms = rooted[tool_def.name]
-            else:
-                fn, timeout_ms = with_env.get(tool_def.name, phase1a_fn), None
-            tier = tier_of(tool_def)
-            hippo.register_tool(tool_def)  # type: ignore[attr-defined]
-            executor.register(
-                tool_def.name,
-                fn,
-                timeout_ms=timeout_ms,
-                requires_approval=tier_requires_approval(tier),
-            )
+        if tool_def.name not in selected:
+            continue
+        if tool_def.name in rooted:
+            fn, timeout_ms = rooted[tool_def.name]
+        else:
+            fn, timeout_ms = with_env.get(tool_def.name, phase1a_fn), None
+        tier = tier_of(tool_def)
+        hippo.register_tool(tool_def)  # type: ignore[attr-defined]
+        executor.register(
+            tool_def.name,
+            fn,
+            timeout_ms=timeout_ms,
+            requires_approval=tier_requires_approval(tier),
+        )
 
 
 __all__ = [

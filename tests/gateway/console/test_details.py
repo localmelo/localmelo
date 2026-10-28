@@ -44,12 +44,14 @@ async def test_tools_list_each_tool_and_whether_it_is_granted(
         # MCP in the console is deferred: the tab says so (decision 5B).
         assert listed["mcp_error"] == "MCP is not built in the console yet"
         by_name = {tool["name"]: tool for tool in listed["tools"]}
-        assert set(by_name) >= {"file_write", "shell_exec", "file_read"}
+        # A console session is gateway mode: no shell_exec, but the other
+        # built-ins stay, and the panel still asks about python_exec.
+        assert set(by_name) == {"file_read", "file_write", "python_exec"}
         assert by_name["file_write"]["granted"] is True
-        assert by_name["shell_exec"]["granted"] is False
-        assert by_name["shell_exec"]["requires_approval"] is True
-        assert by_name["shell_exec"]["source"] == "builtin"
-        assert by_name["shell_exec"]["parameters"]["type"] == "object"
+        assert by_name["python_exec"]["granted"] is False
+        assert by_name["python_exec"]["requires_approval"] is True
+        assert by_name["python_exec"]["source"] == "builtin"
+        assert by_name["python_exec"]["parameters"]["type"] == "object"
 
 
 async def test_tools_open_a_session_its_agent_was_kept_from(
@@ -337,6 +339,10 @@ async def test_default_builder_without_a_gate_wraps_nothing(
 
     try:
         assert not isinstance(agent._llm, GatedLLM)
+        # The production builder, not only the test one, is gateway mode.
+        assert agent.options.mode == "gateway"
+        names = {tool.name for tool in agent.list_tools()}
+        assert names == {"file_read", "file_write", "python_exec"}
     finally:
         await agent.close()
 
