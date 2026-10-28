@@ -97,7 +97,7 @@ def sensitive_read(
             continue
         resolved = os.path.realpath(os.path.join(workspace or os.getcwd(), path))
         if matches(path) or matches(resolved):
-            return redact_worker(path)
+            return redact_secrets(path)[0]
     return None
 
 
