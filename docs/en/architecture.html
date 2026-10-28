@@ -150,7 +150,10 @@
           session's first turn the past runs the progress line would show.
           The
           UI runs its turns on a session (stored in
-          <code>~/.cache/localmelo/cli/sessions.db</code>), asks in a panel
+          <code>~/.cache/localmelo/cli/sessions.db</code>), resumes a saved
+          chat in its workspace with <code>melo -c</code> or
+          <code>melo -r</code> (<code>/sessions</code> and
+          <code>/resume</code> open the same picker), asks in a panel
           before <code>shell_exec</code>, <code>python_exec</code> and
           <code>file_write</code> run, keeps the file tools in its workspace,
           and saves the model and server that <code>/model</code> and
@@ -382,9 +385,19 @@
           Working memory holds the conversation of a run or a gateway session:
           the last 20 messages, in RAM. History records every task and step
           and, with persistence on, every model call and its reasoning.
-          Long-term memory needs an embedding backend: it stores step summaries
-          and reflections with their embeddings, and recalls the 5 closest
-          entries on each step. Procedural memory keeps the steps of each run
+          In <code>legacy</code>, long-term memory needs an embedding
+          backend: it stores step summaries and reflections with their
+          embeddings, and recalls the 5 closest entries on each step. In the
+          compress modes it is a typed store instead: every entry has a kind
+          (<code>semantic</code>, <code>episodic</code>, <code>profile</code>
+          or <code>reflection</code>), a source, a status and the signal that
+          admitted it, with its provenance beside the text and the vector,
+          and one decision (<code>NEW</code>, <code>UPDATE</code>,
+          <code>RELATED</code>, <code>CONFLICT</code> or
+          <code>IGNORE</code>) is kept for each candidate; a candidate is
+          admitted only by a rehearsal, a user request or statement, or
+          <code>--admit-on-outcome on</code> for the final digest. Procedural
+          memory keeps the steps of each run
           and learns the steps of tasks you repeat. History, long-term and
           procedural memory stay in RAM, or go to <code>history.db</code>,
           <code>long_term.db</code> and <code>procedures.db</code> when
@@ -409,9 +422,22 @@
           and rehearsed into an attempt digest as later notes, calls and
           reflections use it. Every note, draft and digest passes the
           <code>check_memory_candidate</code> boundary (redact, sanitize, cap)
-          before it reaches the window or the store. Nothing is recalled from
-          the notes yet, and history gains no notes table. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">Reasoning notes</a>.
+          before it reaches the window or the store. The compress modes
+          recall them back: at start, attempt and step a delimited,
+          data-framed block carries this task's notes, drafts and thought
+          chunks and earlier tasks' long-term entries, chosen by
+          <code>--retriever auto|off|bm25|llm|embedding</code> (embedding when
+          configured, else <code>llm</code> at start and attempt and
+          <code>bm25</code> at step and tool, with <code>bm25</code> as the
+          fallback), placed by <code>--recall-at</code> and
+          <code>--recall-placement</code>, checked and bounded; a thought
+          chunk is recallable only after the turn that produced it left the
+          window. <code>history.db</code> version 2 records each new block in
+          <code>recall_json</code>, and the <code>recall</code> event carries
+          its hits. See
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">Reasoning notes</a>
+          and
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#recall-in-the-loop">Recall in the loop</a>.
         </p>
         <p>
           <code>melo/memory/retrieval/</code> holds three switchable
@@ -419,7 +445,8 @@
           <code>embedding</code>. They search documents built from a run's
           model calls: the notes on the model's reasoning, code drafts and
           chunks of its thinking that <code>melo/memory/notes.py</code> builds
-          from a model reply, and reflections. Runs do not use them yet: the
+          from a model reply, and reflections. The compress modes use them in
+          the loop (see above), and the
           <code>melo-retrieve</code> command (<code>support/retrieve.py</code>)
           compares them offline on labelled queries, and turns model calls
           recorded as raw-call JSONL into a corpus. With persistence on, the
@@ -435,8 +462,9 @@
           one stopped. A runner built with <code>progress=True</code> asks each
           turn's run for its <code>run.progress</code> events and stores them
           with the turn. The gateway's file and the terminal's file are separate.
-          The interactive UI runs its turns on sessions, though it cannot
-          resume one yet; the web console runs and reads its sessions in the
+          The interactive UI runs its turns on sessions and resumes a saved
+          chat with <code>melo -c</code> or <code>melo -r</code>; the web
+          console runs and reads its sessions in the
           gateway's own file, while its <code>/v1</code> sessions stay in RAM
           (code: <code>support/sessions/</code>,
           <code>support/gateway/console/</code>). See
@@ -511,7 +539,7 @@
           <code>melo/sleep/</code>, <code>melo/memory/personalized/</code> and
           <code>support/melo_serving/</code> hold code that the agent does not
           use yet. <code>melo/memory/retrieval/</code> and
-          <code>melo/memory/notes.py</code> serve only
+          <code>melo/memory/notes.py</code> serve recall in the loop and
           <code>melo-retrieve</code>; <code>support/scheduler/</code> is the
           scheduling policy core and its simulator, which the gateway's gate
           uses for the web workspace's chats and the console's turns, and
@@ -556,8 +584,8 @@
       <section class="section" id="status">
         <h2>What exists today</h2>
         <ul>
-          <li>Direct mode with run options, including how a reply's reasoning is sent back or kept (<code>legacy</code>, <code>drop</code>, <code>replay</code>, <code>compress</code> or <code>compress+replay</code>), nine run statuses, text or JSON output, and fixed exit codes.</li>
-          <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals with the diff a file write will make, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>, <code>/approvals</code>, <code>/status</code>, <code>/mcp</code> and <code>/retry</code>, and an MCP servers file (<code>--mcp-config</code> or the config's <code>mcp_config</code>); and the plain conversation loop (<code>melo ""</code>).</li>
+          <li>Direct mode with run options, including <code>--workspace DIR</code> for the folder a task works in and how a reply's reasoning is sent back or kept (<code>legacy</code>, <code>drop</code>, <code>replay</code>, <code>compress</code> or <code>compress+replay</code>), nine run statuses, text or JSON output, and fixed exit codes.</li>
+          <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals with the diff a file write will make, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>, <code>/approvals</code>, <code>/status</code>, <code>/mcp</code> and <code>/retry</code>, an MCP servers file (<code>--mcp-config</code> or the config's <code>mcp_config</code>), and saved chats that <code>melo -c</code>, <code>melo -r</code>, <code>/sessions</code> and <code>/resume</code> resume; and the plain conversation loop (<code>melo ""</code>).</li>
           <li>Four built-in tools, with <code>python_exec</code> in a child process in every mode, and tools from local MCP servers in direct mode, the Python API and the interactive UI.</li>
           <li>Tool children and MCP servers run with a minimal environment (<code>PATH</code>, <code>HOME</code>, <code>USER</code>, <code>LOGNAME</code>, <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, <code>LC_*</code>, <code>TMPDIR</code>), plus <code>AgentOptions(tool_env)</code> or the server's <code>env</code>; nothing else is inherited.</li>
           <li>A step offers the built-in tools, the tools the model has already called in the conversation and the three closest matches for the task (the default <code>retrieve</code> mode); <code>all</code> offers every tool on every step.</li>
@@ -565,9 +593,9 @@
           <li>Sessions (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>); a runner can ask its turns for progress events. The interactive UI keeps its turns in them, and the web console runs and reads its sessions in the gateway's own store; the <code>/v1</code> HTTP API does not use sessions yet.</li>
           <li>The gateway: the HTTP API, the console's API v2 under <code>/api</code> (health, sessions, turns, an event stream, blobs, submissions, tools, grants, memory and runs, and the writes that create a session and start, retry, stop and approve its turns), sessions that close on request only when idle, the web workspace, whose chats and console turns pass through the scheduler's policy (<code>off</code> by default) and whose header shows the GPU lock and the battery, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
           <li>Backends for Ollama, MLC LLM, vLLM, SGLang and four cloud APIs.</li>
-          <li>Working memory, history and long-term memory, saved to SQLite when persistence is on; the saved text is redacted first, the saved history also keeps every model call with its reasoning, for 30 days by default, and the Python API can forget a task's memory or all of it.</li>
-          <li>Reasoning notes: the <code>compress</code> and <code>compress+replay</code> modes keep a short note of each reply and its code drafts in a RAM-only store beside the working window and rehearse them into an attempt digest; nothing is recalled from them yet.</li>
-          <li><code>melo-retrieve</code>, which compares the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers offline. Runs do not use the retrievers yet.</li>
+          <li>Working memory, history and long-term memory, saved to SQLite when persistence is on; in the compress modes long-term memory is a typed store whose entries carry a kind, a source, a status, the signal that admitted them and their provenance, with one decision per candidate; the saved text is redacted first, the saved history also keeps every model call with its reasoning, for 30 days by default, and the Python API can forget a task's memory or all of it.</li>
+          <li>Reasoning notes: the <code>compress</code> and <code>compress+replay</code> modes keep a short note of each reply and its code drafts in a RAM-only store beside the working window and rehearse them into an attempt digest, and recall them, with the task's drafts and thought chunks and earlier tasks' long-term entries, at start, attempt and step (<code>--retriever</code>, <code>--recall-*</code> and the <code>recall</code> tool).</li>
+          <li><code>melo-retrieve</code>, which compares the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers offline, exports a typed store or its decisions, and scores candidate files for the bench. The compress modes use the same retrievers in the loop; <code>legacy</code> runs do not.</li>
           <li>Procedural memory: each run records its steps, and a completed run updates the step template of its task, in <code>procedures.db</code> with persistence on. Python callers get <code>run.progress</code> events with <code>progress=True</code>, without a percent bar for now. On a terminal, <code>melo &quot;&lt;task&gt;&quot;</code> draws them as a progress line on stderr (<code>support/progress_line.py</code>). <code>melo-procedures</code> replays the progress rules offline.</li>
           <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>), and the gateway's shared gate, GPU-lock reader and battery reader (<code>support/gateway/chat_gate.py</code>, <code>machine_monitor.py</code>). The web workspace's chats and a console session's turns go through it; direct runs, <code>melo ""</code> and the <code>/v1</code> HTTP API do not.</li>
         </ul>

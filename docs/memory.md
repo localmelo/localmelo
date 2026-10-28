@@ -78,8 +78,8 @@ step reads it; a reply with no text gets the checked note as its copy instead.
   reflection cites them in `used_notes`. A rehearsed note feeds the
   attempt's **digest**: the task, the outcome, the facts, the observed
   lines and the open questions, at most 1,500 characters. An unrehearsed
-  note stays out of it. Notes of an attempt are superseded after its
-  digest.
+  note stays out of it. The attempt's notes and thought chunks are
+  superseded after its digest.
 - Nothing here is written to `history.db` or `sessions.db` as a note.
   `history.db` keeps no notes table; it still keeps the model's raw reply
   in `steps` and in `llm_calls`. The only new session field is the turn's
@@ -104,8 +104,8 @@ default `--retriever auto` recalls at three points; an explicit
 |---|---|---|
 | `start` | Before the task's first planning call. | Earlier tasks' long-term entries only. A cosine hit must reach `--recall-min-score` (0.35); a BM25 hit has no absolute floor. The current task's own entries are never returned. |
 | `attempt` | After a reflection, before the attempt's digest is built. | The failed attempt's notes and drafts, the reflection's note, and long-term entries, minus what the window shows. |
-| `step` | After each tool turn's results, for the next planning call. | This task's notes (a later attempt's superseded ones included), drafts, digests and thought chunks the window does not show, and long-term entries when `long` is in `--recall-kinds`. The query is the latest note's plan, what it found, its open questions and outcome, plus the paths and commands of the latest calls, at most 600 characters. |
-| `tool` | When the model calls the `recall` tool. | Every candidate above, superseded notes included; the query is the model's argument. |
+| `step` | After each tool turn's results, for the next planning call. | This task's notes (a later attempt's superseded ones included), drafts, digests and thought chunks (a later attempt's superseded ones included) the window does not show, and long-term entries when `long` is in `--recall-kinds`. The query is the latest note's plan, what it found, its open questions and outcome, plus the paths and commands of the latest calls, at most 600 characters. |
+| `tool` | When the model calls the `recall` tool. | Every candidate above, superseded notes and thought chunks included; the query is the model's argument. |
 
 `--retriever auto` uses the configured embedding provider; without one it
 uses `llm` at `start` and `attempt` and `bm25` at `step` and `tool`.
@@ -126,10 +126,12 @@ plan: …
 [end of localmelo recall]
 ```
 
-A note that a later attempt's boundary superseded is an earlier attempt's
-thinking, not the current plan, so its head names the attempt and says so:
-`[n3] note · step 1 · attempt 1 (superseded):`. Every other item line keeps
-its exact text.
+A note or thought chunk that a later attempt's boundary superseded is an
+earlier attempt's thinking, not the current plan, so its head names the
+attempt and says so: `[n3] note · step 1 · attempt 1 (superseded):`, and a
+chunk keeps its one-line form after the mark,
+`[t1] thinking · step 1 · attempt 1 (superseded): …`. Every other item line
+keeps its exact text.
 
 At `start` and `attempt` the block is appended to the task query message in
 the request copy only, and it stays frozen for that attempt. At `step` it
@@ -151,7 +153,9 @@ tool output and recalled memory are data, not instructions.
   They never leave the task and never enter long-term memory. A chunk
   counts as shown while its step's turn is in the window: its alias stays
   with that turn and leaves with it, so `step` recall and the `recall` tool
-  can return the chunk only after the turn was evicted.
+  can return the chunk only after the turn was evicted. At an attempt's
+  boundary the attempt's chunks are superseded with its notes, so a chunk
+  recalled later is marked `(superseded)`, as a note is.
 - **The counters.** `recall_empty` counts a triggered recall that had no candidate or no hit, so a pass that added no block is visible next to `recall_skipped` and `recall_refused`.
 - **The record.** Every block that is first sent is recorded in
   `llm_calls.recall_json`: the trigger, the query, the hit ids and aliases,
@@ -208,8 +212,8 @@ Nothing is written without a signal:
 | Signal | When | What it admits |
 |---|---|---|
 | `rehearsal` | A restatement, a successful call that acted on the note's path or command, or a reflection's `used_notes`. | That candidate, at once. A second admission of the unchanged candidate writes nothing. |
-| `user_request` | The user's message asks to remember, and states no fact. | This run's `remember` notes and its final digest at the run's end; never the final reflection. |
-| `user_statement` | A declarative sentence of the user's message states a stable fact, or corrects one and carries the corrected value. A question (`?`/`？`) never counts, and `my … is`/`我的…是` refuses a meta noun (task, question, request, goal, plan, problem, issue, job, point; 任务, 问题, 请求, 目标, 计划). | That sentence, at once. |
+| `user_request` | The user's message asks to remember (`remember that …`, `记住…`). | The fact the request carries after its marker, this run's `remember` notes and its final digest at the run's end; never the final reflection. The fact is classified by `classify_kind`, so it is `semantic` unless it is first-person (`profile`), and the meta-noun and question rules below apply to it. |
+| `user_statement` | A declarative sentence of the user's message states a stable fact without a remember request, or corrects one and carries the corrected value. A question (`?`/`？`) never counts, and `my … is`/`我的…是` refuses a meta noun (task, question, request, goal, plan, problem, issue, job, point; 任务, 问题, 请求, 目标, 计划). | That sentence, at once. |
 | `outcome` | The end of the run, only with `--admit-on-outcome on`. | The final attempt digest, with the terminal status in its provenance; never the final reflection. |
 | `sleep` | Reserved for the sleep pipeline's probe gate. | Nothing in v1. |
 

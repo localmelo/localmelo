@@ -223,6 +223,42 @@ async def test_a_cited_note_is_rehearsed_and_counted() -> None:
 
 
 @pytest.mark.asyncio
+async def test_an_attempts_thought_chunks_are_superseded_with_its_notes() -> None:
+    # T59: a later attempt's boundary supersedes the earlier attempt's
+    # thinking chunks as well as its notes, so a recalled chunk is marked.
+    server = FakeLLM(
+        _note_reply(
+            "the bug is in list_ops.py",
+            thinking="First attempt: read list_ops.py to find the bug.",
+        ),
+        _reflection(used_notes=["n1"]),
+        _note_reply(
+            "the bug is in list_ops.py",
+            thinking="Second attempt: reread list_ops.py after the reflection.",
+        ),
+        _reflection(used_notes=["n2"]),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            attempt_policy="reflect",
+            steps_per_attempt=1,
+            max_attempts=2,
+            recall_kinds=frozenset({"note", "draft", "thought"}),
+        ),
+    )
+    await agent.run_task("q")
+    await agent.close()
+    thoughts = [entry for entry in agent.notes() if entry.kind == "thought"]
+    assert [entry.alias for entry in thoughts] == ["t1", "t2"]
+    assert [entry.attempt for entry in thoughts] == [1, 2]
+    assert [entry.stage for entry in thoughts] == ["superseded", "superseded"]
+    notes = [entry for entry in agent.notes() if entry.kind == "note"]
+    assert notes and all(entry.stage == "superseded" for entry in notes)
+
+
+@pytest.mark.asyncio
 async def test_a_later_write_marks_the_draft_written(tmp_path: Path) -> None:
     draft_text = "def append(a, b):\n    return a + b"
     server = FakeLLM(

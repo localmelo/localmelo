@@ -734,6 +734,12 @@ def _item_line(item: RecallHit) -> str:
         attempt = f" · attempt {item.attempt}" if item.attempt else ""
         head = f"[{item.alias}] {label}{step}{attempt} (superseded):"
         return f"{head}\n{text}".rstrip()
+    if item.kind == "thought" and item.stage == "superseded":
+        # The same rule for the attempt's thinking chunks (T59): a chunk
+        # the boundary superseded is an earlier attempt's reasoning.
+        attempt = f" · attempt {item.attempt}" if item.attempt else ""
+        head = f"[{item.alias}] {label}{step}{attempt} (superseded):"
+        return f"{head} {text}".rstrip()
     origin = f" · {item.origin}" if item.origin else ""
     head = f"[{item.alias}] {label}{step}{origin}:"
     if item.kind == "thought":
