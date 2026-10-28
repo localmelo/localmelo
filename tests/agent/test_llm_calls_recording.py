@@ -511,7 +511,8 @@ async def test_rows_are_redacted_while_the_run_keeps_the_text(tmp_path: Path) ->
     )
     [call] = [m for m in window if m.tool_calls]
     assert (call.content, call.thinking) == (code, f"The key is {KEY}.")
-    assert steps[0].thought == code
+    # The run keeps the text; the step history keeps is redacted too.
+    assert steps[0].thought == "Your verification code is [redacted]."
     assert result.result == code
 
 

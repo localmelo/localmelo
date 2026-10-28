@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Collection
+from dataclasses import replace
 from typing import Any
 
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
 from localmelo.melo.memory.history import History
 from localmelo.melo.memory.long import LongTerm
@@ -19,6 +21,77 @@ from localmelo.melo.schema import (
     TaskRecord,
     ToolDef,
 )
+
+
+def _redacted_text(text: str) -> str:
+    """*text* with the secrets of :func:`redact_secrets` replaced."""
+    return redact_secrets(text)[0]
+
+
+def _redacted_value(value: Any) -> Any:
+    """A tool argument with the secrets of its text replaced.
+
+    A call's arguments are a dict of JSON values; every string in it, at any
+    depth, is redacted, and every other value stays as it is. The walk keeps
+    its own stack, so arguments nested past the recursion limit (which a
+    provider decodes from a reply all the same) do not raise
+    ``RecursionError``.
+    """
+    if isinstance(value, str):
+        return _redacted_text(value)
+    if not isinstance(value, (dict, list)):
+        return value
+    root: Any = {} if isinstance(value, dict) else []
+    todo: list[tuple[Any, Any]] = [(value, root)]
+    while todo:
+        source, target = todo.pop()
+        pairs = source.items() if isinstance(source, dict) else enumerate(source)
+        for name, item in pairs:
+            if isinstance(item, str):
+                redacted: Any = _redacted_text(item)
+            elif isinstance(item, (dict, list)):
+                redacted = {} if isinstance(item, dict) else []
+                todo.append((item, redacted))
+            else:
+                redacted = item
+            if isinstance(target, dict):
+                target[name] = redacted
+            else:
+                target.append(redacted)
+    return root
+
+
+def _redacted_step(step: StepRecord) -> StepRecord:
+    """The copy of *step* that history stores, with its secrets redacted."""
+    call = step.tool_call
+    if call is not None:
+        call = replace(call, arguments=_redacted_value(call.arguments))
+    result = step.tool_result
+    if result is not None:
+        result = replace(
+            result,
+            output=_redacted_text(result.output),
+            error=_redacted_text(result.error),
+        )
+    return replace(
+        step,
+        thought=_redacted_text(step.thought),
+        tool_call=call,
+        tool_result=result,
+    )
+
+
+def _redacted_task(task: TaskRecord) -> TaskRecord:
+    """The copy of *task* that history stores, with its texts redacted.
+
+    The result is redacted like the query: an answer often quotes the code
+    or the key a tool returned.
+    """
+    return replace(
+        task,
+        query=_redacted_text(task.query),
+        result=_redacted_text(task.result),
+    )
 
 
 class Hippo:
@@ -103,7 +176,13 @@ class Hippo:
     # ── Task management ──
 
     async def save_task(self, task: TaskRecord) -> None:
-        await self.history.save_task(task)
+        """Record *task* in history, with its texts redacted.
+
+        The copy that history keeps has the secrets of :func:`redact_secrets`
+        replaced, in its query and its result; *task* itself is untouched,
+        because a run still reads it.
+        """
+        await self.history.save_task(_redacted_task(task))
 
     async def get_task(self, task_id: str) -> TaskRecord | None:
         return await self.history.get_task(task_id)
@@ -113,17 +192,24 @@ class Hippo:
     async def store_step(self, task_id: str, step: StepRecord) -> str:
         """Record step in history and return a summary string.
 
+        History keeps a copy with the secrets of :func:`redact_secrets`
+        replaced, in its thought, tool arguments, tool output and error;
+        *step* itself is untouched, because working memory and the model
+        still read it. The summary is built from the stored copy, so the
+        text a caller passes to :meth:`memorize` is redacted too.
+
         Does NOT write to short/long memory.  The caller is responsible
         for routing the summary through ``Checker.check_memory_write``
         and then calling ``memorize()`` if allowed.
         """
-        await self.history.add_step(task_id, step)
+        stored = _redacted_step(step)
+        await self.history.add_step(task_id, stored)
 
-        summary = step.thought
-        if step.tool_call:
-            summary += f" [called {step.tool_call.tool_name}]"
-        if step.tool_result:
-            output = step.tool_result.output[:200]
+        summary = stored.thought
+        if stored.tool_call:
+            summary += f" [called {stored.tool_call.tool_name}]"
+        if stored.tool_result:
+            output = stored.tool_result.output[:200]
             summary += f" -> {output}"
 
         return summary
@@ -141,13 +227,18 @@ class Hippo:
         Pass ``to_working=False`` to write long-term memory only. The agent
         does this for step summaries, because working memory already holds
         the real tool-call turn for the current task.
+
+        Long-term memory keeps *text* with the secrets of
+        :func:`redact_secrets` replaced. Working memory keeps it as it is:
+        it is what the model reads.
         """
         if to_working:
             self.working.append(Message(role=role, content=text))
 
         if self.embedding:
-            emb = await self.embedding.embed([text])
-            await self.long.add(text=text, embedding=emb[0], metadata=metadata or {})
+            stored = _redacted_text(text)
+            emb = await self.embedding.embed([stored])
+            await self.long.add(text=stored, embedding=emb[0], metadata=metadata or {})
 
     # ── Forgetting ──
 
@@ -187,7 +278,7 @@ class Hippo:
             return
 
         for entry in reflections:
-            text = self._format_reflection_for_long(entry)
+            text = _redacted_text(self._format_reflection_for_long(entry))
             if text.strip():
                 emb = await self.embedding.embed([text])
                 await self.long.add(
