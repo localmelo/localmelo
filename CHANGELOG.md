@@ -400,6 +400,6 @@ earlier milestones.
 [#63]: https://github.com/localmelo/localmelo/pull/63
 [#64]: https://github.com/localmelo/localmelo/pull/64
 [#66]: https://github.com/localmelo/localmelo/pull/66
-[#67]: https://github.com/localmelo/localmelo/pull/NN
+[#67]: https://github.com/localmelo/localmelo/pull/67
 [#68]: https://github.com/localmelo/localmelo/pull/68
 [#69]: https://github.com/localmelo/localmelo/pull/69
