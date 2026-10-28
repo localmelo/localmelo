@@ -465,6 +465,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A thought chunk recalled with `--recall-kinds thought` no longer replays
+  the reply that produced it: its alias stays with that step's turn, so
+  step recall and the `recall` tool return it only after the turn left the
+  window, as they already did for notes and drafts ([#NN]).
 - The test suite no longer writes into the user's own `~/.cache/localmelo`:
   every test runs with `HOME` in a temporary directory, the defaults of the
   gateway's call log, the web workspace's memory and `config.toml` resolve
