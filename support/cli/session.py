@@ -1043,6 +1043,7 @@ class CliSession:
                 return False
             self._work = None  # past this point the switch completes
             new.load_conversation(old.conversation())
+            new.load_notes(old.notes())
             if self.runner is not None:
                 self.runner.replace_agent(new)
             self.agent = new

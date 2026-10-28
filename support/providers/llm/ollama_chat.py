@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, BaseLLMProvider
 from localmelo.melo.schema import Message, ToolCall, ToolDef, describe_images
 from localmelo.support.providers._http import (
     attempt_headers,
@@ -219,6 +219,7 @@ class OllamaNativeChat(BaseLLMProvider):
         payload: dict[str, Any] = {
             "think": True,  # extra_body may turn this off
             **self.extra_body,
+            **self.extra_body_by_kind.get(LLM_REQUEST_KIND.get(), {}),
             "model": self.model,
             "messages": _messages_to_ollama(messages),
             "stream": False,
