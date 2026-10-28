@@ -213,16 +213,26 @@ see [Signals](cli.md#signals).
 ## Approve tool calls
 
 An approval policy decides whether a tool call may run. Pass one as
-`approval` to `run_task` or `run_tool`. These tools require approval:
+`approval` to `run_task` or `run_tool`. A built-in or provided tool is asked
+about when its permission tier is not `read` (see
+[Permission tiers](tools.md#permission-tiers)):
 
-- the built-ins `shell_exec`, `python_exec` and `file_write`;
-- a provided tool whose `ProvidedTool.requires_approval` is `True`;
+- the built-ins `shell_exec` and `python_exec` (`exec`) and `file_write`
+  (`write`);
+- a provided tool with no annotations, or with annotations that make it
+  `write` or `network`;
+- a provided tool whose `ProvidedTool.requires_approval` is `True`, which
+  also makes a `read` tool ask;
 - the tools of an MCP server whose entry sets `require_approval`; see
   [MCP config file](tools.md#mcp-config-file).
 
-`file_read` does not: a [workspace root](#work-in-a-directory) limits it
-instead. Without a policy, a tool that requires approval runs like any
-other, as in direct mode, which never sets a policy.
+`file_read` is `read` and does not ask: a
+[workspace root](#work-in-a-directory) limits it instead. A read-only MCP
+tool (`readOnlyHint: true`) does not ask either, unless `require_approval`
+names it. A tool registered directly with `agent.executor.register` keeps
+its explicit `requires_approval`; its tier is a label only. Without a
+policy, a tool that would ask runs like any other, as in direct mode, which
+never sets a policy.
 
 A policy is any object with an `async def decide(request)` method that
 returns an `ApprovalDecision`. This one asks in the terminal:
@@ -482,7 +492,7 @@ To keep a conversation in a file, across processes and restarts, see
 | `await agent.run_task(query, *, on_event=None, approval=None, observe=None, progress=False, routine=None)` | Runs one task and returns its `RunResult`; see [Results](#results) and [Follow a run with events](#follow-a-run-with-events). |
 | `await agent.run(query)` | Runs one task and returns its text. |
 | `await agent.start()` | Starts the tool providers and registers their tools now, instead of at the first run. A second call does nothing. It raises the setup's error. |
-| `agent.list_tools()` | The registered tools, sorted by name, as `ToolInfo`: `name`, `description`, `parameters`, `source` (`"builtin"`, `"provided"` or `"custom"`) and `requires_approval`. |
+| `agent.list_tools()` | The registered tools, sorted by name, as `ToolInfo`: `name`, `description`, `parameters`, `source` (`"builtin"`, `"provided"` or `"custom"`), `requires_approval`, and `tier` (`"read"`, `"write"`, `"exec"` or `"network"`; see [Permission tiers](tools.md#permission-tiers)). |
 | `await agent.run_tool(name, arguments, *, approval=None)` | Runs one tool call outside a run and returns its `ToolResult`. |
 | `agent.conversation()` | A copy of the working-memory window, as a list of `Message`. |
 | `agent.load_conversation(messages)` | Replaces the working-memory window and returns the number of messages kept. |
@@ -561,6 +571,10 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
   is already registered, the run ends as `setup_error`. Later runs on that
   agent end the same way.
 - `agent.close()` stops the MCP servers.
+- Each MCP tool's raw `annotations` object is kept on its
+  `ToolDef.annotations`, and the checker derives the tool's tier from it;
+  see [Permission tiers](tools.md#permission-tiers). A `ToolDef` you build
+  yourself starts with `{}`, which is `write`.
 - A provided tool with `requires_approval=True` asks the run's approval
   policy before each call; see [Approve tool calls](#approve-tool-calls).
   For an MCP server, set `require_approval` in its entry.

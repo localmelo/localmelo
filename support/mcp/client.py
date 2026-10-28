@@ -33,7 +33,7 @@ import os
 import signal
 import sys
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from localmelo.melo.checker.validators import (
@@ -106,11 +106,18 @@ class McpError(Exception):
 
 @dataclass(frozen=True)
 class McpTool:
-    """A tool as listed by the server (original, un-namespaced name)."""
+    """A tool as listed by the server (original, un-namespaced name).
+
+    ``annotations`` holds the server's raw ``annotations`` object when it
+    is a JSON object with string keys, and ``{}`` otherwise. A malformed
+    value never makes the tool fail to list; the tier derivation ignores
+    anything it does not understand.
+    """
 
     name: str
     description: str
     input_schema: dict[str, Any]
+    annotations: dict[str, Any] = field(default_factory=dict)
 
 
 class StdioMcpClient:
@@ -684,6 +691,16 @@ def _close_pipes(proc: asyncio.subprocess.Process) -> None:
                 pipe.close()
 
 
+def _parse_annotations(item: dict[str, Any]) -> dict[str, Any]:
+    """The tool's raw annotations, if they are a JSON object of string keys."""
+    annotations = item.get("annotations")
+    if not isinstance(annotations, dict):
+        return {}
+    if not all(isinstance(key, str) for key in annotations):
+        return {}
+    return dict(annotations)
+
+
 def _parse_tool(item: Any) -> McpTool | None:
     if not isinstance(item, dict) or not isinstance(item.get("name"), str):
         return None
@@ -695,4 +712,5 @@ def _parse_tool(item: Any) -> McpTool | None:
         name=item["name"],
         description=description if isinstance(description, str) else "",
         input_schema=schema,
+        annotations=_parse_annotations(item),
     )

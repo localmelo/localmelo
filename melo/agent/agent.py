@@ -40,6 +40,7 @@ from localmelo.melo.checker.payloads import (
     MemoryWritePayload,
     ToolResolutionResult,
 )
+from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
@@ -98,6 +99,7 @@ from localmelo.melo.schema import (
     ToolDef,
     ToolInfo,
     ToolResult,
+    ToolTier,
     answer_text,
     clip_session_text,
     describe_images,
@@ -896,11 +898,13 @@ class _ApprovalGate:
         run: _RunState,
         call: ToolCall,
         workspace_root: str | None,
+        tier: ToolTier,
     ) -> None:
         self._policy = policy
         self._run = run
         self._call = call
         self._workspace_root = workspace_root
+        self._tier = tier
         # The approval of tool.finished: request_id, allowed, reason,
         # remember and origin, once the policy is asked; None until then.
         self.asked: dict[str, Any] | None = None
@@ -915,6 +919,7 @@ class _ApprovalGate:
             arguments=copy.deepcopy(request.arguments),
             preview=call_preview(request.tool_name, request.arguments),
             workspace_root=self._workspace_root,
+            tier=self._tier,
         )
         run.waiting_call_id = call.id
         try:
@@ -1170,6 +1175,7 @@ class Agent:
         a tool of the tool providers, which appear once :meth:`start` or
         the first run has set them up, and ``"custom"`` for a tool
         registered with the agent's executor and tool registry directly.
+        ``tier`` is the permission tier the checker derives for it.
         """
         tools: list[ToolInfo] = []
         for tool in sorted(self.hippo.list_tools(), key=lambda t: t.name):
@@ -1185,6 +1191,7 @@ class Agent:
                     parameters=copy.deepcopy(tool.parameters),
                     source=source,
                     requires_approval=self.executor.requires_approval(tool.name),
+                    tier=self.checker.tier(tool),
                 )
             )
         return tools
@@ -1329,12 +1336,18 @@ class Agent:
                 await self._close_providers(started)
                 raise
             for tool in provided:
+                # The checker's tier only adds caution: require_approval
+                # can force a read tool to ask, but false cannot un-mark a
+                # write, exec or network one.
                 self.hippo.register_tool(tool.definition)
                 self.executor.register(
                     tool.definition.name,
                     tool.function,
                     timeout_ms=tool.timeout_ms,
-                    requires_approval=tool.requires_approval,
+                    requires_approval=(
+                        tier_requires_approval(tier_of(tool.definition))
+                        or tool.requires_approval
+                    ),
                 )
             self._provided_names = frozenset(tool.definition.name for tool in provided)
             self._tools_ready = True
@@ -1638,11 +1651,15 @@ class Agent:
         events.tool_started(call)
         exit_codes: list[int] | None = [] if events.active else None
         slot = TOOL_EXIT_CODE.set(exit_codes) if exit_codes is not None else None
-        gate = (
-            None
-            if run.approval is None
-            else _ApprovalGate(run.approval, run, call, self.executor.workspace_root)
-        )
+        gate = None
+        if run.approval is not None:
+            called_tool = self.hippo.get_tool(call.tool_name)
+            tier: ToolTier = (
+                "write" if called_tool is None else self.checker.tier(called_tool)
+            )
+            gate = _ApprovalGate(
+                run.approval, run, call, self.executor.workspace_root, tier
+            )
         try:
             exec_request = ExecutionRequest(
                 tool_name=call.tool_name,

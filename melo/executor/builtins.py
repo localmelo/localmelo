@@ -14,6 +14,7 @@ import sys
 from collections.abc import Callable, Coroutine
 from typing import Any
 
+from localmelo.melo.checker.tiers import BUILTIN_TIERS, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_OUTPUT_LEN
 from localmelo.melo.schema import ToolDef
 
@@ -22,11 +23,11 @@ ToolFunction = Callable[..., Coroutine[Any, Any, str]]
 
 BUILTINS: list[tuple[ToolDef, ToolFunction]] = []
 
-# The built-ins that run code or change files. register_builtins marks them,
-# so a call of one asks the run's approval policy, when the run has one,
-# before it runs (see Executor.execute_structured).
+# The built-ins whose tier is not read. register_builtins marks them, so a
+# call of one asks the run's approval policy, when the run has one, before
+# it runs (see Executor.execute_structured).
 APPROVAL_BUILTINS: frozenset[str] = frozenset(
-    {"shell_exec", "python_exec", "file_write"}
+    name for name, tier in BUILTIN_TIERS.items() if tier_requires_approval(tier)
 )
 
 # Exit statuses of the child processes a tool call ran, for the exit_code of

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Collection
 
+from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.executor.builtins import (
     APPROVAL_BUILTINS,
     BUILTINS,
@@ -39,9 +40,10 @@ def register_builtins(
     them, an empty collection none. An unknown name raises ``ValueError``
     before anything is registered.
 
-    The tools in :data:`APPROVAL_BUILTINS` are registered as requiring
-    approval: a call of one asks the approval gate that
-    :meth:`Executor.execute_structured` is given, if any, before it runs.
+    The tools whose tier is not read are registered as requiring approval
+    (the names in :data:`APPROVAL_BUILTINS`): a call of one asks the
+    approval gate that :meth:`Executor.execute_structured` is given, if
+    any, before it runs.
 
     Without *workspace_root*, the functions of :data:`BUILTINS` themselves
     are registered, and a *tool_timeout_s* raises ``ValueError``. Its
@@ -77,12 +79,13 @@ def register_builtins(
     for tool_def, phase1a_fn in BUILTINS:
         if selected is None or tool_def.name in selected:
             fn, timeout_ms = rooted.get(tool_def.name, (phase1a_fn, None))
+            tier = tier_of(tool_def)
             hippo.register_tool(tool_def)  # type: ignore[attr-defined]
             executor.register(
                 tool_def.name,
                 fn,
                 timeout_ms=timeout_ms,
-                requires_approval=tool_def.name in APPROVAL_BUILTINS,
+                requires_approval=tier_requires_approval(tier),
             )
 
 

@@ -31,7 +31,10 @@ Python API, an agent with a workspace root keeps the file tools inside a
 directory and starts `shell_exec` and `python_exec` there (see
 [With a workspace root](#with-a-workspace-root)). The interactive UI (bare
 `melo`) runs with its workspace as the root and asks before each
-`shell_exec`, `python_exec` and `file_write` call, unless `--yolo`.
+`shell_exec`, `python_exec` and `file_write` call, unless `--yolo` (see
+[Permission tiers](#permission-tiers)). The interactive UI does not load MCP
+servers yet; a Python run with an approval policy asks its own policy about
+an MCP tool by the same tiers.
 
 ## Choose the built-in tools
 
@@ -107,7 +110,7 @@ Every key of a server entry:
 | `timeout` | `120` | Seconds each tool call may take. |
 | `startup_timeout` | `30` | Seconds to start the server and list its tools. |
 | `include_tools` | all tools | Register only these tools, by the names the server uses. |
-| `require_approval` | `false` | `true`: each call of the server's tools asks the run's approval policy first. A list of tool names, spelled as in `include_tools`: only calls of those tools ask. It has an effect only in a run with a policy; see [With an approval policy](#with-an-approval-policy). |
+| `require_approval` | `false` | `true`: each call of the server's tools asks the run's approval policy first, even a read-only one. A list of tool names, spelled as in `include_tools`: only calls of those tools ask. It is an extra mark on top of the tool's tier (see [Permission tiers](#permission-tiers)) and has an effect only in a run with a policy. |
 | `disabled` | `false` | `true` skips the server. |
 
 - `servers` is accepted in place of `mcpServers`. Other keys are ignored,
@@ -126,6 +129,10 @@ Every key of a server entry:
   digits, `_` and `-` become `_`. Names longer than 64 characters are
   shortened to 64 and end with a short hash; `config.tools` in the JSON line
   shows the names used.
+- A tool's `annotations` object is kept as the server gives it, and decides
+  the tool's permission tier when it is not a built-in (see
+  [Permission tiers](#permission-tiers)). A malformed value is ignored: the
+  tool still lists.
 - The servers start when the run starts. A server that cannot start ends the
   run with status `setup_error`, for example
   `MCP server 'notes' exited (code 1)`.
@@ -160,13 +167,16 @@ Before a tool runs, localmelo checks the call:
   also have the type the tool declares; a call such as `shell_exec` with a
   list for `command` is refused with
   `Arguments for shell_exec: 'command' must be of type string, not array`.
-- `shell_exec` refuses commands that match one of six patterns: `rm -rf /`,
-  `mkfs`, `dd if=`, a fork bomb, `shutdown` and `reboot`.
+- `shell_exec`, the `exec` built-in that takes a command line, refuses
+  commands that match one of six patterns: `rm -rf /`, `mkfs`, `dd if=`, a
+  fork bomb, `shutdown` and `reboot`.
 - With a workspace root, the path of `file_read` and `file_write` must be
   inside it (see [With a workspace root](#with-a-workspace-root)).
-- With an approval policy, a tool that requires approval waits for the
-  policy's decision, and with a workspace root, a file path is then checked
-  again (see [With an approval policy](#with-an-approval-policy)).
+- With an approval policy, a tool whose tier is not `read`, or that is
+  explicitly marked, waits for the policy's decision, and with a workspace
+  root, a file path is then checked again (see
+  [Permission tiers](#permission-tiers) and
+  [With an approval policy](#with-an-approval-policy)).
 
 After a tool runs:
 
@@ -195,6 +205,45 @@ The checks are guardrails, not a sandbox:
 To limit what a task can do, use `--builtins none` or a subset of tools,
 `--mcp-only`, a container or virtual machine, or a separate user account.
 See the [security policy](https://github.com/localmelo/localmelo/blob/main/SECURITY.md).
+
+### Permission tiers
+
+Every tool has one of four tiers. A tier says what a call can reach; it is
+not a denial. For a built-in or provided tool in a run with an approval
+policy, `read` is the only tier that runs without asking.
+
+| Tier | Meaning | Asks with a policy |
+|---|---|---|
+| `read` | Reads local data; no side effect outside the process. | No, unless the tool is explicitly marked. |
+| `write` | Creates, changes or deletes local files or state. | Yes. |
+| `exec` | Runs a command, code or another program with your privileges. | Yes. |
+| `network` | Sends data to, or acts on, something outside this machine: an HTTP API, a chat, a payment, a GUI. | Yes. |
+
+The built-ins are fixed by name: `file_read` is `read`, `file_write` is
+`write`, and `shell_exec` and `python_exec` are `exec`. The table wins over a
+tool's own claims, so a provided or custom tool that reuses a built-in's name
+inherits that tier.
+
+Every other tool's tier comes from the MCP `annotations` object that the
+server lists with it, read cautiously:
+
+- `openWorldHint: true` makes it `network`, whether or not it also claims to
+  be read-only.
+- `readOnlyHint: true` makes it `read`, unless `destructiveHint: true`
+  contradicts it; then the cautious reading wins and it is `write`.
+- Everything else is `write`: no annotations, an annotation that is not an
+  object, a hint that is not a boolean, and the `idempotentHint` and `title`
+  keys. A tool is not read-only unless it says so.
+
+Annotations are claims by the server, not proof: a server can say
+`readOnlyHint: true` for a destructive tool. localmelo trusts the hint only
+after you chose to start that server. A tool registered by Python keeps its
+explicit `requires_approval`: the tier is only a label for it, and a
+`register` call without the mark does not ask.
+
+An MCP server's `require_approval` is an extra mark on top of the tier:
+`true` or a list of tool names makes even a `read` tool ask. `false` means no
+extra mark; it cannot stop a `write`, `exec` or `network` tool from asking.
 
 ### With a workspace root
 
@@ -240,10 +289,15 @@ Direct mode and the gateway never set a workspace root.
 ### With an approval policy
 
 A run started in Python with `approval=policy` asks the policy before each
-call of a tool that requires approval: `shell_exec`, `python_exec`,
-`file_write`, and the tools of tool providers that are marked so, such as
-the tools of an MCP server that sets `require_approval` (see
-[Approve tool calls](python-api.md#approve-tool-calls)).
+call of a built-in or provided tool whose tier is not `read` (see
+[Permission tiers](#permission-tiers)): the built-ins `shell_exec`,
+`python_exec` and `file_write`, and a provided or MCP tool that is `write`,
+`exec` or `network`. That includes an MCP tool with no annotations, which is
+`write`. A tool is also asked about when it is explicitly marked: a provided
+tool with `requires_approval=True`, a custom tool whose `register` call sets
+it, or the tools of an MCP server that sets `require_approval` (see
+[Approve tool calls](python-api.md#approve-tool-calls)). A custom tool's
+tier is only a label: it asks when its `register` call sets the mark.
 
 - **After the other checks.** The policy is asked only about a call that
   every check above lets through, so it sees exactly what will run, the
