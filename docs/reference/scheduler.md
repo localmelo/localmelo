@@ -53,15 +53,16 @@ the lane by code.
 
 ## Tasks, workers and the scheduler store (S3a)
 
-The gateway's `sessions.db` gains a `scheduler` component beside the session
-tables. `support/gateway/task_store.py` creates version 1 of it — `tasks`,
-`task_deps`, `priority_events`, `questions`, `sched_rules`, `sched_log` and
-`idle_windows`, with indexes on `tasks(state, level_eff)`,
-`priority_events(task_id, ts)` and `sched_log(ts)` — in one
-`BEGIN IMMEDIATE` transaction, then records `('scheduler', 1)` in
-`schema_components`. `PRAGMA user_version` stays the session schema's, and a
-terminal `melo` never creates the component or reads its tables; a component
-newer than 1 is refused like a newer `user_version`. `TaskStore.open()` is called by the console after it opens the store. A
+The gateway's `sessions.db` has a `scheduler` component beside the session
+tables. `support/gateway/task_store.py` creates version 2 with `tasks`,
+`task_deps`, `priority_events`, `questions`, `sched_rules`, `sched_log`,
+`idle_windows` and `park_priority`, with indexes on `tasks(state, level_eff)`,
+`priority_events(task_id, ts)` and `sched_log(ts)`, in one `BEGIN IMMEDIATE`
+transaction. `TaskStore.open()` also migrates version 1 to 2 atomically and
+records the component version in `schema_components`. `PRAGMA user_version`
+stays the session schema's, and a terminal `melo` never creates the component
+or reads its tables; a component newer than 2 is refused. The console calls
+`TaskStore.open()` after opening the store. A
 gateway takes the session file's owner
 lock: a second gateway process is refused rather than concurrently migrating
 or writing the same file.
@@ -144,9 +145,46 @@ and service, wait and tool accounting is deferred. Pause parks a task at P5
 and takes effect at the next model call: running tools finish and an answered
 pending approval waits until resume. A task paused before it starts does not
 start a worker until resumed. Resume restores the prior priority unless a new
-level is supplied; if there is no pause log (such as when created or set at
-P5), or retention pruned it, resume falls back to computed P2. Resuming an unpaused task returns 409 `not_paused`. The task
-PATCH route rejects `first` with 400; it is deferred to S6b.
+level is supplied; without a saved pause snapshot (such as a task created or
+set at P5), resume falls back to computed P2. Resuming an unpaused task returns
+409 `not_paused`. The task PATCH route rejects `first` with 400; it is deferred
+to S6b.
+
+## S3b.1a foundations
+
+Pause saves the prior level, source, reason and rank in `park_priority` in the
+same transaction as the P5 transition. This snapshot survives `sched_log`
+retention and is consumed on resume. Migration reconstructs snapshots for v1
+paused P5 rows when the retained audit trail supports it; without a usable
+pause record there is no snapshot and resume falls back to P2. Migration checks
+for later `task.level`, `task.first` and `task.resume` audit entries; a later
+runnable priority may instead leave the task no longer paused. Explicit
+priority changes can update or invalidate the snapshot. The row also carries a
+monotonic `generation` and an `operation_id` for guarded transitions; it remains
+across resume and is removed with the task. `pause_pending` is reserved for
+S3b.1b and is not set by worker code in S3b.1a. Before a task's first pause or
+park creates its identity row, preventing stale worker safe-point callbacks relies
+on the S3b.1b worker coordinator; these foundations do not provide that fence.
+
+`ChatGate.try_park()` is an internal, synchronous primitive for a single
+pending, unadmitted task plan or reflection call bound to a turn. On the same
+event loop it fences the call from admission and asks the runner to cancel that
+exact turn with cause `park`. A stale or already-stopping turn cannot win. If
+cancellation is refused or raises, the fence is rolled back unless the call has
+ended. The primitive does not itself integrate parking with a worker.
+
+`SessionStore.component_event_transaction()` and `append_component_event()`
+allow gateway component rows and reserved out-of-turn session events to commit
+atomically. Task-store pause emits `sched.pause_requested`; resume and terminal
+transitions also emit committed events with their identity. `ParkStore` uses the
+same transaction seam for internal hold, resume and park transitions,
+recording hold coordinates supplied by the caller and emitting `sched.held`,
+`sched.resumed` or `sched.parked`; its returned record includes the current
+`pause_pending` marker. It does not change priority. Its card builder
+uses the task spec and persisted events only, bounds and redacts text, omits
+tool outputs and arguments other than file paths, and treats completion as
+unverified. These primitives do not implement worker hold/park integration or
+ship a new API. Worker API pause behavior remains as in #119; S3b.1b follows.
 
 ## Import bench traces
 

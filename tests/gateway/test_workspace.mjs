@@ -361,6 +361,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/turns\.mjs";\n/m, '')
   .replace(/^import \{ renderMarkdown \} from "\.\/markdown\.mjs";\n/m, '')
   .replace(/^import \{ setupSettings \} from "\.\/settings\.mjs";\n/m, '')
+  .replace(/^import \{ setupDrawer \} from "\.\/drawer\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -524,10 +525,17 @@ function harness(routes, {mobile = false} = {}) {
   };
   documentDouble = document;
   const net = gateway(routes);
+  const drawer = {
+    opened: false, calls: [],
+    open(tab) { this.opened = true; this.calls.push(tab); },
+    close() { if (!this.opened) return false; this.opened = false; return true; },
+    selectTab(tab) { this.calls.push(`select:${tab}`); }, sessionChanged() {},
+  };
   const context = vm.createContext({
     ...turns,
     renderMarkdown,
     setupSettings: () => async () => {},
+    setupDrawer: () => drawer,
     document,
     location: {hash: ''},
     localStorage: storage(),
@@ -564,6 +572,7 @@ function harness(routes, {mobile = false} = {}) {
     text: (id) => flatten(element(id)),
     stream: () => FakeEventSource.instances[FakeEventSource.instances.length - 1],
     documentListeners,
+    drawer,
     windowListeners,
     local: context.localStorage,
     session: context.sessionStorage,
@@ -909,14 +918,54 @@ test('API errors retain validation details', async () => {
   });
 });
 
-test('setup failure keeps its hint without a premature tools action', async () => {
+test('title and independent banners follow active state without replacing notices', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.state().health = {...health, configured: false, sessions: {...health.sessions, store: 'error', store_error: 'database offline'}};
+  h.state().view.pending.set('req', {});
+  h.run('notify("Other error", {sticky: true}); S.stream.status = "paused"; S.stream.retryAt = 0; syncUI()');
+  assert.match(h.context.document.title, /localmelo · New chat · 1/);
+  assert.match(h.element('store-banner').textContent, /database offline/);
+  assert.match(h.element('model-banner').textContent, /No model/);
+  assert.equal(h.element('stream-banner').hidden, false);
+  assert.equal(h.element('notice').textContent, 'Other error');
+  await h.element('reconnect-btn').click();
+  assert.equal(h.state().stream.status, 'live');
+  h.run('syncUI()');
+  assert.equal(h.element('stream-banner').hidden, true);
+});
+
+test('status banners do not rewrite unchanged live text', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.state().health = {...health, configured: false, sessions: {...health.sessions, store: 'error', store_error: 'offline'}};
+  h.run('S.stream.status="paused"; S.stream.retryAt=0; syncUI()');
+  const writes = {};
+  for (const id of ['store-banner', 'model-banner', 'stream-banner-text']) {
+    const node = h.element(id);
+    let value = node.textContent;
+    writes[id] = 0;
+    Object.defineProperty(node, 'textContent', {get: () => value, set: (text) => { writes[id]++; value = text; }});
+  }
+  h.run('syncUI(); refreshStreamNotice()');
+  assert.deepEqual(writes, {'store-banner': 0, 'model-banner': 0, 'stream-banner-text': 0});
+  h.state().health.sessions.store_error = 'new error';
+  h.run('syncUI()');
+  assert.equal(writes['store-banner'], 1);
+  assert.equal(writes['model-banner'], 0);
+});
+
+test('setup failure offers the details drawer tools action', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
   const turn = turns.newTurn(turnRow({status: 'setup_error', result: {error: 'MCP failed'}}));
   h.context.turn = turn;
   const node = h.run('statusNode(turn)');
   assert.match(flatten(node), /MCP server failed to start/);
-  assert.equal(findNode(node, (item) => item.textContent === 'Show tools'), null);
+  const show = findNode(node, (item) => item.textContent === 'Show tools');
+  assert.ok(show);
+  show.click();
+  assert.deepEqual(h.drawer.calls, ['tools']);
 });
 
 test('failure actions are limited to the newest eligible turn', async () => {
@@ -1660,6 +1709,27 @@ test('the 4 s poll redraws the work group when the hold changes', async () => {
   routes['GET /sessions'] = {sessions: [session('a', {busy: true, held: 'Resources'})], machine: null, has_more: false};
   await h.run('refreshList()');
   assert.match(h.text('messages'), /Waiting: Resources/);
+});
+
+test('opening settings closes the trapped drawer first', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.drawer.open('tools');
+  await h.element('settings-btn').click();
+  assert.equal(h.drawer.opened, false);
+});
+
+test('Escape closes the drawer before stopping a running turn', async () => {
+  const h = harness(baseRoutes({'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}}}));
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'turn-2', user_text: 'A long task'}});
+  h.drawer.open('tools');
+  const [escape] = h.documentListeners.keydown;
+  escape({key: 'Escape', isComposing: false, keyCode: 27});
+  assert.equal(h.drawer.opened, false);
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 0);
+  escape({key: 'Escape', isComposing: false, keyCode: 27});
+  assert.equal(h.net.callsTo('/turns/turn-2/cancel').length, 1);
 });
 
 test('Escape closes the level menu before it stops the turn', async () => {

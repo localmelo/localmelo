@@ -7,6 +7,7 @@ This page moved. Choose a section below to open its new location.
 ## [the-gate-on-chats-s2](guides/scheduler.md#the-gate-on-chats-s2)
 ## [the-gpu-lock-and-the-battery-s2b](guides/scheduler.md#the-gpu-lock-and-the-battery-s2b)
 ## [tasks-workers-and-the-scheduler-store-s3a1](reference/scheduler.md#tasks-workers-and-the-scheduler-store-s3a)
+## [s3b1a-foundations](reference/scheduler.md#s3b1a-foundations)
 ## [run-one-simulation](guides/scheduler.md#run-one-simulation)
 ## [import-bench-traces](reference/scheduler.md#import-bench-traces)
 ## [results-are-not-validated](reference/scheduler.md#results-are-not-validated)
