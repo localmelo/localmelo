@@ -1061,6 +1061,18 @@ async def test_begin_turn_checks_its_arguments(tmp_path: Path) -> None:
     await store.aclose()
 
 
+async def test_latest_event_id_is_the_newest_stored_event(tmp_path: Path) -> None:
+    store = gateway(tmp_path / "s.db")
+    session_id, _ = await finished_turn(store)
+    events = await store.list_events(session_id)
+    assert await store.latest_event_id(session_id) == events[-1].id
+    await store.rename_session(session_id, "named")
+    renamed = await store.list_events(session_id)
+    assert await store.latest_event_id(session_id) == renamed[-1].id
+    assert await store.latest_event_id("0123456789ab") == 0
+    await store.aclose()
+
+
 async def test_event_ids_grow_and_page_by_turn(tmp_path: Path) -> None:
     store = gateway(tmp_path / "s.db")
     session_id, _ = await finished_turn(store)

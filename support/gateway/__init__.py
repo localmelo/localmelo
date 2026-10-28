@@ -17,17 +17,23 @@ except ImportError as e:
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload, SessionTransition
 from localmelo.support import config
+from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.guard import LoopbackGuard, is_loopback
 from localmelo.support.gateway.session import SessionBusyError, SessionManager
 
 logger = logging.getLogger("localmelo.gateway")
+
+# Seconds uvicorn waits for open connections after it starts shutting down.
+GRACEFUL_SHUTDOWN_S = 3.0
 
 
 # ── Gateway Server ──
 
 
 class GatewayServer:
-    def __init__(self, cfg: config.Config) -> None:
+    def __init__(
+        self, cfg: config.Config, *, console_options: ConsoleOptions | None = None
+    ) -> None:
         self.cfg = cfg
         host = cfg.gateway.host
         # A URL writes an IPv6 address in brackets, as in [::1]; the socket
@@ -46,17 +52,29 @@ class GatewayServer:
             config=cfg,
         )
 
-        self.app = FastAPI(title="localmelo gateway", lifespan=self._lifespan)
+        # No Swagger or ReDoc page: /docs loads Swagger UI from a CDN, which
+        # the console's no-CDN rule forbids. API v2 is documented in
+        # docs/api.md instead.
+        self.app = FastAPI(
+            title="localmelo gateway",
+            lifespan=self._lifespan,
+            docs_url=None,
+            redoc_url=None,
+            openapi_url=None,
+        )
         self._register_routes()
 
         from localmelo.support.gateway.webapp import mount as mount_webapp
 
         mount_webapp(self.app, self.cfg)
 
-        # The guard sees each request before routing, so it covers every
-        # route, error responses and routes added later. Middleware added
-        # after it would run before it: add middleware above this point.
+        # The console is mounted only on loopback: API v2 has no login. Its
+        # error middleware must be added before the guard, so the guard stays
+        # outermost and refuses a foreign request before any route sees it.
+        self.console: Console | None = None
         if is_loopback(self.host):
+            self.console = Console(self.cfg, port=self.port, options=console_options)
+            self.console.mount(self.app)
             self.app.add_middleware(LoopbackGuard, port=self.port)
         else:
             logger.warning(
@@ -73,6 +91,8 @@ class GatewayServer:
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI) -> AsyncIterator[None]:  # type: ignore[type-arg]
         self._started_at = time.time()
+        if self.console is not None:
+            await self.console.start()
         logger.info("gateway ready on %s:%d", self.host, self.port)
         try:
             yield
@@ -84,6 +104,8 @@ class GatewayServer:
             playground = getattr(app.state, "smoke_playground", None)
             if playground is not None:
                 await playground.close_all()
+            if self.console is not None:
+                await self.console.aclose()
 
     # ── Routes ──
 
@@ -212,11 +234,41 @@ class GatewayServer:
 
     # ── Run ──
 
+    def uvicorn_server(self) -> uvicorn.Server:
+        """The server ``run()`` uses, whose shutdown ends the event streams first."""
+        config = uvicorn.Config(
+            self.app,
+            host=self.host,
+            port=self.port,
+            log_level="info",
+            timeout_graceful_shutdown=int(GRACEFUL_SHUTDOWN_S),
+        )
+        return _ConsoleServer(config, console=self.console)
+
     def run(self) -> None:
-        uvicorn.run(self.app, host=self.host, port=self.port, log_level="info")
+        self.uvicorn_server().run()
 
 
 def start_gateway(cfg: config.Config) -> None:
     cfg.validate_or_raise()
     server = GatewayServer(cfg)
     server.run()
+
+
+class _ConsoleServer(uvicorn.Server):
+    """A uvicorn server that ends the console's streams before it waits.
+
+    uvicorn waits for open connections to close before it runs the lifespan
+    shutdown, and an ``EventSource`` never closes by itself. Setting the
+    console's shutdown event first makes every stream return, so Ctrl+C and
+    SIGTERM do not hang on an open console tab.
+    """
+
+    def __init__(self, config: uvicorn.Config, *, console: Console | None) -> None:
+        super().__init__(config)
+        self._console = console
+
+    async def shutdown(self, sockets: Any = None) -> None:
+        if self._console is not None:
+            self._console.begin_shutdown()
+        await super().shutdown(sockets=sockets)

@@ -1,0 +1,335 @@
+"""The web console's server half: API v2 under ``/api``.
+
+:class:`Console` owns the one gateway :class:`~localmelo.support.sessions.store.SessionStore`,
+its :class:`~localmelo.support.sessions.hub.SessionHub`, an
+:class:`~localmelo.support.sessions.approvals.ApprovalBroker` and the open
+sessions. It opens the store when the gateway starts, answers 503
+``store_unavailable`` on the routes that need it while it is not open, and
+retries the open every :data:`STORE_RETRY_S` seconds. Health is served
+either way. The console page itself arrives in PR 5; this PR mounts only
+``/api``.
+
+The gateway mounts the console only when it listens on a loopback address
+(see :class:`~localmelo.support.gateway.guard.LoopbackGuard`); API v2 has
+no login.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import logging
+import time
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Final
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
+from starlette.routing import Match
+
+from localmelo.support.sessions import display
+from localmelo.support.sessions.approvals import ApprovalBroker
+from localmelo.support.sessions.hub import SessionHub
+from localmelo.support.sessions.store import (
+    FAILED_ERROR,
+    GATEWAY_SESSIONS_DB,
+    RETENTION_SWEEP_S,
+    SessionStore,
+    SessionStoreError,
+)
+
+from . import errors, routes_sessions, routes_settings
+from .errors import ApiError
+from .probe import ModelServerProbe, Probe
+from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
+
+if TYPE_CHECKING:
+    from localmelo.support.config import Config
+
+logger = logging.getLogger(__name__)
+
+# Seconds between retries of a store open that failed.
+STORE_RETRY_S: Final = 5.0
+
+
+@dataclass(frozen=True)
+class ConsoleOptions:
+    """What a test may replace; production reads every default.
+
+    *store_path* is ``~/.cache/localmelo/gateway/sessions.db`` when None,
+    *builder* is :func:`~.registry.default_builder`, and *probe* is the
+    real cached model-server probe. *dev_reload* is read by the static
+    bundle of PR 5.
+    """
+
+    store_path: str | None = None
+    builder: AgentBuilder | None = None
+    probe: Probe | None = None
+    dev_reload: bool = False
+
+
+class Console:
+    """The console's server state and the ``/api`` routes over it."""
+
+    def __init__(
+        self,
+        cfg: Config,
+        *,
+        port: int,
+        options: ConsoleOptions | None = None,
+    ) -> None:
+        self.cfg = cfg
+        self.port = port
+        self.options = options or ConsoleOptions()
+        self.store = SessionStore(self.options.store_path, writer="gateway")
+        self.hub = SessionHub(self.store)
+        self.broker = ApprovalBroker(timeout_s=None)
+        self.sessions = ConsoleSessions(
+            self.store,
+            self.broker,
+            lambda: self.cfg,
+            builder=self.options.builder,
+        )
+        self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
+        self._started_at = time.time()
+        self._store_ok = False
+        self._store_error = ""
+        self._closed = False
+        self._shutdown = asyncio.Event()
+        self._retry_task: asyncio.Task[None] | None = None
+        self._retention_task: asyncio.Task[None] | None = None
+        self._sweep_task: asyncio.Task[None] | None = None
+        self._streams = 0
+        self.app: FastAPI | None = None
+
+    # ── Mounting ──
+
+    def mount(self, app: FastAPI) -> None:
+        """Register the error handlers and the ``/api`` routes on *app*."""
+        self.app = app
+        app.state.console = self
+        errors.install(app)
+        routes_settings.add_routes(app, self)
+        routes_sessions.add_routes(app, self)
+        _add_not_found(app)
+
+    # ── Lifecycle ──
+
+    async def start(self) -> None:
+        """Open the store, or start retrying it; start the sweeps.
+
+        A failure does not raise: the gateway still serves ``/v1`` and
+        ``/api/health``, and ``/api`` answers 503 ``store_unavailable``
+        until an open succeeds.
+        """
+        self._started_at = time.time()
+        if await self._try_open():
+            self._start_retention()
+        else:
+            self._retry_task = asyncio.create_task(self._retry_loop())
+        self._sweep_task = asyncio.create_task(self._sweep_loop())
+
+    async def _try_open(self) -> bool:
+        try:
+            await self.store.open()
+        except SessionStoreError as exc:
+            self._store_ok = False
+            self._store_error = display.home_label(str(exc))
+            logger.warning("The session store is unavailable: %s", self._store_error)
+            return False
+        self._store_ok = True
+        self._store_error = ""
+        return True
+
+    def _start_retention(self) -> None:
+        if self._retention_task is not None and not self._retention_task.done():
+            return
+        self._retention_task = asyncio.create_task(self._retention_loop())
+
+    async def _retry_loop(self) -> None:
+        while not self._closed:
+            await asyncio.sleep(STORE_RETRY_S)
+            if self._closed or self.store.failed is not None:
+                return
+            if await self._try_open():
+                self._start_retention()
+                return
+
+    async def _retention_loop(self) -> None:
+        while not self._closed:
+            await asyncio.sleep(RETENTION_SWEEP_S)
+            try:
+                await self.store.apply_retention()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning("Session retention failed: %s", exc)
+
+    async def _sweep_loop(self) -> None:
+        while not self._closed:
+            await asyncio.sleep(SWEEP_INTERVAL_S)
+            try:
+                await self.sessions.close_idle()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("The console's idle sweep failed")
+
+    def begin_shutdown(self) -> None:
+        """End every event stream; the uvicorn server calls this first."""
+        self._shutdown.set()
+
+    async def aclose(self) -> None:
+        """Close the sessions, the hub and the store, releasing the owner lock last."""
+        if self._closed:
+            return
+        self._closed = True
+        self._shutdown.set()
+        tasks = [
+            task
+            for task in (self._retry_task, self._retention_task, self._sweep_task)
+            if task is not None
+        ]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        try:
+            await self.sessions.close_all()
+        finally:
+            try:
+                await self.hub.aclose()
+            finally:
+                try:
+                    await self.store.aclose()
+                except Exception:  # never opened, or already closed
+                    logger.debug("Closing the session store failed", exc_info=True)
+                with contextlib.suppress(Exception):
+                    await self.probe.aclose()
+
+    # ── Store state ──
+
+    @property
+    def shutdown(self) -> asyncio.Event:
+        """Set when the gateway starts to shut down; every stream waits on it."""
+        return self._shutdown
+
+    def uptime_s(self) -> float:
+        return max(0.0, time.time() - self._started_at)
+
+    def store_state(self) -> str:
+        """``ok``, ``unavailable`` or ``failed``, as health reports it."""
+        if self.store.failed is not None:
+            return "failed"
+        return "ok" if self._store_ok else "unavailable"
+
+    def store_error(self) -> str:
+        """Why the store is not ``ok``, with the home folder as ``~``."""
+        if self.store.failed is not None:
+            return display.home_label(str(self.store.failed))
+        if self._store_ok:
+            return ""
+        return self._store_error
+
+    def require_store(self) -> None:
+        """Raise ``503 store_unavailable`` unless the store is open and usable."""
+        state = self.store_state()
+        if state == "ok":
+            return
+        if state == "failed":
+            raise ApiError(503, "store_unavailable", FAILED_ERROR)
+        raise ApiError(
+            503,
+            "store_unavailable",
+            self._store_error or "The session store is not available.",
+        )
+
+    async def store_api_error(
+        self, exc: SessionStoreError, session_id: str | None = None
+    ) -> ApiError:
+        """Map a store failure as API v2 says, by state and never by message text.
+
+        A failure while ``store.failed`` is set is a 503 without a second
+        read. Any other failure makes the route read the row again: a
+        missing row is 404 ``This session was deleted.``, anything else 503.
+        """
+        if self.store.failed is not None:
+            return ApiError(503, "store_unavailable", FAILED_ERROR)
+        if session_id is not None:
+            try:
+                info = await self.store.get_session(session_id)
+            except SessionStoreError:
+                return ApiError(503, "store_unavailable", self._store_error or str(exc))
+            if info is None:
+                return ApiError(404, "not_found", "This session was deleted.")
+        return ApiError(
+            503,
+            "store_unavailable",
+            self._store_error or display.home_label(str(exc)),
+        )
+
+    # ── Event streams ──
+
+    def stream_opened(self) -> None:
+        self._streams += 1
+
+    def stream_closed(self) -> None:
+        self._streams = max(0, self._streams - 1)
+
+    @property
+    def open_streams(self) -> int:
+        return self._streams
+
+
+def _add_not_found(app: FastAPI) -> None:
+    """Answer an unknown ``/api`` path with the API v2 404 shape."""
+    methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+    @app.api_route("/api", methods=methods)
+    async def api_root_not_found() -> JSONResponse:
+        raise ApiError(404, "not_found", "Not found.")
+
+    @app.api_route("/api/{rest:path}", methods=methods)
+    async def api_not_found(request: Request, rest: str) -> JSONResponse:
+        if _serves_another_method(request.app, str(request.url.path), request.method):
+            raise HTTPException(status_code=405, detail="Method Not Allowed")
+        raise ApiError(404, "not_found", "Not found.")
+
+
+def _serves_another_method(app: FastAPI, path: str, method: str) -> bool:
+    """Whether one of ``/api``'s real routes matches *path* for a method.
+
+    The catch-all runs after every real route; Starlette's router would have
+    answered 405 for a known path with the wrong method, but the catch-all
+    matches the path first. A partial match on a real route is that 405.
+    """
+    scope = {
+        "type": "http",
+        "path": path,
+        "root_path": "",
+        "method": method,
+        "headers": [],
+    }
+    for route in app.router.routes:
+        endpoint = getattr(route, "endpoint", None)
+        if getattr(endpoint, "__name__", "") in {
+            "api_not_found",
+            "api_root_not_found",
+        }:
+            continue
+        match, _ = route.matches(scope)
+        if match == Match.PARTIAL:
+            return True
+    return False
+
+
+# Re-exported for the gateway and for tests: the path the console uses when
+# no ConsoleOptions.store_path is given.
+DEFAULT_STORE_PATH: Final = GATEWAY_SESSIONS_DB
+__all__ = [
+    "Console",
+    "ConsoleOptions",
+    "DEFAULT_STORE_PATH",
+    "STORE_RETRY_S",
+    "ApiError",
+]

@@ -1410,6 +1410,22 @@ class SessionStore:
             StoredEvent(row[0], session_id, row[1], json.loads(row[2])) for row in rows
         ]
 
+    async def latest_event_id(self, session_id: str) -> int:
+        """The id of the session's newest stored event, or 0 when it has none.
+
+        A one-shot event read snapshots this id at its request time, then
+        serves only events at or below it, so a turn that starts while the
+        response pages does not add frames to it.
+        """
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                "SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id = ?",
+                (session_id,),
+            )
+        return int(rows[0][0])
+
     async def get_blob(self, session_id: str, sha256: str) -> tuple[str, bytes] | None:
         """The MIME type and bytes of an image a turn's tool returned, or ``None``."""
         async with self._lock:

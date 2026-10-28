@@ -34,6 +34,10 @@ _OWN_FETCH_SITES = frozenset({"same-origin", "none"})
 # Close code of a refused websocket handshake: policy violation.
 _WS_POLICY_VIOLATION = 1008
 
+# The headers of an API v2 refusal: the console's middleware never sees it,
+# because the guard is outermost, so it sets no-store itself.
+_API_REFUSAL_HEADERS = {"cache-control": "no-store"}
+
 # Headers of every HTTP response: no page may show the gateway's pages in
 # a frame, where a page on another site could trick the user into
 # clicking them.
@@ -90,6 +94,12 @@ def _forbid_framing(send: Send) -> Send:
     return send_forbidding_framing
 
 
+def _is_api_path(scope: Scope) -> bool:
+    """Whether the request is ``/api`` or below it, also with leading slashes."""
+    path = "/" + str(scope.get("path", "")).lstrip("/")
+    return path == "/api" or path.startswith("/api/")
+
+
 def _one_of(values: list[str], allowed: frozenset[str]) -> bool:
     """Whether a header's *values* are a single value in *allowed*, ignoring case."""
     return len(values) == 1 and values[0].lower() in allowed
@@ -110,14 +120,17 @@ class LoopbackGuard:
        ``http://[::1]:<port>``; otherwise it gets 403 with the code
        ``foreign_origin`` (``Origin: null`` included). A request without
        Origin, such as one from curl or a script, passes.
-    3. A request under ``/v1/`` whose Sec-Fetch-Site header is present and
-       is neither ``same-origin`` nor ``none`` gets 403 ``foreign_origin``.
-       A link from another site to the web UI at ``/`` still opens it.
+    3. A request under ``/v1/`` or ``/api/`` whose Sec-Fetch-Site header is
+       present and is neither ``same-origin`` nor ``none`` gets 403
+       ``foreign_origin``. A link from another site to the web UI at ``/``
+       still opens it, and so does a navigation to ``/api/health`` typed into
+       the address bar, whose ``Sec-Fetch-Site`` is ``none``.
 
-    Host names compare ignoring case. A refused request gets the gateway's
-    error shape plus its code, ``{"error": "...", "code": "..."}``; a
-    refused websocket handshake is closed. Other scopes, such as lifespan,
-    pass through.
+    Host names compare ignoring case. A refused legacy request gets the
+    gateway's error shape plus its code, ``{"error": "...", "code": "..."}``;
+    a request under ``/api`` gets API v2's nested envelope instead, with
+    ``Cache-Control: no-store``. A refused websocket handshake is closed.
+    Other scopes, such as lifespan, pass through.
 
     Every HTTP response, a refusal or not, carries ``X-Frame-Options:
     DENY`` and ``Content-Security-Policy: frame-ancestors 'none'``, so no
@@ -164,9 +177,20 @@ class LoopbackGuard:
                 }
             )
             return
-        response = JSONResponse(
-            status_code=status_code, content={"error": error, "code": code}
-        )
+        if _is_api_path(scope):
+            # API v2 has one error shape; the legacy routes keep theirs.
+            content: dict[str, object] = {
+                "error": {"code": code, "message": error, "details": {}}
+            }
+            response = JSONResponse(
+                status_code=status_code,
+                content=content,
+                headers=_API_REFUSAL_HEADERS,
+            )
+        else:
+            response = JSONResponse(
+                status_code=status_code, content={"error": error, "code": code}
+            )
         await response(scope, receive, send)
 
     def _refusal(self, scope: Scope) -> tuple[int, str, str] | None:
@@ -193,7 +217,7 @@ class LoopbackGuard:
 
         # A path may start with several slashes, as in //v1/health.
         path = "/" + str(scope.get("path", "")).lstrip("/")
-        if path.startswith("/v1/"):
+        if path.startswith("/v1/") or path == "/api" or path.startswith("/api/"):
             for site in headers.get(b"sec-fetch-site", []):
                 if site.lower() not in _OWN_FETCH_SITES:
                     return 403, "foreign_origin", self._origin_error
