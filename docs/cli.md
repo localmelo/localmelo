@@ -446,6 +446,9 @@ These options apply to a task run without `--serve`.
 | `--embedding-model NAME` | `default` | The model to request from the `--embedding-base-url` server. |
 | `--progress auto\|off` | `auto` | Draw a [progress line](#progress-line) on stderr while the task runs: `auto` when stderr is a terminal and the output is text, `off` never. |
 | `--routine NAME` | not set | Learn and recall this task's steps as the routine `NAME`, in any folder and whatever the task's wording. |
+| `--reasoning legacy\|drop\|replay` | `legacy` | How a reply's reasoning is sent back. `legacy` keeps the provider's own behavior (an OpenAI-compatible server gets none, Ollama native gets its own field); `drop` never sends it; `replay` sends it on the assistant turns in scope, under one key. |
+| `--reasoning-field auto\|reasoning_content\|reasoning` | not set | The request key `--reasoning replay` uses. `auto` follows the key the last reply's reasoning came from; the others fix it. Needed with `--base-url`, or set `reasoning_field` in the chat backend's config section. |
+| `--replay-turns N` | every turn in scope | With `replay`, keep the newest `N` assistant turns' reasoning; older ones are sent without it. It is inert in `legacy` and `drop`. |
 
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
@@ -477,6 +480,28 @@ These options apply to a task run without `--serve`.
   routine, so `--routine daily-mail` joins differently worded requests run
   from any folder. A blank name is a usage error. See
   [Procedural memory](procedures.md#how-it-works).
+- `--reasoning`: `legacy` is the default and leaves the wire unchanged.
+  `drop` and `replay` do not read `[RECALL]` and remove an inline `<think>`
+  block from an explicit-mode reply's text, so the result is the clean
+  answer. `replay` sends the reasoning on assistant turns in scope, at most
+  `40,000` characters per turn (a longer turn's reasoning is skipped and
+  counted); a backend whose `requires_reasoning_replay` is true never has
+  its reasoning cut, and `drop` is refused there. `legacy` is never
+  refused, even on such a backend, where it can still draw an HTTP 400.
+  `--replay-turns` counts assistant turns that carry reasoning; tool results
+  do not consume a turn. The default task scope is the current task's
+  turns only: earlier turns of a `melo ""` loop or of a session are not
+  replayed. On a backend whose `requires_reasoning_replay` is true, every
+  assistant turn in the window is replayed, and neither the task scope nor
+  `--replay-turns` applies. `--base-url` runs use these flags and do not
+  read the config file.
+- `--reasoning-field`: `auto` resolves to the key the last reply's
+  reasoning came from, and sends no key before the first such reply. The
+  flag, and a backend's `reasoning_field`, are used only in `replay`; in
+  `legacy` and `drop` the wire is as if no field were set. The `ollama`
+  backend fixes its field to `thinking`, so the flag is a usage error
+  there. The interactive UI refuses the flag until it applies it (R2b);
+  direct mode is the only place it works now.
 
 ### Interactive UI
 
@@ -488,11 +513,13 @@ These options apply to `melo` without a task.
 | `--yolo` | off | Run every tool without asking for approval. |
 
 - The UI also takes `--max-steps`, `--attempt-policy`, `--reflection-gate`,
-  `--builtins`, `--memory`, `--memory-dir`, `--request-timeout` and the
-  `--embedding-*` options, for every turn of the session. `--tool-exposure`
-  (the UI offers every tool), `--timeout`, `--output-format`, `--progress`
-  and `--routine` are usage errors there; `--mcp-config` and `--mcp-only`
-  are accepted.
+  `--builtins`, `--memory`, `--memory-dir`, `--request-timeout`,
+  `--reasoning`, `--replay-turns` and the `--embedding-*` options, for
+  every turn of the session. The UI does not yet apply `[agent]`; use
+  direct mode for that. `--tool-exposure`
+  (the UI offers every tool), `--timeout`, `--output-format`, `--progress`,
+  `--routine` and `--reasoning-field` are usage errors there;
+  `--mcp-config` and `--mcp-only` are accepted.
 - `--workspace` that is not a folder exits with code 2:
   `melo: --workspace: not a directory: DIR`.
 
@@ -553,6 +580,20 @@ These are usage errors:
   `--host and --port are for --serve and --daemon; bare melo opens the interactive UI`;
 - `--reconfigure` with `--base-url` and no task, reported as
   `--reconfigure sets up the config file, which --base-url does not use; give one of them`;
+- `--reasoning replay` with `--base-url` and no `--reasoning-field`, reported
+  as
+  `argument --reasoning: replay needs a reasoning field: give --reasoning-field (auto, reasoning_content or reasoning) with --base-url, or set reasoning_field in the backend's config`;
+- `--reasoning replay` on a configured backend whose `reasoning_field` is
+  unset, reported as
+  `argument --reasoning: replay needs a reasoning field: set reasoning_field in the chat backend's config section`;
+- `--reasoning drop` on a backend with `requires_reasoning_replay = true`,
+  reported as
+  `argument --reasoning: this backend requires reasoning replay, so drop is not possible: use replay`;
+- `--reasoning-field` with the `ollama` backend, reported as
+  `argument --reasoning-field: the ollama backend always reads and sends the thinking field`;
+- `--reasoning-field` with bare `melo`, whose interactive UI does not apply it
+  yet, reported as
+  `--reasoning-field is not in the interactive UI yet; give it with a task (melo -- "<task>")`;
 - an MCP config file that cannot be read or is not valid;
 - an invalid `LOCALMELO_THINKING_RETENTION_DAYS`, also with `--serve` or
   `melo ""`, which prints its one `melo: error:` line without the usage
@@ -581,6 +622,11 @@ These are usage errors:
 - `localmelo_version` is the output of `git describe --tags --always --dirty`
   when localmelo runs from a git checkout (for example `603f40d`), otherwise
   the installed package version (for example `0.1.0`), or `unknown`.
+- Outside `--reasoning legacy`, the record also has `config.reasoning`,
+  `config.replay_turns`, `usage.reasoning_chars` (and `usage.reasoning_tokens`
+  or `usage.cached_tokens` when the server reports them) and
+  `memory_stats`; see [Run results](run-results.md#fields). A `legacy`
+  record has none of them.
 
 **In both formats:**
 

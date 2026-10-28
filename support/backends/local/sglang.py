@@ -66,6 +66,10 @@ class SglangBackend(BaseBackend):
             model=cfg.sglang.chat_model,
             extra_body=cfg.sglang.extra_body,
             timeout=cfg.request_timeout_s,
+            reasoning_field=getattr(cfg.sglang, "reasoning_field", "") or None,
+            requires_reasoning_replay=getattr(
+                cfg.sglang, "requires_reasoning_replay", False
+            ),
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

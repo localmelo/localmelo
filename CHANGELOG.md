@@ -9,6 +9,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A reasoning mode for direct runs: `--reasoning legacy|drop|replay`
+  (default `legacy`), `--reasoning-field auto|reasoning_content|reasoning`
+  and `--replay-turns N`, or the same `[agent]` keys in `config.toml`.
+  `legacy` is byte-identical to before everywhere, including a provider
+  built from the config by the gateway, a session or the Python API; `drop`
+  never sends reasoning, and `replay` sends it on the assistant turns in
+  scope (by default only the current task's) under one key, with a
+  40,000-character per-turn cap and strip-first eviction. A backend whose
+  `requires_reasoning_replay` is true gets every assistant turn in the
+  window and keeps the final answer's thinking with `record_answers`. The
+  JSON line reports the mode, `usage.reasoning_chars`, and the
+  `memory_stats` replay counters outside `legacy`. The interactive UI
+  refuses `--reasoning-field` until R2b wires it ([#78]).
 - Diffs in the approval panel: a `file_write` over an existing file shows
   the change (`+a -b lines`, removed lines in red and added in green),
   a new file its line count, and a file too large or not text says why.
@@ -453,3 +466,4 @@ earlier milestones.
 [#74]: https://github.com/localmelo/localmelo/pull/74
 [#75]: https://github.com/localmelo/localmelo/pull/75
 [#76]: https://github.com/localmelo/localmelo/pull/76
+[#78]: https://github.com/localmelo/localmelo/pull/78

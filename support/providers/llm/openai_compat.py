@@ -61,17 +61,21 @@ def _image_parts(images: Sequence[ImagePart]) -> list[dict[str, Any]]:
     ]
 
 
-def _message_to_openai(msg: Message) -> dict[str, Any]:
+def _message_to_openai(
+    msg: Message, *, reasoning_key: str | None = None
+) -> dict[str, Any]:
     """Serialize a Message as an OpenAI chat message.
 
-    Only spec fields are sent: ``thinking``, ``usage``, ``timestamp`` and
-    ``tool_result`` stay local. An assistant message with tool calls keeps
-    its (possibly empty) text and lists every call; a tool result names
-    the call it answers through ``tool_call_id``. A user message with
-    images that have data becomes a content array of ``text`` and
-    ``image_url`` parts. Images on other roles are not sent here (see
-    :func:`_messages_to_openai` for tool results and for images without
-    data; the spec allows images only in user content).
+    Only spec fields are sent: ``usage``, ``timestamp`` and ``tool_result``
+    stay local. ``thinking`` stays local unless *reasoning_key* is set, in
+    which case an assistant message with non-empty thinking adds it under
+    exactly that one key (see :func:`_messages_to_openai`). An assistant
+    message with tool calls keeps its (possibly empty) text and lists every
+    call; a tool result names the call it answers through ``tool_call_id``.
+    A user message with images that have data becomes a content array of
+    ``text`` and ``image_url`` parts. Images on other roles are not sent
+    here (see :func:`_messages_to_openai` for tool results and for images
+    without data; the spec allows images only in user content).
     """
     if msg.role == "user" and msg.images:
         parts = _image_parts(msg.images)
@@ -79,18 +83,24 @@ def _message_to_openai(msg: Message) -> dict[str, Any]:
             text = [{"type": "text", "text": msg.content}] if msg.content else []
             return {"role": "user", "content": text + parts}
     if msg.role == "assistant" and msg.tool_calls:
-        return {
+        out: dict[str, Any] = {
             "role": "assistant",
             "content": msg.content,
             "tool_calls": [_tool_call_to_openai(tc) for tc in msg.tool_calls],
         }
-    if msg.role == "tool":
-        out: dict[str, Any] = {"role": "tool"}
-        if msg.tool_call_id:
-            out["tool_call_id"] = msg.tool_call_id
-        out["content"] = msg.content
+        if reasoning_key and msg.thinking:
+            out[reasoning_key] = msg.thinking
         return out
-    return {"role": msg.role, "content": msg.content}
+    if msg.role == "tool":
+        result: dict[str, Any] = {"role": "tool"}
+        if msg.tool_call_id:
+            result["tool_call_id"] = msg.tool_call_id
+        result["content"] = msg.content
+        return result
+    plain: dict[str, Any] = {"role": msg.role, "content": msg.content}
+    if reasoning_key and msg.role == "assistant" and msg.thinking:
+        plain[reasoning_key] = msg.thinking
+    return plain
 
 
 def _tool_images_message(msg: Message, tool_names: dict[str, str]) -> dict[str, Any]:
@@ -113,7 +123,9 @@ def _tool_images_message(msg: Message, tool_names: dict[str, str]) -> dict[str, 
     }
 
 
-def _messages_to_openai(messages: Sequence[Message]) -> list[dict[str, Any]]:
+def _messages_to_openai(
+    messages: Sequence[Message], *, reasoning_key: str | None = None
+) -> list[dict[str, Any]]:
     """Serialize a conversation, moving tool-result images into user turns.
 
     OpenAI tool messages are text-only, and oMLX 0.3.9 drops image parts
@@ -140,7 +152,7 @@ def _messages_to_openai(messages: Sequence[Message]) -> list[dict[str, Any]]:
             trailing = []
         for tc in msg.tool_calls:
             tool_names[tc.id] = tc.tool_name
-        out.append(_message_to_openai(msg))
+        out.append(_message_to_openai(msg, reasoning_key=reasoning_key))
         if msg.role == "tool" and _image_parts(msg.images):
             trailing.append(_tool_images_message(msg, tool_names))
     out.extend(trailing)
@@ -282,6 +294,15 @@ class OpenAICompatLLM(BaseLLMProvider):
         ``tool_choice``, ``stream``) are rejected with ``ValueError``.
     transport : httpx.AsyncBaseTransport | None
         Optional HTTP transport, e.g. ``httpx.MockTransport`` in tests.
+    reasoning_field : str | None
+        The request key this provider sends an assistant turn's thinking
+        back under: ``None`` (the default, never), ``"auto"`` (the key the
+        last reply's reasoning came from), ``"reasoning_content"`` or
+        ``"reasoning"``. Any other value raises ``ValueError``.
+    requires_reasoning_replay : bool
+        Whether the server rejects requests that omit a reply's reasoning.
+        The agent then evicts whole units instead of cutting or skipping
+        reasoning. ``False`` by default.
     """
 
     def __init__(
@@ -293,10 +314,19 @@ class OpenAICompatLLM(BaseLLMProvider):
         *,
         extra_body: Mapping[str, Any] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        reasoning_field: str | None = None,
+        requires_reasoning_replay: bool = False,
         **kwargs: Any,
     ) -> None:
+        if reasoning_field not in (None, "auto", "reasoning_content", "reasoning"):
+            raise ValueError(
+                "reasoning_field must be None, 'auto', 'reasoning_content' or "
+                f"'reasoning', got {reasoning_field!r}"
+            )
         self.model = model
         self.extra_body = prepare_extra_body(extra_body)
+        self.reasoning_field = reasoning_field
+        self.requires_reasoning_replay = requires_reasoning_replay
         headers: dict[str, str] = {}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -312,10 +342,13 @@ class OpenAICompatLLM(BaseLLMProvider):
         messages: list[Message],
         tools: list[ToolDef] | None = None,
     ) -> Message:
+        reasoning_key = self.reasoning_field
+        if reasoning_key == "auto":
+            reasoning_key = self.last_reasoning_key or None
         payload: dict[str, Any] = {
             **self.extra_body,
             "model": self.model,
-            "messages": _messages_to_openai(messages),
+            "messages": _messages_to_openai(messages, reasoning_key=reasoning_key),
         }
         if tools:
             payload["tools"] = [_tool_def_to_openai(t) for t in tools]
