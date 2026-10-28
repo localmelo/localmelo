@@ -28,7 +28,7 @@ _UNLINKED_DOORS = re.compile(
     re.IGNORECASE,
 )
 _RESIDENCE = re.compile(
-    r"^(?P<name>[A-Z][a-z]{1,30})\s+(?P<verb>lives in|does not live in|no longer lives in|now lives in|moved to|changed residence to)\s+(?P<value>[A-Z][A-Za-z -]{1,60})[.!]?$",
+    r"^(?P<name>[A-Z][a-z]{1,30})\s+(?P<verb>lives in|does not live in|no longer lives in|now lives in|moved to|changed residence to)\s+(?P<value>[A-Z][A-Za-z -]{1,60}?)(?:\s+(?P<change>now|instead))?[.!]?$",
     re.IGNORECASE,
 )
 _CJK_RESIDENCE = re.compile(
@@ -36,6 +36,9 @@ _CJK_RESIDENCE = re.compile(
 )
 _CJK_MEETING = re.compile(
     r"^(?P<name>[一-鿿]{2,12}?)会议(?P<date>\d{4}-\d{2}-\d{2})(?P<verb>定于|改到|改成|改为|推迟到|延后到|提前到)(?P<value>(?:[01]\d|2[0-3]):[0-5]\d)[。.!！]?$"
+)
+_CJK_MEETING_CANCELLED = re.compile(
+    r"^(?P<name>[一-鿿]{2,12}?)会议(?P<date>\d{4}-\d{2}-\d{2})(?:已|被)?取消[。.!！]?$"
 )
 _CANCELLED_DOORS = re.compile(
     r"\bdoors\s+(?:is\s+|are\s+|was\s+|were\s+)?cancel(?:l)?ed\b", re.IGNORECASE
@@ -87,28 +90,30 @@ def verified_record(
         for key in ("text", "body", "content")
     ):
         return False, None
+    parsed = _source_time(record)
+    return True, parsed.date() if parsed is not None else None
+
+
+def _source_time(record: dict[str, Any]) -> datetime | None:
+    """The record's timezone-aware ``timestamp`` or ``date``, if it has one."""
     stamp = record.get("timestamp")
-    if isinstance(stamp, str):
-        try:
-            parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-            if parsed.utcoffset() is not None:
-                return True, parsed.date()
-        except ValueError:
-            pass
-    return True, None
+    if not isinstance(stamp, str):
+        stamp = record.get("date")
+    if not isinstance(stamp, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return parsed if parsed.utcoffset() is not None else None
 
 
 def record_observed_at(evidence: str) -> float | None:
     """A timezone-aware source timestamp, not the later ingestion time."""
     try:
         record = json.loads(evidence)
-        stamp = record.get("timestamp")
-        if not isinstance(stamp, str):
-            return None
-        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-        if parsed.utcoffset() is None:
-            return None
-        return parsed.timestamp()
+        parsed = _source_time(record) if isinstance(record, dict) else None
+        return parsed.timestamp() if parsed is not None else None
     except (ValueError, TypeError, AttributeError, OverflowError, OSError):
         return None
 
@@ -176,7 +181,8 @@ def parse_assertion(text: str, *, source_date: date | None = None) -> Assertion 
                 "now lives in",
                 "moved to",
                 "changed residence to",
-            ),
+            )
+            or (match.group("change") or "").lower() in ("now", "instead"),
             text,
         )
     match = _CJK_RESIDENCE.fullmatch(text.strip())
@@ -204,6 +210,23 @@ def parse_assertion(text: str, *, source_date: date | None = None) -> Assertion 
             "positive",
             "asserted",
             meeting.group("verb") != "定于",
+            text,
+            effective_date=day,
+        )
+    cancelled_meeting = _CJK_MEETING_CANCELLED.fullmatch(text.strip())
+    if cancelled_meeting:
+        day = cancelled_meeting.group("date")
+        try:
+            date.fromisoformat(day)
+        except ValueError:
+            return None
+        return Assertion(
+            f"meeting:{cancelled_meeting.group('name')}:{day}",
+            "meeting_time",
+            "",
+            "positive",
+            "cancelled",
+            True,
             text,
             effective_date=day,
         )

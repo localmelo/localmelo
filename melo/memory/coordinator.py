@@ -182,6 +182,9 @@ class Hippo:
         self.admit_on_outcome = admit_on_outcome
         self.keep_decision_text = keep_decision_text
         self.typed_assertions = typed_assertions
+        # User statements have no source timestamp; sentence/message order is
+        # their trusted observation order (T112R finding 2).
+        self._user_order = 0
         # R6-lite's typed write path exists only for a real long store: an
         # injected backend, never the in-memory fallback of a legacy run.
         self._store_enabled = long is not None and memory
@@ -399,11 +402,13 @@ class Hippo:
                 parsed = parse_assertion(checked, source_date=source_date)
                 if parsed is not None and verified:
                     typed = parsed.to_dict()
-                    typed["observed_at"] = (
-                        candidate.created_at
-                        if candidate.source == "user"
-                        else record_observed_at(item.evidence or "")
-                    )
+                    if candidate.source == "user":
+                        self._user_order += 1
+                        typed["observed_at"] = float(self._user_order)
+                    else:
+                        typed["observed_at"] = record_observed_at(item.evidence or "")
+                        if source_date is not None:
+                            typed["observed_date"] = source_date.isoformat()
                     item_provenance["assertion"] = typed
                     kind = "semantic"
             try:
@@ -452,6 +457,10 @@ class Hippo:
                     "short fact",
                     "meta claim about the agent's own work",
                     "task-file-only fact",
+                )
+                and not (
+                    decision.action == "IGNORE"
+                    and decision.reason.rstrip().endswith("duplicate")
                 )
             ):
                 decision = replace(

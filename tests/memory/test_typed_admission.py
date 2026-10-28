@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from pathlib import Path
+
+import pytest
 
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.hippo.signals import user_candidates
 from localmelo.melo.memory.long import LongTerm
+from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.schema import CandidateItem, MemoryCandidate, TaskRecord
 
 
@@ -26,8 +30,13 @@ def candidate(
     )
 
 
-def record(name: str, text: str, timestamp: str = "2026-04-11T16:50:00-04:00") -> str:
-    return json.dumps({"id": name, "text": text, "timestamp": timestamp})
+def record(
+    name: str,
+    text: str,
+    timestamp: str = "2026-04-11T16:50:00-04:00",
+    field: str = "timestamp",
+) -> str:
+    return json.dumps({"id": name, "text": text, field: timestamp})
 
 
 def test_short_user_facts_are_opt_in_and_not_questions() -> None:
@@ -68,6 +77,92 @@ async def test_agent_admits_short_user_fact_to_ram() -> None:
         assert any(entry.text == "Mina lives in Paris." for entry in entries)
     finally:
         await agent.close()
+
+
+async def test_agent_user_correction_supersedes_in_message_order() -> None:
+    from localmelo.melo.schema import Message
+    from localmelo.tests.agent.test_recall_loop import FakeLLM, _agent, _options
+
+    agent = _agent(
+        FakeLLM(Message("assistant", "Noted.")),
+        _options(reasoning="compress", retriever="bm25", typed_assertions=True),
+    )
+    try:
+        await agent.run_task("Mina lives in Paris. Mina now lives in Rome.")
+        active = await agent.hippo.long.active_entries()
+        assert [entry.text for entry in active] == ["Mina now lives in Rome."]
+        decisions = [row["action"] for row in await agent.hippo.long.decisions()]
+        assert decisions == ["NEW", "UPDATE"]
+    finally:
+        await agent.close()
+
+
+@pytest.mark.parametrize("sqlite", [False, True])
+async def test_gate_keeps_an_exact_duplicate_ignored(
+    tmp_path: Path, sqlite: bool
+) -> None:
+    store: LongTerm = SqliteLongTerm(tmp_path / "long.db") if sqlite else LongTerm()
+    hippo = Hippo(long=store, typed_assertions=True)
+    text = "Quarterly planning review is scheduled for 2026-05-04."
+    try:
+        for name in ("a", "b"):
+            hippo.propose(MemoryCandidate(name, "digest", text, "rule", "task"))
+            decision = (await hippo.admit(name, "rehearsal"))[0]
+        assert decision.action == "IGNORE"
+        assert len(await store.active_entries()) == 1
+    finally:
+        if isinstance(store, SqliteLongTerm):
+            await store.aclose()
+
+
+async def test_date_field_is_recorded_as_source_time() -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store, typed_assertions=True)
+    text = "Doors moved to 7 tonight, the support act cancelled!"
+    stamp = "2026-05-02T19:10:00-04:00"
+    hippo.propose(candidate("a", text, record("a", text, stamp, "date"), 10))
+    assert (await hippo.admit("a", "rehearsal"))[0].action == "NEW"
+    assertion = (await store.active_entries())[0].provenance["assertion"]
+    assert assertion["effective_date"] == "2026-05-02"
+    assert assertion["observed_at"] == datetime.fromisoformat(stamp).timestamp()
+    assert assertion["observed_date"] == "2026-05-02"
+
+
+async def test_recall_title_uses_the_source_date_not_the_machine_timezone(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import time
+    from datetime import date
+
+    from localmelo.melo.memory.assertions import parse_assertion
+    from localmelo.melo.memory.recall import docs_from_entries
+
+    monkeypatch.setenv("TZ", "UTC")
+    time.tzset()
+    try:
+        text = "Doors moved to 7 tonight, the support act cancelled!"
+        assertion = parse_assertion(text, source_date=date(2026, 5, 2))
+        assert assertion is not None
+        observed = datetime.fromisoformat("2026-05-02T23:30:00-04:00").timestamp()
+        assertion_data = {
+            **assertion.to_dict(),
+            "observed_at": observed,
+            "observed_date": "2026-05-02",
+        }
+        meta = {
+            "id": 1,
+            "kind": "semantic",
+            "source": "reasoning_note",
+            "status": "active",
+            "task_id": "task",
+            "created_at": observed,
+            "provenance": {"assertion": assertion_data},
+        }
+        docs = docs_from_entries([(text, 1.0, meta)], include_history=True)
+        assert docs[0].title.startswith("2026-05-02")
+    finally:
+        monkeypatch.undo()
+        time.tzset()
 
 
 async def test_verified_typed_updates_and_unverified_abstention() -> None:

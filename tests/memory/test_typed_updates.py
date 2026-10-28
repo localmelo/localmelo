@@ -62,6 +62,9 @@ async def test_atomic_typed_updates_and_conflicts(tmp_path: Path, sqlite: bool) 
         assert (await apply(store, "Mina now lives in Berlin.", 5, "d"))[
             1
         ] == "CONFLICT"
+        assert (await apply(store, "Mina does not live in Paris.", 30, "e"))[
+            1
+        ] == "CONFLICT"
     finally:
         if isinstance(store, SqliteLongTerm):
             await store.aclose()

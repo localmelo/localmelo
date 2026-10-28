@@ -437,7 +437,11 @@ def docs_from_entries(
                 observed = _number(assertion.get("observed_at"))
                 if observed > 0:
                     order_time = observed
-                    title = _long_title(observed)
+                    source_date = assertion.get("observed_date")
+                    if isinstance(source_date, str) and source_date:
+                        title = source_date
+                    elif meta.get("source") != "user":
+                        title = _long_title(observed)
                 if not assertion.get("subject_key"):
                     labels.append("unlinked assertion")
                 effective = assertion.get("effective_date")

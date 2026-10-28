@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
-from localmelo.melo.memory.assertions import parse_assertion
+from localmelo.melo.memory.assertions import parse_assertion, verified_record
 
 
 @pytest.mark.parametrize(
@@ -62,6 +64,21 @@ def test_chinese_residence(text: str, value: str, polarity: str, changed: bool) 
     assert (assertion.polarity, assertion.changed) == (polarity, changed)
 
 
+def test_shared_attributes_without_one_identity_do_not_link() -> None:
+    pairs = [
+        (
+            "Riverside concert at the Old Mill on 2026-05-02 doors at 18:00.",
+            "Harbor concert at the Old Mill on 2026-05-02 doors at 21:00.",
+        ),
+        ("小王住在北京。", "小李住在北京。"),
+    ]
+    for first, second in pairs:
+        left, right = parse_assertion(first), parse_assertion(second)
+        assert left is not None and right is not None
+        assert left.predicate_key == right.predicate_key
+        assert left.subject_key != right.subject_key
+
+
 def test_event_without_venue_is_not_linked() -> None:
     assertion = parse_assertion("Static Bloom concert 2026-04-11 doors at 20:00.")
     assert assertion is not None and assertion.subject_key is None
@@ -106,9 +123,38 @@ def test_unlinked_relative_doors_keep_original_without_guessing_date() -> None:
     assert dated.polarity == "positive" and dated.state == "asserted"
 
 
-def test_source_record_verification_requires_complete_matching_evidence() -> None:
-    from localmelo.melo.memory.assertions import verified_record
+def test_trailing_change_marker_stays_out_of_the_residence_value() -> None:
+    for text in ("Mina lives in Rome now.", "Mina lives in Rome instead."):
+        assertion = parse_assertion(text)
+        assert assertion is not None
+        assert assertion.value_text == "Rome" and assertion.changed
 
+
+def test_chinese_meeting_cancellation_is_a_state() -> None:
+    original = parse_assertion("团队会议2026-04-11定于20:00。")
+    cancelled = parse_assertion("团队会议2026-04-11取消。")
+    assert original is not None and cancelled is not None
+    assert cancelled.subject_key == original.subject_key
+    assert cancelled.state == "cancelled" and cancelled.changed
+    assert cancelled.value_text == ""
+
+
+def test_long_colliding_or_missing_source_records_do_not_verify() -> None:
+    text = "Doors moved to 7 tonight, the support act cancelled!"
+    cases = [
+        ("x" * 501, ("r1",)),
+        (text, ("r1", "r2")),
+        (text, ("other",)),
+        (text, ()),
+    ]
+    for checked, ids in cases:
+        evidence = json.dumps(
+            {"record_id": "r1", "text": checked, "date": "2026-05-02T19:10:00-04:00"}
+        )
+        assert verified_record(checked, ids, evidence) == (False, None)
+
+
+def test_source_record_verification_requires_complete_matching_evidence() -> None:
     text = "Doors pushed to 9 tonight, the opener cancelled!"
     evidence = '{"id":"F3","text":"Doors pushed to 9 tonight, the opener cancelled!","timestamp":"2026-04-11T16:50:00-04:00"}'
     verified, day = verified_record(text, ("F3",), evidence)

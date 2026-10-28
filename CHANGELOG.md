@@ -43,7 +43,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Added
 
 - Experimental Python opt-in typed memory assertions: conservative evidence
-  checks, ordered same-task updates and labelled historical recall ([#NN]).
+  checks (timezone-aware `timestamp` or `date` records), ordered same-task
+  updates (record time or user sentence order), cancellation markers,
+  exact-duplicate retention and labelled historical recall with source-dated
+  titles ([#NN]).
 - Interactive terminal text attachments: `/attach PATH`, `/attachments`,
   `/detach N|all`, and explicit `@` file-completion selection stage bounded
   workspace snapshots. Best-effort redaction and cleaning require confirmation

@@ -101,17 +101,22 @@ assertion is not automatically superseded. Source records and assertions still
 pass pattern-based redaction, which can miss secrets.
 
 Within the same task, an explicitly marked change to a verified typed key can
-supersede one older active assertion when its verified source timestamp is later
-(or, for a user statement, the recorded observation time is later). Missing or
-naive source timestamps do not establish order. Multiple active candidates, missing ordering or a different value without a
-change marker retain conflicts instead. This does not link entities across tasks
-or sessions. An unlinked assertion is kept without claiming it names the same
-entity; a relative `tonight` gets an effective date only from a matching record's
-timezone-aware timestamp. Old rows have no inferred polarity.
+supersede one older active assertion when its verified source time (`timestamp`
+or `date`) is later; a user statement is ordered by message and sentence
+position. Missing or naive source times do not order; markers include Chinese
+meeting `取消` and trailing `now`/`instead`. Multiple active candidates, missing
+ordering or a different value without a change marker retain conflicts. This
+does not link entities across tasks or sessions. An unlinked assertion is kept
+without claiming it names the same entity; a relative `tonight` gets an
+effective date only from a matching record's timezone-aware timestamp. Old rows
+have no inferred polarity.
 
 With the option on, BM25 long-term search can include superseded entries; recall
-labels those entries and unlinked assertions, and orders selected long-term hits
-newest first. Search still has relevance and item limits and does not guarantee
+labels those entries and unlinked assertions, dates their titles from a record's
+source date rather than the machine timezone, orders selected long-term hits
+newest first, and keeps an exact duplicate `IGNORE`; only an unverified
+assertion that would link different content is kept unlinked. Search still has
+relevance and item limits and does not guarantee
 that every related fact will appear. `history_entries(task_id)` on the long-term
 store returns that task's active and superseded entries newest first; forget
 removes both. In a nonpersistent explicit-mode agent the option enables a RAM
