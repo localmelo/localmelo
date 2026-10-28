@@ -78,7 +78,7 @@ curl http://127.0.0.1:8401/api/health
   "model": {"backend": "ollama", "backend_label": "Ollama", "name": "qwen3:8b", "embedding": "none"},
   "model_server": {"url_label": "http://127.0.0.1:11434/v1", "reachable": true, "error": "", "checked_s_ago": 4},
   "limits": {"text_chars": 100000, "attachment_budget_chars": 8000, "body_bytes": 1048576},
-  "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_error": "", "resume_mode": "pairs"},
+  "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_reason": null, "store_error": "", "resume_mode": "pairs"},
   "uptime_s": 132.4
 }
 ```
@@ -102,6 +102,10 @@ curl http://127.0.0.1:8401/api/health
 - `sessions.store` is `ok`, `unavailable` (the store could not open and the
   gateway retries every 5 s) or `failed` (a write failed; restart the
   gateway). `store_error` says why, with the home folder written as `~`.
+  `store_reason` is `null` when healthy, `owned` when another gateway owns
+  the store, `open-error` for any other open failure, or `failed` after a
+  write failure. Clients should use this stable reason instead of parsing
+  `store_error`; it clears when the store opens successfully.
 - `sessions.resume_mode` is the resume arm in use; it is `pairs` today.
 
 ## GET /api/settings

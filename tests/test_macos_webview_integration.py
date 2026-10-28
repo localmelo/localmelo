@@ -50,7 +50,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/api/health":
             if mode == "store":
-                body = b'{"api":2,"sessions":{"store":"unavailable","store_error":"Another melo gateway owns the store","running":0}}'
+                body = b'{"api":2,"sessions":{"store":"unavailable","store_error":"Another melo gateway owns the store","store_reason":"owned","running":0}}'
+            elif mode == "store-open-error":
+                body = b'{"api":2,"sessions":{"store":"unavailable","store_error":"permission denied","store_reason":"open-error","running":0}}'
             elif mode == "quit":
                 body = b'{"api":2,"sessions":{"store":"ok","store_error":"","running":1}}'
             else:
@@ -61,7 +63,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json" if self.path == "/api/health" else "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
-        if mode in ("correct", "quit"):
+        if mode in ("correct", "quit", "idlequit", "keys"):
             self.send_header("X-LocalMelo-Instance", os.environ["LOCALMELO_APP_INSTANCE"])
         elif mode == "wrong":
             self.send_header("X-LocalMelo-Instance", "wrong")
@@ -116,18 +118,31 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
         "        webView = nil": '        webView = nil\n        record("removed")',
-        "    private func fail(_ text: String) {": '    private func fail(_ text: String) {\n        record("alert " + text)',
-        "    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,": """    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        '    private func fail(_ text: String, title: String = "LocalMelo could not start") {': '    private func fail(_ text: String, title: String = "LocalMelo could not start") {\n        record("alert " + text)',
+        "    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {": """    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         record("loaded")
-        if ProcessInfo.processInfo.environment["TEST_MODE"] == "quit" {
-            DispatchQueue.main.async { NSApp.terminate(nil) }
+        if let menu = NSApp.mainMenu?.items.last?.submenu {
+            record("edit " + menu.items.map { $0.title + ":" + $0.keyEquivalent }.joined(separator: ","))
         }
-    }
-    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,""",
+        if ProcessInfo.processInfo.environment["TEST_MODE"] == "keys" {
+            webView.evaluateJavaScript("document.body.innerHTML='<input id=editor value=hello>'; document.getElementById('editor').focus()") { _, _ in
+                let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .command,
+                                            timestamp: 0, windowNumber: self.window.windowNumber,
+                                            context: nil, characters: "a", charactersIgnoringModifiers: "a",
+                                            isARepeat: false, keyCode: 0)!
+                _ = webView.performKeyEquivalent(with: event)
+                webView.evaluateJavaScript("document.getElementById('editor').selectionEnd - document.getElementById('editor').selectionStart") { value, _ in
+                    record("selection " + String(describing: value ?? "nil"))
+                }
+            }
+        }
+        if ["quit", "idlequit"].contains(ProcessInfo.processInfo.environment["TEST_MODE"] ?? "") {
+            DispatchQueue.main.async { NSApp.terminate(nil) }
+        }""",
         "    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {": '    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {\n        record("quit-request")',
         '                    alert.addButton(withTitle: "Cancel")': """                    alert.addButton(withTitle: "Cancel")
                     record("quit-prompt")
-                    if ProcessInfo.processInfo.environment["TEST_MODE"] == "quit" {
+                    if ["quit", "idlequit"].contains(ProcessInfo.processInfo.environment["TEST_MODE"] ?? "") {
                         let timer = Timer(timeInterval: 0.1, repeats: false) { _ in
                             if quitPhase == 0 {
                                 quitPhase = 1
@@ -252,18 +267,31 @@ def test_wrong_or_absent_instance_header_cancels_real_webview(
         stop(process, tmp_path)
 
 
+def test_command_select_all_in_webview(app: Path, tmp_path: Path) -> None:
+    sock = safe_socket()
+    port = sock.getsockname()[1]
+    sock.close()
+    process = launch(app, tmp_path, port, "keys")
+    try:
+        wait_for(tmp_path / "events", "selection 5", process)
+    finally:
+        stop(process, tmp_path)
+
+
 def test_child_exit_removes_loaded_webview(app: Path, tmp_path: Path) -> None:
     sock = safe_socket()
     port = sock.getsockname()[1]
     sock.close()
     process = launch(app, tmp_path, port, "correct")
     try:
-        wait_for(tmp_path / "events", "loaded", process)
+        events = wait_for(tmp_path / "events", "edit ", process)
+        for item in ("Undo:z", "Redo:Z", "Cut:x", "Copy:c", "Paste:v", "Select All:a"):
+            assert item in events
         child_pid = int((tmp_path / "gateway-pid").read_text())
         os.kill(child_pid, signal.SIGKILL)
         events = wait_for(tmp_path / "events", "alert ", process)
         assert "removed" in events
-        assert "The gateway exited" in events
+        assert "terminated by signal 9" in events
     finally:
         stop(process, tmp_path)
 
@@ -283,11 +311,27 @@ def test_owned_store_stops_host_before_page_load(app: Path, tmp_path: Path) -> N
         stop(process, tmp_path)
 
 
-def test_quit_with_active_turn_can_cancel_then_stop(app: Path, tmp_path: Path) -> None:
+def test_non_owner_store_error_gives_relevant_hint(app: Path, tmp_path: Path) -> None:
     sock = safe_socket()
     port = sock.getsockname()[1]
     sock.close()
-    process = launch(app, tmp_path, port, "quit")
+    process = launch(app, tmp_path, port, "store-open-error")
+    try:
+        events = wait_for(tmp_path / "events", "alert ", process)
+        assert "permission denied" in events
+        assert "store permissions" in events
+        assert "Stop the other gateway" not in events
+        assert not (tmp_path / "requested-page").exists()
+    finally:
+        stop(process, tmp_path)
+
+
+@pytest.mark.parametrize("mode", ["quit", "idlequit"])
+def test_quit_can_cancel_then_stop(app: Path, tmp_path: Path, mode: str) -> None:
+    sock = safe_socket()
+    port = sock.getsockname()[1]
+    sock.close()
+    process = launch(app, tmp_path, port, mode)
     try:
         events = wait_for(tmp_path / "events", "quit-resumed", process)
         assert "quit-cancel" in events
@@ -328,6 +372,8 @@ def test_existing_foreign_listener_never_loads(app: Path, tmp_path: Path) -> Non
     try:
         events = wait_for(tmp_path / "events", "alert ", process)
         assert f"Port {port} is already in use" in events
+        assert "melo --daemon status" in events
+        assert "melo --daemon uninstall" in events
         assert "loaded" not in events
         assert not requests
         assert not (tmp_path / "Library/Logs/LocalMelo/gateway.log").exists()

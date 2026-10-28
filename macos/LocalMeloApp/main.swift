@@ -7,6 +7,19 @@ import WebKit
 // non-reserved port via the environment, without changing the user's config.
 let defaultPort = 8401
 
+final class ConsoleWebView: WKWebView {
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
+              let key = event.charactersIgnoringModifiers?.lowercased() else {
+            return super.performKeyEquivalent(with: event)
+        }
+        let actions = ["c": "copy:", "v": "paste:", "x": "cut:", "a": "selectAll:",
+                       "z": event.modifierFlags.contains(.shift) ? "redo:" : "undo:"]
+        if let name = actions[key], NSApp.sendAction(Selector(name), to: nil, from: self) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
 final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate {
     private var window: NSWindow!
     private var webView: WKWebView!
@@ -38,7 +51,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     }
 
     private func createWindow() {
-        webView = WKWebView(frame: .zero)
+        webView = ConsoleWebView(frame: .zero)
         webView.navigationDelegate = self
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1050, height: 720),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -60,6 +73,15 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         let entry = NSMenuItem()
         entry.submenu = appMenu
         root.addItem(entry)
+        let edit = NSMenu(title: "Edit")
+        for (title, action, key) in [("Undo", "undo:", "z"), ("Redo", "redo:", "Z"),
+                                      ("Cut", "cut:", "x"), ("Copy", "copy:", "c"),
+                                      ("Paste", "paste:", "v"), ("Select All", "selectAll:", "a")] {
+            edit.addItem(withTitle: title, action: Selector(action), keyEquivalent: key)
+        }
+        let editEntry = NSMenuItem()
+        editEntry.submenu = edit
+        root.addItem(editEntry)
         NSApp.mainMenu = root
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "Melo"
@@ -117,7 +139,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             return
         }
         guard listeners.isEmpty else {
-            fail("Port \(port) is already in use by process \(listeners.map(String.init).joined(separator: ", ")). Stop the existing gateway or choose another port.")
+            fail("Port \(port) is already in use by process \(listeners.map(String.init).joined(separator: ", ")). Stop the listener or choose another port. For the melo service, use melo --daemon status and melo --daemon uninstall.")
             return
         }
         guard let executable = Bundle.main.resourceURL?.appendingPathComponent("runtime/bin/melo") else {
@@ -159,7 +181,8 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 self.listenerPIDs { pids in
                     let holders = (pids ?? []).filter { $0 != process.processIdentifier }
                     let detail = holders.isEmpty ? "" : " Port \(self.port) is held by process \(holders.map(String.init).joined(separator: ", "))."
-                    self.fail("The gateway exited (status \(process.terminationStatus)).\(detail) See ~/Library/Logs/LocalMelo/gateway.log.")
+                    let exit = gatewayExitMessage(status: process.terminationStatus, signalled: process.terminationReason == .uncaughtSignal)
+                    self.fail("\(exit)\(detail) See ~/Library/Logs/LocalMelo/gateway.log.", title: self.ready ? "LocalMelo gateway stopped" : "LocalMelo could not start")
                 }
             }
         }
@@ -211,7 +234,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                         self.timer?.invalidate()
                         self.stopping = true
                         kill(child.processIdentifier, SIGTERM)
-                        self.fail("The gateway session store is unavailable: \(health.error). Stop the other gateway and try again.")
+                        self.fail(storeFailureMessage(health))
                         return
                     }
                     self.ready = true
@@ -233,9 +256,18 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     func webView(_ webView: WKWebView, decidePolicyFor response: WKNavigationResponse,
                  decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         guard response.isForMainFrame else { decisionHandler(.allow); return }
-        guard let http = response.response as? HTTPURLResponse,
-              let url = http.url, isGatewayURL(url, port: port),
-              acceptsInstance(http.value(forHTTPHeaderField: "X-LocalMelo-Instance"),
+        guard let http = response.response as? HTTPURLResponse, let url = http.url else {
+            decisionHandler(.cancel)
+            return
+        }
+        guard isGatewayPage(url, port: port) else {
+            decisionHandler(.cancel)
+            if child?.isRunning == true {
+                webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!))
+            }
+            return
+        }
+        guard acceptsInstance(http.value(forHTTPHeaderField: "X-LocalMelo-Instance"),
                               expected: instance, childRunning: child?.isRunning == true) else {
             decisionHandler(.cancel)
             tearDownWebView()
@@ -245,11 +277,18 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         decisionHandler(.allow)
     }
 
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard child?.isRunning == true else {
+            tearDownWebView()
+            return
+        }
+    }
+
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = action.request.url else { decisionHandler(.cancel); return }
-        if url.scheme == "http", url.host == "127.0.0.1", url.port == port {
-            decisionHandler(.allow)
+        if isGatewayURL(url, port: port) {
+            decisionHandler(action.targetFrame?.isMainFrame == false || isGatewayPage(url, port: port) ? .allow : .cancel)
         } else {
             decisionHandler(.cancel)
             if action.navigationType == .linkActivated, ["http", "https"].contains(url.scheme ?? "") {
@@ -330,13 +369,13 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         RunLoop.main.add(timeout, forMode: .modalPanel)
     }
 
-    private func fail(_ text: String) {
+    private func fail(_ text: String, title: String = "LocalMelo could not start") {
         stopping = true
         timer?.invalidate()
         tearDownWebView()
         let alert = NSAlert()
         alert.alertStyle = .critical
-        alert.messageText = "LocalMelo could not start"
+        alert.messageText = title
         alert.informativeText = text
         alert.runModal()
         NSApp.terminate(nil)

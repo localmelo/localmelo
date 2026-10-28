@@ -162,6 +162,7 @@ def health_json(console: Console) -> dict[str, Any]:
                 len(console.broker.pending(entry.session_id)) for entry in entries
             ),
             "store": console.store_state(),
+            "store_reason": console.store_reason(),
             "store_error": console.store_error(),
             "resume_mode": DEFAULT_RESUME_MODE,
         },

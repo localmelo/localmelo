@@ -48,6 +48,7 @@ def test_relocated_launcher_via_symlinks(tmp_path: Path) -> None:
     )
     assert result.stdout.splitlines() == [
         "||1",
+        "-P",
         "-m",
         "localmelo",
         "--help",

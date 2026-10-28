@@ -7,7 +7,7 @@ Humans: start at the [README](https://github.com/localmelo/localmelo#readme) or 
 - A local agent: it runs one task with tools (shell, Python, files, MCP) and memory, on a model server the user runs (any OpenAI-compatible server, Ollama) or a cloud API. It never downloads, starts or serves models.
 - Three surfaces: the `melo` CLI (a fixed exit code per run, and one JSON line with `--output-format json`), the Python `Agent` (experimental), an HTTP gateway on 127.0.0.1.
 - Pre-alpha: CLI, HTTP API and Python API may change before v0.1.0.
-- An unsigned arm64 macOS development bundle can be built locally; see [macOS app](guides/macos-app.md). Its page instance check is not authentication.
+- An unsigned arm64 macOS development bundle can be built locally; see [macOS app](guides/macos-app.md). Its page instance check is not authentication; quitting always asks before stopping its gateway. `/api/health` `sessions.store_reason` distinguishes `owned`, `open-error`, `failed` and healthy `null`.
 
 ## Rules (read before running anything)
 

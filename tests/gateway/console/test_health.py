@@ -12,6 +12,7 @@ from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.schema import SESSION_TEXT_CHARS
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.console.routes_settings import BODY_BYTES_LIMIT
+from localmelo.support.sessions.store import SessionStoreError
 
 from .conftest import FakeBuilder, FakeProbe, make_cfg, open_session, seed_turn
 
@@ -50,6 +51,7 @@ async def test_health_shape(client: TestClient) -> None:
         "running": 0,
         "pending_approvals": 0,
         "store": "ok",
+        "store_reason": None,
         "store_error": "",
         "resume_mode": "pairs",
     }
@@ -75,6 +77,7 @@ async def test_health_does_not_require_the_store(
     console.store._failed = RuntimeError("The disk is gone")  # type: ignore[attr-defined]
     body = client.get("/api/health").json()
     assert body["sessions"]["store"] == "failed"
+    assert body["sessions"]["store_reason"] == "failed"
     assert body["sessions"]["store_error"] == "The disk is gone"
 
 
@@ -114,9 +117,40 @@ async def test_a_store_that_could_not_open_is_unavailable(
         assert health.status_code == 200
         body: dict[str, Any] = health.json()
         assert body["sessions"]["store"] == "unavailable"
+        assert body["sessions"]["store_reason"] == "owned"
         assert body["sessions"]["store_error"]
         assert sessions.status_code == 503
         assert sessions.json()["error"]["code"] == "store_unavailable"
+        await first.aclose()
+        assert await second._try_open()
+        recovered = client.get("/api/health").json()["sessions"]
+        assert recovered["store"] == "ok"
+        assert recovered["store_reason"] is None
+        assert recovered["store_error"] == ""
     finally:
         await second.aclose()
         await first.aclose()
+
+
+async def test_health_open_error_and_recovery(
+    console: Console, client: TestClient, monkeypatch: Any
+) -> None:
+    original_open = console.store.open
+
+    async def fail_open() -> None:
+        raise SessionStoreError(
+            "Another melo gateway is using the console's session file."
+        )
+
+    monkeypatch.setattr(console.store, "open", fail_open)
+    assert not await console._try_open()
+    sessions = client.get("/api/health").json()["sessions"]
+    assert sessions["store"] == "unavailable"
+    assert sessions["store_reason"] == "open-error"
+
+    monkeypatch.setattr(console.store, "open", original_open)
+    assert await console._try_open()
+    sessions = client.get("/api/health").json()["sessions"]
+    assert sessions["store"] == "ok"
+    assert sessions["store_reason"] is None
+    assert sessions["store_error"] == ""

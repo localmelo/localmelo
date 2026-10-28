@@ -39,7 +39,7 @@ DIR=$(CDPATH= cd -P -- "$(dirname -- "$SOURCE")" && pwd)
 unset PYTHONHOME PYTHONPATH
 export PYTHONNOUSERSITE=1
 export PYTHONDONTWRITEBYTECODE=1
-exec "$DIR/python/bin/python3" -m localmelo "$@"
+exec "$DIR/python/bin/python3" -P -m localmelo "$@"
 """
 
 

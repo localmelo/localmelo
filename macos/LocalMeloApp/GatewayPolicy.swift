@@ -3,6 +3,7 @@ import Foundation
 struct GatewayHealth {
     let store: String
     let error: String
+    let reason: String
     let running: Int
 }
 
@@ -13,7 +14,7 @@ func gatewayHealth(_ data: Data) -> GatewayHealth? {
           let store = sessions["store"] as? String,
           let error = sessions["store_error"] as? String,
           let running = sessions["running"] as? Int, running >= 0 else { return nil }
-    return GatewayHealth(store: store, error: error, running: running)
+    return GatewayHealth(store: store, error: error, reason: sessions["store_reason"] as? String ?? "", running: running)
 }
 
 func ownsListener(_ pids: [Int32]?, child: Int32) -> Bool {
@@ -28,4 +29,19 @@ func acceptsInstance(_ header: String?, expected: String, childRunning: Bool) ->
 func isGatewayURL(_ url: URL, port: Int) -> Bool {
     url.scheme == "http" && url.host == "127.0.0.1" && url.port == port
         && url.user == nil && url.password == nil
+}
+
+func isGatewayPage(_ url: URL, port: Int) -> Bool {
+    isGatewayURL(url, port: port) && url.path == "/"
+}
+
+func storeFailureMessage(_ health: GatewayHealth) -> String {
+    let hint = health.reason == "owned"
+        ? " Stop the other gateway and try again."
+        : " Check the gateway log and session store permissions, then try again."
+    return "The gateway session store is unavailable: \(health.error).\(hint)"
+}
+
+func gatewayExitMessage(status: Int32, signalled: Bool) -> String {
+    signalled ? "The gateway was terminated by signal \(status)." : "The gateway exited (status \(status))."
 }

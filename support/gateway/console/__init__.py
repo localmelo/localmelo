@@ -139,6 +139,7 @@ class Console:
         self._started_at = time.time()
         self._store_ok = False
         self._store_error = ""
+        self._store_open_reason = "open-error"
         self._closed = False
         self._shutdown = asyncio.Event()
         self._retry_task: asyncio.Task[None] | None = None
@@ -232,6 +233,9 @@ class Console:
             await self.workers.open()
         except SessionStoreError as exc:
             self._store_ok = False
+            self._store_open_reason = (
+                "owned" if isinstance(exc, StoreOwnedError) else "open-error"
+            )
             self._store_error = store_message(exc)
             logger.warning("The session store is unavailable: %s", self._store_error)
             return False
@@ -333,6 +337,12 @@ class Console:
         if self.store.failed is not None:
             return "failed"
         return "ok" if self._store_ok else "unavailable"
+
+    def store_reason(self) -> str | None:
+        """A stable machine-readable reason for the current store state."""
+        if self.store.failed is not None:
+            return "failed"
+        return None if self._store_ok else self._store_open_reason
 
     def store_error(self) -> str:
         """Why the store is not ``ok``, with the home folder as ``~``."""

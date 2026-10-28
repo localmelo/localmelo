@@ -19,8 +19,9 @@ SHA-256 checked before extraction; wheel hashes are checked against the lock fil
 Opening the app starts an owned gateway on `127.0.0.1:8401`; it does not adopt an existing
 listener. Stop a conflicting listener or gateway holding the console store first. For isolated
 manual tests, `LOCALMELO_APP_PORT` can select another available port; use a temporary `HOME` and
-avoid ports reserved by other work. Closing the window leaves the gateway running; quitting checks
-for running tasks and asks before stopping them. Child output goes to
+avoid ports reserved by other work. Closing the window leaves the gateway running; quitting always
+asks before stopping the gateway and any running tasks. If the listener is a melo background service,
+`melo --daemon status` checks it and `melo --daemon uninstall` stops and removes it. Child output goes to
 `~/Library/Logs/LocalMelo/gateway.log`. This prototype has no log rotation.
 
 The app sends a random launch identifier to its child and checks it on main-frame page responses
