@@ -144,7 +144,9 @@ class WorkerObserver:
             if line is None:
                 return
             try:
-                self.out.write(line)
+                written = self.out.write(line)
+                if written != len(line):
+                    raise OSError("short worker output write")
                 self.out.flush()
             except Exception as exc:
                 self._fail(exc)
