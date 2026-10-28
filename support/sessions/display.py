@@ -66,6 +66,26 @@ def format_tokens(n: int) -> str:
     return f"{n // 100_000 / 10:.1f}M"
 
 
+def format_bytes(n: int) -> str:
+    """``412 bytes``, ``1.2 KB``, ``312 KB``, ``12 MB``: decimal units, cut.
+
+    1 KB is 1,000 bytes, as macOS shows sizes: below 1,000 bytes the count
+    with ``bytes``; then one decimal below 10 of a unit, and whole units
+    from 10. A value is cut, never rounded up.
+    """
+    n = max(0, int(n))
+    if n < 1_000:
+        return f"{n} bytes"
+    value = float(n)
+    for unit in ("KB", "MB", "GB", "TB"):
+        value /= 1_000
+        if value < 1_000 or unit == "TB":
+            if value < 10:
+                return f"{math.floor(value * 10) / 10:.1f} {unit}"
+            return f"{math.floor(value)} {unit}"
+    raise AssertionError("unreachable")
+
+
 def _homes() -> tuple[str, ...]:
     home = os.path.expanduser("~").rstrip(os.sep) or os.sep
     real = os.path.realpath(home)

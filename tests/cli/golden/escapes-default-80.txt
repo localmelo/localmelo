@@ -1,0 +1,11 @@
+› Print the demo page's raw output.
+
+  No approvals for this turn (--yolo).
+✓ emit  {} · 0.1s
+  └ red
+
+    copying 3/3
+    done
+● The page printed escape sequences.
+✻ Worked for 0.1s · 1 tool call · ↓ 22 tokens
+

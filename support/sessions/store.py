@@ -1841,6 +1841,7 @@ class SessionStore:
         answer: str,
         window: Sequence[Message] | None = None,
         error: str | None = None,
+        on_stored: Callable[[StoredEvent], None] | None = None,
     ) -> TurnInfo:
         """End a turn that runs under *holder*, in one transaction (T-8).
 
@@ -1868,6 +1869,7 @@ class SessionStore:
         if error is None:
             error = str(result_copy.get("error") or "") if result_copy else ""
         stored_answer = redact_secrets(answer)[0]
+        stored_events: list[StoredEvent] = []
         async with self._lock:
             conn = await self._ready()
             try:
@@ -1909,10 +1911,14 @@ class SessionStore:
                     if window is not None:
                         await self._store_window(conn, session_id, turn, window, now)
                     info = await self._get_turn(conn, session_id, turn)
+                stored_events = list(stored)
             except (sqlite3.Error, OSError) as exc:
                 self._fail(exc)
                 raise
         assert info is not None
+        if on_stored is not None:
+            for event in stored_events:
+                on_stored(event)
         return info
 
     async def _end_turn(

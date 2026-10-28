@@ -28,7 +28,12 @@ from localmelo.support.cli.session import STOP_REASON, CliSession
 from localmelo.support.cli.theme import UNICODE
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import SessionBusyError, SessionStore
-from localmelo.tests.sessions.helpers import ScriptedLLM, answer, started_agent
+from localmelo.tests.sessions.helpers import (
+    ScriptedLLM,
+    answer,
+    started_agent,
+    tool_call,
+)
 
 URL = "http://127.0.0.1:9/v1"
 
@@ -947,3 +952,181 @@ async def test_a_refused_command_and_exit_are_not_echoed(setup: Setup) -> None:
     await _until(lambda: setup.app.exited)
     text = setup.out.text()
     assert "› /nope" not in text and "› /new" not in text and "› /exit" not in text
+
+
+# ── U2a.2's commands ──
+
+
+async def _tool_turn(setup: Setup, *, lines: int = 10) -> None:
+    """Run one turn that reads a file of *lines* lines, so /expand has a call."""
+    setup.factory.scripts["m1"] = [
+        tool_call("file_read", {"path": "notes.txt"}),
+        answer("done"),
+    ]
+    setup.session.agent = await setup.factory.build()
+    root = Path(setup.session.agent.workspace_root or "")
+    (root / "notes.txt").write_text(
+        "\n".join(f"line {number}" for number in range(1, lines + 1)) + "\n",
+        encoding="utf-8",
+    )
+    setup.session.enter("read the notes")
+    await setup.idle()
+
+
+async def test_verbose_and_thinking_toggle(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    session.enter("/verbose")
+    await _until(lambda: "Verbose rendering on." in out.text())
+    assert session.renderer.verbose
+    session.enter("/verbose")
+    await _until(lambda: "Verbose rendering off." in out.text())
+    assert not session.renderer.verbose
+    session.enter("/verbose maybe")
+    await _until(lambda: "✗ Use /verbose on or /verbose off." in out.text())
+    assert not session.renderer.verbose
+    session.enter("/thinking off")
+    await _until(lambda: "Thinking excerpts off." in out.text())
+    assert not session.renderer.thinking
+    session.enter("/thinking on")
+    await _until(lambda: "Thinking excerpts on." in out.text())
+    assert session.renderer.thinking
+    session.enter("/thinking yes")
+    await _until(lambda: "✗ Use /thinking on or /thinking off." in out.text())
+    assert session.renderer.thinking
+
+
+async def test_expand_prints_a_call_in_full(setup: Setup) -> None:
+    await _tool_turn(setup)
+    out = setup.out
+    assert "line 4" not in out.text()  # the block shows three lines
+    setup.session.enter("/expand")
+    await _until(lambda: "line 10" in out.text())
+    assert "line 4" in out.text()
+    setup.session.enter("/expand 1.1")
+    await _until(lambda: out.text().count("line 10") >= 2)
+    # A call of a resumed turn is not in this process's list.
+    setup.session.enter("/expand 1.2")
+    await _until(lambda: "✗ Turn 1 has 1 tool call." in out.text())
+    setup.session.enter("/expand 2")
+    await _until(lambda: out.text().count("✗ Turn 1 has 1 tool call.") == 2)
+    setup.session.enter("/expand 9.1")
+    await _until(lambda: "✗ No tool calls yet." in out.text())
+    setup.session.enter("/expand nope")
+    await _until(lambda: "✗ Use /expand [turn.call]." in out.text())
+
+
+async def test_the_new_commands_follow_the_ascii_symbols(setup: Setup) -> None:
+    from localmelo.support.cli.theme import ASCII
+
+    session, out = setup.session, setup.out
+    session.renderer.symbols = ASCII
+    session.enter("/verbose maybe")
+    await _until(lambda: "x Use /verbose on or /verbose off." in out.text())
+    session.renderer.progress = {
+        "level": 1,
+        "state": "running",
+        "step": 1,
+        "attempt": 1,
+        "limits": {},
+        "phase": None,
+        "cycle": 0,
+        "tests": None,
+        "items": [{"label": "Edit b", "state": "current", "repeat": 2}],
+        "fraction": None,
+        "expected_steps": None,
+        "past": None,
+        "off_reason": None,
+        "basis": {
+            "routine_id": "r",
+            "template_id": "t",
+            "version": 1,
+            "match": "routine",
+            "model": "m",
+            "title": None,
+        },
+    }
+    session.enter("/progress")
+    await _until(lambda: "Edit b (x2) - current" in out.text())
+    assert "basis r - v1 - match routine - model m" in out.text()
+
+
+async def test_expand_with_no_call_yet_says_so(setup: Setup) -> None:
+    setup.session.enter("/expand")
+    await _until(lambda: "✗ No tool calls yet." in setup.out.text())
+
+
+async def test_expand_stops_at_two_hundred_lines(setup: Setup) -> None:
+    await _tool_turn(setup, lines=300)
+    setup.session.enter("/expand")
+    await _until(lambda: "lines not shown" in setup.out.text())
+    text = setup.out.text()
+    assert "line 200" in text and "line 201" not in text
+    assert "… +100 lines not shown (" in text and " chars in all)" in text
+
+
+async def test_progress_prints_the_latest_facts(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    session.enter("/progress")
+    await _until(lambda: "No progress facts for this turn yet." in out.text())
+    session.enter("hello")
+    await setup.idle()
+    assert session.renderer.progress is not None  # the turn asked for them
+    session.renderer.progress = {
+        "level": 1,
+        "state": "running",
+        "step": 4,
+        "attempt": 2,
+        "limits": {},
+        "phase": "Verify",
+        "cycle": 1,
+        "tests": {"passed": 7, "failed": 1, "total": 8},
+        "items": [
+            {"label": "Read a", "state": "done", "repeat": None},
+            {"label": "Edit b", "state": "current", "repeat": 2},
+        ],
+        "fraction": None,
+        "expected_steps": None,
+        "past": {
+            "runs": 2,
+            "steps_lo": 6,
+            "steps_hi": 8,
+            "last_steps": 8,
+            "wall_lo_s": 120.0,
+            "wall_hi_s": 180.0,
+            "last_wall_s": 170.0,
+        },
+        "off_reason": None,
+        "basis": {
+            "routine_id": "routine-1",
+            "template_id": "routine-1:t",
+            "version": 3,
+            "match": "routine",
+            "model": "stub-model",
+            "title": None,
+        },
+    }
+    session.enter("/progress")
+    await _until(lambda: "level 1 · step 4 · attempt 2" in out.text())
+    text = out.text()
+    assert "phase Verify (cycle 1) · tests 7/8" in text
+    assert "past 2 runs · 6-8 steps · 2-3 min · last 8 steps, 2m50s" in text
+    assert "items\n  Read a · done\n  Edit b (×2) · current" in text
+    assert "basis routine-1 · v3 · match routine · model stub-model" in text
+
+
+async def test_new_forgets_this_process_calls_and_progress(setup: Setup) -> None:
+    await _tool_turn(setup)
+    session = setup.session
+    assert session.renderer.tool_outputs
+    assert session.renderer.progress is not None
+    session.renderer.verbose = True
+    session.renderer.thinking = False
+    session.enter("/new")
+    await _until(lambda: session.runner is None)
+    assert session.renderer.tool_outputs == []
+    assert session.renderer.progress is None
+    assert not session.renderer.verbose and session.renderer.thinking
+    session.enter("/expand")
+    await _until(lambda: "✗ No tool calls yet." in setup.out.text())
+    session.enter("/progress")
+    await _until(lambda: "No progress facts for this turn yet." in setup.out.text())
