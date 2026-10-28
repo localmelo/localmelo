@@ -159,7 +159,8 @@ class ReasoningNote:
     reasoning_chars: int = 0
     # record ids from this turn's JSON tool results (section 5)
     source_ids: list[str] = field(default_factory=list)
-    # (record id, up to 500 chars of its text), for an item's source ids
+    # (record id, up to 500 chars of its text) for an item's source ids: this
+    # turn's results first, then the earlier observations that match an item
     source_records: list[tuple[str, str]] = field(default_factory=list)
     remember: bool = False  # the agent-side bool (section 5): this note is a candidate
     remember_by: str = ""  # model | heuristic | rule: who set it
@@ -811,8 +812,95 @@ def _source_records(
     return records
 
 
+def source_records(
+    pairs: Sequence[tuple[ToolCall, ToolResult]],
+) -> list[tuple[str, str]]:
+    """The records of one reply's tool results, in call order (see ``_source_records``)."""
+    return _source_records(pairs)
+
+
 def _source_ids(pairs: Sequence[tuple[ToolCall, ToolResult]]) -> list[str]:
     return [record_id for record_id, _text in _source_records(pairs)]
+
+
+TASK_SOURCE_RECORD_LIMIT = 200  # the task's most recent tool-result records kept
+
+
+@dataclass
+class SourceRecordLog:
+    """The task's tool-result records, oldest first and bounded.
+
+    It is where a note's item finds the earlier observation that established
+    it: the run adds every executed reply's records, and :meth:`earlier`
+    splits them into the results still in the window and the rest, both
+    newest first. Only the task's last :data:`TASK_SOURCE_RECORD_LIMIT`
+    records are kept; another task's records are never in this log.
+    """
+
+    limit: int = TASK_SOURCE_RECORD_LIMIT
+    entries: list[tuple[str, list[tuple[str, str]]]] = field(default_factory=list)
+
+    def add(self, call_id: str, records: Sequence[tuple[str, str]]) -> None:
+        """Add one result's records, dropping the oldest above the limit."""
+        if not records:
+            return
+        self.entries.append((call_id, list(records)))
+        total = sum(len(kept) for _call_id, kept in self.entries)
+        while total > self.limit and self.entries:
+            call_id, kept = self.entries[0]
+            excess = total - self.limit
+            if len(kept) <= excess:
+                self.entries.pop(0)
+                total -= len(kept)
+            else:
+                self.entries[0] = (call_id, kept[excess:])
+                total -= excess
+
+    def earlier(
+        self, window_call_ids: Iterable[str]
+    ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+        """``(window, task)`` records, newest first, for a new note's items."""
+        window = set(window_call_ids)
+        still: list[tuple[str, str]] = []
+        rest: list[tuple[str, str]] = []
+        for call_id, records in reversed(self.entries):
+            target = still if call_id in window else rest
+            target.extend(records)
+        return still, rest
+
+    @property
+    def count(self) -> int:
+        """How many records the log holds (at most ``limit``)."""
+        return sum(len(kept) for _call_id, kept in self.entries)
+
+
+def _earlier_records(
+    items: Sequence[str],
+    own: Sequence[tuple[str, str]],
+    window_records: Sequence[tuple[str, str]],
+    task_records: Sequence[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """The earlier records that can establish one of *items*, window then task.
+
+    Only a record whose text shares a number, date, name or distinctive word
+    with an item is kept, so a note does not carry the whole task's records.
+    The caller's order is kept: ``own``, then *window_records*, then
+    *task_records*; :func:`candidate_items` takes the first match.
+    """
+    keys = [key for item in items if (key := _item_keys(item))]
+    if not keys:
+        return []
+    seen = {record_id for record_id, _text in own}
+    kept: list[tuple[str, str]] = []
+    for records in (window_records, task_records):
+        for record_id, text in records:
+            if record_id in seen:
+                continue
+            folded = text.lower()
+            if any(key in folded for item_keys in keys for key in item_keys):
+                kept.append((record_id, text))
+                seen.add(record_id)
+    return kept
 
 
 # ── The note ──
@@ -827,6 +915,8 @@ def note_from_reply(
     kind: str = "",
     writer: str = "auto",
     fallback: str = "",
+    window_records: Sequence[tuple[str, str]] = (),
+    task_records: Sequence[tuple[str, str]] = (),
 ) -> tuple[ReasoningNote, str]:
     """Compress one model reply into a note; pure and deterministic.
 
@@ -861,6 +951,13 @@ def note_from_reply(
     ``len(thinking)``; and ``remember``, when the model's note gives none,
     is whether the note has a ``found`` or ``decided`` item
     (``remember_by = "heuristic"``).
+
+    *window_records* and *task_records* are earlier observations of this
+    task, newest first: the results still in the working-memory window,
+    then the rest. An item whose own reply has no matching record finds
+    one there, window before task, and only a record that shares one of
+    the item's keys is kept; a note never carries another task's records.
+    The pool's bound is :data:`TASK_SOURCE_RECORD_LIMIT`.
 
     When neither the model's block nor the heuristic finds a content
     field, a minimal note is still made so that every reply has one: the
@@ -910,8 +1007,11 @@ def note_from_reply(
         _observed(call, result) for call, result in pairs[:NOTE_MAX_OBSERVED]
     ]
     note.outcome = _outcome(pairs)
-    note.source_ids = _source_ids(pairs)
-    note.source_records = _source_records(pairs)
+    own = _source_records(pairs)
+    note.source_ids = [record_id for record_id, _text in own]
+    note.source_records = own + _earlier_records(
+        [*note.found, *note.decided], own, window_records, task_records
+    )
     note.reasoning_chars = len(thinking)
     if kind:
         note.kind = kind
@@ -1106,7 +1206,8 @@ def digest_note(
     ``open_questions`` become ``open_questions`` (deduplicated). ``plan``
     is *query*, shortened to :data:`DIGEST_TASK_CHARS`; ``outcome`` is the
     attempt's failure type or the run's status. ``source_ids`` is the
-    union of the contributing notes', in order. The digest has
+    union of the contributing notes' ids and the records behind their
+    items, in order. The digest has
     ``kind="digest"``, ``remember=True`` and ``remember_by="rule"``. Its
     identity fields stay at their defaults; the caller sets them.
     """
@@ -1140,6 +1241,10 @@ def digest_note(
         for source_id in note.source_ids:
             if source_id not in source_ids:
                 source_ids.append(source_id)
+        for item in (*note.found, *note.decided):
+            for source_id in _item_source_ids(item, note.source_records):
+                if source_id not in source_ids:
+                    source_ids.append(source_id)
     return ReasoningNote(
         task_id=task_id,
         step=step,
@@ -1280,24 +1385,27 @@ _ITEM_STOPWORDS = frozenset(
 
 
 def _item_source_ids(item: str, records: Sequence[tuple[str, str]]) -> list[str]:
-    """The record ids whose text shares a number, date, name or word with *item*."""
+    """The first record id whose text shares a number, date, name or word with *item*.
+
+    *records* is in the precedence order :func:`note_from_reply` gives it:
+    the reply's own results, the window's, then the rest of the task's.
+    """
     keys = _item_keys(item)
     if not keys:
         return []
-    ids: list[str] = []
     for record_id, text in records:
         folded = text.lower()
-        if any(key in folded for key in keys) and record_id not in ids:
-            ids.append(record_id)
-    return ids
+        if any(key in folded for key in keys):
+            return [record_id]
+    return []
 
 
 def candidate_items(note: ReasoningNote) -> tuple[CandidateItem, ...]:
     """A note's found and decided items, each with the records behind it.
 
-    An item keeps the ids of the records whose text shares a number, a
-    date, a capitalised name or a distinctive word with it; when none
-    matches, the note's whole ``source_ids`` are used.
+    An item keeps the first record whose text shares a number, a date, a
+    capitalised name or a distinctive word with it; when none matches,
+    the note's whole ``source_ids`` are used.
     """
     items: list[CandidateItem] = []
     default = tuple(note.source_ids)

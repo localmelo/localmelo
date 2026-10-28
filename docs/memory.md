@@ -207,6 +207,16 @@ not thread one; the gateway does not thread its own id into the run yet. A
 search returns the legacy metadata merged with these columns, so an older
 reader still sees the same text and metadata.
 
+The source of a fact is the observation that established it, which may be
+earlier in the task than the note that states it. An item matches records
+in this order, and the first match wins: the records of this reply's own
+tool results; then those of results still in the working-memory window,
+newest first; then the rest of the same task's results, newest first. Only
+the task's last 200 records are kept, and another task's records are never
+used. When no record matches, the item keeps the note's own `source_ids`. A
+digest's ids are the union of its notes' ids and the records behind their
+items.
+
 Nothing is written without a signal:
 
 | Signal | When | What it admits |
