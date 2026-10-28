@@ -10,11 +10,14 @@ from localmelo.melo.checker.payloads import (
     ExecutorRequest,
     ExecutorResultPayload,
     GatewayIngressPayload,
+    MemoryCandidatePayload,
     MemoryWritePayload,
     SessionTransition,
     ToolResolutionResult,
     ValidationResult,
 )
+from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker.sanitize import sanitize_assistant_text
 from localmelo.melo.schema import ImagePart
 
 # ── Constants ──
@@ -308,3 +311,112 @@ def validate_memory_write(payload: MemoryWritePayload) -> ValidationResult:
             )
 
     return ValidationResult(allowed=True)
+
+
+# ── Memory candidate ──
+#
+# R4's boundary for the documents the reasoning-note loop puts into a
+# prompt or a store: a note, a draft, a thought chunk, the attempt digest,
+# a reflection, a stated fact, a recall block or a sleep-derived candidate.
+# R4 uses the first five sources and the "candidate" target; R5 adds
+# "prompt", R6-lite "long".
+
+CANDIDATE_SOURCES: tuple[str, ...] = (
+    "reasoning_note",
+    "draft",
+    "thought",
+    "digest",
+    "reflection",
+    "user",
+    "recall",
+    "sleep",
+)
+CANDIDATE_TARGETS: tuple[str, ...] = ("candidate", "prompt", "long")
+CANDIDATE_LIMITS: dict[str, int] = {
+    "reasoning_note": 1_200,
+    "draft": 8_000,
+    "digest": 1_500,
+    "reflection": 2_000,
+    "thought": 1_500,
+    "user": 300,
+    "recall": 10_000,
+    "sleep": 1_500,
+}
+# Ends a candidate cut to its source's limit; its length is inside the cap.
+CANDIDATE_TRUNCATION_SUFFIX = "\n... [truncated]"
+
+
+def _cut_candidate(text: str, limit: int) -> str:
+    """*text* at most *limit* characters, ending with the truncation suffix.
+
+    A cut never splits a surrogate pair: when the cut falls between the
+    halves of one, it moves back by one character.
+    """
+    if len(text) <= limit:
+        return text
+    keep = max(limit - len(CANDIDATE_TRUNCATION_SUFFIX), 0)
+    if (
+        0 < keep < len(text)
+        and "\ud800" <= text[keep - 1] <= "\udbff"
+        and "\udc00" <= text[keep] <= "\udfff"
+    ):
+        keep -= 1
+    return text[:keep] + CANDIDATE_TRUNCATION_SUFFIX
+
+
+def validate_memory_candidate(payload: MemoryCandidatePayload) -> ValidationResult:
+    """Check one memory candidate, in the order read, redact, sanitize, cap.
+
+    Refusals: empty or whitespace-only text, an unknown ``source`` or
+    ``target``, and a ``profile`` entry for the ``long`` target whose
+    source is not ``user`` (R6-lite's rule, declared now). Otherwise
+    :func:`~localmelo.melo.checker.redaction.redact_secrets` runs first,
+    then :func:`~localmelo.melo.checker.sanitize.sanitize_assistant_text`,
+    then the text is cut to its source's limit with
+    :data:`CANDIDATE_TRUNCATION_SUFFIX`. The sanitized payload's metadata
+    carries ``redactions``, the count the redaction pass returned.
+    """
+    if not payload.text or not payload.text.strip():
+        return ValidationResult(
+            allowed=False, reason="Memory candidate text must not be empty"
+        )
+    if payload.source not in CANDIDATE_SOURCES:
+        return ValidationResult(
+            allowed=False,
+            reason=(
+                f"Unknown memory candidate source: {payload.source!r}; "
+                f"known sources: {CANDIDATE_SOURCES}"
+            ),
+        )
+    if payload.target not in CANDIDATE_TARGETS:
+        return ValidationResult(
+            allowed=False,
+            reason=(
+                f"Unknown memory candidate target: {payload.target!r}; "
+                f"known targets: {CANDIDATE_TARGETS}"
+            ),
+        )
+    if (
+        payload.target == "long"
+        and payload.kind == "profile"
+        and payload.source != "user"
+    ):
+        return ValidationResult(
+            allowed=False,
+            reason="A profile entry in long-term memory must come from the user",
+        )
+    text, redactions = redact_secrets(payload.text)
+    text = sanitize_assistant_text(text)
+    if not text.strip():
+        return ValidationResult(
+            allowed=False, reason="Memory candidate is empty after sanitizing"
+        )
+    text = _cut_candidate(text, CANDIDATE_LIMITS[payload.source])
+    return ValidationResult(
+        allowed=True,
+        sanitized_payload=replace(
+            payload,
+            text=text,
+            metadata={**payload.metadata, "redactions": redactions},
+        ),
+    )

@@ -155,10 +155,14 @@ def _options(**kwargs: Any) -> AgentOptions:
 
 def test_agent_options_validate_the_reasoning_fields() -> None:
     with pytest.raises(ValueError, match="reasoning must be one of"):
-        AgentOptions(reasoning="compress")  # type: ignore[arg-type]
+        AgentOptions(reasoning="summarize")  # type: ignore[arg-type]
     for bad in (0, -1, 1.5, True):
         with pytest.raises(ValueError, match="replay_turns must be"):
             AgentOptions(replay_turns=bad)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="note_writer must be one of"):
+        AgentOptions(note_writer="mystery")  # type: ignore[arg-type]
+    assert AgentOptions(reasoning="compress").note_writer == "auto"
+    assert AgentOptions(reasoning="compress+replay").note_writer == "auto"
     with pytest.raises(ValueError, match="replay_scope must be one of"):
         AgentOptions(replay_scope="session")  # type: ignore[arg-type]
 
@@ -167,7 +171,12 @@ def test_reasoning_refusal_is_a_pure_capability_check() -> None:
     assert reasoning_refusal("legacy", None, True) is None
     assert reasoning_refusal("drop", None, False) is None
     assert reasoning_refusal("replay", "auto", False) is None
-    assert "needs a reasoning field" in (reasoning_refusal("replay", None, False) or "")
+    assert "need a reasoning field" in (reasoning_refusal("replay", None, False) or "")
+    assert "need a reasoning field" in (
+        reasoning_refusal("compress+replay", None, False) or ""
+    )
+    assert reasoning_refusal("compress", None, False) is None
+    assert reasoning_refusal("compress", None, True) is None
     assert "drop is not possible" in (reasoning_refusal("drop", "auto", True) or "")
 
 
@@ -239,6 +248,19 @@ async def test_drop_equals_legacy_on_the_wire() -> None:
         "replayed_chars": 0,
         "replay_skipped": 0,
         "replay_stripped": 0,
+        "notes": 0,
+        "notes_model": 0,
+        "notes_heuristic": 0,
+        "note_chars": 0,
+        "drafts": 0,
+        "drafts_written": 0,
+        "candidates": 0,
+        "remember_model": 0,
+        "remember_heuristic": 0,
+        "candidates_refused": 0,
+        "redactions": 0,
+        "rehearsed": {"restated": 0, "acted": 0, "cited": 0},
+        "digests": 0,
     }
     assert drop_result.config["reasoning"] == "drop"
     assert "reasoning_chars" in drop_result.usage
@@ -721,7 +743,7 @@ async def test_the_agent_refuses_an_impossible_pair() -> None:
         model="m",
         transport=httpx.MockTransport(Scripted().handler),
     )
-    with pytest.raises(ValueError, match="needs a reasoning field"):
+    with pytest.raises(ValueError, match="need a reasoning field"):
         Agent(llm=without_field, options=_options(reasoning="replay"))
     await without_field.close()
 
@@ -1031,3 +1053,35 @@ async def test_a_reflection_that_fit_refuses_reads_as_unreadable(
         assert result.error == "Could not parse reflection response"
         assert result.result == ""
         assert result.attempts == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["drop", "replay", "compress", "compress+replay"])
+async def test_the_explicit_modes_write_no_raw_step_summary(mode: str) -> None:
+    embedding = CountingEmbedding()
+    server = Scripted(
+        _reply("", thinking="draft", calls=1),
+        _reply("done"),
+    )
+    agent = _agent(
+        server.llm(reasoning_field="auto"),
+        _options(reasoning=mode),
+        embedding=embedding,
+    )
+    await agent.run_task("q")
+    await agent.close()
+    assert embedding.calls == 0
+
+    embedding = CountingEmbedding()
+    server = Scripted(
+        _reply("", thinking="draft", calls=1),
+        _reply("done"),
+    )
+    legacy = _agent(
+        server.llm(),
+        _options(reasoning="legacy"),
+        embedding=embedding,
+    )
+    await legacy.run_task("q")
+    await legacy.close()
+    assert embedding.calls >= 1

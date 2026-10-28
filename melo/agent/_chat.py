@@ -16,6 +16,7 @@ from localmelo.melo.contracts.providers import (
     BaseLLMProvider,
     ProviderError,
 )
+from localmelo.melo.memory.notes import render_note_block
 from localmelo.melo.memory.short import tail_turns
 from localmelo.melo.schema import Message, ToolDef
 
@@ -129,6 +130,13 @@ FINAL_REFLECTION_NOTE = (
     "either way put your best answer in best_effort_result."
 )
 
+# Appended to a compress-mode reflection's system message: cited notes are
+# the rehearsal signal R4 counts.
+USED_NOTES_NOTE = (
+    "If your decision uses facts from the notes, list their ids in a "
+    "`used_notes` array; otherwise omit it."
+)
+
 # Ends the request when a reflection is asked again because the first reply
 # held no JSON object. Such a reply is often a tool call: the window ends in
 # tool turns, and some models continue them although the request offers no
@@ -194,11 +202,13 @@ def _build_system_prompt(
     short: list[Message],
     reflections: list[ReflectionEntry] | None = None,
     notes: Sequence[str] = (),
+    instruction: str = "",
 ) -> tuple[str, list[Message]]:
     """Merge all system messages into a single system prompt.
 
-    *notes*, such as the agent's workspace note, follow ``SYSTEM_PROMPT``
-    first, each as a paragraph of its own. Memory items (prefixed with
+    *instruction*, the compress modes' static note instruction, comes right
+    after ``SYSTEM_PROMPT``; then *notes*, such as the agent's workspace
+    note, each as a paragraph of its own. Memory items (prefixed with
     ``[memory] ``) are collected under a single ``[RECALL]`` section.
     Reflection entries are rendered under a ``[REFLECTION]`` section.
     Other system messages are appended verbatim, after the notes.
@@ -220,7 +230,10 @@ def _build_system_prompt(
         else:
             non_system.append(msg)
 
-    parts: list[str] = [SYSTEM_PROMPT, *notes]
+    parts: list[str] = [SYSTEM_PROMPT]
+    if instruction:
+        parts.append(instruction)
+    parts.extend(notes)
     for extra in extra_system:
         parts.append(extra)
     if recall_items:
@@ -288,8 +301,14 @@ class Chat:
 
     *system_notes* go into the system prompt of every planning request,
     right after ``SYSTEM_PROMPT`` (see :meth:`plan_step`); they are the same
-    on every step, so a server's prefix cache still holds. Reflection
-    requests build their own system prompt and do not carry them.
+    on every step, so a server's prefix cache still holds. *note_instruction*,
+    when given, comes between ``SYSTEM_PROMPT`` and *system_notes*; it is
+    the compress modes' static note instruction. Reflection requests build
+    their own system prompt and do not carry the notes, except that in the
+    compress modes they append the ``used_notes`` paragraph when
+    *note_instruction* is set. *empty_prefix* passes to
+    :func:`~localmelo.melo.memory.short.tail_turns`, for the compress
+    modes' empty-reply label that carries a note.
 
     A request that fails with a retryable :class:`ProviderError` is sent
     again after each delay in *retry_delays* (default
@@ -302,11 +321,15 @@ class Chat:
         llm: BaseLLMProvider,
         *,
         system_notes: Sequence[str] = (),
+        note_instruction: str = "",
+        empty_prefix: bool = False,
         retry_delays: Sequence[float] = RETRY_DELAYS_S,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         self.llm = llm
         self.system_notes = tuple(system_notes)
+        self.note_instruction = note_instruction
+        self.empty_prefix = empty_prefix
         self.retry_delays = tuple(retry_delays)
         self.sleep = sleep
         self.stats = RequestStats()
@@ -438,7 +461,7 @@ class Chat:
         reflections: list[ReflectionEntry] | None = None,
     ) -> Message:
         system_prompt, other_msgs = _build_system_prompt(
-            context, short, reflections, self.system_notes
+            context, short, reflections, self.system_notes, self.note_instruction
         )
         messages = [Message(role="system", content=system_prompt)]
         if lacks_task_query(short, query):
@@ -463,6 +486,8 @@ class Chat:
         final: bool = False,
         retry: bool = False,
         fit: Callable[[list[Message]], Awaitable[list[Message] | None]] | None = None,
+        notes: Sequence[str] = (),
+        draft_titles: Sequence[str] = (),
     ) -> Message | None:
         """Ask the LLM to reflect on the current attempt.
 
@@ -475,6 +500,13 @@ class Chat:
         the same request and :data:`REFLECTION_RETRY_NOTE`. With no tool
         turns left, a model has no tool call to continue.
 
+        In the compress modes, *notes* and *draft_titles* are the
+        already-rendered entry lines of this attempt's notes and pending
+        drafts; :func:`~localmelo.melo.memory.notes.render_note_block`
+        frames them as data and they precede the request sentence in the
+        final user message. The system message then also carries the
+        ``used_notes`` paragraph.
+
         *fit*, when given, receives the built messages before they are
         sent and returns them, maybe shortened, or ``None`` to refuse the
         request. The explicit reasoning modes pass it to keep the
@@ -484,6 +516,8 @@ class Chat:
         """
         # Build system prompt with prior reflection context
         system_parts = [REFLECTION_PROMPT]
+        if self.note_instruction:
+            system_parts.append(USED_NOTES_NOTE)
         if prior_reflections:
             lines = ["Prior reflections:"]
             for r in prior_reflections:
@@ -511,8 +545,11 @@ class Chat:
         )
         if final:
             request += f" {FINAL_REFLECTION_NOTE}"
+        block = render_note_block(notes, draft_titles)
+        if block:
+            request = f"{block}\n\n{request}"
 
-        tail = tail_turns(short, REFLECTION_WINDOW)
+        tail = tail_turns(short, REFLECTION_WINDOW, empty_prefix=self.empty_prefix)
         if tail and tail[-1].role == "user":
             # Some chat templates (Mistral, Gemma) reject two user messages
             # in a row, so the request does not follow one: the agent's

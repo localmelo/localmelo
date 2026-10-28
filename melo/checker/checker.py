@@ -6,6 +6,7 @@ from localmelo.melo.checker.payloads import (
     ExecutorRequest,
     ExecutorResultPayload,
     GatewayIngressPayload,
+    MemoryCandidatePayload,
     MemoryWritePayload,
     SessionTransition,
     ToolResolutionResult,
@@ -19,6 +20,7 @@ from localmelo.melo.checker.validators import (
     validate_executor_request,
     validate_executor_result,
     validate_gateway_ingress,
+    validate_memory_candidate,
     validate_memory_write,
     validate_session_transition,
     validate_tool_resolution,
@@ -125,3 +127,8 @@ class Checker:
 
     def check_memory_write(self, payload: MemoryWritePayload) -> ValidationResult:
         return validate_memory_write(payload)
+
+    def check_memory_candidate(
+        self, payload: MemoryCandidatePayload
+    ) -> ValidationResult:
+        return validate_memory_candidate(payload)

@@ -118,12 +118,15 @@ class Hippo:
         history: History | None = None,
         long: LongTerm | None = None,
         procedures: Procedures | None = None,
+        short_term_empty_prefix: bool = False,
     ) -> None:
         self.embedding = embedding
         self._long_term_top_k = long_term_top_k
         self._tool_search_top_k = tool_search_top_k
         self.history = history if history is not None else History()
-        self.working = WorkingMemory(max_len=short_term_max)
+        self.working = WorkingMemory(
+            max_len=short_term_max, empty_prefix=short_term_empty_prefix
+        )
         self.long = long if long is not None else LongTerm()
         self.procedures: Procedures = (
             procedures if procedures is not None else MemoryProcedures()

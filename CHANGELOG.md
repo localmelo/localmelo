@@ -9,6 +9,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Reasoning notes for the compress modes: `--reasoning compress` and
+  `compress+replay`, `--note-writer auto|heuristic`, and the `[agent]`
+  `note_writer` key. `compress` sends no reasoning; instead each reply is
+  compressed into a short note (what it planned, found, decided and left
+  open, plus what its tools returned), with its code drafts, in a RAM-only
+  note store beside the working window. A pending targeted draft is pinned
+  once after its turn's tool results; a successful later write of 60% of
+  its lines marks it written. Notes are rehearsed when a later note
+  restates them, a successful call acts on a path or command they name, or
+  a reflection cites them, and each attempt gets a digest from its rehearsed
+  notes. `compress+replay` also sends thinking as `replay` does; a backend
+  that requires replay runs `compress` as `compress+replay` and the JSON
+  line reports that. Every document passes the new
+  `check_memory_candidate` boundary (redact, sanitize, cap) before it
+  reaches the window or the store. Nothing is recalled from the notes yet
+  (retrieval is a later release), no notes table or schema change reaches
+  `history.db`, the explicit modes stop writing raw step summaries and
+  promoting reflections to long-term memory, and a session turn's `note`
+  column gets the final digest. Legacy is byte-identical, goldens included
+  ([#85]).
 - The gateway opens its console session store and serves API v2 reads under
   `/api`: health with the versions, limits, store state and a cached
   model-server check; the sessions list and one session, a pending
@@ -526,3 +546,4 @@ earlier milestones.
 [#81]: https://github.com/localmelo/localmelo/pull/81
 [#83]: https://github.com/localmelo/localmelo/pull/83
 [#84]: https://github.com/localmelo/localmelo/pull/84
+[#85]: https://github.com/localmelo/localmelo/pull/85

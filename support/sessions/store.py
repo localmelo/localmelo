@@ -1857,6 +1857,7 @@ class SessionStore:
         answer: str,
         window: Sequence[Message] | None = None,
         error: str | None = None,
+        note: str = "",
         on_stored: Callable[[StoredEvent], None] | None = None,
     ) -> TurnInfo:
         """End a turn that runs under *holder*, in one transaction (T-8).
@@ -1915,6 +1916,7 @@ class SessionStore:
                         status=status,
                         cause=cause,
                         answer=stored_answer,
+                        note=note,
                         result=result_text,
                         error=error,
                         now=now,
@@ -1948,6 +1950,7 @@ class SessionStore:
         status: str,
         cause: str,
         answer: str,
+        note: str,
         result: str | None,
         error: str,
         now: float,
@@ -2003,8 +2006,9 @@ class SessionStore:
             )
         await conn.execute(
             "UPDATE turns SET status = ?, cause = ?, answer = ?, result = ?, "
-            "finished_at = ? WHERE session_id = ? AND turn = ? AND status = 'running'",
-            (status, cause, answer, result, now, session_id, turn),
+            "note = ?, finished_at = ? WHERE session_id = ? AND turn = ? "
+            "AND status = 'running'",
+            (status, cause, answer, result, note, now, session_id, turn),
         )
         await self._insert_event(
             conn,
@@ -2518,6 +2522,7 @@ class SessionStore:
             status=status,
             cause=cause,
             answer=answer,
+            note="",
             result=result_text,
             error=error,
             now=now,

@@ -13,7 +13,8 @@ from localmelo.melo.schema import MAX_AGENT_STEPS, MAX_ATTEMPTS, STEPS_PER_ATTEM
 AttemptPolicy = Literal["reflect", "none"]
 ReflectionGate = Literal["flags", "utility"]
 ToolExposure = Literal["retrieve", "all"]
-ReasoningMode = Literal["legacy", "drop", "replay"]
+ReasoningMode = Literal["legacy", "drop", "replay", "compress", "compress+replay"]
+NoteWriter = Literal["auto", "heuristic"]
 
 # The reasoning a replay request carries for one turn is capped at this many
 # characters. At the plan's 3.45 characters per token that is about 11,600
@@ -134,6 +135,19 @@ class AgentOptions:
     - ``replay_scope``: ``"task"`` (default) replays only the current
       task's turns; ``"window"`` replays every turn in the window, earlier
       tasks included. It is API-only in R2.
+    - ``compress`` (R4): sends no thinking, asks the model for a short
+      note before each tool call, keeps the notes and drafts in the
+      working-memory note store, pins a pending draft once after its
+      turn's tool results, and puts the attempt's notes in the reflection
+      request. ``compress+replay`` does the same and replays thinking as
+      ``replay`` does. A provider that requires replay runs ``compress``
+      as ``compress+replay``, and the effective mode is what the run
+      reports. Neither mode recalls anything yet (R5).
+    - ``note_writer``: who writes a reply's note in the compress modes:
+      ``"auto"`` (default) parses the model's ``<note>`` block and falls
+      back to the heuristic, ``"heuristic"`` always writes it from the
+      reply's text and thinking. It is accepted and inert in the other
+      modes.
     """
 
     max_steps: int = MAX_AGENT_STEPS
@@ -153,6 +167,7 @@ class AgentOptions:
     reasoning: ReasoningMode = "legacy"
     replay_turns: int | None = None
     replay_scope: Literal["task", "window"] = "task"
+    note_writer: NoteWriter = "auto"
 
     def __post_init__(self) -> None:
         for name in ("max_steps", "steps_per_attempt", "max_attempts"):
@@ -166,6 +181,7 @@ class AgentOptions:
             ("tool_exposure", get_args(ToolExposure)),
             ("reasoning", get_args(ReasoningMode)),
             ("replay_scope", ("task", "window")),
+            ("note_writer", get_args(NoteWriter)),
         ):
             value = getattr(self, name)
             if value not in allowed:
@@ -274,12 +290,12 @@ def reasoning_refusal(
     if mode == "drop" and requires_replay:
         return (
             "this backend requires reasoning replay, so drop is not possible: "
-            "use replay"
+            "use replay or compress+replay"
         )
-    if mode == "replay" and not reasoning_field:
+    if mode in ("replay", "compress+replay") and not reasoning_field:
         return (
-            "replay needs a reasoning field: give --reasoning-field "
-            "(auto, reasoning_content or reasoning) with --base-url, or set "
-            "reasoning_field in the backend's config"
+            "replay and compress+replay need a reasoning field: give "
+            "--reasoning-field (auto, reasoning_content or reasoning) with "
+            "--base-url, or set reasoning_field in the backend's config"
         )
     return None

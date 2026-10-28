@@ -159,6 +159,7 @@ asyncio.run(main())
 | `run.started` | First, once the arguments of `run_task` are checked. | `query`, `max_steps`, `workspace_root`, `approval` |
 | `step.started` | At the start of each planning step. | `step`, `attempt` |
 | `assistant.message` | When the step's planning reply arrives. | `step`, `content`, `thinking`, `tool_calls`, `usage`, `duration_s` |
+| `note` | In the compress modes, when a note, a reflection's note or an attempt digest enters the RAM-only note store. | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
 | `tool.started` | Before each tool call goes to the executor, also a call that the checks then refuse. | `step`, `call_id`, `name`, `arguments`, `preview` |
 | `tool.finished` | When that call is done, refused, cancelled or crashed. | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code` |
 | `notice` | When an attempt ends, the model gave an empty reply, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
@@ -273,6 +274,24 @@ The number of `tool.started` events is `RunResult.n_tool`.
   non-zero exit does not change `status`: `shell_exec` succeeds, and its text
   starts with `[exit code <n>]`; `python_exec` fails with
   `Python exited with code <n>`.
+
+### note
+
+- `step`, `attempt`: the planning step and attempt the note belongs to.
+- `note_id`: the note's record id, which events, sessions and a later
+  long-term store use. Prompts use the short alias instead (`n4`, `d1`,
+  `g1`).
+- `kind`: `step` (a reply with tool calls), `answer`, `empty`,
+  `reflection` or `digest`.
+- `source`: `model` or `heuristic`, who wrote the note.
+- `text`: the checked note text, already redacted and sanitized; `chars` is
+  its length.
+- `drafts`: the aliases of the reply's drafts, as strings.
+- `remember`, `stage`: whether a later memory may keep it, and its stage
+  (`fresh`, `rehearsed` or `superseded`).
+
+The CLI ignores the event until its plan line lands; the session runner
+stores it, and a turn's last `digest` note goes to the turn's `note` column.
 
 ### notice
 

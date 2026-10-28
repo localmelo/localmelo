@@ -50,6 +50,7 @@ class TestCatalogue:
             "run.started",
             "step.started",
             "assistant.message",
+            "note",
             "tool.started",
             "tool.finished",
             "notice",

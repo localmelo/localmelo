@@ -317,11 +317,13 @@ class TestReasoningConfig:
 
     def test_agent_values_validate(self) -> None:
         cfg = Config(chat_backend="vllm", embedding_backend="none")
-        cfg.agent.reasoning = "compress"
+        cfg.agent.reasoning = "summarize"
         cfg.agent.replay_turns = 0
+        cfg.agent.note_writer = "mystery"
         errors = cfg.validate()
         assert any("[agent] reasoning" in e for e in errors)
         assert any("[agent] replay_turns" in e for e in errors)
+        assert any("[agent] note_writer" in e for e in errors)
 
     def test_a_cloud_section_validates_the_same_keys(
         self, monkeypatch: pytest.MonkeyPatch

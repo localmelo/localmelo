@@ -42,6 +42,7 @@ from localmelo.melo.agent.options import (
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
     ExecutorResultPayload,
+    MemoryCandidatePayload,
     MemoryWritePayload,
     ToolResolutionResult,
 )
@@ -68,6 +69,24 @@ from localmelo.melo.executor import (
 )
 from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
+from localmelo.melo.memory.notes import (
+    NOTE_MAX_DECIDED,
+    NOTE_MAX_FOUND,
+    NOTE_SHOWN_CHARS,
+    Draft,
+    ReasoningNote,
+    digest_note,
+    draft_title,
+    extract_draft,
+    mark_drafts_written,
+    note_from_reply,
+    path_spans,
+    render_digest,
+    render_draft_block,
+    render_note,
+    same_path,
+    split_note,
+)
 from localmelo.melo.memory.procedures.normalize import (
     RoutineKey,
     key_for_query,
@@ -84,6 +103,7 @@ from localmelo.melo.memory.procedures.tracker import (
     shown_view,
 )
 from localmelo.melo.memory.short import group_turns
+from localmelo.melo.memory.short.note_store import NoteStoreEntry
 from localmelo.melo.schema import (
     ANSWER_NOT_KEPT_LABEL,
     CALL_INTERRUPTED,
@@ -108,6 +128,7 @@ from localmelo.melo.schema import (
     answer_text,
     clip_session_text,
     describe_images,
+    new_record_id,
     new_tool_call_id,
     split_thinking,
 )
@@ -328,7 +349,7 @@ def _replay_plan(
         if msg.role != "assistant" or not msg.thinking:
             sent.append(msg)
             continue
-        if options.reasoning != "replay" or index not in keep:
+        if options.reasoning not in ("replay", "compress+replay") or index not in keep:
             sent.append(dataclasses.replace(msg, thinking=""))
             continue
         if not requires_replay and len(msg.thinking) > REPLAY_TURN_CAP:
@@ -350,7 +371,7 @@ def _as_sent(
 
     In ``legacy`` it is *window* itself, unchanged. Otherwise it is a new
     list in which an assistant message keeps its thinking only in
-    ``replay``, in scope (the current task from *task_query* on, or the
+    ``replay`` and ``compress+replay``, in scope (the current task from *task_query* on, or the
     whole window), among the newest ``replay_turns`` such turns, and within
     :data:`REPLAY_TURN_CAP` (the cap does not apply to a provider that
     requires replay). A provider that requires replay gets every assistant
@@ -739,6 +760,35 @@ WORKSPACE_NOTE = (
     "there; file_read and file_write refuse paths outside it."
 )
 
+# The compress modes' static system instruction, passed between
+# SYSTEM_PROMPT and the workspace note (see Chat). Static per run, so a
+# server's prefix cache still holds.
+NOTE_INSTRUCTION = (
+    "Before each tool call, write a short note in your reply:\n"
+    "<note>\n"
+    "plan: your next step and why, in one line\n"
+    "found: what you have established (file contents, test results)\n"
+    "open: what is still unknown\n"
+    "remember: yes if a fact or decision here should be kept after this task, "
+    "else no\n"
+    "</note>\n"
+    "At most 600 characters. Your earlier thinking is not shown to you again; "
+    "your notes and code drafts are.\n"
+    "Put code you drafted into the tool call, not into the note."
+)
+
+# The one sentence of NOTE_INSTRUCTION that compress+replay changes.
+NOTE_REPLAY_SENTENCE = (
+    "Your earlier thinking is not shown to you again; your notes and code "
+    "drafts are."
+)
+
+# A note text after this many characters is cut in the reflection's block.
+REFLECTION_NOTE_CHARS = NOTE_SHOWN_CHARS
+
+# Notes of this attempt the reflection request carries at most.
+REFLECTION_MAX_NOTES = 12
+
 
 @dataclasses.dataclass(frozen=True)
 class _Exit:
@@ -816,6 +866,14 @@ class _InflightStep:
     stored: int = 0
     # The result the closed step gives each call, once it is closed.
     closed: list[ToolResult] = dataclasses.field(default_factory=list)
+    # In the compress modes, the reply's content without its <note> block,
+    # and whether it carried a model note.
+    rest: str = ""
+    has_model_note: bool = False
+    # The task's most recent successful read or write before this reply, a
+    # draft target when the reply names none. The exporter takes the same
+    # value: a path used in this reply is not the fallback for it.
+    recent_path: str = ""
 
 
 @dataclasses.dataclass
@@ -853,6 +911,27 @@ class _RunState:
     replayed_chars: int = 0
     replay_skipped: int = 0
     replay_stripped: int = 0
+    # R4's counters (see memory_stats on RunResult), kept in every explicit
+    # mode so the shape is stable; only the compress modes move them.
+    notes: int = 0
+    notes_model: int = 0
+    notes_heuristic: int = 0
+    note_chars: int = 0
+    drafts: int = 0
+    drafts_written: int = 0
+    candidates: int = 0
+    remember_model: int = 0
+    remember_heuristic: int = 0
+    candidates_refused: int = 0
+    redactions: int = 0
+    digests: int = 0
+    # Rehearsal signals: restated, acted and cited.
+    rehearsed: dict[str, int] = dataclasses.field(
+        default_factory=lambda: {"restated": 0, "acted": 0, "cited": 0}
+    )
+    # The path of the latest successful file read or write, a draft's target
+    # when the reply names none.
+    recent_path: str = ""
     # Reports the run's events to the caller's sink; silent without one.
     events: _Emitter = dataclasses.field(default_factory=_Emitter)
     # The approval policy the caller passed to run_task, or None.
@@ -1162,10 +1241,23 @@ class Agent:
             raise TypeError("Agent requires either config= or llm= to be provided")
 
         self.options = options if options is not None else AgentOptions()
+        if self.options.reasoning == "compress" and bool(
+            getattr(self._llm, "requires_reasoning_replay", False)
+        ):
+            # A provider that requires replay cannot omit thinking, so
+            # compress runs as compress+replay and the run reports the arm
+            # it actually ran. replay_turns=None and the task scope are
+            # what replay itself uses on such a provider.
+            self.options = dataclasses.replace(
+                self.options,
+                reasoning="compress+replay",
+                replay_turns=None,
+                replay_scope="task",
+            )
         if (
             config is not None
             and llm is None
-            and self.options.reasoning != "replay"
+            and self.options.reasoning not in ("replay", "compress+replay")
             and config.chat_backend != "ollama"
         ):
             # The section's key is only for replay: legacy and drop send no
@@ -1260,6 +1352,7 @@ class Agent:
             history=history_backend,
             long=long_backend,
             procedures=procedures_backend,
+            short_term_empty_prefix=self.options.reasoning != "legacy",
         )
         self.checker = Checker()
         self.executor = Executor(
@@ -1270,7 +1363,28 @@ class Agent:
             if workspace_root is None
             else [WORKSPACE_NOTE.format(root=workspace_root)]
         )
-        self.chat = Chat(self._llm, system_notes=notes)
+        instruction = ""
+        if self.options.reasoning in ("compress", "compress+replay"):
+            instruction = NOTE_INSTRUCTION
+            if self.options.reasoning == "compress+replay":
+                kept = self.options.replay_turns
+                if kept is not None:
+                    step = "step" if kept == 1 else "steps"
+                    sentence = (
+                        f"Your thinking is kept for your last {kept} {step}; "
+                        "older steps keep only their notes."
+                    )
+                elif self._requires_replay:
+                    sentence = "Your thinking is kept for every step in the window."
+                else:
+                    sentence = "Your thinking is kept for every step of this task."
+                instruction = instruction.replace(NOTE_REPLAY_SENTENCE, sentence)
+        self.chat = Chat(
+            self._llm,
+            system_notes=notes,
+            note_instruction=instruction,
+            empty_prefix=self.options.reasoning != "legacy",
+        )
 
         register_builtins(
             self.executor,
@@ -1295,7 +1409,7 @@ class Agent:
     @property
     def _counts_thinking(self) -> bool:
         """Whether prompt checks count the reasoning a request carries."""
-        return self.options.reasoning == "replay"
+        return self.options.reasoning in ("replay", "compress+replay")
 
     @property
     def _requires_replay(self) -> bool:
@@ -1408,7 +1522,9 @@ class Agent:
                 )
         working = self.hippo.working
         working.clear_all()
-        for unit in group_turns(copy.deepcopy(loaded)):
+        for unit in group_turns(
+            copy.deepcopy(loaded), empty_prefix=working.empty_prefix
+        ):
             head = unit[0]
             if head.role == "assistant" and head.tool_calls:
                 if _answers_every_call(head, unit[1:]):
@@ -1431,6 +1547,561 @@ class Agent:
                 reason,
             )
         return len(working.get_window())
+
+    def notes(self) -> list[NoteStoreEntry]:
+        """Copies of the working-memory note store's entries, oldest first.
+
+        The note store holds the compress modes' notes, drafts and attempt
+        digests (R4). It is RAM only: no session or history row keeps it.
+        The entries are internal/experimental, like the note store itself.
+        """
+        return self.hippo.working.notes.entries()
+
+    def load_notes(self, entries: Sequence[NoteStoreEntry]) -> int:
+        """Replace the note store with copies of *entries*.
+
+        The store is cleared first, an entry keeps its alias, and the
+        store's caps still apply in their eviction order. Returns the
+        number of entries kept; ``[]`` clears the store. Both work in
+        RAM: R4 proposes nothing to Hippo (R6-lite adds that).
+
+        Raises ``RuntimeError`` during a run, and ``TypeError``, before
+        anything is cleared, for an item that is not a
+        :class:`~localmelo.melo.memory.short.note_store.NoteStoreEntry`.
+        """
+        if self._active_runs:
+            raise RuntimeError("Cannot load notes while a run is active")
+        loaded = list(entries)
+        for entry in loaded:
+            if not isinstance(entry, NoteStoreEntry):
+                raise TypeError(
+                    "load_notes takes NoteStoreEntry objects, got "
+                    f"{type(entry).__name__}"
+                )
+        return self.hippo.working.notes.load(loaded)
+
+    # ── Reasoning notes (R4) ──
+
+    @property
+    def _notes_mode(self) -> bool:
+        """Whether the run compresses its replies into notes."""
+        return self.options.reasoning in ("compress", "compress+replay")
+
+    @staticmethod
+    def _last_call_seq() -> int:
+        """The ``llm_calls.seq`` of the reply that just arrived, or 0."""
+        recorder = CALL_RECORDER.get()
+        return int(getattr(recorder, "last_seq", 0) or 0)
+
+    def _reply_note(
+        self,
+        response: Message,
+        results: Sequence[ToolResult],
+        *,
+        kind: str,
+        task_id: str,
+        run: _RunState,
+    ) -> tuple[ReasoningNote, str]:
+        """Build the note of *response* and the content without its note block."""
+        note, rest = note_from_reply(
+            response.content,
+            response.thinking,
+            response.tool_calls,
+            results,
+            kind=kind,
+            writer=self.options.note_writer,
+        )
+        note = dataclasses.replace(
+            note,
+            note_id=new_record_id(),
+            task_id=task_id,
+            step=run.steps,
+            attempt=run.attempts,
+            call_seq=self._last_call_seq(),
+            created_at=time.time(),
+        )
+        return note, rest
+
+    def _check_candidate(self, text: str, source: str, run: _RunState) -> str | None:
+        """Run one document through the candidate boundary; its checked text."""
+        run.candidates += 1
+        check = self.checker.check_memory_candidate(
+            MemoryCandidatePayload(text=text, source=source, target="candidate")
+        )
+        if not check.allowed:
+            run.candidates_refused += 1
+            logger.debug(
+                "Dropped a %s candidate of task %s: %s",
+                source,
+                run.task_id,
+                check.reason,
+            )
+            return None
+        payload = check.sanitized_payload
+        run.redactions += int(payload.metadata.get("redactions", 0) or 0)
+        return str(payload.text)
+
+    def _store_note(
+        self,
+        note: ReasoningNote,
+        run: _RunState,
+        *,
+        source: str,
+        drafts: Sequence[str] = (),
+    ) -> NoteStoreEntry | None:
+        """Check and store one note; emit its ``note`` event."""
+        text = render_note(note, executor=True)
+        checked = self._check_candidate(text, source, run)
+        if checked is None:
+            return None
+        entry = self.hippo.working.notes.add(
+            "note",
+            checked,
+            note=note,
+            stage=note.stage,
+            step=note.step,
+            attempt=note.attempt,
+            remember=note.remember,
+            remember_by=note.remember_by,
+        )
+        if entry is None:
+            run.candidates_refused += 1
+            return None
+        run.notes += 1
+        run.note_chars += len(checked)
+        if note.source == "model":
+            run.notes_model += 1
+        elif note.source == "heuristic":
+            run.notes_heuristic += 1
+        if note.remember and note.remember_by == "model":
+            run.remember_model += 1
+        elif note.remember and note.remember_by == "heuristic":
+            run.remember_heuristic += 1
+        run.events.note(
+            step=note.step,
+            attempt=note.attempt,
+            note_id=note.note_id,
+            kind=note.kind,
+            source=note.source,
+            text=checked,
+            chars=len(checked),
+            drafts=list(drafts),
+            remember=note.remember,
+            stage=entry.stage,
+        )
+        return entry
+
+    def _store_draft(self, draft: Draft, run: _RunState) -> NoteStoreEntry | None:
+        """Check and store one draft, superseding older pending ones."""
+        checked = self._check_candidate(draft.text, "draft", run)
+        if checked is None:
+            return None
+        entry = self.hippo.working.notes.add(
+            "draft",
+            checked,
+            draft=draft,
+            step=draft.step,
+            attempt=run.attempts,
+        )
+        if entry is None:
+            run.candidates_refused += 1
+            return None
+        run.drafts += 1
+        self.hippo.working.notes.supersede_drafts(draft.target, keep=entry.alias)
+        return entry
+
+    def _prepare_note_turn(
+        self,
+        response: Message,
+        step: _InflightStep,
+        pairs: Sequence[tuple[ToolCall, ToolResult]],
+        run: _RunState,
+    ) -> tuple[str, str, NoteStoreEntry | None, NoteStoreEntry | None]:
+        """Build and store a tool-call reply's draft and note; place them.
+
+        Returns the working-memory content and thinking of the turn, and
+        the stored note and draft entries (either may be ``None`` when the
+        boundary or the store refuses it). The draft is marked written
+        first, for this reply's writes and any earlier pending draft they
+        cover, so a draft written in the same reply is never pinned.
+        """
+        store = self.hippo.working.notes
+        pending = [
+            entry.draft
+            for entry in store.of_kind("draft")
+            if entry.draft is not None and entry.draft.status == "pending"
+        ]
+        run.drafts_written += mark_drafts_written(pending, pairs)
+        draft_entry = None
+        draft = extract_draft(step.rest, recent_path=step.recent_path)
+        if draft is not None:
+            draft = dataclasses.replace(
+                draft,
+                draft_id=new_record_id(),
+                task_id=run.task_id,
+                step=run.steps,
+                call_seq=self._last_call_seq(),
+                created_at=time.time(),
+            )
+            run.drafts_written += mark_drafts_written([draft], pairs)
+            draft_entry = self._store_draft(draft, run)
+        note, _rest = self._reply_note(
+            response,
+            [result for _call, result in pairs],
+            kind="step",
+            task_id=run.task_id,
+            run=run,
+        )
+        aliases = [] if draft_entry is None else [draft_entry.alias]
+        note_entry = self._store_note(
+            note, run, source="reasoning_note", drafts=aliases
+        )
+        if note_entry is not None:
+            self._restate(note, run)
+        note_text = "" if note_entry is None else note_entry.text
+        if step.has_model_note:
+            content = response.content
+        elif not step.rest.strip():
+            content = note_text
+        elif note_text and len(step.rest) + 2 + len(note_text) <= ASSISTANT_TEXT_SHARE:
+            content = f"{step.rest}\n\n{note_text}"
+        else:
+            content = step.rest
+        thinking = "" if self.options.reasoning == "compress" else response.thinking
+        return content, thinking, note_entry, draft_entry
+
+    def _pin_pending_draft(
+        self,
+        tool_msgs: list[Message],
+        draft_entry: NoteStoreEntry | None,
+        run: _RunState,
+    ) -> None:
+        """Append the turn's pending targeted draft to its last tool result."""
+        if (
+            draft_entry is None
+            or draft_entry.draft is None
+            or draft_entry.draft.status != "pending"
+            or not draft_entry.draft.target
+            or not tool_msgs
+        ):
+            return
+        block = render_draft_block(
+            draft_entry.alias,
+            draft_entry.step,
+            draft_entry.draft,
+            text=draft_entry.text,
+        )
+        checked = self._check_candidate(block, "draft", run)
+        if checked:
+            last = tool_msgs[-1]
+            tool_msgs[-1] = dataclasses.replace(
+                last, content=f"{last.content}\n{checked}"
+            )
+
+    @staticmethod
+    def _checked_note_copy(entry: NoteStoreEntry) -> ReasoningNote:
+        """*entry*'s note with only the fields its checked text still holds.
+
+        The digest is built from the checked text the store keeps, never
+        from raw fields a redaction or a cap changed: an item whose raw
+        text is not in ``entry.text`` is left out, and the rest is a copy
+        that the digest may read.
+        """
+        note = entry.note
+        assert note is not None
+        text = entry.text
+
+        def kept(items: Sequence[str]) -> list[str]:
+            return [item for item in items if item and item in text]
+
+        return dataclasses.replace(
+            note,
+            plan="",
+            found=kept(note.found),
+            decided=kept(note.decided),
+            open_questions=kept(note.open_questions),
+            observed=kept(note.observed),
+            outcome=note.outcome if note.outcome and note.outcome in text else "",
+            stage="rehearsed",
+        )
+
+    def _build_digest(
+        self, query: str, outcome: str, run: _RunState, task_id: str
+    ) -> str:
+        """Build, check and store the digest of the attempt that just ended."""
+        notes = [
+            self._checked_note_copy(entry)
+            for entry in self.hippo.working.notes.of_kind("note")
+            if entry.attempt == run.attempts
+            and entry.stage == "rehearsed"
+            and entry.note is not None
+        ]
+        note = digest_note(
+            query,
+            outcome or run.status,
+            notes,
+            task_id=task_id,
+            attempt=run.attempts,
+            step=run.steps,
+        )
+        note = dataclasses.replace(
+            note,
+            note_id=new_record_id(),
+            call_seq=self._last_call_seq(),
+            created_at=time.time(),
+        )
+        checked = self._check_candidate(render_digest(note), "digest", run)
+        if checked is None:
+            return ""
+        entry = self.hippo.working.notes.add(
+            "digest",
+            checked,
+            note=note,
+            step=note.step,
+            attempt=note.attempt,
+            remember=True,
+            remember_by="rule",
+        )
+        if entry is None:
+            run.candidates_refused += 1
+            return ""
+        run.digests += 1
+        run.events.note(
+            step=note.step,
+            attempt=note.attempt,
+            note_id=note.note_id,
+            kind="digest",
+            source=note.source,
+            text=checked,
+            chars=len(checked),
+            drafts=[],
+            remember=True,
+            stage=entry.stage,
+        )
+        return checked
+
+    def _restate(self, note: ReasoningNote, run: _RunState) -> bool:
+        """Compact *note*'s new items into an older note with the same facts.
+
+        A later note whose ``found`` or ``decided`` items match an existing
+        note's by normalized text restates it: the new items join the older
+        note (deduplicated, caps kept), its rendered text passes the
+        boundary again, and its stage becomes ``rehearsed``. Returns
+        whether a restatement happened.
+        """
+        items = [*note.found, *note.decided]
+        if not items:
+            return False
+        new_keys = {" ".join(item.split()).lower() for item in items}
+        for entry in self.hippo.working.notes.of_kind("note"):
+            older = entry.note
+            if older is None or older is note or entry.stage == "superseded":
+                continue
+            if not any(
+                " ".join(item.split()).lower() in new_keys
+                for item in (*older.found, *older.decided)
+            ):
+                continue
+            found = list(older.found)
+            decided = list(older.decided)
+            old_keys = {" ".join(item.split()).lower() for item in (*found, *decided)}
+            for item in note.found:
+                key = " ".join(item.split()).lower()
+                if key not in old_keys and len(found) < NOTE_MAX_FOUND:
+                    found.append(item)
+                    old_keys.add(key)
+            for item in note.decided:
+                key = " ".join(item.split()).lower()
+                if key not in old_keys and len(decided) < NOTE_MAX_DECIDED:
+                    decided.append(item)
+                    old_keys.add(key)
+            updated = dataclasses.replace(
+                older,
+                found=found,
+                decided=decided,
+                stage="rehearsed",
+                uses=older.uses + 1,
+                last_used_at=time.time(),
+            )
+            checked = self._check_candidate(
+                render_note(updated, executor=True), "reasoning_note", run
+            )
+            if checked is None:
+                return False
+            if not self.hippo.working.notes.replace_text(entry.alias, checked, updated):
+                return False
+            self.hippo.working.notes.touch(entry.alias, use=True, stage="rehearsed")
+            run.rehearsed["restated"] += 1
+            return True
+        return False
+
+    @staticmethod
+    def _call_succeeded(
+        call: ToolCall, result: ToolResult, exit_codes: Sequence[int]
+    ) -> bool:
+        """Whether a call returned without an error and with exit status 0.
+
+        *exit_codes* are the statuses the tool recorded in ``TOOL_EXIT_CODE``
+        (see :meth:`_do_execute`). A rooted ``shell_exec`` prefixes a
+        non-zero status in its text; an unrooted one records none, so its
+        status is unknown there and the call is not counted as a success:
+        a rehearsal signal must not come from a command that may have
+        failed.
+        """
+        if result.error.strip():
+            return False
+        if call.tool_name != "shell_exec":
+            return True
+        if result.output.startswith("[exit code "):
+            return result.output.startswith("[exit code 0]")
+        return bool(exit_codes) and exit_codes[-1] == 0
+
+    @staticmethod
+    def _touched_names(call: ToolCall) -> list[str]:
+        """The paths and command words a successful call acted on."""
+        names: list[str] = []
+        if call.tool_name in ("file_read", "file_write"):
+            path = call.arguments.get("path")
+            if isinstance(path, str) and path.strip():
+                names.append(path)
+                names.extend(path[start:end] for start, end in path_spans(path))
+        elif call.tool_name == "shell_exec":
+            command = call.arguments.get("command")
+            if isinstance(command, list):
+                command = " ".join(str(part) for part in command)
+            if isinstance(command, str) and command.strip():
+                names.append(command)
+                names.extend(command[start:end] for start, end in path_spans(command))
+                head = command.split()[0]
+                if head:
+                    names.append(head)
+        return [name for name in names if len(name) >= 3]
+
+    @staticmethod
+    def _mentions(text: str, name: str) -> bool:
+        """Whether *text* names *name* as a path or a whole word.
+
+        A path or file name is compared with :func:`same_path` against
+        the paths :func:`~localmelo.melo.memory.notes.path_spans` finds in
+        *text*; any other name (a command word) must stand between
+        non-word characters, so ``ls`` does not match ``results``.
+        """
+        if path_spans(name):
+            return any(
+                same_path(text[start:end], name) for start, end in path_spans(text)
+            )
+        start = 0
+        while True:
+            index = text.find(name, start)
+            if index < 0:
+                return False
+            before = text[index - 1] if index else ""
+            after = text[index + len(name) : index + len(name) + 1]
+            if not (before.isalnum() or before == "_") and not (
+                after.isalnum() or after == "_"
+            ):
+                return True
+            start = index + 1
+
+    def _rehearse_acted(
+        self,
+        call: ToolCall,
+        result: ToolResult,
+        run: _RunState,
+        exit_codes: Sequence[int] = (),
+    ) -> None:
+        """Mark the notes a successful call acted on as rehearsed."""
+        if not self._call_succeeded(call, result, exit_codes):
+            return
+        touched = self._touched_names(call)
+        if not touched:
+            return
+        for entry in self.hippo.working.notes.of_kind("note"):
+            note = entry.note
+            if note is None or entry.stage == "superseded":
+                continue
+            text = " ".join((*note.found, *note.decided))
+            if entry.stage == "rehearsed":
+                continue
+            if not any(self._mentions(text, name) for name in touched):
+                continue
+            note.stage = "rehearsed"
+            self.hippo.working.notes.touch(entry.alias, stage="rehearsed")
+            run.rehearsed["acted"] += 1
+
+    def _cite_notes(self, aliases: Sequence[str], run: _RunState) -> None:
+        """Mark the notes a reflection cited in ``used_notes`` as rehearsed."""
+        for alias in aliases:
+            entry = self.hippo.working.notes.get(alias)
+            if entry is None or entry.kind != "note" or entry.stage == "superseded":
+                continue
+            if entry.note is not None:
+                entry.note.stage = "rehearsed"
+            self.hippo.working.notes.touch(alias, use=True, stage="rehearsed")
+            run.rehearsed["cited"] += 1
+
+    @staticmethod
+    def _used_notes(content: str, flags: bool) -> list[str]:
+        """The string aliases of the reflection reply's ``used_notes``.
+
+        The object is the one the gate's parser reads: with ``"flags"``
+        the first object with a valid ``recommended_action`` (see
+        :func:`_find_reflection`), with ``"utility"`` the first JSON
+        object. A non-list or non-string entries are ignored.
+        """
+        data: dict[str, Any] | None
+        if flags:
+            data = _find_reflection(_coerce_str(content))
+        else:
+            try:
+                value = _decode_reflection(_coerce_str(content))
+            except ValueError:
+                return []
+            if not isinstance(value, dict):
+                return []
+            data = value
+        if data is None:
+            return []
+        names = data.get("used_notes")
+        if not isinstance(names, list):
+            return []
+        return [name for name in names if isinstance(name, str) and name]
+
+    def _reflection_note_inputs(self, run: _RunState) -> tuple[list[str], list[str]]:
+        """The notes lines and draft-title lines a reflection request carries."""
+        notes = [
+            entry
+            for entry in self.hippo.working.notes.of_kind("note")
+            if entry.attempt == run.attempts
+            and entry.stage != "superseded"
+            and entry.note is not None
+        ][-REFLECTION_MAX_NOTES:]
+        lines = [
+            f"[{entry.alias}] note · step {entry.step} · "
+            f"{entry.text[:REFLECTION_NOTE_CHARS]}"
+            for entry in notes
+        ]
+        # A pending draft is store-global: an earlier attempt's draft that
+        # was never written is still one the next step may need.
+        drafts = [
+            entry
+            for entry in self.hippo.working.notes.of_kind("draft")
+            if entry.draft is not None and entry.draft.status == "pending"
+        ]
+        titles: list[str] = []
+        for entry in drafts:
+            if entry.draft is None:
+                continue
+            title = (
+                f"[{entry.alias}] draft · step {entry.step} · "
+                f"{draft_title(dataclasses.replace(entry.draft, text=entry.text))}"
+            )
+            # The target is raw metadata; the line reaches a prompt only
+            # after the candidate boundary.
+            checked = self._check_candidate(title, "draft", run)
+            if checked:
+                titles.append(checked)
+        return lines, titles
 
     # ── Tool providers ──
 
@@ -1646,7 +2317,10 @@ class Agent:
         cut or skipped. ``legacy`` and ``drop`` run the loop as before.
         The newest unit always stays.
         """
-        units = group_turns(self.hippo.working.get_window())
+        units = group_turns(
+            self.hippo.working.get_window(),
+            empty_prefix=self.hippo.working.empty_prefix,
+        )
 
         async def fits(kept: list[Message]) -> bool:
             sent = _as_sent(
@@ -1662,7 +2336,10 @@ class Agent:
             return check.allowed
 
         if not await fits(self.hippo.working.get_window()):
-            if self.options.reasoning == "replay" and not self._requires_replay:
+            if (
+                self.options.reasoning in ("replay", "compress+replay")
+                and not self._requires_replay
+            ):
                 carried = {
                     id(msg)
                     for msg in _as_sent(
@@ -1902,7 +2579,10 @@ class Agent:
         """
         events = run.events
         events.tool_started(call)
-        exit_codes: list[int] | None = [] if events.active else None
+        # A list for an event, and in the compress modes for the rehearsal
+        # signal too; elsewhere, without a sink, the slot stays unset as
+        # before.
+        exit_codes: list[int] | None = [] if events.active or self._notes_mode else None
         slot = TOOL_EXIT_CODE.set(exit_codes) if exit_codes is not None else None
         gate = None
         if run.approval is not None:
@@ -1970,9 +2650,17 @@ class Agent:
                 call.tool_name, call.arguments, outcome.status.value, result.output
             )
         )
+        if not result.error.strip() and call.tool_name in ("file_read", "file_write"):
+            path = call.arguments.get("path")
+            if isinstance(path, str) and path.strip():
+                run.recent_path = path
+        if self._notes_mode:
+            self._rehearse_acted(call, result, run, exit_codes or ())
         return result, cut
 
-    async def _do_memorize(self, task_id: str, step: _InflightStep) -> None:
+    async def _do_memorize(
+        self, task_id: str, step: _InflightStep, run: _RunState
+    ) -> None:
         """Stage 5: record the step and write checked results to memory.
 
         *step* holds the planning reply and, for each of its calls, the
@@ -1981,8 +2669,13 @@ class Agent:
 
         - History gets one StepRecord per executed call (the assistant
           text is attached to the first), unconditionally.
-        - Long-term memory gets each record's text summary, if the checker
-          allows the write.
+        - Long-term memory gets each record's text summary in ``legacy``,
+          if the checker allows the write. The explicit modes write no
+          raw summary (R4 keeps only unchecked bytes out of memory).
+        - In the compress modes the reply's note and draft are built from
+          the calls and results, checked, stored and placed into the
+          working-memory turn; a pending targeted draft is pinned once,
+          after the turn's tool results.
         - Working memory always gets the real protocol turn: the assistant
           message with its tool calls, then one ``role="tool"`` message per
           call paired by ``tool_call_id``, appended as one unit. Checked
@@ -2016,18 +2709,20 @@ class Agent:
             summary = await self.hippo.store_step(task_id, record)
             step.stored += 1
 
-            # Checked write: step summary -> long-term memory only
-            mem_check = self.checker.check_memory_write(
-                MemoryWritePayload(
-                    text=summary,
-                    role="assistant",
-                    metadata={"step_id": record.step_id},
+            # Checked write: step summary -> long-term memory only, in
+            # legacy. The explicit modes stop writing the raw summary.
+            if self.options.reasoning == "legacy":
+                mem_check = self.checker.check_memory_write(
+                    MemoryWritePayload(
+                        text=summary,
+                        role="assistant",
+                        metadata={"step_id": record.step_id},
+                    )
                 )
-            )
-            if mem_check.allowed:
-                await self.hippo.memorize(
-                    summary, metadata={"step_id": record.step_id}, to_working=False
-                )
+                if mem_check.allowed:
+                    await self.hippo.memorize(
+                        summary, metadata={"step_id": record.step_id}, to_working=False
+                    )
 
         recorder = CALL_RECORDER.get()
         if recorder is not None:
@@ -2036,6 +2731,22 @@ class Agent:
                 [record.step_id for record in step.records[: step.stored]]
             )
 
+        content = response.content
+        thinking = response.thinking
+        if self._notes_mode:
+            content, thinking, note_entry, draft_entry = self._prepare_note_turn(
+                response, step, list(zip(calls, kept, strict=True)), run
+            )
+            assistant_msg, tool_msgs = self._checked_tool_turn(
+                response,
+                kept,
+                step.cut_before,
+                content=content,
+                thinking=thinking,
+            )
+            self._pin_pending_draft(tool_msgs, draft_entry, run)
+            self.hippo.working.append_turn(assistant_msg, tool_msgs)
+            return
         assistant_msg, tool_msgs = self._checked_tool_turn(
             response, kept, step.cut_before
         )
@@ -2076,6 +2787,9 @@ class Agent:
         response: Message,
         results: Sequence[ToolResult],
         cut_before: Sequence[int],
+        *,
+        content: str | None = None,
+        thinking: str | None = None,
     ) -> tuple[Message, list[Message]]:
         """Build the working-memory copy of one tool-call turn.
 
@@ -2122,7 +2836,10 @@ class Agent:
         """
         calls = self._checked_calls(response.tool_calls)
         calls_text = _render_tool_calls(calls)
-        content, thinking = response.content, response.thinking
+        if content is None:
+            content = response.content
+        if thinking is None:
+            thinking = response.thinking
         full_text = "\n".join(part for part in (content, calls_text) if part)
         text_allowed = self._memory_write_allowed(full_text, "assistant")
         # The text's share includes the line break that joins it to the calls.
@@ -2269,7 +2986,9 @@ class Agent:
                 return None
             self._note_reflection_sent(messages, run, skipped, sent)
             return messages
-        units = group_turns(messages[1:-1])
+        units = group_turns(
+            messages[1:-1], empty_prefix=self.hippo.working.empty_prefix
+        )
         for first in range(len(units)):
             kept = [msg for unit in units[first:] for msg in unit]
             candidate = [messages[0], *kept, messages[-1]]
@@ -2297,6 +3016,54 @@ class Agent:
         if skipped and sent is not None:
             kept = {id(msg) for msg in candidate}
             run.replay_skipped += sum(1 for index in skipped if id(sent[index]) in kept)
+
+    def _store_reflection_note(
+        self, response: Message, task: TaskRecord, run: _RunState
+    ) -> NoteStoreEntry | None:
+        """Store the heuristic note of the reflection reply that was read.
+
+        A reply that is only the JSON object, with no thinking that names
+        anything, still gets a note: its ``summary`` (else ``rationale``)
+        stands in for the missing text (see :func:`note_from_reply`).
+        """
+        note, _rest = note_from_reply(
+            response.content,
+            response.thinking,
+            kind="reflection",
+            writer="heuristic",
+            fallback=self._reflection_summary(response.content),
+        )
+        note = dataclasses.replace(
+            note,
+            note_id=new_record_id(),
+            task_id=task.task_id,
+            step=run.steps,
+            attempt=run.attempts,
+            call_seq=self._last_call_seq(),
+            created_at=time.time(),
+            remember=True,
+            remember_by="rule",
+        )
+        return self._store_note(note, run, source="reflection")
+
+    @staticmethod
+    def _reflection_summary(content: str) -> str:
+        """The summary (else rationale) of a readable reflection reply, or ""."""
+        found = _find_reflection(content)
+        if found is not None:
+            data: object = found
+        else:
+            try:
+                data = _decode_reflection(_coerce_str(content))
+            except ValueError:
+                return ""
+        if not isinstance(data, dict):
+            return ""
+        for key in ("summary", "rationale"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return ""
 
     async def _do_reflect(
         self,
@@ -2368,6 +3135,10 @@ class Agent:
                 )
 
         prior_reflections = self.hippo.working.get_reflections()
+        note_lines: list[str] = []
+        draft_titles: list[str] = []
+        if self._notes_mode and run is not None:
+            note_lines, draft_titles = self._reflection_note_inputs(run)
         response = await self.chat.reflect(
             short=sent,
             query=task.query,
@@ -2376,6 +3147,8 @@ class Agent:
             prior_reflections=prior_reflections or None,
             final=final,
             fit=fit,
+            notes=note_lines,
+            draft_titles=draft_titles,
         )
         if response is None:
             # The fit refused the request before it was sent; read it as an
@@ -2407,6 +3180,8 @@ class Agent:
                 final=final,
                 retry=True,
                 fit=fit,
+                notes=note_lines,
+                draft_titles=draft_titles,
             )
             if response is None:
                 return (
@@ -2423,6 +3198,14 @@ class Agent:
                 replies.append(response)
         if run is not None:
             run.reflection_thinking = response.thinking
+            readable = (
+                _find_reflection(response.content) is not None
+                if flags
+                else _holds_reflection_object(response.content)
+            )
+            if self._notes_mode and readable:
+                self._cite_notes(self._used_notes(response.content, flags), run)
+                self._store_reflection_note(response, task, run)
         if flags:
             data = _find_reflection(response.content)
             if data is None:
@@ -2602,17 +3385,51 @@ class Agent:
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""
-            if response.content.strip():
-                run.last_text = response.content
+            rest = response.content
+            has_model_note = False
+            if self._notes_mode:
+                block, rest = split_note(response.content)
+                # With --note-writer heuristic the model's block is ignored,
+                # so it is no model note for placement either.
+                has_model_note = (
+                    block is not None and self.options.note_writer == "auto"
+                )
+            if rest.strip():
+                run.last_text = rest
                 run.last_text_thinking = response.thinking
 
             if not response.tool_calls:
-                if response.content.strip():
-                    # No tool call → direct answer
+                if rest.strip():
+                    # No tool call → direct answer. In the compress modes
+                    # the note is stored first and the answer is the text
+                    # without its <note> block.
+                    if self._notes_mode:
+                        note, _ = self._reply_note(
+                            response,
+                            (),
+                            kind="answer",
+                            task_id=task.task_id,
+                            run=run,
+                        )
+                        entry = self._store_note(note, run, source="reasoning_note")
+                        if entry is not None:
+                            self._restate(note, run)
                     run.answer_thinking = response.thinking
-                    run.end("completed", result=response.content)
+                    run.end("completed", result=rest)
                     return step + 1, ""
                 # An empty reply is no answer: ask for one and plan again.
+                label_content = EMPTY_REPLY_LABEL
+                if self._notes_mode:
+                    note, _ = self._reply_note(
+                        response,
+                        (),
+                        kind="empty",
+                        task_id=task.task_id,
+                        run=run,
+                    )
+                    entry = self._store_note(note, run, source="reasoning_note")
+                    if entry is not None:
+                        label_content = f"{EMPTY_REPLY_LABEL}\n{entry.text}"
                 run.empty_replies += 1
                 if run.empty_replies >= MAX_EMPTY_REPLIES:
                     run.end("failed", error="empty replies")
@@ -2620,8 +3437,8 @@ class Agent:
                 # The label stands in for the reply, so the nudge does not
                 # follow another user message; as one unit, the two are
                 # only ever dropped together.
-                label = Message(role="assistant", content=EMPTY_REPLY_LABEL)
-                if self.options.reasoning != "legacy":
+                label = Message(role="assistant", content=label_content)
+                if self.options.reasoning not in ("legacy", "compress"):
                     label = dataclasses.replace(label, thinking=response.thinking)
                 self.hippo.working.append_turn(
                     label,
@@ -2637,7 +3454,12 @@ class Agent:
             # cancellation can close it (see _on_cancelled).
             allowed = frozenset(t.name for t in tools)
             calls = list(response.tool_calls)
-            inflight = run.inflight = _InflightStep(response=response)
+            inflight = run.inflight = _InflightStep(
+                response=response,
+                rest=rest,
+                has_model_note=has_model_note,
+                recent_path=run.recent_path,
+            )
             for call in calls:
                 # Counted when handed over, so a call that timeout_s cuts
                 # short counts too.
@@ -2645,7 +3467,7 @@ class Agent:
                 result, cut = await self._do_execute(call, allowed=allowed, run=run)
                 inflight.results.append(result)
                 inflight.cut_before.append(cut)
-            await self._do_memorize(task.task_id, inflight)
+            await self._do_memorize(task.task_id, inflight, run)
             run.inflight = None
 
             # Stuck detection (one fingerprint per step)
@@ -3148,7 +3970,10 @@ class Agent:
                 text = ANSWER_NOT_KEPT_LABEL.format(reason=check.reason)
             thinking = (
                 run.answer_thinking
-                if self.options.reasoning == "replay" and self._requires_replay
+                if (
+                    self.options.reasoning in ("replay", "compress+replay")
+                    and self._requires_replay
+                )
                 else ""
             )
             self.hippo.working.append(
@@ -3181,32 +4006,38 @@ class Agent:
                     task.task_id,
                     _exception_text(exc),
                 )
-            bound = asyncio.timeout(PROMOTION_TIMEOUT_S)
-            try:
-                # With memory=False Hippo has no embedding, so this only
-                # clears the reflections (see __init__).
-                async with bound:
-                    await self.hippo.promote_reflections(task.task_id)
-            except ProviderError as exc:
-                logger.info(
-                    "Could not promote the reflections of task %s: %s",
-                    task.task_id,
-                    exc,
-                )
-            except Exception as exc:
-                if isinstance(exc, TimeoutError) and bound.expired():
+            if self.options.reasoning != "legacy":
+                # R4 gates the promotion too: the explicit modes write
+                # nothing unchecked to long-term memory (R6-lite adds
+                # their own path through the candidate boundary).
+                self.hippo.working.clear_reflections()
+            else:
+                bound = asyncio.timeout(PROMOTION_TIMEOUT_S)
+                try:
+                    # With memory=False Hippo has no embedding, so this only
+                    # clears the reflections (see __init__).
+                    async with bound:
+                        await self.hippo.promote_reflections(task.task_id)
+                except ProviderError as exc:
                     logger.info(
-                        "Could not promote the reflections of task %s: "
-                        "no answer within %g s",
-                        task.task_id,
-                        PROMOTION_TIMEOUT_S,
-                    )
-                else:
-                    logger.warning(
                         "Could not promote the reflections of task %s: %s",
                         task.task_id,
-                        _exception_text(exc),
+                        exc,
                     )
+                except Exception as exc:
+                    if isinstance(exc, TimeoutError) and bound.expired():
+                        logger.info(
+                            "Could not promote the reflections of task %s: "
+                            "no answer within %g s",
+                            task.task_id,
+                            PROMOTION_TIMEOUT_S,
+                        )
+                    else:
+                        logger.warning(
+                            "Could not promote the reflections of task %s: %s",
+                            task.task_id,
+                            _exception_text(exc),
+                        )
         finally:
             self.hippo.working.clear_reflections()
 
@@ -3278,7 +4109,7 @@ class Agent:
         if run.inflight is None:
             return
         try:
-            self._close_interrupted_step(run.inflight, run.waiting_call_id)
+            self._close_interrupted_step(run.inflight, run.waiting_call_id, run)
         except Exception:
             # Logged, not raised: nothing may take the cancellation's place.
             logger.exception(
@@ -3301,7 +4132,7 @@ class Agent:
         return CANCELLED_ERROR
 
     def _close_interrupted_step(
-        self, step: _InflightStep, waiting_call_id: str
+        self, step: _InflightStep, waiting_call_id: str, run: _RunState
     ) -> None:
         """Answer every call of *step* and append the step to working memory.
 
@@ -3328,6 +4159,23 @@ class Agent:
             closed.append(ToolResult(tool_name=call.tool_name, error=error))
         step.closed = closed
         cut_before = [*step.cut_before, *[0] * (len(calls) - returned)]
+        if self._notes_mode:
+            content, thinking, _note_entry, draft_entry = self._prepare_note_turn(
+                step.response,
+                step,
+                list(zip(calls, closed, strict=True)),
+                run,
+            )
+            assistant_msg, tool_msgs = self._checked_tool_turn(
+                step.response,
+                closed,
+                cut_before,
+                content=content,
+                thinking=thinking,
+            )
+            self._pin_pending_draft(tool_msgs, draft_entry, run)
+            self.hippo.working.append_turn(assistant_msg, tool_msgs)
+            return
         assistant_msg, tool_msgs = self._checked_tool_turn(
             step.response, closed, cut_before
         )
@@ -3548,6 +4396,19 @@ class Agent:
                 "replayed_chars": run.replayed_chars,
                 "replay_skipped": run.replay_skipped,
                 "replay_stripped": run.replay_stripped,
+                "notes": run.notes,
+                "notes_model": run.notes_model,
+                "notes_heuristic": run.notes_heuristic,
+                "note_chars": run.note_chars,
+                "drafts": run.drafts,
+                "drafts_written": run.drafts_written,
+                "candidates": run.candidates,
+                "remember_model": run.remember_model,
+                "remember_heuristic": run.remember_heuristic,
+                "candidates_refused": run.candidates_refused,
+                "redactions": run.redactions,
+                "rehearsed": dict(run.rehearsed),
+                "digests": run.digests,
             }
         return RunResult(
             task_id=task.task_id,
@@ -3587,6 +4448,7 @@ class Agent:
         if opts.reasoning != "legacy":
             config["reasoning"] = opts.reasoning
             config["replay_turns"] = opts.replay_turns
+            config["note_writer"] = opts.note_writer
         return config
 
     async def _run_reflective_attempts(
@@ -3641,6 +4503,13 @@ class Agent:
         opts = self.options
         total_steps = 0
 
+        def record_digest() -> None:
+            """Build the attempt's digest, then supersede its notes."""
+            if not self._notes_mode:
+                return
+            self._build_digest(query, failure_type, run, task.task_id)
+            self.hippo.working.notes.supersede_attempt(run.attempts)
+
         for attempt_id in range(opts.max_attempts):
             # Never below 1: the previous attempt ended the run otherwise.
             budget = min(opts.steps_per_attempt, opts.max_steps - total_steps)
@@ -3649,6 +4518,7 @@ class Agent:
             total_steps += steps_used
 
             if not run.running:
+                record_digest()
                 return
 
             # Reflect at attempt boundary
@@ -3669,6 +4539,7 @@ class Agent:
                 replies=run.events.replies,
                 run=run,
             )
+            record_digest()
             if reflection is None:  # only with reflection_gate="flags"
                 run.events.reflection(None, continue_run=not out_of)
                 if out_of:
@@ -3731,6 +4602,9 @@ class Agent:
         _, failure_type = await self._run_attempt(
             task, query, self.options.max_steps, run
         )
+        if self._notes_mode:
+            self._build_digest(query, failure_type, run, task.task_id)
+            self.hippo.working.notes.supersede_attempt(run.attempts)
         if not run.running:
             return
         task.attempts_completed = 1
