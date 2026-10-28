@@ -327,7 +327,10 @@ See [Reflection](how-it-works.md#reflection) and
 ### run.progress
 
 Where the run stands, for a progress display. It comes only when
-`run_task` gets `progress=True` and a sink. Every key is always present,
+`run_task` gets `progress=True` and a sink. A session turn's sink is its
+runner's, so the turn stores and forwards `run.progress` events only when
+its `SessionRunner` was built with `progress=True` (see
+[Sessions](sessions.md#run-a-conversation)). Every key is always present,
 `null` where it is unknown. What it shows rests on the run's routine, as
 [procedural memory](procedures.md) remembers it on this model with these
 options:
