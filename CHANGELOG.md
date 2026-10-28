@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Console session details over API v2, and the scheduler gate in front of
+  a console turn: `GET /api/sessions/{id}/tools` lists each tool's source,
+  whether it asks first and whether the session allows it, `/memory` the
+  conversation the gateway holds (thinking stripped, text cut at 2,000
+  characters) and `/runs` each finished turn's `RunResult` without its
+  answer, while `DELETE /api/sessions/{id}/grants/{tool}` and `/grants`
+  take a session grant back. Every model call of a console turn now waits
+  for its slot under `[scheduler]`, like a workspace chat's: the console
+  builds a `ChatGate` from the same table and wraps the Agent's providers
+  with `GatedLLM`/`GatedEmbedding` through `build_session_agent`'s hooks,
+  so the call log records the session's id and `lock_gate = "wait"` holds
+  a turn while a foreign GPU lock is present. A create now makes its
+  session row before it builds the Agent, because the gate needs the id;
+  its key still lands in the create scope, so a client without the id finds
+  it, and a create whose Agent or first turn never came up deletes the row
+  it made. Console runners ask each turn for `run.progress`. `/`, the
+  workspace page and every `/v1/*` route are unchanged ([#89]).
 - Console turns over API v2: `POST /api/sessions` (with an optional first
   turn), `POST /api/sessions/{id}/turns`, `/retry` and `/turns/{id}/cancel`,
   the two cancel-by-key routes, `POST /api/approvals/{request_id}`, and
@@ -564,3 +581,4 @@ earlier milestones.
 [#84]: https://github.com/localmelo/localmelo/pull/84
 [#85]: https://github.com/localmelo/localmelo/pull/85
 [#88]: https://github.com/localmelo/localmelo/pull/88
+[#89]: https://github.com/localmelo/localmelo/pull/89

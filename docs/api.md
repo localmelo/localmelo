@@ -11,9 +11,9 @@ know. This page documents the routes that exist now: the reads, and the
 writes that create a session and start, retry, stop and approve its
 turns. Settings and model listing come in a later change.
 
-A console turn does not pass the scheduler gate yet: it calls the model at
-once, where a workspace chat waits for its slot. The gate arrives in the
-next change. Until then, do not benchmark slot sharing through API v2.
+A console turn passes the same scheduler gate a workspace chat does: every
+model call waits for its slot under `[scheduler]`, and the call log records
+it under the session's id. See [Scheduler](scheduler.md#the-gate-on-chats-s2).
 
 Requests and responses are JSON in UTF-8. A successful read carries
 `Cache-Control: no-store`. A refused request carries one error shape:
@@ -293,8 +293,9 @@ and three resume keys:
 
 - The turn starts at once and runs in the background: the answer is 202 as
   soon as its row exists, 201 when a create started it. Follow it on the
-  event stream — `turn.started`, the run's events, `turn.finished` with
-  `status` and `cause` — and read the answer from the turn row.
+  event stream — `turn.started`, the run's events, its `run.progress`
+  events, `turn.finished` with `status` and `cause` — and read the answer
+  from the turn row.
 - `resumed_turns` is how many earlier turns the Agent loaded from the
   session file when this request opened the session; `resume_mode` is the
   arm that loaded them (`pairs` or `window`) and
@@ -485,6 +486,88 @@ curl -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
   is still running after this gateway stopped it — rare: the row, its
   turns and its events stay as they were, and the call can be repeated.
 
+## GET /api/sessions/{id}/tools
+
+Every tool the session's Agent offers, with whether this session allows it.
+
+```bash
+curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/tools
+```
+
+```json
+{"tools": [{"name": "shell_exec", "description": "Run a shell command ...", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}, "source": "builtin", "requires_approval": true, "granted": false}], "mcp_config_label": "", "mcp_error": ""}
+```
+
+- `source` is `builtin`, `provided` (an MCP server's tool) or `custom`.
+  `requires_approval` says a call of it asks first; `granted` says this
+  session allows it for the rest of the gateway run.
+- This route opens the session, because a provider's tools appear only once
+  its Agent started. It can take seconds, and a start that fails is 502
+  `agent_start_failed`.
+- `mcp_config_label` is the config's `mcp_config` with the home folder as
+  `~`, or `""`. `mcp_error` is why this session runs without MCP tools, or
+  `""`; MCP in the console is not built yet, so it is always `""`.
+
+## DELETE /api/sessions/{id}/grants/{tool}
+
+Take back one session grant, so the tool asks again next time.
+
+```bash
+curl -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/shell_exec
+```
+
+```json
+{"grants": []}
+```
+
+- 200 with the grants that remain; both `grants` and `granted_at` of
+  `GET /api/sessions/{id}` drop it.
+- 404 `not_found` when the session is not open or the tool has no grant.
+  `DELETE /api/sessions/{id}/grants` without a tool forgets every grant and
+  answers 200 `{"grants": []}`, whether or not the session is open.
+
+## GET /api/sessions/{id}/memory
+
+What the session's Agent remembers in its window.
+
+```bash
+curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/memory
+```
+
+```json
+{"agent": "open", "working": [{"role": "user", "text": "What is in this project?", "tool_calls": [], "tool_call_id": "", "images": 0}], "working_max": 20, "long_term": {"enabled": false, "backend": "none"}}
+```
+
+- This route never opens the session. `working` is the open Agent's
+  conversation, the kept copy while `paused`, and `[]` when `not_loaded`.
+- An assistant row's `text` has its `<think>` block removed, and every text
+  stops at 2,000 characters with `… (+N chars)` when longer; the page
+  expands the message itself.
+- `tool_calls` lists the names a message called, `images` counts its image
+  references.
+- `working_max` is the window's message bound. `long_term.enabled` is
+  whether the settings name an embedding backend, and `backend` is its key
+  (`none` when they do not).
+
+## GET /api/sessions/{id}/runs
+
+Each finished turn's run record, newest page first like the turns list.
+
+```bash
+curl 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/runs?limit=20'
+```
+
+```json
+{"runs": [{"turn": 3, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "status": "completed", "started_at": 1761141600.2, "finished_at": 1761141612.4, "result": {"task_id": "4b1e7c9a2f3d4e5b8a6c0d1e2f3a4b5c", "status": "completed", "error": "", "steps": 3, "...": "..."}}], "has_earlier": false}
+```
+
+- `limit` is 1 to 50 (default 20); `before=N` pages to turns numbered below
+  `N`, as on `GET /api/sessions/{id}/turns`.
+- `result` is the turn's `RunResult` without its `result` text, which the
+  transcript already shows. A turn that is still running has no run record
+  and is left out; `has_earlier` says that older turns exist beyond the
+  page.
+
 ## A script: create, run, approve, read
 
 One Python file, standard library only. It creates a session with a first
@@ -593,10 +676,8 @@ the `turns` read after the stream ends sees the answer.
 
 ## Not in this version
 
-There are no settings, model-list or tools routes, no `DELETE` of a tool
-grant, and no reads of memory or runs yet. Turn events carry no progress
-updates. They arrive in later changes; the shapes above are the ones those
-changes extend.
+There are no settings or model-list routes yet. They arrive in a later
+change; the shapes above are the ones it extends.
 
 FastAPI's `/docs`, `/redoc` and `/openapi.json` are off: this page is the
 reference. Run the API only on the loopback address. A gateway on `0.0.0.0`
