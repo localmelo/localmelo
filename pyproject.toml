@@ -38,6 +38,8 @@ dev = [
     "mypy",
     "pytest",
     "pytest-asyncio",
+    "pytest-testmon>=2.2.0",
+    "pytest-xdist>=3.8.0",
     "pre-commit",
     "pyte",
 ]
