@@ -280,7 +280,9 @@ must be running to serve it: `melo --serve`, then open the address it prints.
    local model discovery lists models without starting one. A cloud backend
    names an API-key environment variable and shows only whether it is set,
    never the key. Saving uses the loaded settings revision; if the file changed,
-   reload the dialog and retry. You can also use `melo --reconfigure`.
+   reload the dialog and retry. **Test connection** probes the unsaved model
+   settings; **Theme** applies System, Light or Dark immediately and remembers
+   it in this browser. You can also use `melo --reconfigure`.
 2. Type a message and send. The first message creates the chat: the page
    answers your draft with the chat's first turn, and never creates a chat on
    its own. Answers are rendered as Markdown, with code blocks.
@@ -299,7 +301,15 @@ without moving the current view. A stream the browser gives up on reopens
 after 1, 2, 4, 8, 16 and then 30 seconds from the page's own cursor, and only
 after the chat is read again: one that is gone leaves the page on a new chat
 rather than retrying for ever. The list is re-read every 4 seconds while the
-tab is visible, for changes from another browser.
+tab is visible, for changes from another browser. **Reconnect now** checks the
+chat before reopening its stream. Independent banners show store, model and
+connection problems without replacing other notices.
+
+**Details** opens a session drawer with its tools and session grants, working
+and long-term memory status, and finished runs with paging when a page supplies
+a turn cursor. Granted tools can be
+revoked there; the tools view may open a paused session. On narrow screens the
+drawer stacks below the composer.
 
 A send is named by a `client_request_id`. If its answer is lost the page asks
 the store whether the message was accepted, and offers `Retry` only when it

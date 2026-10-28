@@ -1156,6 +1156,43 @@ class SessionStore:
             async with self._transaction(conn, label):
                 yield conn
 
+    @contextlib.asynccontextmanager
+    async def component_event_transaction(
+        self, label: str
+    ) -> AsyncIterator[tuple[aiosqlite.Connection, list[StoredEvent]]]:
+        """Commit component rows and session events in one transaction."""
+        if self._writer != "gateway":
+            raise SessionStoreError("Out-of-turn events need the gateway's store")
+        async with self._lock:
+            conn = await self._ready()
+            self._check_writable()
+            async with self._transaction(conn, label) as stored:
+                yield conn, stored
+
+    async def append_component_event(
+        self,
+        conn: aiosqlite.Connection,
+        stored: list[StoredEvent],
+        session_id: str,
+        event_type: str,
+        data: Mapping[str, Any],
+    ) -> None:
+        """Append an event inside a component event transaction."""
+        if not (
+            isinstance(event_type, str)
+            and event_type.startswith(RESERVED_EVENT_PREFIXES)
+            and RESERVED_EVENT_TYPE_RE.fullmatch(event_type)
+        ):
+            raise ValueError("invalid out-of-turn event type")
+        await self._require_session(conn, session_id)
+        await self._insert_event(
+            conn,
+            stored,
+            session_id,
+            None,
+            _session_event(event_type, data, self._clock()),
+        )
+
     # ── Transactions ──
 
     def _before_commit(self, label: str) -> None:

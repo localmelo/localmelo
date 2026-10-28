@@ -12,8 +12,25 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Opt-in context-window request accounting reports estimated and measured planning/reflection
   tokens in events and run results; it does not prune or enforce an output cap ([#NN]).
 
+- S3b.1a foundations: scheduler component v2 adds a durable pause priority
+  snapshot and atomic v1 migration; durable generation and operation IDs guard
+  transitions and identify committed receipts. The internal synchronous gate
+  `try_park` fences an eligible pending call and cancels only its bound turn.
+  An atomic component event transaction supports `ParkStore` hold/resume/park
+  records, including the current pending-pause flag. Guarded terminal retries
+  return their matching committed record. An evidence-only card builder derives
+  bounded, redacted cards from the task spec and persisted events. Worker API
+  pause behavior remains as in #119; there is no worker hold/park integration or
+  new API in this slice.
+  S3b.1b follows ([#125]).
+
+- Workspace settings gain connection testing and an immediately applied theme;
+  a session details drawer shows tools, grant revocation, memory and runs.
+  Store, model and stream banners no longer replace other notices. ([#124])
+
 - Optional direct worker-session recording and dsh JSONL import, with a
   read-only, filterable and paginated gateway worker-history API. [#123]
+
 - Workspace approval cards with a 500 ms guard, explicit allow/deny choices,
   and a jump-to-approval control; failure and stopped states with retry,
   continuation when eligible, copy-error and details; older-turn paging;
@@ -21,7 +38,6 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   update events also carry a display-safe workspace label. ([#122])
 - A documentation inventory, bilingual style guide and experimental offline
   preview builder lay the groundwork for a later site migration; published
-  pages and existing URLs are unchanged ([#121]).
   pages and existing URLs are unchanged ([#120]).
 - S3a.2 adds `/api/tasks` creation, inspection and control and in-process
   workers sharing the console's scheduler gate. Creation is idempotent with
@@ -893,3 +909,5 @@ earlier milestones.
 [#121]: https://github.com/localmelo/localmelo/pull/121
 [#122]: https://github.com/localmelo/localmelo/pull/122
 [#123]: https://github.com/localmelo/localmelo/pull/123
+[#124]: https://github.com/localmelo/localmelo/pull/124
+[#125]: https://github.com/localmelo/localmelo/pull/125
