@@ -216,7 +216,8 @@ type more letters to narrow them, Tab or Enter to take one.
 - **Thinking.** `✻ Thought for 1.2s`, then the first 3 rows of the
   thinking (40 with `/verbose`, none with `/thinking off`), wrapped to
   the width. An intermediate message prints as Markdown after `●`; the
-  last one is held and prints only when it differs from the final answer.
+  last one is held, prints at the next step, and at the end only when it
+  differs from the final answer.
 - **Tool calls** print one block each when they finish: `✓` ran, `✗`
   failed, `⊘` blocked or denied, `◌` stopped or not run; the duration;
   `exit N` when a command ran and exited with another code than 0 (`grep`

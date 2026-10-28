@@ -284,6 +284,8 @@ class TurnRenderer:
         self.live: LiveState | None = None
         # The latest run.progress of this session, for /progress.
         self.progress: Mapping[str, Any] | None = None
+        # A cancelled run.finished whose turn.finished has not come yet.
+        self._cancelled_pending = False
         # The latest request's prompt tokens, for the status bar.
         self.context_tokens = 0
         # Calls a reply listed that have not started, and the previews of
@@ -333,6 +335,7 @@ class TurnRenderer:
         self._calls = {}
         self._previews = {}
         self._finished = False
+        self._cancelled_pending = False
         self._tool_count = 0
         self._stop_cause = ""
         self._held = ""
@@ -379,11 +382,18 @@ class TurnRenderer:
                 )
             elif result is not None and result.status == "cancelled":
                 self._print_unstarted()
+                self._cancelled_pending = False
                 self.out.print(
                     stopped_line(cause or self._stop_cause or "user_stop", self.symbols)
                 )
             elif result is not None:
                 self._print_result(result, footer=False)
+        elif self._cancelled_pending:
+            # turn.finished never reached the sink: use what the CLI knows.
+            self._cancelled_pending = False
+            self.out.print(
+                stopped_line(cause or self._stop_cause or "user_stop", self.symbols)
+            )
         self.out.print(Text(""))
         self.live = None
 
@@ -394,6 +404,15 @@ class TurnRenderer:
             self.out.print(
                 Text("  No approvals for this turn (--yolo).", style="muted")
             )
+
+    def _clear_retry(self) -> None:
+        """A non-retry event ends the retry state (section 3's activity table)."""
+        live = self.live
+        if live is None:
+            return
+        if live.activity == "Retrying":
+            live.activity = "Thinking"
+        live.retry_until = 0.0
 
     def _on_step_started(self, data: Mapping[str, Any]) -> None:
         self._print_held()
@@ -414,8 +433,7 @@ class TurnRenderer:
                         name=str(call.get("name") or "?"),
                         preview=str(call.get("preview") or ""),
                     )
-        if self.live is not None:
-            self.live.retry_until = 0.0
+        self._clear_retry()
         content = str(data.get("content") or "")
         block, text = split_thinking(content)
         thinking = str(data.get("thinking") or "")
@@ -423,7 +441,7 @@ class TurnRenderer:
             thinking = block
         if thinking.strip():
             self._print_thinking(thinking, _float(data.get("duration_s")))
-        text = text.strip()
+        text = clean_output(text).strip()
         if not isinstance(calls, list) or not calls:
             # The last message may be the answer: hold it until the end
             # says whether to print it (section 3).
@@ -471,8 +489,8 @@ class TurnRenderer:
         if self.live is None:
             return
         name = str(data.get("name") or "?")
+        self._clear_retry()
         self.live.activity = "Running"
-        self.live.retry_until = 0.0
         self.live.tool = name
         self.live.preview = preview
         self.live.tool_started = self._clock()
@@ -488,8 +506,8 @@ class TurnRenderer:
             self._arguments.pop(call_id, None)
         if self.live is not None:
             self.live.tool = ""
+            self._clear_retry()
             self.live.activity = "Thinking"
-            self.live.retry_until = 0.0
 
     def _remember_tool_output(self, data: Mapping[str, Any]) -> None:
         """Keep a finished call's text for /expand."""
@@ -532,14 +550,14 @@ class TurnRenderer:
 
     def _on_reflection_started(self, data: Mapping[str, Any]) -> None:
         if self.live is not None:
+            self._clear_retry()
             self.live.activity = "Reflecting"
-            self.live.retry_until = 0.0
 
     def _on_reflection(self, data: Mapping[str, Any]) -> None:
         self._count_usage(data.get("usage"))
         if self.live is not None:
+            self._clear_retry()
             self.live.activity = "Thinking"
-            self.live.retry_until = 0.0
         attempt = _int(data.get("attempt"), 0)
         duration = format_duration(_float(data.get("duration_s")))
         if data.get("readable") is False:
@@ -548,28 +566,24 @@ class TurnRenderer:
                 if data.get("continue_run")
                 else ("the budget is used up")
             )
-            self.out.print(
-                Text(
-                    f"{self.symbols.thought} Could not read the reflection after "
-                    f"attempt {attempt}; {tail} ({duration})"
-                )
+            line = (
+                f"{self.symbols.thought} Could not read the reflection after "
+                f"attempt {attempt}; {tail} ({duration})"
             )
+            self.out.print(_one_line(line, self.out.width, self.symbols))
             return
         action = plain(str(data.get("action") or ""))
-        rationale = plain(str(data.get("rationale") or ""))
-        self.out.print(
-            Text(
-                f"{self.symbols.thought} Reflected after attempt {attempt}: "
-                f"{action} {self.symbols.dot} {rationale} ({duration})"
-                + (
-                    " · asked twice"
-                    if self.verbose and _int(data.get("requests"), 0) == 2
-                    else ""
-                )
-            )
-        )
+        first = _first_line(str(data.get("rationale") or ""))
+        line = f"{self.symbols.thought} Reflected after attempt {attempt}: {action}"
+        if self.verbose and _int(data.get("requests"), 0) == 2:
+            line += f" {self.symbols.dot} asked twice"
+        if first:
+            line += f" {self.symbols.dot} {first}"
+        line += f" ({duration})"
+        self.out.print(_one_line(line, self.out.width, self.symbols))
         if self.verbose:
             summary = plain(str(data.get("summary") or ""))
+            rationale = plain(str(data.get("rationale") or ""))
             detail = Text(no_wrap=True, overflow="ellipsis")
             if summary:
                 detail.append("  " + summary)
@@ -610,6 +624,7 @@ class TurnRenderer:
             duration_s=float(raw.get("duration_s") or 0.0),
         )
         self._finished = True
+        self._clear_retry()
         self._print_unstarted()
         # The last message prints when the answer differs from it (section 3).
         held, self._held = self._held, ""
@@ -617,7 +632,8 @@ class TurnRenderer:
         if held and held.strip() != answer.strip():
             self.out.print(_marked(self.symbols.assistant, "", markdown(held)))
         if result.status == "cancelled":
-            self.out.print(stopped_line(self._stop_cause or "user_stop", self.symbols))
+            # The cause is turn.finished's, which comes after this event.
+            self._cancelled_pending = True
         else:
             self._print_result(result, footer=True)
         if self.live is not None:
@@ -628,19 +644,29 @@ class TurnRenderer:
             self.live.retry_until = 0.0
 
     def _on_turn_finished(self, data: Mapping[str, Any]) -> None:
-        """A turn U1 ended without a run.finished (recovery): its status line."""
+        """The turn's end: a cancelled run's cause, or a stale turn's status."""
+        cause = str(data.get("cause") or "")
+        if self._cancelled_pending:
+            self._cancelled_pending = False
+            self.out.print(
+                stopped_line(cause or self._stop_cause or "user_stop", self.symbols)
+            )
+            return
         if self._finished:
             return
         self._finished = True
         status = str(data.get("status") or "")
-        cause = str(data.get("cause") or "")
         error = str(data.get("error") or "")
         if status == "cancelled":
             self.out.print(
                 stopped_line(cause or self._stop_cause or "user_stop", self.symbols)
             )
         elif status:
-            severe = status in _SEVERE
+            # A crash is a bug only when the run raised it; a crash cause
+            # means the process stopped (section 3's severity table).
+            severe = status in {"provider_error", "setup_error"} or (
+                status == "crashed" and cause != "crash"
+            )
             mark = self.symbols.failed if severe else self.symbols.warn
             line = Text(
                 f"{mark} {status_line(status, plain(error))}",
@@ -666,8 +692,11 @@ class TurnRenderer:
         self._previews = {}
         self._arguments = {}
         self._finished = False
+        self._cancelled_pending = False
         self._tool_count = 0
         self._stop_cause = ""
+        self.verbose = False
+        self.thinking = True
 
     def stopped_by(self, cause: str) -> None:
         """Note that the turn is being stopped for *cause* (its stopped line)."""
@@ -778,22 +807,6 @@ class TurnRenderer:
             parts.append(images)
         return Group(*parts)
 
-    def _arguments_of(self, data: Mapping[str, Any]) -> object:
-        """The arguments a finished call was started with (tool.started's)."""
-        arguments = data.get("arguments")
-        if isinstance(arguments, Mapping):
-            return arguments
-        call_id = data.get("call_id")
-        return self._arguments.get(call_id) if isinstance(call_id, str) else None
-
-    def tool_output(self, ref: str | None) -> ToolOutput | None:
-        """The finished call *ref* names, or the latest when *ref* is None."""
-        if not self.tool_outputs:
-            return None
-        if ref is None:
-            return self.tool_outputs[-1]
-        return next((call for call in self.tool_outputs if call.ref == ref), None)
-
     def _take_snapshot(self, data: Mapping[str, Any]) -> Snapshot | None:
         """The file_write snapshot of this call, removed (only a write has one)."""
         if self._snapshots is None:
@@ -838,6 +851,22 @@ class TurnRenderer:
                 line = cut_cells(f"{row.old or row.new:4} {sign} {row.text}", width)
                 body.append("\n      " + line, style=style)
         return body
+
+    def _arguments_of(self, data: Mapping[str, Any]) -> object:
+        """The arguments a finished call was started with (tool.started's)."""
+        arguments = data.get("arguments")
+        if isinstance(arguments, Mapping):
+            return arguments
+        call_id = data.get("call_id")
+        return self._arguments.get(call_id) if isinstance(call_id, str) else None
+
+    def tool_output(self, ref: str | None) -> ToolOutput | None:
+        """The finished call *ref* names, or the latest when *ref* is None."""
+        if not self.tool_outputs:
+            return None
+        if ref is None:
+            return self.tool_outputs[-1]
+        return next((call for call in self.tool_outputs if call.ref == ref), None)
 
     def _preview_of(self, data: Mapping[str, Any]) -> str:
         call_id = data.get("call_id")
@@ -905,19 +934,40 @@ class TurnRenderer:
             if hint:
                 self.out.print(Padding(Text(hint, style="muted"), (0, 0, 0, 2)))
         if footer:
-            self.out.print(Text(self.footer(result), style="muted"))
+            self.out.print(Text(self.footer(result), style="muted", no_wrap=True))
 
     def footer(self, result: RunResult) -> str:
-        """``✻ Worked for 14s · 1 tool call · ↓ 412 tokens``."""
+        """``✻ Worked for 14s · 1 tool call · ↓ 412 tokens``, on one line."""
         calls = result.n_tool or self._tool_count
         parts = [
             f"{self.symbols.thought} Worked for {format_duration(result.duration_s)}",
             f"{calls} tool call" + ("" if calls == 1 else "s"),
         ]
         tokens = self.live.output_tokens if self.live is not None else 0
-        if tokens:
-            parts.append(self.symbols.output_tokens.format(format_tokens(tokens)))
-        return f" {self.symbols.dot} ".join(parts)
+        token_part = (
+            self.symbols.output_tokens.format(format_tokens(tokens)) if tokens else ""
+        )
+        text = f" {self.symbols.dot} ".join(
+            parts + ([token_part] if token_part else [])
+        )
+        if cells(text) > self.out.width and token_part:
+            text = f" {self.symbols.dot} ".join(parts)  # the tokens go first
+        return cut_cells(text, self.out.width, self.symbols.ellipsis)
+
+
+def _one_line(line: str, width: int, symbols: Symbols) -> Text:
+    """*line* cut to *width* cells with the ellipsis: never wrapped."""
+    return Text(
+        cut_cells(line, width, symbols.ellipsis), no_wrap=True, overflow="ellipsis"
+    )
+
+
+def _first_line(text: str) -> str:
+    """The first non-blank line of *text*, cleaned and collapsed."""
+    for line in clean_output(text).splitlines():
+        if line.strip():
+            return " ".join(line.split())
+    return ""
 
 
 def _int(value: object, default: int) -> int:
@@ -977,7 +1027,7 @@ def _image_lines(images: object, symbols: Symbols) -> Text | None:
         if not first:
             body.append("\n")
         first = False
-        mime = str(image.get("mime_type") or "image")
+        mime = clean_output(str(image.get("mime_type") or "image"))
         size = format_bytes(_int(image.get("size_bytes"), 0))
         body.append(
             "    "

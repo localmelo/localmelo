@@ -36,7 +36,8 @@ from localmelo.support.cli.approvals import Approvals, Mode, TerminalApprover
 from localmelo.support.cli.output import Out
 from localmelo.support.cli.render import EXPAND_LINES, ToolOutput, TurnRenderer
 from localmelo.support.cli.text import expand_tabs, wrap_cells
-from localmelo.support.cli.theme import in_symbols
+from localmelo.support.cli.theme import ASCII, in_symbols
+from localmelo.support.progress_line import run_elapsed, wall_range
 from localmelo.support.sessions.display import (
     clean_output,
     format_tokens,
@@ -73,15 +74,16 @@ def _toggle(arguments: str, current: bool) -> bool | None:
     return None
 
 
-def _progress_lines(payload: dict[str, Any]) -> list[str]:
+def _progress_lines(payload: dict[str, Any], symbols: Any) -> list[str]:
     """A run.progress payload as /progress prints it, one fact per line."""
+    dot = f" {symbols.dot} "
     level = payload.get("level") or 0
     step = payload.get("step") or 0
     attempt = payload.get("attempt") or 1
     head = [f"level {level}", f"step {step}"]
     if attempt >= 2:
         head.append(f"attempt {attempt}")
-    lines = [" · ".join(head)]
+    lines = [dot.join(head)]
     second: list[str] = []
     phase = payload.get("phase")
     if isinstance(phase, str) and phase:
@@ -93,7 +95,7 @@ def _progress_lines(payload: dict[str, Any]) -> list[str]:
         if isinstance(passed, int) and isinstance(total, int):
             second.append(f"tests {passed}/{total}")
     if second:
-        lines.append(" · ".join(second))
+        lines.append(dot.join(second))
     past = payload.get("past")
     if isinstance(past, dict):
         runs = past.get("runs") or 0
@@ -102,9 +104,16 @@ def _progress_lines(payload: dict[str, Any]) -> list[str]:
         facts = [f"past {runs} run{'' if runs == 1 else 's'}"]
         if isinstance(lo, int) and isinstance(hi, int):
             facts.append(f"{lo}-{hi} steps" if lo != hi else f"{lo} steps")
+        wall_lo, wall_hi = past.get("wall_lo_s"), past.get("wall_hi_s")
+        if isinstance(wall_lo, int | float) and isinstance(wall_hi, int | float):
+            facts.append(wall_range(float(wall_lo), float(wall_hi)))
         if isinstance(last, int):
-            facts.append(f"last {last} steps")
-        lines.append(" · ".join(facts))
+            last_fact = f"last {last} steps"
+            last_wall = past.get("last_wall_s")
+            if isinstance(last_wall, int | float):
+                last_fact += f", {run_elapsed(float(last_wall))}"
+            facts.append(last_fact)
+        lines.append(dot.join(facts))
     items = payload.get("items")
     if isinstance(items, list) and items:
         lines.append("items")
@@ -117,8 +126,9 @@ def _progress_lines(payload: dict[str, Any]) -> list[str]:
             state = str(item.get("state") or "pending")
             repeat = item.get("repeat")
             if isinstance(repeat, int) and repeat > 1:
-                label += f" (×{repeat})"
-            lines.append(f"  {label} · {state}")
+                times = "x" if symbols is ASCII else "×"
+                label += f" ({times}{repeat})"
+            lines.append(f"  {label}{dot}{state}")
     basis = payload.get("basis")
     if isinstance(basis, dict):
         facts = []
@@ -131,7 +141,7 @@ def _progress_lines(payload: dict[str, Any]) -> list[str]:
         if basis.get("model"):
             facts.append(f"model {basis['model']}")
         if facts:
-            lines.append("basis " + " · ".join(facts))
+            lines.append("basis " + dot.join(facts))
     return lines
 
 
@@ -446,25 +456,33 @@ class CliSession:
         """``/verbose [on|off]``: verbose rendering, or the other way."""
         state = _toggle(arguments, self.renderer.verbose)
         if state is None:
-            self.out.print(_line("✗ Use /verbose on or /verbose off.", style="error"))
+            self.out.print(
+                self._text("✗ Use /verbose on or /verbose off.", style="error")
+            )
             return
         self.renderer.verbose = state
-        self.out.print(_line(f"Verbose rendering {'on' if state else 'off'}.", "muted"))
+        self.out.print(
+            self._text(f"Verbose rendering {'on' if state else 'off'}.", "muted")
+        )
 
     def toggle_thinking(self, arguments: str) -> None:
         """``/thinking [on|off]``: thinking excerpts, or the other way."""
         state = _toggle(arguments, self.renderer.thinking)
         if state is None:
-            self.out.print(_line("✗ Use /thinking on or /thinking off.", style="error"))
+            self.out.print(
+                self._text("✗ Use /thinking on or /thinking off.", style="error")
+            )
             return
         self.renderer.thinking = state
-        self.out.print(_line(f"Thinking excerpts {'on' if state else 'off'}.", "muted"))
+        self.out.print(
+            self._text(f"Thinking excerpts {'on' if state else 'off'}.", "muted")
+        )
 
     def expand(self, arguments: str) -> None:
         """``/expand [turn.call]``: a tool call's whole output or error."""
         calls = self.renderer.tool_outputs
         if not calls:
-            self.out.print(_line("✗ No tool calls yet.", style="error"))
+            self.out.print(self._text("✗ No tool calls yet.", style="error"))
             return
         latest_turn = calls[-1].ref.split(".", 1)[0]
         call: ToolOutput | None
@@ -472,12 +490,12 @@ class CliSession:
         if not argument:
             call = calls[-1]
         elif argument.startswith("!"):
-            self.out.print(_line("✗ No tool calls yet.", style="error"))
+            self.out.print(self._text("✗ No tool calls yet.", style="error"))
             return
         elif "." in argument:
             turn, _, number = argument.partition(".")
             if not (turn.isdigit() and number.isdigit()):
-                self.out.print(_line("✗ Use /expand [turn.call].", style="error"))
+                self.out.print(self._text("✗ Use /expand [turn.call].", style="error"))
                 return
             call = self.renderer.tool_output(f"{int(turn)}.{int(number)}")
             if call is None:
@@ -489,7 +507,7 @@ class CliSession:
                 self._expand_missing(int(latest_turn))
                 return
         else:
-            self.out.print(_line("✗ Use /expand [turn.call].", style="error"))
+            self.out.print(self._text("✗ Use /expand [turn.call].", style="error"))
             return
         self._print_expanded(call.text)
 
@@ -499,13 +517,13 @@ class CliSession:
         )
         if count:
             self.out.print(
-                _line(
+                self._text(
                     f"✗ Turn {turn} has {count} tool call{'' if count == 1 else 's'}.",
                     style="error",
                 )
             )
         else:
-            self.out.print(_line("✗ No tool calls yet.", style="error"))
+            self.out.print(self._text("✗ No tool calls yet.", style="error"))
 
     def _print_expanded(self, text: str) -> None:
         lines = [
@@ -519,9 +537,10 @@ class CliSession:
         for row in rows[:EXPAND_LINES]:
             self.out.print(Text(row))
         if len(rows) > EXPAND_LINES:
+            ellipsis = self.renderer.symbols.ellipsis
             self.out.print(
                 Text(
-                    f"… +{len(rows) - EXPAND_LINES} lines not shown "
+                    f"{ellipsis} +{len(rows) - EXPAND_LINES} lines not shown "
                     f"({len(text)} chars in all)",
                     style="muted",
                 )
@@ -532,10 +551,10 @@ class CliSession:
         approvals = self.approvals
         mode = approvals.mode
         if mode == "yolo":
-            self.out.print(_line("Approvals: YOLO (--yolo); no grants.", "muted"))
+            self.out.print(self._text("Approvals: YOLO (--yolo); no grants.", "muted"))
             if arguments:
                 self.out.print(
-                    _line(
+                    self._text(
                         "✗ YOLO is on; /approvals ask turns prompts on.",
                         style="error",
                     )
@@ -550,23 +569,23 @@ class CliSession:
                 approvals.forget(parts[1] if len(parts) > 1 else None)
             else:
                 self.out.print(
-                    _line(
+                    self._text(
                         "✗ Use /approvals ask, auto, deny, or forget [tool].",
                         style="error",
                     )
                 )
                 return
         grants = ", ".join(sorted(approvals.allowed_tools)) or "none"
-        self.out.print(_line(f"Approvals: {approvals.mode} · grants: {grants}"))
+        self.out.print(self._text(f"Approvals: {approvals.mode} · grants: {grants}"))
 
     def progress(self) -> None:
         """``/progress``: the latest run.progress of this session, in full."""
         payload = self.renderer.progress
         if not isinstance(payload, dict):
-            self.out.print(_line("No progress facts for this turn yet.", "muted"))
+            self.out.print(self._text("No progress facts for this turn yet.", "muted"))
             return
-        for line in _progress_lines(payload):
-            self.out.print(_line(line))
+        for line in _progress_lines(payload, self.renderer.symbols):
+            self.out.print(self._text(line))
 
     async def new(self) -> None:
         """``/new``: the next message starts a new session, with no grants."""

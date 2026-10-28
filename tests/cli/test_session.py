@@ -1015,6 +1015,41 @@ async def test_expand_prints_a_call_in_full(setup: Setup) -> None:
     await _until(lambda: "✗ Use /expand [turn.call]." in out.text())
 
 
+async def test_the_new_commands_follow_the_ascii_symbols(setup: Setup) -> None:
+    from localmelo.support.cli.theme import ASCII
+
+    session, out = setup.session, setup.out
+    session.renderer.symbols = ASCII
+    session.enter("/verbose maybe")
+    await _until(lambda: "x Use /verbose on or /verbose off." in out.text())
+    session.renderer.progress = {
+        "level": 1,
+        "state": "running",
+        "step": 1,
+        "attempt": 1,
+        "limits": {},
+        "phase": None,
+        "cycle": 0,
+        "tests": None,
+        "items": [{"label": "Edit b", "state": "current", "repeat": 2}],
+        "fraction": None,
+        "expected_steps": None,
+        "past": None,
+        "off_reason": None,
+        "basis": {
+            "routine_id": "r",
+            "template_id": "t",
+            "version": 1,
+            "match": "routine",
+            "model": "m",
+            "title": None,
+        },
+    }
+    session.enter("/progress")
+    await _until(lambda: "Edit b (x2) - current" in out.text())
+    assert "basis r - v1 - match routine - model m" in out.text()
+
+
 async def test_expand_with_no_call_yet_says_so(setup: Setup) -> None:
     setup.session.enter("/expand")
     await _until(lambda: "✗ No tool calls yet." in setup.out.text())
@@ -1051,7 +1086,15 @@ async def test_progress_prints_the_latest_facts(setup: Setup) -> None:
         ],
         "fraction": None,
         "expected_steps": None,
-        "past": {"runs": 2, "steps_lo": 6, "steps_hi": 8, "last_steps": 8},
+        "past": {
+            "runs": 2,
+            "steps_lo": 6,
+            "steps_hi": 8,
+            "last_steps": 8,
+            "wall_lo_s": 120.0,
+            "wall_hi_s": 180.0,
+            "last_wall_s": 170.0,
+        },
         "off_reason": None,
         "basis": {
             "routine_id": "routine-1",
@@ -1066,7 +1109,7 @@ async def test_progress_prints_the_latest_facts(setup: Setup) -> None:
     await _until(lambda: "level 1 · step 4 · attempt 2" in out.text())
     text = out.text()
     assert "phase Verify (cycle 1) · tests 7/8" in text
-    assert "past 2 runs · 6-8 steps · last 8 steps" in text
+    assert "past 2 runs · 6-8 steps · 2-3 min · last 8 steps, 2m50s" in text
     assert "items\n  Read a · done\n  Edit b (×2) · current" in text
     assert "basis routine-1 · v3 · match routine · model stub-model" in text
 
@@ -1076,10 +1119,13 @@ async def test_new_forgets_this_process_calls_and_progress(setup: Setup) -> None
     session = setup.session
     assert session.renderer.tool_outputs
     assert session.renderer.progress is not None
+    session.renderer.verbose = True
+    session.renderer.thinking = False
     session.enter("/new")
     await _until(lambda: session.runner is None)
     assert session.renderer.tool_outputs == []
     assert session.renderer.progress is None
+    assert not session.renderer.verbose and session.renderer.thinking
     session.enter("/expand")
     await _until(lambda: "✗ No tool calls yet." in setup.out.text())
     session.enter("/progress")

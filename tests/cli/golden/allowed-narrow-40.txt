@@ -7,8 +7,7 @@
 ✓ shell_exec · 0.2s · allowed by a sess…
   └ three
 ● All three commands ran.
-✻ Worked for 0.2s · 3 tool calls · ↓ 42
-tokens
+✻ Worked for 0.2s · 3 tool calls
 
 › Run it again in auto mode.
 
@@ -16,6 +15,5 @@ tokens
   └ four
 ● The command ran without asking:
   approvals are set to auto.
-✻ Worked for 0.3s · 1 tool call · ↓ 22
-tokens
+✻ Worked for 0.3s · 1 tool call
 

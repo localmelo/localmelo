@@ -4,7 +4,7 @@
 ✓ shell_exec  true · 0.1s
   └ (no output)
 ⚠ The attempt used its step budget.
-✻ Reflected after attempt 1: continue ·  (0.1s)
+✻ Reflected after attempt 1: continue (0.1s)
 ✓ shell_exec  true · 0.1s
   └ (no output)
 ⚠ The attempt used its step budget.

@@ -1,7 +1,7 @@
 › Run the long check.
 
   No approvals for this turn (--yolo).
-✗ melo: run ended with status crashed: The process running this turn stopped be…
+⚠ melo: run ended with status crashed: The process running this turn stopped be…
   melo stopped before this turn finished (the process was killed or the computer
   lost power).
 

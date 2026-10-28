@@ -289,6 +289,14 @@ def test_calls_a_reply_listed_that_never_started_print_as_not_run() -> None:
     )
     turn.tool("shell_exec", "ls", status="cancelled", duration_s=0.5)
     turn.finish("cancelled", error="Stopped by the user")
+    turn.event(
+        "turn.finished",
+        turn=1,
+        turn_id="t",
+        status="cancelled",
+        error="Stopped by the user",
+        cause="user_stop",
+    )
     text = turn.text()
     assert (
         text.index("◌ shell_exec  ls · stopped after 0.5s")
@@ -434,6 +442,15 @@ def test_a_stopped_turn(cause: str, line: str) -> None:
     turn.renderer.stopped_by(cause)
     assert turn.renderer.live is not None and turn.renderer.live.activity == "Stopping"
     turn.finish("cancelled", error="Stopped by the user")
+    # The cause is turn.finished's, which the runner forwards after the run.
+    turn.event(
+        "turn.finished",
+        turn=1,
+        turn_id="t",
+        status="cancelled",
+        error="Stopped by the user",
+        cause=cause,
+    )
     assert line in turn.text() and "Worked for" not in turn.text()
 
 
@@ -1301,6 +1318,9 @@ def test_a_stale_turn_takes_its_status_from_turn_finished() -> None:
     )
     assert "melo: run ended with status crashed" in text
     assert "melo stopped before this turn finished" in text
+    # A crash cause is a warning, not a bug: yellow, not the red failed mark.
+    assert "⚠ melo: run ended with status crashed" in text
+    assert "✗ melo: run ended" not in text
 
 
 def test_a_wrapped_thinking_row_never_starts_with_a_space() -> None:
@@ -1318,6 +1338,118 @@ def test_a_wrapped_thinking_row_never_starts_with_a_space() -> None:
     rows = [row for row in text.split("\n") if row.startswith("  ")]
     assert len(rows) >= 2, text
     assert not any(row.startswith("   ") for row in rows), rows
+
+
+# ── Review fixes (T4R) ──
+
+
+def test_intermediate_and_held_text_cannot_act_on_the_terminal() -> None:
+    for content in ("A\x1b[2JB", "A\x1b]0;PWNED\x1b\\B", "A\x1b]52;c;aGk=\x07B"):
+        with_calls = _message(
+            Turn(),
+            content=content,
+            tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}],
+        ).text()
+        held = _message(Turn(), content=content).text()
+        assert "\x1b" not in with_calls and "\x1b" not in held, content
+        assert "PWNED" not in held.split("›", 1)[-1] or "\x1b" not in held
+
+
+def test_an_image_mime_type_cannot_act_on_the_terminal() -> None:
+    text = (
+        Turn()
+        .tool(
+            "screenshot",
+            "{}",
+            images=[{"mime_type": "image/png\x1b]0;PWNED\x07", "size_bytes": 3}],
+        )
+        .text()
+    )
+    assert "\x1b" not in text and "\x07" not in text
+
+
+def test_a_cancelled_run_waits_for_the_turn_finished_cause() -> None:
+    turn = Turn()
+    turn.finish("cancelled", error="Another window took over")
+    assert "Stopped" not in turn.text()  # deferred until the cause arrives
+    turn.event(
+        "turn.finished",
+        turn=1,
+        turn_id="t",
+        status="cancelled",
+        error="Another window took over",
+        cause="takeover",
+    )
+    assert "■ Stopped: another melo window took over this session" in turn.text()
+
+
+def test_a_long_reflection_and_a_footer_are_one_line_each() -> None:
+    rationale = "Run it once more, then report the result to the user."
+    text = (
+        Turn(width=40)
+        .event(
+            "reflection",
+            attempt=1,
+            action="continue",
+            continue_run=True,
+            rationale=rationale,
+            summary=None,
+            best_effort_result=None,
+            requests=1,
+            readable=True,
+            usage={"completion_tokens": 76},
+            duration_s=0.4,
+        )
+        .finish("completed", result="done", n_tool=3, duration_s=0.5)
+        .text()
+    )
+    lines = text.split("\n")
+    [reflection] = [
+        index for index, line in enumerate(lines) if "Reflected after" in line
+    ]
+    assert lines[reflection].endswith("…") and "(0.4s)" not in lines[reflection]
+    [footer] = [index for index, line in enumerate(lines) if "Worked for" in line]
+    assert "tokens" not in lines[footer] and len(lines[footer]) <= 40
+    assert lines[footer + 1] == ""
+
+
+def test_an_empty_rationale_has_one_separator() -> None:
+    text = (
+        Turn()
+        .event(
+            "reflection",
+            attempt=1,
+            action="continue",
+            continue_run=True,
+            rationale="",
+            summary=None,
+            best_effort_result=None,
+            requests=1,
+            readable=True,
+            usage={},
+            duration_s=0.1,
+        )
+        .text()
+    )
+    assert "Reflected after attempt 1: continue (0.1s)" in text
+
+
+def test_a_retry_ends_at_the_next_event() -> None:
+    turn = Turn()
+    turn.event(
+        "notice",
+        kind="retry",
+        message="Model request failed; retrying in 4 s",
+        detail={"delay_s": 4.0},
+        step=1,
+        attempt=1,
+    )
+    assert turn.renderer.live is not None
+    assert turn.renderer.live.activity == "Retrying"
+    _message(
+        turn, content="", tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}]
+    )
+    assert turn.renderer.live.activity == "Thinking"
 
 
 # ── U2a.3: a file write's change from its snapshot ──
