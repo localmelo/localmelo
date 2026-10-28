@@ -631,6 +631,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Correct documentation of retrieval option validation, persistent memory,
+  interface event streams and current architecture status ([#NN]).
+
 - The heuristic note writer reads factual replies without a `<note>` into up
   to 12 `found` items, and an explicit note can also hold 12. Questions,
   options, plans and negated or cancelled statements are not promoted as
