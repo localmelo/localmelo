@@ -41,6 +41,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 COLUMNS = 200
+FAKE_SERVER = Path(__file__).resolve().parents[1] / "mcp" / "fake_mcp_server.py"
 
 
 @pytest.fixture
@@ -268,10 +269,10 @@ def test_nothing_drawn_without_a_terminal(
     assert (done.returncode, done.stdout, done.stderr) == (0, b"done\n", "")
 
 
-def test_the_timer_runs_while_python_exec_holds_the_event_loop(
+def test_the_timer_runs_while_python_exec_sleeps_in_its_child(
     chat_server: FakeChatServer, tmp_path: Path
 ) -> None:
-    """Without a workspace root, python_exec code runs on the event loop."""
+    """Without a workspace root, python_exec code runs in a child process."""
     code = "import time\ntime.sleep(2)\nprint('slept')"
     _queue(chat_server, [_tool_call("python_exec", {"code": code})])
     done = _run(chat_server, tmp_path, ["sleep a while"])
@@ -286,22 +287,41 @@ def test_the_timer_runs_while_python_exec_holds_the_event_loop(
 def test_a_warning_goes_on_its_own_line_above_the_line(
     chat_server: FakeChatServer, tmp_path: Path
 ) -> None:
-    code = (
-        "import logging, time\n"
-        "logging.getLogger('localmelo.tests').warning('careful now')\n"
-        "time.sleep(1.2)\n"
+    # The warning must come from melo's own process: python_exec runs in a
+    # child now, and its logging stays in the tool's output. An MCP server
+    # that starts but offers no tools makes melo log one while the line is
+    # drawn, before the first step.
+    config = tmp_path / "mcp.json"
+    config.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "quiet": {
+                        "command": sys.executable,
+                        "args": [str(FAKE_SERVER)],
+                        "env": {"FAKE_MCP_MODE": "prompts_only"},
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
     )
+    code = "import time\ntime.sleep(1.2)\n"
     _queue(chat_server, [_tool_call("python_exec", {"code": code})])
-    done = _run(chat_server, tmp_path, ["warn me"])
+    done = _run(chat_server, tmp_path, ["--mcp-config", str(config), "warn me"])
     assert done.returncode == 0
     assert done.stdout == b"done\n"
-    before, found, after = done.stderr.partition(ERASE + "careful now\r\n")
+    warning = (
+        "MCP server 'quiet' offers no tools: it does not declare the tools "
+        "capability"
+    )
+    before, found, after = done.stderr.partition(ERASE + warning + "\r\n")
     assert found, done.stderr
     assert before.startswith(ERASE + "starting")
     # Drawn again right below it, then on until the end.
-    assert after.startswith(ERASE + "step 1 · Python 0:0")
+    assert after.startswith(ERASE + "starting")
     assert after.endswith(ERASE)
-    assert done.stderr.count("careful now") == 1
+    assert done.stderr.count(warning) == 1
 
 
 def test_sigterm_erases_the_line_before_melo_exits(

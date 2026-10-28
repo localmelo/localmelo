@@ -67,6 +67,10 @@ class MlcBackend(BaseBackend):
             model=cfg.mlc.chat_model,
             extra_body=cfg.mlc.extra_body,
             timeout=cfg.request_timeout_s,
+            reasoning_field=getattr(cfg.mlc, "reasoning_field", "") or None,
+            requires_reasoning_replay=getattr(
+                cfg.mlc, "requires_reasoning_replay", False
+            ),
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

@@ -229,14 +229,14 @@ the same; the reason is the scheduler's own code (`Resources`, `Priority`,
 not count against the 600-second active-time bound.
 
 Stop cancels the run. A model request in flight is abandoned, although the
-model server may finish computing it, and a running `shell_exec` command is
-killed with its process group. `python_exec` code runs inside the gateway
-process and cannot be interrupted: until it returns, Stop has no effect and
-the gateway answers no other request. See [Tools and MCP](tools.md) for the
-tools' limits. The task is saved with the status `cancelled`, and the chat
-takes the next message once that save is done. A Stop that comes after the
-answer, while the task is being saved, leaves the answer in the chat. Each
-message sees the earlier answers of its chat, as in a [session](#sessions).
+model server may finish computing it, and a running `shell_exec` command or
+`python_exec` child is killed with its process group. `python_exec` code runs
+in a child process, so the gateway keeps answering other requests while it
+runs. See [Tools and MCP](tools.md) for the tools' limits. The task is saved
+with the status `cancelled`, and the chat takes the next message once that
+save is done. A Stop that comes after the answer, while the task is being
+saved, leaves the answer in the chat. Each message sees the earlier answers
+of its chat, as in a [session](#sessions).
 
 The web workspace works apart from the HTTP API above:
 

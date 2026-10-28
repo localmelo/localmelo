@@ -632,8 +632,12 @@ class TestJsonOutput:
         assert ran.code == 2
         out, err = capsys.readouterr()
         record = self._record(out)
+        # A legacy result omits memory_stats from to_dict(), so the line has
+        # the fields the dataclass had before R2, plus the version.
         assert list(record) == [
-            field.name for field in dataclasses.fields(RunResult)
+            field.name
+            for field in dataclasses.fields(RunResult)
+            if field.name != "memory_stats"
         ] + ["localmelo_version"]
         assert record.pop("localmelo_version") == "v-test"
         assert record == outcome.to_dict()

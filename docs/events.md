@@ -267,12 +267,11 @@ The number of `tool.started` events is `RunResult.n_tool`.
   or `withdrawn` when the run was cancelled while the policy decided. See
   [Approve tool calls](python-api.md#approve-tool-calls).
 - `exit_code`: the exit status of the child process that `shell_exec` or
-  `python_exec` ran with a workspace root; a negative value `-N` means that
-  signal `N` ended it. It is `null` for every other tool, for these tools
-  without a workspace root, for a call whose child never started, and when
-  the tool killed its child, after a timeout or a cancellation. A non-zero
-  exit does not change `status`: `shell_exec` succeeds, and its text starts
-  with `[exit code <n>]`; `python_exec` fails with
+  `python_exec` ran; a negative value `-N` means that signal `N` ended it. It
+  is `null` for every other tool, for a call whose child never started, and
+  when the tool killed its child, after a timeout or a cancellation. A
+  non-zero exit does not change `status`: `shell_exec` succeeds, and its text
+  starts with `[exit code <n>]`; `python_exec` fails with
   `Python exited with code <n>`.
 
 ### notice

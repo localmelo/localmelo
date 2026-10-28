@@ -30,12 +30,17 @@ def build_openai_chat(
     api_key: str | None = None,
     extra_body: Mapping[str, Any] | None = None,
     timeout: float | None = None,
+    *,
+    reasoning_field: str | None = None,
+    requires_reasoning_replay: bool = False,
 ) -> BaseLLMProvider:
     """Build an :class:`OpenAICompatLLM` with consistent URL handling.
 
     *extra_body* is merged into every chat request (see
     :class:`OpenAICompatLLM`). *timeout* is the HTTP timeout of each chat
     request in seconds; None keeps the provider's default (120 s).
+    *reasoning_field* and *requires_reasoning_replay* are the provider's
+    reasoning capabilities (see :class:`OpenAICompatLLM`).
     """
     # Passed only when set: httpx reads timeout=None as no timeout at all.
     options: dict[str, Any] = {} if timeout is None else {"timeout": timeout}
@@ -44,6 +49,8 @@ def build_openai_chat(
         model=model,
         api_key=api_key,
         extra_body=extra_body,
+        reasoning_field=reasoning_field,
+        requires_reasoning_replay=requires_reasoning_replay,
         **options,
     )
 

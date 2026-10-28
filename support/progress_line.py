@@ -617,8 +617,8 @@ class ProgressLine:
     writer, does every write: the line, its erase and the log records
     written above it (see :meth:`start`), in the order they are asked for,
     so they never mix. It draws the line again on each event and once a
-    second with the latest state, so the timers advance also while
-    ``python_exec`` code holds the event loop. An event or a record waits
+    second with the latest state, so a tool's clock advances while it runs.
+    An event or a record waits
     for its draw, but at most :data:`DRAW_WAIT_S`: a terminal whose output
     was stopped (Ctrl+S) holds the writer, never the run, and SIGTERM can
     still end it. A draw is :data:`ERASE` and the line, never a newline.

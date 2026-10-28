@@ -51,10 +51,14 @@ SPEC_FIELDS = [
     "config",
 ]
 
+# The dataclass gained R2's memory_stats; to_dict() omits it while it is None,
+# so SPEC_FIELDS stays the legacy JSON line's shape.
+DATACLASS_FIELDS = [*SPEC_FIELDS, "memory_stats"]
+
 
 class TestRunResult:
     def test_fields_are_in_spec_order(self) -> None:
-        assert [f.name for f in dataclasses.fields(RunResult)] == SPEC_FIELDS
+        assert [f.name for f in dataclasses.fields(RunResult)] == DATACLASS_FIELDS
 
     def test_defaults(self) -> None:
         assert RunResult(task_id="t1", status="completed").to_dict() == {
