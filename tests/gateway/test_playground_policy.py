@@ -71,6 +71,10 @@ def make_manager(
     return manager, provider
 
 
+def admitted(call: Any) -> bool:
+    return bool(call.future is not None and call.future.done())
+
+
 async def create(manager: SmokePlayground) -> str:
     payload = await manager.create_session(
         chat_url=CHAT_URL, chat_model="Qwen-27B", adapter="omlx"
@@ -179,6 +183,8 @@ async def test_a_hold_does_not_trip_the_run_timeout(
         finally:
             await release
         assert response["answer"] == "Hello"
+        # The call really was held, so the timeout path was exercised.
+        assert manager._gate.held_seconds(session_id) >= 0.3
     finally:
         await manager.close_all()
 
@@ -212,6 +218,55 @@ async def test_a_hold_that_starts_near_the_timeout_still_does_not_fire(
         finally:
             await filler
         assert response["answer"] == "held then done"
+        assert manager._gate.held_seconds(session_id) >= 0.1
+    finally:
+        await manager.close_all()
+
+
+class ClockBox:
+    """A monotonic clock the test advances by hand, in microseconds."""
+
+    def __init__(self) -> None:
+        self.mono_us = 1_000_000
+        self.wall_us = 1_700_000_000_000_000
+
+    def __call__(self) -> Any:
+        from localmelo.support.scheduler import Clock
+
+        return Clock(self.mono_us, self.wall_us)
+
+    def advance(self, seconds: float) -> None:
+        self.mono_us += round(seconds * 1_000_000)
+        self.wall_us += round(seconds * 1_000_000)
+
+
+async def test_a_hold_wakes_when_the_focus_window_expires(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager, _ = make_manager(tmp_path, monkeypatch, policy="fcfs", n_srv=8, n_fg=1)
+    clock = ClockBox()
+    manager._gate._clock = clock
+    manager._hold_wake_s = 0.02
+    gate = manager._gate
+    try:
+        gate.focus("focused")
+        holder = gate.submit("background")
+        assert admitted(holder)
+        started = gate.turn_start("waiting")
+        held = gate.submit("waiting")
+        assert not admitted(held)
+        task = asyncio.create_task(gate.acquire(held))
+        waiter = asyncio.create_task(
+            manager._wait_for_turn("waiting", task, 60.0, started)
+        )
+        await asyncio.sleep(0.05)
+        assert gate.held("waiting") in REASONS
+        clock.advance(31.0)  # the typing heartbeat is now stale
+        await asyncio.wait_for(waiter, 2.0)
+        assert admitted(held)
+        assert gate.held("waiting") == ""
+        gate.finish(held)
+        gate.finish(holder)
     finally:
         await manager.close_all()
 
@@ -298,6 +353,31 @@ async def test_the_level_route_sets_and_validates(
         await manager.close_all()
 
 
+async def test_the_routes_are_accepted_under_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager, _ = make_manager(tmp_path, monkeypatch, policy="off")
+    app = make_app(manager)
+    try:
+        session_id = await create(manager)
+        async with client_for(app) as client:
+            level = await client.post(
+                f"/v1/playground/session/{session_id}/level", json={"level": 4}
+            )
+            assert level.status_code == 200
+            assert level.json() == {"session_id": session_id, "level": 4}
+            presence = await client.post(
+                "/v1/playground/presence", json={"session_id": session_id}
+            )
+            assert presence.status_code == 200
+            assert presence.json() == {"ok": True}
+        payload = manager.get_session(session_id)
+        assert payload["level"] == 4
+        assert payload["held"] == ""
+    finally:
+        await manager.close_all()
+
+
 async def test_the_presence_route_moves_the_lane(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -364,8 +444,9 @@ async def test_the_playground_reads_the_scheduler_config(
         assert isinstance(manager._sessions[session_id].agent._llm, GatedLLM)
         response = await manager.run(session_id, "hello")
         assert response["answer"] == "Hello"
-        assert manager._gate.call_log_path is not None
-        assert manager._gate.call_log_path.is_file()
+        path = manager._gate.call_log_path
+        assert path is not None and path.is_file()
+        assert path.is_relative_to(tmp_path / "scheduler" / "runs")
     finally:
         await manager.close_all()
 
@@ -376,11 +457,12 @@ async def test_a_closed_chat_is_forgotten_from_the_gate(
     manager, _ = make_manager(tmp_path, monkeypatch, policy="fcfs", n_srv=2)
     try:
         session_id = await create(manager)
+        assert manager.set_level(session_id, 3)["level"] == 3
         assert (await manager.run(session_id, "hello"))["answer"] == "Hello"
         assert any(t.task_id == session_id for t in manager._gate._state.tasks)
         assert await manager.close(session_id)
         assert not any(t.task_id == session_id for t in manager._gate._state.tasks)
-        assert manager._gate.level(session_id) == 2
+        assert manager._gate.level(session_id) == 2, "the level map is dropped too"
     finally:
         await manager.close_all()
 
@@ -412,14 +494,19 @@ async def test_the_call_log_is_under_the_configured_dir_and_is_pruned(
     old = runs / "20200101T000000"
     old.mkdir(parents=True)
     os.utime(old, (time.time() - 31 * 86400, time.time() - 31 * 86400))
+    keep = runs / "not-a-run"
+    keep.mkdir()
+    os.utime(keep, (time.time() - 31 * 86400, time.time() - 31 * 86400))
     gate = ChatGate(policy="off", call_log_dir=tmp_path, retention_days=30)
     try:
         assert not old.exists()
+        assert keep.exists(), "Only timestamp-directories are pruned"
         path = gate.call_log_path
         assert path is not None
         assert path.parent.parent == runs
         assert path.parent.name[:2] == "20"
         assert (path.stat().st_mode & 0o777) == 0o600
+        assert (path.parent.stat().st_mode & 0o777) == 0o700
         call = gate.submit("a")
         gate.finish(call)
         assert path.read_text(encoding="utf-8").strip()

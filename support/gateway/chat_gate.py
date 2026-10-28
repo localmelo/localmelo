@@ -107,6 +107,10 @@ _RUN_DIR = re.compile(r"^\d{8}T\d{6}$")
 _TRACE_SOURCE = "gateway"
 _TRACE_HARNESS = "localmelo"
 
+# The largest plausible token count; larger values are treated as unknown,
+# as S1's clean_state does, so a bad usage cannot overflow charge_s.
+_MAX_TOKENS = 10**9
+
 # Alarms already logged, once per process (R10).
 _WARNED_ALARMS: set[str] = set()
 
@@ -141,7 +145,11 @@ def _usage_tokens(
     for key in ("prompt_tokens", "completion_tokens", "cached_tokens"):
         value = usage.get(key)
         out.append(
-            value if isinstance(value, int) and not isinstance(value, bool) else None
+            value
+            if isinstance(value, int)
+            and not isinstance(value, bool)
+            and 0 <= value <= _MAX_TOKENS
+            else None
         )
     return out[0], out[1], out[2]
 
@@ -222,6 +230,7 @@ class CallLog:
                 logger.warning("Call log write failed, disabling it: %s", exc)
                 self._warned = True
             self._close_fd()
+            self._path = None
 
     def _close_fd(self) -> None:
         if self._fd is not None:
@@ -482,7 +491,11 @@ class ChatGate:
             CallSubmitted(
                 Call(
                     call_id=meta.call_id,
-                    task_id=session_id if planning else None,
+                    # R11: a lane call is taskless; only a background plan or
+                    # reflect call belongs to the chat's task.
+                    task_id=(
+                        session_id if planning and session_kind != "front" else None
+                    ),
                     session_kind=cast(SessionKind, session_kind),
                     kind=call_kind,
                     attempt=meta.attempt,
@@ -519,7 +532,13 @@ class ChatGate:
         self._calls.pop(meta.call_id, None)
         now = self._clock()
         prompt, completion, cached = _usage_tokens(usage)
-        charge, source = self._charge(meta, outcome, prompt, completion, cached, now)
+        try:
+            charge, source = self._charge(
+                meta, outcome, prompt, completion, cached, now
+            )
+        except Exception:  # an odd usage value must not leak the call's slot
+            logger.warning("Call charge failed; logging it as unknown", exc_info=True)
+            charge, source = 0.0, "unknown"
         if self.policy != "off":
             events: list[Event] = [
                 CallEnded(
@@ -642,7 +661,17 @@ class ChatGate:
         if self._closed:
             return
         self._closed = True
+        now = self._clock()
         for call in list(self._calls.values()):
+            if not call.done and call.meta.admitted_mono_us is None:
+                # A call still waiting at shutdown never left the gate; it
+                # still gets its one line (R19), as a refused call.
+                try:
+                    self._write_line(
+                        call.meta, "refused", now, 0.0, "unknown", None, None, None
+                    )
+                except Exception:
+                    logger.warning("Call log line could not be written", exc_info=True)
             call.done = True
             if call.future is not None and not call.future.done():
                 call.future.cancel()
@@ -675,7 +704,10 @@ class ChatGate:
         except Exception as exc:
             self._failed(now, exc)
             return
-        self._apply(result, now)
+        try:
+            self._apply(result, now)
+        except Exception as exc:  # releasing a future or booking a hold failed
+            self._failed(now, exc)
 
     def _failed(self, now: Clock, exc: BaseException) -> None:
         """A transition raised: alarm, admit everything pending, keep going (R10)."""

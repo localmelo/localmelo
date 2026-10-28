@@ -340,7 +340,9 @@ def load() -> Config:
             if hasattr(cfg.gateway, k):
                 setattr(cfg.gateway, k, v)
 
-    if "scheduler" in data:
+    # A [scheduler] that is not a table is ignored, like an unknown key; a
+    # malformed value inside a real table is left for Config.validate.
+    if isinstance(data.get("scheduler"), dict):
         for k, v in data["scheduler"].items():
             if hasattr(cfg.scheduler, k):
                 setattr(cfg.scheduler, k, v)

@@ -189,17 +189,30 @@ async def test_off_leaves_the_run_timeout_line_unchanged(
         monkeypatch.setattr(manager._sessions[session_id].agent, "run_task", run_task)
         seen: list[tuple[object, float | None]] = []
         original = playground.asyncio.wait_for
+        real_shield = playground.asyncio.shield
+        shields: list[tuple[object, object]] = []
 
         async def spy(awaitable: Any, timeout: float | None = None) -> Any:
             seen.append((awaitable, timeout))
             return await original(awaitable, timeout)
 
+        def shield_spy(inner: Any) -> Any:
+            shielded = real_shield(inner)
+            shields.append((inner, shielded))
+            return shielded
+
         monkeypatch.setattr(playground.asyncio, "wait_for", spy)
+        monkeypatch.setattr(playground.asyncio, "shield", shield_spy)
         await manager.run(session_id, "hello")
         assert len(seen) == 1
         awaitable, timeout = seen[0]
         assert timeout == 600.0
         assert isinstance(awaitable, asyncio.Future)
+        # It is the shielded future, not the run's task itself.
+        assert len(shields) == 1
+        inner, shielded = shields[0]
+        assert awaitable is shielded
+        assert inner is not shielded
     finally:
         await manager.close_all()
 
@@ -209,17 +222,20 @@ async def test_off_leaves_the_run_timeout_line_unchanged(
 
 async def test_fcfs_admits_in_arrival_order() -> None:
     gate = ChatGate(policy="fcfs", n_srv=2)
-    order: list[str] = []
+    gate.set_level("a", 1)
     first = gate.submit("a")
     assert admitted(first)
-    second = gate.submit("b")
-    third = gate.submit("c")
-    assert not admitted(second) and not admitted(third)
+    gate.set_level("c", 3)
+    older = gate.submit("c")
+    gate.set_level("b", 2)
+    newer = gate.submit("b")
+    assert not admitted(older) and not admitted(newer)
     finish(gate, first)
-    order.append("b" if admitted(second) else "c")
-    finish(gate, second if admitted(second) else third)
-    order.append("c" if admitted(third) else "b")
-    assert order == ["b", "c"]
+    # fcfs is arrival order: the older P3 call goes before the newer P2 one.
+    assert admitted(older)
+    assert not admitted(newer)
+    finish(gate, older)
+    assert admitted(newer)
     await gate.close()
 
 
@@ -406,14 +422,14 @@ async def test_a_level_change_redistributes_the_next_admission() -> None:
     gate = ChatGate(policy="class", n_srv=2)
     holder = gate.submit("holder")
     assert admitted(holder)
-    second = gate.submit("p2")
-    third = gate.submit("p3")
-    gate.set_level("p2", 3)
-    assert not admitted(second) and not admitted(third)
-    gate.set_level("p2", 1)
+    older = gate.submit("older")  # the older call stays P2
+    raised = gate.submit("raised")
+    assert not admitted(older) and not admitted(raised)
+    gate.set_level("raised", 1)
     finish(gate, holder)
-    assert admitted(second)
-    assert not admitted(third)
+    # If a level change did nothing, arrival order would admit older.
+    assert admitted(raised)
+    assert not admitted(older)
     await gate.close()
 
 
@@ -453,6 +469,7 @@ async def test_the_log_writes_one_canonical_line_per_call_with_mode_0600(
     path = gate._log.path
     mode = stat.S_IMODE(path.stat().st_mode)
     assert mode == 0o600
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
     lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line]
     assert len(lines) == 2
     traces = read_trace(path)
@@ -521,11 +538,137 @@ async def test_a_log_write_failure_warns_once_and_does_not_fail_the_call(
         read_only.chmod(0o700)
 
 
+async def test_a_write_failure_after_startup_warns_once_and_keeps_the_chat(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gate = ChatGate(policy="off", call_log_dir=tmp_path)
+    assert gate.call_log_path is not None
+
+    def broken(*args: Any, **kwargs: Any) -> int:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(chat_gate.os, "write", broken)
+    with caplog.at_level("WARNING"):
+        gate.finish(gate.submit("a"))
+        assert gate.call_log_path is None
+        gate.finish(gate.submit("b"))
+    warnings = [r for r in caplog.records if "Call log write failed" in r.message]
+    assert len(warnings) == 1
+    await gate.close()
+
+
+async def test_an_apply_failure_admits_the_call_and_keeps_the_gate_usable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real = chat_gate.ChatGate._update_holds
+    state = {"failed": False}
+
+    def flaky(self: Any, decided: Any, now: Any) -> None:
+        if not state["failed"]:
+            state["failed"] = True
+            raise RuntimeError("apply broke")
+        real(self, decided, now)
+
+    monkeypatch.setattr(chat_gate.ChatGate, "_update_holds", flaky)
+    gate = ChatGate(policy="fcfs", n_srv=2)
+    first = gate.submit("a")
+    assert admitted(first)
+    assert any(a.startswith("sched_transition_failed") for a in gate.alarms)
+    finish(gate, first)
+    second = gate.submit("b")
+    assert admitted(second)
+    await gate.close()
+
+
+async def test_a_charge_failure_does_not_leak_the_slot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real = chat_gate.ChatGate._charge
+    state = {"failed": False}
+
+    def flaky(self: Any, *args: Any, **kwargs: Any) -> Any:
+        if not state["failed"]:
+            state["failed"] = True
+            raise ArithmeticError("bad usage")
+        return real(self, *args, **kwargs)
+
+    monkeypatch.setattr(chat_gate.ChatGate, "_charge", flaky)
+    gate = ChatGate(policy="fcfs", n_srv=1)
+    first = gate.submit("a")
+    finish(gate, first)  # the charge raises once, but CallEnded must still apply
+    second = gate.submit("b")
+    assert admitted(second)
+    assert not gate.held("b")
+    await gate.close()
+
+
+async def test_an_odd_usage_value_is_logged_as_unknown(tmp_path: Path) -> None:
+    gate = ChatGate(policy="off", call_log_dir=tmp_path)
+    call = gate.submit("a")
+    gate.finish(
+        call,
+        "ok",
+        {"prompt_tokens": 10**100, "completion_tokens": 1, "cached_tokens": -1},
+    )
+    assert gate.call_log_path is not None
+    await gate.close()
+    line = read_trace(gate._log.path)[0].calls[0]  # type: ignore[arg-type]
+    assert line.prompt_tokens is None
+    assert line.cached_tokens is None
+    assert line.tokens_unknown is True
+
+
+async def test_a_held_call_gets_a_refused_line_at_shutdown(tmp_path: Path) -> None:
+    gate = ChatGate(policy="fcfs", n_srv=1, call_log_dir=tmp_path)
+    holder = gate.submit("a")
+    held = gate.submit("b")
+    assert not admitted(held)
+    path = gate.call_log_path
+    await gate.close()
+    assert path is not None and path.is_file()
+    traces = read_trace(path)
+    refused = [c for trace in traces for c in trace.calls if c.status == "refused"]
+    assert len(refused) == 1
+    assert refused[0].admit_s is None
+    assert refused[0].start_s == refused[0].submit_s
+    finish(gate, holder)
+
+
+async def test_a_lane_call_is_taskless() -> None:
+    gate = ChatGate(policy="fcfs", n_srv=2)
+    gate.focus("f")
+    call = gate.submit("f")
+    assert admitted(call)
+    state_call = next(c for c in gate._state.calls if c.call_id == call.meta.call_id)
+    assert state_call.session_kind == "front"
+    assert state_call.task_id is None
+    finish(gate, call)
+    await gate.close()
+
+
 async def test_every_charge_source_maps_to_the_trace_vocabulary() -> None:
-    assert _trace_source("server") == "server"
-    assert _trace_source("tokens") == "tokens"
-    assert _trace_source("wall_share") == "wall"
-    assert _trace_source("none") == "unknown"
+    from localmelo.support.scheduler.costs import Rates, charge_s
+
+    rates = Rates()
+    sources = {
+        "tokens": charge_s("ok", 10, 0, 5, None, None, None, None, rates)[1],
+        "server": charge_s("failed", None, None, None, 1.0, 1.0, None, None, rates)[1],
+        "wall_share": charge_s("failed", None, None, None, None, None, 2.0, 1.0, rates)[
+            1
+        ],
+        "none": charge_s("failed", None, None, None, None, None, None, None, rates)[1],
+    }
+    mapped = {
+        "tokens": "tokens",
+        "server": "server",
+        "wall_share": "wall",
+        "none": "unknown",
+    }
+    for expected, source in sources.items():
+        assert source == expected
+        assert _trace_source(source) == mapped[expected]
     assert _trace_source("not-a-source") == "unknown"
 
 

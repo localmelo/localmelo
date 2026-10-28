@@ -33,6 +33,13 @@ from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
 _DEFAULT_MEMORY_DIR = Path("~/.cache/localmelo/playground").expanduser()
 
+# While a call is held, the run's wait re-evaluates at least this often (the
+# focus window): a hold caused only by the typing heartbeat has no event to
+# end it once the user stops typing, so a bounded wake keeps it from waiting
+# forever (R10). The wake never raises the run's TimeoutError; it only runs a
+# no-event transition and waits again.
+HOLD_WAKE_S = 30.0
+
 _SCENARIOS_PATH = (
     Path(__file__).resolve().parents[2] / "tests" / "smoke" / "data" / "scenarios.json"
 )
@@ -187,6 +194,7 @@ class SmokePlayground:
         self._thinking_retention_days = thinking_retention_days()
         self._long_term_path = mem_dir / "long_term.db"
         self._procedures_path = mem_dir / "procedures.db"
+        self._hold_wake_s = HOLD_WAKE_S
         # One gate for every chat; call_log_dir=None writes no call log.
         self._gate = ChatGate(
             policy=policy,
@@ -490,7 +498,9 @@ class SmokePlayground:
             gate.wait_event.clear()
             now = gate.now()
             if gate.held_since(session_id) is not None:
-                remaining: float | None = None
+                # A wake, never the run's timeout: the hold is re-evaluated
+                # and the wait continues if the policy still holds the call.
+                remaining: float | None = self._hold_wake_s
             else:
                 spent = gate.held_seconds(session_id)
                 remaining = timeout - ((now - started) / 1_000_000 - spent)
@@ -507,6 +517,8 @@ class SmokePlayground:
                 waiter.cancel()
             if task.done():
                 return task.result()
+            if gate.held_since(session_id) is not None:
+                gate.wake()
 
     def _close_turn(
         self, session: PlaygroundSession, outcome: RunResult | None, note: str

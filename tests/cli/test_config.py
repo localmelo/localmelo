@@ -1106,6 +1106,14 @@ class TestSchedulerConfig:
         with pytest.raises(ConfigError, match=r"\[scheduler\]"):
             cfg.validate_or_raise()
 
+    def test_a_non_table_scheduler_is_ignored_on_load(self, config_path: Path) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\nscheduler = "off"\n',
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert loaded.scheduler == SchedulerConfig()
+
     def test_an_unknown_scheduler_key_is_ignored_on_load(
         self, config_path: Path
     ) -> None:
