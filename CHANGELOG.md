@@ -40,7 +40,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   intents and receipts, and process identity records. Interrupted recovery
   retains pending pause intent; explicit legacy adoption records orphan-risk
   acceptance. Startup behavior remains unchanged; process capture completeness
-  and runtime recovery are deferred. [#NN]
+  and runtime recovery are deferred. [#147]
 - Experimental opt-in provider streaming and OpenAI-compatible SSE assembly;
   display filtering buffers complete replies, and no CLI or agent uses it yet ([#145]).
 - Direct workers can read a brief file and emit a versioned JSON result or an
@@ -988,3 +988,4 @@ earlier milestones.
 [#143]: https://github.com/localmelo/localmelo/pull/143
 [#144]: https://github.com/localmelo/localmelo/pull/144
 [#145]: https://github.com/localmelo/localmelo/pull/145
+[#147]: https://github.com/localmelo/localmelo/pull/147
