@@ -112,8 +112,15 @@ the session is first used and kept; when a ninth Agent would open, the
 least recently used idle one is closed with its conversation kept.
 Approvals wait in the gateway's memory with no timeout until a client
 answers them or the turn stops, and stopping the gateway ends a waiting
-turn `cancelled` with cause `shutdown`. A console turn does not pass the
-scheduler gate yet: it calls the model without waiting for a slot.
+turn `cancelled` with cause `shutdown`. A console turn passes the
+scheduler gate like a workspace chat: the gateway builds one gate from the
+`[scheduler]` table and both surfaces use it, so their calls share one
+`n_srv` budget and one call log, and the monitor the workspace page runs
+feeds both (a foreign GPU lock holds a console turn under
+`lock_gate = "wait"`; the battery is read for the page's chip and never
+holds a call). The gateway closes that gate last at shutdown, after both
+surfaces' sessions, so a turn waiting for its slot ends `cancelled` with
+cause `shutdown`.
 
 ### GET /v1/health
 

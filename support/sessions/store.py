@@ -1343,8 +1343,7 @@ class SessionStore:
         *query* matches the title or any turn's user text (``LIKE``, with
         ``%`` and ``_`` taken literally); *workspace* the stored workspace
         exactly; *min_turns* keeps the sessions with at least that many
-        turns that are neither running nor undone. *kinds* ``None`` means
-        every kind.
+        turns, running ones included. *kinds* ``None`` means every kind.
         """
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
             raise ValueError(f"limit must be an int >= 1, got {limit!r}")
@@ -1363,9 +1362,11 @@ class SessionStore:
             clauses.append("AND s.workspace = ?")
             args.append(workspace)
         if min_turns > 0:
+            # Any turn counts, a running or an undone one too: a session
+            # with a turn is a session the list shows, from the moment its
+            # first turn's row exists.
             clauses.append(
-                "AND (SELECT COUNT(*) FROM turns m WHERE m.session_id = s.id "
-                "AND m.status != 'running' AND m.undone = 0) >= ?"
+                "AND (SELECT COUNT(*) FROM turns m WHERE m.session_id = s.id) >= ?"
             )
             args.append(min_turns)
         async with self._lock:
@@ -1615,11 +1616,15 @@ class SessionStore:
         title: str | None = None,
         client_request_id: str | None = None,
         new_session: NewSession | None = None,
+        create_scope: bool = False,
     ) -> TurnInfo:
         """Start a turn of *user_text* under *holder*, in one transaction (T-5).
 
         Takes *session_id*, or *new_session* to create the session with the
-        turn. With *client_request_id*, the key decides first: a stored
+        turn. *create_scope* stores the turn's key in the create scope, as
+        one begun with *new_session* is stored: that is what a client that
+        lost the response to a create looks up without a session id.
+        With *client_request_id*, the key decides first: a stored
         submission of it raises ``SubmissionConflict`` (another text),
         ``SubmissionWithdrawn`` or ``SubmissionRepeated`` (with the turn it
         started), and nothing is written. Then a running turn raises
@@ -1649,9 +1654,15 @@ class SessionStore:
             self._check_writable()
             async with self._transaction(conn, "begin_turn") as stored:
                 now = self._clock()
-                # 1. The key decides before the lease.
+                # 1. The key decides before the lease. A create's key is
+                # judged in the create scope, where step 8 stores it: a
+                # withdrawal recorded while the session's Agent started must
+                # answer here, not collide with the insert below.
                 if client_request_id is not None:
-                    found = await self._submission(conn, session_id, client_request_id)
+                    lookup = (
+                        None if new_session is not None or create_scope else session_id
+                    )
+                    found = await self._submission(conn, lookup, client_request_id)
                     check_submission(found, user_text)
                 # 2. The session.
                 if new_session is not None:
@@ -1722,7 +1733,11 @@ class SessionStore:
                         "state, session_id, turn, created_at) "
                         "VALUES (?, ?, ?, 'accepted', ?, ?, ?)",
                         (
-                            "" if new_session is not None else session_id,
+                            (
+                                ""
+                                if new_session is not None or create_scope
+                                else session_id
+                            ),
                             client_request_id,
                             text_sha256(user_text),
                             session_id,

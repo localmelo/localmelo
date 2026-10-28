@@ -432,3 +432,39 @@ async def test_the_create_scope(tmp_path: Path) -> None:
     assert rows(path, "SELECT COUNT(*) FROM sessions") == [(1,)]
     check_invariants(path, "gateway")
     await store.aclose()
+
+
+async def test_a_create_scope_key_is_judged_where_it_is_stored(
+    tmp_path: Path,
+) -> None:
+    # A create makes its row before its Agent, so the console passes
+    # create_scope: the key must be judged in the create scope, or a
+    # withdrawal recorded meanwhile collides with the insert instead of
+    # refusing the turn.
+    store = store_at(tmp_path / "s.db")
+    session = await store.create_session()
+    await store.withdraw_submission(None, "w", user_text="hello")
+    with pytest.raises(SubmissionWithdrawn):
+        await store.begin_turn(
+            session.id,
+            "hello",
+            holder=HOLDER,
+            client_request_id="w",
+            create_scope=True,
+        )
+    accepted = await store.begin_turn(
+        session.id, "hello", holder=HOLDER, client_request_id="a", create_scope=True
+    )
+    found = await store.get_submission(None, "a")
+    assert found is not None and found.turn_id == accepted.id
+    other = await store.create_session()
+    with pytest.raises(SubmissionRepeated) as repeated:
+        await store.begin_turn(
+            other.id,
+            "hello",
+            holder=HOLDER,
+            client_request_id="a",
+            create_scope=True,
+        )
+    assert repeated.value.turn.id == accepted.id
+    await store.aclose()

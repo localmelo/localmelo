@@ -22,7 +22,8 @@ import httpx
 import pytest
 from fastapi import FastAPI
 
-from localmelo.melo.schema import Message
+from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.sessions.store import SessionBusyError
 from localmelo.tests.sessions.helpers import (
@@ -32,7 +33,7 @@ from localmelo.tests.sessions.helpers import (
     tool_call,
 )
 
-from .conftest import PORT, FakeProbe, make_cfg, seed_turn
+from .conftest import PORT, FakeProbe, make_cfg, quiet_gate, seed_turn
 
 TIMEOUT_S = 10.0
 
@@ -48,7 +49,9 @@ async def console_with(
     """
     llms: list[ScriptedLLM] = []
 
-    async def build(settings: Any, workspace: str, mcp_config: str | None) -> Any:
+    async def build(
+        settings: Any, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Any:
         # A rebuilt Agent takes the replies its predecessors did not use:
         # every Agent here answers with one reply per turn.
         script = (
@@ -67,6 +70,7 @@ async def console_with(
             store_path=str(tmp_path / "sessions.db"),
             builder=build,
             probe=FakeProbe(),
+            gate=quiet_gate(),
         ),
     )
     await console.start()
@@ -195,7 +199,9 @@ async def test_a_bad_workspace_is_invalid_workspace(tmp_path: Path) -> None:
 
 
 async def test_a_builder_that_fails_is_agent_start_failed(tmp_path: Path) -> None:
-    async def build(settings: Any, workspace: str, mcp_config: str | None) -> Any:
+    async def build(
+        settings: Any, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Any:
         raise RuntimeError("no model server")
 
     console = Console(
@@ -205,6 +211,7 @@ async def test_a_builder_that_fails_is_agent_start_failed(tmp_path: Path) -> Non
             store_path=str(tmp_path / "sessions.db"),
             builder=build,
             probe=FakeProbe(),
+            gate=quiet_gate(),
         ),
     )
     await console.start()
@@ -222,6 +229,8 @@ async def test_a_builder_that_fails_is_agent_start_failed(tmp_path: Path) -> Non
         assert response.status_code == 502
         assert response.json()["error"]["code"] == "agent_start_failed"
         assert response.json()["error"]["message"] == "no model server"
+        # The row a create makes before its Agent is gone again.
+        assert await console.store.list_sessions() == []
     finally:
         await console.aclose()
 
@@ -792,6 +801,232 @@ async def test_retry_while_a_turn_runs_is_session_busy(tmp_path: Path) -> None:
             f"/api/approvals/{pending['request_id']}", json={"choice": "deny"}
         )
         await _wait_turn(client, session_id)
+
+
+async def test_a_creates_key_is_found_without_a_session_id(tmp_path: Path) -> None:
+    async with console_with(tmp_path, answer("hello")) as (_console, client, _):
+        body = await _create(
+            client, tmp_path, "Hi there", client_request_id="create-key-1"
+        )
+        session_id = body["session"]["id"]
+        await _wait_turn(client, session_id)
+
+        # The create makes its row before the Agent; the key still lands in
+        # the create scope, where a client without the id looks it up.
+        found = (await client.get("/api/submissions/create-key-1")).json()
+        assert found["submission"]["state"] == "accepted"
+        assert found["submission"]["session_id"] == session_id
+        by_session = (
+            await client.get(f"/api/sessions/{session_id}/submissions/create-key-1")
+        ).json()
+        assert by_session["submission"]["turn_id"] == body["turn_id"]
+
+
+async def test_a_cancel_during_a_slow_create_withdraws_its_key(
+    tmp_path: Path,
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def build(
+        settings: Any, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Any:
+        entered.set()
+        await release.wait()
+        return await started_agent(Path(workspace), ScriptedLLM([answer("hello")]))
+
+    console = Console(
+        make_cfg(),
+        port=PORT,
+        options=ConsoleOptions(
+            store_path=str(tmp_path / "sessions.db"),
+            builder=build,
+            probe=FakeProbe(),
+            gate=quiet_gate(),
+        ),
+    )
+    await console.start()
+    app = FastAPI()
+    console.mount(app)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url=f"http://127.0.0.1:{PORT}",
+        ) as client:
+            creating = asyncio.create_task(
+                client.post(
+                    "/api/sessions",
+                    json={
+                        "turn": {"text": "hello", "client_request_id": "slow-key"},
+                        **_workspace(tmp_path),
+                    },
+                )
+            )
+            await entered.wait()
+            withdrew = await client.post(
+                "/api/submissions/slow-key/cancel", json={"text": "hello"}
+            )
+            assert withdrew.status_code == 200
+            assert withdrew.json()["submission"]["state"] == "withdrawn"
+
+            release.set()
+            response = await creating
+
+        # The key was withdrawn while the Agent started: the turn is
+        # refused, not written over the withdrawal.
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "submission_withdrawn"
+        assert await console.store.list_sessions() == []
+    finally:
+        await console.aclose()
+
+
+async def test_a_stop_for_an_unregistered_turn_lands_when_it_registers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    slow_model = asyncio.Event()
+
+    class SlowLLM(BaseLLMProvider):
+        """A model that holds its answer until the test lets go."""
+
+        model = "slow"
+
+        async def chat(
+            self, messages: list[Message], tools: list[ToolDef] | None = None
+        ) -> Message:
+            await slow_model.wait()
+            return Message(role="assistant", content="done")
+
+        async def close(self) -> None:
+            return None
+
+    async def build(
+        settings: Any, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Any:
+        return await started_agent(Path(workspace), SlowLLM())
+
+    console = Console(
+        make_cfg(),
+        port=PORT,
+        options=ConsoleOptions(
+            store_path=str(tmp_path / "sessions.db"),
+            builder=build,
+            probe=FakeProbe(),
+            gate=quiet_gate(),
+        ),
+    )
+    await console.start()
+    app = FastAPI()
+    console.mount(app)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url=f"http://127.0.0.1:{PORT}",
+        ) as client:
+            begin = console.store.begin_turn
+
+            async def slow_begin(*args: Any, **kwargs: Any) -> Any:
+                turn = await begin(*args, **kwargs)
+                if kwargs.get("client_request_id") == "late-key":
+                    entered.set()
+                    await release.wait()
+                return turn
+
+            monkeypatch.setattr(console.store, "begin_turn", slow_begin)
+            create = asyncio.create_task(
+                client.post(
+                    "/api/sessions",
+                    json={
+                        "turn": {"text": "Hi there", "client_request_id": "late-key"},
+                        **_workspace(tmp_path),
+                    },
+                )
+            )
+            await asyncio.wait_for(entered.wait(), TIMEOUT_S)
+
+            # The window a create has: its row and the turn are stored, but
+            # the registry has not registered the turn yet, so only the
+            # deferred stop can reach it.
+            response = await client.post(
+                "/api/submissions/late-key/cancel", json={"text": "Hi there"}
+            )
+            release.set()
+            created = await create
+
+            assert created.status_code == 201
+            assert response.status_code == 202
+            assert response.json()["cancelling"] is True
+            session_id = created.json()["session"]["id"]
+            turn = await _wait_turn(client, session_id)
+            assert (turn["status"], turn["cause"]) == ("cancelled", "user_stop")
+    finally:
+        slow_model.set()
+        await console.aclose()
+
+
+async def test_a_turn_on_a_row_still_being_created_waits_for_it(
+    tmp_path: Path,
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    builds: list[str] = []
+
+    async def build(
+        settings: Any, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Any:
+        builds.append(session_id)
+        if len(builds) == 1:
+            entered.set()
+            await release.wait()
+        return await started_agent(Path(workspace), ScriptedLLM([answer("hello")]))
+
+    console = Console(
+        make_cfg(),
+        port=PORT,
+        options=ConsoleOptions(
+            store_path=str(tmp_path / "sessions.db"),
+            builder=build,
+            probe=FakeProbe(),
+            gate=quiet_gate(),
+        ),
+    )
+    await console.start()
+    app = FastAPI()
+    console.mount(app)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app),
+            base_url=f"http://127.0.0.1:{PORT}",
+        ) as client:
+            create = asyncio.create_task(
+                client.post(
+                    "/api/sessions",
+                    json={"turn": {"text": "Hi there"}, **_workspace(tmp_path)},
+                )
+            )
+            await asyncio.wait_for(entered.wait(), TIMEOUT_S)
+            # The row exists while its Agent is still being built.
+            [row] = await console.store.list_sessions()
+            second = asyncio.create_task(
+                client.post(f"/api/sessions/{row.id}/turns", json={"text": "Later"})
+            )
+            await asyncio.sleep(0.05)
+            # It waits on the session's lock instead of building a second
+            # Agent for a row no entry owns yet.
+            assert not second.done()
+            assert len(builds) == 1
+            release.set()
+            created = await create
+            queued = await second
+
+        assert created.status_code == 201
+        # The queued turn then finds the create's turn running (409) or done.
+        assert queued.status_code in (202, 409)
+        assert len(builds) == 1
+    finally:
+        await console.aclose()
 
 
 # ── Workspaces ──

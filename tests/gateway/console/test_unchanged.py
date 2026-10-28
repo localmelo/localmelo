@@ -12,7 +12,7 @@ from localmelo.support.gateway import GatewayServer
 from localmelo.support.gateway.console import ConsoleOptions
 from localmelo.support.gateway.session import Session
 
-from .conftest import make_cfg
+from .conftest import make_cfg, quiet_gate
 
 
 class QuietProbe:
@@ -39,7 +39,9 @@ def build(tmp_path: Path, *, host: str = "127.0.0.1") -> GatewayServer:
     return GatewayServer(
         cfg,
         console_options=ConsoleOptions(
-            store_path=str(tmp_path / "sessions.db"), probe=QuietProbe()
+            store_path=str(tmp_path / "sessions.db"),
+            probe=QuietProbe(),
+            gate=quiet_gate(),
         ),
     )
 

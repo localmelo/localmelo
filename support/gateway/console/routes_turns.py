@@ -3,9 +3,10 @@
 Every route here writes. A turn starts under the session's lock and returns
 as soon as its row exists (202); its events arrive on the stream of
 ``routes_sessions``. A ``client_request_id`` makes a send safe to repeat:
-the same key again answers 200 with the turn it started. Console turns run
-without the scheduler gate until the next change (3b) adds its provider
-wrapper.
+the same key again answers 200 with the turn it started. A console turn
+passes the scheduler gate: ``default_builder`` wraps the Agent's providers
+with ``GatedLLM``/``GatedEmbedding``, so its model calls wait for a slot on
+the one gate this gateway shares with the workspace page.
 """
 
 from __future__ import annotations
@@ -34,6 +35,7 @@ from localmelo.support.sessions.submissions import (
 )
 
 from .errors import ApiError
+from .registry import STOP_REASON
 from .shapes import session_json, submission_json, turn_json
 
 if TYPE_CHECKING:
@@ -41,8 +43,6 @@ if TYPE_CHECKING:
 
     from . import Console
 
-# What a Stop from the console says, and the cause it records.
-STOP_REASON = "Stopped from the web console"
 _MAX_REASON_CHARS = 500
 _checker = Checker()
 
@@ -382,6 +382,11 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 cancelling = entry.runner.cancel(
                     STOP_REASON, cause="user_stop", turn_id=submission.turn_id
                 )
+            else:
+                # The key made a session whose create is still registering
+                # its first turn: the stop lands when it does.
+                console.sessions.defer_cancel(submission.turn_id)
+                cancelling = True
         return JSONResponse(
             status_code=202 if cancelling else 200,
             content={
@@ -485,4 +490,4 @@ def add_routes(app: FastAPI, console: Console) -> None:
         return Response(status_code=204)
 
 
-__all__ = ["STOP_REASON", "add_routes"]
+__all__ = ["add_routes"]
