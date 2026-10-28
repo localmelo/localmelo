@@ -9,7 +9,11 @@ import pytest
 
 from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.task_policy import TaskSpec
-from localmelo.support.gateway.task_store import TaskStore, TaskStoreError
+from localmelo.support.gateway.task_store import (
+    TaskConflictError,
+    TaskStore,
+    TaskStoreError,
+)
 from localmelo.support.sessions.store import SessionStore, StoredEvent
 
 
@@ -384,6 +388,56 @@ async def test_start_retry_and_changed_payload(stores: tuple) -> None:
     receipt = await recovery.receipt(task_id, "start-1")
     assert receipt is not None and receipt[1] is True
     assert len(events) == 1
+
+
+async def test_start_retry_survives_priority_and_pending_pause(
+    stores: tuple,
+) -> None:
+    sessions, tasks, recovery, task_id = stores
+    task_id = await mark_created(sessions, tasks)
+    generation, previous = await tasks.park_identity(task_id)
+    args = dict(
+        operation_id="start-1",
+        execution_id="execution-1",
+        expected_generation=generation,
+        expected_operation_id=previous,
+        _capture=True,
+    )
+    assert (await recovery.start(task_id, **args)).acquired
+    # Each identity change carries the committed start receipt along, so a
+    # retry of the same launch is a retry, not a superseded operation.
+    await tasks.change(task_id, priority=2)
+    assert not (await recovery.start(task_id, **args)).acquired
+    await tasks.request_pending_pause(
+        task_id, operation_id="pause", **await identity(tasks, task_id)
+    )
+    retried = await recovery.start(task_id, **args)
+    assert not retried.acquired
+
+
+async def test_prepared_recovery_blocks_an_ordinary_start(stores: tuple) -> None:
+    sessions, tasks, recovery, task_id = stores
+    task_id = await mark_created(sessions, tasks)
+    await start(tasks, recovery, task_id)
+    await prepare(tasks, recovery, task_id, "recover-1")
+    with pytest.raises(TaskConflictError, match="not eligible for an ordinary start"):
+        await tasks.change(
+            task_id,
+            state="running",
+            actor="scheduler",
+            _capture_execution="execution-1",
+            _capture_existing=True,
+        )
+
+
+async def test_pending_pause_blocks_a_park(stores: tuple) -> None:
+    sessions, tasks, recovery, task_id = stores
+    task_id = await mark_created(sessions, tasks)
+    await tasks.request_pending_pause(
+        task_id, operation_id="pause", **await identity(tasks, task_id)
+    )
+    with pytest.raises(TaskConflictError, match="pending pause"):
+        await tasks.change(task_id, state="parked")
 
 
 async def test_resumed_execution_requires_review_and_changes_identity(

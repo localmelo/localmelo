@@ -240,6 +240,7 @@ async def test_file_read_and_recall_are_offered_together() -> None:
     )
     try:
         await agent.run_task("q")
+        assert {"file_read", "recall"} <= agent.executor._process_free
     finally:
         await agent.close()
     offered = set(llm.offers[0])

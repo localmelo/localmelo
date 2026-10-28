@@ -108,6 +108,7 @@ def register_builtins(
             fn,
             timeout_ms=timeout_ms,
             requires_approval=tier_requires_approval(tier),
+            process_free=tool_def.name in {"file_read", "file_write"},
         )
 
 
