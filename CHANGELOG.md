@@ -7,6 +7,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
+### Fixed
+
+- Attempt digests skip task headings and report verification only for passing
+  checks, rather than treating trivial Python imports as tests ([#128]).
+
 ### Added
 
 - Read-only worker history in the web workspace, with server-side filters,
@@ -915,3 +920,4 @@ earlier milestones.
 [#124]: https://github.com/localmelo/localmelo/pull/124
 [#125]: https://github.com/localmelo/localmelo/pull/125
 [#126]: https://github.com/localmelo/localmelo/pull/126
+[#128]: https://github.com/localmelo/localmelo/pull/128
