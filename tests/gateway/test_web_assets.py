@@ -81,6 +81,50 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
         await manager.close_all()
 
 
+async def test_instance_header_only_when_configured(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("LOCALMELO_APP_INSTANCE", "0123456789abcdef" * 2)
+    app = FastAPI()
+    manager = SmokePlayground(memory_dir=tmp_path)
+    app.state.smoke_playground = manager
+    webapp.mount(app)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            page = await client.get("/")
+            assert page.status_code == 200
+            assert page.headers["x-localmelo-instance"] == "0123456789abcdef" * 2
+            assert (
+                "x-localmelo-instance"
+                not in (await client.get("/assets/workspace.js")).headers
+            )
+    finally:
+        await manager.close_all()
+
+
+@pytest.mark.parametrize("instance", [None, "wrong-value", "a" * 31])
+async def test_bad_or_absent_instance_has_no_header(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, instance: str | None
+) -> None:
+    if instance is None:
+        monkeypatch.delenv("LOCALMELO_APP_INSTANCE", raising=False)
+    else:
+        monkeypatch.setenv("LOCALMELO_APP_INSTANCE", instance)
+    app = FastAPI()
+    manager = SmokePlayground(memory_dir=tmp_path)
+    app.state.smoke_playground = manager
+    webapp.mount(app)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            assert "x-localmelo-instance" not in (await client.get("/")).headers
+    finally:
+        await manager.close_all()
+
+
 async def test_shell_assets_and_module_imports_are_served(
     client: httpx.AsyncClient,
 ) -> None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -67,9 +69,22 @@ def mount(app: FastAPI, cfg: Config | None = None) -> None:
     async def _close_smoke_playground() -> None:
         await _manager(app).close_all()
 
+    # This identifies an app-started instance, not a secret or authentication:
+    # any local client can read the header from the page response.
+    instance = os.environ.get("LOCALMELO_APP_INSTANCE", "")
+    if not re.fullmatch(r"[0-9a-f]{32}", instance):
+        instance = ""
+
     @app.get("/", response_class=HTMLResponse)
-    async def chat_ui() -> str:
-        return (_STATIC / "index.html").read_text(encoding="utf-8")
+    async def chat_ui() -> HTMLResponse:
+        headers = (
+            {"X-LocalMelo-Instance": instance, "Cache-Control": "no-store"}
+            if instance
+            else {}
+        )
+        return HTMLResponse(
+            (_STATIC / "index.html").read_text(encoding="utf-8"), headers=headers
+        )
 
     @app.post("/v1/playground/presence")
     async def playground_presence(body: dict[str, Any]) -> JSONResponse:
