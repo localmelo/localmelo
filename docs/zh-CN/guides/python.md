@@ -35,9 +35,9 @@ asyncio.run(main())
 
 - 用 `observe=sink` 代替 `on_event=sink` 会向接收函数提供相同事件，但不会让运行变成交互式运行，因此被取消的运行仍以 `crashed` 结束（见[停止运行](#stop-a-run)）。适用于仅观察的展示界面。
 - 两种方式都可搭配 `progress=True`，以增加 [`run.progress`（英文）](../../reference/events.md#runprogress)事件：步数、尝试、阶段和测试计数，以及此前在该模型上运行过这个任务时，过去的运行都做了什么。没有接收函数时，它不起作用。
-- 无论任务的措辞和目录如何，`routine="name"` 都会将这些运行归为[程序记忆（英文）](../../concepts/procedures.md)中的同一个例程；不指定时，例程由屏蔽日期和时间后的查询以及运行工具所使用的目录决定。空白名称会在运行前引发 `ValueError`。
+- 无论任务的措辞和目录如何，`routine="name"` 都会将这些运行归为[程序记忆](../concepts/procedures.md)中的同一个例程；不指定时，例程由屏蔽日期和时间后的查询以及运行工具所使用的目录决定。空白名称会在运行前引发 `ValueError`。
 
-在 `run.finished` 之后、`run_task` 返回之前，运行会记录到程序记忆中：最多耗时 2 秒，通常只有几毫秒（见[记忆（英文）](../../concepts/memory.md#how-memory-works)）。引发异常的运行（如被取消的运行）不会被记录，在 `agent.begin_exit()` 之后结束的运行也不会。
+在 `run.finished` 之后、`run_task` 返回之前，运行会记录到程序记忆中：最多耗时 2 秒，通常只有几毫秒（见[记忆](../concepts/memory.md#how-memory-works)）。引发异常的运行（如被取消的运行）不会被记录，在 `agent.begin_exit()` 之后结束的运行也不会。
 
 <a id="stop-a-run"></a>
 
