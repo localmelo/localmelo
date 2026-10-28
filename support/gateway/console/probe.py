@@ -170,6 +170,33 @@ class ModelServerProbe:
         """:meth:`model_server`'s answer, the name the console calls it by."""
         return self.model_server()
 
+    def reset(self, cfg: Config) -> None:
+        """Use *cfg* from now on, dropping a cached result for another server."""
+        old_backend = self._cfg.chat_backend
+        old_sec = getattr(self._cfg, old_backend, None) if old_backend else None
+        old_url = getattr(old_sec, "chat_url", "") if old_sec is not None else ""
+        new_backend = cfg.chat_backend
+        new_sec = getattr(cfg, new_backend, None) if new_backend else None
+        new_url = getattr(new_sec, "chat_url", "") if new_sec is not None else ""
+        self._cfg = cfg
+        if (old_backend, old_url) != (new_backend, new_url):
+            self._result = None
+            task, self._task = self._task, None
+            if task is not None and not task.done():
+                task.cancel()
+
+    def probe_now(self) -> None:
+        """Start a background probe now if none is running and the backend is local."""
+        if self._closed or self._task is not None:
+            return
+        backend = self._cfg.chat_backend
+        if backend not in LOCAL_BACKENDS:
+            return
+        section = getattr(self._cfg, backend, None)
+        url = getattr(section, "chat_url", "") if section is not None else ""
+        if url and url_label(url):
+            self._start(backend, url)
+
     def _should_probe(self, now: float) -> bool:
         if self._closed or self._task is not None:
             return False

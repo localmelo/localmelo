@@ -34,16 +34,35 @@ _OWN_FETCH_SITES = frozenset({"same-origin", "none"})
 # Close code of a refused websocket handshake: policy violation.
 _WS_POLICY_VIOLATION = 1008
 
+# Largest request body the gateway accepts, in bytes (1 MiB).
+BODY_BYTES_LIMIT = 1_048_576
+_TOO_LARGE_ERROR = f"Request body too large (max {BODY_BYTES_LIMIT} bytes)."
+_UNSUPPORTED_MEDIA_TYPE_ERROR = "Content-Type must be application/json."
+
 # The headers of an API v2 refusal: the console's middleware never sees it,
 # because the guard is outermost, so it sets no-store itself.
 _API_REFUSAL_HEADERS = {"cache-control": "no-store"}
 
 # Headers of every HTTP response: no page may show the gateway's pages in
 # a frame, where a page on another site could trick the user into
-# clicking them. The CSP rule is added to a response's own policy when it
-# has one, so a blob's ``default-src 'none'; sandbox`` stays one header.
-_NO_FRAMING_HEADERS = ((b"x-frame-options", b"DENY"),)
+# clicking them, and browsers get the console's baseline security headers.
+# The CSP rule is added to a response's own policy when it has one, so a
+# blob's ``default-src 'none'; sandbox`` stays one header.
+_SECURITY_HEADERS = (
+    (b"x-frame-options", b"DENY"),
+    (b"x-content-type-options", b"nosniff"),
+    (b"referrer-policy", b"no-referrer"),
+    (b"cross-origin-opener-policy", b"same-origin"),
+    (b"cross-origin-resource-policy", b"same-origin"),
+    (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
+)
 _FRAMING_CSP = b"frame-ancestors 'none'"
+API_CSP = (
+    b"default-src 'none'; script-src 'self'; style-src 'self'; "
+    b"img-src 'self'; connect-src 'self'; font-src 'self'; "
+    b"manifest-src 'self'; base-uri 'none'; form-action 'none'; "
+    b"frame-ancestors 'none'"
+)
 
 
 def is_loopback(host: str) -> bool:
@@ -81,7 +100,7 @@ def _is_loopback_ip(address: str) -> bool:
     return ip.is_loopback
 
 
-def _forbid_framing(send: Send) -> Send:
+def _forbid_framing(send: Send, *, is_api: bool = False) -> Send:
     """Wrap *send* so that the response carries the headers that forbid framing."""
 
     async def send_forbidding_framing(message: Message) -> None:
@@ -101,9 +120,18 @@ def _forbid_framing(send: Send) -> Send:
                 for name, value in headers
                 if name.lower() != b"content-security-policy"
             ]
-            value = b"; ".join([*policies, _FRAMING_CSP]) if policies else _FRAMING_CSP
+            if policies:
+                if any(_FRAMING_CSP in policy for policy in policies):
+                    value = b"; ".join(policies)
+                else:
+                    value = b"; ".join([*policies, _FRAMING_CSP])
+            else:
+                value = API_CSP if is_api else _FRAMING_CSP
             headers.append((b"content-security-policy", value))
-            headers.extend(_NO_FRAMING_HEADERS)
+            present = {name.lower() for name, _ in headers}
+            for name, header_value in _SECURITY_HEADERS:
+                if name not in present:
+                    headers.append((name, header_value))
             message = {**message, "headers": headers}
         await send(message)
 
@@ -119,6 +147,38 @@ def _is_api_path(scope: Scope) -> bool:
 def _one_of(values: list[str], allowed: frozenset[str]) -> bool:
     """Whether a header's *values* are a single value in *allowed*, ignoring case."""
     return len(values) == 1 and values[0].lower() in allowed
+
+
+def is_json_content_type(values: list[str]) -> bool:
+    """Whether *values* is a single ``application/json`` Content-Type header."""
+    if len(values) != 1:
+        return False
+    parts = [part.strip() for part in values[0].split(";")]
+    if not parts or parts[0].lower() != "application/json":
+        return False
+    for param in parts[1:]:
+        if not param:
+            return False
+        key, sep, val = param.partition("=")
+        if not sep:
+            return False
+        if (
+            key.strip().lower() == "charset"
+            and val.strip().strip('"').lower() != "utf-8"
+        ):
+            return False
+    return True
+
+
+def _content_length_too_large(values: list[str]) -> bool:
+    """Whether any ``Content-Length`` header exceeds :data:`BODY_BYTES_LIMIT`."""
+    for raw in values:
+        text = raw.strip()
+        if not text.isdigit():
+            continue
+        if int(text) > BODY_BYTES_LIMIT:
+            return True
+    return False
 
 
 class LoopbackGuard:
@@ -175,9 +235,11 @@ class LoopbackGuard:
             await self.app(scope, receive, send)
             return
         if scope["type"] == "http":
-            send = _forbid_framing(send)
+            send = _forbid_framing(send, is_api=_is_api_path(scope))
 
         refusal = self._refusal(scope)
+        if refusal is None and scope["type"] == "http":
+            receive, refusal = await self._read_body(scope, receive)
         if refusal is None:
             await self.app(scope, receive, send)
             return
@@ -209,6 +271,58 @@ class LoopbackGuard:
             )
         await response(scope, receive, send)
 
+    async def _read_body(
+        self, scope: Scope, receive: Receive
+    ) -> tuple[Receive, tuple[int, str, str] | None]:
+        """Read up to :data:`BODY_BYTES_LIMIT` bytes and check ``/api`` Content-Type."""
+        chunks: list[bytes] = []
+        total = 0
+        disconnected = False
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                disconnected = True
+                break
+            chunk = message.get("body", b"")
+            if chunk:
+                total += len(chunk)
+                if total > BODY_BYTES_LIMIT:
+                    return receive, (413, "too_large", _TOO_LARGE_ERROR)
+                chunks.append(chunk)
+            if not message.get("more_body", False):
+                break
+
+        if total > 0 and _is_api_path(scope):
+            content_types = [
+                value.decode("latin-1")
+                for name, value in scope.get("headers", ())
+                if name.lower() == b"content-type"
+            ]
+            if not is_json_content_type(content_types):
+                return receive, (
+                    415,
+                    "unsupported_media_type",
+                    _UNSUPPORTED_MEDIA_TYPE_ERROR,
+                )
+
+        full_body = b"".join(chunks)
+        first_sent = False
+
+        async def replay_receive() -> Message:
+            nonlocal first_sent
+            if not first_sent:
+                first_sent = True
+                if disconnected:
+                    return {"type": "http.disconnect"}
+                return {
+                    "type": "http.request",
+                    "body": full_body,
+                    "more_body": False,
+                }
+            return await receive()
+
+        return replay_receive, None
+
     def _refusal(self, scope: Scope) -> tuple[int, str, str] | None:
         """Status code, code and error of a request to refuse, or None."""
         headers: dict[bytes, list[str]] = {}
@@ -237,5 +351,23 @@ class LoopbackGuard:
             for site in headers.get(b"sec-fetch-site", []):
                 if site.lower() not in _OWN_FETCH_SITES:
                     return 403, "foreign_origin", self._origin_error
+
+        if scope["type"] == "http":
+            content_lengths = headers.get(b"content-length", [])
+            if _content_length_too_large(content_lengths):
+                return 413, "too_large", _TOO_LARGE_ERROR
+            if (
+                _is_api_path(scope)
+                and any(
+                    raw.strip().isdigit() and int(raw.strip()) > 0
+                    for raw in content_lengths
+                )
+                and not is_json_content_type(headers.get(b"content-type", []))
+            ):
+                return (
+                    415,
+                    "unsupported_media_type",
+                    _UNSUPPORTED_MEDIA_TYPE_ERROR,
+                )
 
         return None
