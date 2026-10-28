@@ -169,7 +169,7 @@ tables of the chosen backends.
 | `k` | `[retrieval]` | `3` | Task-local hits per recall, from 1 to 10. |
 | `kinds` | `[retrieval]` | not set | A list of `note`, `draft`, `thought`, `digest`, `reflection` and `long`. Omit for all but `thought`. |
 | `placement` | `[retrieval]` | `"tool"` | `tool` (append to the last tool result) or `message` (its own user message). `message` is refused in `replay` and `compress+replay`. |
-| `min_score` | `[retrieval]` | `0.35` | The cosine floor for embedding and long-term hits, from 0 to 1. Inert for `bm25` and `llm`. |
+| `min_score` | `[retrieval]` | `0.35` | The cosine floor for the long-term leg and for embedding task hits, from 0 to 1. Inert only for the task-local `bm25` and `llm` ranking. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. |
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
 | `host` | `[gateway]` | `"127.0.0.1"` | The address the gateway listens on: keep `127.0.0.1`, or use `localhost` or `::1`. On a host that is not `localhost` or a loopback IP address, such as `0.0.0.0`, the gateway does not check the `Host` and `Origin` of requests; see [Keep the gateway private](gateway.md#keep-the-gateway-private). |

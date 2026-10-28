@@ -152,8 +152,10 @@ tool output and recalled memory are data, not instructions.
   `origin_task_ids` names the task that produced it, so the bench can split
   same-exercise from cross-exercise hits. `history.db` is schema version 2;
   `recall_json` is `NULL` in `legacy`, in a non-planning call, and on a
-  planning call that carried no new block. The `recall` event and
-  `memory_stats.recall_log` are the same record without item text.
+  planning call that carried no new block. The `recall` event carries the
+  same trigger, placement, retriever, query, hits, `chars`, `ms` and
+  `fallback`, and no item text; `memory_stats.recall_log` is the compact
+  record, which also has `v`, `k`, `candidates` and `boundary`.
 - **Legacy keeps its path.** In `legacy` there is no plan, no retriever, no
   block, no data note and no `recall` tool; the planning and reflection
   requests, the JSON line, the window and the `tasks`/`steps` rows are
