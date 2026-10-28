@@ -11,6 +11,7 @@ import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent.agent import _as_sent
+from localmelo.melo.agent.options import reasoning_refusal
 from localmelo.melo.checker import Checker
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.short import WorkingMemory
@@ -144,6 +145,24 @@ def _reflection(action: str = "continue") -> dict[str, Any]:
 def _options(**kwargs: Any) -> AgentOptions:
     kwargs.setdefault("builtins", frozenset())
     return AgentOptions(**kwargs)
+
+
+def test_agent_options_validate_the_reasoning_fields() -> None:
+    with pytest.raises(ValueError, match="reasoning must be one of"):
+        AgentOptions(reasoning="compress")  # type: ignore[arg-type]
+    for bad in (0, -1, 1.5, True):
+        with pytest.raises(ValueError, match="replay_turns must be"):
+            AgentOptions(replay_turns=bad)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="replay_scope must be one of"):
+        AgentOptions(replay_scope="session")  # type: ignore[arg-type]
+
+
+def test_reasoning_refusal_is_a_pure_capability_check() -> None:
+    assert reasoning_refusal("legacy", None, True) is None
+    assert reasoning_refusal("drop", None, False) is None
+    assert reasoning_refusal("replay", "auto", False) is None
+    assert "needs a reasoning field" in (reasoning_refusal("replay", None, False) or "")
+    assert "drop is not possible" in (reasoning_refusal("drop", "auto", True) or "")
 
 
 def _agent(
@@ -595,6 +614,24 @@ class CountingEmbedding(BaseEmbeddingProvider):
 
     async def close(self) -> None:
         pass
+
+
+@pytest.mark.asyncio
+async def test_the_agent_refuses_an_impossible_pair() -> None:
+    replay_llm = Scripted(_reply("done")).llm(
+        reasoning_field="auto", requires_reasoning_replay=True
+    )
+    with pytest.raises(ValueError, match="drop is not possible"):
+        Agent(llm=replay_llm, options=_options(reasoning="drop"))
+    await replay_llm.close()
+    without_field = OpenAICompatLLM(
+        base_url="http://stub.test/v1",
+        model="m",
+        transport=httpx.MockTransport(Scripted().handler),
+    )
+    with pytest.raises(ValueError, match="needs a reasoning field"):
+        Agent(llm=without_field, options=_options(reasoning="replay"))
+    await without_field.close()
 
 
 class RecordingLLM(BaseLLMProvider):
