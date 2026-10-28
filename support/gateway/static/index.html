@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="light dark" />
     <title>localmelo · Workspace</title>
     <link rel="icon" type="image/png" sizes="64x64" href="/assets/icon_small.png" />
+    <script src="/assets/theme-init.js"></script>
     <link rel="stylesheet" href="/assets/workspace.css" />
     <script type="module" src="/assets/workspace.js"></script>
   </head>
@@ -88,11 +89,18 @@
               hidden
             ></div>
           </div>
+          <button type="button" class="secondary-button" id="details-trigger" aria-expanded="false" aria-controls="details-drawer" disabled>Details</button>
           <button class="connection-chip" id="connection-btn">
             <span class="status-dot" id="connection-dot"></span
             ><span id="connection-label">Set up model</span>
           </button>
         </header>
+        <div class="banner" id="store-banner" role="status" hidden></div>
+        <div class="banner" id="model-banner" role="status" hidden></div>
+        <div class="banner" id="stream-banner" role="status" hidden>
+          <span id="stream-banner-text"></span>
+          <button type="button" class="link-button" id="reconnect-btn">Reconnect now</button>
+        </div>
         <div class="notice" id="notice" role="status" hidden></div>
         <section class="scroll" id="scroll" aria-label="Conversation">
           <div class="welcome" id="welcome">
@@ -182,6 +190,7 @@
             <span>Runs through your configured backend</span>
           </p>
         </div>
+        <section class="details-drawer" id="details-drawer" hidden></section>
       </main>
     </div>
     <dialog id="settings-dialog" aria-labelledby="settings-title">
@@ -194,6 +203,12 @@
       </div>
       <p class="settings-description">Settings apply to subsequent turns. Current turns finish with their existing connection.</p>
       <p id="settings-status" class="field-hint" role="status" aria-live="polite"></p>
+      <nav class="settings-tabs" aria-label="Settings sections">
+        <button type="button" id="settings-tab-model" aria-pressed="true">Model</button>
+        <button type="button" id="settings-tab-test" aria-pressed="false">Test</button>
+        <button type="button" id="settings-tab-theme" aria-pressed="false">Theme</button>
+      </nav>
+      <section id="settings-panel-model" aria-label="Model settings">
       <div class="field">
         <label for="s-adapter">Chat backend</label>
         <select id="s-adapter" disabled></select>
@@ -246,11 +261,25 @@
           </div>
         </div>
       </details>
+      </section>
+      <section id="settings-panel-test" aria-label="Connection test" hidden>
+      <button type="button" class="secondary-button" id="settings-test" disabled>Test connection</button>
+      <p id="settings-test-status" class="field-hint" role="status" aria-live="polite"></p>
+      </section>
+      <section id="settings-panel-theme" aria-label="Theme settings" hidden>
+      <fieldset class="theme-options">
+        <legend>Theme</legend>
+        <label><input type="radio" name="settings-theme" id="settings-theme-system" value="system" /> System</label>
+        <label><input type="radio" name="settings-theme" id="settings-theme-light" value="light" /> Light</label>
+        <label><input type="radio" name="settings-theme" id="settings-theme-dark" value="dark" /> Dark</label>
+      </fieldset>
+      </section>
       <p id="create-error" class="error" role="alert" hidden></p>
       <button type="button" class="secondary-button" id="settings-reload" hidden>Reload settings</button>
       <div class="settings-footer">
-        <span>Changes are saved to your local settings file.</span>
-        <button type="button" class="primary-button" id="create-btn" disabled>Save settings</button>
+        <span><span id="settings-file"></span><br /><span id="settings-revision"></span></span>
+        <button type="button" class="secondary-button" id="cancel-settings">Cancel</button>
+        <button type="button" class="primary-button" id="create-btn" disabled>Save</button>
       </div>
     </dialog>
   </body>

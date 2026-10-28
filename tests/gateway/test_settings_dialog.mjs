@@ -25,14 +25,15 @@ function fixture(overrides = {}) {
   };
 }
 
-function harness(routes) {
+function harness(routes, storage = new Map()) {
   const nodes = new Map();
   const calls = [];
   const element = (id) => {
     if (!nodes.has(id)) {
       const node = {
         id, value: '', textContent: '', hidden: false, disabled: false, open: false,
-        children: [], handlers: {},
+        children: [], handlers: {}, dataset: {}, checked: false, attributes: {},
+        setAttribute(name, value) { this.attributes[name] = String(value); },
         addEventListener(type, handler) { (this.handlers[type] ||= []).push(handler); },
         async emit(type) { for (const handler of this.handlers[type] || []) await handler({target: this}); },
         append(child) { this.children.push(child); },
@@ -44,7 +45,11 @@ function harness(routes) {
     }
     return nodes.get(id);
   };
-  globalThis.document = {getElementById: element, createElement: (tag) => ({tag, value: '', textContent: ''})};
+  globalThis.document = {documentElement: {dataset: {}}, getElementById: element, createElement: (tag) => ({tag, value: '', textContent: ''})};
+  globalThis.localStorage = storage instanceof Map ? {
+    getItem: (key) => storage.get(key) ?? null,
+    setItem: (key, value) => storage.set(key, value),
+  } : storage;
   const api = async (path, options = {}) => {
     calls.push({path, options});
     const handler = routes[`${options.method || 'GET'} ${path}`];
@@ -61,6 +66,18 @@ async function change(h, id, value, event = 'input') {
   node.value = value;
   await node.emit(event);
 }
+
+test('settings section buttons switch visible panels', async () => {
+  const h = harness({'GET /settings': fixture()});
+  await h.open();
+  await h.element('settings-tab-theme').emit('click');
+  assert.equal(h.element('settings-panel-theme').hidden, false);
+  assert.equal(h.element('settings-panel-model').hidden, true);
+  assert.equal(h.element('settings-tab-theme').attributes['aria-pressed'], 'true');
+  await h.element('settings-tab-test').emit('click');
+  assert.equal(h.element('settings-panel-theme').hidden, true);
+  assert.equal(h.element('settings-panel-test').hidden, false);
+});
 
 test('load, discover, save and notify with revision and only writable selected fields', async () => {
   const value = fixture();
@@ -203,4 +220,86 @@ test('closing during load invalidates its response; save errors remain in dialog
   assert.equal(h.element('create-error').textContent, 'Invalid workspace');
   assert.equal(h.element('settings-dialog').open, true);
   assert.equal(h.element('create-btn').disabled, false);
+});
+
+test('theme loads immediately, persists, and tolerates blocked or invalid storage', async () => {
+  const storage = new Map([['localmelo-console.theme', 'dark']]);
+  const h = harness({}, storage);
+  assert.equal(document.documentElement.dataset.theme, 'dark');
+  assert.equal(h.element('settings-theme-dark').checked, true);
+  h.element('settings-theme-light').checked = true;
+  await h.element('settings-theme-light').emit('change');
+  assert.equal(document.documentElement.dataset.theme, 'light');
+  assert.equal(storage.get('localmelo-console.theme'), 'light');
+  const blocked = harness({}, {getItem() { throw Error('blocked'); }, setItem() { throw Error('blocked'); }});
+  assert.equal(document.documentElement.dataset.theme, 'system');
+  blocked.element('settings-theme-dark').checked = true;
+  await blocked.element('settings-theme-dark').emit('change');
+  assert.equal(document.documentElement.dataset.theme, 'dark');
+  harness({}, new Map([['localmelo-console.theme', 'invalid']]));
+  assert.equal(document.documentElement.dataset.theme, 'system');
+});
+
+test('connection test sends unsaved candidate and reports probe and request failures', async () => {
+  let result = {ok: true};
+  const h = harness({'GET /settings': fixture(), 'POST /settings/test': () => {
+    if (result instanceof Error) throw result;
+    return result;
+  }});
+  await h.open();
+  await change(h, 's-chat-model', 'draft');
+  await change(h, 's-embed-backend', 'vllm', 'change');
+  await h.element('settings-test').emit('click');
+  assert.deepEqual(h.calls.at(-1), {path: '/settings/test', options: {method: 'POST', body: {
+    chat_backend: 'mlc', embedding_backend: 'vllm', workspace: '~/ws',
+    sections: {mlc: {chat_url: 'http://localhost/v1', chat_model: 'draft'}, vllm: {embedding_url: 'http://embed/v1', embedding_model: 'embed'}},
+  }}});
+  assert.equal(h.element('settings-test-status').textContent, 'Backend reachable');
+  result = {ok: false, error: 'connection refused\nmore details'};
+  await h.element('settings-test').emit('click');
+  assert.equal(h.element('settings-test-status').textContent, 'Could not connect: connection refused');
+  assert.equal(h.element('settings-test-status').dataset.state, 'error');
+  result = new Error('offline\nmore');
+  await h.element('settings-test').emit('click');
+  assert.equal(h.element('settings-test-status').textContent, 'Could not connect: offline');
+});
+
+test('connection test invalidates stale results on edits, reload, and close', async () => {
+  const requests = [];
+  const h = harness({'GET /settings': fixture(), 'POST /settings/test': () => {
+    const request = deferred(); requests.push(request); return request.promise;
+  }});
+  await h.open();
+  const first = h.element('settings-test').emit('click');
+  assert.equal(h.element('settings-test-status').textContent, 'Testing…');
+  assert.equal(h.element('settings-test').disabled, true);
+  await change(h, 's-workspace', '/other');
+  const second = h.element('settings-test').emit('click');
+  requests[0].resolve({ok: true});
+  await first;
+  assert.equal(h.element('settings-test-status').textContent, 'Testing…');
+  requests[1].resolve({ok: false, error: 'no'});
+  await second;
+  assert.equal(h.element('settings-test-status').textContent, 'Could not connect: no');
+  const third = h.element('settings-test').emit('click');
+  await h.open();
+  requests[2].resolve({ok: true});
+  await third;
+  assert.equal(h.element('settings-test-status').textContent, '');
+  const fourth = h.element('settings-test').emit('click');
+  h.element('settings-dialog').close();
+  requests[3].resolve({ok: true});
+  await fourth;
+  assert.equal(h.element('settings-test-status').textContent, '');
+});
+
+test('cloud candidate includes key environment name but never key status or revision', async () => {
+  const h = harness({'GET /settings': fixture(), 'GET /settings/key-status?name=OPENAI_API_KEY': {set: true}, 'POST /settings/test': {ok: true}});
+  await h.open();
+  await change(h, 's-adapter', 'openai', 'change');
+  await h.element('settings-test').emit('click');
+  const body = h.calls.find((call) => call.path === '/settings/test').options.body;
+  assert.deepEqual(body.sections, {openai: {api_key_env: 'OPENAI_API_KEY', base_url: '', chat_model: 'cloud'}});
+  assert.equal('revision' in body, false);
+  assert.equal(JSON.stringify(body).includes('api_key_set'), false);
 });
