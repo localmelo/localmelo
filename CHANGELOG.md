@@ -32,6 +32,42 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   event pages, and quitting prints a saved session's resume command.
   Direct runs keep their legacy parsing and output ([#NN]).
 
+- Console session details over API v2, and the scheduler gate in front of
+  a console turn: `GET /api/sessions/{id}/tools` lists each tool's source,
+  whether it asks first and whether the session allows it, `/memory` the
+  conversation the gateway holds (thinking stripped, every text redacted,
+  text cut at 2,000 characters) and `/runs` each finished turn's `RunResult`
+  without its answer, while `DELETE /api/sessions/{id}/grants/{tool}` and `/grants`
+  take a session grant back. Every model call of a console turn now waits
+  for its slot under `[scheduler]`, like a workspace chat's: the console
+  shares the gateway's one `ChatGate` and wraps the Agent's providers
+  with `GatedLLM`/`GatedEmbedding` through `build_session_agent`'s hooks,
+  so the call log records the session's id and `lock_gate = "wait"` holds
+  a turn while a foreign GPU lock is present. A create now makes its
+  session row before it builds the Agent, because the gate needs the id;
+  its key still lands in the create scope, so a client without the id finds
+  it, and a create whose Agent or first turn never came up, or was
+  cancelled, deletes the row it made. Console runners ask each turn for
+  `run.progress`. `/`, the workspace page and every `/v1/*` route are
+  unchanged ([#92]).
+- Console turns over API v2: `POST /api/sessions` (with an optional first
+  turn), `POST /api/sessions/{id}/turns`, `/retry` and `/turns/{id}/cancel`,
+  the two cancel-by-key routes, `POST /api/approvals/{request_id}`, and
+  `PATCH`/`DELETE` of a session. A turn starts in the background and its
+  events arrive on the session's stream: `approval.requested` waits for an
+  answer given through the API, and the turn finishes `turn.finished` with
+  the result read from its row. A `client_request_id` makes a create or a
+  turn safe to repeat, one turn runs per session (409 `session_busy`), and
+  a stop during an approval wait withdraws the card. The console keeps the
+  `ApprovalBroker` and its `RememberingPolicy` through `runner.observe`, so
+  the approvals a console turn asks show on the stream. A console turn
+  does not pass the scheduler gate yet; that arrives with the tools and
+  grants change. `docs/api.md` gains the routes and a tested Python script
+  that creates a session, follows the stream, answers an approval and reads
+  the answer; every request string must be valid UTF-8 (a lone surrogate
+  is 400 `invalid_request`), a session's workspace is stored as its real
+  path, and `/`, the workspace page and every `/v1/*` route are unchanged
+  ([#91]).
 - Reasoning notes for the compress modes: `--reasoning compress` and
   `compress+replay`, `--note-writer auto|heuristic`, and the `[agent]`
   `note_writer` key. `compress` sends no reasoning; instead each reply is
@@ -582,5 +618,7 @@ earlier milestones.
 [#83]: https://github.com/localmelo/localmelo/pull/83
 [#84]: https://github.com/localmelo/localmelo/pull/84
 [#85]: https://github.com/localmelo/localmelo/pull/85
+[#91]: https://github.com/localmelo/localmelo/pull/91
+[#92]: https://github.com/localmelo/localmelo/pull/92
 [#89]: https://github.com/localmelo/localmelo/pull/89
 [#90]: https://github.com/localmelo/localmelo/pull/90
