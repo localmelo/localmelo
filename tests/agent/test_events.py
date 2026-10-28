@@ -530,6 +530,18 @@ class TestFields:
                 "remember",
                 "stage",
             },
+            "recall": {
+                "step",
+                "attempt",
+                "trigger",
+                "retriever",
+                "query",
+                "hits",
+                "chars",
+                "ms",
+                "fallback",
+                "placement",
+            },
             "notice": {"kind", "message", "step", "attempt", "detail"},
             "reflection.started": {"attempt", "failure_type"},
             "reflection": {
@@ -623,7 +635,39 @@ class TestFields:
             "digest",
         }
 
-        events = reflect.events + stuck.events + compress.events
+        # R5's recall event, from a step that has a stored note to recall.
+        from localmelo.melo.memory.notes import ReasoningNote
+        from localmelo.melo.memory.short.note_store import NoteStoreEntry
+
+        recalled = Recorder()
+        agent = _agent(
+            ScriptedLLM(
+                [
+                    _echo("a", content="<note>plan: the answer is 42</note>"),
+                    _answer("done"),
+                ]
+            ),
+            reasoning="compress",
+            retriever="bm25",
+            attempt_policy="none",
+        )
+        agent.load_notes(
+            [
+                NoteStoreEntry(
+                    alias="n1",
+                    kind="note",
+                    text="plan: the answer is 42 and tests pass",
+                    note=ReasoningNote(note_id="x", plan="the answer is 42"),
+                    task_id="",
+                )
+            ]
+        )
+        result = await agent.run_task("echo a", on_event=recalled)
+        assert result.status == "completed"
+        assert recalled.of("recall")
+        await agent.close()
+
+        events = reflect.events + stuck.events + compress.events + recalled.events
         seen = {event.type for event in events}
         assert seen == set(EVENT_FIELDS)
         for event in events:

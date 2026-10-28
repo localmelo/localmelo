@@ -261,6 +261,20 @@ async def test_drop_equals_legacy_on_the_wire() -> None:
         "redactions": 0,
         "rehearsed": {"restated": 0, "acted": 0, "cited": 0},
         "digests": 0,
+        "recalls": 0,
+        "recalls_by_trigger": {"start": 0, "attempt": 0, "step": 0, "tool": 0},
+        "recall_hits": 0,
+        "recall_chars": 0,
+        "recall_ms": 0,
+        "recall_fallbacks": 0,
+        "recall_skipped": 0,
+        "recall_refused": 0,
+        "aux_retrieve_calls": 0,
+        "retrieve_errors": 0,
+        "retrieve_prompt_tokens": 0,
+        "retrieve_completion_tokens": 0,
+        "thought_chunks": 0,
+        "recall_log": [],
     }
     assert drop_result.config["reasoning"] == "drop"
     assert "reasoning_chars" in drop_result.usage
@@ -1070,7 +1084,9 @@ async def test_the_explicit_modes_write_no_raw_step_summary(mode: str) -> None:
     )
     await agent.run_task("q")
     await agent.close()
-    assert embedding.calls == 0
+    # R5's recall may embed the query when the plan is on; what the explicit
+    # modes must not do is write the raw step summary to long-term memory.
+    assert len(agent.hippo.long._entries) == 0
 
     embedding = CountingEmbedding()
     server = Scripted(
