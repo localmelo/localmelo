@@ -29,6 +29,7 @@ from starlette.routing import Match
 
 from localmelo.support.gateway.chat_gate import ChatGate, call_log_dir
 from localmelo.support.gateway.machine_monitor import MachineMonitor
+from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.sessions import display
 from localmelo.support.sessions.approvals import ApprovalBroker
 from localmelo.support.sessions.hub import SessionHub
@@ -48,6 +49,7 @@ from . import (
     routes_page,
     routes_sessions,
     routes_settings,
+    routes_tasks,
     routes_turns,
 )
 from .errors import ApiError
@@ -130,6 +132,9 @@ class Console:
             builder=self.options.builder,
             gate=self.gate,
         )
+        self.workers = TaskWorkers(
+            self.store, self.gate, lambda: self.cfg, self.hub, broker=self.broker
+        )
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
         self._started_at = time.time()
         self._store_ok = False
@@ -200,6 +205,7 @@ class Console:
         routes_turns.add_routes(app, self)
         routes_details.add_routes(app, self)
         routes_page.add_routes(app, self)
+        routes_tasks.add_routes(app, self)
         _add_not_found(app)
 
     # ── Lifecycle ──
@@ -223,6 +229,7 @@ class Console:
     async def _try_open(self) -> bool:
         try:
             await self.store.open()
+            await self.workers.open()
         except SessionStoreError as exc:
             self._store_ok = False
             self._store_error = store_message(exc)
@@ -289,7 +296,10 @@ class Console:
             with contextlib.suppress(Exception):
                 await self._monitor.stop()
         try:
-            await self.sessions.close_all()
+            try:
+                await self.workers.aclose()
+            finally:
+                await self.sessions.close_all()
         finally:
             # Every live call leaves its one line; the log's files close.
             # A shared gate stays open: the gateway closes it last.

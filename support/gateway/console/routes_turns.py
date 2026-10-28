@@ -387,7 +387,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.patch("/api/sessions/{session_id}")
     async def patch_session(session_id: str, body: PatchRequest) -> JSONResponse:
         console.require_store()
-        await _require_session(console, session_id)
+        info = await _require_session(console, session_id)
+        if info.kind == "task":
+            raise ApiError(
+                409,
+                "task_session_read_only",
+                "A task session cannot be changed as a chat.",
+            )
         # Both changes are judged before either is written, so a refused
         # title or workspace leaves the session as it was.
         title: str | None = None

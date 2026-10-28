@@ -19,8 +19,8 @@ different spec raises :class:`TaskConflictError`.
 Retention is the session store's thinking retention (30 days by default):
 :meth:`TaskStore.apply_retention` clears ``sched_log`` rows and
 ``idle_windows`` older than that cutoff; it is a hook of the session store's
-sweep and also runs when the component opens. No route or worker calls the store
-yet; S3a.2 does (design decision 4).
+sweep and also runs when the component opens. Console routes and task workers
+use the store for task persistence.
 """
 
 from __future__ import annotations
@@ -144,6 +144,10 @@ class TaskNotFoundError(TaskStoreError):
     """No task has this id."""
 
 
+class TaskNotPausedError(TaskStoreError):
+    """A resume was requested for a task that is not paused."""
+
+
 @dataclass(frozen=True)
 class TaskRecord:
     """One ``tasks`` row, with its JSON columns decoded."""
@@ -244,6 +248,54 @@ class TaskStore:
 
     # ── Creation ──
 
+    async def find_existing_request(
+        self,
+        spec: TaskSpec,
+        *,
+        origin: str,
+        front_id: str | None = None,
+        request_key: str | None = None,
+        task_id: str | None = None,
+        meta: Mapping[str, Any] | None = None,
+        deadline: float | None = None,
+    ) -> TaskRecord | None:
+        """Find an identical keyed request before validating its workspace.
+
+        A reused key with a different request raises ``TaskConflictError``.
+        An absent key or match returns None. This is only a preflight lookup:
+        ``create_task`` repeats the check atomically when inserting.
+        """
+        _validate_create_request(spec, origin, front_id, request_key, task_id, meta)
+        if request_key is None:
+            return None
+        async with self._store.component_transaction("task_find_request") as conn:
+            return await self._find_request(
+                conn, spec, origin, front_id, request_key, deadline
+            )
+
+    @staticmethod
+    async def _find_request(
+        conn: Any,
+        spec: TaskSpec,
+        origin: str,
+        front_id: str | None,
+        request_key: str,
+        deadline: float | None,
+    ) -> TaskRecord | None:
+        row = await _first(
+            conn,
+            f"{_SELECT_TASK} WHERE origin = ? AND request_key = ?",
+            (origin, request_key),
+        )
+        if row is None:
+            return None
+        record = TaskRecord.from_row(row)
+        if not _same_request(record, spec, origin, front_id, request_key, deadline):
+            raise TaskConflictError(
+                "This request key was already used for a different task"
+            )
+        return record
+
     async def create_task(
         self,
         spec: TaskSpec,
@@ -254,6 +306,7 @@ class TaskStore:
         request_key: str | None = None,
         task_id: str | None = None,
         meta: Mapping[str, Any] | None = None,
+        deadline: float | None = None,
     ) -> tuple[TaskRecord, bool]:
         """Create the task and its ``kind="task"`` session in one transaction.
 
@@ -266,33 +319,18 @@ class TaskStore:
         """
         if not isinstance(workspace, str) or not os.path.isabs(workspace):
             raise ValueError("workspace must be a validated absolute path")
-        if origin not in TASK_ORIGINS:
-            raise ValueError(f"unknown origin {origin!r}")
-        if request_key is not None and not isinstance(request_key, str):
-            raise ValueError("request_key must be a string or None")
-        if request_key == "":
-            raise ValueError("request_key must not be empty")
-        if front_id is not None and not isinstance(front_id, str):
-            raise ValueError("front_id must be a string or None")
-        if task_id is not None and not isinstance(task_id, str):
-            raise ValueError("task_id must be a string or None")
-        meta_text = json.dumps(dict(meta or {}), sort_keys=True)
-        body = spec.to_dict()
+        meta_text, body = _validate_create_request(
+            spec, origin, front_id, request_key, task_id, meta
+        )
+        body["deadline"] = deadline
         now = self._clock()
         async with self._store.component_transaction("task_create") as conn:
             if request_key is not None:
-                row = await _first(
-                    conn,
-                    f"{_SELECT_TASK} WHERE origin = ? AND request_key = ?",
-                    (origin, request_key),
+                record = await self._find_request(
+                    conn, spec, origin, front_id, request_key, deadline
                 )
-                if row is not None:
-                    record = TaskRecord.from_row(row)
-                    if _same_request(record, spec, origin, front_id, request_key):
-                        return record, True
-                    raise TaskConflictError(
-                        "This request key was already used for a different task"
-                    )
+                if record is not None:
+                    return record, True
             identifier = task_id or _new_id()
             if await self._get(conn, identifier) is not None or await _session_exists(
                 conn, identifier
@@ -325,9 +363,9 @@ class TaskStore:
                 "INSERT INTO tasks (task_id, front_id, root_id, origin, "
                 "request_key, title, spec, state, wait_reason, hold_site, level, "
                 "level_source, level_pinned, level_eff, peak_level, reason, "
-                "user_rank, created_at, updated_at) "
+                "user_rank, deadline, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', '', '', ?, ?, ?, ?, ?, ?, "
-                "NULL, ?, ?)",
+                "NULL, ?, ?, ?)",
                 (
                     identifier,
                     front_id,
@@ -342,6 +380,7 @@ class TaskStore:
                     spec.level,
                     spec.level,
                     spec.reason,
+                    deadline,
                     now,
                     now,
                 ),
@@ -482,6 +521,291 @@ class TaskStore:
         return await self.set_level(
             task_id, choice, source="user", actor=actor, reason=reason, quote=quote
         )
+
+    async def get_task(self, task_id: str) -> TaskRecord:
+        async with self._store.component_transaction("task_get") as conn:
+            record = await self._get(conn, task_id)
+            if record is None:
+                raise TaskNotFoundError(f"No task has id {task_id}")
+            return record
+
+    async def list_tasks(self) -> list[TaskRecord]:
+        async with self._store.component_transaction("task_list") as conn:
+            rows = await _rows(
+                conn, f"{_SELECT_TASK} ORDER BY created_at DESC, task_id"
+            )
+            return [TaskRecord.from_row(row) for row in rows]
+
+    async def priority_events(self, task_id: str) -> list[dict[str, Any]]:
+        async with self._store.component_transaction("task_events") as conn:
+            rows = await _rows(
+                conn,
+                "SELECT ts, actor, from_level, to_level, pinned, "
+                "reason, quote FROM priority_events WHERE task_id = ? ORDER BY id",
+                (task_id,),
+            )
+            keys = (
+                "ts",
+                "actor",
+                "from_level",
+                "to_level",
+                "pinned",
+                "reason",
+                "quote",
+            )
+            return [dict(zip(keys, row, strict=True)) for row in rows]
+
+    async def change(
+        self,
+        task_id: str,
+        *,
+        priority: object = None,
+        state: str | None = None,
+        actor: str = "user",
+        failure_reason: str | None = None,
+    ) -> TaskRecord:
+        """Commit priority and state together, including P0 demotions and audit rows.
+
+        A failure reason is stored in wait_reason for a failed task.
+        """
+        choice = priority.strip().lower() if isinstance(priority, str) else priority
+        if (
+            isinstance(choice, str)
+            and len(choice) == 2
+            and choice[0] == "p"
+            and choice[1] in "012345"
+        ):
+            choice = int(choice[1])
+        if (
+            choice is not None
+            and choice not in ("auto", "first")
+            and (
+                isinstance(choice, bool)
+                or not isinstance(choice, int)
+                or not 0 <= choice <= 5
+            )
+        ):
+            raise ValueError("priority must be P0-P5, auto or first")
+        if state is not None and state not in {
+            "queued",
+            "running",
+            "held",
+            "parked",
+            "done",
+            "failed",
+            "cancelled",
+            "expired",
+        }:
+            raise ValueError("invalid task state")
+        if failure_reason is not None and (
+            not isinstance(failure_reason, str) or state != "failed"
+        ):
+            raise ValueError(
+                "failure_reason requires a failed state and must be a string"
+            )
+        now = self._clock()
+        async with self._store.component_transaction("task_change") as conn:
+            current = await self._get(conn, task_id)
+            if current is None:
+                raise TaskNotFoundError(f"No task has id {task_id}")
+            if current.state in _TERMINAL_STATES:
+                raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
+            if choice is not None:
+                if choice == "first":
+                    await conn.execute(
+                        "UPDATE tasks SET user_rank = ?, updated_at = ? WHERE task_id = ?",
+                        (now, now, task_id),
+                    )
+                else:
+                    level = 2 if choice == "auto" else choice
+                    source = "computed" if choice == "auto" else "user"
+                    if level == 0:
+                        await self._demote_other_p0(conn, task_id, actor, now)
+                    reason = current.reason if current.level == level else ""
+                    await self._write_level(
+                        conn, current, level, source, None, reason, now
+                    )
+                    if current.level != level:
+                        await self._event(
+                            conn,
+                            task_id,
+                            from_level=current.level,
+                            to_level=level,
+                            actor=actor,
+                            reason="",
+                            quote="",
+                            pinned=_pinned(source),
+                            ts=now,
+                        )
+                await self._log(
+                    conn,
+                    (
+                        "task.level.noop"
+                        if choice == 5
+                        and current.level == 5
+                        and current.reason == "pause"
+                        else "task.level"
+                    ),
+                    task_id,
+                    {"choice": choice, "actor": actor},
+                    ts=now,
+                )
+            if state is not None:
+                await conn.execute(
+                    "UPDATE tasks SET state = ?, started_at = CASE WHEN ? = 'running' THEN COALESCE(started_at, ?) ELSE started_at END, "
+                    "finished_at = CASE WHEN ? IN ('done','failed','cancelled','expired') THEN ? ELSE NULL END, "
+                    "wait_reason = ?, hold_site = '', updated_at = ? WHERE task_id = ?",
+                    (state, state, now, state, now, failure_reason or "", now, task_id),
+                )
+                await self._log(
+                    conn,
+                    "task.state",
+                    task_id,
+                    {"from": current.state, "to": state, "actor": actor},
+                    ts=now,
+                )
+            await self._touch_session(conn, task_id, now)
+            result = await self._get(conn, task_id)
+        assert result is not None
+        return result
+
+    async def pause(self, task_id: str, *, actor: str = "user") -> TaskRecord:
+        """Park at P5, recording the previous priority in the audit log."""
+        now = self._clock()
+        async with self._store.component_transaction("task_pause") as conn:
+            current = await self._get(conn, task_id)
+            if current is None:
+                raise TaskNotFoundError(f"No task has id {task_id}")
+            if current.state in _TERMINAL_STATES:
+                raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
+            if current.state == "parked" and current.level == 5:
+                return current
+            await self._write_level(conn, current, 5, "user", None, "pause", now)
+            await self._event(
+                conn,
+                task_id,
+                from_level=current.level,
+                to_level=5,
+                actor=actor,
+                reason="pause",
+                quote="",
+                pinned=True,
+                ts=now,
+            )
+            await conn.execute(
+                "UPDATE tasks SET state = 'parked', wait_reason = '', hold_site = '' WHERE task_id = ?",
+                (task_id,),
+            )
+            await self._log(
+                conn,
+                "task.pause",
+                task_id,
+                {
+                    "from_level": current.level,
+                    "from_source": current.level_source,
+                    "reason": current.reason,
+                    "rank": current.user_rank,
+                },
+                ts=now,
+            )
+            result = await self._get(conn, task_id)
+        assert result is not None
+        return result
+
+    async def resume(self, task_id: str, *, actor: str = "user") -> TaskRecord:
+        """Restore a pause priority; a parked P5 without a pause falls back to P2."""
+        now = self._clock()
+        async with self._store.component_transaction("task_resume") as conn:
+            current = await self._get(conn, task_id)
+            if current is None:
+                raise TaskNotFoundError(f"No task has id {task_id}")
+            if current.state in _TERMINAL_STATES:
+                raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
+            if current.state != "parked" or current.level != 5:
+                raise TaskNotPausedError(f"Task {task_id} is not paused")
+            row = (
+                await _first(
+                    conn,
+                    "SELECT id, data FROM sched_log WHERE task_id = ? AND kind = 'task.pause' ORDER BY id DESC LIMIT 1",
+                    (task_id,),
+                )
+                if current.reason == "pause"
+                else None
+            )
+            later = (
+                await _first(
+                    conn,
+                    "SELECT 1 FROM sched_log WHERE task_id = ? AND id > ? AND kind IN ('task.level', 'task.first', 'task.resume') LIMIT 1",
+                    (task_id, row[0]),
+                )
+                if row
+                else None
+            )
+            saved = json.loads(row[1]) if row and not later else None
+            level = saved["from_level"] if saved else (current.level if later else 2)
+            source = (
+                saved["from_source"]
+                if saved
+                else (current.level_source if later else "computed")
+            )
+            reason = saved["reason"] if saved else (current.reason if later else "")
+            rank = saved["rank"] if saved else (current.user_rank if later else None)
+            if level == 0 and source == "user":
+                await self._demote_other_p0(conn, task_id, actor, now)
+            await self._write_level(conn, current, level, source, rank, reason, now)
+            if current.level != level:
+                await self._event(
+                    conn,
+                    task_id,
+                    from_level=current.level,
+                    to_level=level,
+                    actor=actor,
+                    reason="resume",
+                    quote="",
+                    pinned=_pinned(source),
+                    ts=now,
+                )
+            await conn.execute(
+                "UPDATE tasks SET state = ?, wait_reason = '', hold_site = '' WHERE task_id = ?",
+                ("parked" if level == 5 else "queued", task_id),
+            )
+            await self._log(
+                conn, "task.resume", task_id, {"level": level, "source": source}, ts=now
+            )
+            result = await self._get(conn, task_id)
+        assert result is not None
+        return result
+
+    async def fail_nonterminal_on_restart(self) -> int:
+        """Fail unrecovered tasks together when a new gateway starts."""
+        now = self._clock()
+        reason = "gateway restarted; recovery arrives in S3b"
+        async with self._store.component_transaction("task_restart") as conn:
+            rows = await _rows(
+                conn,
+                "SELECT task_id, state FROM tasks WHERE state NOT IN (?, ?, ?, ?)",
+                tuple(sorted(_TERMINAL_STATES)),
+            )
+            for task_id, state in rows:
+                await conn.execute(
+                    "UPDATE tasks SET state = 'failed', wait_reason = ?, hold_site = '', "
+                    "finished_at = ?, updated_at = ? WHERE task_id = ?",
+                    (reason, now, now, task_id),
+                )
+                await self._touch_session(conn, task_id, now)
+                await self._log(
+                    conn,
+                    "task.state",
+                    task_id,
+                    {
+                        "from": state,
+                        "to": "failed",
+                        "actor": "scheduler",
+                        "reason": reason,
+                    },
+                    ts=now,
+                )
+        return len(rows)
 
     # ── Retention ──
 
@@ -637,6 +961,27 @@ class TaskStore:
         )
 
 
+def _validate_create_request(
+    spec: TaskSpec,
+    origin: str,
+    front_id: str | None,
+    request_key: str | None,
+    task_id: str | None,
+    meta: Mapping[str, Any] | None,
+) -> tuple[str, dict[str, Any]]:
+    if origin not in TASK_ORIGINS:
+        raise ValueError(f"unknown origin {origin!r}")
+    if request_key is not None and not isinstance(request_key, str):
+        raise ValueError("request_key must be a string or None")
+    if request_key == "":
+        raise ValueError("request_key must not be empty")
+    if front_id is not None and not isinstance(front_id, str):
+        raise ValueError("front_id must be a string or None")
+    if task_id is not None and not isinstance(task_id, str):
+        raise ValueError("task_id must be a string or None")
+    return json.dumps(dict(meta or {}), sort_keys=True), spec.to_dict()
+
+
 def _pinned(source: str) -> bool:
     """Whether a level source pins the level against computed changes."""
     return source in ("user", "user_rule")
@@ -648,10 +993,13 @@ def _same_request(
     origin: str,
     front_id: str | None,
     request_key: str,
+    deadline: float | None,
 ) -> bool:
     stored = {key: value for key, value in record.spec.items() if key != "task_id"}
+    stored.setdefault("deadline", None)
     expected = {
         **spec.to_dict(),
+        "deadline": deadline,
         "origin": origin,
         "request_key": request_key,
         "front_id": front_id,
@@ -686,6 +1034,7 @@ __all__ = [
     "TASK_ORIGINS",
     "TaskConflictError",
     "TaskNotFoundError",
+    "TaskNotPausedError",
     "TaskRecord",
     "TaskStore",
     "TaskStoreError",

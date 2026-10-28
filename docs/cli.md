@@ -632,9 +632,9 @@ These options apply to a task run without `--serve`.
   `--replay-turns` applies. `--base-url` runs use these flags and do not
   read the config file.
 - `--retriever`, `--recall-*` and `--retrieval-extra-body`: see
-  [Recall in the loop](memory.md#recall-in-the-loop). `--retriever` and
-  `--recall-*` are accepted in the interactive UI; `--retrieval-extra-body`
-  is refused there for now. They have no effect in `legacy`: every one of
+  [Recall in the loop](memory.md#recall-in-the-loop). `--retriever`,
+  `--recall-*` and `--retrieval-extra-body` are accepted in the interactive
+  UI. They have no effect in `legacy`: every one of
   them is a usage error there (exit 2, one line), as are `--retriever
   embedding` without an embedding provider or with `--memory off`,
   `--recall-placement message` in `replay`/`compress+replay`, `--recall-at
