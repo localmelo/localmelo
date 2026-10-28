@@ -139,6 +139,9 @@ tables of the chosen backends.
 | `n_fg` | `[scheduler]` | `1` | Background calls allowed in flight while a chat is focused. |
 | `call_log` | `[scheduler]` | `true` | Write one JSONL call log per gateway run. |
 | `call_log_dir` | `[scheduler]` | `""` | The log's parent directory; the default is `~/.cache/localmelo/scheduler`. |
+| `gpu_lock_file` | `[scheduler]` | `""` | The shared GPU lock to read; empty means no lock reader. The battery reader is always on in the gateway. |
+| `lock_self` | `[scheduler]` | `""` | This bench's own holder: the exact `holder:` value, or `holder:run` when the lock carries a `run:` line. Matching is exact and case-sensitive. |
+| `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](scheduler.md#the-gpu-lock-and-the-battery-s2b). |
 
 A `[scheduler]` table that is all defaults is not written, and unknown
 scheduler keys are dropped, so a config file without such a table keeps its

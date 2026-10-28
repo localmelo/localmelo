@@ -18,6 +18,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   schema-1 line in `~/.cache/localmelo/scheduler/runs/<UTC>/calls.jsonl`.
   Direct runs, the CLI and `/v1/agent/run` are unchanged and gated nowhere
   ([#69]).
+- The gateway reads the shared GPU lock and `pmset -g batt`, records both in
+  `machine.jsonl` beside the call log, and shows the holder and the battery
+  in the workspace header. `[scheduler] lock_gate` defaults to `record`,
+  which changes no request; `wait` holds every workspace call, embeddings
+  included, while a foreign lock is present, and shows
+  `Waiting: Reservation`. `lock_self` is an exact holder (or `holder:run`);
+  unreadable and stale locks are foreign, and localmelo never writes,
+  renames or removes a lock. Direct runs, the CLI and `/v1/agent/run` are
+  unchanged and read neither source ([#NN]).
 - Tools have a permission tier, and an approval policy asks by tier rather
   than by a fixed list of names. The built-ins keep their tiers (`file_read`
   read, `file_write` write, `shell_exec` and `python_exec` exec), and a
