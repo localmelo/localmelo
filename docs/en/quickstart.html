@@ -364,16 +364,19 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
         <p>
           The web workspace at <code>http://127.0.0.1:8401/</code> is the
           console's live page and talks only to <code>/api</code>: it uses the
-          gateway's configured model, so <code>melo --reconfigure</code> changes
-          it. It lists your chats newest first, with search and a draft for
+          gateway's configured model, which you can change in connection settings
+          or with <code>melo --reconfigure</code>. It lists your chats newest first, with search and a draft for
           each, and draws a turn as the terminal does: your message, a work
           card for each tool call, folded reasoning and reflections, notices,
           the live progress row and the answer with its facts and
           <code>Copy response</code>. Stop cancels the turn, a waiting approval
           shows as <code>Needs approval</code>, and the chats are saved in the
           gateway's <code>sessions.db</code>, so a restart keeps them. Other
-          browser tabs on the same gateway see the same chats. The approval
-          cards and the settings dialog arrive in a later update.
+          browser tabs on the same gateway see the same chats. Approval cards
+          let you allow or deny tool calls; the settings dialog configures the
+          connection. The Workers section shows saved worker runs read-only.
+          The gateway has no login, and approvals are not a security boundary
+          against other local processes.
         </p>
       </section>
 

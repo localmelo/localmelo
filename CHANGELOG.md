@@ -9,6 +9,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Correct the API v2 response formats and tools example, and update the bilingual
+  quickstart to reflect the shipped console settings and approvals ([#122], [#124]).
+  Clarify task validation and read-only worker details ([#119], [#123], [#130], [#NN]).
+
 - Attempt digests skip task headings and report verification only for passing
   checks, rather than treating trivial Python imports as tests ([#128]).
 
