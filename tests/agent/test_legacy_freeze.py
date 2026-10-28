@@ -84,6 +84,13 @@ LATER_OPTIONS = [
     "--workspace",
     "--yolo",
     "--note-writer",
+    "--retriever",
+    "--recall-at",
+    "--recall-k",
+    "--recall-kinds",
+    "--recall-placement",
+    "--recall-min-score",
+    "--retrieval-extra-body",
 ]
 
 
