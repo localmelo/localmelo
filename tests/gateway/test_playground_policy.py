@@ -255,7 +255,12 @@ async def test_a_hold_wakes_when_the_focus_window_expires(
         started = gate.turn_start("waiting")
         held = gate.submit("waiting")
         assert not admitted(held)
-        task = asyncio.create_task(gate.acquire(held))
+
+        async def held_task() -> RunResult:
+            await gate.acquire(held)
+            return RunResult(task_id="t", status="completed", result="done")
+
+        task = asyncio.create_task(held_task())
         waiter = asyncio.create_task(
             manager._wait_for_turn("waiting", task, 60.0, started)
         )
