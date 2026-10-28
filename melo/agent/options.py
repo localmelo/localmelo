@@ -171,6 +171,7 @@ class AgentOptions:
       modes.
     """
 
+    captured_history: bool = False
     context_window: int | None = None
     output_reserve: int | None = None
     safety_margin: int | None = None
@@ -277,7 +278,7 @@ class AgentOptions:
         if not isinstance(self.memory, bool):
             raise ValueError(f"memory must be a bool, got {self.memory!r}")
 
-        for name in ("admit_on_outcome", "keep_decision_text"):
+        for name in ("admit_on_outcome", "keep_decision_text", "captured_history"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a bool, got {getattr(self, name)!r}")
 

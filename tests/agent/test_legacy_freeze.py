@@ -106,6 +106,7 @@ LATER_OPTIONS = [
     "--parent-run",
     "--import-session",
     "--title",
+    "--captured-history",
     "--context-window",
     "--output-reserve",
     "--safety-margin",

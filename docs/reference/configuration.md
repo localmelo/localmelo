@@ -210,6 +210,15 @@ retry policy. Events and JSON results report the estimate, actual prompt count i
 pruning counts without storing prompt text. The output reserve is not a provider generation cap;
 the independent character guard still applies.
 
+Opt in to separate captured tool history with `[agent] captured_history = true` or
+`--captured-history on`; `off` overrides the setting. The checked preview uses a 50,000-character
+ceiling including truncation and image notices. History stores a distinct, pattern-redacted copy of
+up to 200,000 characters per result (errors first), with exact omitted counts relative to the
+redacted capture. `acquisition_omitted_chars` is null because the tool may already have limited its
+output. Capture is not a complete file or unlimited stdout; redaction is pattern-based and can miss
+secrets. Existing history retention and permissions apply, and captured text is not sent as a model
+preview. The option is off by default.
+
 ## Embedding and long-term memory
 
 Long-term memory needs an embedding backend; see
