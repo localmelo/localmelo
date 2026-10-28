@@ -215,6 +215,16 @@ def test_the_three_modes_are_mutually_exclusive(
     assert "cannot be combined" in capsys.readouterr().err
 
 
+def test_export_run_refuses_memory_dir(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert (
+        retrieve.main(["--export-run", str(tmp_path), "--memory-dir", str(tmp_path)])
+        == 2
+    )
+    assert "--memory-dir applies only to --route" in capsys.readouterr().err
+
+
 def test_route_needs_an_explicit_scratch_directory(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
