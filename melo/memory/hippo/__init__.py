@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from localmelo.melo.memory.hippo.policy import (
     ACTIONS,
     CHANGE_MARKERS,
+    EXACT_DUPLICATE_REASON,
     FILE_ONLY_WORDS,
     PROFILE_PREDICATES,
     SEMANTIC_ATTRIBUTES,
@@ -73,6 +74,7 @@ class MemoryDecision:
 __all__ = [
     "ACTIONS",
     "CHANGE_MARKERS",
+    "EXACT_DUPLICATE_REASON",
     "FILE_ONLY_WORDS",
     "KINDS",
     "PROFILE_PREDICATES",
