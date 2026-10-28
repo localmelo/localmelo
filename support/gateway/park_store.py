@@ -196,6 +196,53 @@ class ParkStore:
             operation_id=operation_id,
         )
 
+    async def interrupt(
+        self,
+        task_id: str,
+        *,
+        card: str,
+        expected_generation: int | None,
+        expected_operation_id: str | None,
+        operation_id: str,
+        reason: str = "park not saved; retries exhausted",
+        allow_empty: bool = False,
+    ) -> ParkRecord:
+        """Save a recoverable interruption after park retries are exhausted."""
+        if (
+            not isinstance(card, str)
+            or len(card) > 2000
+            or (not card.strip() and not allow_empty)
+        ):
+            raise ValueError("card must be non-empty and at most 2000 characters")
+        return await self._transition(
+            task_id,
+            "interrupted",
+            card=card,
+            reason=reason,
+            expected_generation=expected_generation,
+            expected_operation_id=expected_operation_id,
+            operation_id=operation_id,
+        )
+
+    async def mark_park_retry(
+        self,
+        task_id: str,
+        *,
+        expected_generation: int | None,
+        expected_operation_id: str | None,
+        operation_id: str,
+        reason: str = "park not saved; retrying",
+    ) -> ParkRecord:
+        """Record a retryable park failure without opening the worker fence."""
+        return await self._transition(
+            task_id,
+            "retrying",
+            reason=reason,
+            expected_generation=expected_generation,
+            expected_operation_id=expected_operation_id,
+            operation_id=operation_id,
+        )
+
     async def _transition(
         self,
         task_id: str,
@@ -264,7 +311,7 @@ class ParkStore:
                 raise ParkStoreError(f"Task {task_id} is terminal")
             snapshot = await (
                 await conn.execute(
-                    "SELECT generation, operation_id, pause_pending FROM park_priority WHERE task_id = ?",
+                    "SELECT generation, operation_id, pause_pending, snapshot_active FROM park_priority WHERE task_id = ?",
                     (task_id,),
                 )
             ).fetchone()
@@ -277,6 +324,12 @@ class ParkStore:
                 if not current or old is None:
                     raise ParkStoreError("Operation superseded")
                 return old
+            if target in {"interrupted", "retrying"} and (
+                not snapshot or not snapshot[3] or row[4] != 5 or row[5] != "pause"
+            ):
+                raise ParkStoreError(
+                    "Interrupted recovery requires an active pause snapshot"
+                )
             if target == "running" and snapshot is not None and snapshot[2]:
                 raise ParkStoreError("Cannot resume while pause is pending")
             phase = json.loads(row[1]).get("status") if old else None
@@ -292,7 +345,10 @@ class ParkStore:
             expected = "running" if target == "held" else "held"
             paused_hold = paused and target == "held" and old is None
             paused_park = (
-                paused and target == "parked" and old is not None and phase == "held"
+                paused
+                and target in {"parked", "interrupted", "retrying"}
+                and old is not None
+                and phase == "held"
             )
             if not (paused_hold or paused_park) and (
                 state != expected
@@ -301,6 +357,7 @@ class ParkStore:
                 raise ParkStoreError(f"Cannot transition {state} to {target}")
             if target != "held":
                 assert old is not None
+                requested_reason = reason
                 site, step, agent, attempt, reason = (
                     old.site,
                     old.step,
@@ -310,7 +367,13 @@ class ParkStore:
                 )
                 if target == "running":
                     card = old.card
-            task_state = "parked" if paused_hold else target
+                elif target == "interrupted":
+                    reason = requested_reason
+                elif target == "retrying":
+                    reason, card = requested_reason, old.card
+            task_state = (
+                state if target == "retrying" else ("parked" if paused_hold else target)
+            )
             record = ParkRecord(
                 task_id,
                 task_state,
@@ -324,7 +387,7 @@ class ParkStore:
             )
             metadata = json.dumps(
                 {
-                    "status": target,
+                    "status": "held" if target == "retrying" else target,
                     "task_state": task_state,
                     "site": site,
                     "step": step,
@@ -347,8 +410,12 @@ class ParkStore:
             )
             pending_id = (
                 operation_id
-                if target == "parked" and snapshot is None
-                else None if target == "parked" else expected_operation_id
+                if target in {"parked", "interrupted"} and snapshot is None
+                else (
+                    None
+                    if target in {"parked", "interrupted"}
+                    else expected_operation_id
+                )
             )
             try:
                 new_generation = await compare_park_identity(
@@ -357,11 +424,11 @@ class ParkStore:
                     expected_generation=expected_generation,
                     expected_operation_id=expected_operation_id,
                     operation_id=pending_id,
-                    create=target == "parked",
+                    create=target in {"parked", "interrupted"},
                 )
             except TaskConflictError as exc:
                 raise ParkStoreError(str(exc)) from exc
-            if target == "parked":
+            if target in {"parked", "interrupted"}:
                 await conn.execute(
                     "UPDATE park_priority SET pause_pending = 0 WHERE task_id = ?",
                     (task_id,),
@@ -374,6 +441,8 @@ class ParkStore:
                     "held": "sched.held",
                     "running": "sched.resumed",
                     "parked": "sched.parked",
+                    "interrupted": "sched.interrupted",
+                    "retrying": "sched.park_retrying",
                 }[target],
                 {
                     "task_id": task_id,
@@ -385,7 +454,9 @@ class ParkStore:
                     "card": card,
                     "state": task_state,
                     "pause_pending": bool(
-                        snapshot and snapshot[2] and target != "parked"
+                        snapshot
+                        and snapshot[2]
+                        and target not in {"parked", "interrupted"}
                     ),
                     "park_request": request,
                     "generation": new_generation,

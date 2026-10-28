@@ -14,6 +14,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Worker park integration fences held provider and approval delivery, persists
+  pause intent and evidence-based cards, releases cleanly parked worker slots,
+  and re-asks withdrawn approvals on resume. Failed park writes retry and can
+  interrupt with a card; unavailable storage keeps the fence closed, and failed
+  cleanup quarantines the slot until restart. Restart replay and accounting are
+  deferred. [#NN]
+
 - Opt-in context-window request accounting reports estimated and measured planning/reflection
   tokens in events and run results; it does not prune or enforce an output cap ([#126]).
 
