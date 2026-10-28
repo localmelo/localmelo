@@ -424,6 +424,23 @@ async def test_user_can_set_priority_on_a_non_user_origin(tasks: TaskStore) -> N
     changed = await tasks.set_priority(record.task_id, "P0")
     assert (changed.origin, changed.level, changed.level_source) == ("front", 0, "user")
 
+    # Recovery must accept the persisted user priority for a front-origin task.
+    from localmelo.support.gateway.chat_gate import ChatGate
+    from localmelo.support.scheduler import Task
+
+    gate = ChatGate(policy="class")
+    gate.register_task(
+        Task(
+            task_id=changed.task_id,
+            origin="front",
+            level=changed.level,
+            level_source="user",
+            phase="queued",
+        )
+    )
+    assert gate.level(changed.task_id) == 0
+    await gate.close()
+
 
 async def test_a_pinned_level_needs_force_to_become_computed(tasks: TaskStore) -> None:
     record, _ = await tasks.create_task(spec(), origin="user")

@@ -1307,3 +1307,18 @@ class TestGatewayWorkspaceAndAtomicSave:
             assert any(
                 err.startswith("[gateway] workspace") for err in loaded.validate()
             )
+
+    def test_gateway_workspace_rejects_root_home_and_symlinks(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        link = tmp_path / "home-link"
+        link.symlink_to(home, target_is_directory=True)
+        cfg = _timeout_cfg()
+        for path in ("/", "~/", str(home), str(link)):
+            cfg.gateway.workspace = path
+            assert any("[gateway] workspace" in error for error in cfg.validate()), path
+        cfg.gateway.workspace = str(home / "project")
+        assert not any("[gateway] workspace" in error for error in cfg.validate())
