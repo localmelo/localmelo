@@ -193,8 +193,8 @@ data: {"id":790,"session_id":"3f9c2a7b1d4e","turn":3,"v":1,"type":"turn.started"
 - `after` defaults to 0. The `Last-Event-ID` header wins over it when both
   are present, which is what a browser's `EventSource` sends when it
   reconnects; an `after` that would be invalid is not read then. Otherwise
-  it must be decimal digits: negative, `+1`, `1_0` and non-numeric values
-  are 400 `invalid_request`.
+  it must be decimal digits within a signed 64-bit integer: negative, `+1`,
+  `1_0`, non-numeric and too-large values are 400 `invalid_request`.
 - `follow=false` sends the stored events after the start point, up to the
   newest event id the request read, and then ends the response; it is
   one-shot catch-up, and a turn that starts while it pages adds no frames.
