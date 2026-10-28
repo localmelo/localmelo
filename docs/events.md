@@ -210,10 +210,10 @@ redaction of secrets, which replaces each with `[redacted]`:
   `passcode`, `OTP` or `验证码`, on the same line.
 
 The redaction runs on the whole text, before it is clipped, and only for a
-run with a sink. Working memory, history's tasks and steps, the `RunResult`
-and `run.finished` keep the text as the model wrote it, while history's
-model calls store it with the same redaction (see
-[Model calls](memory.md#model-calls)).
+run with a sink. Working memory, the requests a run sends, the `RunResult`
+and `run.finished` keep the text as the model wrote it, while history
+stores its tasks and steps with the same redaction, and its model calls
+too (see [Model calls](memory.md#model-calls)).
 
 ### tool.started
 
@@ -326,14 +326,18 @@ stores it, and a turn's last `digest` note goes to the turn's `note` column.
   it.
 - `requests`: the number of reflection requests, 1 or 2. A reply that holds
   no reflection is asked for once more, without tools; the second request
-  gets no event of its own.
+  gets no event of its own. In the compress modes the prompt fit can
+  refuse a request before it is sent, which reads as an unreadable reply:
+  `requests` is then 0, or 1 when only the retry was refused.
 - `readable`: `false` when, with the default `reflection_gate="flags"`, the
   second reply still held no reflection. `requests` is then 2; `action`,
   `rationale`, `summary` and `best_effort_result` are `null`; and
   `continue_run` is `true`, unless no attempt could start, in which case the
   run ends as `budget_exhausted`. With `"utility"` it is always `true`: such
   a reply counts as `stop`, with the rationale
-  `Could not parse reflection response`.
+  `Could not parse reflection response`, or
+  `Reflection response was not a JSON object` when it was valid JSON that
+  is not an object.
 - `usage` and `duration_s`: the token counts and the time of both requests,
   their retries included. With persistence on, `duration_s` also includes
   recording the replies in history, which can wait up to 5 seconds while
@@ -450,8 +454,12 @@ returned.
   `RunResult.n_tool`. `run.finished`'s `result` equals the `to_dict()` of
   the `RunResult` that `run_task` returns, or would have returned. The
   `usage` of the run's `assistant.message` and `reflection` events adds up
-  to `RunResult.usage`, except in these cases, where a reply is counted but
-  no event carries it:
+  to the token counts of `RunResult.usage` (`prompt_tokens`,
+  `completion_tokens`, `total_tokens`). The explicit reasoning modes also
+  put `reasoning_chars` in `RunResult.usage`, and `cached_tokens` or
+  `reasoning_tokens` when the server reports them, which no event carries.
+  The events fall short of the run's counts in these cases too, where a
+  reply is counted but no event carries it:
   - the response check raised an exception after the reply arrived, which
     ends the run as `crashed`;
   - the second request of a reflection failed after the first had returned;
