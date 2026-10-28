@@ -205,6 +205,11 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
   embedding server does not stop the setup: the wizard saves with
   embedding off.
 
+A gateway HTTP 401 means its bearer or browser session is missing or invalid.
+Run `melo --gateway-login` in a terminal for a fresh single-use link, adding
+`--port PORT` when needed. For API clients use the private gateway token;
+rotation invalidates existing browser sessions. See [gateway security](../guides/gateway.md#keep-the-gateway-private).
+
 ### `melo --serve --reconfigure` does not return
 
 - **Cause:** after saving, the wizard starts the gateway, which keeps running.
