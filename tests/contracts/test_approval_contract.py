@@ -152,6 +152,32 @@ class TestDenialText:
         )
 
 
+class TestApprovalRequest:
+    def test_the_tier_defaults_to_none(self) -> None:
+        # Only a caller that builds the request itself leaves it out; an
+        # agent always fills it.
+        assert _request().tier is None
+        assert (
+            _request().request_id,
+            _request().tool_name,
+            _request().arguments,
+        ) == ("0" * 32, "shell_exec", {"command": "ls"})
+
+    @pytest.mark.parametrize("tier", ["read", "write", "exec", "network"])
+    def test_the_four_tiers_are_accepted(self, tier: Any) -> None:
+        request = ApprovalRequest(
+            request_id="0" * 32,
+            run_id="run",
+            call_id="call_1",
+            tool_name="shell_exec",
+            arguments={"command": "ls"},
+            preview="ls",
+            workspace_root=None,
+            tier=tier,
+        )
+        assert request.tier == tier
+
+
 class TestPolicies:
     @pytest.mark.asyncio
     async def test_allow_all(self) -> None:

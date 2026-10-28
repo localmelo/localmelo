@@ -169,6 +169,7 @@ class ReleaseTools(BaseToolProvider):
                     name="changelog",
                     description="Show the changelog",
                     parameters={"type": "object", "properties": {}},
+                    annotations={"readOnlyHint": True},
                 ),
                 function=self._changelog,
             ),
@@ -380,8 +381,8 @@ class TestWhoIsAsked:
         assert result.status == "completed"
         assert agent.executor.requires_approval("release")
         assert not agent.executor.requires_approval("changelog")
-        assert [(r.tool_name, dict(r.arguments)) for r in policy.requests] == [
-            ("release", {"version": "1.2"})
+        assert [(r.tool_name, dict(r.arguments), r.tier) for r in policy.requests] == [
+            ("release", {"version": "1.2"}, "write")
         ]
         assert provider.ran == ["changelog", "release 1.2"]
 
@@ -462,6 +463,7 @@ class TestRequest:
             arguments=write,
             preview=f"{target} (5 chars)",
             workspace_root=None,
+            tier="write",
         )
         assert deploy_request == ApprovalRequest(
             request_id=deploy_request.request_id,
@@ -471,6 +473,7 @@ class TestRequest:
             arguments={"target": "prod"},
             preview='{"target":"prod"}',
             workspace_root=None,
+            tier="write",
         )
         assert (again.run_id, again.call_id) == (second.task_id, "call_d")
         ids = [request.request_id for request in policy.requests]
@@ -510,11 +513,29 @@ class TestRequest:
             arguments={"path": resolved, "content": "hi"},
             preview=f"{resolved} (2 chars)",
             workspace_root=agent.workspace_root,
+            tier="write",
         )
         assert agent.workspace_root == os.path.realpath(root)
         [started] = recorder.of("run.started")
         assert started.data["workspace_root"] == agent.workspace_root
         assert Path(resolved).read_text() == "hi"
+
+    @pytest.mark.asyncio
+    async def test_a_shell_exec_request_is_exec(self) -> None:
+        llm = ScriptedLLM(
+            [
+                _calls(("shell_exec", {"command": "printf hi"}, "call_s")),
+                _answer("done"),
+            ]
+        )
+        policy = Policy(ApprovalDecision(True))
+        agent, _ = _agent(llm, builtins=frozenset({"shell_exec"}))
+
+        result = await agent.run_task("say hi", approval=policy)
+
+        assert result.status == "completed"
+        [request] = policy.requests
+        assert (request.tool_name, request.tier) == ("shell_exec", "exec")
 
     @pytest.mark.asyncio
     async def test_the_arguments_are_a_copy(self, tmp_path: Path) -> None:
