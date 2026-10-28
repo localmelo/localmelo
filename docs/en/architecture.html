@@ -187,6 +187,18 @@
           request, the task's length and the session id, before a run.
         </p>
         <p>
+          Under <code>/api/</code> it serves API v2, the web console's
+          read-only API: health, the sessions list and one session, a
+          session's turns with their events, a Server-Sent Events stream,
+          image blobs and submission lookups. The console opens a session's
+          agent on demand and resumes its conversation when an idle sweep or
+          the open cap closed it. API v2 is served only on a loopback
+          address, carries one error envelope and <code>Cache-Control:
+          no-store</code>, and only grows; a turn cannot be started, stopped
+          or retried through it yet. See
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2</a>.
+        </p>
+        <p>
           At <code>/</code> it serves the web workspace, which does not read
           the config file: it lists the models of a server whose URL you
           enter, and keeps up to 12 chats of its own, with search, a draft for
@@ -216,8 +228,10 @@
           <code>session.py</code>, <code>guard.py</code> (the
           <code>Host</code> and <code>Origin</code> checks),
           <code>webapp.py</code> and <code>playground.py</code> (the web
-          workspace's routes and chats), <code>static/</code> (its page), and
-          <code>daemon.py</code> for the macOS background service.
+          workspace's routes and chats), <code>console/</code> (the
+          console's session store and API v2 routes), <code>static/</code>
+          (its page), and <code>daemon.py</code> for the macOS background
+          service.
         </p>
 
         <h3 id="c-mcp">MCP servers</h3>
@@ -232,7 +246,9 @@
           <code>mcp_config</code> key); the gateway does not load them yet. A server's <code>require_approval</code>
           makes calls of its tools, or of the tools it names, ask the run's
           approval policy first; a run without a policy, such as a direct run,
-          runs them without asking.
+          runs them without asking. Each server starts with the same minimal
+          environment as a tool's child process, plus the <code>env</code> its
+          entry names.
         </p>
         <p>
           Key files: <code>support/mcp/config.py</code>, <code>client.py</code>,
@@ -325,7 +341,16 @@
           never reads the terminal. <code>python_exec</code> code always runs
           in a child process, which a time limit or a cancellation kills: in
           the current directory without a workspace root, in the root with
-          one. A refusal, a denial, a time-out or an error comes back as the
+          one. The child of <code>shell_exec</code> or
+          <code>python_exec</code> gets only <code>PATH</code>,
+          <code>HOME</code>, <code>USER</code>, <code>LOGNAME</code>,
+          <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, every
+          <code>LC_*</code> variable and <code>TMPDIR</code>, plus
+          <code>AgentOptions(tool_env=…)</code>: an API key in melo's
+          environment reaches no tool, and <code>VIRTUAL_ENV</code>,
+          <code>PYTHONPATH</code>, <code>SSH_AUTH_SOCK</code> and the proxy
+          variables pass only through <code>tool_env</code>. A refusal, a
+          denial, a time-out or an error comes back as the
           tool's error.
         </p>
         <p>
@@ -357,12 +382,29 @@
           procedural memory stay in RAM, or go to <code>history.db</code>,
           <code>long_term.db</code> and <code>procedures.db</code> when
           persistence is on. New files are created readable only by you (mode
-          0600). The Python API can forget a task's history rows and the
+          0600). The text history and long-term memory keep is redacted before
+          it is written: <code>sk-</code> keys, GitHub tokens, AWS access key
+          ids, the token after <code>Bearer</code> and a one-time code next to
+          its keyword, as events and model calls already were; the run, its
+          requests and the model keep the text. The Python API can forget a
+          task's history rows and the
           long-term reflections that name it with
           <code>Hippo.forget(task_id)</code>, and empty history and long-term
           memory, step summaries included, with <code>forget_all()</code>. The
           tool registry holds every registered tool,
           with the BM25 index that retrieve mode searches.
+        </p>
+        <p>
+          In the <code>compress</code> and <code>compress+replay</code>
+          reasoning modes, each reply becomes a short note (its plan, what it
+          found, decided and left open, and what its tools returned) with its
+          code drafts, kept in a RAM-only note store beside the working window
+          and rehearsed into an attempt digest as later notes, calls and
+          reflections use it. Every note, draft and digest passes the
+          <code>check_memory_candidate</code> boundary (redact, sanitize, cap)
+          before it reaches the window or the store. Nothing is recalled from
+          the notes yet, and history gains no notes table. See
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">Reasoning notes</a>.
         </p>
         <p>
           <code>melo/memory/retrieval/</code> holds three switchable
@@ -387,8 +429,9 @@
           turn's run for its <code>run.progress</code> events and stores them
           with the turn. The gateway's file and the terminal's file are separate.
           The interactive UI runs its turns on sessions, though it cannot
-          resume one yet; the gateway does not use them (code:
-          <code>support/sessions/</code>). See
+          resume one yet; the gateway opens its own file for the web console
+          and API v2, while its <code>/v1</code> sessions stay in RAM (code:
+          <code>support/sessions/</code>, <code>support/gateway/console/</code>). See
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/sessions.md">Sessions</a>.
         </p>
         <p>
@@ -504,15 +547,17 @@
       <section class="section" id="status">
         <h2>What exists today</h2>
         <ul>
-          <li>Direct mode with run options, including how a reply's reasoning is sent back (<code>legacy</code>, <code>drop</code> or <code>replay</code>), nine run statuses, text or JSON output, and fixed exit codes.</li>
+          <li>Direct mode with run options, including how a reply's reasoning is sent back or kept (<code>legacy</code>, <code>drop</code>, <code>replay</code>, <code>compress</code> or <code>compress+replay</code>), nine run statuses, text or JSON output, and fixed exit codes.</li>
           <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals with the diff a file write will make, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>, <code>/approvals</code>, <code>/status</code>, <code>/mcp</code> and <code>/retry</code>, and an MCP servers file (<code>--mcp-config</code> or the config's <code>mcp_config</code>); and the plain conversation loop (<code>melo ""</code>).</li>
           <li>Four built-in tools, with <code>python_exec</code> in a child process in every mode, and tools from local MCP servers in direct mode, the Python API and the interactive UI.</li>
+          <li>Tool children and MCP servers run with a minimal environment (<code>PATH</code>, <code>HOME</code>, <code>USER</code>, <code>LOGNAME</code>, <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, <code>LC_*</code>, <code>TMPDIR</code>), plus <code>AgentOptions(tool_env)</code> or the server's <code>env</code>; nothing else is inherited.</li>
           <li>A step offers the built-in tools, the tools the model has already called in the conversation and the three closest matches for the task (the default <code>retrieve</code> mode); <code>all</code> offers every tool on every step.</li>
           <li>The Python API (experimental): run events, stopping a run, approval policies for tool calls, a workspace root for the file tools, and conversations that carry over between runs.</li>
-          <li>Sessions (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>); a runner can ask its turns for progress events. The interactive UI keeps its turns in them; the gateway does not use them yet.</li>
-          <li>The gateway: the HTTP API, sessions that close on request only when idle, the web workspace, whose chats pass through the scheduler's policy (<code>off</code> by default) and whose header shows the GPU lock and the battery, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
+          <li>Sessions (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>); a runner can ask its turns for progress events. The interactive UI keeps its turns in them, and the gateway opens its console session store for the web console and API v2; the <code>/v1</code> HTTP API does not use sessions yet.</li>
+          <li>The gateway: the HTTP API, the console's read-only API v2 under <code>/api</code> (health, sessions, turns, an event stream, blobs and submissions), sessions that close on request only when idle, the web workspace, whose chats pass through the scheduler's policy (<code>off</code> by default) and whose header shows the GPU lock and the battery, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
           <li>Backends for Ollama, MLC LLM, vLLM, SGLang and four cloud APIs.</li>
-          <li>Working memory, history and long-term memory, saved to SQLite when persistence is on; the saved history also keeps every model call with its reasoning, for 30 days by default, and the Python API can forget a task's memory or all of it.</li>
+          <li>Working memory, history and long-term memory, saved to SQLite when persistence is on; the saved text is redacted first, the saved history also keeps every model call with its reasoning, for 30 days by default, and the Python API can forget a task's memory or all of it.</li>
+          <li>Reasoning notes: the <code>compress</code> and <code>compress+replay</code> modes keep a short note of each reply and its code drafts in a RAM-only store beside the working window and rehearse them into an attempt digest; nothing is recalled from them yet.</li>
           <li><code>melo-retrieve</code>, which compares the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers offline. Runs do not use the retrievers yet.</li>
           <li>Procedural memory: each run records its steps, and a completed run updates the step template of its task, in <code>procedures.db</code> with persistence on. Python callers get <code>run.progress</code> events with <code>progress=True</code>, without a percent bar for now. On a terminal, <code>melo &quot;&lt;task&gt;&quot;</code> draws them as a progress line on stderr (<code>support/progress_line.py</code>). <code>melo-procedures</code> replays the progress rules offline.</li>
           <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>), and the gateway's chat gate, GPU-lock reader and battery reader (<code>support/gateway/chat_gate.py</code>, <code>machine_monitor.py</code>). Direct runs, <code>melo ""</code> and the HTTP API do not go through it.</li>
