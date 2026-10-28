@@ -21,6 +21,8 @@ model server. It connects to the configured gateway or an explicit loopback
 and environment proxies. Start the gateway first. A missing or unsafe token,
 unreachable gateway or rejected request is an error, not a reason to fall
 back to unauthenticated requests. The token is not accepted as an argument.
+An explicit `--gateway` bypasses gateway configuration loading. Loopback names
+and numeric spellings accepted by the gateway are supported without DNS lookup.
 
 - `new TEXT`, `new --brief FILE` or `new --stdin` submits one objective;
   optional `--title`, `--workspace`, `--level P0` through `P5` and
@@ -37,13 +39,13 @@ back to unauthenticated requests. The token is not accepted as an argument.
   rechecks task state. It reconnects using durable event IDs, not run-local
   sequence numbers. A terminal state is a snapshot; retention and finalization
   races mean event completeness is not guaranteed. Repeated disconnects or
-  invalid events are errors; Ctrl-C does not stop the task. Without `--wait`, a
+  invalid events are errors; Ctrl-C exits 130 without stopping the task. Without `--wait`, a
   terminal observation exits 0; with `--wait`, done exits 0, failed 1, and
   cancelled or expired 2. Other successful operations exit 0; usage errors
   exit 2 and network, authentication or output failures exit 1.
 - `--json` emits one versioned JSON object per non-stream command, or NDJSON
-  for follow. Argument parser errors print usage to stderr instead of JSON.
-  Check the terminal record and process exit; EOF alone is not success. Error
+  for follow. Follow diagnostics and argument parser errors go to stderr, not
+  JSON stdout. Check the terminal record and process exit; EOF alone is not success. Error
   details and terminal output may contain sensitive task data;
   review output before sharing. This is not the direct worker result schema.
 

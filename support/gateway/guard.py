@@ -18,7 +18,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from localmelo.support.gateway.auth import GatewayAuth
-from localmelo.support.loopback import is_loopback
+from localmelo.support.loopback import is_loopback as is_loopback
 
 # The names of the gateway in a Host header or an origin, IPv6 in brackets.
 _GATEWAY_NAMES = ("127.0.0.1", "localhost", "[::1]")

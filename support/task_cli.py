@@ -51,9 +51,11 @@ def address(url: str) -> str:
         if host.lower() in ("localhost", "localhost."):
             host = "127.0.0.1"
         else:
-            host = socket.getaddrinfo(
-                host, None, type=socket.SOCK_STREAM, flags=socket.AI_NUMERICHOST
-            )[0][4][0]
+            host = str(
+                socket.getaddrinfo(
+                    host, None, type=socket.SOCK_STREAM, flags=socket.AI_NUMERICHOST
+                )[0][4][0]
+            )
         rendered = f"[{host}]" if ":" in host else host
         return f"{parsed.scheme}://{rendered}:{port}"
     except (OSError, UnicodeError, ValueError):
