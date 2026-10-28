@@ -250,6 +250,9 @@ class ConsoleSessions:
             workspace = self._default_workspace
             try:
                 os.makedirs(workspace, mode=0o700, exist_ok=True)
+                # The real path, as a create stores it: the row and the
+                # Agent's workspace_root agree from the start.
+                workspace = os.path.realpath(workspace)
                 await self._store.update_session(session_id, workspace=workspace)
             except SessionStoreError as exc:
                 raise ApiError(503, "store_unavailable", str(exc)) from exc
@@ -469,7 +472,12 @@ class ConsoleSessions:
             )
 
     def _resolve_workspace(self, workspace: str | None) -> str:
-        """The folder a new session gets: the default, or a checked path."""
+        """The folder a new session gets: the default, or a checked path.
+
+        The real path is what the row keeps, so every stored workspace is
+        the Agent's ``workspace_root``: a link or a ``..`` path cannot make
+        a session that a later open reads as a different folder.
+        """
         if workspace is None:
             path = self._default_workspace
             try:
@@ -481,7 +489,7 @@ class ConsoleSessions:
                     f"Could not create the default workspace "
                     f"{display.home_label(path)}: {exc}",
                 ) from exc
-            return path
+            return os.path.realpath(path)
         if not isinstance(workspace, str) or not (
             os.path.isabs(workspace) or workspace.startswith("~/")
         ):
@@ -497,7 +505,7 @@ class ConsoleSessions:
                 "invalid_workspace",
                 f"Not a directory: {display.home_label(path)}",
             )
-        return path
+        return os.path.realpath(path)
 
     def _create_lock(self, client_request_id: str | None) -> asyncio.Lock | None:
         """The lock of *client_request_id*'s create, or ``None`` for an unkeyed one."""
@@ -627,8 +635,10 @@ class ConsoleSessions:
                 client_request_id=client_request_id,
             )
         except BaseException:
-            with contextlib.suppress(Exception):
-                await agent.close()
+            # A first turn that failed or was cancelled may have committed
+            # the session's row already; no client has its id, so end the
+            # runner and drop that row before the Agent goes.
+            await self._abandon_create(runner, agent)
             raise
         session_id = runner.session_id
         assert session_id is not None
@@ -652,6 +662,29 @@ class ConsoleSessions:
         )
         self._sessions[session_id] = entry
         return entry, turn
+
+    async def _abandon_create(self, runner: SessionRunner, agent: Agent) -> None:
+        """Undo a create whose first turn never returned.
+
+        ``start_turn`` may have committed the session's row and started its
+        tasks before it raised, and no client ever received the id. The
+        cancel that brought us here keeps arriving, so the cleanup runs in
+        its own task: shielded from this one, it ends the runner, deletes
+        the row and closes the Agent.
+        """
+
+        async def cleanup() -> None:
+            if runner.session_id is not None:
+                with contextlib.suppress(Exception):
+                    await runner.close(cause="shutdown")
+                with contextlib.suppress(Exception):
+                    await self._store.delete_session(runner.session_id)
+            with contextlib.suppress(Exception):
+                await agent.close()
+
+        task = asyncio.create_task(cleanup())
+        with contextlib.suppress(asyncio.CancelledError):
+            await asyncio.shield(task)
 
     async def start_turn(
         self,
@@ -717,6 +750,7 @@ class ConsoleSessions:
                     "Only the newest finished turn can be tried again.",
                 )
             resumed = entry.runner.last_resume
+            await self._reconcile(entry)
             turn = await entry.runner.start_turn(
                 undone.user_text, approval=entry.policy
             )
@@ -860,7 +894,11 @@ class ConsoleSessions:
                 deleted = await self._store.delete_session(session_id)
             except SessionBusyError as exc:
                 self._sessions.pop(session_id, None)
-                raise ApiError(409, "session_busy", str(exc)) from exc
+                # The standard message (2.2): the store's text names the
+                # id and carries its own wording.
+                raise ApiError(
+                    409, "session_busy", "A turn is already running in this session."
+                ) from exc
             if not deleted:
                 raise ApiError(404, "not_found", "Session not found.")
         # The lock stays: a turn that queued on it before the delete holds

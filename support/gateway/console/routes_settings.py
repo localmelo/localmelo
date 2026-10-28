@@ -24,9 +24,6 @@ from localmelo.support.sessions.runner import DEFAULT_RESUME_MODE
 if TYPE_CHECKING:
     from . import Console
 
-# The largest request body API v2 accepts, in bytes.
-BODY_BYTES_LIMIT = 1_048_576
-
 
 def model_json(cfg: Any) -> dict[str, Any]:
     """The settings' chat model, with the registry's label for its backend."""
@@ -60,7 +57,6 @@ def health_json(console: Console) -> dict[str, Any]:
         "limits": {
             "text_chars": MAX_QUERY_LEN,
             "attachment_budget_chars": SESSION_TEXT_CHARS,
-            "body_bytes": BODY_BYTES_LIMIT,
         },
         "sessions": {
             "open": len(entries),
