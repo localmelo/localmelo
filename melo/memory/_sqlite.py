@@ -8,7 +8,7 @@ import logging
 import math
 import os
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Mapping
 from typing import Final
 
 import aiosqlite
@@ -126,6 +126,47 @@ def create_private_file(path: str) -> None:
         logger.debug("Could not set %s to mode 0600: %s", path, exc)
     finally:
         os.close(fd)
+
+
+@contextlib.asynccontextmanager
+async def secure_deletes(conn: aiosqlite.Connection) -> AsyncIterator[None]:
+    """Make SQLite overwrite what a ``DELETE`` frees, then restore the setting.
+
+    ``PRAGMA secure_delete=ON`` makes SQLite zero the cells a delete frees,
+    so their text does not stay in the database file's free pages. The
+    connection's previous setting (``OFF``, ``ON`` or ``FAST``) is put back
+    when the block ends, also when it raises. Set this before the
+    transaction whose deletes it is to cover: the pragma is a connection
+    setting, not a transaction one.
+    """
+    async with conn.execute("PRAGMA secure_delete") as cur:
+        row = await cur.fetchone()
+    previous = int(row[0]) if row else 0
+    await conn.execute("PRAGMA secure_delete=ON")
+    try:
+        yield
+    finally:
+        mode = {0: "OFF", 1: "ON", 2: "FAST"}.get(previous, "OFF")
+        with contextlib.suppress(Exception):
+            await conn.execute(f"PRAGMA secure_delete={mode}")
+
+
+async def checkpoint_wal(conn: aiosqlite.Connection) -> bool:
+    """Fold a WAL database's ``-wal`` file into the database and truncate it.
+
+    Returns ``True`` when the checkpoint ran and the ``-wal`` file is
+    empty, ``False`` when SQLite reports it busy (another connection holds
+    the file) or raises. A caller for which the checkpoint is a privacy
+    step, such as a forget, is to log the ``False``: the committed rows are
+    still gone, but their old copies can stay in the WAL until the next
+    checkpoint truncates it.
+    """
+    try:
+        async with conn.execute("PRAGMA wal_checkpoint(TRUNCATE)") as cur:
+            row = await cur.fetchone()
+    except sqlite3.Error:
+        return False
+    return not (row and int(row[0]))
 
 
 def tighten_private_dir(path: str) -> None:
