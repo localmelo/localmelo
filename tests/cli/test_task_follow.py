@@ -135,6 +135,28 @@ def test_transport_failure_never_succeeds(monkeypatch: pytest.MonkeyPatch) -> No
     assert "secret" not in str(error.value)
 
 
+def test_idle_timeouts_keep_following_until_terminal() -> None:
+    details = iter(["running"] * 5 + ["done", "done"])
+    streams = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal streams
+        if request.url.path.endswith("/events"):
+            streams += 1
+            if streams <= 5:
+                raise httpx.ReadTimeout("idle", request=request)
+            return httpx.Response(
+                200, headers={"content-type": "text/event-stream"}, content=b""
+            )
+        return httpx.Response(200, json={"task": {"state": next(details)}})
+
+    out = io.StringIO()
+    with client(handler) as c:
+        assert follow(c, "abc", json_mode=True, wait=True, out=out) == 0
+    assert streams == 6
+    assert json.loads(out.getvalue())["state"] == "done"
+
+
 def test_output_failure_and_interrupt_never_stop() -> None:
     requests = []
 

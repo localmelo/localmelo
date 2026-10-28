@@ -226,13 +226,20 @@ def follow(
                 if state in _TERMINAL:
                     failures = 0
                     continue
-            except httpx.TransportError as exc:
+            except httpx.ReadTimeout:
                 if catching_up:
                     raise FollowError(
                         "SSE catch-up transport failed; follow incomplete"
                     ) from None
-                # Read timeouts allow idle reconciliation; repeated failures remain bounded.
-                del exc
+                # An idle stream is not a failed task; poll state and reconnect.
+                failures = 0
+                state = _detail(client, task_path)
+                continue
+            except httpx.TransportError:
+                if catching_up:
+                    raise FollowError(
+                        "SSE catch-up transport failed; follow incomplete"
+                    ) from None
             state = _detail(client, task_path)
             if state in _TERMINAL:
                 failures = 0

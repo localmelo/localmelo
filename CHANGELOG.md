@@ -22,6 +22,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- `melo-task` creates, inspects and controls gateway tasks, with authenticated
+  loopback requests and an optional event follow stream. ([#NN])
+
 - Read-only worker history in the web workspace, with server-side filters,
   paging, recorded transcripts and explicit refresh for unfinished runs. ([#130])
 

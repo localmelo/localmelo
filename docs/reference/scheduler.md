@@ -13,6 +13,40 @@ traces.
 > defaults to `off`, which only records; `fcfs` and `class` are the two
 > enforcing arms. Direct runs and the terminal CLI are not gated.
 
+## Task command
+
+`melo-task` is a separate gateway client; it never starts the gateway or a
+model server. It connects to the configured gateway or an explicit loopback
+`--gateway` URL, uses the private gateway bearer file and refuses redirects
+and environment proxies. Start the gateway first. A missing or unsafe token,
+unreachable gateway or rejected request is an error, not a reason to fall
+back to unauthenticated requests. The token is not accepted as an argument.
+
+- `new TEXT`, `new --brief FILE` or `new --stdin` submits one objective;
+  optional `--title`, `--workspace`, `--level P0` through `P5` and
+  `--request-key` set fields explicitly. A file or stdin is task content,
+  not a trusted urgency signal. Input is nonempty UTF-8, at most 1 MiB and
+  100,000 characters. A generated request key allows safe retry; on an
+  ambiguous network error it is printed to stderr. Keep the same text,
+  options and key when retrying. `new` reports admission, not completion.
+- `list [--state STATE] [--level Pn]` lists matching tasks, not their admission
+  order. `show ID` inspects one. `pause ID`, `resume ID [--level Pn]`,
+  `stop ID` and `level ID Pn|auto` control tasks. `first` and deadlines are
+  not supported. Pause does not interrupt a running tool.
+- `follow ID [--after EVENT_ID] [--wait]` streams stored session events and
+  rechecks task state. It reconnects using durable event IDs, not run-local
+  sequence numbers. A terminal state is a snapshot; retention and finalization
+  races mean event completeness is not guaranteed. Repeated disconnects or
+  invalid events are errors; Ctrl-C does not stop the task. Without `--wait`, a
+  terminal observation exits 0; with `--wait`, done exits 0, failed 1, and
+  cancelled or expired 2. Other successful operations exit 0; usage errors
+  exit 2 and network, authentication or output failures exit 1.
+- `--json` emits one versioned JSON object per non-stream command, or NDJSON
+  for follow. Argument parser errors print usage to stderr instead of JSON.
+  Check the terminal record and process exit; EOF alone is not success. Error
+  details and terminal output may contain sensitive task data;
+  review output before sharing. This is not the direct worker result schema.
+
 ## What is here
 
 - **The policy core** (`localmelo.support.scheduler`). `decide()` is a pure
