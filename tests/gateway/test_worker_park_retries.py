@@ -101,6 +101,10 @@ async def test_failed_park_retries_then_interrupts_with_card(
         interrupted = await workers.get(task_id)
         assert attempts == 3
         assert interrupted["state"] == "interrupted" and interrupted["card"]
+        assert (
+            next(t.phase for t in gate.registered_tasks if t.task_id == task_id)
+            == "interrupted"
+        )
         assert interrupted_commit == uncertain_interrupt
         assert [e.event["type"] for e in await store.list_events(task_id)].count(
             "sched.interrupted"
@@ -178,6 +182,10 @@ async def test_uncertain_park_commit_reconciles_once(
                 await asyncio.sleep(0.001)
         task = await workers.get(task_id)
         assert raised and task["state"] == "parked" and task["card"]
+        assert (
+            next(t.phase for t in gate.registered_tasks if t.task_id == task_id)
+            == "parked"
+        )
         assert not calls
         assert [e.event["type"] for e in await store.list_events(task_id)].count(
             "sched.parked"

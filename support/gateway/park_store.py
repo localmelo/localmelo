@@ -325,7 +325,7 @@ class ParkStore:
                     raise ParkStoreError("Operation superseded")
                 return old
             if target in {"interrupted", "retrying"} and (
-                not snapshot or not snapshot[3] or row[4] != 5 or row[5] != "pause"
+                snapshot and (not snapshot[3] or row[4] != 5 or row[5] != "pause")
             ):
                 raise ParkStoreError(
                     "Interrupted recovery requires an active pause snapshot"
@@ -355,6 +355,9 @@ class ParkStore:
                 or (target != "held" and (old is None or phase != "held"))
             ):
                 raise ParkStoreError(f"Cannot transition {state} to {target}")
+            hold_reason = (
+                json.loads(row[1]).get("hold_reason", old.reason) if old else reason
+            )
             if target != "held":
                 assert old is not None
                 requested_reason = reason
@@ -365,7 +368,9 @@ class ParkStore:
                     old.attempt,
                     old.reason,
                 )
-                if target == "running":
+                if target == "parked":
+                    reason = hold_reason
+                elif target == "running":
                     card = old.card
                 elif target == "interrupted":
                     reason = requested_reason
@@ -394,6 +399,7 @@ class ParkStore:
                     "agent": agent,
                     "attempt": attempt,
                     "reason": reason,
+                    **({"hold_reason": hold_reason} if target == "retrying" else {}),
                 },
                 sort_keys=True,
             )
@@ -428,6 +434,17 @@ class ParkStore:
                 )
             except TaskConflictError as exc:
                 raise ParkStoreError(str(exc)) from exc
+            if target == "interrupted" and snapshot is None:
+                await conn.execute(
+                    "UPDATE park_priority SET level = 2, source = 'computed', reason = '', "
+                    "user_rank = NULL, snapshot_active = 1 WHERE task_id = ?",
+                    (task_id,),
+                )
+                await conn.execute(
+                    "UPDATE tasks SET level = 5, level_source = 'user', level_pinned = 1, "
+                    "level_eff = 5, user_rank = NULL, reason = 'pause' WHERE task_id = ?",
+                    (task_id,),
+                )
             if target in {"parked", "interrupted"}:
                 await conn.execute(
                     "UPDATE park_priority SET pause_pending = 0 WHERE task_id = ?",
