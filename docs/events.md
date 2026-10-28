@@ -210,10 +210,10 @@ redaction of secrets, which replaces each with `[redacted]`:
   `passcode`, `OTP` or `验证码`, on the same line.
 
 The redaction runs on the whole text, before it is clipped, and only for a
-run with a sink. Working memory, history's tasks and steps, the `RunResult`
-and `run.finished` keep the text as the model wrote it, while history's
-model calls store it with the same redaction (see
-[Model calls](memory.md#model-calls)).
+run with a sink. Working memory, the requests a run sends, the `RunResult`
+and `run.finished` keep the text as the model wrote it, while history
+stores its tasks and steps with the same redaction, and its model calls
+too (see [Model calls](memory.md#model-calls)).
 
 ### tool.started
 
