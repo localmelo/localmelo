@@ -341,6 +341,7 @@ async def test_v1_migration_preserves_rows_and_pause_before_retention(
     before_log = await recent_log(tasks, record.task_id)
     async with store.component_transaction("make_v1") as conn:
         await conn.execute("DROP TABLE park_priority")
+        await conn.execute("DROP TABLE recovery_capture")
         await conn.execute("DROP TABLE recovery_provenance")
         await conn.execute("DROP TABLE recovery_operations")
         await conn.execute("DROP TABLE recovery_crashes")

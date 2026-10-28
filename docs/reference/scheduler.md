@@ -54,14 +54,14 @@ the lane by code.
 ## Tasks, workers and the scheduler store (S3a)
 
 The gateway's `sessions.db` has a `scheduler` component beside the session
-tables. `support/gateway/task_store.py` creates version 3 with `tasks`,
+tables. `support/gateway/task_store.py` creates version 4 with `tasks`,
 `task_deps`, `priority_events`, `questions`, `sched_rules`, `sched_log`,
 `idle_windows`, `park_priority` and recovery storage, with indexes on `tasks(state, level_eff)`,
 `priority_events(task_id, ts)` and `sched_log(ts)`, in one `BEGIN IMMEDIATE`
-transaction. `TaskStore.open()` also migrates versions 1 and 2 atomically and
+transaction. `TaskStore.open()` also migrates versions 1, 2 and 3 atomically and
 records the component version in `schema_components`. `PRAGMA user_version`
 stays the session schema's, and a terminal `melo` never creates the component
-or reads its tables; a component newer than 3 is refused. The console calls
+or reads its tables; a component newer than 4 is refused. The console calls
 `TaskStore.open()` after opening the store. A
 gateway takes the session file's owner
 lock: a second gateway process is refused rather than concurrently migrating
@@ -73,9 +73,11 @@ park generation; interrupted recovery preserves a pending pause until explicit
 resume or a terminal outcome. Missing provenance and missing process records
 are unknown, not proof that a task never ran or that its processes are gone.
 The internal legacy-adoption seam records explicit orphan-risk confirmation but
-does not itself queue or launch a task. Process capture has no completeness
-proof. Startup classification uses the recovery journal; process verification,
-controlled restart scheduling and user-facing confirmation remain later work.
+does not itself queue or launch a task. Version 4 adds dormant per-execution
+capture state, process identity checks and a gated subprocess primitive. No worker
+uses them yet, so existing process records still lack completeness proof. Startup
+classification uses the recovery journal; process verification, controlled restart
+scheduling and user-facing confirmation remain later work.
 
 A task row's id is its `kind="task"` session's id. `create_task()` writes the
 session, the task, its first `priority_events` row and a `sched_log` row in

@@ -47,6 +47,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Scheduler component v4 adds dormant process capture state, identity checks
+  and a gated subprocess primitive; worker behavior and Resume are unchanged. [#158]
+
 - Interactive terminal text attachments: `/attach PATH`, `/attachments`,
   `/detach N|all`, and explicit `@` file-completion selection stage bounded
   workspace snapshots. Best-effort redaction and cleaning require confirmation
@@ -1017,3 +1020,4 @@ earlier milestones.
 [#153]: https://github.com/localmelo/localmelo/pull/153
 [#155]: https://github.com/localmelo/localmelo/pull/155
 [#157]: https://github.com/localmelo/localmelo/pull/157
+[#158]: https://github.com/localmelo/localmelo/pull/158
