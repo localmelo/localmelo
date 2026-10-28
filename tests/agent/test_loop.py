@@ -203,7 +203,7 @@ class TestToolCallLoop:
 
 
 class TestBlockedToolCall:
-    """Checker blocks a dangerous tool call — agent must fail cleanly."""
+    """A dangerous call the run cannot make must fail cleanly."""
 
     @pytest.mark.asyncio
     async def test_blocked_shell_command(self) -> None:

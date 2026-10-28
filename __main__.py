@@ -490,8 +490,8 @@ async def _run(
             agent.options.mode, agent.options.builtins
         ):
             print(
-                "shell_exec is off in this loop; start melo with --builtins all "
-                "to turn it on."
+                "shell_exec is off in this loop (direct mode); a task run with "
+                "--builtins all turns it on."
             )
         while True:
             try:
@@ -658,9 +658,7 @@ def _routine_name(text: str) -> str:
     return text
 
 
-def _parse_builtins(
-    parser: argparse.ArgumentParser, text: str
-) -> frozenset[str] | None:
+def _parse_builtins(parser: argparse.ArgumentParser, text: str) -> frozenset[str]:
     """``all`` (every built-in, named explicitly), ``none`` or a name list."""
     if text == "all":
         return frozenset(builtin_names())
@@ -786,7 +784,7 @@ def _check_recall_args(
             parser.error("argument --recall-at: tool is not available with --mcp-only")
         if args.builtins is not None and args.builtins != "all":
             names = _parse_builtins(parser, args.builtins)
-            if names is not None and "recall" not in names:
+            if "recall" not in names:
                 parser.error(
                     "argument --recall-at tool: --builtins must include recall"
                 )

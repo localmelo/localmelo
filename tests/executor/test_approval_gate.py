@@ -223,7 +223,7 @@ async def test_a_refused_call_never_asks(
     assert stand_ins.calls == []
 
 
-async def test_a_tier_refused_call_never_asks(root: Path) -> None:
+async def test_a_tier_refused_call_never_asks() -> None:
     """P13b: an exec tool the mode does not offer is refused before the gate."""
     hippo = Hippo()
     executor = Executor(hippo, Checker(mode="direct"))

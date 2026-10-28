@@ -881,8 +881,8 @@ class TestInteractive:
         assert out == (
             "localmelo · local agent\n"
             "Enter a task to begin. Type /help for commands or /exit to quit.\n"
-            "shell_exec is off in this loop; start melo with --builtins all "
-            "to turn it on.\n"
+            "shell_exec is off in this loop (direct mode); a task run with "
+            "--builtins all turns it on.\n"
             "\nsecond answer\n"
         )
         assert err == "melo: run ended with status provider_error: HTTP 500\n"
