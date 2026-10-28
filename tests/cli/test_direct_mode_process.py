@@ -44,8 +44,8 @@ class FakeChatServer:
     """An OpenAI-compatible ``/chat/completions`` that replays queued replies.
 
     Once ``replies`` is empty, every reply is the final answer ``done``.
-    ``bodies`` keeps the body of every request, in order. ``GET /models``
-    lists ``models``.
+    ``bodies`` keeps the body of every chat request, in order. ``GET /models``
+    lists ``models``; ``POST /embeddings`` answers a two-value vector.
     """
 
     def __init__(self) -> None:
@@ -71,16 +71,20 @@ class FakeChatServer:
 
             def do_POST(self) -> None:
                 body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-                server.bodies.append(json.loads(body))
-                server.requests += 1
-                message = (
-                    server.replies.pop(0)
-                    if server.replies
-                    else {"role": "assistant", "content": "done"}
-                )
-                body = json.dumps(
-                    {"choices": [{"index": 0, "message": message}]}
-                ).encode()
+                payload = json.loads(body)
+                if self.path.endswith("/embeddings"):
+                    # The first run's probe of a listed embedding model.
+                    answer = {"data": [{"embedding": [0.0, 1.0]}]}
+                else:
+                    server.bodies.append(payload)
+                    server.requests += 1
+                    message = (
+                        server.replies.pop(0)
+                        if server.replies
+                        else {"role": "assistant", "content": "done"}
+                    )
+                    answer = {"choices": [{"index": 0, "message": message}]}
+                body = json.dumps(answer).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))

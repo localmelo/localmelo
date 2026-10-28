@@ -118,12 +118,16 @@ def test_a_found_server_prefills_the_url_and_its_models_are_offered(
     config_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     models = ["bge-m3-embed", "Qwen3-8B", "Qwen3-32B"]
-    answers = _Answers("", "")
+    answers = _Answers("", "", "n")
     result, detect, list_models = _first_setup(
         answers, found=FoundServer(url=URL, models=models)
     )
     assert result == FirstSetup(url=URL, model="Qwen3-8B", saved=True)
-    assert answers.prompts == [f"Model server URL [{URL}]: ", "Model [2]: "]
+    assert answers.prompts == [
+        f"Model server URL [{URL}]: ",
+        "Model [2]: ",
+        "Use bge-m3-embed for long-term memory? [Y/n]: ",
+    ]
     detect.assert_awaited_once_with(
         ("http://127.0.0.1:8000/v1", "http://127.0.0.1:11434/v1")
     )
@@ -135,11 +139,112 @@ def test_a_found_server_prefills_the_url_and_its_models_are_offered(
         "  [2] Qwen3-8B\n"
         "  [3] Qwen3-32B\n"
         f"✓ {URL} lists 3 models; using Qwen3-8B.\n"
+        "Long-term memory off (melo --reconfigure sets it again).\n"
         f"Saved to {config_path} (melo --reconfigure changes it).\n"
     )
     cfg = config.load()
     assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "none")
     assert (cfg.vllm.chat_url, cfg.vllm.chat_model) == (URL, "Qwen3-8B")
+
+
+def test_a_first_run_offers_the_servers_embedding_model(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    models = ["Qwen3-8B", "Qwen3-Embedding-0.6B"]
+    answers = _Answers("", "", "")  # URL, model, then Enter: yes
+    probe = mock.AsyncMock()
+    with mock.patch.object(onboard, "probe_embedding", probe):
+        result, _, _ = _first_setup(answers, found=FoundServer(url=URL, models=models))
+    assert result == FirstSetup(url=URL, model="Qwen3-8B", saved=True)
+    assert answers.prompts == [
+        f"Model server URL [{URL}]: ",
+        "Model [1]: ",
+        "Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]: ",
+    ]
+    probe.assert_awaited_once()
+    probed = probe.await_args.args[0]
+    assert (
+        probed.embedding_backend,
+        probed.vllm.embedding_url,
+        probed.vllm.embedding_model,
+    ) == ("vllm", URL, "Qwen3-Embedding-0.6B")
+    cfg = config.load()
+    assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "vllm")
+    assert (cfg.vllm.chat_url, cfg.vllm.chat_model) == (URL, "Qwen3-8B")
+    assert (cfg.vllm.embedding_url, cfg.vllm.embedding_model) == (
+        URL,
+        "Qwen3-Embedding-0.6B",
+    )
+    out = capsys.readouterr().out
+    assert "Long-term memory off" not in out
+
+
+def test_a_first_run_that_declines_saves_embedding_off(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    models = ["Qwen3-8B", "Qwen3-Embedding-0.6B"]
+    answers = _Answers("", "", "n")
+    probe = mock.AsyncMock()
+    with mock.patch.object(onboard, "probe_embedding", probe):
+        result, _, _ = _first_setup(answers, found=FoundServer(url=URL, models=models))
+    assert result == FirstSetup(url=URL, model="Qwen3-8B", saved=True)
+    probe.assert_not_awaited()
+    cfg = config.load()
+    assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "none")
+    assert "Long-term memory off (melo --reconfigure sets it again).\n" in (
+        capsys.readouterr().out
+    )
+
+
+@pytest.mark.parametrize(
+    ("ollama", "hint"),
+    [
+        (
+            False,
+            "No embedding model on this server. Serve Qwen3-Embedding-0.6B "
+            "on it, then melo --reconfigure.",
+        ),
+        (
+            True,
+            "No embedding model on this server. ollama pull "
+            "qwen3-embedding:0.6b, then melo --reconfigure.",
+        ),
+    ],
+)
+def test_a_first_run_without_a_candidate_prints_the_hint(
+    config_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+    ollama: bool,
+    hint: str,
+) -> None:
+    async def is_ollama(url: str, **kwargs: object) -> bool:
+        return ollama
+
+    monkeypatch.setattr(discovery, "is_ollama", is_ollama)
+    result, _, _ = _first_setup(_Answers(URL), lists={URL: ["only"]})
+    assert result == FirstSetup(url=URL, model="only", saved=True)
+    out = capsys.readouterr().out
+    assert f"{hint}\n" in out
+    assert config.load().embedding_backend == "none"
+
+
+def test_a_failed_embedding_probe_saves_with_embedding_off(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    models = ["Qwen3-8B", "Qwen3-Embedding-0.6B"]
+    probe = mock.AsyncMock(side_effect=ProbeError("embedding probe failed: refused"))
+    with mock.patch.object(onboard, "probe_embedding", probe):
+        result, _, _ = _first_setup(
+            _Answers("", "", "y"), found=FoundServer(url=URL, models=models)
+        )
+    assert result == FirstSetup(url=URL, model="Qwen3-8B", saved=True)
+    cfg = config.load()
+    assert (cfg.chat_backend, cfg.embedding_backend) == ("vllm", "none")
+    assert (cfg.vllm.chat_url, cfg.vllm.chat_model) == (URL, "Qwen3-8B")
+    out = capsys.readouterr().out
+    assert "  Probe failed: embedding probe failed: refused\n" in out
+    assert "  Saving with embedding off: no long-term memory" in out
 
 
 def test_without_a_found_server_the_typed_url_is_listed(

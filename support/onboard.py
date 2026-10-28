@@ -238,6 +238,28 @@ def run_backend_setup() -> config.Config | None:
     return cfg
 
 
+_SAVING_EMBEDDING_OFF = (
+    "Saving with embedding off: no long-term memory "
+    "(melo --reconfigure sets it again)."
+)
+_EMBEDDING_OFF = "Long-term memory off (melo --reconfigure sets it again)."
+_NO_EMBEDDING_OLLAMA = (
+    "No embedding model on this server. ollama pull qwen3-embedding:0.6b, "
+    "then melo --reconfigure."
+)
+_NO_EMBEDDING_LOCAL = (
+    "No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, "
+    "then melo --reconfigure."
+)
+
+
+def _print_probe_failed(exc: ProbeError, *, blank_line: bool = True) -> None:
+    """The failed-check lines, shared by first run and the wizard."""
+    prefix = "\n" if blank_line else ""
+    print(f"{prefix}  Probe failed: {exc}")
+    print(f"  {_SAVING_EMBEDDING_OFF}")
+
+
 def _run_probes(cfg: config.Config, retry: Callable[[], bool] | None = None) -> bool:
     """Check the chat and embedding backends before saving.
 
@@ -273,11 +295,7 @@ def _run_probes(cfg: config.Config, retry: Callable[[], bool] | None = None) -> 
     try:
         asyncio.run(probe_embedding(cfg))
     except ProbeError as exc:
-        print(f"\n  Probe failed: {exc}")
-        print(
-            "  Saving with embedding off: no long-term memory "
-            "(melo --reconfigure sets it again)."
-        )
+        _print_probe_failed(exc)
         cfg.embedding_backend = "none"
         return True
     print("  Backends OK.")
@@ -357,26 +375,21 @@ def _choose_model(url: str, models: list[str]) -> str:
         print(f"  Type a number from 1 to {len(models)}, or a model id.")
 
 
-async def save_chat_server(
+def _with_chat_server(
+    cfg: config.Config,
     url: str,
     model: str,
     *,
-    keep_embedding: bool = False,
-    ollama: bool | None = None,
-) -> bool:
-    """Save *url* and *model* as the default chat backend; False if it failed.
+    ollama: bool,
+    embedding_model: str | None = None,
+) -> config.Config:
+    """*cfg* with its chat on *url*, as :func:`save_chat_server` writes it.
 
-    An Ollama server (it answers ``GET /api/version``) is saved as the
-    ``ollama`` backend in the ``[ollama]`` table; the backend chats on
-    Ollama's native API with its 300 s timeout. Any other OpenAI-compatible
-    server is saved as ``vllm``. *ollama* is the answer to that question
-    when the caller asked it already. The first run turns embedding off;
-    with *keep_embedding* (a server chosen in a configured session) the
-    embedding backend stays. The config's other values are kept.
+    *ollama* makes the chat backend ``ollama``; otherwise it is ``vllm``.
+    With *embedding_model*, the same table's embedding URL and model are
+    set too, so a first run can probe exactly what it will save. Nothing
+    is written to disk.
     """
-    cfg = config.load()
-    if ollama is None:
-        ollama = await discovery.is_ollama(url)
     if ollama:
         cfg.chat_backend = "ollama"
         cfg.ollama.chat_url = url
@@ -385,7 +398,39 @@ async def save_chat_server(
         cfg.chat_backend = "vllm"
         cfg.vllm.chat_url = url
         cfg.vllm.chat_model = model
-    if not keep_embedding:
+    if embedding_model is not None:
+        cfg.embedding_backend = cfg.chat_backend
+        embedding_section = getattr(cfg, cfg.chat_backend)
+        embedding_section.embedding_url = url
+        embedding_section.embedding_model = embedding_model
+    return cfg
+
+
+async def save_chat_server(
+    url: str,
+    model: str,
+    *,
+    keep_embedding: bool = False,
+    ollama: bool | None = None,
+    embedding_model: str | None = None,
+) -> bool:
+    """Save *url* and *model* as the default chat backend; False if it failed.
+
+    An Ollama server (it answers ``GET /api/version``) is saved as the
+    ``ollama`` backend in the ``[ollama]`` table; the backend chats on
+    Ollama's native API with its 300 s timeout. Any other OpenAI-compatible
+    server is saved as ``vllm``. *ollama* is the answer to that question
+    when the caller asked it already. With *embedding_model*, the chat
+    backend's table also gets that embedding URL and model (the first-run
+    choice). Otherwise the first run turns embedding off; with
+    *keep_embedding* (a server chosen in a configured session) the
+    embedding backend stays. The config's other values are kept.
+    """
+    cfg = config.load()
+    if ollama is None:
+        ollama = await discovery.is_ollama(url)
+    _with_chat_server(cfg, url, model, ollama=ollama, embedding_model=embedding_model)
+    if embedding_model is None and not keep_embedding:
         cfg.embedding_backend = "none"
     try:
         config.save(cfg)
@@ -394,6 +439,45 @@ async def save_chat_server(
         return False
     print(f"Saved to {_home_path(config.CONFIG_PATH)} (melo --reconfigure changes it).")
     return True
+
+
+def _offer_embedding(
+    url: str, model: str, models: list[str], *, ollama: bool | None
+) -> tuple[str | None, bool | None]:
+    """Ask whether to use the server's embedding model; the model and Ollama answer.
+
+    *ollama* is the answer to ``GET /api/version`` when the caller already
+    asked it, else None. Returns ``(embedding_model, ollama)``: the model
+    to save, or None for embedding off, and the Ollama answer to pass on so
+    the first run asks the server only once.
+    """
+    candidates = [
+        candidate
+        for candidate in discovery.embedding_models(models)
+        if candidate != model
+    ]
+    if not candidates:
+        if ollama is None:
+            ollama = asyncio.run(discovery.is_ollama(url))
+        print(_NO_EMBEDDING_OLLAMA if ollama else _NO_EMBEDDING_LOCAL)
+        return None, ollama
+    candidate = discovery.recommend_embedding(candidates)
+    assert candidate is not None  # candidates is not empty
+    answer = _choose(f"Use {candidate} for long-term memory? [Y/n]: ", "yn", "y")
+    if answer == "n":
+        print(_EMBEDDING_OFF)
+        return None, ollama
+    if ollama is None:
+        ollama = asyncio.run(discovery.is_ollama(url))
+    probe_cfg = _with_chat_server(
+        config.load(), url, model, ollama=ollama, embedding_model=candidate
+    )
+    try:
+        asyncio.run(probe_embedding(probe_cfg))
+    except ProbeError as exc:
+        _print_probe_failed(exc, blank_line=False)
+        return None, ollama
+    return candidate, ollama
 
 
 def run_first_setup() -> FirstSetup | None:
@@ -452,7 +536,15 @@ def run_first_setup() -> FirstSetup | None:
     model = _choose_model(url, models)
     count = len(models)
     print(f"✓ {url} lists {count} model{'' if count == 1 else 's'}; using {model}.")
-    saved = asyncio.run(save_chat_server(url, model))
+    embedding_model, ollama = _offer_embedding(url, model, models, ollama=None)
+    saved = asyncio.run(
+        save_chat_server(
+            url,
+            model,
+            ollama=ollama,
+            embedding_model=embedding_model,
+        )
+    )
     return FirstSetup(url=url, model=model, saved=saved)
 
 
