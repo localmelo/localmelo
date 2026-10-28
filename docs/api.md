@@ -157,7 +157,8 @@ curl -X PUT http://127.0.0.1:8401/api/settings \
 ```
 
 - Every string must be a single line with no control characters, and
-  `workspace` is required and must be an absolute path or start with `~/`;
+  `workspace` is required, must be an absolute path or start with `~/`, and
+  must not resolve to `/` or the home folder (including through a symlink);
   otherwise 400 `invalid_request`. `api_key_set` is not accepted in
   `sections`.
 - A `revision` that does not match the file on disk returns 409

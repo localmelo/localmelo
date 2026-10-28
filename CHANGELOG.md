@@ -9,6 +9,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The gateway's `sessions.db` can hold the scheduler's `scheduler` component
+  version 1: `tasks`, `task_deps`, `priority_events`, `questions`,
+  `sched_rules`, `sched_log` and `idle_windows` are created in one
+  transaction in that file only, `PRAGMA user_version` stays the session
+  schema's, and a newer component is refused. A task and its `kind="task"`
+  session are created together behind `UNIQUE(origin, request_key)`, so a
+  repeated request returns its task and a reused key with a different
+  payload is a conflict; actual level changes write `priority_events` and
+  30-day retention clears the log and idle windows.
+  The task boundary normalizes the `TaskSpec`, pins a user-selected level
+  only through a trusted adapter, and resolves a worker's folder under the
+  user's home or `[gateway] workspace`; a non-user task with no folder gets
+  its own child workspace. Only `user` and
+  `user_rule` origins get remembered approvals, unmarked MCP tools and session
+  grants. `ChatGate` can register a worker task, so its calls are logged as
+  `session_kind="task"`, its P0 is the user's single task P0, and only the
+  runner ends it. No `/api/tasks` route or worker runs yet; the console
+  wiring is S3a.2 ([#113]).
 - The workspace page on API v2. `http://127.0.0.1:8401/` now talks only to
   `/api`: the session list with its machine snapshot, one chat's turns, its
   event stream (SSE, reopened from the last applied event id), keyed sends
@@ -46,6 +64,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   console's Content-Security-Policy on `/api` and baseline security headers
   on every response; and `melo --serve --allow-unconfigured` so the gateway
   can boot before a backend is configured ([#106]).
+
 - Terminal session commands: `/title [text]` shows or sets a title, including
   before the first message; `/undo` forgets the latest finished turn and
   keeps its typed history without reversing file changes (a committed undo
@@ -792,3 +811,4 @@ earlier milestones.
 [#106]: https://github.com/localmelo/localmelo/pull/106
 [#110]: https://github.com/localmelo/localmelo/pull/110
 [#111]: https://github.com/localmelo/localmelo/pull/111
+[#113]: https://github.com/localmelo/localmelo/pull/113
