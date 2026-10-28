@@ -424,6 +424,7 @@ class GateCall:
     # The pre-gate parked this call: the policy has not seen it yet (wait mode
     # under a foreign lock, section 6.2).
     lock_waiting: bool = False
+    park_fenced: bool = False
 
 
 @dataclass(frozen=True)
@@ -830,6 +831,49 @@ class ChatGate:
             )
         )
         return events
+
+    def try_park(self, task_id: str, cancel: Callable[[], bool]) -> GateCall | None:
+        """Fence one pending worker plan/reflect and synchronously cancel its run.
+
+        The callback must request cancellation with cause ``park``. A false
+        result or exception rolls the fence back, unless the call has ended.
+        All gate operations and the callback must run on the same event loop.
+        """
+        task = self._task_registry.get(task_id)
+        calls = [c for c in self._calls.values() if c.meta.session_id == task_id]
+        if task is None or is_terminal(task.phase) or len(calls) != 1:
+            return None
+        call = calls[0]
+        if (
+            call.done
+            or call.park_fenced
+            or call.meta.session_kind != "task"
+            or call.meta.kind not in _CHAT_KINDS
+            or call.meta.admitted_mono_us is not None
+            or call.future is None
+            or call.future.done()
+        ):
+            return None
+        call.park_fenced = True
+        removed = tuple(c for c in self._state.calls if c.call_id == call.meta.call_id)
+        self._state = replace(
+            self._state, calls=tuple(c for c in self._state.calls if c not in removed)
+        )
+        accepted = False
+        try:
+            accepted = cancel()
+        finally:
+            if not accepted:
+                call.park_fenced = False
+                if not call.done and call.future is not None and not call.future.done():
+                    if removed:
+                        self._state = replace(
+                            self._state, calls=(*self._state.calls, *removed)
+                        )
+                        self.wake()
+                    elif call.lock_waiting and self.machine.lock != "foreign":
+                        self._release_lock_waiters(self._clock())
+        return call if accepted else None
 
     async def acquire(self, call: GateCall) -> None:
         """Wait until the policy admits *call*; under ``off`` it is a no-op."""
@@ -1329,7 +1373,7 @@ class ChatGate:
         """A transition raised: alarm, admit everything pending, keep going (R10)."""
         self._alarm(f"sched_transition_failed:{type(exc).__name__}")
         for call in self._calls.values():
-            if call.done:
+            if call.done or call.park_fenced:
                 continue
             if call.meta.admitted_mono_us is None:
                 call.meta.admitted_mono_us = now.mono_us
@@ -1350,7 +1394,7 @@ class ChatGate:
         }
         for call_id in (*result.lane_admit, *decided.admit, *decided.admit_unheld):
             call = self._calls.get(call_id)
-            if call is None or call.done:
+            if call is None or call.done or call.park_fenced:
                 continue
             level = admitted_levels.get(call_id)
             if level is not None:
@@ -1365,7 +1409,7 @@ class ChatGate:
             # S2 has no code answer for a lane call: alarm, then admit it.
             self._alarm(f"lane_answer:{reason}")
             call = self._calls.get(call_id)
-            if call is None or call.done:
+            if call is None or call.done or call.park_fenced:
                 continue
             if call.meta.admitted_mono_us is None:
                 call.meta.admitted_mono_us = now.mono_us
@@ -1398,7 +1442,11 @@ class ChatGate:
     def _release_lock_waiters(self, now: Clock) -> None:
         """Admit the calls parked by the pre-gate, in submit order (section 6.2)."""
         waiting = sorted(
-            (c for c in self._calls.values() if c.lock_waiting and not c.done),
+            (
+                c
+                for c in self._calls.values()
+                if c.lock_waiting and not c.done and not c.park_fenced
+            ),
             key=lambda c: (c.meta.submit_mono_us, c.meta.call_id),
         )
         if not waiting:

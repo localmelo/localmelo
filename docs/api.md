@@ -253,16 +253,19 @@ memory off. Tools run with the user's permissions, not in a sandbox.
   `auto`) and/or `state` (`pause`, `resume`, or `stop`). It returns
   `{"task": ...}`. `first` is rejected with 400 `invalid_request`; it is
   deferred to S6b. Pause parks at P5; resume restores the priority before
-  pause unless a new runnable level is supplied. If there is no pause log
-  (for example, a task created or set at P5), or retention pruned it,
-  resume falls back to computed P2. `auto` selects computed P2.
+  pause unless a new runnable level is supplied. The saved priority survives
+  audit-log retention. If there is no saved snapshot (for example, a task
+  created or set at P5, or a v1 pause whose log was already missing), resume
+  falls back to computed P2. `auto` selects computed P2.
   Pause cannot be combined with a level. Resuming a task that is not paused
   returns 409 `not_paused`. Stop cancels a running worker or cancels a queued
   task. Finished tasks cannot be changed (409 `invalid_transition`).
 
 Pause takes effect at the next model call: an already-running tool finishes,
 and an answered pending approval waits until resume before proceeding. If a
-task is paused before it starts, no worker starts until it resumes.
+task is paused before it starts, no worker starts until it resumes. S3b.1a
+does not change that worker pause behavior from #119 or ship a new API; its
+internal hold/park foundations are not integrated with workers. S3b.1b follows.
 
 Task objects include the task id, normalized `spec`, `state`, priority and
 source, `wait_reason`, timestamps, workspace and `priority_events`, along

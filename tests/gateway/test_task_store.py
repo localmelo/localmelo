@@ -150,6 +150,7 @@ async def test_open_creates_seven_tables_and_leaves_user_version_alone(
         "sched_rules",
         "sched_log",
         "idle_windows",
+        "park_priority",
     } <= objects
     indexes = {
         row[0]
@@ -225,6 +226,14 @@ async def test_open_creates_seven_tables_and_leaves_user_version_alone(
         },
         "sched_rules": {"id", "text", "match", "level", "enabled", "created_at"},
         "sched_log": {"id", "ts", "kind", "task_id", "data"},
+        "park_priority": {
+            "task_id",
+            "level",
+            "source",
+            "reason",
+            "user_rank",
+            "pause_pending",
+        },
         "idle_windows": {
             "start",
             "end",
@@ -246,9 +255,9 @@ async def test_a_newer_scheduler_component_is_refused(
     async with store.component_transaction("newer") as conn:
         await conn.execute(
             "INSERT INTO schema_components (name, version) VALUES (?, ?)",
-            (COMPONENT, 2),
+            (COMPONENT, 3),
         )
-    with pytest.raises(SessionStoreError, match="scheduler schema version 2"):
+    with pytest.raises(SessionStoreError, match="scheduler schema version 3"):
         await TaskStore(store, clock=clock).open()
     assert await one(store, "SELECT name FROM sqlite_master WHERE name='tasks'") is None
 
@@ -307,6 +316,120 @@ async def test_a_closed_and_reopened_file_keeps_the_component_and_tasks(
         assert repeated is True and again.task_id == record.task_id
     finally:
         await second.aclose()
+
+
+async def test_v1_migration_preserves_rows_and_pause_before_retention(
+    store: SessionStore, tasks: TaskStore, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user", reason="urgent"), origin="user"
+    )
+    await tasks.set_priority(record.task_id, "first")
+    rank = (await tasks.get_task(record.task_id)).user_rank
+    paused = await tasks.pause(record.task_id)
+    before_events = await priority_events(tasks, record.task_id)
+    before_log = await recent_log(tasks, record.task_id)
+    async with store.component_transaction("make_v1") as conn:
+        await conn.execute("DROP TABLE park_priority")
+        await conn.execute(
+            "UPDATE schema_components SET version = 1 WHERE name = ?", (COMPONENT,)
+        )
+
+    def fail(label: str) -> None:
+        if label == "component_scheduler":
+            raise RuntimeError("migration rollback")
+
+    monkeypatch.setattr(store, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="migration rollback"):
+        await TaskStore(store, clock=clock).open()
+    assert await component_version(store, COMPONENT) == 1
+    assert (
+        await one(store, "SELECT name FROM sqlite_master WHERE name='park_priority'")
+        is None
+    )
+    assert await tasks.get_task(record.task_id) == paused
+    monkeypatch.undo()
+    clock.advance(31 * 86_400)
+    migrated = TaskStore(store, clock=clock)
+    assert await migrated.open() == 2
+    assert await migrated.get_task(record.task_id) == paused
+    assert await one(
+        store,
+        "SELECT pause_pending FROM park_priority WHERE task_id = ?",
+        (record.task_id,),
+    ) == (0,)
+    assert await priority_events(migrated, record.task_id) == before_events
+    assert before_log and await recent_log(migrated, record.task_id) == []
+    resumed = await migrated.resume(record.task_id)
+    assert (resumed.level, resumed.level_source, resumed.reason, resumed.user_rank) == (
+        1,
+        "user",
+        "urgent",
+        rank,
+    )
+    assert await one(store, "PRAGMA user_version") == (1,)
+
+
+async def test_v1_migration_preserves_later_override_and_missing_log_fallback(
+    store: SessionStore, tasks: TaskStore, clock: Clock
+) -> None:
+    overridden, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    missing, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.pause(overridden.task_id)
+    changed = await tasks.set_priority(overridden.task_id, "first")
+    await tasks.pause(missing.task_id)
+    async with store.component_transaction("make_v1") as conn:
+        await conn.execute("DROP TABLE park_priority")
+        await conn.execute(
+            "UPDATE schema_components SET version = 1 WHERE name = ?", (COMPONENT,)
+        )
+        await conn.execute(
+            "DELETE FROM sched_log WHERE task_id = ?", (missing.task_id,)
+        )
+    migrated = TaskStore(store, clock=clock)
+    await migrated.open()
+    resumed = await migrated.resume(overridden.task_id)
+    assert (resumed.state, resumed.level, resumed.reason, resumed.user_rank) == (
+        "parked",
+        5,
+        changed.reason,
+        changed.user_rank,
+    )
+    resumed = await migrated.resume(missing.task_id)
+    assert (resumed.state, resumed.level, resumed.level_source) == (
+        "queued",
+        2,
+        "computed",
+    )
+
+
+async def test_snapshot_writes_roll_back_with_pause_and_resume(
+    store: SessionStore, tasks: TaskStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+
+    def fail(label: str) -> None:
+        if label in {"task_pause", "task_resume"}:
+            raise RuntimeError("rollback")
+
+    monkeypatch.setattr(store, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="rollback"):
+        await tasks.pause(record.task_id)
+    assert await tasks.get_task(record.task_id) == record
+    assert await one(store, "SELECT * FROM park_priority") is None
+    monkeypatch.undo()
+    paused = await tasks.pause(record.task_id)
+    monkeypatch.setattr(store, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="rollback"):
+        await tasks.resume(record.task_id)
+    assert await tasks.get_task(record.task_id) == paused
+    assert await one(store, "SELECT level FROM park_priority") == (1,)
 
 
 async def test_the_cli_file_never_gets_the_component(tmp_path: Path) -> None:
@@ -663,6 +786,60 @@ async def test_resume_after_pause_log_retention_uses_computed_default(
         "queued",
         2,
         "computed",
+    )
+
+
+async def test_resume_after_pause_log_retention_uses_durable_snapshot(
+    tasks: TaskStore, clock: Clock
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user", reason="urgent"), origin="user"
+    )
+    await tasks.set_priority(record.task_id, "first")
+    rank = (await tasks.get_task(record.task_id)).user_rank
+    await tasks.pause(record.task_id)
+    clock.advance(31 * 86_400)
+    await tasks.apply_retention()
+    assert await recent_log(tasks, record.task_id) == []
+    resumed = await tasks.resume(record.task_id)
+    assert (
+        resumed.state,
+        resumed.level,
+        resumed.level_source,
+        resumed.reason,
+        resumed.user_rank,
+    ) == ("queued", 1, "user", "urgent", rank)
+
+
+@pytest.mark.parametrize("operation", ["change_first", "set_first", "set_p5"])
+async def test_later_priority_override_survives_retention(
+    tasks: TaskStore, clock: Clock, operation: str
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.pause(record.task_id)
+    if operation == "change_first":
+        changed = await tasks.change(record.task_id, priority="first")
+    elif operation == "set_first":
+        changed = await tasks.set_priority(record.task_id, "first")
+    else:
+        changed = await tasks.set_level(record.task_id, 5, reason="later")
+    clock.advance(31 * 86_400)
+    await tasks.apply_retention()
+    resumed = await tasks.resume(record.task_id)
+    assert (
+        resumed.state,
+        resumed.level,
+        resumed.level_source,
+        resumed.reason,
+        resumed.user_rank,
+    ) == (
+        "parked",
+        changed.level,
+        changed.level_source,
+        changed.reason,
+        changed.user_rank,
     )
 
 

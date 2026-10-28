@@ -9,6 +9,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- S3b.1a foundations: scheduler component v2 adds a durable pause priority
+  snapshot and atomic v1 migration; the internal synchronous gate `try_park`
+  fences an eligible pending call while cancellation is requested. An atomic
+  component event transaction supports `ParkStore` hold/resume/park records,
+  and an evidence-only card builder derives bounded, redacted cards from the
+  task spec and persisted events. Worker API pause behavior remains as in
+  #119; there is no worker hold/park integration or new API in this slice.
+  S3b.1b follows ([#NN]).
+
 - S3a.2 adds `/api/tasks` creation, inspection and control and in-process
   workers sharing the console's scheduler gate. Creation is idempotent with
   `request_key`; workers disable memory, omit `shell_exec`, and have at most

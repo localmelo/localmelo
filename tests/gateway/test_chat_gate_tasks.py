@@ -585,6 +585,169 @@ async def test_terminal_refusals_are_logged_once(
     assert lines[0]["call_index"] == call.meta.call_index
 
 
+@pytest.mark.parametrize("kind", ["plan", "reflect"])
+async def test_park_wins_before_admission(kind: str) -> None:
+    gate = ChatGate(policy="class", n_srv=1, r_f=0)
+    gate.register_task(task(phase="running"))
+    busy = gate.submit("busy")
+    call = gate.submit("worker", kind=kind)
+    assert call.future is not None and not call.future.done()
+
+    def cancel() -> bool:
+        # This is the deterministic admission barrier: dispatch runs inside cancel.
+        gate.finish(busy)
+        gate.wake()
+        assert call.future is not None
+        assert call.meta.admitted_mono_us is None and not call.future.done()
+        return True
+
+    assert gate.try_park("worker", cancel) is call
+    gate.wake()
+    assert call.meta.admitted_mono_us is None and not call.future.done()
+    gate.finish(call, "refused")
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "class"])
+async def test_park_fences_foreign_lock_release_and_failure(policy: str) -> None:
+    gate = ChatGate(policy=policy, lock_gate="wait")
+    gate.register_task(task(phase="running"))
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("worker")
+
+    def cancel() -> bool:
+        gate.set_machine(Machine(lock="none"))
+        gate._failed(gate._clock(), RuntimeError())
+        assert call.meta.admitted_mono_us is None
+        assert call.future is not None and not call.future.done()
+        return True
+
+    assert gate.try_park("worker", cancel) is call
+    gate.finish(call, "refused")
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "class"])
+@pytest.mark.parametrize("error", [False, True])
+async def test_park_rollback_releases_lock_waiter(policy: str, error: bool) -> None:
+    gate = ChatGate(policy=policy, lock_gate="wait")
+    gate.register_task(task(phase="running"))
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("worker")
+
+    def cancel() -> bool:
+        gate.set_machine(Machine(lock="none"))
+        if error:
+            raise RuntimeError("cancel failed")
+        return False
+
+    if error:
+        with pytest.raises(RuntimeError, match="cancel failed"):
+            gate.try_park("worker", cancel)
+    else:
+        assert gate.try_park("worker", cancel) is None
+    await gate.acquire(call)
+    assert call.meta.admitted_mono_us is not None
+    gate.finish(call)
+    await gate.close()
+
+
+async def test_park_rollback_after_stop_does_not_resurrect_call() -> None:
+    gate = ChatGate(policy="class", n_srv=1, r_f=0)
+    gate.register_task(task(phase="running"))
+    busy = gate.submit("busy")
+    call = gate.submit("worker")
+
+    def cancel() -> bool:
+        gate.finish_task("worker", "cancelled")
+        return False
+
+    assert gate.try_park("worker", cancel) is None
+    assert call.done and call.future is not None and call.future.cancelled()
+    assert all(c.call_id != call.meta.call_id for c in gate._state.calls)
+    gate.finish(busy)
+    await gate.close()
+
+
+async def test_park_rollback_redispatches_policy_call() -> None:
+    gate = ChatGate(policy="class", n_srv=1, r_f=0)
+    gate.register_task(task(phase="running"))
+    busy = gate.submit("busy")
+    call = gate.submit("worker")
+
+    def cancel() -> bool:
+        gate.finish(busy)
+        assert call.meta.admitted_mono_us is None
+        return False
+
+    assert gate.try_park("worker", cancel) is None
+    await gate.acquire(call)
+    assert call.meta.admitted_mono_us is not None
+    gate.finish(call)
+    await gate.close()
+
+
+@pytest.mark.parametrize("kind", ["plan", "reflect", "embed", "retrieve", "estimate"])
+async def test_park_refuses_unsafe_or_admitted_calls(kind: str) -> None:
+    gate = ChatGate(policy="off", lock_gate="wait")
+    gate.register_task(task(phase="running"))
+    admitted = gate.submit("worker", kind=kind)
+    assert gate.try_park("worker", lambda: pytest.fail("cancel called")) is None
+    gate.finish(admitted)
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("worker", kind=kind)
+    if kind not in ("plan", "reflect"):
+        assert gate.try_park("worker", lambda: pytest.fail("cancel called")) is None
+    gate.finish(call, "refused")
+    chat = gate.submit("chat")
+    assert gate.try_park("chat", lambda: pytest.fail("cancel called")) is None
+    gate.finish(chat, "refused")
+    await gate.close()
+
+
+async def test_park_cancels_runner_at_real_acquire_barrier() -> None:
+    gate = ChatGate(policy="class", n_srv=1, r_f=0)
+    gate.register_task(task(phase="running"))
+    busy = gate.submit("busy")
+    reached = asyncio.Event()
+    sent = False
+
+    async def run() -> None:
+        nonlocal sent
+        call = gate.submit("worker")
+        reached.set()
+        try:
+            await gate.acquire(call)
+            sent = True
+        finally:
+            gate.finish(call, "refused")
+
+    runner = asyncio.create_task(run())
+    await reached.wait()
+    parked = gate.try_park("worker", lambda: runner.cancel("park"))
+    assert parked is not None
+    gate.finish(busy)
+    with pytest.raises(asyncio.CancelledError, match="park"):
+        await runner
+    assert not sent and parked.done and parked.meta.admitted_mono_us is None
+    await gate.close()
+
+
+async def test_admission_wins_and_multiple_calls_are_not_safe() -> None:
+    gate = ChatGate(policy="class", n_srv=1, r_f=0)
+    gate.register_task(task(phase="running"))
+    busy = gate.submit("busy")
+    call = gate.submit("worker")
+    gate.finish(busy)
+    assert gate.try_park("worker", lambda: pytest.fail("cancel called")) is None
+    second = gate.submit("worker")
+    assert gate.try_park("worker", lambda: pytest.fail("cancel called")) is None
+    gate.finish(second, "refused")
+    gate.finish(call)
+    assert gate.try_park("worker", lambda: pytest.fail("cancel called")) is None
+    await gate.close()
+
+
 def test_the_gate_s_p0_is_the_user_s_task_p0() -> None:
     gate = ChatGate(policy="class")
     assert gate._params is not None

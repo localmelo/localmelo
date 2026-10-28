@@ -1,4 +1,4 @@
-"""The scheduler's task store: component version 1 of the gateway's file.
+"""The scheduler's task store: component version 2 of the gateway's file.
 
 The seven tables of design 4.2 arrive as the ``scheduler`` component of the
 gateway's ``sessions.db``, never of the CLI's file. :meth:`TaskStore.open`
@@ -38,7 +38,7 @@ from localmelo.support.scheduler.model import TERMINAL_PHASES, Origin
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 COMPONENT: Final = "scheduler"
-SCHEDULER_VERSION: Final = 1
+SCHEDULER_VERSION: Final = 2
 
 TASK_ORIGINS: Final = frozenset(get_args(Origin))
 _TERMINAL_STATES: Final = TERMINAL_PHASES
@@ -94,6 +94,11 @@ _SCHEMA: Final = (
     "CREATE INDEX IF NOT EXISTS sched_log_ts ON sched_log(ts)",
     "CREATE INDEX IF NOT EXISTS idle_windows_start ON idle_windows(start)",
 )
+
+_SNAPSHOT_SCHEMA: Final = """CREATE TABLE park_priority (
+  task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE CASCADE,
+  level INTEGER NOT NULL, source TEXT NOT NULL, reason TEXT NOT NULL,
+  user_rank REAL, pause_pending INTEGER NOT NULL DEFAULT 0)"""
 
 _TASK_COLUMNS: Final = (
     "task_id",
@@ -229,15 +234,40 @@ class TaskStore:
         return self._version
 
     async def open(self) -> int:
-        """Create the ``scheduler`` component at version 1, or check it.
-
-        Idempotent. On a gateway file whose component is absent, the seven
-        tables and the version row are written in one transaction; a newer
-        version raises :class:`SessionStoreError` and writes nothing.
-        """
-        self._version = await self._store.ensure_component(
-            COMPONENT, SCHEDULER_VERSION, _SCHEMA
-        )
+        """Create or migrate the scheduler component in one transaction."""
+        async with self._store.component_transaction("component_scheduler") as conn:
+            row = await _first(
+                conn,
+                "SELECT version FROM schema_components WHERE name = ?",
+                (COMPONENT,),
+            )
+            current = row[0] if row else None
+            if current is None:
+                for statement in _SCHEMA:
+                    await conn.execute(statement)
+                await conn.execute(_SNAPSHOT_SCHEMA)
+                await conn.execute(
+                    "INSERT INTO schema_components (name, version) VALUES (?, ?)",
+                    (COMPONENT, SCHEDULER_VERSION),
+                )
+            elif current == 1:
+                await conn.execute(_SNAPSHOT_SCHEMA)
+                await self._migrate_snapshots(conn)
+                await conn.execute(
+                    "UPDATE schema_components SET version = ? WHERE name = ?",
+                    (SCHEDULER_VERSION, COMPONENT),
+                )
+            elif current > SCHEDULER_VERSION:
+                raise SessionStoreError(
+                    f"{self._store.path} has scheduler schema version {current}; "
+                    f"this localmelo reads version {SCHEDULER_VERSION}"
+                )
+            elif current != SCHEDULER_VERSION:
+                raise SessionStoreError(
+                    f"{self._store.path} has scheduler schema version {current}; "
+                    f"this localmelo cannot migrate it to version {SCHEDULER_VERSION}"
+                )
+        self._version = SCHEDULER_VERSION
         if not self._retention_hooked:
             self._store.add_retention_hook(self.apply_retention)
             self._retention_hooked = True
@@ -245,6 +275,61 @@ class TaskStore:
         # trace and idle rows as it opens, beside the session store's sweep.
         await self.apply_retention()
         return self._version
+
+    async def _migrate_snapshots(self, conn: Any) -> None:
+        # Reconstruct only pauses still supported by the v1 audit trail.
+        rows = await _rows(
+            conn,
+            "SELECT task_id, level, level_source, reason, user_rank FROM tasks "
+            "WHERE state = 'parked' AND level = 5 AND reason = 'pause'",
+        )
+        for task_id, level, source, reason, rank in rows:
+            pause = await _first(
+                conn,
+                "SELECT id, data FROM sched_log WHERE task_id = ? AND kind = 'task.pause' ORDER BY id DESC LIMIT 1",
+                (task_id,),
+            )
+            if pause is None:
+                continue
+            later = await _first(
+                conn,
+                "SELECT 1 FROM sched_log WHERE task_id = ? AND id > ? AND kind IN ('task.level', 'task.first', 'task.resume') LIMIT 1",
+                (task_id, pause[0]),
+            )
+            if not later:
+                saved = json.loads(pause[1])
+                level, source, reason, rank = (
+                    saved["from_level"],
+                    saved["from_source"],
+                    saved["reason"],
+                    saved["rank"],
+                )
+            await self._save_snapshot(conn, task_id, level, source, reason, rank)
+
+    async def _save_snapshot(
+        self,
+        conn: Any,
+        task_id: str,
+        level: int,
+        source: str,
+        reason: str,
+        rank: float | None,
+    ) -> None:
+        await conn.execute(
+            "INSERT OR REPLACE INTO park_priority (task_id, level, source, reason, user_rank) VALUES (?, ?, ?, ?, ?)",
+            (task_id, level, source, reason, rank),
+        )
+
+    async def _has_snapshot(self, conn: Any, task_id: str) -> bool:
+        return (
+            await _first(
+                conn, "SELECT 1 FROM park_priority WHERE task_id = ?", (task_id,)
+            )
+            is not None
+        )
+
+    async def _clear_snapshot(self, conn: Any, task_id: str) -> None:
+        await conn.execute("DELETE FROM park_priority WHERE task_id = ?", (task_id,))
 
     # ── Creation ──
 
@@ -454,6 +539,15 @@ class TaskStore:
             if level == 0 and source == "user":
                 await self._demote_other_p0(conn, task_id, actor, now)
             await self._write_level(conn, current, level, source, None, reason, now)
+            if (
+                current.state == "parked"
+                and current.level == 5
+                and level == 5
+                and await self._has_snapshot(conn, task_id)
+            ):
+                await self._save_snapshot(conn, task_id, level, source, reason, None)
+            else:
+                await self._clear_snapshot(conn, task_id)
             if current.level != level:
                 await self._event(
                     conn,
@@ -637,6 +731,24 @@ class TaskStore:
                             pinned=_pinned(source),
                             ts=now,
                         )
+                if (
+                    choice == "first"
+                    and current.state == "parked"
+                    and current.level == 5
+                    and await self._has_snapshot(conn, task_id)
+                ):
+                    await self._save_snapshot(
+                        conn,
+                        task_id,
+                        current.level,
+                        current.level_source,
+                        current.reason,
+                        now,
+                    )
+                elif not (
+                    choice == 5 and current.level == 5 and current.reason == "pause"
+                ):
+                    await self._clear_snapshot(conn, task_id)
                 await self._log(
                     conn,
                     (
@@ -651,6 +763,8 @@ class TaskStore:
                     ts=now,
                 )
             if state is not None:
+                if state != "parked":
+                    await self._clear_snapshot(conn, task_id)
                 await conn.execute(
                     "UPDATE tasks SET state = ?, started_at = CASE WHEN ? = 'running' THEN COALESCE(started_at, ?) ELSE started_at END, "
                     "finished_at = CASE WHEN ? IN ('done','failed','cancelled','expired') THEN ? ELSE NULL END, "
@@ -670,7 +784,7 @@ class TaskStore:
         return result
 
     async def pause(self, task_id: str, *, actor: str = "user") -> TaskRecord:
-        """Park at P5, recording the previous priority in the audit log."""
+        """Park at P5, saving the previous priority independently of audit retention."""
         now = self._clock()
         async with self._store.component_transaction("task_pause") as conn:
             current = await self._get(conn, task_id)
@@ -680,6 +794,14 @@ class TaskStore:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
             if current.state == "parked" and current.level == 5:
                 return current
+            await self._save_snapshot(
+                conn,
+                task_id,
+                current.level,
+                current.level_source,
+                current.reason,
+                current.user_rank,
+            )
             await self._write_level(conn, current, 5, "user", None, "pause", now)
             await self._event(
                 conn,
@@ -693,7 +815,10 @@ class TaskStore:
                 ts=now,
             )
             await conn.execute(
-                "UPDATE tasks SET state = 'parked', wait_reason = '', hold_site = '' WHERE task_id = ?",
+                "UPDATE tasks SET state = 'parked', "
+                "wait_reason = CASE WHEN state = 'held' THEN wait_reason ELSE '' END, "
+                "hold_site = CASE WHEN state = 'held' THEN hold_site ELSE '' END "
+                "WHERE task_id = ?",
                 (task_id,),
             )
             await self._log(
@@ -723,33 +848,13 @@ class TaskStore:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
             if current.state != "parked" or current.level != 5:
                 raise TaskNotPausedError(f"Task {task_id} is not paused")
-            row = (
-                await _first(
-                    conn,
-                    "SELECT id, data FROM sched_log WHERE task_id = ? AND kind = 'task.pause' ORDER BY id DESC LIMIT 1",
-                    (task_id,),
-                )
-                if current.reason == "pause"
-                else None
+            saved = await _first(
+                conn,
+                "SELECT level, source, reason, user_rank FROM park_priority WHERE task_id = ?",
+                (task_id,),
             )
-            later = (
-                await _first(
-                    conn,
-                    "SELECT 1 FROM sched_log WHERE task_id = ? AND id > ? AND kind IN ('task.level', 'task.first', 'task.resume') LIMIT 1",
-                    (task_id, row[0]),
-                )
-                if row
-                else None
-            )
-            saved = json.loads(row[1]) if row and not later else None
-            level = saved["from_level"] if saved else (current.level if later else 2)
-            source = (
-                saved["from_source"]
-                if saved
-                else (current.level_source if later else "computed")
-            )
-            reason = saved["reason"] if saved else (current.reason if later else "")
-            rank = saved["rank"] if saved else (current.user_rank if later else None)
+            level, source, reason, rank = saved if saved else (2, "computed", "", None)
+            await self._clear_snapshot(conn, task_id)
             if level == 0 and source == "user":
                 await self._demote_other_p0(conn, task_id, actor, now)
             await self._write_level(conn, current, level, source, rank, reason, now)
@@ -910,6 +1015,19 @@ class TaskStore:
                 "UPDATE tasks SET user_rank = ?, updated_at = ? WHERE task_id = ?",
                 (rank, now, task_id),
             )
+            if (
+                current.state == "parked"
+                and current.level == 5
+                and await self._has_snapshot(conn, task_id)
+            ):
+                await self._save_snapshot(
+                    conn,
+                    task_id,
+                    current.level,
+                    current.level_source,
+                    current.reason,
+                    rank,
+                )
             await self._touch_session(conn, task_id, now)
             await self._log(
                 conn,
