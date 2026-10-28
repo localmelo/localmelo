@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import re
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +14,7 @@ from localmelo.melo.contracts.providers import ProviderError
 from localmelo.support import config
 from localmelo.support.config import Config, SchedulerConfig
 from localmelo.support.gateway.chat_gate import call_log_dir
+from localmelo.support.gateway.guard import app_instance
 from localmelo.support.gateway.machine_monitor import read_pmset
 from localmelo.support.gateway.playground import LockHeldError, SmokePlayground
 
@@ -97,9 +96,7 @@ def mount(
     app.mount("/assets", StaticFiles(directory=_STATIC), name="workspace-assets")
 
     # The header identifies this app-started instance; it is not authentication.
-    instance = os.environ.get("LOCALMELO_APP_INSTANCE", "")
-    if not re.fullmatch(r"[0-9a-f]{32}", instance):
-        instance = ""
+    instance = app_instance()
 
     @app.get("/", response_class=HTMLResponse)
     async def chat_ui() -> HTMLResponse:

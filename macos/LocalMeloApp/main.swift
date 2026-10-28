@@ -26,14 +26,17 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var statusItem: NSStatusItem!
     private var child: Process?
     private var timer: Timer?
+    private var healthTimer: Timer?
     private var deadline = Date()
     private var stopping = false
     private var quitPending = false
     private var ready = false
     private var checking = false
+    private var nextLoginAttempt = Date()
     private let healthSession = URLSession(configuration: .ephemeral)
     private var healthAuthenticated = false
     private var browserLoginCode: String?
+    private var signInAttempts = 0
     // Instance collision check, not authentication against another local process.
     private let instance = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     private var port = defaultPort
@@ -70,6 +73,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private func createMenu() {
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Open LocalMelo", action: #selector(openWindow), keyEquivalent: "")
+        appMenu.addItem(withTitle: "Sign In Again", action: #selector(signInAgain), keyEquivalent: "")
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Quit LocalMelo", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let root = NSMenu()
@@ -94,6 +98,20 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     @objc private func openWindow() {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    // A manual sign-in uses the same instance-checked flow as startup and
+    // rotation recovery. It issues fresh one-use codes.
+    @objc private func signInAgain() {
+        guard !stopping, !checking, let child = child, child.isRunning else { return }
+        healthAuthenticated = false
+        browserLoginCode = nil
+        nextLoginAttempt = Date()
+        if ready {
+            pollHealth()
+        } else {
+            checkReady()
+        }
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -208,6 +226,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             return
         }
         guard !checking else { return }
+        if !healthAuthenticated && Date() < nextLoginAttempt { return }
         checking = true
         listenerPIDs { [weak self] pids in
             guard let self = self else { return }
@@ -216,19 +235,49 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 return
             }
             if self.healthAuthenticated {
-                self.fetchHealth(child: child)
+                self.fetchHealth(child: child, reload: false)
             } else {
-                self.authenticateHealth(child: child)
+                self.signIn(child: child, reload: false)
             }
         }
     }
 
-    private func authenticateHealth(child: Process) {
+    // Prove that the listener is this child before issuing any login code.
+    // The identifier catches an accidental collision; it is not authentication.
+    private func signIn(child: Process, reload: Bool) {
+        let url = URL(string: "http://127.0.0.1:\(port)/")!
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 2
+        request.setValue(instance, forHTTPHeaderField: "X-LocalMelo-Instance")
+        healthSession.dataTask(with: request) { [weak self] _, response, _ in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard !self.stopping, child.isRunning else {
+                    self.checking = false
+                    return
+                }
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    self.retryLogin()
+                    return
+                }
+                guard acceptsInstance(http.value(forHTTPHeaderField: "X-LocalMelo-Instance"),
+                                      expected: self.instance, childRunning: child.isRunning) else {
+                    self.checking = false
+                    self.fail("Port \(self.port) is held by another process. Stop the existing listener and try again.")
+                    return
+                }
+                self.issueLoginCodes(child: child, reload: reload)
+            }
+        }.resume()
+    }
+
+    private func issueLoginCodes(child: Process, reload: Bool) {
         guard let python = Bundle.main.resourceURL?.appendingPathComponent("runtime/bin/python/bin/python3") else {
-            checking = false
+            retryLogin()
             return
         }
         let port = self.port
+        let instance = self.instance
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let process = Process()
             process.executableURL = python
@@ -243,7 +292,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             let output = Pipe()
             process.standardOutput = output
             do { try process.run() } catch {
-                DispatchQueue.main.async { self?.checking = false }
+                DispatchQueue.main.async { self?.retryLogin() }
                 return
             }
             let limit = Date().addingTimeInterval(3)
@@ -254,7 +303,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             let codes = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).map(String.init)
             guard process.terminationStatus == 0, codes.count == 2,
                   codes.allSatisfy({ $0.count <= 256 }) else {
-                DispatchQueue.main.async { self?.checking = false }
+                DispatchQueue.main.async { self?.retryLogin() }
                 return
             }
             let url = URL(string: "http://127.0.0.1:\(port)/api/auth/login")!
@@ -263,21 +312,32 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             request.timeoutInterval = 2
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.setValue("http://127.0.0.1:\(port)", forHTTPHeaderField: "Origin")
+            request.setValue(instance, forHTTPHeaderField: "X-LocalMelo-Instance")
             request.httpBody = try? JSONSerialization.data(withJSONObject: ["code": codes[0]])
             self?.healthSession.dataTask(with: request) { [weak self] _, response, _ in
                 DispatchQueue.main.async {
                     guard let self = self else { return }
-                    self.checking = false
                     guard !self.stopping, child.isRunning,
-                          (response as? HTTPURLResponse)?.statusCode == 204 else { return }
+                          (response as? HTTPURLResponse)?.statusCode == 204 else {
+                        self.retryLogin()
+                        return
+                    }
+                    // The cookie is presumed, not proven: fetchHealth verifies
+                    // it and clears the flag on 401 so sign-in runs again.
                     self.healthAuthenticated = true
                     self.browserLoginCode = codes[1]
+                    self.fetchHealth(child: child, reload: reload)
                 }
             }.resume()
         }
     }
 
-    private func fetchHealth(child: Process) {
+    private func retryLogin() {
+        checking = false
+        nextLoginAttempt = Date().addingTimeInterval(0.5)
+    }
+
+    private func fetchHealth(child: Process, reload: Bool) {
         let url = URL(string: "http://127.0.0.1:\(port)/api/health")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 2
@@ -285,28 +345,75 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.checking = false
-                guard let data = data, (response as? HTTPURLResponse)?.statusCode == 200,
-                      let health = gatewayHealth(data), !self.ready, !self.stopping,
-                      child.isRunning else { return }
-                self.listenerPIDs { [weak self] pids in
-                    guard let self = self, !self.ready, !self.stopping, child.isRunning,
-                          ownsListener(pids, child: child.processIdentifier) else { return }
-                    guard health.store == "ok" else {
+                guard !self.stopping, child.isRunning else { return }
+                let status = (response as? HTTPURLResponse)?.statusCode
+                if status == 401 {
+                    self.healthAuthenticated = false
+                    self.nextLoginAttempt = Date().addingTimeInterval(0.5)
+                    return
+                }
+                guard status == 200, let data = data, let health = gatewayHealth(data) else { return }
+                self.healthAuthenticated = true
+                guard health.store == "ok" else {
+                    if !self.ready {
                         self.timer?.invalidate()
+                        self.healthTimer?.invalidate()
                         self.stopping = true
                         kill(child.processIdentifier, SIGTERM)
                         self.fail(storeFailureMessage(health))
-                        return
                     }
-                    guard let code = self.browserLoginCode,
-                          let url = URL(string: "http://127.0.0.1:\(self.port)/#login=\(code)") else { return }
-                    self.browserLoginCode = nil
-                    self.ready = true
-                    self.timer?.invalidate()
+                    return
+                }
+                guard !self.ready || reload else { return }
+                guard let code = self.browserLoginCode else { return }
+                let replacing = self.ready
+                self.browserLoginCode = nil
+                self.ready = true
+                self.timer?.invalidate()
+                self.startHealthPolling()
+                // A changing query makes a re-sign-in a new document load; a
+                // fragment-only change would not run the page's login code again.
+                self.signInAttempts += 1
+                guard let url = URL(
+                    string: "http://127.0.0.1:\(self.port)/?auth=\(self.signInAttempts)#login=\(code)&instance=\(self.instance)"
+                ) else { return }
+                if replacing {
+                    // A fresh web view avoids a stalled second navigation that
+                    // WebKit can leave uncommitted after the first page loaded.
+                    self.loadConsole(url)
+                } else {
                     self.webView.load(URLRequest(url: url))
                 }
             }
         }.resume()
+    }
+
+    private func loadConsole(_ url: URL) {
+        let frame = webView?.frame ?? .zero
+        tearDownWebView()
+        let view = ConsoleWebView(frame: frame)
+        view.navigationDelegate = self
+        webView = view
+        window.contentView = view
+        view.load(URLRequest(url: url))
+    }
+
+    private func startHealthPolling() {
+        healthTimer?.invalidate()
+        healthTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.pollHealth()
+        }
+    }
+
+    private func pollHealth() {
+        guard ready, !stopping, !checking, Date() >= nextLoginAttempt,
+              let child = child, child.isRunning else { return }
+        checking = true
+        if healthAuthenticated {
+            fetchHealth(child: child, reload: false)
+        } else {
+            signIn(child: child, reload: true)
+        }
     }
 
     private func tearDownWebView() {

@@ -38,52 +38,105 @@ func record(_ text: String) {
     handle.closeFile()
 }
 var quitPhase = 0
+var didSignInAgain = false
 """
 
 FAKE_GATEWAY = r"""import http.server, json, os, pathlib, sys, threading, time
+from http.cookies import SimpleCookie
 from localmelo.support.gateway.auth import GatewayAuth
 port = int(sys.argv[sys.argv.index("--port") + 1])
 home = pathlib.Path(os.environ["HOME"])
 mode = os.environ["TEST_MODE"]
+instance = os.environ["LOCALMELO_APP_INSTANCE"]
 pidfile = home / "gateway-pid"
 pidfile.write_text(str(os.getpid()))
+auth = GatewayAuth()
+requests = home / "requests"
+logins = home / "logins"
+
+def record(text):
+    with requests.open("a") as stream:
+        stream.write(text + "\n")
+
+def note_login():
+    with logins.open("a") as stream:
+        stream.write("login\n")
+
+def cookie_ok(header):
+    cookie = SimpleCookie()
+    try:
+        cookie.load(header)
+    except Exception:
+        return False
+    name = f"melo_session_{port}"
+    return name in cookie and auth.valid_cookie(cookie[name].value, port)
+
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path != "/api/auth/login":
             self.send_error(404)
             return
+        record("POST " + self.path)
+        note_login()
+        if self.headers.get("X-LocalMelo-Instance") != instance:
+            self.send_error(421)
+            return
         data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
-        auth = GatewayAuth()
-        try:
-            cookie = auth.consume_login(data.get("code", ""), port)
-        finally:
-            auth.close()
+        cookie = auth.consume_login(data.get("code", ""), port)
         if self.headers.get("Origin") != f"http://127.0.0.1:{port}" or not cookie:
             self.send_error(403)
             return
+        if self.headers.get("X-Test-Browser") == "1":
+            (home / "browser-login-ok").write_text("yes")
+        if mode == "no-cookie":
+            self.send_response(204)
+            self.end_headers()
+            return
+        if mode == "rotate" and (home / "rotate-now").exists():
+            (home / "rotate-now").unlink()
         self.send_response(204)
-        self.send_header("Set-Cookie", "test_session=ok; HttpOnly; Path=/")
+        self.send_header("Set-Cookie", f"melo_session_{port}={cookie}; HttpOnly; Path=/")
         self.end_headers()
     def do_GET(self):
+        record("GET " + self.path)
         if self.path == "/api/health":
-            if mode == "store":
+            if not cookie_ok(self.headers.get("Cookie", "")):
+                body = b"{}"
+                status = 401
+            elif mode == "rotate" and (home / "rotate-now").exists():
+                body = b"{}"
+                status = 401
+            elif mode == "store":
                 body = b'{"api":2,"sessions":{"store":"unavailable","store_error":"Another melo gateway owns the store","store_reason":"owned","running":0}}'
+                status = 200
             elif mode == "store-open-error":
                 body = b'{"api":2,"sessions":{"store":"unavailable","store_error":"permission denied","store_reason":"open-error","running":0}}'
+                status = 200
             elif mode == "quit":
                 body = b'{"api":2,"sessions":{"store":"ok","store_error":"","running":1}}'
+                status = 200
             else:
                 body = b'{"api":2,"sessions":{"store":"ok","store_error":"","running":0}}'
-        else:
+                status = 200
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            if status == 200 and mode in ("correct", "quit", "idlequit", "keys", "rotate", "signin"):
+                self.send_header("X-LocalMelo-Instance", instance)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.headers.get("X-LocalMelo-Instance") is None:
             (home / "requested-page").write_text("yes")
-            body = b'<html><body id="test-page">test page</body></html>'
+        page = '<html><body id="test-page">test page</body></html>'
+        body = page.encode()
         self.send_response(200)
-        self.send_header("Content-Type", "application/json" if self.path == "/api/health" else "text/html; charset=utf-8")
+        self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
-        if mode in ("correct", "quit", "idlequit", "keys"):
-            self.send_header("X-LocalMelo-Instance", os.environ["LOCALMELO_APP_INSTANCE"])
-        elif mode == "wrong":
+        if mode == "wrong":
             self.send_header("X-LocalMelo-Instance", "wrong")
+        elif mode != "absent":
+            self.send_header("X-LocalMelo-Instance", instance)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -139,11 +192,26 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
         "        webView = nil": '        webView = nil\n        record("removed")',
-        '    private func fail(_ text: String, title: String = "LocalMelo could not start") {': '    private func fail(_ text: String, title: String = "LocalMelo could not start") {\n        record("alert " + text)',
-        "    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {": """    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        record("loaded")
+        "        tearDownWebView()\n        let alert = NSAlert()": '        tearDownWebView()\n        record("alert " + text)\n        let alert = NSAlert()',
+        "    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {": r"""    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        record("loaded " + (webView.url?.absoluteString ?? ""))
         if let menu = NSApp.mainMenu?.items.last?.submenu {
             record("edit " + menu.items.map { $0.title + ":" + $0.keyEquivalent }.joined(separator: ","))
+        }
+        if let hash = webView.url?.fragment {
+            let fields = hash.split(separator: "&")
+            let code = fields.first { $0.hasPrefix("login=") }?.dropFirst("login=".count)
+            let launch = fields.first { $0.hasPrefix("instance=") }?.dropFirst("instance=".count)
+            if let code = code, let launch = launch {
+                var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/auth/login")!)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.setValue("http://127.0.0.1:\(port)", forHTTPHeaderField: "Origin")
+                request.setValue(String(launch), forHTTPHeaderField: "X-LocalMelo-Instance")
+                request.setValue("1", forHTTPHeaderField: "X-Test-Browser")
+                request.httpBody = try? JSONSerialization.data(withJSONObject: ["code": String(code)])
+                URLSession.shared.dataTask(with: request).resume()
+            }
         }
         if ProcessInfo.processInfo.environment["TEST_MODE"] == "keys" {
             webView.evaluateJavaScript("document.body.innerHTML='<input id=editor value=hello>'; document.getElementById('editor').focus()") { _, _ in
@@ -159,6 +227,19 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
         }
         if ["quit", "idlequit"].contains(ProcessInfo.processInfo.environment["TEST_MODE"] ?? "") {
             DispatchQueue.main.async { NSApp.terminate(nil) }
+        }
+        if ProcessInfo.processInfo.environment["TEST_MODE"] == "signin" && !didSignInAgain {
+            didSignInAgain = true
+            record("sign-in-action")
+            let home = ProcessInfo.processInfo.environment["HOME"]!
+            func performSignIn(_ remaining: Int) {
+                if FileManager.default.fileExists(atPath: home + "/browser-login-ok") || remaining == 0 {
+                    _ = (NSApp.delegate as? NSObject)?.perform(Selector(("signInAgain")))
+                } else {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { performSignIn(remaining - 1) }
+                }
+            }
+            performSignIn(100)
         }""",
         "    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {": '    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {\n        record("quit-request")',
         '                    alert.addButton(withTitle: "Cancel")': """                    alert.addButton(withTitle: "Cancel")
@@ -223,14 +304,18 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
 
 
 def wait_for(
-    path: Path, predicate: str, process: subprocess.Popen[bytes], timeout: float = 15
+    path: Path,
+    predicate: str,
+    process: subprocess.Popen[bytes],
+    timeout: float = 15,
+    count: int = 1,
 ) -> str:
     deadline = time.monotonic() + timeout
     text = ""
     while time.monotonic() < deadline:
         if path.exists():
             text = path.read_text()
-            if predicate in text:
+            if text.count(predicate) >= count:
                 return text
         assert (
             process.poll() is None
@@ -268,43 +353,70 @@ def stop(process: subprocess.Popen[bytes], home: Path) -> None:
             os.kill(int(pidfile.read_text()), signal.SIGKILL)
 
 
-@pytest.mark.parametrize("mode", ["wrong", "absent"])
-def test_wrong_or_absent_instance_header_cancels_real_webview(
-    app: Path, tmp_path: Path, mode: str
-) -> None:
+@contextlib.contextmanager
+def running(
+    app: Path, home: Path, mode: str
+) -> Iterator[tuple[subprocess.Popen[bytes], int]]:
     sock = safe_socket()
     port = sock.getsockname()[1]
     sock.close()
-    process = launch(app, tmp_path, port, mode)
+    process = launch(app, home, port, mode)
     try:
+        yield process, port
+    finally:
+        stop(process, home)
+
+
+@pytest.mark.parametrize("mode", ["wrong", "absent"])
+def test_wrong_or_absent_instance_header_sends_no_login_code(
+    app: Path, tmp_path: Path, mode: str
+) -> None:
+    with running(app, tmp_path, mode) as (process, port):
         events = wait_for(tmp_path / "events", "alert ", process)
-        assert (
-            tmp_path / "requested-page"
-        ).exists(), "real navigation did not reach the fake gateway"
+        requests = (tmp_path / "requests").read_text()
+        assert "GET /" in requests, "the instance check did not reach the listener"
+        assert "POST /api/auth/login" not in requests
+        assert not (
+            tmp_path / "logins"
+        ).exists(), "a login code was sent to a foreign listener"
+        assert not (tmp_path / "requested-page").exists()
         assert "removed" in events
         assert "loaded" not in events
         assert f"Port {port} is held by another process" in events
-    finally:
-        stop(process, tmp_path)
+
+
+def test_a_login_that_stores_no_cookie_is_retried(app: Path, tmp_path: Path) -> None:
+    with running(app, tmp_path, "no-cookie") as (process, _):
+        wait_for(tmp_path / "logins", "login", process, timeout=20, count=2)
+        assert not (tmp_path / "requested-page").exists()
+        assert not (tmp_path / "browser-login-ok").exists()
+
+
+@pytest.mark.parametrize("mode", ["rotate", "signin"])
+def test_reauthentication_gets_a_new_session(
+    app: Path, tmp_path: Path, mode: str
+) -> None:
+    with running(app, tmp_path, mode) as (process, _):
+        if mode == "rotate":
+            wait_for(tmp_path / "browser-login-ok", "yes", process)
+            (tmp_path / "rotate-now").write_text("yes")
+        else:
+            wait_for(tmp_path / "events", "sign-in-action", process)
+        wait_for(tmp_path / "logins", "login", process, timeout=20, count=4)
+        events = wait_for(tmp_path / "events", "loaded", process, count=2)
+        assert "alert " not in events
 
 
 def test_command_select_all_in_webview(app: Path, tmp_path: Path) -> None:
-    sock = safe_socket()
-    port = sock.getsockname()[1]
-    sock.close()
-    process = launch(app, tmp_path, port, "keys")
-    try:
+    with running(app, tmp_path, "keys") as (process, _):
         wait_for(tmp_path / "events", "selection 5", process)
-    finally:
-        stop(process, tmp_path)
 
 
 def test_child_exit_removes_loaded_webview(app: Path, tmp_path: Path) -> None:
-    sock = safe_socket()
-    port = sock.getsockname()[1]
-    sock.close()
-    process = launch(app, tmp_path, port, "correct")
-    try:
+    with running(app, tmp_path, "correct") as (process, _):
+        wait_for(tmp_path / "browser-login-ok", "yes", process)
+        logins = (tmp_path / "logins").read_text().splitlines()
+        assert len(logins) == 2, "health and page must consume separate one-use codes"
         events = wait_for(tmp_path / "events", "edit ", process)
         for item in ("Undo:z", "Redo:Z", "Cut:x", "Copy:c", "Paste:v", "Select All:a"):
             assert item in events
@@ -313,47 +425,29 @@ def test_child_exit_removes_loaded_webview(app: Path, tmp_path: Path) -> None:
         events = wait_for(tmp_path / "events", "alert ", process)
         assert "removed" in events
         assert "terminated by signal 9" in events
-    finally:
-        stop(process, tmp_path)
 
 
 def test_owned_store_stops_host_before_page_load(app: Path, tmp_path: Path) -> None:
-    sock = safe_socket()
-    port = sock.getsockname()[1]
-    sock.close()
-    process = launch(app, tmp_path, port, "store")
-    try:
+    with running(app, tmp_path, "store") as (process, _):
         wait_for(tmp_path / "events", "removed", process)
         events = (tmp_path / "events").read_text()
         assert "session store is unavailable" in events
         assert "Another melo gateway" in events
         assert not (tmp_path / "requested-page").exists()
-    finally:
-        stop(process, tmp_path)
 
 
 def test_non_owner_store_error_gives_relevant_hint(app: Path, tmp_path: Path) -> None:
-    sock = safe_socket()
-    port = sock.getsockname()[1]
-    sock.close()
-    process = launch(app, tmp_path, port, "store-open-error")
-    try:
+    with running(app, tmp_path, "store-open-error") as (process, _):
         events = wait_for(tmp_path / "events", "alert ", process)
         assert "permission denied" in events
         assert "store permissions" in events
         assert "Stop the other gateway" not in events
         assert not (tmp_path / "requested-page").exists()
-    finally:
-        stop(process, tmp_path)
 
 
 @pytest.mark.parametrize("mode", ["quit", "idlequit"])
 def test_quit_can_cancel_then_stop(app: Path, tmp_path: Path, mode: str) -> None:
-    sock = safe_socket()
-    port = sock.getsockname()[1]
-    sock.close()
-    process = launch(app, tmp_path, port, mode)
-    try:
+    with running(app, tmp_path, mode) as (process, _):
         events = wait_for(tmp_path / "events", "quit-resumed", process)
         assert "quit-cancel" in events
         child_pid = int((tmp_path / "gateway-pid").read_text())
@@ -363,8 +457,6 @@ def test_quit_can_cancel_then_stop(app: Path, tmp_path: Path, mode: str) -> None
         events = (tmp_path / "events").read_text()
         assert "quit-confirm" in events
         assert process.returncode == 0
-    finally:
-        stop(process, tmp_path)
 
 
 def test_existing_foreign_listener_never_loads(app: Path, tmp_path: Path) -> None:

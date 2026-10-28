@@ -43,8 +43,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Added
 
 - An unsigned arm64 macOS development bundle wraps the local web console in a
-  native window and menu-bar host. It owns its gateway child and checks the page
-  instance for accidental port collisions; the check is not authentication ([#NN]).
+  native window and menu-bar host. It owns its gateway child, checks the
+  instance before sending any login code and on page responses, re-signs in
+  after a token rotation, and offers "Sign In Again"; the check is not
+  authentication ([#NN]).
 - Interactive terminal text attachments: `/attach PATH`, `/attachments`,
   `/detach N|all`, and explicit `@` file-completion selection stage bounded
   workspace snapshots. Best-effort redaction and cleaning require confirmation

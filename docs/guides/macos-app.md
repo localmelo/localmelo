@@ -16,22 +16,23 @@ extra into the bundle, compiles the Swift host with release Xcode, and includes 
 `Contents/Resources/runtime/bin/melo`. The exact standalone interpreter archive is pinned and
 SHA-256 checked before extraction; wheel hashes are checked against the lock file.
 
-Opening the app starts an owned gateway on `127.0.0.1:8401`; it does not adopt an existing
-listener. Stop a conflicting listener or gateway holding the console store first. For isolated
-manual tests, `LOCALMELO_APP_PORT` can select another available port; use a temporary `HOME` and
-avoid ports reserved by other work. Closing the window leaves the gateway running; quitting always
-asks before stopping the gateway and any running tasks. If the listener is a melo background service,
-`melo --daemon status` checks it and `melo --daemon uninstall` stops and removes it. Child output goes to
+Opening the app starts an owned gateway on `127.0.0.1:8401`; it does not adopt an existing listener. Stop a
+conflicting listener or gateway holding the console store first. A machine that reserves 8400-8799 for other work
+must not run the app during that work. For isolated manual tests, `LOCALMELO_APP_PORT` can select another available
+port; use a temporary `HOME` and avoid ports reserved by other work. Closing the window leaves the gateway running;
+quitting always asks before stopping the gateway and any running tasks. If the listener is a melo background
+service, `melo --daemon status` checks it and `melo --daemon uninstall` stops and removes it. Child output goes to
 `~/Library/Logs/LocalMelo/gateway.log`. This prototype has no log rotation.
 
-The app sends a random launch identifier to its child and checks it on main-frame page responses
-to catch accidental port collisions. **This is an instance check, not authentication:** any local
-process can read the response header and replay it. The gateway separately requires authentication:
-for its own health checks and web view the app obtains short-lived, single-use login codes without
-logging them or placing the bearer token in a URL. The browser code is carried in a URL fragment,
-which the console removes after sign-in. Same-user processes and other localhost services remain
-outside the authentication boundary, and tools run as the user. Do not expose it on a network or
-use it with untrusted tasks.
+The app sends a random launch identifier to its child and checks it on a `GET /` probe before it sends any login
+code, and again on main-frame page responses, to catch accidental port collisions. Its login request carries the
+identifier, so a gateway started by the app refuses a mismatched exchange. **This is an instance check, not
+authentication:** any local process can read the response header and replay it. The gateway separately requires
+authentication: for its own health checks and web view the app obtains short-lived, single-use login codes without
+logging them or placing the bearer token in a URL. The browser code is carried in a URL fragment, which the console
+removes after sign-in. It verifies the health cookie and retries a login that stores none. After a token rotation it
+signs in again and reloads; the app menu's **Sign In Again** action does the same on demand. The codes come from a
+private in-bundle snippet; a documented `melo` command for this is A1b work, not yet available. Same-user processes and other localhost services remain outside the authentication boundary, and tools run as the user. Do not expose it on a network or use it with untrusted tasks.
 
 The app and console use the regular localmelo config and session store under `~/.cache/localmelo`;
 first-run setup is the web console's settings dialog. The app does not install or remove the

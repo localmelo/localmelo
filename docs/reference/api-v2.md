@@ -13,8 +13,10 @@ submissions, approvals, tools, grants, memory, runs and scheduler tasks.
 
 `POST /api/auth/login` exchanges a valid single-use code for a browser cookie;
 `POST /api/auth/logout` revokes the cookie. `POST /api/auth/rotate` requires
-the bearer and rotates it. The login exchange requires a matching Origin.
-See [gateway security](../guides/gateway.md#keep-the-gateway-private).
+the bearer and rotates it. The login exchange requires a matching Origin. When
+the macOS app started the gateway, it also requires the app's
+`X-LocalMelo-Instance` header; a missing or different value is refused before
+the code is consumed. See [gateway security](../guides/gateway.md#keep-the-gateway-private).
 
 A console turn passes the same scheduler gate a workspace chat does: every
 model call waits for its slot under `[scheduler]`, and the call log records
@@ -51,7 +53,7 @@ every route below:
 | 409 | `settings_changed` | `config.toml` changed on disk since `GET /api/settings` read its `revision` |
 | 413 | `too_large` | the request body is over 1 MiB |
 | 415 | `unsupported_media_type` | a non-empty request body without `Content-Type: application/json` |
-| 421 | `misdirected_request` | the `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>` |
+| 421 | `misdirected_request` | the `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`, or an app-started gateway's `/api/auth/login` has no matching `X-LocalMelo-Instance` |
 | 500 | `internal_error` | an unexpected failure; the message is `Internal error; see the gateway log.` and never a traceback or a value from the request |
 | 502 | `backend_unreachable` | listing models failed or returned no models |
 | 503 | `store_unavailable` | the gateway's session store could not open, or stopped recording changes; restart the gateway in the second case |

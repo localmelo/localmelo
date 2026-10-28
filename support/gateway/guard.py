@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import os
+import re
 import socket
 from http.cookies import CookieError, SimpleCookie
 
@@ -23,6 +25,17 @@ from localmelo.support.gateway.auth import GatewayAuth
 
 # Names of a loopback address, compared ignoring case.
 _LOOPBACK_NAMES = frozenset({"localhost", "localhost."})
+
+# The macOS app passes a random per-launch identifier to its gateway. It is
+# a collision check, not authentication: a same-user process can read it.
+_APP_INSTANCE = re.compile(r"[0-9a-f]{32}")
+
+
+def app_instance() -> str:
+    """The valid per-launch app identifier from the environment, or ``""``."""
+    value = os.environ.get("LOCALMELO_APP_INSTANCE", "")
+    return value if _APP_INSTANCE.fullmatch(value) else ""
+
 
 # The names of the gateway in a Host header or an origin, IPv6 in brackets.
 _GATEWAY_NAMES = ("127.0.0.1", "localhost", "[::1]")
@@ -218,11 +231,17 @@ class LoopbackGuard:
     """
 
     def __init__(
-        self, app: ASGIApp, *, port: int, auth: GatewayAuth | None = None
+        self,
+        app: ASGIApp,
+        *,
+        port: int,
+        auth: GatewayAuth | None = None,
+        instance: str = "",
     ) -> None:
         self.app = app
         self.port = port
         self.auth = auth
+        self.instance = instance
         hosts = {f"{name}:{port}" for name in _GATEWAY_NAMES}
         if port == 80:
             hosts.update(_GATEWAY_NAMES)
@@ -236,6 +255,9 @@ class LoopbackGuard:
             f"Cross-origin request refused: only pages at "
             f"http://127.0.0.1:{port}, http://localhost:{port} or "
             f"http://[::1]:{port} may send it"
+        )
+        self._instance_error = (
+            "X-LocalMelo-Instance does not match this gateway instance."
         )
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -325,6 +347,11 @@ class LoopbackGuard:
         if method in ("GET", "HEAD") and (path == "/" or path.startswith("/assets/")):
             return None
         if path == "/api/auth/login" and method == "POST":
+            if self.instance and not _one_of(
+                headers.get(b"x-localmelo-instance", []),
+                frozenset({self.instance}),
+            ):
+                return 421, "misdirected_request", self._instance_error
             if not origins or any(
                 site.lower() != "same-origin"
                 for site in headers.get(b"sec-fetch-site", [])

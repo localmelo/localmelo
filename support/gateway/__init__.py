@@ -20,7 +20,7 @@ from localmelo.melo.checker import Checker, GatewayIngressPayload, SessionTransi
 from localmelo.support import config
 from localmelo.support.gateway.auth import COOKIE_TTL, GatewayAuth
 from localmelo.support.gateway.console import Console, ConsoleOptions
-from localmelo.support.gateway.guard import LoopbackGuard, is_loopback
+from localmelo.support.gateway.guard import LoopbackGuard, app_instance, is_loopback
 from localmelo.support.gateway.session import SessionBusyError, SessionManager
 
 logger = logging.getLogger("localmelo.gateway")
@@ -85,7 +85,12 @@ class GatewayServer:
             options=self._console_options(console_options),
         )
         self.console.mount(self.app)
-        self.app.add_middleware(LoopbackGuard, port=self.port, auth=self.auth)
+        self.app.add_middleware(
+            LoopbackGuard,
+            port=self.port,
+            auth=self.auth,
+            instance=app_instance(),
+        )
 
     def _console_options(self, options: ConsoleOptions | None) -> ConsoleOptions:
         """*options*, with the workspace page's gate when it built one.

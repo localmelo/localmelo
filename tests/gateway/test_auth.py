@@ -47,6 +47,38 @@ def test_login_codes_are_single_use_persistent_and_rotated(tmp_path: Path) -> No
         other.close()
 
 
+def test_app_login_requires_the_launch_instance_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    instance = "0123456789abcdef" * 2
+    monkeypatch.setenv("LOCALMELO_APP_INSTANCE", instance)
+    server = GatewayServer(Config())
+    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    try:
+        assert client.get("/").headers["x-localmelo-instance"] == instance
+        code = server.auth.issue_login(8401)
+        origin = {"Origin": "http://127.0.0.1:8401"}
+        for headers in (
+            origin,
+            {**origin, "X-LocalMelo-Instance": "f" * 32},
+        ):
+            response = client.post(
+                "/api/auth/login", json={"code": code}, headers=headers
+            )
+            assert response.status_code == 421
+            assert response.json()["error"]["code"] == "misdirected_request"
+        # A refused exchange must not consume the code.
+        response = client.post(
+            "/api/auth/login",
+            json={"code": code},
+            headers={**origin, "X-LocalMelo-Instance": instance},
+        )
+        assert response.status_code == 204
+        assert client.get("/api/health").status_code == 200
+    finally:
+        server.auth.close()
+
+
 def test_gateway_login_cookie_and_rotation() -> None:
     server = GatewayServer(Config())
     client = TestClient(server.app, base_url="http://127.0.0.1:8401")
