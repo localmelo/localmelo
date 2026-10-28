@@ -193,7 +193,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   repository layout and the `melo/` ↔ `support/` rule, the package layout,
   setup, tests, ruff/black/mypy, adding a backend, a built-in tool or a
   check, commits and pull requests, and the docs and website layout
-  ([#NN]).
+  ([#67]).
 - The `dev` extra installs `pytest-xdist` and `pytest-testmon`, so
   `uv run pytest -n auto -q` runs the offline suite in parallel before a
   pull request and `uv run pytest --testmon -q` runs only the tests a
@@ -379,4 +379,4 @@ earlier milestones.
 [#63]: https://github.com/localmelo/localmelo/pull/63
 [#64]: https://github.com/localmelo/localmelo/pull/64
 [#66]: https://github.com/localmelo/localmelo/pull/66
-[#NN]: https://github.com/localmelo/localmelo/pull/NN
+[#67]: https://github.com/localmelo/localmelo/pull/NN
