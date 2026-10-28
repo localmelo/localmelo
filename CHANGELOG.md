@@ -9,6 +9,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- API v2 settings, model listing, guard body limits and unconfigured gateway
+  startup: `GET /api/settings`, `PUT /api/settings`,
+  `POST /api/settings/test`, `GET /api/settings/key-status` and
+  `GET /api/models`; `[gateway] workspace` in `config.toml` (written only
+  when non-empty) and atomic `config.save()` replacement via `os.replace`;
+  `onboard.backend_defaults()`; a 1 MiB request body cap (`413 too_large`),
+  `Content-Type: application/json` enforcement on non-empty `/api` bodies
+  (`415 unsupported_media_type`), UTF-8/lone-surrogate validation, and
+  baseline security headers on every response; and
+  `melo --serve --allow-unconfigured` so the gateway can boot before a
+  backend is configured ([#NN]).
 - Reasoning notes for the compress modes: `--reasoning compress` and
   `compress+replay`, `--note-writer auto|heuristic`, and the `[agent]`
   `note_writer` key. `compress` sends no reasoning; instead each reply is

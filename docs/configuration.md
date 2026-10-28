@@ -123,10 +123,11 @@ gateway. Press Ctrl+C to stop the gateway.
 - Without a terminal the wizard reads its answers from stdin. With no
   config file and no terminal, `melo --serve` exits with code 1 and one
   line on stderr instead of waiting for answers that cannot come, as under
-  launchd.
+  launchd. Pass `--allow-unconfigured` with `melo --serve` to start the
+  gateway anyway and configure it over `/api/settings`.
 - Run the wizard again to change backends. It keeps the other settings it
   knows, such as `request_timeout_s` and `extra_body`, and rewrites the file
-  in the current format; comments and unknown keys are dropped.
+  atomically in the current format; comments and unknown keys are dropped.
 
 ## The config file
 
@@ -168,6 +169,7 @@ tables of the chosen backends.
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
 | `host` | `[gateway]` | `"127.0.0.1"` | The address the gateway listens on: keep `127.0.0.1`, or use `localhost` or `::1`. On a host that is not `localhost` or a loopback IP address, such as `0.0.0.0`, the gateway does not check the `Host` and `Origin` of requests; see [Keep the gateway private](gateway.md#keep-the-gateway-private). |
 | `port` | `[gateway]` | `8401` | The port the gateway listens on. |
+| `workspace` | `[gateway]` | `""` | The default workspace folder for web console sessions (`~/localmelo-workspace` when empty); written only when set. |
 | `policy` | `[scheduler]` | `"off"` | How the web workspace's calls reach the model server: `off` records only, `fcfs` admits first come and `class` admits P1 before P2 (and so on); see [Scheduler](scheduler.md#the-gate-on-chats-s2). |
 | `n_srv` | `[scheduler]` | `8` | The model server's slots. |
 | `r_f` | `[scheduler]` | `1` | Slots kept for the CLI and direct runs; forced to 0 when `n_srv <= 2`. |
