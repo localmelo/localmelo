@@ -379,6 +379,55 @@ test('the status label shows waiting with the reason', () => {
   assert.equal(h.element('run-status').textContent, 'Running on your backend');
 });
 
+test('the header pill and the bubble show a hold, then Working when it ends', () => {
+  const h = harness(async () => ({}), {renderMessages: true});
+  h.state.sessions = [session('a', {is_busy: true, held: 'Resources', messages: [{role: 'user', content: 'Hi'}]})];
+  h.state.activeId = 'a';
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('connection-label').textContent, 'Waiting: Resources');
+  let rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Waiting: Resources…');
+  h.state.sessions[0].held = '';
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('connection-label').textContent, 'Working');
+  rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Working on your request…');
+});
+
+test('a pending send follows the hold without re-selecting the chat', async () => {
+  const run = deferred();
+  const details = [];
+  let held = 'Resources';
+  const h = harness(async path => {
+    if (path === '/sessions')
+      return {sessions: [session('a', {is_busy: true, held, last_active: 2})]};
+    if (path === '/session/a') {
+      details.push(path);
+      return session('a', {is_busy: true, messages: [{role: 'user', content: 'Hi'}]});
+    }
+    if (path.endsWith('/run')) return run.promise;
+    return {};
+  }, {renderMessages: true});
+  h.state.sessions = [session('a')];
+  h.state.activeId = 'a';
+  h.element('input').value = 'Hi';
+  const sending = h.run('send()');
+  assert.equal(h.state.pending.has('a'), true);
+  await h.run('poll()');
+  assert.equal(h.element('connection-label').textContent, 'Waiting: Resources');
+  let rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Waiting: Resources…');
+  assert.deepEqual(details, [], 'The detail is not fetched while the send is pending');
+  held = '';
+  await h.run('poll()');
+  assert.equal(h.element('connection-label').textContent, 'Working');
+  rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Working on your request…');
+  run.resolve({result: 'Done'});
+  await sending;
+  assert.equal(h.state.pending.has('a'), false);
+});
+
 test('presence is throttled to one request per 2.5 seconds', async () => {
   const posts = [];
   const h = harness(async () => ({}));

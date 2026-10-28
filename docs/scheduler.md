@@ -57,14 +57,14 @@ Every model call a web workspace chat makes passes through one in-process
 gate (`support/gateway/chat_gate.py`). The gate submits the call to the
 policy and either sends it at once or holds it until the policy admits it.
 The page polls its chats every 2.5 seconds, so a held chat shows
-`Waiting: <reason>` in the status label and `● Waiting` in the sidebar; the
-reason is one of the policy's codes (`Resources` for the first blocked call,
-`Priority` for later ones). A hold is a wait: it never counts against the
-600-second bound on a turn, and a Stop during a hold ends the turn as
-cancelled. A held call also wakes at least every 30 seconds (the focus
-window) to re-run the policy, so a hold that only waited for the typing
-window to expire ends on its own, with no new request and no timer in the
-gate.
+`Waiting: <reason>` in the header's status pill and the status label, and
+`● Waiting` in the sidebar; the reason is one of the policy's codes
+(`Resources` for the first blocked call, `Priority` for later ones). A hold
+is a wait: it never counts against the 600-second bound on a turn, and a
+Stop during a hold ends the turn as cancelled. A held call also wakes at
+least every 30 seconds (the focus window) to re-run the policy, so a hold
+that only waited for the typing window to expire ends on its own, with no
+new request and no timer in the gate.
 
 The `[scheduler]` table of `config.toml` sets the policy:
 

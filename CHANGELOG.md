@@ -272,6 +272,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A held chat's header still said `● Working` while the sidebar, status
+  label and message area said it was waiting, and a chat that had just sent
+  kept `Working on your request…` in the message area for the whole hold
+  (the poll skipped the detail refresh while the send was pending). The
+  header's status pill now says `Waiting: <reason>`, and while the send is
+  pending the message area follows the polled hold as it changes; both
+  return to Working when the hold ends ([#71]).
 - The scheduler simulator's importer reads a chat call's kind from the
   `X-Localmelo-Call-Kind` header that localmelo sends, in the headers side
   file a proxy record names with `bodies.headers`. Retrieval and
@@ -403,3 +410,4 @@ earlier milestones.
 [#67]: https://github.com/localmelo/localmelo/pull/67
 [#68]: https://github.com/localmelo/localmelo/pull/68
 [#69]: https://github.com/localmelo/localmelo/pull/69
+[#71]: https://github.com/localmelo/localmelo/pull/71
