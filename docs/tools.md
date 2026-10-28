@@ -21,9 +21,10 @@ Python API, an agent with a workspace root keeps the file tools inside a
 directory and runs `shell_exec` and `python_exec` there (see
 [With a workspace root](#with-a-workspace-root)). The interactive UI (bare
 `melo`) runs with its workspace as the root and asks before each
-`shell_exec`, `python_exec` and `file_write` call, and before an MCP tool
-whose tier is not `read`, unless `--yolo` (see
-[Permission tiers](#permission-tiers)).
+`shell_exec`, `python_exec` and `file_write` call, unless `--yolo` (see
+[Permission tiers](#permission-tiers)). The interactive UI does not load MCP
+servers yet; a Python run with an approval policy asks its own policy about
+an MCP tool by the same tiers.
 
 ## Choose the built-in tools
 

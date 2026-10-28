@@ -216,9 +216,10 @@ type more letters to narrow them, Tab or Enter to take one.
 
 ### Approvals
 
-`shell_exec`, `python_exec` and `file_write` run only once you answer, and
-so does an MCP tool whose annotations make it `write` or `network`. The
-panel takes the place of the input box, and your draft stays:
+`shell_exec`, `python_exec` and `file_write` run only once you answer. (The
+interactive UI does not load MCP servers yet; in a Python run, an approval
+policy asks about an MCP tool by the same tiers.) The panel takes the place
+of the input box, and your draft stays:
 
 ```text
 ╭─ Run a shell command? ───────────────────────────────────────────────────╮
@@ -238,9 +239,10 @@ panel takes the place of the input box, and your draft stays:
   model reads; Enter sends it. ↑ ↓ and Enter choose too. No letter answers,
   and for 0.4 seconds after the panel opens only Esc and Ctrl+C act, so a
   message you were typing cannot answer it.
-- The header names the tool's permission tier after its name (`exec` here;
-  `write`, `exec` or `network` for an MCP tool). A read-only MCP tool shows
-  `read` only when the server's `require_approval` forces it to ask; see
+- The header names the tool's permission tier after its name, and after the
+  path for `file_write` (`exec` here; `write`, `exec` or `network` for an MCP
+  tool, once the UI can load one). A read-only MCP tool would show `read`
+  only when the server's `require_approval` forces it to ask; see
   [Permission tiers](tools.md#permission-tiers).
 - Esc or Ctrl+C at the choices stops the turn, and a second Ctrl+C within
   2 seconds quits; in the reason field, Esc goes back to the choices.
