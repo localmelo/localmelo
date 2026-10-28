@@ -47,6 +47,7 @@ const LIST_POLL_MS = 4000;
 
 const S = {
   health: null,
+  authenticated: false,
   machine: null,
   sessions: [],
   activeId: null,
@@ -144,12 +145,35 @@ function notify(message, { sticky = false, kind = "" } = {}) {
   }
 }
 
+function lock(message = "") {
+  if (S.authenticated) saveDraft();
+  S.authenticated = false;
+  closeStream();
+  $("settings-dialog")?.close?.();
+  $("app").inert = true;
+  $("app").hidden = true;
+  $("lock-screen").hidden = false;
+  $("lock-status").textContent = message;
+  $("lock-title").focus();
+}
+
 /** One `/api` call; an API v2 error keeps its code, message and details. */
-async function api(path, { body, method } = {}) {
+async function api(path, { body, method, allowLocked = false } = {}) {
+  if (!S.authenticated && !allowLocked) {
+    const error = new Error("Workspace is locked");
+    error.status = 401;
+    throw error;
+  }
   const response = await fetch("/api" + path, {
     method: method ?? (body ? "POST" : "GET"),
     ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
   });
+  if (response.status === 401) {
+    lock();
+    const error = new Error("Workspace is locked");
+    error.status = 401;
+    throw error;
+  }
   const payload = response.status === 204 ? {} : await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(
@@ -584,7 +608,7 @@ function eventsUrl(id) {
 function startStream(id) {
   // A chat opened and then left before its load finished keeps no stream:
   // one bound to this id would ignore every frame of the chat now open.
-  if (S.activeId !== id || workerMode) return;
+  if (!S.authenticated || S.activeId !== id || workerMode) return;
   closeStream();
   if (typeof EventSource !== "function") return;
   S.stream.sessionId = id;
@@ -614,14 +638,13 @@ function startStream(id) {
     syncUI();
   };
   source.onerror = () => {
-    if (S.activeId !== id || S.view === null) return;
-    // A stream the browser will retry by itself is left alone; one it gave
-    // up on is reopened here, after the same backoff, from our own cursor.
-    if (source.readyState === 2) {
-      S.stream.status = "paused";
-      scheduleReconnect();
-      refreshStreamNotice();
-    }
+    if (!S.authenticated || S.stream.source !== source || S.activeId !== id || S.view === null) return;
+    // EventSource cannot expose a 401. Stop its automatic retry and check
+    // authentication before opening another stream.
+    source.close();
+    S.stream.status = "paused";
+    scheduleReconnect();
+    refreshStreamNotice();
   };
 }
 
@@ -660,7 +683,7 @@ function closeStream() {
 
 function scheduleReconnect() {
   const id = S.activeId;
-  if (!id || S.stream.timer !== null) return;
+  if (!S.authenticated || !id || S.stream.timer !== null) return;
   const delay = STREAM_DELAYS_S[Math.min(S.stream.attempt, STREAM_DELAYS_S.length - 1)];
   S.stream.attempt += 1;
   S.stream.retryAt = nowSeconds() + delay;
@@ -681,7 +704,7 @@ function scheduleReconnect() {
         return;
       }
     }
-    if (S.activeId !== id) return;
+    if (!S.authenticated || S.activeId !== id) return;
     startStream(id);
   }, delay * 1000);
 }
@@ -1716,7 +1739,7 @@ async function setLevel(level) {
 function presence(force = false) {
   if (workerMode) return;
   const id = S.activeId;
-  if (!id) return;
+  if (!S.authenticated || !id) return;
   const now = Date.now();
   if (!force && now - S.lastPresenceAt < PRESENCE_MS) return;
   S.lastPresenceAt = now;
@@ -1727,7 +1750,7 @@ function presence(force = false) {
       body: JSON.stringify({ session_id: id }),
       keepalive: true,
     });
-    request?.catch?.(() => {});
+    request?.then?.((response) => { if (response.status === 401) lock(); }).catch(() => {});
   } catch {
     /* A browser may refuse fetch, or a test may not allow it. */
   }
@@ -1951,6 +1974,41 @@ function tick() {
 // ── Starting up ──
 
 async function init() {
+  const fragment = globalThis.location?.hash || "";
+  if (fragment.startsWith("#login=")) {
+    // Remove the entire fragment before any request, including a failed exchange.
+    try {
+      globalThis.history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
+    } catch {
+      lock("Could not clear the sign-in link. Close this tab and try again.");
+      return;
+    }
+    try {
+      const code = new URLSearchParams(fragment.slice(1)).get("login") || "";
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({code}),
+      });
+      if (response.status !== 204) {
+        lock("This sign-in link is invalid or expired. Get a new link and try again.");
+        return;
+      }
+    } catch {
+      lock("Could not sign in. Get a new link and try again.");
+      return;
+    }
+  }
+  try {
+    S.health = await api("/health", {allowLocked: true});
+  } catch (error) {
+    lock(error.status === 401 ? "" : "Could not reach the gateway. Open a new sign-in link to try again.");
+    return;
+  }
+  S.authenticated = true;
+  $("lock-screen").hidden = true;
+  $("app").hidden = false;
+  $("app").inert = false;
   S.drafts = stored(KEY + "-drafts", {}, "sessionStorage");
   const savedOutbox = stored(KEY + "-outbox", {}, "sessionStorage");
   S.outbox = {};
@@ -1962,13 +2020,8 @@ async function init() {
   input.value = S.drafts.new || "";
   resizeInput();
   sidebar(false);
-  const health = api("/health")
-    .then((body) => {
-      S.health = body;
-      return body;
-    })
-    .catch(() => null);
-  await Promise.allSettled([health, refreshList()]);
+  await refreshList();
+  if (!S.authenticated) return;
   syncUI();
   // The hash wins: `#/s/<id>` opens that chat, `#/new` a new one. Without
   // one, the last chat this tab opened, else the newest. The hash id is
@@ -1996,12 +2049,14 @@ async function init() {
     renderMessages(true);
     syncUI();
   }
+  if (!S.authenticated) return;
   for (const [slot, entry] of Object.entries(S.outbox)) {
     if (entry.state === "checking") await checkSubmission(slot, entry.clientRequestId);
+    if (!S.authenticated) return;
   }
   setInterval(tick, 1000);
   setInterval(() => {
-    if (!document.hidden) {
+    if (S.authenticated && !document.hidden) {
       refreshList();
       api("/health").then((body) => { S.health = body; syncUI(); }).catch(() => {});
     }
@@ -2076,6 +2131,7 @@ $("sidebar-backdrop").addEventListener("click", () => sidebar(false));
 matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(false));
 // Back and Forward move the hash; the chat follows it, as a reload would.
 globalThis.addEventListener?.("hashchange", async () => {
+  if (!S.authenticated) return;
   const worker = workerRoute();
   if (worker !== null) { showWorkers(worker); return; }
   const wasWorker = workerMode;
@@ -2097,7 +2153,7 @@ document.querySelectorAll("[data-prompt]").forEach((node) =>
   }),
 );
 document.addEventListener("keydown", (event) => {
-  if (workerMode) return;
+  if (!S.authenticated || workerMode) return;
   if (event.isComposing || event.keyCode === 229) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
@@ -2131,7 +2187,7 @@ document.addEventListener("keydown", (event) => {
   if (runningTurn() !== null) stop();
 });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refreshList();
+  if (S.authenticated && !document.hidden) refreshList();
 });
 
 init();

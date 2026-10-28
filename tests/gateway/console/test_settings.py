@@ -607,7 +607,11 @@ def test_unconfigured_gateway_server_boots_and_onboards_over_api(
             probe=FakeProbe(),
         ),
     )
-    with TestClient(server.app, base_url="http://127.0.0.1:8401") as tc:
+    with TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    ) as tc:
         h1 = tc.get("/api/health").json()
         assert h1["configured"] is False
         assert h1["config_errors"]

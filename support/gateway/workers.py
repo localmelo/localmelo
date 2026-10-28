@@ -3,23 +3,33 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 import logging
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from contextlib import suppress
 from dataclasses import asdict
-from typing import cast
+from typing import Any, cast
 
-from localmelo.melo.agent import AgentOptions
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
-from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.melo.contracts.providers import (
+    LLM_REQUEST_ATTEMPT,
+    LLM_REQUEST_KIND,
+    BaseEmbeddingProvider,
+    BaseLLMProvider,
+)
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import (
     ChatGate,
+    GateCall,
     GatedEmbedding,
     GatedLLM,
     SessionClient,
 )
+from localmelo.support.gateway.park_card import build_park_card
+from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.task_policy import (
     TaskSpec,
     WorkspaceError,
@@ -33,13 +43,17 @@ from localmelo.support.gateway.task_store import (
     TaskStore,
     TaskStoreError,
 )
+from localmelo.support.gateway.worker_evidence import (
+    SafePointEvidence,
+    committed_evidence,
+)
 from localmelo.support.scheduler.model import TERMINAL_PHASES, LevelSource, Phase, Task
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import build_session_agent
 from localmelo.support.sessions.approvals import ApprovalBroker, RememberingPolicy
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.runner import SessionRunner
-from localmelo.support.sessions.store import SessionStore
+from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 log = logging.getLogger(__name__)
 MAX_WORKERS = 4
@@ -47,16 +61,62 @@ MAX_WORKERS = 4
 
 class _WorkerLLM(GatedLLM):
     def __init__(
-        self, inner: BaseLLMProvider, client: SessionClient, ready: asyncio.Event
+        self,
+        inner: BaseLLMProvider,
+        client: SessionClient,
+        ready: asyncio.Event,
+        runner: Callable[[], SessionRunner | None],
+        hold: Callable[[GateCall, SessionRunner, str, str], Awaitable[None]],
+        release: Callable[[GateCall, SessionRunner, str], Awaitable[None]],
+        started: Callable[[GateCall], None],
     ) -> None:
         super().__init__(inner, client)
         self.ready = ready
+        self.runner = runner
+        self.hold = hold
+        self.release = release
+        self.started = started
 
     async def chat(
         self, messages: list[Message], tools: list[ToolDef] | None = None
     ) -> Message:
-        await self.ready.wait()
-        return await super().chat(messages, tools=tools)
+        runner = self.runner()
+        turn = runner.current_turn if runner is not None else None
+        if turn is None or runner is None:
+            raise RuntimeError("Worker call has no active turn")
+        gate = self.client.gate
+        kind = LLM_REQUEST_KIND.get()
+        call = gate.submit(
+            self.client.session_id,
+            kind=kind,
+            attempt=LLM_REQUEST_ATTEMPT.get(),
+            turn_id=turn.id,
+        )
+        held = kind in ("plan", "reflect") and (
+            call.meta.admitted_mono_us is None or not self.ready.is_set()
+        )
+        try:
+            if held:
+                self.ready.clear()
+                await self.hold(call, runner, turn.id, kind)
+            await gate.acquire(call)
+            if held:
+                await self.release(call, runner, turn.id)
+            await self.ready.wait()
+            if self.runner() is not runner or runner.current_turn != turn:
+                raise RuntimeError("Worker turn changed before provider admission")
+            self.started(call)
+        except BaseException:
+            gate.finish(call, "refused")
+            raise
+        try:
+            message = await self.inner.chat(messages, tools=tools)
+        except BaseException:
+            gate.finish(call, "failed")
+            raise
+        self._copy()
+        gate.finish(call, "ok", self.last_usage)
+        return message
 
 
 class _WorkerEmbedding(GatedEmbedding):
@@ -88,6 +148,7 @@ class TaskWorkers:
         self.hub = hub
         self.broker = broker or ApprovalBroker()
         self.tasks = TaskStore(store)
+        self.parks = ParkStore(store)
         self._lock = asyncio.Lock()
         self._eligible: set[str] = set()
         self._runs: dict[str, asyncio.Task[None]] = {}
@@ -95,6 +156,16 @@ class TaskWorkers:
         self._stopping: set[str] = set()
         self._invalid_workspace: set[str] = set()
         self._ready: dict[str, asyncio.Event] = {}
+        self._points: dict[str, tuple[GateCall, SessionRunner, str]] = {}
+        self._approval_points: dict[
+            str, tuple[SessionRunner, str, SafePointEvidence]
+        ] = {}
+        self._pause_requested: set[str] = set()
+        self._park_winners: set[str] = set()
+        self._unavailable: set[str] = set()
+        self._failure_events: dict[str, asyncio.Event] = {}
+        self._quarantined: set[str] = set()
+        self._shutdown = asyncio.Event()
         self._closed = False
         self._opened = False
 
@@ -196,17 +267,97 @@ class TaskWorkers:
             isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 5
         ):
             raise ValueError("level must be P0-P5 or auto")
+        if task_id in self._unavailable:
+            raise SessionStoreError("store unavailable")
+        if task_id in self._quarantined and state != "stop":
+            raise TaskStoreError("worker cleanup failed; slot held until restart")
         is_p5 = level == 5 or level == "p5"
         if state == "pause" and level is not None:
             raise ValueError("pause cannot be combined with a level")
         if state == "resume" and is_p5:
             raise ValueError("choose a runnable priority to resume a P5 task")
+        if is_p5 and state != "stop":
+            state, level = "pause", None
+        if (state == "pause" or is_p5) and task_id in self._runs:
+            self._pause_requested.add(task_id)
+            self._ready[task_id].clear()
+        if state == "stop" and task_id in self._runs:
+            self._stopping.add(task_id)
+            self._ready[task_id].clear()
+            runner = self._runners.get(task_id)
+            if runner is not None:
+                runner.cancel(cause="user_stop")
+        if state == "resume" and task_id in self._park_winners:
+            cleanup = self._runs.get(task_id)
+            if cleanup is not None:
+                failure = asyncio.create_task(
+                    self._failure_events.setdefault(task_id, asyncio.Event()).wait()
+                )
+                try:
+                    done, _ = await asyncio.wait(
+                        {cleanup, failure}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                finally:
+                    failure.cancel()
+                    await asyncio.gather(failure, return_exceptions=True)
+                if (
+                    failure in done
+                    or task_id in self._unavailable
+                    or task_id in self._quarantined
+                ):
+                    raise SessionStoreError("store unavailable")
         async with self._lock:
+            if task_id in self._unavailable:
+                raise SessionStoreError("store unavailable")
+            if task_id in self._quarantined and state != "stop":
+                raise TaskStoreError("worker cleanup failed; slot held until restart")
             current = await self.tasks.get_task(task_id)
             if current.state in TERMINAL_PHASES:
                 raise TaskStoreError("task is finished")
-            if state == "resume" and current.state != "parked":
-                raise TaskNotPausedError("task is not paused")
+            if task_id in self._quarantined:
+                generation, previous = await self.tasks.park_identity(task_id)
+                args: dict[str, Any] = dict(
+                    state="cancelled",
+                    actor="user",
+                    expected_generation=generation,
+                    expected_operation_id=previous,
+                    operation_id=uuid.uuid4().hex,
+                )
+                try:
+                    record = await self.tasks.change(task_id, **args)
+                except (Exception, asyncio.CancelledError):
+                    record = await self.tasks.change(task_id, **args)
+                self._eligible.discard(task_id)
+                self.gate.finish_task(task_id, "cancelled")
+                return await self._body(record)
+            pending_resume = False
+            if state == "pause" and current.level == 5:
+                async with self.store.component_transaction("worker_pending") as conn:
+                    pending = await (
+                        await conn.execute(
+                            "SELECT pause_pending FROM park_priority WHERE task_id = ?",
+                            (task_id,),
+                        )
+                    ).fetchone()
+                if pending and pending[0]:
+                    if current.state == "held":
+                        self._select_park(task_id)
+                    return await self._body(current)
+            if state == "resume" and current.state not in ("parked", "interrupted"):
+                async with self.store.component_transaction("worker_pending") as conn:
+                    row = await (
+                        await conn.execute(
+                            "SELECT pause_pending FROM park_priority WHERE task_id = ?",
+                            (task_id,),
+                        )
+                    ).fetchone()
+                pending_resume = bool(row and row[0])
+                if not pending_resume:
+                    raise TaskNotPausedError("task is not paused")
+            if state == "stop" and task_id in self._runs:
+                runner = self._runners.get(task_id)
+                if runner is not None:
+                    runner.cancel(cause="user_stop")
             if state == "resume" or (
                 current.level == 5
                 and level is not None
@@ -237,15 +388,89 @@ class TaskWorkers:
                     return await self._body(record)
             if state in ("pause", "resume") and level is None:
                 self._register(current)
-                record = await (
-                    self.tasks.pause(task_id)
-                    if state == "pause"
-                    else self.tasks.resume(task_id)
-                )
+                if state == "resume" and current.state == "interrupted":
+                    generation, previous = await self.tasks.park_identity(task_id)
+                    record = await self.tasks.resume_interrupted(
+                        task_id,
+                        expected_generation=generation,
+                        expected_operation_id=previous,
+                        operation_id=uuid.uuid4().hex,
+                    )
+                elif state == "resume" and pending_resume:
+                    generation, previous = await self.tasks.park_identity(task_id)
+                    record = await self.tasks.cancel_pending_pause(
+                        task_id,
+                        expected_generation=generation,
+                        expected_operation_id=previous,
+                        operation_id=uuid.uuid4().hex,
+                    )
+                    if record.state == "held":
+                        generation, previous = await self.tasks.park_identity(task_id)
+                        await self.parks.resume(
+                            task_id,
+                            expected_generation=generation,
+                            expected_operation_id=previous,
+                            operation_id=uuid.uuid4().hex,
+                        )
+                        record = await self.tasks.get_task(task_id)
+                elif (
+                    state == "pause"
+                    and task_id in self._runners
+                    and self._runners[task_id].busy
+                ):
+                    generation, previous = await self.tasks.park_identity(task_id)
+                    record = await self.tasks.request_pending_pause(
+                        task_id,
+                        expected_generation=generation,
+                        expected_operation_id=previous,
+                        operation_id=uuid.uuid4().hex,
+                    )
+                    if record.state != "held" and task_id in self._approval_points:
+                        evidence = self._approval_points[task_id][2]
+                        generation, previous = await self.tasks.park_identity(task_id)
+                        await self.parks.hold(
+                            task_id,
+                            site="approval",
+                            step=evidence.step,
+                            attempt=evidence.attempt,
+                            reason="approval",
+                            expected_generation=generation,
+                            expected_operation_id=previous,
+                            operation_id=uuid.uuid4().hex,
+                        )
+                        record = await self.tasks.get_task(task_id)
+                    if record.state != "held" and task_id in self._points:
+                        prior = await self.parks.get(task_id)
+                        if prior is not None and prior.state == "running":
+                            generation, previous = await self.tasks.park_identity(
+                                task_id
+                            )
+                            await self.parks.hold(
+                                task_id,
+                                site=prior.site,
+                                step=prior.step,
+                                attempt=prior.attempt,
+                                reason=prior.reason,
+                                agent=prior.agent,
+                                expected_generation=generation,
+                                expected_operation_id=previous,
+                                operation_id=uuid.uuid4().hex,
+                            )
+                            record = await self.tasks.get_task(task_id)
+                    if record.state == "held":
+                        self._select_park(task_id)
+                else:
+                    record = await (
+                        self.tasks.pause(task_id)
+                        if state == "pause"
+                        else self.tasks.resume(task_id)
+                    )
                 if state == "resume" and record.level != 5 and task_id in self._runs:
                     record = await self.tasks.change(
                         task_id, state="running", actor="scheduler"
                     )
+                if state == "resume":
+                    self._pause_requested.discard(task_id)
                 restored: int | str = (
                     record.level if record.level_source == "user" else "auto"
                 )
@@ -254,7 +479,8 @@ class TaskWorkers:
                     self._ready[task_id].clear()
                 else:
                     self._eligible.add(task_id)
-                    self._ready[task_id].set()
+                    if task_id not in self._stopping:
+                        self._ready[task_id].set()
                 await self._schedule()
                 return await self._body(record)
             parked = is_p5
@@ -281,23 +507,398 @@ class TaskWorkers:
             if state == "stop":
                 self._eligible.discard(task_id)
                 self._ready[task_id].set()
-                runner = self._runners.get(task_id)
-                if task_id in self._runs:
-                    self._stopping.add(task_id)
-                    if runner is not None:
-                        runner.cancel(cause="user_stop")
-                else:
+                if task_id not in self._runs:
                     self.gate.finish_task(task_id, "cancelled")
                     self._ready.pop(task_id, None)
             elif parked:
                 self._ready[task_id].clear()
                 self.gate.update_task(task_id, paused=True)
             elif state == "resume" or (level is not None and current.level == 5):
+                self._pause_requested.discard(task_id)
                 self._eligible.add(task_id)
                 self.gate.update_task(task_id, paused=False)
                 self._ready[task_id].set()
             await self._schedule()
             return await self._body(record)
+
+    def _select_park(self, task_id: str) -> None:
+        point = self._points.get(task_id)
+        if task_id in self._stopping:
+            return
+        if point is None:
+            approval = self._approval_points.get(task_id)
+            if approval is not None and approval[0].cancel_for_park(approval[1]):
+                self._park_winners.add(task_id)
+            return
+        call, runner, turn_id = point
+        if call.meta.admitted_mono_us is None:
+            won = self.gate.try_park(task_id, turn_id, runner) is call
+        else:
+            won = runner.cancel_for_park(turn_id)
+        if won:
+            self._park_winners.add(task_id)
+
+    async def _hold_call(
+        self,
+        task_id: str,
+        call: GateCall,
+        runner: SessionRunner,
+        turn_id: str,
+        kind: str,
+    ) -> None:
+        if self._runners.get(task_id) is not runner:
+            raise asyncio.CancelledError()
+        point = (call, runner, turn_id)
+        self._points[task_id] = point
+        evidence = await committed_evidence(
+            runner,
+            self.store,
+            turn_id=turn_id,
+            site="reflect" if kind == "reflect" else "plan",
+        )
+        async with self._lock:
+            if self._points.get(task_id) != point or task_id in self._stopping:
+                raise asyncio.CancelledError()
+            generation, previous = await self.tasks.park_identity(task_id)
+            await self.parks.hold(
+                task_id,
+                site=evidence.site,
+                step=evidence.step,
+                attempt=evidence.attempt,
+                reason=self.gate.held(task_id) or "scheduler",
+                expected_generation=generation,
+                expected_operation_id=previous,
+                operation_id=uuid.uuid4().hex,
+            )
+            current = await self.tasks.get_task(task_id)
+            if task_id in self._pause_requested and current.level == 5:
+                self._select_park(task_id)
+
+    async def _release_call(
+        self, task_id: str, call: GateCall, runner: SessionRunner, turn_id: str
+    ) -> None:
+        async with self._lock:
+            if self._points.get(task_id) != (call, runner, turn_id):
+                raise asyncio.CancelledError()
+            if task_id in self._stopping or task_id in self._pause_requested:
+                return
+            generation, previous = await self.tasks.park_identity(task_id)
+            await self.parks.resume(
+                task_id,
+                expected_generation=generation,
+                expected_operation_id=previous,
+                operation_id=uuid.uuid4().hex,
+            )
+            if task_id not in self._stopping and task_id not in self._pause_requested:
+                self._ready[task_id].set()
+
+    async def _hold_approval(
+        self, task_id: str, runner: SessionRunner, request: ApprovalRequest
+    ) -> tuple[SessionRunner, str, SafePointEvidence]:
+        turn = runner.current_turn
+        if self._runners.get(task_id) is not runner:
+            raise asyncio.CancelledError()
+        if turn is None:
+            raise RuntimeError("Approval has no active worker turn")
+        self._ready[task_id].clear()
+        evidence = await committed_evidence(
+            runner,
+            self.store,
+            turn_id=turn.id,
+            site="approval",
+            request_id=request.request_id,
+        )
+        point = (runner, turn.id, evidence)
+        async with self._lock:
+            if (
+                task_id in self._stopping
+                or self._runners.get(task_id) is not runner
+                or runner.current_turn != turn
+            ):
+                raise asyncio.CancelledError()
+            self._approval_points[task_id] = point
+            generation, previous = await self.tasks.park_identity(task_id)
+            await self.parks.hold(
+                task_id,
+                site="approval",
+                step=evidence.step,
+                attempt=evidence.attempt,
+                reason="approval",
+                expected_generation=generation,
+                expected_operation_id=previous,
+                operation_id=uuid.uuid4().hex,
+            )
+            current = await self.tasks.get_task(task_id)
+            if task_id in self._pause_requested and current.level == 5:
+                self._select_park(task_id)
+        return point
+
+    async def _release_approval(
+        self, task_id: str, point: tuple[SessionRunner, str, SafePointEvidence]
+    ) -> None:
+        async with self._lock:
+            if self._approval_points.get(task_id) != point or task_id in self._stopping:
+                raise asyncio.CancelledError()
+            if task_id in self._pause_requested:
+                return
+            generation, previous = await self.tasks.park_identity(task_id)
+            await self.parks.resume(
+                task_id,
+                expected_generation=generation,
+                expected_operation_id=previous,
+                operation_id=uuid.uuid4().hex,
+            )
+            if task_id not in self._stopping and task_id not in self._pause_requested:
+                self._ready[task_id].set()
+
+    def _call_started(self, task_id: str, call: GateCall) -> None:
+        point = self._points.get(task_id)
+        if point is not None and point[0] is call:
+            self._points.pop(task_id, None)
+
+    async def _park_card(self, task_id: str) -> str:
+        if self.store.failed is not None:
+            raise RuntimeError("Event store is not writable")
+        record = await self.tasks.get_task(task_id)
+        after = 0
+        events = []
+        while True:
+            page = await self.store.list_events(task_id, after_id=after)
+            events.extend(page)
+            if len(page) < 1000:
+                break
+            assert page[-1].id is not None
+            after = page[-1].id
+        return build_park_card(record.spec, events)
+
+    async def _finalize_park(
+        self,
+        task_id: str,
+        operation_id: str,
+        interrupt_id: str,
+        attempts: builtins.list[int],
+    ) -> None:
+        for candidate in (operation_id, interrupt_id):
+            receipt = await self.parks.reconcile(task_id, operation_id=candidate)
+            if receipt is not None:
+                if not receipt[1]:
+                    raise RuntimeError("Park operation was superseded")
+                return
+        card = await self._park_card(task_id)
+        for attempt in range(3):
+            if task_id in self._stopping or self._closed:
+                raise RuntimeError("Park superseded by stop")
+            generation, previous = await self.tasks.park_identity(task_id)
+            if attempts[0] >= 3:
+                await self.parks.interrupt(
+                    task_id,
+                    card=card,
+                    expected_generation=generation,
+                    expected_operation_id=previous,
+                    operation_id=interrupt_id,
+                )
+                break
+            try:
+                await self.parks.park(
+                    task_id,
+                    card=card,
+                    expected_generation=generation,
+                    expected_operation_id=previous,
+                    operation_id=operation_id,
+                )
+                break
+            except (Exception, asyncio.CancelledError):
+                attempts[0] += 1
+                self._store_unavailable(task_id)
+                receipt = await self.parks.reconcile(task_id, operation_id=operation_id)
+                if receipt is not None:
+                    if receipt[1]:
+                        break
+                    raise RuntimeError("Park operation was superseded") from None
+                if self.store.failed is not None or await self.tasks.park_identity(
+                    task_id
+                ) != (generation, previous):
+                    raise
+                if attempts[0] >= 3:
+                    await self.parks.interrupt(
+                        task_id,
+                        card=card,
+                        expected_generation=generation,
+                        expected_operation_id=previous,
+                        operation_id=interrupt_id,
+                    )
+                    break
+                marker_id = uuid.uuid4().hex
+                try:
+                    await self.parks.mark_park_retry(
+                        task_id,
+                        expected_generation=generation,
+                        expected_operation_id=previous,
+                        operation_id=marker_id,
+                    )
+                except (Exception, asyncio.CancelledError):
+                    marker = await self.parks.reconcile(task_id, operation_id=marker_id)
+                    if marker is not None and not marker[1]:
+                        raise RuntimeError("Retry marker was superseded") from None
+                    if marker is None and await self.tasks.park_identity(task_id) != (
+                        generation,
+                        previous,
+                    ):
+                        raise RuntimeError("Retry marker outcome is unknown") from None
+                    log.warning("Could not record park retry for worker %s", task_id)
+                await asyncio.sleep(0.05 * 2**attempt)
+
+    async def _sync_park_phase(self, task_id: str) -> None:
+        record = await self.tasks.get_task(task_id)
+        if record.state in ("parked", "interrupted") and task_id not in self._stopping:
+            self.gate.update_task(task_id, phase=cast(Phase, record.state), paused=True)
+
+    def _store_unavailable(self, task_id: str) -> None:
+        self._unavailable.add(task_id)
+        self._failure_events.setdefault(task_id, asyncio.Event()).set()
+
+    async def _retry_finalization(self, task_id: str, *, cleanup_failed: bool) -> None:
+        delay = 0.1
+        operation_id = uuid.uuid4().hex
+        interrupt_id = uuid.uuid4().hex
+        stop_id = uuid.uuid4().hex
+        attempts = [0]
+        identity: tuple[int | None, str | None] | None = None
+        stop_identity: tuple[int | None, str | None] | None = None
+        while not self._closed:
+            try:
+                if task_id in self._stopping:
+                    async with self._lock:
+                        current = await self.tasks.get_task(task_id)
+                        if current.state == "cancelled" and stop_identity is None:
+                            self.gate.finish_task(task_id, "cancelled")
+                            self._eligible.discard(task_id)
+                            return
+                        if stop_identity is None:
+                            stop_identity = await self.tasks.park_identity(task_id)
+                        await self.tasks.change(
+                            task_id,
+                            state="cancelled",
+                            actor="scheduler",
+                            expected_generation=stop_identity[0],
+                            expected_operation_id=stop_identity[1],
+                            operation_id=stop_id,
+                        )
+                        self.gate.finish_task(task_id, "cancelled")
+                        self._eligible.discard(task_id)
+                    self._unavailable.discard(task_id)
+                    return
+                if cleanup_failed:
+                    receipt = await self.parks.reconcile(
+                        task_id, operation_id=operation_id
+                    )
+                    if receipt is not None:
+                        if not receipt[1]:
+                            raise RuntimeError("Cleanup interruption superseded")
+                        await self._sync_park_phase(task_id)
+                        self._unavailable.discard(task_id)
+                        return
+                    card = await self._park_card(task_id)
+                    current_identity = await self.tasks.park_identity(task_id)
+                    if identity is None:
+                        identity = current_identity
+                    elif identity != current_identity:
+                        raise RuntimeError("Cleanup interruption outcome unknown")
+                    generation, previous = identity
+                    async with self._lock:
+                        if task_id in self._stopping:
+                            continue
+                        await self.parks.interrupt(
+                            task_id,
+                            card=card,
+                            reason="cleanup failed; slot held until restart",
+                            allow_empty=True,
+                            expected_generation=generation,
+                            expected_operation_id=previous,
+                            operation_id=operation_id,
+                        )
+                else:
+                    await self._finalize_park(
+                        task_id, operation_id, interrupt_id, attempts
+                    )
+                await self._sync_park_phase(task_id)
+                self._unavailable.discard(task_id)
+                if not cleanup_failed:
+                    self._failure_events.setdefault(task_id, asyncio.Event()).clear()
+                return
+            except (Exception, asyncio.CancelledError):
+                self._store_unavailable(task_id)
+                log.exception("Could not persist park for worker %s; retrying", task_id)
+                with suppress(TimeoutError):
+                    await asyncio.wait_for(self._shutdown.wait(), timeout=delay)
+                delay = min(delay * 2, 5.0)
+
+    async def _close_worker(
+        self, runner: SessionRunner | None, agent: Agent | None
+    ) -> None:
+        failed = False
+        for close in (
+            (
+                (lambda: runner.close(cause="shutdown" if self._closed else "closed"))
+                if runner is not None
+                else None
+            ),
+            agent.close if agent is not None else None,
+        ):
+            if close is not None:
+                try:
+                    await close()
+                except Exception:
+                    failed = True
+                    log.exception("Worker resource close failed")
+        if failed:
+            raise RuntimeError("Worker cleanup failed")
+
+    async def _cleanup_park(
+        self, task_id: str, runner: SessionRunner | None, agent: Agent | None
+    ) -> bool:
+        for attempt in range(4):
+            try:
+                closing = asyncio.create_task(self._close_worker(runner, agent))
+                shutdown = asyncio.create_task(self._shutdown.wait())
+                try:
+                    done, _ = await asyncio.wait(
+                        {closing, shutdown}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if closing not in done:
+                        done, _ = await asyncio.wait({closing}, timeout=10)
+                        if not done:
+                            closing.cancel()
+                            log.error(
+                                "Worker %s cleanup timed out at shutdown", task_id
+                            )
+                            return False
+                    await closing
+                finally:
+                    shutdown.cancel()
+                return True
+            except Exception:
+                if self._closed:
+                    return False
+                if attempt == 0:
+                    try:
+                        generation, previous = await self.tasks.park_identity(task_id)
+                        await self.parks.mark_park_retry(
+                            task_id,
+                            reason="park cleanup retrying",
+                            expected_generation=generation,
+                            expected_operation_id=previous,
+                            operation_id=uuid.uuid4().hex,
+                        )
+                    except Exception:
+                        self._store_unavailable(task_id)
+                        log.exception("Could not persist cleanup retry for %s", task_id)
+                if attempt < 3:
+                    with suppress(TimeoutError):
+                        await asyncio.wait_for(
+                            self._shutdown.wait(), timeout=0.05 * 2**attempt
+                        )
+        return False
 
     def _register(self, record: TaskRecord) -> None:
         if record.task_id not in self._ready:
@@ -383,18 +984,42 @@ class TaskWorkers:
                     timeout_s=None,
                     builtins=worker_tool_allowlist("user").builtins,
                 ),
-                wrap_llm=lambda inner: _WorkerLLM(inner, client, self._ready[task_id]),
+                wrap_llm=lambda inner: _WorkerLLM(
+                    inner,
+                    client,
+                    self._ready[task_id],
+                    lambda: self._runners.get(task_id),
+                    lambda call, runner, turn, kind: self._hold_call(
+                        task_id, call, runner, turn, kind
+                    ),
+                    lambda call, runner, turn: self._release_call(
+                        task_id, call, runner, turn
+                    ),
+                    lambda call: self._call_started(task_id, call),
+                ),
                 wrap_embedding=lambda inner: _WorkerEmbedding(
                     inner, client, self._ready[task_id]
                 ),
             )
             runner = SessionRunner(agent, self.store, task_id, progress=True)
-            ask = self.broker.asker(task_id)
 
             async def paused_ask(request: ApprovalRequest) -> ApprovalDecision:
-                decision = await ask(request)
-                await self._ready[task_id].wait()
-                return decision
+                answer = self.broker.begin(task_id, request)
+                try:
+                    point = await self._hold_approval(task_id, runner, request)
+                    decision = await answer
+                    await self._release_approval(task_id, point)
+                    await self._ready[task_id].wait()
+                    if (
+                        self._approval_points.get(task_id) != point
+                        or task_id in self._stopping
+                    ):
+                        raise asyncio.CancelledError()
+                    self._approval_points.pop(task_id, None)
+                    return decision
+                finally:
+                    answer.cancel()
+                    await asyncio.gather(answer, return_exceptions=True)
 
             policy = RememberingPolicy(runner.observe(paused_ask))
             async with self._lock:
@@ -415,8 +1040,11 @@ class TaskWorkers:
                         )
                         self.gate.update_task(task_id, phase="running")
                         self.gate.turn_start(task_id)
+                        if record.card:
+                            await runner.resume()
                         await runner.start_turn(
-                            str(record.spec["objective"]), approval=policy
+                            record.card or str(record.spec["objective"]),
+                            approval=policy,
                         )
             if phase != "cancelled" and not deferred:
                 result = await runner.wait()
@@ -441,15 +1069,50 @@ class TaskWorkers:
         except Exception:
             log.exception("Worker %s failed", task_id)
         finally:
-            try:
-                if runner is not None:
-                    await runner.close(cause="shutdown" if self._closed else "closed")
-                if agent is not None:
-                    await agent.close()
-            except Exception:
-                log.exception("Could not close worker %s", task_id)
+            park = task_id in self._park_winners and not (
+                self._closed
+                or task_id in self._stopping
+                or task_id in self._invalid_workspace
+            )
+            if park:
+                cleaned = await self._cleanup_park(task_id, runner, agent)
+                if not cleaned and not self._closed:
+                    self._quarantined.add(task_id)
+                    self._failure_events.setdefault(task_id, asyncio.Event()).set()
+                    await self._retry_finalization(task_id, cleanup_failed=True)
+                    await self._shutdown.wait()
+                    try:
+                        closing = asyncio.create_task(self._close_worker(runner, agent))
+                        done, _ = await asyncio.wait({closing}, timeout=10)
+                        if not done:
+                            closing.cancel()
+                            log.error(
+                                "Quarantined worker %s timed out at shutdown", task_id
+                            )
+                        else:
+                            await closing
+                    except (Exception, asyncio.CancelledError):
+                        log.exception(
+                            "Quarantined worker %s remained open at shutdown", task_id
+                        )
+                    raise asyncio.CancelledError()
+                if cleaned and not self._closed:
+                    await self._retry_finalization(task_id, cleanup_failed=False)
+            else:
+                try:
+                    await self._close_worker(runner, agent)
+                except Exception:
+                    log.exception("Could not close worker %s", task_id)
             async with self._lock:
-                preserve = deferred and not (
+                park = task_id in self._park_winners and not (
+                    self._closed
+                    or task_id in self._stopping
+                    or task_id in self._invalid_workspace
+                )
+                if park:
+                    self._park_winners.discard(task_id)
+                    self._points.pop(task_id, None)
+                preserve = (deferred or park) and not (
                     self._closed
                     or task_id in self._stopping
                     or task_id in self._invalid_workspace
@@ -467,7 +1130,11 @@ class TaskWorkers:
                     elif task_id in self._stopping:
                         phase = "cancelled"
                     try:
-                        if task_id not in self._invalid_workspace:
+                        if (
+                            task_id not in self._invalid_workspace
+                            and (await self.tasks.get_task(task_id)).state
+                            not in TERMINAL_PHASES
+                        ):
                             await self.tasks.change(
                                 task_id,
                                 state=phase,
@@ -483,8 +1150,12 @@ class TaskWorkers:
                     self.gate.finish_task(task_id, phase)
                     self._eligible.discard(task_id)
                     self._stopping.discard(task_id)
+                    self._pause_requested.discard(task_id)
+                    self._park_winners.discard(task_id)
                     self._invalid_workspace.discard(task_id)
                     self._ready.pop(task_id, None)
+                self._points.pop(task_id, None)
+                self._approval_points.pop(task_id, None)
                 self._runners.pop(task_id, None)
                 self._runs.pop(task_id, None)
                 await self._schedule()
@@ -526,6 +1197,7 @@ class TaskWorkers:
     async def aclose(self) -> None:
         async with self._lock:
             self._closed = True
+            self._shutdown.set()
             self._eligible.clear()
             for task_id in self._runs:
                 self._stopping.add(task_id)
