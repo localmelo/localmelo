@@ -7,6 +7,7 @@ This page moved. Choose a section below to open its new location.
 ## [the-config-file](reference/configuration.md#the-config-file)
 ## [reasoning](reference/configuration.md#reasoning)
 ## [tool-environment](reference/configuration.md#tool-environment)
+## [context-accounting](reference/configuration.md#context-accounting)
 ## [backends](guides/model-servers.md#backends)
 ## [omlx](guides/model-servers.md#omlx)
 ## [ollama-with-embeddings](guides/model-servers.md#ollama-with-embeddings)

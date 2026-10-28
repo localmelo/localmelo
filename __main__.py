@@ -64,6 +64,9 @@ STATUS_LINE_ERROR_CHARS = 500
 # interactive UI also takes --workspace.
 _DIRECT_FLAGS = {
     "workspace": "--workspace",
+    "context_window": "--context-window",
+    "output_reserve": "--output-reserve",
+    "safety_margin": "--safety-margin",
     "max_steps": "--max-steps",
     "attempt_policy": "--attempt-policy",
     "reflection_gate": "--reflection-gate",
@@ -988,7 +991,7 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         given = [
             flag
             for dest, flag in _DIRECT_FLAGS.items()
-            if getattr(args, dest) not in (None, False)
+            if getattr(args, dest, None) not in (None, False)
             and (not interactive or dest in _UI_REFUSED)
             and not (dest == "builtins" and loop)
         ]
@@ -1097,14 +1100,22 @@ def _direct_tool_providers(
 
 
 class _WorkerFlagParser(argparse.ArgumentParser):
-    """Keep old abbreviations unambiguous; worker options require full names."""
+    """Keep old abbreviations unambiguous; new options require full names."""
 
     def _get_option_tuples(self, option_string: str) -> Any:
-        worker = {"--save-session", "--parent-run", "--import-session", "--title"}
+        full_name_only = {
+            "--save-session",
+            "--parent-run",
+            "--import-session",
+            "--title",
+            "--context-window",
+            "--output-reserve",
+            "--safety-margin",
+        }
         return [
             item
             for item in super()._get_option_tuples(option_string)
-            if item[1] not in worker
+            if item[1] not in full_name_only
         ]
 
 
@@ -1145,6 +1156,10 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     direct = parser.add_argument_group(
         "direct mode", "Options for a query run without --serve."
     )
+    for name in ("context-window", "output-reserve", "safety-margin"):
+        direct.add_argument(
+            f"--{name}", type=_positive_int, metavar="TOKENS", default=argparse.SUPPRESS
+        )
     direct.add_argument(
         "--save-session",
         nargs="?",
@@ -1677,6 +1692,26 @@ def _build_direct_mode_agent(
         parser = _build_parser()
     base_url = args.base_url
     request_timeout = getattr(args, "request_timeout", None)
+    from localmelo.support import config
+    from localmelo.support.sessions.agents import configured_context_options
+
+    try:
+        budget_cfg = config.load()
+    except (OSError, ValueError):
+        if not base_url:
+            raise
+        budget_cfg = config.Config()
+    try:
+        options = configured_context_options(
+            budget_cfg,
+            options or AgentOptions(),
+            {
+                name: getattr(args, name, None)
+                for name in ("context_window", "output_reserve", "safety_margin")
+            },
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if base_url:
         # Generic OpenAI-compatible endpoint
@@ -1719,7 +1754,9 @@ def _build_direct_mode_agent(
     # No --base-url: use configured backends from config file
     from localmelo.support import config
 
-    cfg = config.load()
+    cfg = budget_cfg
+    for name in ("context_window", "output_reserve", "safety_margin"):
+        setattr(cfg.agent, name, getattr(options, name))
     if not cfg.is_configured:
         print(
             "No backend configured. Run 'melo --serve --reconfigure' to set up,\n"

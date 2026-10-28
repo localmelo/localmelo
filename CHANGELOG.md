@@ -9,6 +9,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Opt-in context-window request accounting reports estimated and measured planning/reflection
+  tokens in events and run results; it does not prune or enforce an output cap ([#126]).
+
 - S3b.1a foundations: scheduler component v2 adds a durable pause priority
   snapshot and atomic v1 migration; durable generation and operation IDs guard
   transitions and identify committed receipts. The internal synchronous gate
@@ -908,3 +911,4 @@ earlier milestones.
 [#123]: https://github.com/localmelo/localmelo/pull/123
 [#124]: https://github.com/localmelo/localmelo/pull/124
 [#125]: https://github.com/localmelo/localmelo/pull/125
+[#126]: https://github.com/localmelo/localmelo/pull/126

@@ -36,16 +36,50 @@ LLMWrapper = Callable[[BaseLLMProvider], BaseLLMProvider]
 EmbeddingWrapper = Callable[[BaseEmbeddingProvider], BaseEmbeddingProvider]
 
 
+def configured_context_options(
+    cfg: Config | None, options: AgentOptions, overrides: Mapping[str, int | None]
+) -> AgentOptions:
+    """Resolve context settings together so flags may override individual keys."""
+    names = ("context_window", "output_reserve", "safety_margin")
+    fields: dict[str, Any] = {
+        name: (
+            overrides.get(name)
+            if overrides.get(name) is not None
+            else (
+                getattr(cfg.agent, name, None)
+                if cfg is not None and getattr(cfg.agent, name, None) is not None
+                else getattr(options, name)
+            )
+        )
+        for name in names
+    }
+    if all(getattr(options, name) == value for name, value in fields.items()):
+        return options
+    return dataclasses.replace(options, **fields)
+
+
 def configured_session_options(
     cfg: Config | None,
     options: AgentOptions | None = None,
     *,
     explicit: Collection[str] = (),
+    budget_overrides: Mapping[str, int | None] | None = None,
 ) -> AgentOptions:
     """Config defaults for a session; names in *explicit* retain the caller's values."""
     options = options or AgentOptions()
+    overrides = {
+        name: getattr(options, name)
+        for name in ("context_window", "output_reserve", "safety_margin")
+        if name in explicit
+    }
+    overrides.update(budget_overrides or {})
+    options = configured_context_options(cfg, options, overrides)
     if cfg is None:
         return options
+    if overrides:
+        cfg = copy.deepcopy(cfg)
+        for name in ("context_window", "output_reserve", "safety_margin"):
+            setattr(cfg.agent, name, getattr(options, name))
     fields: dict[str, Any] = {
         name: getattr(cfg.agent, name)
         for name in ("reasoning", "replay_turns", "note_writer")

@@ -579,6 +579,18 @@ class TestFields:
                 "off_reason",
                 "basis",
             },
+            "context_budget": {
+                "kind",
+                "model",
+                "attempt",
+                "proxy_version",
+                "source",
+                "estimate",
+                "measured_prompt_tokens",
+                "input_limit",
+                "over_limit",
+                "image_allowance",
+            },
             "run.finished": {"result"},
         } == {name: set(keys) for name, keys in EVENT_FIELDS.items()}
 
@@ -678,7 +690,8 @@ class TestFields:
         seen = {event.type for event in events}
         # The memory event is emitted only by a store-backed admission;
         # test_memory_admission.py emits and pins it.
-        assert seen == set(EVENT_FIELDS) - {"memory"}
+        # Budget events need an opted-in run; test_request_accounting pins one.
+        assert seen == set(EVENT_FIELDS) - {"memory", "context_budget"}
         for event in events:
             assert set(event.data) == EVENT_FIELDS[event.type]
         details = {
