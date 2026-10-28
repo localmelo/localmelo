@@ -441,8 +441,10 @@ These options apply to a task run without `--serve`.
   the config file.
 - `--reasoning-field`: `auto` resolves to the key the last reply's
   reasoning came from, and sends no key before the first such reply. The
-  `ollama` backend fixes its field to `thinking`, so the flag is a usage
-  error there.
+  flag, and a backend's `reasoning_field`, are used only in `replay`; in
+  `legacy` and `drop` the wire is as if no field were set. The `ollama`
+  backend fixes its field to `thinking`, so the flag is a usage error
+  there.
 
 ### Interactive UI
 
