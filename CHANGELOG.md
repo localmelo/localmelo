@@ -151,6 +151,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The `dev` extra installs `pytest-xdist` and `pytest-testmon`, so
+  `uv run pytest -n auto -q` runs the offline suite in parallel before a
+  pull request and `uv run pytest --testmon -q` runs only the tests a
+  change affects while working. CONTRIBUTING and the agent docs name both,
+  and `.testmondata` is ignored ([#NN]).
 - `melo` without a task, in a terminal, opens the interactive UI on the
   saved backend; it used to start the gateway, which `melo --serve` still
   does. `melo --base-url URL` and `melo --chat-model NAME` without a task

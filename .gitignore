@@ -8,6 +8,9 @@
 .cache/
 __pycache__/
 
+# pytest-testmon's database
+.testmondata
+
 # virtualenv (uv sync)
 .venv/
 

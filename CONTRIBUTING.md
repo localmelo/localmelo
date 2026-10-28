@@ -35,18 +35,23 @@ uv sync --extra dev --extra gateway
 Run these before you send a pull request:
 
 ```bash
-uv run pytest -q --ignore=tests/smoke/test_backend_smoke.py
+uv run pytest -n auto -q --ignore=tests/smoke/test_backend_smoke.py
 uv run ruff check .
 uv run black --check .
 uv run mypy .
 ```
 
-The first command runs the offline test suite, which needs no model server.
-While you work, run the part you change:
+The first command runs the offline test suite once, in parallel with
+`pytest-xdist`; use it before a pull request. While you work, run only the
+tests a change affects with `pytest-testmon`:
 
 ```bash
-uv run pytest tests/agent -q
+uv run pytest --testmon -q --ignore=tests/smoke/test_backend_smoke.py
 ```
+
+Its first run tests everything and records what each test covers; later runs
+test only the tests that cover the changed files. To run one directory
+directly, use `uv run pytest tests/agent -q`.
 
 | Directory | What it tests | Needs |
 |---|---|---|
