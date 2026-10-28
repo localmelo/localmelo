@@ -115,6 +115,19 @@
           </ul>
         </article>
 
+        <article class="update-entry" id="u-2026-10-27-gpu-lock">
+          <h3>The gateway reads the GPU lock and the battery</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/76">#76</a>
+          </p>
+          <ul>
+            <li>The web workspace's header shows a foreign GPU lock (holder and purpose, with <code>(recorded)</code> or <code>(chats wait)</code>), your own lock, an unreadable lock, <code>· ETA passed</code>, and the battery percent and state on battery power. The same change is logged to <code>machine.jsonl</code> beside <code>calls.jsonl</code>.</li>
+            <li><code>[scheduler] lock_gate</code> defaults to <code>record</code>: the lock and battery are shown and logged and no request changes. <code>wait</code> holds every workspace call, embeddings included, while a foreign lock is present; the chat says <code>Waiting: Reservation</code>.</li>
+            <li><code>lock_self</code> matches the holder exactly (or <code>holder:run</code>). An unreadable or stale lock is foreign and never auto-cleared, and localmelo never writes, renames or removes a lock. Direct runs, the CLI and <code>/v1/agent/run</code> are unchanged.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-27-turn-work">
           <h3>A turn's work, as it happens</h3>
           <p class="update-date">

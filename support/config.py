@@ -78,6 +78,13 @@ class SchedulerConfig:
     n_fg: int = 1
     call_log: bool = True
     call_log_dir: str = ""
+    # The GPU lock and the battery (S2b). An empty path means no lock
+    # reader; the gateway's battery reader is always on. ``record`` only
+    # observes; ``wait`` holds every workspace call while a foreign lock is
+    # present.
+    gpu_lock_file: str = ""
+    lock_self: str = ""
+    lock_gate: str = "record"  # record | wait
 
 
 @dataclass
@@ -201,6 +208,17 @@ class Config:
                 "[scheduler] call_log_dir must be a string, "
                 f"got {scheduler.call_log_dir!r}"
             )
+        if scheduler.lock_gate not in ("record", "wait"):
+            errors.append(
+                f"[scheduler] lock_gate={scheduler.lock_gate!r} is not one of "
+                "('record', 'wait')"
+            )
+        for name in ("gpu_lock_file", "lock_self"):
+            value = getattr(scheduler, name)
+            if not isinstance(value, str):
+                errors.append(f"[scheduler] {name} must be a string, got {value!r}")
+            elif "\x00" in value:
+                errors.append(f"[scheduler] {name} must not contain a NUL byte")
         return errors
 
     def _validate_request_timeout(self) -> list[str]:
@@ -553,6 +571,9 @@ def save(cfg: Config) -> None:
         lines.append(f"n_fg = {scheduler.n_fg}")
         lines.append(f"call_log = {'true' if scheduler.call_log else 'false'}")
         lines.append(f"call_log_dir = {_toml_string(scheduler.call_log_dir)}")
+        lines.append(f"gpu_lock_file = {_toml_string(scheduler.gpu_lock_file)}")
+        lines.append(f"lock_self = {_toml_string(scheduler.lock_self)}")
+        lines.append(f"lock_gate = {_toml_string(scheduler.lock_gate)}")
         lines.append("")
 
     # TOML files are UTF-8. Encode before opening the file, so text that

@@ -5,6 +5,7 @@ import contextlib
 import json
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,15 @@ from localmelo.support.gateway.chat_gate import (
     GatedEmbedding,
     GatedLLM,
 )
+from localmelo.support.gateway.machine_monitor import (
+    BATTERY_POLL_S,
+    LOCK_GUARD_POLL_S,
+    LOCK_POLL_S,
+    LOCK_SETTLE_S,
+    LockRead,
+    MachineMonitor,
+    MachineSnapshot,
+)
 from localmelo.support.gateway.session import SessionBusyError
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
@@ -36,6 +46,10 @@ _DEFAULT_MEMORY_DIR = Path("~/.cache/localmelo/playground").expanduser()
 _SCENARIOS_PATH = (
     Path(__file__).resolve().parents[2] / "tests" / "smoke" / "data" / "scenarios.json"
 )
+
+
+class LockHeldError(Exception):
+    """A create that would embed its seeds was refused: a foreign lock is held."""
 
 
 async def _answer(agent: Agent, query: str) -> RunResult:
@@ -170,6 +184,15 @@ class SmokePlayground:
         r_f: int = 1,
         n_fg: int = 1,
         call_log_dir: Path | str | None = None,
+        lock_path: Path | str | None = None,
+        lock_self: str = "",
+        lock_gate: str = "record",
+        lock_read: LockRead | None = None,
+        battery_runner: Callable[[], str] | None = None,
+        lock_poll_s: float = LOCK_POLL_S,
+        battery_poll_s: float = BATTERY_POLL_S,
+        settle_s: float = LOCK_SETTLE_S,
+        guard_poll_s: float = LOCK_GUARD_POLL_S,
     ) -> None:
         self._sessions: dict[str, PlaygroundSession] = {}
         self._max = max_sessions
@@ -195,6 +218,7 @@ class SmokePlayground:
             n_fg=n_fg,
             call_log_dir=call_log_dir,
             retention_days=self._thinking_retention_days,
+            lock_gate=lock_gate,
         )
         # While a call is held the run wakes at least this often (the focus
         # window, from the policy's Params): a hold caused only by the typing
@@ -202,6 +226,42 @@ class SmokePlayground:
         # bounded wake keeps it from waiting forever (R10). It never raises
         # the run's TimeoutError; it runs a no-event transition and waits.
         self._hold_wake_s = self._gate.hold_wake_s
+        # A monitor exists when there is a lock path to watch or a battery to
+        # read. The gateway always gives a battery runner, so it always has
+        # one; a test that passes neither has none (R3).
+        self._monitor: MachineMonitor | None = None
+        if lock_path is not None or battery_runner is not None:
+            self._monitor = MachineMonitor(
+                lock_path=lock_path,
+                lock_self=lock_self,
+                lock_gate=lock_gate,
+                write=self._gate.write_machine,
+                on_change=self._on_machine,
+                lock_read=lock_read,
+                battery_runner=battery_runner,
+                lock_poll_s=lock_poll_s,
+                battery_poll_s=battery_poll_s,
+                settle_s=settle_s,
+                guard_poll_s=guard_poll_s,
+            )
+
+    def _on_machine(self, snapshot: MachineSnapshot) -> None:
+        """Feed one observed snapshot to the gate; no await between the two."""
+        self._gate.set_machine(snapshot.machine, payload=snapshot.payload())
+
+    async def start(self) -> None:
+        """Start the machine monitor; idempotent."""
+        if self._monitor is not None:
+            await self._monitor.start()
+
+    async def stop(self) -> None:
+        """Stop the machine monitor; idempotent."""
+        if self._monitor is not None:
+            await self._monitor.stop()
+
+    def machine_payload(self) -> dict[str, Any] | None:
+        """The machine snapshot for the page, or ``None`` without a monitor."""
+        return None if self._monitor is None else self._monitor.payload()
 
     def scenarios_payload(self) -> list[dict[str, Any]]:
         payload: list[dict[str, Any]] = []
@@ -271,6 +331,19 @@ class SmokePlayground:
             and scenario_id not in self._scenario_map
         ):
             raise ValueError("Unknown seed memory set")
+        if (
+            self._gate.lock_gate == "wait"
+            and self._gate.machine.lock == "foreign"
+            and scenario_id
+            and embedding_model
+        ):
+            # Seeding embeds before the chat exists; parking that call would
+            # hide a model request behind a create with no chat and no timer
+            # (D14). Answer 409 with the holder and send nothing.
+            holder = str(self._gate.machine_payload().get("holder") or "a session")
+            raise LockHeldError(
+                f"GPU lock held by {holder}; try again when it is released"
+            )
 
         detected = _detect_adapter(chat_url, adapter)
         # Seeding may await embedding requests. Reserve capacity across the
@@ -441,8 +514,9 @@ class SmokePlayground:
             timed_out = False
             try:
                 # Shielded, so that only _stop cancels the run: the chat
-                # stays busy until the run is saved.
-                if self._gate.policy == "off":
+                # stays busy until the run is saved. Under a lock hold the
+                # wait is the gate's even when the policy is off (R12).
+                if not self._gate.enforces_holds:
                     outcome = await asyncio.wait_for(asyncio.shield(task), timeout)
                 else:
                     outcome = await self._wait_for_turn(
@@ -602,6 +676,9 @@ class SmokePlayground:
         return True
 
     async def close_all(self) -> None:
+        # The monitor writes through the gate's log, so stop it before the
+        # gate closes the files (R21).
+        await self.stop()
         for session in list(self._sessions.values()):
             with contextlib.suppress(Exception):
                 await self.cancel(session.session_id)

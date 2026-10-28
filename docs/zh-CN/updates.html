@@ -103,6 +103,19 @@
           </ul>
         </article>
 
+        <article class="update-entry" id="u-2026-10-27-gpu-lock">
+          <h3>网关读取 GPU 锁和电池</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/76">#76</a>
+          </p>
+          <ul>
+            <li>网页工作区的标题栏会显示外部的 GPU 锁（持有者和用途，并标注 <code>(recorded)</code> 或 <code>(chats wait)</code>）、自己的锁、无法读取的锁、<code>· ETA passed</code>，以及使用电池时的电量和状态。同样的变化会写入 <code>calls.jsonl</code> 旁边的 <code>machine.jsonl</code>。</li>
+            <li><code>[scheduler] lock_gate</code> 默认是 <code>record</code>：只显示和记录锁与电池，不改变任何请求。<code>wait</code> 会在外部锁存在时扣住工作区的每个调用（包括向量调用），聊天显示 <code>Waiting: Reservation</code>。</li>
+            <li><code>lock_self</code> 必须与持有者完全一致（或写成 <code>holder:run</code>）。无法读取或已过期的锁仍算外部锁，永远不会被自动清除；localmelo 从不写入、重命名或删除锁。直接运行、命令行和 <code>/v1/agent/run</code> 都不变。</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-27-turn-work">
           <h3>回合的工作实时可见</h3>
           <p class="update-date">
