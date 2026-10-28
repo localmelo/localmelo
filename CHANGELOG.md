@@ -28,7 +28,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   digests, with an optional cold-start allowance. A digest key includes the
   run's workspace realpath, and a final evidence-less attempt keeps the last
   evidence-bearing attempt's digest. General memories are not gated. Do not
-  admit digests lacking file or verification evidence ([#NN]).
+  admit digests lacking file or verification evidence ([#165]).
 
 - Label Python checks in attempt digests with a recognizable runner and safe
   target basename when available, rather than the first line of code. Unknown
@@ -1042,3 +1042,4 @@ earlier milestones.
 [#159]: https://github.com/localmelo/localmelo/pull/159
 [#162]: https://github.com/localmelo/localmelo/pull/162
 [#164]: https://github.com/localmelo/localmelo/pull/164
+[#165]: https://github.com/localmelo/localmelo/pull/165
