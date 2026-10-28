@@ -761,7 +761,12 @@ class InteractiveApp:
         boxed = width >= 40 and symbols.rule == "─"
         while True:
             inner = width - 4 if boxed else width
-            text = panel_text(pending.request, exists=pending.exists, width=inner - 2)
+            text = panel_text(
+                pending.request,
+                target=pending.target,
+                width=inner - 2,
+                minus=symbols.minus,
+            )
             # The header holds a path: its rows keep every character.
             header = text.header.replace(" · ", f" {symbols.dot} ")
             head = [("class:tool", part) for part in wrap_words(header, inner)]
@@ -779,7 +784,7 @@ class InteractiveApp:
             else:
                 keys = []
         limit = max(1, min(BODY_LINES, room))
-        body = [("", "  " + line) for line in text.body]
+        body = [(style, "  " + line) for style, line in text.body]
         if len(body) > limit:
             hidden = len(body) - (limit - 1)
             body = body[: limit - 1] + [
@@ -859,10 +864,15 @@ class InteractiveApp:
         if pending is None or self.approver is None or self.approver.guarded():
             return
         text = panel_text(
-            pending.request, exists=pending.exists, width=self.renderer.out.width - 2
+            pending.request,
+            target=pending.target,
+            width=self.renderer.out.width - 2,
+            minus=self.symbols.minus,
         )
         header = text.header.replace(" · ", f" {self.symbols.dot} ")
-        self.renderer.out.print(Text("\n".join([header, *text.body])))
+        self.renderer.out.print(
+            Text("\n".join([header, *(line for _, line in text.body)]))
+        )
 
     def _panel_bindings(self) -> list[KeyBindings]:
         kb = KeyBindings()

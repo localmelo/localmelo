@@ -237,3 +237,60 @@ async def test_an_agent_that_fails_to_start_is_closed(
             options=AgentOptions(),
         )
     assert closed == [True]
+
+
+# ── The facts of a file_write approval (approval_target) ──
+
+
+def test_approval_target_is_none_for_another_tool() -> None:
+    assert display.approval_target({"tool_name": "shell_exec", "arguments": {}}) is None
+
+
+def test_approval_target_reads_a_missing_file_and_a_text_one(tmp_path: Path) -> None:
+    missing = display.approval_target(
+        {
+            "tool_name": "file_write",
+            "arguments": {"path": str(tmp_path / "missing.md")},
+            "workspace_root": str(tmp_path),
+        }
+    )
+    assert missing == {"path_label": "missing.md", "exists": False, "size_bytes": 0}
+    path = tmp_path / "notes.txt"
+    path.write_text("buy milk\n", encoding="utf-8")
+    found = display.approval_target(
+        {
+            "tool_name": "file_write",
+            "arguments": {"path": str(path)},
+            "workspace_root": str(tmp_path),
+        }
+    )
+    assert found == {
+        "path_label": "notes.txt",
+        "exists": True,
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def test_approval_target_does_not_follow_a_final_symlink_or_open_a_fifo(
+    tmp_path: Path,
+) -> None:
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path / "missing")
+    linked = display.approval_target(
+        {
+            "tool_name": "file_write",
+            "arguments": {"path": str(link)},
+            "workspace_root": str(tmp_path),
+        }
+    )
+    assert linked == {"path_label": "link", "exists": True, "size_bytes": 0}
+    fifo = tmp_path / "pipe"
+    os.mkfifo(fifo)
+    piped = display.approval_target(
+        {
+            "tool_name": "file_write",
+            "arguments": {"path": str(fifo)},
+            "workspace_root": str(tmp_path),
+        }
+    )
+    assert piped == {"path_label": "pipe", "exists": True, "size_bytes": 0}

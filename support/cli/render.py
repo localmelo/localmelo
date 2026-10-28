@@ -31,6 +31,8 @@ from rich.table import Table
 from rich.text import Text
 
 from localmelo.melo.schema import RunResult, split_thinking
+from localmelo.support.cli import edits
+from localmelo.support.cli.approvals import EditSnapshots, Snapshot
 from localmelo.support.cli.output import Out
 from localmelo.support.cli.text import (
     cells,
@@ -267,10 +269,13 @@ class TurnRenderer:
         backend: Callable[[], BackendInfo],
         verbose: bool = False,
         thinking: bool = True,
+        snapshots: EditSnapshots | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.out = out
         self.symbols = symbols
+        # The session's file_write snapshots, for a block's change.
+        self._snapshots = snapshots
         # Per session, not saved: /verbose and /thinking flip them.
         self.verbose = verbose
         self.thinking = thinking
@@ -756,6 +761,13 @@ class TurnRenderer:
             body = error + ("\n" + output if output.strip() else "")
         meta.append(tag)
         parts: list[RenderableType] = [self._header(symbol, style, name, preview, meta)]
+        snapshot = self._take_snapshot(data)
+        if status == "success" and snapshot is not None:
+            parts.append(self._change_body(snapshot))
+            images = _image_lines(data.get("images"), self.symbols)
+            if images is not None:
+                parts.append(images)
+            return Group(*parts)
         if self.verbose:
             arguments = _argument_lines(self._arguments_of(data), self.out.width)
             if arguments is not None:
@@ -781,6 +793,51 @@ class TurnRenderer:
         if ref is None:
             return self.tool_outputs[-1]
         return next((call for call in self.tool_outputs if call.ref == ref), None)
+
+    def _take_snapshot(self, data: Mapping[str, Any]) -> Snapshot | None:
+        """The file_write snapshot of this call, removed (only a write has one)."""
+        if self._snapshots is None:
+            return None
+        approval = data.get("approval")
+        if not isinstance(approval, Mapping):
+            return None
+        request_id = approval.get("request_id")
+        if not isinstance(request_id, str):
+            return None
+        return self._snapshots.take(request_id)
+
+    def _change_body(self, snapshot: Snapshot) -> Text:
+        """A file write's change: ``+1 −1 lines``, or ``new file, 12 lines``.
+
+        With /verbose the diff's hunks follow, dim, removed lines in the
+        error style and added lines in the ok style.
+        """
+        target = snapshot.target
+        if not target.exists:
+            count = len(snapshot.new.splitlines())
+            return Text(
+                f"  {self.symbols.connector} new file, {count} line"
+                + ("" if count == 1 else "s"),
+                no_wrap=True,
+                overflow="ellipsis",
+            )
+        rows, added, removed = edits.diff(target.text or "", snapshot.new)
+        body = Text(no_wrap=True, overflow="ellipsis")
+        body.append(
+            f"  {self.symbols.connector} +{added} {self.symbols.minus}{removed} lines",
+            style="muted",
+        )
+        if self.verbose:
+            width = max(1, self.out.width - 6)
+            for row in rows:
+                if row.kind == "…":
+                    body.append("\n      " + self.symbols.ellipsis, style="muted")
+                    continue
+                sign = {"+": "+", "-": self.symbols.minus, " ": " "}[row.kind]
+                style = {"+": "ok", "-": "error", " ": "muted"}[row.kind]
+                line = cut_cells(f"{row.old or row.new:4} {sign} {row.text}", width)
+                body.append("\n      " + line, style=style)
+        return body
 
     def _preview_of(self, data: Mapping[str, Any]) -> str:
         call_id = data.get("call_id")

@@ -14,17 +14,19 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal
 
 from localmelo.melo.contracts.approvals import (
+    AllowAllPolicy,
     ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
+    DenyAllPolicy,
 )
+from localmelo.support.cli import edits
 from localmelo.support.cli.text import escape_arguments, wrap_cells
 from localmelo.support.sessions.approvals import AskFunction, RememberingPolicy
 from localmelo.support.sessions.display import display_path, home_label
@@ -41,7 +43,9 @@ NUMBER_CELLS: Final = 5
 
 ESCAPED_WARNING: Final = "The arguments contain control characters, shown escaped."
 
-Mode = Literal["ask", "yolo"]
+Mode = Literal["ask", "auto", "deny", "yolo"]
+# The reason a denial in deny mode gives the model.
+DENY_REASON: Final = "approvals are set to deny"
 Choice = Literal["once", "session", "deny"]
 
 
@@ -53,7 +57,8 @@ class PendingApproval:
     offer_session: bool
     opened_at: float
     future: asyncio.Future[ApprovalDecision]
-    exists: bool | None = None  # for file_write: does the file exist
+    # For file_write: what the path holds now, for the diff.
+    target: edits.Target | None = None
     selected: int = 0
     reason: bool = False  # the reason field is open
 
@@ -64,7 +69,7 @@ class PanelText:
 
     title: str
     header: str
-    body: list[str]
+    body: list[tuple[str, str]]  # style and text per row
     escaped: bool
 
 
@@ -96,13 +101,40 @@ def _wrapped(lines: list[str], width: int) -> list[str]:
     return [row for line in lines for row in wrap_cells(line, width)]
 
 
+def _diff_body(
+    target: edits.Target,
+    content: str,
+    width: int,
+    shown: Callable[[str], str],
+    minus: str,
+) -> tuple[list[tuple[str, str]], int, int]:
+    """The diff's rows and counts: old line numbers on removals, new otherwise."""
+    rows, added, removed = edits.diff(target.text or "", content)
+    body: list[tuple[str, str]] = []
+    for row in rows:
+        if row.kind == "…":
+            body.append(("muted", "      " + "…"))
+            continue
+        number = row.old if row.kind == "-" else row.new
+        sign = {"+": "+", "-": minus, " ": " "}[row.kind]
+        style = {"+": "ok", "-": "error", " ": ""}[row.kind]
+        text = shown(row.text)
+        for index, part in enumerate(wrap_cells(f"{number:4} {sign} {text}", width)):
+            body.append((style, part if index == 0 else "      " + part))
+    return body, added, removed
+
+
 def panel_text(
-    request: ApprovalRequest, *, exists: bool | None, width: int
+    request: ApprovalRequest,
+    *,
+    target: edits.Target | None = None,
+    width: int,
+    minus: str = "−",
 ) -> PanelText:
     """The panel's title, header and whole body for *request*, escaped.
 
-    *exists* says whether a ``file_write`` target exists; *width* is the
-    width the body is wrapped to.
+    *target* is what a ``file_write`` path holds now; *width* is the width
+    the body is wrapped to; *minus* is the UI's minus sign, for a diff.
     """
     arguments: Mapping[str, Any] = request.arguments
     root = request.workspace_root
@@ -121,7 +153,7 @@ def panel_text(
     mark = "" if request.tier is None else f" · {shown(request.tier)}"
     if tool == "shell_exec":
         command = shown(_command_text(arguments.get("command")))
-        body = _wrapped(command.split("\n"), width)
+        body = [("", row) for row in _wrapped(command.split("\n"), width)]
         return PanelText(
             "Run a shell command?",
             f"shell_exec{mark} · in {workspace}",
@@ -133,26 +165,31 @@ def panel_text(
         return PanelText(
             "Run Python code?",
             f"python_exec{mark} · in {workspace}",
-            _numbered(_lines(code), width),
+            [("", row) for row in _numbered(_lines(code), width)],
             escaped_any,
         )
     if tool == "file_write":
         path = str(arguments.get("path") or "")
         content = str(arguments.get("content") or "")
-        lines = _lines(shown(content))
         where = shown(display_path(path, root))
-        if exists:
-            header = f"file_write  {where}{mark} · overwrites the file; no diff shown"
-            body = _numbered(lines, width)
+        if target is None or not target.exists:
+            lines = _lines(shown(content))
+            count = len(lines)
+            header = f"file_write  {where}{mark} · new file, {count} line" + (
+                "" if count == 1 else "s"
+            )
+            body = [("", row) for row in _numbered(lines, width)]
+            return PanelText("Write a new file?", header, body, escaped_any)
+        if target.diffable:
+            body, added, removed = _diff_body(target, content, width, shown, minus)
+            header = f"file_write  {where}{mark} · +{added} {minus}{removed} lines"
             return PanelText("Change a file?", header, body, escaped_any)
-        count = len(lines)
-        header = f"file_write  {where}{mark} · new file, {count} line" + (
-            "" if count == 1 else "s"
-        )
-        body = _numbered(lines, width)
-        return PanelText("Write a new file?", header, body, escaped_any)
+        header = f"file_write  {where}{mark} · {shown(target.problem)}; no diff shown"
+        lines = _lines(shown(content))
+        body = [("", row) for row in _numbered(lines, width)]
+        return PanelText("Change a file?", header, body, escaped_any)
     text = json.dumps(dict(arguments), indent=2, ensure_ascii=False, default=str)
-    body = _wrapped(shown(text).split("\n"), width)
+    body = [("", row) for row in _wrapped(shown(text).split("\n"), width)]
     return PanelText(f"Call {shown(tool)}?", f"{shown(tool)}{mark}", body, escaped_any)
 
 
@@ -177,9 +214,11 @@ class TerminalApprover:
         self,
         on_change: Callable[[], None] = lambda: None,
         *,
+        snapshots: EditSnapshots | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.on_change = on_change
+        self.snapshots = snapshots if snapshots is not None else EditSnapshots()
         self._clock = clock
         self.pending: PendingApproval | None = None
 
@@ -191,10 +230,12 @@ class TerminalApprover:
         A cancellation (a stop, a shutdown) withdraws the panel and
         propagates: a withdrawn prompt is not a denial.
         """
-        exists: bool | None = None
+        target: edits.Target | None = None
         if request.tool_name == "file_write":
-            path = str(request.arguments.get("path") or "")
-            exists = await asyncio.to_thread(os.path.lexists, path)
+            target = self.snapshots.target_for(request.request_id)
+            if target is None:
+                path = str(request.arguments.get("path") or "")
+                target = await asyncio.to_thread(edits.read_target, path)
         future: asyncio.Future[ApprovalDecision] = (
             asyncio.get_running_loop().create_future()
         )
@@ -203,7 +244,7 @@ class TerminalApprover:
             offer_session=offer_session,
             opened_at=self._clock(),
             future=future,
-            exists=exists,
+            target=target,
         )
         self.on_change()
         try:
@@ -235,17 +276,95 @@ class TerminalApprover:
         pending.future.set_result(decision)
 
 
+@dataclass(frozen=True)
+class Snapshot:
+    """What a ``file_write`` call is about to change, by its request id."""
+
+    request_id: str
+    target: edits.Target
+    new: str
+    added: int
+    removed: int
+
+
+class EditSnapshots:
+    """Reads a ``file_write`` target before the call is answered and keeps it.
+
+    Wraps another policy; the renderer then shows the change by the
+    request's id when the call ends. Every marked call is snapshotted, a
+    granted or auto-allowed one and a denied one too (only an allowed
+    write has a change to show).
+    """
+
+    def __init__(self, inner: ApprovalPolicy | None = None) -> None:
+        self.inner = inner
+        self._snapshots: dict[str, Snapshot] = {}
+
+    async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        if request.tool_name == "file_write" and isinstance(request.arguments, Mapping):
+            path = str(request.arguments.get("path") or "")
+            target = await asyncio.to_thread(edits.read_target, path)
+            new = str(request.arguments.get("content") or "")
+            if target.diffable:
+                _, added, removed = edits.diff(target.text or "", new)
+            else:
+                added = removed = 0
+            self._snapshots[request.request_id] = Snapshot(
+                request_id=request.request_id,
+                target=target,
+                new=new,
+                added=added,
+                removed=removed,
+            )
+        if self.inner is None:
+            return ApprovalDecision(True)
+        return await self.inner.decide(request)
+
+    def target_for(self, request_id: str) -> edits.Target | None:
+        """The target read for *request_id*, kept for the panel."""
+        snapshot = self._snapshots.get(request_id)
+        return snapshot.target if snapshot is not None else None
+
+    def take(self, request_id: str) -> Snapshot | None:
+        """The snapshot of *request_id*, removed: a finished call shows it once."""
+        return self._snapshots.pop(request_id, None)
+
+    def clear(self) -> None:
+        """Drop every snapshot, as ``/new`` does."""
+        self._snapshots.clear()
+
+
 class Approvals:
     """The session's approval mode and policy, which keeps the grants."""
 
-    def __init__(self, ask: AskFunction, mode: Mode) -> None:
+    def __init__(
+        self,
+        ask: AskFunction,
+        mode: Mode,
+        *,
+        snapshots: EditSnapshots | None = None,
+    ) -> None:
         self.mode: Mode = mode
         self._ask = ask
+        self.snapshots = snapshots if snapshots is not None else EditSnapshots()
         self._policy = RememberingPolicy(ask)
 
     def policy(self) -> ApprovalPolicy | None:
         """The policy for a turn: None with ``--yolo``, so nothing asks."""
-        return None if self.mode == "yolo" else self._policy
+        if self.mode == "yolo":
+            return None
+        if self.mode == "deny":
+            return DenyAllPolicy(DENY_REASON)
+        self.snapshots.inner = AllowAllPolicy() if self.mode == "auto" else self._policy
+        return self.snapshots
+
+    def set_mode(self, mode: Literal["ask", "auto", "deny"]) -> None:
+        """Switch the mode; a turn under way keeps the policy it started with."""
+        self.mode = mode
+
+    def forget(self, tool_name: str | None = None) -> None:
+        """Take back one tool's grant, or every grant."""
+        self._policy.forget(tool_name)
 
     @property
     def allowed_tools(self) -> frozenset[str]:
@@ -254,3 +373,4 @@ class Approvals:
     def reset(self) -> None:
         """Forget every grant: a new session starts with none."""
         self._policy = RememberingPolicy(self._ask)
+        self.snapshots.clear()

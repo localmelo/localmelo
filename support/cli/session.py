@@ -18,7 +18,7 @@ import contextlib
 import logging
 import time
 from collections.abc import Callable, Coroutine
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, cast
 
 from prompt_toolkit.document import Document
 from rich.text import Text
@@ -167,7 +167,7 @@ class CliSession:
         self.renderer = renderer
         self.approver = approver
         self.out = out
-        self.approvals = Approvals(self._ask, mode)
+        self.approvals = Approvals(self._ask, mode, snapshots=self.approver.snapshots)
         self.runner: SessionRunner | None = None
         self.app: InteractiveApp | None = None
         self.queued: str | None = None
@@ -194,13 +194,14 @@ class CliSession:
     def status_bar(self) -> StatusBar:
         backend = self.factory.backend
         context = self.renderer.context_tokens
-        yolo = self.approvals.mode == "yolo"
+        mode = self.approvals.mode
+        yolo = mode == "yolo"
         return StatusBar(
             model=backend.model,
             workspace=home_label(self.agent.workspace_root or ""),
             context=f"ctx {format_tokens(context)}" if context else "",
             title=self.title or "New session",
-            mode=f"{self.renderer.symbols.warn} YOLO: no approvals" if yolo else "ask",
+            mode=f"{self.renderer.symbols.warn} YOLO: no approvals" if yolo else mode,
             mode_style="class:yolo" if yolo else "class:muted",
         )
 
@@ -438,6 +439,8 @@ class CliSession:
             self.expand(arguments)
         elif name == "progress":
             self.progress()
+        elif name == "approvals":
+            self.approvals_command(arguments)
 
     def toggle_verbose(self, arguments: str) -> None:
         """``/verbose [on|off]``: verbose rendering, or the other way."""
@@ -523,6 +526,38 @@ class CliSession:
                     style="muted",
                 )
             )
+
+    def approvals_command(self, arguments: str) -> None:
+        """``/approvals``: the mode and grants, or switch, or forget one."""
+        approvals = self.approvals
+        mode = approvals.mode
+        if mode == "yolo":
+            self.out.print(_line("Approvals: YOLO (--yolo); no grants.", "muted"))
+            if arguments:
+                self.out.print(
+                    _line(
+                        "✗ YOLO is on; /approvals ask turns prompts on.",
+                        style="error",
+                    )
+                )
+            return
+        parts = arguments.split()
+        if parts:
+            what = parts[0].lower()
+            if what in ("ask", "auto", "deny"):
+                approvals.set_mode(cast(Literal["ask", "auto", "deny"], what))
+            elif what == "forget":
+                approvals.forget(parts[1] if len(parts) > 1 else None)
+            else:
+                self.out.print(
+                    _line(
+                        "✗ Use /approvals ask, auto, deny, or forget [tool].",
+                        style="error",
+                    )
+                )
+                return
+        grants = ", ".join(sorted(approvals.allowed_tools)) or "none"
+        self.out.print(_line(f"Approvals: {approvals.mode} · grants: {grants}"))
 
     def progress(self) -> None:
         """``/progress``: the latest run.progress of this session, in full."""

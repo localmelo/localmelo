@@ -361,8 +361,13 @@ async def main_async(
             print(f"melo: could not start the agent: {exc}", file=sys.stderr)
             return 1, None
 
-        renderer = TurnRenderer(out, symbols=symbols, backend=lambda: factory.backend)
         approver = TerminalApprover()
+        renderer = TurnRenderer(
+            out,
+            symbols=symbols,
+            backend=lambda: factory.backend,
+            snapshots=approver.snapshots,
+        )
         session = CliSession(
             store=store,
             factory=factory,

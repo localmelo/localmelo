@@ -16,8 +16,9 @@ import math
 import os
 import re
 import subprocess
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from localmelo.support.progress_line import run_elapsed
 
@@ -112,6 +113,36 @@ def display_path(path: str, root: str | None) -> str:
         if path.startswith(prefix):
             return path[len(prefix) :]
     return home_label(path)
+
+
+def approval_target(request: Mapping[str, Any]) -> dict[str, Any] | None:
+    """A ``file_write`` request's target, or None for any other tool.
+
+    ``{"path_label": display_path(...), "exists": bool, "size_bytes": int}``.
+    The facts come from ``os.open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)``
+    and ``fstat``, as the panel's diff reads them: a final symlink is not
+    followed and a FIFO never blocks. ``exists`` is false only for a missing
+    path; any other failure to open counts as existing, with size 0.
+    """
+    if request.get("tool_name") != "file_write":
+        return None
+    arguments = request.get("arguments")
+    if not isinstance(arguments, Mapping):
+        return None
+    path = str(arguments.get("path") or "")
+    root = request.get("workspace_root")
+    label = display_path(path, root if isinstance(root, str) else None)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return {"path_label": label, "exists": False, "size_bytes": 0}
+    except OSError:
+        return {"path_label": label, "exists": True, "size_bytes": 0}
+    try:
+        info = os.fstat(fd)
+    finally:
+        os.close(fd)
+    return {"path_label": label, "exists": True, "size_bytes": info.st_size}
 
 
 def status_line(status: str, error: str) -> str:

@@ -48,6 +48,13 @@ COMMANDS: Final[tuple[Command, ...]] = (
     Command("verbose", (), "[on|off]", "Toggle verbose rendering", True),
     Command("thinking", (), "[on|off]", "Toggle thinking excerpts", True),
     Command("expand", (), "[turn.call]", "Show a tool call's full output", True),
+    Command(
+        "approvals",
+        (),
+        "[ask|auto|deny|forget [tool]]",
+        "Show or switch how tools are approved",
+        "show",
+    ),
     Command("progress", (), "", "Show this turn's progress facts", True),
     Command("model", (), "[name]", "Show, list or switch the model (saved)", False),
     Command("backend", (), "[url]", "Switch to another model server (saved)", False),

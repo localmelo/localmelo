@@ -1084,3 +1084,36 @@ async def test_new_forgets_this_process_calls_and_progress(setup: Setup) -> None
     await _until(lambda: "✗ No tool calls yet." in setup.out.text())
     session.enter("/progress")
     await _until(lambda: "No progress facts for this turn yet." in setup.out.text())
+
+
+# ── U2a.3's /approvals ──
+
+
+async def test_approvals_shows_and_switches_the_mode(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    session.enter("/approvals")
+    await _until(lambda: "Approvals: ask · grants: none" in out.text())
+    session.enter("/approvals auto")
+    await _until(lambda: "Approvals: auto" in out.text())
+    assert session.approvals.mode == "auto"
+    assert session.status_bar().mode == "auto"
+    session.enter("/approvals deny")
+    await _until(lambda: "Approvals: deny" in out.text())
+    assert session.approvals.mode == "deny"
+    session.enter("/approvals ask")
+    await _until(lambda: out.text().count("Approvals: ask") >= 2)
+    session.enter("/approvals nope")
+    await _until(
+        lambda: "✗ Use /approvals ask, auto, deny, or forget [tool]." in out.text()
+    )
+    assert session.approvals.mode == "ask"
+
+
+async def test_approvals_under_yolo_says_how_to_turn_prompts_on(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    session.approvals.mode = "yolo"
+    session.enter("/approvals")
+    await _until(lambda: "Approvals: YOLO (--yolo); no grants." in out.text())
+    session.enter("/approvals ask")
+    await _until(lambda: "✗ YOLO is on; /approvals ask turns prompts on." in out.text())
+    assert session.approvals.mode == "yolo"

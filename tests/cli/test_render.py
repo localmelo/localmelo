@@ -41,7 +41,11 @@ class Turn:
     """A renderer on a recording, fed events by type and data."""
 
     def __init__(
-        self, width: int = 80, symbols: Symbols = UNICODE, **backend: Any
+        self,
+        width: int = 80,
+        symbols: Symbols = UNICODE,
+        snapshots: Any = None,
+        **backend: Any,
     ) -> None:
         self.out = RecordingOut(width)
         self.now = [100.0]
@@ -49,6 +53,7 @@ class Turn:
             self.out,
             symbols=symbols,
             backend=lambda: _backend(**backend),
+            snapshots=snapshots,
             clock=lambda: self.now[0],
         )
         self.renderer.begin_turn("What is in this folder?")
@@ -1313,3 +1318,94 @@ def test_a_wrapped_thinking_row_never_starts_with_a_space() -> None:
     rows = [row for row in text.split("\n") if row.startswith("  ")]
     assert len(rows) >= 2, text
     assert not any(row.startswith("   ") for row in rows), rows
+
+
+# ── U2a.3: a file write's change from its snapshot ──
+
+
+def _snapshots(
+    request_id: str, *, old: str | None, new: str, added: int = 1, removed: int = 0
+) -> Any:
+    from localmelo.support.cli import edits
+    from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+
+    snapshots = EditSnapshots()
+    target = (
+        edits.Target(path="todo.md", exists=False)
+        if old is None
+        else edits.Target(path="todo.md", exists=True, text=old)
+    )
+    snapshots._snapshots[request_id] = Snapshot(request_id, target, new, added, removed)
+    return snapshots
+
+
+def test_a_file_write_block_shows_the_counts_from_the_snapshot() -> None:
+    snapshots = _snapshots("r1", old="a\n", new="b\n", added=1, removed=1)
+    text = (
+        Turn(snapshots=snapshots)
+        .tool(
+            "file_write",
+            "todo.md (2 chars)",
+            request_id="r1",
+            status="success",
+            output="Written 2 bytes to todo.md",
+            approval={
+                "request_id": "r1",
+                "allowed": True,
+                "origin": "user",
+                "remember": False,
+            },
+            duration_s=0.1,
+        )
+        .text()
+    )
+    assert "  └ +1 −1 lines" in text
+    assert "Written 2 bytes" not in text
+
+
+def test_a_new_file_block_shows_its_line_count() -> None:
+    snapshots = _snapshots("r1", old=None, new="a\nb\n", added=2, removed=0)
+    text = (
+        Turn(snapshots=snapshots)
+        .tool(
+            "file_write",
+            "new.md",
+            request_id="r1",
+            status="success",
+            output="Written 4 bytes",
+            approval={"request_id": "r1", "allowed": True, "origin": "user"},
+        )
+        .text()
+    )
+    assert "  └ new file, 2 lines" in text
+
+
+def test_verbose_shows_the_change_hunks() -> None:
+    snapshots = _snapshots("r1", old="a\n", new="b\n", added=1, removed=1)
+    turn = Turn(snapshots=snapshots)
+    turn.renderer.verbose = True
+    text = turn.tool(
+        "file_write",
+        "todo.md (2 chars)",
+        request_id="r1",
+        status="success",
+        output="Written 2 bytes",
+        approval={"request_id": "r1", "allowed": True, "origin": "user"},
+    ).text()
+    assert "     1 − a" in text and "     1 + b" in text
+
+
+def test_a_write_without_a_snapshot_shows_its_output() -> None:
+    text = (
+        Turn()
+        .tool(
+            "file_write",
+            "todo.md (2 chars)",
+            request_id="r1",
+            status="success",
+            output="Written 2 bytes to todo.md",
+            approval={"request_id": "r1", "allowed": True, "origin": "user"},
+        )
+        .text()
+    )
+    assert "  └ Written 2 bytes to todo.md" in text
