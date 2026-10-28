@@ -9,6 +9,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Clarify that explicit reasoning modes can use text-only long-term memory
+  without an embedding backend, in the embedding guide and Chinese architecture
+  boundary ([#NN]).
+
 - Attempt digests skip task headings and report verification only for passing
   checks, rather than treating trivial Python imports as tests ([#128]).
 
@@ -537,6 +541,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Organize Markdown documentation into start, guides, reference, concepts and
+  project sections. Old paths retain readable links for each historical
+  fragment; the agent entry points and printed CLI paths remain stable ([#129]).
+
 - An attempt's `compress` digest now says what the attempt did: the paths its
   successful `file_write` calls wrote (at most six, workspace-relative, then
   `+N`), the last `shell_exec` or `python_exec` check and its result (test
@@ -918,3 +926,4 @@ earlier milestones.
 [#125]: https://github.com/localmelo/localmelo/pull/125
 [#126]: https://github.com/localmelo/localmelo/pull/126
 [#128]: https://github.com/localmelo/localmelo/pull/128
+[#129]: https://github.com/localmelo/localmelo/pull/129
