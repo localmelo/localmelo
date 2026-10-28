@@ -184,7 +184,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 - Exit 1 and exit 2 can come with no JSON line (setup or usage error, message on stderr). Check that stdout is non-empty before parsing, then read `status`.
 - Always set `--timeout` (or `timeout_s`): the request timeout counts per read, so a server that keeps sending bytes never trips it, and a silent server costs about 3 x the request timeout + 5 s per request (two retries).
 - `--serve` silently ignores a positional task; direct mode silently ignores `--host`, `--port`, `--reconfigure`.
-- A non-string `session_id` gets a plain-text HTTP 500; omit it or send `null` for a new session.
+- A `session_id` that is not a string, or that does not match `^[a-zA-Z0-9_-]{1,64}$`, gets the 400 `Invalid session_id format`; omit it or send `null` for a new session.
 - One `Agent` per concurrent task: `run_task` has no overlap guard (runs share working memory and counters).
 - `ollama` backend: `result` can start with a `<think>...</think>` block.
 - Gateway: `python_exec` runs in a child process, so the gateway keeps answering while the code runs, and Stop kills it. `DELETE` on a session running a task: 409 `{"error", "session_id"}`, and the run goes on; `/v1/agent` has no cancel route (the web workspace's cancel is for its own chats). At shutdown every session is closed, a busy one included, and a task still running then ends as `crashed`.

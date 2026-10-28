@@ -388,6 +388,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `POST /v1/agent/run` answers a non-string `session_id` (a number, a list)
+  with the route's own 400 `Invalid session_id format` instead of FastAPI's
+  plain-text 500, and its 100,000-character limit counts the query after the
+  surrounding whitespace is removed, which is the text the agent runs: a
+  whitespace-padded query whose trimmed text fits is accepted ([#NN]).
 - A held chat's header still said `● Working` while the sidebar, status
   label and message area said it was waiting, and a chat that had just sent
   kept `Working on your request…` in the message area for the whole hold
@@ -547,3 +552,4 @@ earlier milestones.
 [#83]: https://github.com/localmelo/localmelo/pull/83
 [#84]: https://github.com/localmelo/localmelo/pull/84
 [#85]: https://github.com/localmelo/localmelo/pull/85
+[#NN]: https://github.com/localmelo/localmelo/pull/NN
