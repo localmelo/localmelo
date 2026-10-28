@@ -140,7 +140,7 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 
 | Request field | Required | Description |
 |---|---|---|
-| `query` | yes | The task, up to 100,000 characters as sent; leading and trailing whitespace is removed after that check. |
+| `query` | yes | The task, up to 100,000 characters after leading and trailing whitespace is removed. |
 | `session_id` | no | 1 to 64 letters, digits, `_` or `-`. Uses that session, and creates it if needed. Without it, a new session is created. |
 
 | HTTP status | Body | When |
@@ -153,9 +153,8 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 
 The 400 errors read `Query must be a non-empty string`,
 `Query too large: <n> chars (max 100000)` or
-`Invalid session_id format: '<id>'`. A `session_id` that is not a string at
-all (a number, a list) gets FastAPI's plain-text 500 instead; see
-[Gotchas](for-agents.md#gotchas).
+`Invalid session_id format: '<id>'`; an id that is not a string gets the
+last one too.
 
 `result` is the answer or the run's best effort. When that is empty, it is
 `[<status>] <error>`, for example

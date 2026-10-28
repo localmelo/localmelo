@@ -13,6 +13,7 @@ from unittest.mock import patch  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402
 
+from localmelo.melo.checker.validators import MAX_QUERY_LEN  # noqa: E402
 from localmelo.support.config import (  # noqa: E402
     Config,
     GatewayConfig,
@@ -183,6 +184,54 @@ class TestAgentRun:
         resp = client.post("/v1/agent/run", json={"query": "  hello  "})
         assert resp.status_code == 200
         assert resp.json()["result"] == "echo: hello"
+
+    @pytest.mark.parametrize("session_id", [12345, ["abc"], {"id": "abc"}, True])
+    def test_non_string_session_id_returns_400(
+        self, client: TestClient, session_id: object
+    ) -> None:
+        resp = client.post(
+            "/v1/agent/run",
+            json={"query": "hi", "session_id": session_id},
+        )
+        assert resp.status_code == 400
+        assert resp.json()["error"] == f"Invalid session_id format: {session_id!r}"
+
+    def test_query_at_trimmed_limit_accepted(self, client: TestClient) -> None:
+        resp = client.post("/v1/agent/run", json={"query": "x" * MAX_QUERY_LEN})
+        assert resp.status_code == 200
+        assert resp.json()["result"] == "echo: " + "x" * MAX_QUERY_LEN
+
+    def test_query_over_trimmed_limit_returns_400(self, client: TestClient) -> None:
+        resp = client.post("/v1/agent/run", json={"query": "x" * (MAX_QUERY_LEN + 1)})
+        assert resp.status_code == 400
+        assert resp.json() == {
+            "error": f"Query too large: {MAX_QUERY_LEN + 1} chars "
+            f"(max {MAX_QUERY_LEN})"
+        }
+
+    def test_query_limit_ignores_surrounding_whitespace(
+        self, client: TestClient
+    ) -> None:
+        # Raw text is over the limit, but the trimmed query the agent runs fits.
+        resp = client.post(
+            "/v1/agent/run",
+            json={"query": "  " + "x" * MAX_QUERY_LEN + "  "},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["result"] == "echo: " + "x" * MAX_QUERY_LEN
+
+    def test_padded_query_over_trimmed_limit_returns_400(
+        self, client: TestClient
+    ) -> None:
+        resp = client.post(
+            "/v1/agent/run",
+            json={"query": "  " + "x" * (MAX_QUERY_LEN + 1) + "  "},
+        )
+        assert resp.status_code == 400
+        assert resp.json() == {
+            "error": f"Query too large: {MAX_QUERY_LEN + 1} chars "
+            f"(max {MAX_QUERY_LEN})"
+        }
 
 
 # ---------------------------------------------------------------------------
