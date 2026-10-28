@@ -13,9 +13,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   token for API clients, and a one-use terminal sign-in link for browser sessions.
   Existing unauthenticated API clients must migrate; see the gateway guide.
   Same-user processes and localhost services on other ports remain outside the
-  isolation guarantee. Playground and lifecycle hardening are separate work. ([#136])
+  isolation guarantee. ([#136])
+
+- Gateway security-1b is in progress: disable the legacy playground by default;
+  `melo --serve --enable-playground` opts in behind authentication and uses
+  saved local backend/model settings. Authenticated settings and model probes
+  accept typed HTTP/HTTPS endpoints without following redirects. Explicit
+  close/delete refuses running or queued starts with 409 rather than cancelling
+  them ([#141]).
 
 ### Fixed
+
+- Label Python checks in attempt digests with a recognizable runner and safe
+  target basename when available, rather than the first line of code. Unknown
+  checks use a neutral label. Results show counts, an exit code or `completed`
+  instead of arbitrary output. Hidden paths and agent scratch notes are omitted;
+  Python file writes are not inferred ([#149]).
 
 - Correct the API v2 response formats and tools example, and update the bilingual
   quickstart to reflect the shipped console settings and approvals ([#122], [#124]).
@@ -32,6 +45,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - `melo-task` creates, inspects and controls gateway tasks, with authenticated
   loopback requests and an optional event follow stream. ([#NN])
 
+- Scheduler component v3 adds dormant recovery provenance, guarded durable
+  intents and receipts, and process identity records. Interrupted recovery
+  retains pending pause intent; explicit legacy adoption records orphan-risk
+  acceptance. Startup behavior remains unchanged; process capture completeness
+  and runtime recovery are deferred. [#147]
+- Experimental opt-in provider streaming and OpenAI-compatible SSE assembly;
+  display filtering buffers complete replies, and no CLI or agent uses it yet ([#145]).
+- Direct workers can read a brief file and emit a versioned JSON result or an
+  NDJSON event stream; inbox steering remains future work. ([#143])
+
+- Opt-in fixed system prefix with a local-date snapshot and schema-change telemetry;
+  dynamic recall and reflection remain labelled data ([#142]).
+- Opt-in bounded, pattern-redacted captured tool-result history, separate from the
+  model preview, with capture and acquisition omission metadata ([#144]).
 - Heuristic notes retain a bounded set of explicit English negative and Chinese
   residence/cancellation assertions, and item attribution rejects conflicting
   event times, rejects opposing detected polarity and requires the full negative
@@ -965,3 +992,10 @@ earlier milestones.
 [#135]: https://github.com/localmelo/localmelo/pull/135
 [#136]: https://github.com/localmelo/localmelo/pull/136
 [#137]: https://github.com/localmelo/localmelo/pull/137
+[#141]: https://github.com/localmelo/localmelo/pull/141
+[#142]: https://github.com/localmelo/localmelo/pull/142
+[#143]: https://github.com/localmelo/localmelo/pull/143
+[#144]: https://github.com/localmelo/localmelo/pull/144
+[#145]: https://github.com/localmelo/localmelo/pull/145
+[#147]: https://github.com/localmelo/localmelo/pull/147
+[#149]: https://github.com/localmelo/localmelo/pull/149

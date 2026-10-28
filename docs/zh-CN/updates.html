@@ -65,8 +65,7 @@
         <p>网站同步已在 <a href="https://github.com/localmelo/localmelo/pull/118">#118</a> 落地；任务调度器-2：任务 API 和 workers（S3a.2）已在 <a href="https://github.com/localmelo/localmelo/pull/119">#119</a> 落地。</p>
         <p>进行中，按顺序落地：</p>
         <ul>
-          <li>网关身份验证正在开发：只允许回环监听，API 使用令牌，浏览器使用一次性登录链接。同一用户进程及 localhost 其他端口不受隔离保护。</li>
-          <li>无头工作进程支持-3：网页上的只读 worker 历史（<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>）；详情抽屉已在 <a href="https://github.com/localmelo/localmelo/pull/124">#124</a> 落地。</li>
+          <li>Worker 契约第一部分：任务说明和事件流；网页 worker 历史已在 <a href="https://github.com/localmelo/localmelo/pull/130">#130</a> 落地。</li>
         </ul>
         <p>接下来，按顺序：</p>
         <ul>
@@ -96,6 +95,18 @@
           <p><code>melo-task</code> 可创建、查看和控制网关任务，并跟随事件。最终状态不保证事件重放完整。</p>
         </article>
 
+        <article class="update-entry" id="u-python-check-labels">
+          <h3>更清晰的 Python 检查标签</h3>
+          <p class="update-date">尚未发布</p>
+          <p>尝试摘要会显示可识别的 Python 测试运行器，以及适合展示的目标文件名，而不是代码的第一行。其他 Python 检查使用中性标签。结果显示测试计数、退出码或 <code>completed</code>，不会引用任意输出。隐藏路径和智能体的临时笔记不会列出；系统不会推测 Python 写入的文件。验证条件不变。</p>
+        </article>
+
+        <article class="update-entry" id="u-worker-brief">
+          <h3>Worker 任务说明与事件流</h3>
+          <p class="update-date">尚未发布</p>
+          <p>直接运行的 worker 可读取任务说明，返回版本化 JSON 结果或事件流；收件箱引导将在后续实现。</p>
+        </article>
+
         <article class="update-entry" id="u-facts2-extraction">
           <h3>否定和中文笔记</h3>
           <p class="update-date">尚未发布</p>
@@ -104,8 +115,20 @@
 
         <article class="update-entry" id="u-worker-view">
           <h3>工作区中的 worker 历史</h3>
-          <p class="update-date">尚未发布</p>
+          <p class="update-date">2026-10-28 · #130</p>
           <p>Workers 可筛选和分页查看保存或导入的运行记录。每次运行以只读快照打开；未完成的运行需手动刷新。脱敏记录分享前仍需检查。</p>
+        </article>
+
+        <article class="update-entry" id="u-fixed-prefix">
+          <h3>可选的固定前缀</h3>
+          <p class="update-date">尚未发布</p>
+          <p>带版本的前缀在每次运行中固定本地日期和稳定指令。工具模式变化报告为预期的缓存失效，并非实际测得的缓存未命中。</p>
+        </article>
+
+        <article class="update-entry" id="u-captured-history">
+          <h3>可选的捕获历史记录</h3>
+          <p class="update-date">尚未发布</p>
+          <p>独立于模型预览保存有上限、经过模式脱敏的工具结果副本。工具获取时遗漏的数量可能未知，脱敏也可能漏掉密钥。</p>
         </article>
 
         <article class="update-entry" id="u-2026-10-28-context-accounting">

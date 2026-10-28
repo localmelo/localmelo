@@ -56,6 +56,30 @@ pending approval waits until resume. Resume restores the priority before pause,
 or computed P2 if retention pruned the pause log; an unpaused task returns
 409 `not_paused`. Task PATCH rejects `first` (400); it is deferred to S6b.
 
+### Legacy playground
+
+The internal `/v1/playground/` routes are disabled by default (404), and their
+manager is not started. Opt in with `melo --serve --enable-playground`;
+authentication and Host/Origin checks still apply. Discovery and sessions use
+the saved local chat backend and model, not request overrides. These routes
+include:
+
+- `GET /v1/playground/sessions` for summaries;
+- `GET /v1/playground/session/{id}` for a transcript;
+- `POST /v1/playground/session/{id}/cancel` to cancel a chat;
+- `POST /v1/playground/session/{id}/level` with `{"level": 1..4}` to set a level;
+- `POST /v1/playground/presence` with `{"session_id": ...}` for a typing heartbeat.
+
+The separate `/v1/agent/` API requires authentication too, but its calls do not
+pass through the playground and console's shared scheduler gate.
+
+For development, this starts the authenticated gateway with the playground
+enabled, using its saved configuration and configured loopback address:
+
+```bash
+uv run python -m localmelo.support.gateway._test_webapp
+```
+
 ### GET /v1/health
 
 The examples pipe the gateway bearer token from its private file to curl, keeping
@@ -142,15 +166,15 @@ field; see [Run results](run-results.md#where-results-appear).
 ```
 
 The answer is HTTP 200 with `{"closed": "demo123"}`, or HTTP 404 with
-`{"error": "session not found"}`. A session whose task is still running is
-left alone: the answer is HTTP 409 with the same error body as a refused run,
-`{"error": "Session demo123 is running a task; wait for it to finish before closing it.", "session_id": "demo123"}`,
+`{"error": "session not found"}`. In the in-progress security-1b changes, a session with a running task or queued start is
+left alone: the answer is HTTP 409,
+`{"error": "Session demo123 is running a task; wait for it to finish before closing it.", "session_id": "demo123", "code": "session_busy"}`,
 and the task goes on. `is_busy` in [GET /v1/sessions](#get-v1sessions)
 shows which sessions are busy.
 
 The `/v1/agent` API has no route that stops a run, so wait for it to finish
-and close the session after. `POST /v1/playground/session/{id}/cancel` stops
-a legacy playground chat, not an `/v1/agent` run. The current
+and close the session after. When enabled, `POST /v1/playground/session/{id}/cancel`
+stops a legacy playground chat, not an `/v1/agent` run. The current
 [web workspace](../guides/web-console.md#web-workspace) instead stops its turns
 with [`POST /api/turns/{turn_id}/cancel`](api-v2.md#post-apiturnsturn_idcancel).
 Stopping the gateway still closes every session, a busy one included; see

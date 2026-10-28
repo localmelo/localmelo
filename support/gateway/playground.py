@@ -36,7 +36,7 @@ from localmelo.support.gateway.machine_monitor import (
     MachineMonitor,
     MachineSnapshot,
 )
-from localmelo.support.gateway.session import SessionBusyError
+from localmelo.support.gateway.session import RunLock, SessionBusyError
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
@@ -164,12 +164,16 @@ class PlaygroundSession:
     created_at: float = field(default_factory=time.time)
     last_active: float = field(default_factory=time.time)
     messages: list[dict[str, str]] = field(default_factory=list)
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    lock: RunLock = field(default_factory=RunLock, repr=False)
     task: asyncio.Task[RunResult] | None = field(default=None, repr=False)
     cancel_requested: bool = False
     # The chat's scheduling level, P1-P4; set by the page's chip.
     level: int = 2
     level_source: str = "computed"
+
+    @property
+    def busy(self) -> bool:
+        return self.lock.locked() or bool(self.lock.pending)
 
     def touch(self) -> None:
         self.last_active = time.time()
@@ -357,7 +361,7 @@ class SmokePlayground:
         # complete creation operation instead of racing other creations.
         async with self._creation_lock:
             if len(self._sessions) >= self._max and all(
-                session.lock.locked() for session in self._sessions.values()
+                session.busy for session in self._sessions.values()
             ):
                 raise SessionBusyError(
                     "All sessions are busy. Stop a response before creating a chat."
@@ -491,7 +495,7 @@ class SmokePlayground:
             "created_at": session.created_at,
             "last_active": session.last_active,
             "title": " ".join(title.split())[:80],
-            "is_busy": session.lock.locked(),
+            "is_busy": session.busy,
             "level": session.level,
             "held": self._gate.held(session.session_id),
         }
@@ -504,7 +508,7 @@ class SmokePlayground:
             raise KeyError("session not found")
         if not query.strip():
             raise ValueError("query is required")
-        if session.lock.locked():
+        if session.busy:
             raise SessionBusyError(
                 "This chat is already responding. Stop it or wait for it to finish."
             )
@@ -675,7 +679,7 @@ class SmokePlayground:
         session = self._sessions.get(session_id)
         if session is None:
             return False
-        if session.lock.locked():
+        if session.busy:
             raise SessionBusyError(
                 "This chat is still responding. Stop it before closing it."
             )
@@ -763,12 +767,16 @@ class SmokePlayground:
         expired = [
             sid
             for sid, session in self._sessions.items()
-            if (now - session.last_active) > self._idle_ttl
-            and not session.lock.locked()
+            if (now - session.last_active) > self._idle_ttl and not session.busy
         ]
         for sid in expired:
-            session = self._sessions.pop(sid, None)
-            if session is not None:
+            session = self._sessions.get(sid)
+            if (
+                session is not None
+                and not session.busy
+                and time.time() - session.last_active > self._idle_ttl
+            ):
+                self._sessions.pop(sid)
                 with contextlib.suppress(Exception):
                     await session.agent.close()
                 self._gate.forget(sid)
@@ -776,7 +784,7 @@ class SmokePlayground:
     async def _evict_oldest(self) -> None:
         if not self._sessions:
             return
-        idle_sessions = [s for s in self._sessions.values() if not s.lock.locked()]
+        idle_sessions = [s for s in self._sessions.values() if not s.busy]
         if not idle_sessions:
             return
         oldest = min(idle_sessions, key=lambda s: s.last_active)

@@ -276,6 +276,8 @@ def run_interactive(
     explicit = {
         name
         for name in (
+            "fixed_prefix",
+            "captured_history",
             "reasoning",
             "replay_turns",
             "note_writer",
@@ -290,8 +292,13 @@ def run_interactive(
     }
     try:
         if choice.cfg is None:
+            loaded = config.load()
+            if "fixed_prefix" not in explicit and loaded.agent.fixed_prefix:
+                options = replace(options, fixed_prefix=True)
+            if "captured_history" not in explicit and loaded.agent.captured_history:
+                options = replace(options, captured_history=True)
             options = configured_context_options(
-                config.load(),
+                loaded,
                 options,
                 {
                     name: getattr(args, name, None)
