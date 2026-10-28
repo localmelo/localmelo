@@ -169,7 +169,8 @@ tables of the chosen backends.
 | `k` | `[retrieval]` | `3` | Task-local hits per recall, from 1 to 10. |
 | `kinds` | `[retrieval]` | not set | A list of `note`, `draft`, `thought`, `digest`, `reflection` and `long`. Omit for all but `thought`. |
 | `placement` | `[retrieval]` | `"tool"` | `tool` (append to the last tool result) or `message` (its own user message). `message` is refused in `replay` and `compress+replay`. |
-| `min_score` | `[retrieval]` | `0.35` | The cosine floor for the long-term leg and for embedding task hits, from 0 to 1. Inert only for the task-local `bm25` and `llm` ranking. |
+| `min_score` | `[retrieval]` | `0.35` | The cosine floor for embedding and long-term cosine hits, from 0 to 1. Inert for the task-local `bm25` and `llm` ranking and for a long-term row that only BM25 scored. |
+| `admit_on_outcome` | `[memory]` | `false` | R6-lite: admit only the final attempt digest at the run's end, with the terminal status in its provenance. The `--admit-on-outcome` flag wins for one run; direct mode applies the table, the interactive UI and the gateway do not read it, and it is accepted and inert in `legacy`. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. |
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
 | `host` | `[gateway]` | `"127.0.0.1"` | The address the gateway listens on: keep `127.0.0.1`, or use `localhost` or `::1`. On a host that is not `localhost` or a loopback IP address, such as `0.0.0.0`, the gateway does not check the `Host` and `Origin` of requests; see [Keep the gateway private](gateway.md#keep-the-gateway-private). |
@@ -184,6 +185,12 @@ tables of the chosen backends.
 | `gpu_lock_file` | `[scheduler]` | `""` | The shared GPU lock to read; empty means no lock reader. The battery reader is always on in the gateway. |
 | `lock_self` | `[scheduler]` | `""` | This bench's own holder: the exact `holder:` value, or `holder:run` when the lock carries a `run:` line. Matching is exact and case-sensitive. |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](scheduler.md#the-gpu-lock-and-the-battery-s2b). |
+
+A `[memory]` table that is all defaults is not written. Its one key,
+`admit_on_outcome`, must be a bool; any other value is a configuration error
+(exit 1). It is accepted and inert in `legacy`. The `--keep-decision-text`
+switch is flag-only, because it writes potentially personal text to the
+store and a saved default would be a privacy footgun.
 
 A `[scheduler]` table that is all defaults is not written, and unknown
 scheduler keys are dropped, so a config file without such a table keeps its

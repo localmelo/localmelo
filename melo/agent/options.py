@@ -186,6 +186,11 @@ class AgentOptions:
     recall_kinds: frozenset[str] | None = None
     recall_placement: RecallPlacement = "tool"
     recall_min_score: float = RECALL_MIN_SCORE
+    # R6-lite's write path: admit the final digest at the run's end, and
+    # keep a decision's text (an evaluation switch). Both are inert in
+    # ``legacy``.
+    admit_on_outcome: bool = False
+    keep_decision_text: bool = False
 
     def __post_init__(self) -> None:
         for name in ("max_steps", "steps_per_attempt", "max_attempts"):
@@ -241,6 +246,10 @@ class AgentOptions:
 
         if not isinstance(self.memory, bool):
             raise ValueError(f"memory must be a bool, got {self.memory!r}")
+
+        for name in ("admit_on_outcome", "keep_decision_text"):
+            if not isinstance(getattr(self, name), bool):
+                raise ValueError(f"{name} must be a bool, got {getattr(self, name)!r}")
 
         if self.memory_dir is not None and (
             not isinstance(self.memory_dir, str) or not self.memory_dir

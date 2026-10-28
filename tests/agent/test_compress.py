@@ -514,7 +514,7 @@ async def test_a_cancelled_tool_turn_still_stores_and_places_its_note() -> None:
     run = _RunState(task_id="t" * 32)
     run.steps = 1
     run.attempts = 1
-    agent._close_interrupted_step(step, "", run)
+    await agent._close_interrupted_step(step, "", run)
     await agent.close()
 
     note = next(entry for entry in agent.notes() if entry.kind == "note")

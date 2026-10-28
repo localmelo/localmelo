@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 from localmelo.melo.schema import INTERRUPT_LABEL, NO_ANSWER_LABEL, split_thinking
 from localmelo.support.cli import terminal
 from localmelo.support.cli.session_views import memory_view, usage_view
+from localmelo.support.cli.text import cut_cells
+from localmelo.support.sessions.display import clean_output
 from localmelo.support.sessions.store import TurnInfo, UnknownSessionError, check_title
 from localmelo.support.sessions.sync import SessionMark
 
@@ -102,27 +104,32 @@ class SessionTools:
         if s.runner is None:
             raise ValueError("Nothing to undo.")
         await s.navigation.synchronize()
-        work = asyncio.ensure_future(s.runner.undo())
+        work = asyncio.ensure_future(self._undo_and_report())
         try:
-            turn = await asyncio.shield(work)
+            await asyncio.shield(work)
         except asyncio.CancelledError:
             while True:
                 try:
-                    turn = await asyncio.shield(work)
+                    await asyncio.shield(work)
                     break
                 except asyncio.CancelledError:
                     if work.cancelled():
                         raise
-            if turn is not None:
-                self._remember_undo(turn)
             raise
+
+    async def _undo_and_report(self) -> None:
+        s = self.session
+        assert s.runner is not None
+        turn = await s.runner.undo()
         if turn is None:
             raise ValueError("Nothing to undo.")
         self._remember_undo(turn)
-        first = " ".join((turn.typed_text or turn.user_text).split())[:60]
+        line = ((turn.typed_text or turn.user_text).splitlines() or [""])[0]
+        first = cut_cells(clean_output(line).strip(), 60, s.renderer.symbols.ellipsis)
+        ending = "" if first.endswith((".", "!", "?", "。", "！", "？", "…")) else "."
         s.out.print(
             s._text(
-                f"Undid turn {turn.turn}: {first}. Files the tools changed stay changed."
+                f"Undid turn {turn.turn}: {first}{ending} Files the tools changed stay changed."
             )
         )
         await s.navigation.refresh_refs()

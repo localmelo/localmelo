@@ -59,8 +59,10 @@ EXIT_SIGNALS = tuple(
 # Characters of the error that the text-mode status line shows at most.
 STATUS_LINE_ERROR_CHARS = 500
 
-# Flags that apply to direct mode only (a query without --serve), by dest.
+# Flags that apply to direct mode (a query without --serve), by dest. The
+# interactive UI also takes --workspace.
 _DIRECT_FLAGS = {
+    "workspace": "--workspace",
     "max_steps": "--max-steps",
     "attempt_policy": "--attempt-policy",
     "reflection_gate": "--reflection-gate",
@@ -88,11 +90,12 @@ _DIRECT_FLAGS = {
     "recall_placement": "--recall-placement",
     "recall_min_score": "--recall-min-score",
     "retrieval_extra_body": "--retrieval-extra-body",
+    "admit_on_outcome": "--admit-on-outcome",
+    "keep_decision_text": "--keep-decision-text",
 }
 
 # Flags of the interactive UI (bare melo), by dest.
 _UI_FLAGS = {
-    "workspace": "--workspace",
     "yolo": "--yolo",
     "continue_session": "-c",
     "resume": "-r",
@@ -102,7 +105,8 @@ _UI_FLAGS = {
 # an approval's wait would count toward a timeout, it has no machine output,
 # it draws its own progress, and it does not wire the reasoning field or the
 # retrieval extra body yet (each has its own message below; R2b wires the
-# first, a later change the second).
+# first, a later change the second). `--keep-decision-text` is an evaluation
+# switch, so the UI never accepts it.
 _UI_REFUSED = (
     "tool_exposure",
     "timeout",
@@ -111,6 +115,7 @@ _UI_REFUSED = (
     "routine",
     "reasoning_field",
     "retrieval_extra_body",
+    "keep_decision_text",
 )
 
 
@@ -927,6 +932,16 @@ def _direct_options(
 ) -> AgentOptions:
     """The AgentOptions the direct-mode flags ask for; defaults otherwise."""
     fields: dict[str, Any] = {}
+    if args.workspace is not None and args.query:
+        # Direct mode only: bare melo resolves the folder itself (launch.py),
+        # and `melo ""` refuses the flag in _check_args.
+        root = os.path.realpath(os.path.expanduser(args.workspace))
+        if not os.path.isdir(root):
+            parser.exit(
+                EXIT_NOT_COMPLETED,
+                f"{parser.prog}: --workspace: not a directory: {args.workspace}\n",
+            )
+        fields["workspace_root"] = root
     if args.max_steps is not None:
         fields["max_steps"] = args.max_steps
     if args.attempt_policy is not None:
@@ -973,6 +988,11 @@ def _direct_options(
     recall_min_score = getattr(args, "recall_min_score", None)
     if recall_min_score is not None:
         fields["recall_min_score"] = recall_min_score
+    admit_on_outcome = getattr(args, "admit_on_outcome", None)
+    if admit_on_outcome is not None:
+        fields["admit_on_outcome"] = admit_on_outcome == "on"
+    if getattr(args, "keep_decision_text", False):
+        fields["keep_decision_text"] = True
     try:
         return AgentOptions(**fields)
     except ValueError as exc:  # the flag types should have caught it
@@ -1041,6 +1061,11 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
 
     direct = parser.add_argument_group(
         "direct mode", "Options for a query run without --serve."
+    )
+    direct.add_argument(
+        "--workspace",
+        metavar="DIR",
+        help="The folder melo works in (default: the current directory)",
     )
     direct.add_argument(
         "--max-steps",
@@ -1205,6 +1230,19 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         "(default 0.35; inert only for the task-local bm25/llm ranking)",
     )
     direct.add_argument(
+        "--admit-on-outcome",
+        choices=["on", "off"],
+        help="R6-lite: with a reasoning mode other than legacy, admit the final "
+        "attempt digest to long-term memory at the end of the run (default off); "
+        "inert in legacy",
+    )
+    direct.add_argument(
+        "--keep-decision-text",
+        action="store_true",
+        help="R6-lite: also store the checked text of each admission decision "
+        "(the hash is always kept); an evaluation switch, refused in the UI",
+    )
+    direct.add_argument(
         "--retrieval-extra-body",
         type=_json_object,
         metavar="JSON",
@@ -1216,17 +1254,12 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         interactive = parser.add_argument_group(
             "interactive mode",
             "Options for bare melo, which opens the interactive UI on a terminal. "
-            "It also takes --base-url, --chat-model, --max-steps, --attempt-policy, "
-            "--reflection-gate, --builtins, --memory, --memory-dir, "
-            "--request-timeout, --reasoning, --replay-turns, --note-writer, "
-            "--retriever, --recall-*, --retrieval-extra-body and the "
-            "--embedding-* options. It refuses --reasoning-field and "
+            "It also takes --base-url, --chat-model, --workspace, --max-steps, "
+            "--attempt-policy, --reflection-gate, --builtins, --memory, "
+            "--memory-dir, --request-timeout, --reasoning, --replay-turns, "
+            "--note-writer, --retriever, --recall-*, --retrieval-extra-body and "
+            "the --embedding-* options. It refuses --reasoning-field and "
             "--retrieval-extra-body until a later release wires them.",
-        )
-        interactive.add_argument(
-            "--workspace",
-            metavar="DIR",
-            help="The folder melo works in (default: the current directory)",
         )
         interactive.add_argument(
             "--yolo",
@@ -1591,6 +1624,8 @@ def _build_direct_mode_agent(
         options = dataclasses.replace(
             options, note_writer=cast(NoteWriter, cfg.agent.note_writer)
         )
+    if getattr(args, "admit_on_outcome", None) is None and cfg.memory.admit_on_outcome:
+        options = dataclasses.replace(options, admit_on_outcome=True)
 
     # R5's [retrieval]: a value applies only when its flag is absent, and
     # the table is inert in legacy (decision 10).

@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Collection
 from dataclasses import replace
 from typing import Any
 
+from localmelo.melo.checker.checker import Checker
+from localmelo.melo.checker.payloads import MemoryCandidatePayload
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
+from localmelo.melo.memory.hippo import (
+    SIGNALS,
+    CandidateItem,
+    HippoPolicy,
+    MemoryCandidate,
+    MemoryDecision,
+    StagedCandidates,
+    classify_kind,
+)
 from localmelo.melo.memory.history import History
-from localmelo.melo.memory.long import LongTerm
+from localmelo.melo.memory.long import LongTerm, LongTermSchemaError
 from localmelo.melo.memory.procedures.store import MemoryProcedures, Procedures
 from localmelo.melo.memory.short import WorkingMemory
 from localmelo.melo.memory.tools import ToolRegistry
@@ -22,10 +34,46 @@ from localmelo.melo.schema import (
     ToolDef,
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _exception_text(exc: BaseException) -> str:
+    return str(exc) or type(exc).__name__
+
 
 def _redacted_text(text: str) -> str:
     """*text* with the secrets of :func:`redact_secrets` replaced."""
     return redact_secrets(text)[0]
+
+
+# Provenance is stored beside the entry, so every text it carries is bounded
+# and redacted like the entry text (P4, T53R finding 2).
+PROVENANCE_TEXT_CHARS = 300
+PROVENANCE_LIST_MAX = 20
+
+
+def _bounded_provenance(provenance: dict[str, Any]) -> dict[str, Any]:
+    """*provenance* with its texts redacted and bounded, for the store.
+
+    The policy compares the raw ``task_text`` first; this runs just before
+    the write, so a candidate's route (the Agent or ``--route``) cannot
+    leave a secret in ``provenance_json``.
+    """
+    clean = dict(provenance)
+    task_text, _task_redactions = redact_secrets(str(provenance.get("task_text") or ""))
+    clean["task_text"] = task_text[:PROVENANCE_TEXT_CHARS]
+    for key in ("paths", "commands"):
+        values = provenance.get(key) or ()
+        if isinstance(values, (list, tuple)):
+            values = values[:PROVENANCE_LIST_MAX]
+        else:
+            values = ()
+        clean[key] = [
+            redact_secrets(value)[0][:PROVENANCE_TEXT_CHARS]
+            for value in values
+            if isinstance(value, str)
+        ]
+    return clean
 
 
 def _redacted_value(value: Any) -> Any:
@@ -119,8 +167,22 @@ class Hippo:
         long: LongTerm | None = None,
         procedures: Procedures | None = None,
         short_term_empty_prefix: bool = False,
+        memory: bool = True,
+        admit_on_outcome: bool = False,
+        keep_decision_text: bool = False,
     ) -> None:
         self.embedding = embedding
+        self.memory = memory
+        self.admit_on_outcome = admit_on_outcome
+        self.keep_decision_text = keep_decision_text
+        # R6-lite's typed write path exists only for a real long store: an
+        # injected backend, never the in-memory fallback of a legacy run.
+        self._store_enabled = long is not None and memory
+        self._store_broken = False
+        self._store_error_logged = False
+        self.staged = StagedCandidates()
+        self.policy = HippoPolicy()
+        self._checker = Checker()
         self._long_term_top_k = long_term_top_k
         self._tool_search_top_k = tool_search_top_k
         self.history = history if history is not None else History()
@@ -238,10 +300,282 @@ class Hippo:
         if to_working:
             self.working.append(Message(role=role, content=text))
 
-        if self.embedding:
+        if self.embedding and not self._store_broken:
             stored = _redacted_text(text)
-            emb = await self.embedding.embed([stored])
-            await self.long.add(text=stored, embedding=emb[0], metadata=metadata or {})
+            try:
+                emb = await self.embedding.embed([stored])
+                await self.long.add(
+                    text=stored, embedding=emb[0], metadata=metadata or {}
+                )
+            except LongTermSchemaError as exc:
+                self._disable_store(exc)
+
+    # ── R6-lite: admission ──
+
+    def propose(self, candidate: MemoryCandidate) -> None:
+        """Stage *candidate*; a no-op without a long store."""
+        if not self._store_ready():
+            return
+        self.staged.propose(candidate)
+
+    async def admit(self, candidate_id: str, signal: str) -> list[MemoryDecision]:
+        """Route one staged candidate's items through the boundary and policy."""
+        if signal not in SIGNALS:
+            raise ValueError(f"Unknown admission signal: {signal!r}")
+        if not self._store_ready():
+            return []
+        candidate = self.staged.get(candidate_id)
+        if candidate is None or candidate.processed:
+            return []
+        items = candidate.items or (CandidateItem(candidate.text),)
+        decisions: list[MemoryDecision] = []
+        for index, item in enumerate(items):
+            item_provenance = {
+                **candidate.provenance,
+                "candidate_id": candidate.candidate_id,
+                "item_index": index,
+            }
+            task_text = str(candidate.provenance.get("task_text") or "")
+            kind = classify_kind(
+                item.text, source=candidate.source, task_text=task_text
+            )
+            check = self._checker.check_memory_candidate(
+                MemoryCandidatePayload(
+                    text=item.text,
+                    source=candidate.source,
+                    target="long",
+                    kind=kind,
+                )
+            )
+            if not check.allowed:
+                decisions.append(
+                    MemoryDecision(
+                        candidate_id=candidate.candidate_id,
+                        action="",
+                        kind=kind,
+                        admitted_by=signal,
+                        reason=check.reason,
+                        task_id=candidate.task_id,
+                        refused=True,
+                    )
+                )
+                continue
+            payload = check.sanitized_payload
+            checked = str(payload.text)
+            redactions = int((payload.metadata or {}).get("redactions", 0) or 0)
+            source_ids = tuple(item.source_ids) or tuple(
+                candidate.provenance.get("source_ids") or ()
+            )
+            try:
+                active = await self.long.active_entries(kind)
+            except LongTermSchemaError as exc:
+                self._disable_store(exc)
+                return decisions
+            except Exception as exc:  # a locked or damaged store
+                logger.warning(
+                    "Could not read long-term memory for task %s: %s",
+                    candidate.task_id,
+                    _exception_text(exc),
+                )
+                continue
+            try:
+                decision = self.policy.decide(
+                    checked,
+                    kind=kind,
+                    source=candidate.source,
+                    provenance=item_provenance,
+                    active=active,
+                )
+            except Exception as exc:  # malformed stored data or a policy bug
+                logger.warning("Could not route a memory candidate: %s", exc)
+                continue
+            try:
+                entry_id, action = await self.long.apply(
+                    text=checked,
+                    kind=kind,
+                    source=candidate.source,
+                    admitted_by=signal,
+                    provenance=_bounded_provenance(
+                        {**item_provenance, "source_ids": list(source_ids)}
+                    ),
+                    task_id=candidate.task_id,
+                    session_id=candidate.session_id,
+                    created_at=candidate.created_at,
+                    embedding=None,
+                    action=decision.action,
+                    target_id=decision.target_id,
+                    reason=decision.reason,
+                    source_ids=source_ids,
+                    keep_text=self.keep_decision_text,
+                    candidate_id=candidate.candidate_id,
+                )
+            except LongTermSchemaError as exc:
+                self._disable_store(exc)
+                return decisions
+            except Exception as exc:  # a write failure is logged, not raised
+                logger.warning(
+                    "Could not write a memory candidate of task %s: %s",
+                    candidate.task_id,
+                    _exception_text(exc),
+                )
+                continue
+            decisions.append(
+                MemoryDecision(
+                    candidate_id=candidate.candidate_id,
+                    action=action,
+                    kind=kind,
+                    admitted_by=signal,
+                    entry_id=entry_id,
+                    target_id=decision.target_id,
+                    reason=decision.reason,
+                    source_ids=source_ids,
+                    task_id=candidate.task_id,
+                    redactions=redactions,
+                )
+            )
+        written = next(
+            (item.entry_id for item in decisions if item.entry_id is not None), None
+        )
+        candidate.processed = True
+        candidate.entry_id = written
+        self.staged.update(candidate)
+        return decisions
+
+    async def flush(
+        self,
+        *,
+        run_request: bool,
+        digest: MemoryCandidate | None,
+        final_reflection: MemoryCandidate | None,
+        task_id: str = "",
+    ) -> list[MemoryDecision]:
+        """Admit the run's candidates at its end; never raises.
+
+        *task_id* scopes the run's candidates in a long-lived Agent: without
+        it a candidate of an earlier turn stays staged and a later request
+        would admit it. It is optional so a direct Hippo test can omit it.
+        """
+        try:
+            return await self._flush(
+                run_request=run_request,
+                digest=digest,
+                final_reflection=final_reflection,
+                task_id=task_id,
+            )
+        except Exception as exc:  # a flush never replaces the run's result
+            logger.warning("Could not flush the memory candidates: %s", exc)
+            return []
+
+    async def _flush(
+        self,
+        *,
+        run_request: bool,
+        digest: MemoryCandidate | None,
+        final_reflection: MemoryCandidate | None,
+        task_id: str = "",
+    ) -> list[MemoryDecision]:
+        if not self._store_ready():
+            return []
+        scope = task_id or (digest.task_id if digest is not None else "")
+        selected: list[tuple[MemoryCandidate, str]] = []
+        if run_request:
+            for candidate in self.staged.all():
+                if scope and candidate.task_id != scope:
+                    continue
+                if not candidate.remember or candidate.processed:
+                    continue
+                if candidate.source == "digest":
+                    continue  # earlier attempt digests stay out
+                if (
+                    final_reflection is not None
+                    and candidate.candidate_id == final_reflection.candidate_id
+                ):
+                    continue
+                selected.append((candidate, "user_request"))
+            if digest is not None:
+                selected.append((digest, "user_request"))
+        elif self.admit_on_outcome and digest is not None:
+            selected.append((digest, "outcome"))
+        decisions: list[MemoryDecision] = []
+        for candidate, signal in selected:
+            if self.staged.get(candidate.candidate_id) is None:
+                self.staged.propose(candidate)
+            decisions.extend(await self.admit(candidate.candidate_id, signal))
+        return decisions
+
+    def _store_ready(self) -> bool:
+        return self.memory and self._store_enabled and not self._store_broken
+
+    def _disable_store(self, exc: Exception) -> None:
+        """Stop using a store a newer localmelo wrote, with one WARNING."""
+        if not self._store_error_logged:
+            logger.warning(
+                "Long-term memory is off for this run: %s", _exception_text(exc)
+            )
+            self._store_error_logged = True
+        self._store_enabled = False
+        self._store_broken = True
+
+    async def recall_long(
+        self,
+        query: str,
+        *,
+        exclude_task_ids: Collection[str] = (),
+        kinds: Collection[str] | None = None,
+        pool: int = 20,
+    ) -> list[tuple[str, float, dict[str, Any]]]:
+        """Up to *pool* active entries, by embedding or by BM25."""
+        if not self.memory or self._store_broken:
+            return []
+        try:
+            if await self.long.count_entries() == 0:
+                return []
+            # Each row is tagged with the retriever that scored it, so the
+            # cosine floor never drops a BM25 row (T53R finding 3).
+            if self.embedding is not None:
+                vectors = await self.embedding.embed([query])
+                raw_rows = await self.long.search_embedding(
+                    vectors[0],
+                    top_k=pool,
+                    kinds=kinds,
+                    exclude_task_ids=exclude_task_ids,
+                )
+                rows = [
+                    (text, score, {**meta, "retrieval": "embedding"})
+                    for text, score, meta in raw_rows
+                ]
+                # R6-lite's typed writes are text-only, so the embedding
+                # search cannot see them; the BM25 rows fill the pool.
+                text_rows = await self.long.search_text(
+                    query,
+                    top_k=pool,
+                    kinds=kinds,
+                    exclude_task_ids=exclude_task_ids,
+                )
+                seen = {row[2].get("id") for row in raw_rows}
+                rows.extend(
+                    (text, score, {**meta, "retrieval": "bm25"})
+                    for text, score, meta in text_rows
+                    if meta.get("id") not in seen
+                )
+                rows = rows[:pool]
+            else:
+                rows = [
+                    (text, score, {**meta, "retrieval": "bm25"})
+                    for text, score, meta in await self.long.search_text(
+                        query,
+                        top_k=pool,
+                        kinds=kinds,
+                        exclude_task_ids=exclude_task_ids,
+                    )
+                ]
+            return [
+                (text, score, {**meta, "retrieval_rank": rank})
+                for rank, (text, score, meta) in enumerate(rows, start=1)
+            ]
+        except LongTermSchemaError as exc:
+            self._disable_store(exc)
+            return []
 
     # ── Forgetting ──
 
@@ -257,6 +591,7 @@ class Hippo:
         """
         await self.history.forget(task_id)
         await self.long.forget(task_id)
+        self.staged.drop_task(task_id)
 
     async def forget_all(self) -> None:
         """Forget all of history and long-term memory.
@@ -267,6 +602,7 @@ class Hippo:
         """
         await self.history.forget_all()
         await self.long.forget_all()
+        self.staged.clear()
 
     # ── Reflection promotion ──
 
@@ -282,17 +618,20 @@ class Hippo:
 
         for entry in reflections:
             text = _redacted_text(self._format_reflection_for_long(entry))
-            if text.strip():
-                emb = await self.embedding.embed([text])
-                await self.long.add(
-                    text=text,
-                    embedding=emb[0],
-                    metadata={
-                        "task_id": task_id,
-                        "attempt_id": entry.attempt_id,
-                        "type": "reflection",
-                    },
-                )
+            if text.strip() and not self._store_broken:
+                try:
+                    emb = await self.embedding.embed([text])
+                    await self.long.add(
+                        text=text,
+                        embedding=emb[0],
+                        metadata={
+                            "task_id": task_id,
+                            "attempt_id": entry.attempt_id,
+                            "type": "reflection",
+                        },
+                    )
+                except LongTermSchemaError as exc:
+                    self._disable_store(exc)
         self.working.clear_reflections()
 
     @staticmethod
@@ -320,7 +659,16 @@ class Hippo:
             return []
 
         query_emb = await self.embedding.embed([query])
-        long_results = await self.long.search(query_emb[0], top_k=self._long_term_top_k)
+        try:
+            long_results = await self.long.search(
+                query_emb[0], top_k=self._long_term_top_k
+            )
+        except LongTermSchemaError as exc:
+            # A newer localmelo wrote this file: one WARNING, then the run
+            # continues without long-term memory (Requirement 4, T53R
+            # finding 5). The legacy path had no catch at all.
+            self._disable_store(exc)
+            return []
         return [
             Message(role="system", content=f"[memory] {text}")
             for text, _score, _meta in long_results

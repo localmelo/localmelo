@@ -172,7 +172,7 @@ type more letters to narrow them, Tab or Enter to take one.
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). Under `--yolo`, says how to turn prompts on. |
 | `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, files and version. |
 | `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp-config` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
-| `/retry` | Undo the newest turn and run its stored message again, keeping its typed text even after a resume. Files already changed by tools are not rolled back. |
+| `/retry` | Re-run the newest finished turn, keeping its stored typed text even after a resume. Undo it first only if it is not already undone; earlier turns and files stay changed. |
 | `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
 | `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default (as `ollama` when the server answers like Ollama, else `vllm`). |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
@@ -222,8 +222,15 @@ Titles may be changed during a turn, but not while switching sessions.
 `/undo` removes the newest finished turn from the model's restored working
 window and keeps the original typed message in input history (↑). It does
 not reverse shell commands, Python code or file edits. In another window,
-a running turn blocks undo; the command stays in the draft. `/retry` uses
-the same undo operation and then sends that turn's message again.
+a running turn blocks undo; the command stays in the draft. Once undo is
+committed, Esc does not reverse it: the operation settles and prints its
+`Undid …` line, and the busy hint asks you to wait rather than claiming
+Esc cancels it. The preview uses only the first typed line, clipped by
+terminal cells, without adding a second period.
+
+`/retry` re-runs the newest finished turn. If `/undo` already removed it,
+retry leaves the previous live turn alone; otherwise it undoes the target
+first. It sends the full stored message while retaining its typed text.
 
 `/usage` includes undone rows because that work was performed. A running
 turn or missing counter is `?`, not zero; a partial total ends in `+?`.
@@ -506,6 +513,7 @@ These options apply to a task run without `--serve`.
 
 | Option | Default | Description |
 |---|---|---|
+| `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](tools.md#with-a-workspace-root). |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
 | `--reflection-gate flags\|utility` | `flags` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option). |
@@ -531,9 +539,18 @@ These options apply to a task run without `--serve`.
 | `--recall-k N` | `3` | Task-local hits per recall, from 1 to 10 (plus at most 2 long-term hits). |
 | `--recall-kinds LIST` | all but `thought` | A comma list of `note`, `draft`, `thought`, `digest`, `reflection` and `long`. |
 | `--recall-placement tool\|message` | `tool` | Where a step block goes: appended to the last tool result, or in its own user message. `message` is refused in `replay` and `compress+replay`. |
-| `--recall-min-score F` | `0.35` | The cosine floor for the long-term leg and for embedding task hits, from 0 to 1. It is inert only for the task-local `bm25` and `llm` ranking. |
+| `--recall-min-score F` | `0.35` | The cosine floor for embedding and long-term cosine hits, from 0 to 1. It is inert for the task-local `bm25` and `llm` ranking and for a long-term row that only BM25 scored. |
 | `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. It is a provider setting, not a `config` key. The interactive UI refuses it for now, like `--reasoning-field`: use it with a task. |
+| `--admit-on-outcome on\|off` | `off` | R6-lite: at the run's end, admit only the final attempt digest, with the terminal status in its provenance; off writes nothing unless a signal admits something. Accepted and inert in `legacy`, and accepted in the interactive UI. |
+| `--keep-decision-text` | off | R6-lite: also store the checked text of each admission decision; the SHA-256 is always kept. An evaluation switch and refused in the interactive UI. |
 
+- `--workspace`: without it a task runs in the current folder, exactly as
+  before. With it, `~` is expanded and the path is resolved like the
+  interactive UI's, and the run works in that folder: the file tools stay
+  inside it and `shell_exec` and `python_exec` start there. It adds no
+  approvals (see [With a workspace root](tools.md#with-a-workspace-root)).
+  A path that is not a folder is a usage error (exit 2, one line); see
+  [Usage errors](#usage-errors). `melo ""` and `--serve` refuse the flag.
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
   [How localmelo works](how-it-works.md#the-run-loop).
@@ -606,6 +623,13 @@ These options apply to a task run without `--serve`.
   melo --base-url http://127.0.0.1:11434/v1 --chat-model MODEL \
     --reasoning compress --retriever off -- "List the files"
   ```
+- `--admit-on-outcome` and `--keep-decision-text`: see
+  [Long-term memory](memory.md#long-term-memory). They are accepted in
+  `legacy` and do nothing there. `--keep-decision-text` writes potentially
+  personal text to the store, so the interactive UI refuses it (exit 2, one
+  line). `[memory] admit_on_outcome` is the saved default for the first
+  in direct mode (the interactive UI and the gateway do not read the table);
+  the second is flag-only.
 - `--note-writer`: `auto` (default) parses the model's
   `<note>plan: … found: … open: … remember: …</note>` block and falls back
   to a heuristic when there is none; `heuristic` ignores the block. A note
@@ -633,21 +657,21 @@ These options apply to `melo` without a task.
 |---|---|---|
 | `-c`, `--continue` | off | Resume the newest eligible chat in this workspace; with none, start new. |
 | `-r`, `--resume [ID\|TITLE]` | off | Resume the named chat; without a value open the session picker. |
-| `--workspace DIR` | the current folder | The folder melo works in; see [The workspace](#the-workspace). |
 | `--yolo` | off | Run every tool without asking for approval. |
 
-- The UI also takes `--max-steps`, `--attempt-policy`, `--reflection-gate`,
-  `--builtins`, `--memory`, `--memory-dir`, `--request-timeout`,
-  `--reasoning`, `--replay-turns`, `--note-writer`, `--retriever`,
-  `--recall-*`, `--retrieval-extra-body` and the `--embedding-*` options,
-  for every turn of the session. It accepts
-  `compress` and `compress+replay` but draws nothing for the notes yet.
-  The UI does not yet apply `[agent]`; use direct mode for that.
-  `--tool-exposure` (the UI offers every tool), `--timeout`,
-  `--output-format`, `--progress`, `--routine` and `--reasoning-field` are
-  usage errors there; `--mcp-config` and `--mcp-only` are accepted.
-- `--workspace` that is not a folder exits with code 2:
-  `melo: --workspace: not a directory: DIR`.
+- The UI also takes `--workspace`, `--max-steps`, `--attempt-policy`,
+  `--reflection-gate`, `--builtins`, `--memory`, `--memory-dir`,
+  `--request-timeout`, `--reasoning`, `--replay-turns`, `--note-writer`,
+  `--retriever`, `--recall-*` and the `--embedding-*` options, for every
+  turn of the session. It accepts `compress` and `compress+replay` but
+  draws nothing for the notes yet. The UI does not yet apply `[agent]`;
+  use direct mode for that. `--tool-exposure` (the UI offers every tool),
+  `--timeout`, `--output-format`, `--progress`, `--routine`,
+  `--reasoning-field` and `--retrieval-extra-body` are usage errors there;
+  `--mcp-config` and `--mcp-only` are accepted.
+- `--workspace` is expanded and resolved here too, and a path that is not a
+  folder gives the same one-line usage error as with a task; see
+  [Usage errors](#usage-errors).
 
 ### Gateway and setup
 
@@ -689,16 +713,20 @@ These are usage errors:
 - a value that is not valid, such as `--max-steps 0`, `--timeout 0`, an
   unknown built-in tool name, a blank `--routine`, or a `--memory-dir` that
   is a file;
+- a `--workspace` that is not an existing folder, in either mode, reported
+  with one line and no usage summary:
+  `melo: --workspace: not a directory: DIR`;
 - options that cannot be combined: `--mcp-only` without `--mcp-config`,
   `--mcp-only` with `--builtins` or `--tool-exposure`, `--embedding-model`
   without `--embedding-base-url`, `--embedding-base-url` without
   `--base-url`;
-- a direct-mode option with `--serve` or with `melo ""`, reported as
+- a direct-mode option, `--workspace` included, with `--serve`, `--daemon`
+  or with `melo ""`, reported as
   `only for direct mode (a query without --serve): --max-steps`; without a
   task, only those the interactive UI cannot use (`--tool-exposure`,
   `--timeout`, `--output-format`, `--progress`, `--routine`);
 - `-c` with `-r`, reported as `-c and -r cannot be combined`;
-- `--workspace`, `--yolo`, `-c` or `-r` with a task, `--serve` or `--daemon`, reported as
+- `--yolo`, `-c` or `-r` with a task, `--serve` or `--daemon`, reported as
   `only for the interactive UI (melo without a query, --serve or --daemon): --yolo`;
 - `--base-url` or `--chat-model` with `--serve` or `--daemon`, reported as
   `--base-url and --chat-model are for a task or the interactive UI; --serve uses the config file (melo --reconfigure)`;
@@ -858,7 +886,7 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 |---|---|
 | 0 | The run ended with status `completed`. |
 | 1 | The run ended as `crashed`; or `melo` stopped before the run because no backend is configured or the config file is not valid; or the setup wizard needed a terminal and had none; or the interactive UI could not open its session file or start its agent. |
-| 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal, or `--workspace` is not a folder. |
+| 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal; or `--workspace` is not a folder, in either mode. |
 | 3 | The gateway could not start, for example because its port is in use. |
 | 129 | SIGHUP ended the run. |
 | 130 | Ctrl+C (SIGINT) ended the run. |

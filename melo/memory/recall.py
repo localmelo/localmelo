@@ -15,7 +15,6 @@ and :func:`recall_span_chars` see every block, including R4's pinned draft.
 from __future__ import annotations
 
 import dataclasses
-import hashlib
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -53,6 +52,8 @@ RECALL_QUERY_CHARS = 600
 RECALL_K_DEFAULT = 3
 RECALL_K_MAX = 10
 RECALL_LONG_K = 2
+# The first-stage pool the long leg reads before R5's trigger ranks it.
+LONG_POOL = 20
 RECALL_THOUGHT_PER_TASK = 6
 RECALL_MIN_SCORE = 0.35
 RECALL_TOOL_TIMEOUT_S = 35.0
@@ -369,25 +370,25 @@ def _origin_task_ids(meta: Mapping[str, Any]) -> tuple[str, ...]:
     return (task_id,) if isinstance(task_id, str) and task_id else ()
 
 
-def _long_doc_id(text: str) -> str:
-    return f"long:{hashlib.sha1(text.encode('utf-8')).hexdigest()[:16]}"
-
-
 def _long_alias(index: int) -> str:
     return f"m{index}"
 
 
-def docs_from_long(
+def docs_from_entries(
     rows: Iterable[tuple[str, float, Mapping[str, Any]]],
     *,
     exclude_task_ids: Iterable[str] = (),
     min_score: float = 0.0,
 ) -> list[Doc]:
-    """Docs for long-term rows ``(text, score, metadata)``, aliased m1, m2, ….
+    """Docs for typed long-term rows ``(text, score, metadata)``, aliased m1, m2, ….
 
-    Rows whose ``metadata["task_id"]`` is in *exclude_task_ids*, or whose
-    score is under *min_score*, are left out. The rest are ordered by
-    ``(created_at, doc_id)``, so appending an entry never renumbers an old
+    ``doc_id`` is ``long:<entry id>`` (R6-lite), so two identical texts stay
+    two docs and a hit joins back to the store. Rows that are not active,
+    whose ``metadata["task_id"]`` is in *exclude_task_ids*, or whose score is
+    under *min_score* are left out; a row tagged ``retrieval: bm25`` has no
+    absolute floor, because *min_score* is a cosine floor (T53R finding 3).
+    The rest are ordered by
+    ``(created_at, entry id)``, so appending an entry never renumbers an old
     one while the store only grows.
     """
     excluded = set(exclude_task_ids)
@@ -395,33 +396,33 @@ def docs_from_long(
     for text, score, meta in rows:
         if not isinstance(text, str) or not text.strip():
             continue
+        if meta.get("status") not in (None, "active"):
+            continue
         task_id = meta.get("task_id")
         if isinstance(task_id, str) and task_id in excluded:
             continue
-        # Long vectors are stored as float32, so an exact floor can read a
-        # little under itself; a tolerance keeps "0.35 is kept" true.
-        if score < min_score - 1e-6:
+        # The floor is a cosine floor: a row that BM25 scored has no
+        # absolute one (T53R finding 3). Long vectors are stored as
+        # float32, so an exact floor can read a little under itself; a
+        # tolerance keeps "0.35 is kept" true.
+        if meta.get("retrieval") != "bm25" and score < min_score - 1e-6:
             continue
         kept.append((text, score, meta))
     kept.sort(
         key=lambda item: (
             _number(item[2].get("created_at")),
-            _long_doc_id(item[0]),
+            int(item[2].get("id") or 0),
         )
     )
     docs: list[Doc] = []
-    seen: set[str] = set()
     for text, score, meta in kept:
-        doc_id = _long_doc_id(text)
-        if doc_id in seen:
-            continue
-        seen.add(doc_id)
         index = len(docs) + 1
         origin = _origin_task_ids(meta)
         created = _number(meta.get("created_at"))
+        entry_id = int(meta.get("id") or 0)
         docs.append(
             Doc(
-                doc_id=doc_id,
+                doc_id=f"long:{entry_id}",
                 kind="long",
                 text=text,
                 title=_long_title(created),
@@ -429,6 +430,8 @@ def docs_from_long(
                     **meta,
                     "alias": _long_alias(index),
                     "score": score,
+                    "store_kind": str(meta.get("kind") or ""),
+                    "entry_id": entry_id,
                     "origin_task_ids": origin,
                     "created_at": created,
                     "origin": _long_origin(meta),
@@ -961,6 +964,7 @@ __all__ = [
     "RECALL_K_MAX",
     "RECALL_KINDS",
     "RECALL_LIVE_CHARS",
+    "LONG_POOL",
     "RECALL_LONG_K",
     "RECALL_MIN_SCORE",
     "RECALL_PLACEMENTS",
@@ -979,7 +983,7 @@ __all__ = [
     "build_step_query",
     "compact_record",
     "default_kinds",
-    "docs_from_long",
+    "docs_from_entries",
     "docs_from_notes",
     "event_fields",
     "fit_recall_block",

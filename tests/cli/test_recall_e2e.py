@@ -98,9 +98,29 @@ def _tool_scenario() -> dict[str, Any]:
     return {"models": ["stub-model"], "sequential": True, "replies": replies}
 
 
+def _thought_scenario() -> dict[str, Any]:
+    """One tool turn whose reasoning names the task, then the answer."""
+    replies: list[dict[str, Any]] = [
+        {
+            "reasoning": "parser build failure: the error is in module parser",
+            "tool_calls": [
+                {"name": "shell_exec", "arguments": {"command": "echo parser build"}}
+            ],
+        },
+        _answer(),
+    ]
+    return {"models": ["stub-model"], "sequential": True, "replies": replies}
+
+
 @pytest.fixture
 def stub() -> Iterator[StubServer]:
-    server = StubServer({"step": _step_scenario(), "tool": _tool_scenario()}).start()
+    server = StubServer(
+        {
+            "step": _step_scenario(),
+            "tool": _tool_scenario(),
+            "thought": _thought_scenario(),
+        }
+    ).start()
     try:
         yield server
     finally:
@@ -205,3 +225,26 @@ def test_the_recall_tool_returns_the_superseded_note(
     assert stats["recalls_by_trigger"]["tool"] >= 1
     blocks = _blocks(stub.requests, "tool")
     assert any("[n1]" in block and "parser" in block for block in blocks)
+
+
+def test_the_next_request_does_not_echo_the_last_turns_thought(
+    tmp_path: Path, stub: StubServer
+) -> None:
+    result = _run(
+        tmp_path,
+        stub,
+        "thought",
+        "--recall-at",
+        "step",
+        "--recall-kinds",
+        "note,draft,thought",
+    )
+    assert result["memory_stats"]["thought_chunks"] == 1
+    # The second request carries the first turn, whose thinking produced
+    # t1; a step block naming it would replay that thinking by another name.
+    assert len(stub.requests) >= 2
+    second = "\n".join(
+        str(message.get("content") or "")
+        for message in stub.requests[1].get("messages", [])
+    )
+    assert "[t1]" not in second

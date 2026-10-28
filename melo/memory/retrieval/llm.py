@@ -267,7 +267,10 @@ def _entry_line(alias: str, doc: Doc) -> str:
 
     The step part appears when ``meta["step"]`` is a positive int. The
     title is ``doc.title``, else the text's first non-blank line, with
-    whitespace collapsed.
+    whitespace collapsed. A long entry's title is only its date, so its
+    line also carries the text's first non-blank line (T53R finding 1):
+    without it the llm retriever's catalog names no fact to select, and
+    the default ``auto`` start leg finds nothing when no embedding exists.
     """
     parts = [f"[{alias}] {_KIND_LABELS[doc.kind]}"]
     step = int_step(doc.meta)
@@ -276,6 +279,10 @@ def _entry_line(alias: str, doc: Doc) -> str:
     title = _collapse(doc.title) or _collapse(_first_nonblank_line(doc.text))
     if title:
         parts.append(title)
+    if doc.kind == "long":
+        snippet = _collapse(_first_nonblank_line(doc.text))
+        if snippet and snippet != title:
+            parts.append(snippet)
     return _shorten(" · ".join(parts), CATALOG_ENTRY_CHARS)
 
 

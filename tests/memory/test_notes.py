@@ -83,7 +83,13 @@ def test_golden(name: str) -> None:
     results = [ToolResult(**item) for item in reply["tool_results"]]
 
     note, rest = note_from_reply(reply["content"], reply["thinking"], calls, results)
-    assert dataclasses.asdict(note) == case["expected_note"]
+    actual = dataclasses.asdict(note)
+    # R6-lite adds the record texts beside the ids; the golden keeps the
+    # fields it was written for.
+    source_records = actual.pop("source_records")
+    assert actual == case["expected_note"]
+    assert [record_id for record_id, _text in source_records] == note.source_ids
+    assert all(len(text) <= 500 for _record_id, text in source_records)
     assert rest == case["expected_rest"]
 
     draft = extract_draft(
@@ -147,6 +153,7 @@ def test_reasoning_note_has_the_sketch_fields_in_order() -> None:
         "drafts",
         "reasoning_chars",
         "source_ids",
+        "source_records",
         "remember",
         "remember_by",
         "stage",
