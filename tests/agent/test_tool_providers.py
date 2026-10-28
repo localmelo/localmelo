@@ -13,6 +13,7 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.checker import DEFAULT_BUILTINS
 from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool, ToolFunction
 from localmelo.melo.schema import Message, TaskRecord, ToolCall, ToolDef
 
@@ -205,6 +206,25 @@ class TestSetup:
 
         await agent.close()
         assert events == ["start a", "start b", "close a", "close b"]
+
+    @pytest.mark.asyncio
+    async def test_provider_start_marks_capture_incomplete_first(self) -> None:
+        events: list[str] = []
+        provider = FakeToolProvider("p", ["tool"], events=events)
+        agent = _agent(FakeLLM([_answer("ok")]), [provider])
+
+        async def capture() -> None:
+            events.append("capture")
+
+        token = TOOL_ENTRY.set(capture)
+        try:
+            await agent.start()
+        finally:
+            TOOL_ENTRY.reset(token)
+            await agent.close()
+        # A provider can spawn a child (an MCP server) before any tool call,
+        # so the execution is incomplete before its start().
+        assert events == ["capture", "start p", "close p"]
 
     @pytest.mark.asyncio
     async def test_provided_tools_are_registered_next_to_the_builtins(self) -> None:

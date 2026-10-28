@@ -476,6 +476,9 @@ class TaskStore:
             )
             expected_generation, expected_operation_id = row if row else (None, None)
         op = operation_id or uuid.uuid4().hex
+        current = await _first(
+            conn, "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+        )
         generation = await compare_park_identity(
             conn,
             task_id,
@@ -484,6 +487,35 @@ class TaskStore:
             operation_id=op if pending else None,
             create=create,
         )
+        if (
+            kind
+            in {
+                "sched.priority_changed",
+                "sched.state_changed",
+                "sched.pause_requested",
+                "sched.resumed",
+            }
+            and current
+            and current[0] in {"running", "held"}
+            and (state or current[0]) in {"running", "held"}
+        ):
+            await conn.execute(
+                "UPDATE recovery_operations SET generation = ?, pending_operation_id = ?, task_state = ? "
+                "WHERE task_id = ? AND kind = 'start' AND phase = 'committed' "
+                "AND generation IS ? AND pending_operation_id IS ? AND task_state = ? "
+                "AND json_extract(request, '$.execution_id') IN "
+                "(SELECT execution_id FROM recovery_capture WHERE task_id = ? AND active = 1)",
+                (
+                    generation,
+                    op if pending else None,
+                    state or current[0],
+                    task_id,
+                    expected_generation,
+                    expected_operation_id,
+                    current[0],
+                    task_id,
+                ),
+            )
         await self._store.append_component_event(
             conn,
             events,
@@ -873,11 +905,22 @@ class TaskStore:
         expected_generation: int | None = None,
         expected_operation_id: str | None = None,
         operation_id: str | None = None,
+        _capture_execution: str | None = None,
+        _capture_existing: bool = False,
     ) -> TaskRecord:
         """Commit priority and state together, including P0 demotions and audit rows.
 
         A failure reason is stored in wait_reason for a failed task.
         """
+        if _capture_existing and _capture_execution is None:
+            raise ValueError("existing capture requires an execution")
+        if _capture_execution is not None and (
+            not isinstance(_capture_execution, str)
+            or not _capture_execution.strip()
+            or state != "running"
+            or (actor != "scheduler" and not _capture_existing)
+        ):
+            raise ValueError("capture execution requires a scheduler start")
         choice = priority.strip().lower() if isinstance(priority, str) else priority
         if (
             isinstance(choice, str)
@@ -968,6 +1011,14 @@ class TaskStore:
                 raise TaskConflictError("operation ID reused or superseded")
             if current.state in _TERMINAL_STATES:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
+            if state == "running" and _capture_execution is None:
+                active = await _first(
+                    conn,
+                    "SELECT execution_id FROM recovery_capture WHERE task_id = ? AND active = 1",
+                    (task_id,),
+                )
+                if active and current.state in {"running", "held"}:
+                    _capture_execution, _capture_existing = active[0], True
             if state == "running" and await _first(
                 conn,
                 "SELECT 1 FROM recovery_provenance WHERE task_id = ? AND first_start = 'never_started'",
@@ -977,10 +1028,46 @@ class TaskStore:
                     "first start requires the recovery launch fence"
                 )
             if state == "running":
-                await conn.execute(
-                    "UPDATE recovery_capture SET active = 0, complete = 0 WHERE task_id = ? AND active = 1",
-                    (task_id,),
-                )
+                if _capture_execution is not None and (
+                    (
+                        not _capture_existing
+                        and (current.state != "queued" or current.level >= 5)
+                    )
+                    or (
+                        _capture_existing
+                        and current.state not in {"queued", "running", "held", "parked"}
+                    )
+                    or await _first(
+                        conn,
+                        "SELECT 1 FROM recovery_operations WHERE task_id = ? AND kind = 'recovery' AND phase = 'prepared'",
+                        (task_id,),
+                    )
+                    or await _first(
+                        conn,
+                        "SELECT 1 FROM park_priority WHERE task_id = ? AND pause_pending = 1",
+                        (task_id,),
+                    )
+                ):
+                    raise TaskConflictError(
+                        "task is not eligible for an ordinary start"
+                    )
+                if _capture_existing:
+                    if not await _first(
+                        conn,
+                        "SELECT 1 FROM recovery_capture WHERE task_id = ? AND execution_id = ? AND active = 1",
+                        (task_id, _capture_execution),
+                    ):
+                        raise TaskConflictError("launch capture is no longer active")
+                else:
+                    await conn.execute(
+                        "UPDATE recovery_capture SET active = 0, complete = 0 WHERE task_id = ? AND active = 1",
+                        (task_id,),
+                    )
+                    if _capture_execution is not None:
+                        await conn.execute(
+                            "INSERT INTO recovery_capture VALUES (?, ?, 0, 0, 1)",
+                            (task_id, _capture_execution),
+                        )
             if state == "parked" and await _first(
                 conn,
                 "SELECT 1 FROM park_priority WHERE task_id = ? AND pause_pending = 1",
@@ -988,6 +1075,10 @@ class TaskStore:
             ):
                 raise TaskConflictError("task has a pending pause")
             if state in _TERMINAL_STATES:
+                await conn.execute(
+                    "UPDATE recovery_capture SET active = 0 WHERE task_id = ? AND active = 1",
+                    (task_id,),
+                )
                 await self._identity_transition(
                     conn,
                     events,

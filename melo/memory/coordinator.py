@@ -27,6 +27,7 @@ from localmelo.melo.memory.hippo import (
 from localmelo.melo.memory.history import History
 from localmelo.melo.memory.long import LongTerm, LongTermSchemaError
 from localmelo.melo.memory.procedures.store import MemoryProcedures, Procedures
+from localmelo.melo.memory.recall_gate import digest_has_evidence
 from localmelo.melo.memory.short import WorkingMemory
 from localmelo.melo.memory.tools import ToolRegistry
 from localmelo.melo.schema import (
@@ -373,6 +374,19 @@ class Hippo:
                 continue
             payload = check.sanitized_payload
             checked = str(payload.text)
+            if candidate.source == "digest" and not digest_has_evidence(checked):
+                decisions.append(
+                    MemoryDecision(
+                        candidate_id=candidate.candidate_id,
+                        action="",
+                        kind=kind,
+                        admitted_by=signal,
+                        reason="digest has no file or verification evidence",
+                        task_id=candidate.task_id,
+                        refused=True,
+                    )
+                )
+                continue
             redactions = int((payload.metadata or {}).get("redactions", 0) or 0)
             source_ids = (
                 tuple(candidate.provenance.get("source_ids") or ())
@@ -425,6 +439,17 @@ class Hippo:
                     _exception_text(exc),
                 )
                 continue
+            if candidate.source == "digest":
+                key = item_provenance.get("task_key")
+                if key:
+                    # A digest only competes with digests of the same task;
+                    # an unkeyed candidate keeps the old cross-task look.
+                    active = [
+                        entry
+                        for entry in active
+                        if entry.source == "digest"
+                        and entry.provenance.get("task_key") == key
+                    ]
             try:
                 decision = self.policy.decide(
                     checked,
@@ -612,6 +637,8 @@ class Hippo:
         exclude_task_ids: Collection[str] = (),
         kinds: Collection[str] | None = None,
         pool: int = 20,
+        task_key: str = "",
+        min_score: float = 0.0,
     ) -> list[tuple[str, float, dict[str, Any]]]:
         """Up to *pool* active entries, by embedding or by BM25."""
         if not self.memory or self._store_broken:
@@ -640,7 +667,7 @@ class Hippo:
                     top_k=pool,
                     kinds=kinds,
                     exclude_task_ids=exclude_task_ids,
-                    **({"include_history": True} if self.typed_assertions else {}),
+                    include_history=self.typed_assertions,
                 )
                 seen = {row[2].get("id") for row in raw_rows}
                 rows.extend(
@@ -657,9 +684,40 @@ class Hippo:
                         top_k=pool,
                         kinds=kinds,
                         exclude_task_ids=exclude_task_ids,
-                        **({"include_history": True} if self.typed_assertions else {}),
+                        include_history=self.typed_assertions,
                     )
                 ]
+            same_rows: list[tuple[str, float, dict[str, Any]]] = []
+            if task_key:
+                if self.embedding is not None:
+                    same_rows.extend(
+                        (text, score, {**meta, "retrieval": "embedding"})
+                        for text, score, meta in await self.long.search_embedding(
+                            vectors[0],
+                            top_k=2,
+                            kinds=kinds,
+                            exclude_task_ids=exclude_task_ids,
+                            task_key=task_key,
+                        )
+                        if score >= min_score - 1e-6
+                    )
+                same_rows.extend(
+                    (text, score, {**meta, "retrieval": "bm25"})
+                    for text, score, meta in await self.long.search_text(
+                        query,
+                        top_k=2,
+                        kinds=kinds,
+                        exclude_task_ids=exclude_task_ids,
+                        task_key=task_key,
+                    )
+                )
+                ids = {row[2].get("id") for row in same_rows}
+                rows = same_rows + [row for row in rows if row[2].get("id") not in ids]
+                # A vector row and its text row can describe the same entry.
+                unique: dict[Any, tuple[str, float, dict[str, Any]]] = {}
+                for row in rows:
+                    unique.setdefault(row[2].get("id"), row)
+                rows = list(unique.values())
             return [
                 (text, score, {**meta, "retrieval_rank": rank})
                 for rank, (text, score, meta) in enumerate(rows, start=1)

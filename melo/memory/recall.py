@@ -629,6 +629,7 @@ class RecallHit:
     chars: int
     omitted: bool = False  # a draft turned into a pointer
     stage: str = ""  # the note store's stage: fresh | rehearsed | superseded
+    task_relation: str = "same"  # task-local, other digest or unscoped long entry
     # Rendering metadata, not part of the record's public shape.
     step: int = 0
     attempt: int = 0
@@ -681,6 +682,7 @@ def hit_from_doc(
         text=text,
         chars=len(text),
         stage=stage if isinstance(stage, str) else "",
+        task_relation=str(doc.meta.get("task_relation", "same")),
         step=step if isinstance(step, int) and not isinstance(step, bool) else 0,
         attempt=(
             attempt if isinstance(attempt, int) and not isinstance(attempt, bool) else 0
@@ -888,6 +890,24 @@ def recall_span_chars(messages: Sequence[Message]) -> int:
     return total
 
 
+def relation_counts(hits: Sequence[RecallHit]) -> dict[str, int]:
+    """Delivered long-digest same/cross counts plus task-local note hits.
+
+    Only ``kind == "long"`` hits feed the D11 signal: the note store's
+    notes, drafts, thoughts and in-task digests are not cross-task
+    evidence, so they are counted apart.
+    """
+    return {
+        "same_task": sum(
+            hit.kind == "long" and hit.task_relation == "same" for hit in hits
+        ),
+        "cross_task": sum(
+            hit.kind == "long" and hit.task_relation == "cross" for hit in hits
+        ),
+        "task_notes": sum(hit.kind != "long" for hit in hits),
+    }
+
+
 def compact_record(record: RecallRecord) -> dict[str, Any]:
     """The compact record of the JSON line and the event: no item text."""
     return {
@@ -911,6 +931,7 @@ def compact_record(record: RecallRecord) -> dict[str, Any]:
             }
             for hit in record.hits
         ],
+        **relation_counts(record.hits),
         "chars": record.chars,
         "ms": record.ms,
         "fallback": record.fallback,
@@ -945,6 +966,7 @@ def record_to_dict(record: RecallRecord) -> dict[str, Any]:
             }
             for hit in record.hits
         ],
+        **relation_counts(record.hits),
         "chars": record.chars,
         "ms": record.ms,
         "fallback": record.fallback,
