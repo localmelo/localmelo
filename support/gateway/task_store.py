@@ -963,6 +963,14 @@ class TaskStore:
                 raise TaskConflictError("operation ID reused or superseded")
             if current.state in _TERMINAL_STATES:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
+            if state == "running" and await _first(
+                conn,
+                "SELECT 1 FROM recovery_provenance WHERE task_id = ? AND first_start = 'never_started'",
+                (task_id,),
+            ):
+                raise TaskConflictError(
+                    "first start requires the recovery launch fence"
+                )
             if state == "parked" and await _first(
                 conn,
                 "SELECT 1 FROM park_priority WHERE task_id = ? AND pause_pending = 1",
@@ -993,7 +1001,15 @@ class TaskStore:
                 ):
                     raise TaskConflictError("task has a pending pause")
                 await self._identity_transition(
-                    conn, events, task_id, "sched.priority_changed"
+                    conn,
+                    events,
+                    task_id,
+                    (
+                        "sched.priority_changed"
+                        if choice is not None
+                        else "sched.state_changed"
+                    ),
+                    state=state or "",
                 )
             if choice is not None:
                 if choice == "first":
