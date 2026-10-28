@@ -10,7 +10,11 @@ import time
 
 import pytest
 
-from localmelo.support.gateway.session import Session, SessionManager
+from localmelo.support.gateway.session import (
+    Session,
+    SessionBusyError,
+    SessionManager,
+)
 
 # ── Fake Agent ──
 
@@ -104,6 +108,24 @@ class TestSessionManager:
         assert not await mgr.close("nope")
 
     @pytest.mark.asyncio
+    async def test_close_busy_session_refuses_and_leaves_it(
+        self, mgr: FakeSessionManager
+    ) -> None:
+        s = await mgr.create("busy")
+        agent: FakeAgent = s.agent  # type: ignore[assignment]
+        await s._lock.acquire()
+        try:
+            with pytest.raises(SessionBusyError, match="busy"):
+                await mgr.close("busy")
+            assert not agent.closed
+            assert mgr.get("busy") is s
+            assert s.status == "idle"
+        finally:
+            s._lock.release()
+        assert await mgr.close("busy")
+        assert agent.closed
+
+    @pytest.mark.asyncio
     async def test_list_sessions(self, mgr: FakeSessionManager) -> None:
         await mgr.create("s1")
         await mgr.create("s2")
@@ -166,6 +188,21 @@ class TestSessionManager:
         await mgr.close_all()
         assert agent1.closed
         assert agent2.closed
+        assert mgr.list_sessions() == []
+
+    @pytest.mark.asyncio
+    async def test_close_all_closes_busy_sessions(
+        self, mgr: FakeSessionManager
+    ) -> None:
+        """Shutdown closes every session, a running task's included."""
+        s = await mgr.create("busy")
+        agent: FakeAgent = s.agent  # type: ignore[assignment]
+        await s._lock.acquire()
+        try:
+            await mgr.close_all()
+        finally:
+            s._lock.release()
+        assert agent.closed
         assert mgr.list_sessions() == []
 
 

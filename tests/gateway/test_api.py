@@ -260,6 +260,54 @@ class TestDeleteSession:
         assert "gone" not in ids
 
 
+@pytest.mark.asyncio
+async def test_delete_busy_session_returns_409_and_keeps_it() -> None:
+    import asyncio
+
+    import httpx
+
+    sessions = FakeSessionManager()
+    server = _build_server(sessions)
+    session = await sessions.create("busy-delete")
+    agent: FakeAgent = session.agent  # type: ignore[assignment]
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def blocked(query: str) -> str:
+        started.set()
+        await release.wait()
+        return f"echo: {query}"
+
+    agent.run = blocked  # type: ignore[method-assign]
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=server.app),
+        base_url=f"http://127.0.0.1:{server.port}",
+    ) as client:
+        run = asyncio.create_task(
+            client.post(
+                "/v1/agent/run", json={"session_id": "busy-delete", "query": "wait"}
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        resp = await client.delete("/v1/sessions/busy-delete")
+        assert resp.status_code == 409
+        body = resp.json()
+        assert "busy-delete" in body["error"]
+        assert body["session_id"] == "busy-delete"
+        # The session and its run are untouched.
+        assert sessions.get("busy-delete") is session
+        assert not agent.closed
+        assert session.status == "running"
+
+        release.set()
+        run_resp = await run
+        assert run_resp.status_code == 200
+        assert run_resp.json()["result"] == "echo: wait"
+        assert session.status == "idle"
+        assert await sessions.close("busy-delete")
+        assert agent.closed
+
+
 # ---------------------------------------------------------------------------
 # Session reuse
 # ---------------------------------------------------------------------------

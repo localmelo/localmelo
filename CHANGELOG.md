@@ -225,6 +225,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   pre-R1 records and records without `--log-bodies` keep the old guess, an
   unknown header value keeps the guess and is counted, and the import
   report counts the records of each kind source ([#61]).
+- `DELETE /v1/sessions/{id}` no longer closes a session whose task is still
+  running: it answers 409 with the gateway's error body
+  (`{"error", "session_id"}`) and leaves the task and the session alone;
+  idle sessions close as before. The `/v1/agent` API still has no cancel
+  route, so a caller waits for the task. Stopping the gateway still closes
+  every session, a busy one included, and a task still running then ends as
+  `crashed` ([#63]).
 - A `shell_exec` command no longer inherits melo's standard input: it reads
   `/dev/null` in every mode. A shell whose stdin was a pty that was not
   melo's controlling terminal took that pty as its controlling terminal at
@@ -336,3 +343,4 @@ earlier milestones.
 [#60]: https://github.com/localmelo/localmelo/pull/60
 [#61]: https://github.com/localmelo/localmelo/pull/61
 [#62]: https://github.com/localmelo/localmelo/pull/62
+[#63]: https://github.com/localmelo/localmelo/pull/63
