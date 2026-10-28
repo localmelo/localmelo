@@ -83,6 +83,8 @@ async def test_first_fence_receipt_survives_capture_and_hold_but_not_stop(
         operation_id="hold",
     )
     assert await recovery.capture_complete(task, execution_id="run")
+    with pytest.raises(worker_module.TaskConflictError):
+        await worker._capture_incomplete(task, "run")
     assert not (await recovery.start(task, **args)).acquired
     generation, previous = await tasks.park_identity(task)
     await parks.resume(
@@ -390,14 +392,8 @@ async def test_current_execution_guard_only_preserves_its_own_capture(
     )
     assert await recovery.capture_complete(task, execution_id="run")
 
-    # The live execution's own running/resume transition keeps its capture.
-    await tasks.change(
-        task,
-        state="running",
-        actor="scheduler",
-        _capture_execution="run",
-        _capture_existing=True,
-    )
+    # A running transition with no execution named keeps the live capture.
+    await tasks.change(task, state="running", actor="scheduler")
     assert await recovery.capture_complete(task, execution_id="run")
 
     # A stale execution cannot revive or preserve the current capture.
@@ -417,6 +413,10 @@ async def test_current_execution_guard_only_preserves_its_own_capture(
         other, state="running", actor="scheduler", _capture_execution="new"
     )
     assert not await recovery.capture_complete(other, execution_id="new")
+
+    # Leaving running retires the execution's capture.
+    await tasks.change(task, state="done")
+    assert not await recovery.capture_complete(task, execution_id="run")
 
 
 # A separate process crashes with os._exit, so no Python cleanup runs between

@@ -1011,6 +1011,14 @@ class TaskStore:
                 raise TaskConflictError("operation ID reused or superseded")
             if current.state in _TERMINAL_STATES:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
+            if state == "running" and _capture_execution is None:
+                active = await _first(
+                    conn,
+                    "SELECT execution_id FROM recovery_capture WHERE task_id = ? AND active = 1",
+                    (task_id,),
+                )
+                if active and current.state in {"running", "held"}:
+                    _capture_execution, _capture_existing = active[0], True
             if state == "running" and await _first(
                 conn,
                 "SELECT 1 FROM recovery_provenance WHERE task_id = ? AND first_start = 'never_started'",
@@ -1067,6 +1075,10 @@ class TaskStore:
             ):
                 raise TaskConflictError("task has a pending pause")
             if state in _TERMINAL_STATES:
+                await conn.execute(
+                    "UPDATE recovery_capture SET active = 0 WHERE task_id = ? AND active = 1",
+                    (task_id,),
+                )
                 await self._identity_transition(
                     conn,
                     events,

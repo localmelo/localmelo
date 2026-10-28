@@ -73,6 +73,7 @@ class Executor:
         *,
         timeout_ms: float | None = None,
         requires_approval: bool = False,
+        process_free: bool = False,
     ) -> None:
         """Register *fn* as the callable for tool *name*.
 
@@ -84,7 +85,10 @@ class Executor:
         passes, so a call without *requires_approval* clears the mark.
         """
         self._callables[name] = fn
-        self._process_free.discard(name)
+        if process_free:
+            self._process_free.add(name)
+        else:
+            self._process_free.discard(name)
         if timeout_ms is not None:
             self._timeouts_ms[name] = timeout_ms
         else:

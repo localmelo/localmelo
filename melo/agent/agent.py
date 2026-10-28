@@ -1613,6 +1613,7 @@ class Agent:
                 "recall",
                 self._recall_tool,
                 timeout_ms=RECALL_TOOL_TIMEOUT_S * 1000,
+                process_free=True,
             )
             self._builtin_names = self._builtin_names | {"recall"}
             self._recall_tool_registered = True

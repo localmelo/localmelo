@@ -1033,6 +1033,8 @@ class TaskWorkers:
                             if self._closed or task_id in self._stopping:
                                 raise asyncio.CancelledError()
                         return
+                    except TaskConflictError:
+                        raise
                     except Exception:
                         await asyncio.sleep(delay)
                         delay = min(delay * 2, 1.0)

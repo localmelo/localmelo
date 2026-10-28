@@ -120,8 +120,8 @@ capture state, process identity checks and a gated subprocess primitive. Workers
 record a launch's process group through that gate before releasing the child and
 mark capture incomplete at each arbitrary-code tool entry; a store outage retries
 the marker for up to 10 seconds, then refuses that one call. An unsupported
-platform releases the child only after the marker commits. Nothing reads this
-evidence yet, so Resume stays fenced; process verification, controlled restart
+platform, or an identity/record failure, releases the child only after the marker
+commits. Nothing reads this evidence yet, so Resume stays fenced; process verification, controlled restart
 scheduling and user-facing confirmation remain later work.
 
 A task row's id is its `kind="task"` session's id. `create_task()` writes the

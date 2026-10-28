@@ -132,10 +132,7 @@ async def gated_exec(
         try:
             await _write_all(write_fd, payload)
             await _writable(write_fd)
-            try:
-                await record(proc.pid)
-            except UnsupportedProcessGateError as exc:
-                raise RuntimeError("process recording failed") from exc
+            await record(proc.pid)
             current = asyncio.current_task()
             if current is not None and current.cancelling():
                 raise asyncio.CancelledError()
