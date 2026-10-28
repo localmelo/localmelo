@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from localmelo.melo.schema import INTERRUPT_LABEL, NO_ANSWER_LABEL, split_thinking
 from localmelo.support.cli import terminal
 from localmelo.support.cli.session_views import memory_view, usage_view
-from localmelo.support.sessions.store import TurnInfo, UnknownSessionError
+from localmelo.support.sessions.store import TurnInfo, UnknownSessionError, check_title
 from localmelo.support.sessions.sync import SessionMark
 
 if TYPE_CHECKING:
@@ -23,11 +23,15 @@ class SessionTools:
     def reset(self) -> None:
         self.pending_title = None
 
-    async def turns(self) -> list[TurnInfo]:
+    async def turns(
+        self, *, limit: int | None = None, before: int | None = None
+    ) -> list[TurnInfo]:
         runner = self.session.runner
         if runner is None or runner.session_id is None:
             return []
-        return await self.session.store.list_turns(runner.session_id)
+        return await self.session.store.list_turns(
+            runner.session_id, limit=limit, before=before
+        )
 
     async def run(self, name: str, arguments: str) -> None:
         s = self.session
@@ -38,7 +42,7 @@ class SessionTools:
         elif name == "undo":
             await self.undo()
         elif name == "usage":
-            s.out.print(usage_view(await self.turns()))
+            s.out.print(usage_view(await self.turns(), width=s.out.width))
         elif name == "memory":
             loaded = s.runner.last_resume if s.runner is not None else None
             s.out.print(
@@ -58,8 +62,9 @@ class SessionTools:
         s = self.session
         runner = s.runner
         if text:
-            if not 1 <= len(text) <= 200:
+            if not 1 <= len(text.strip()) <= 200:
                 raise ValueError("A title has 1 to 200 characters.")
+            text = check_title(text)
             self.pending_title = text
             s.title = text
             await self.apply_title()
@@ -101,7 +106,13 @@ class SessionTools:
         try:
             turn = await asyncio.shield(work)
         except asyncio.CancelledError:
-            turn = await work
+            while True:
+                try:
+                    turn = await asyncio.shield(work)
+                    break
+                except asyncio.CancelledError:
+                    if work.cancelled():
+                        raise
             if turn is not None:
                 self._remember_undo(turn)
             raise
@@ -124,26 +135,38 @@ class SessionTools:
             or int(argument) < 1
         ):
             raise ValueError("Use /copy [turn].")
-        turns = await self.turns()
-        selected = (
-            next((t for t in reversed(turns) if t.turn == int(argument)), None)
-            if argument
-            else next(
-                (t for t in reversed(turns) if not t.undone and t.status != "running"),
-                None,
-            )
-        )
+        selected = None
+        if argument:
+            number = int(argument)
+            before = number + 1 if number < 2**63 - 1 else None
+            turns = await self.turns(limit=1, before=before)
+            if turns and turns[0].turn == number:
+                selected = turns[0]
+        else:
+            before = None
+            while turns := await self.turns(limit=50, before=before):
+                selected = next(
+                    (
+                        t
+                        for t in reversed(turns)
+                        if not t.undone and t.status != "running"
+                    ),
+                    None,
+                )
+                if selected is not None:
+                    break
+                before = turns[0].turn
         if selected is None:
             raise ValueError(
                 f"Turn {argument} has no answer."
                 if argument
                 else "No answer to copy yet."
             )
-        answer = split_thinking(selected.answer)[1]
+        answer = split_thinking(selected.answer, strip_answer=False)[1]
         if (
             selected.status == "running"
-            or not answer
-            or answer
+            or not answer.strip()
+            or answer.strip()
             in (
                 INTERRUPT_LABEL,
                 NO_ANSWER_LABEL.format(status=selected.status),

@@ -145,7 +145,7 @@ async def test_copy_uses_the_stored_redacted_markdown(
     monkeypatch.setattr(terminal, "copy_text", copy_text)
     setup.session.enter("/copy")
     await wait_for(lambda: "Copied the answer of turn 2" in setup.out.text())
-    assert copied == [answer.replace(secret, "[redacted]")]
+    assert copied == ["\n" + answer.replace(secret, "[redacted]")]
     assert "private reasoning" not in copied[0]
     assert secret not in copied[0]
 

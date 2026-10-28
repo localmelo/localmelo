@@ -227,6 +227,8 @@ the same undo operation and then sends that turn's message again.
 
 `/usage` includes undone rows because that work was performed. A running
 turn or missing counter is `?`, not zero; a partial total ends in `+?`.
+Below 72 columns, usage uses labeled, wrapped rows instead of clipping
+numeric table cells.
 `/memory` reads a copy of the window, so it and `/usage` may run during a
 turn. Memory rows show user/assistant/tool messages, not hidden thinking;
 the footer explains whether a resume restored pairs or a checkpoint with
@@ -234,8 +236,10 @@ later pairs. It does not read all persistent memories or ask the model to
 summarize them.
 
 `/copy` reads the **stored, redacted answer** after removing thinking, so
-Markdown and code are not copied from the terminal's wrapped rendering.
-An explicit turn number may select an undone answer. Empty answers,
+Markdown and code are not copied from the terminal's wrapped rendering;
+leading code indentation and trailing newlines are preserved. An explicit
+turn number reads just that turn; default selection reads backward in
+bounded pages. An explicit turn number may select an undone answer. Empty answers,
 running turns and status-only labels cannot be copied. On macOS outside
 SSH it uses `/usr/bin/pbcopy` with a two-second timeout; under SSH, on other
 platforms or if that utility fails it sends a base64-encoded OSC 52 request.

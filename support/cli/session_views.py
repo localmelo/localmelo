@@ -44,7 +44,7 @@ def _number(value: Any, *, integer: bool = False) -> int | float | None:
     return value
 
 
-def usage_view(turns: Sequence[TurnInfo]) -> RenderableType:
+def usage_view(turns: Sequence[TurnInfo], *, width: int = 80) -> RenderableType:
     """Include undone work; a missing counter is unknown, never a fabricated zero."""
     if not turns:
         return Text("No turns yet.")
@@ -55,6 +55,8 @@ def usage_view(turns: Sequence[TurnInfo]) -> RenderableType:
         )
     totals: list[int | float] = [0] * 5
     unknown = [False] * 5
+    narrow: list[RenderableType] = []
+    labels = ("steps", "tools", "in", "out", "time")
     for turn in turns:
         result = turn.result if turn.status != "running" else None
         result = result or {}
@@ -82,12 +84,20 @@ def usage_view(turns: Sequence[TurnInfo]) -> RenderableType:
             )
         status = status_text(turn.status, turn.cause).word
         status += " (undone)" if turn.undone else ""
-        table.add_row(
-            str(turn.turn),
-            time.strftime("%m-%d %H:%M", time.localtime(turn.started_at)),
-            status,
-            *cells,
-        )
+        started = time.strftime("%m-%d %H:%M", time.localtime(turn.started_at))
+        if width < 72:
+            narrow.extend(
+                [
+                    Text(f"Turn {turn.turn}  {started}  {status}"),
+                    Text(
+                        "; ".join(
+                            f"{k} {v}" for k, v in zip(labels, cells, strict=True)
+                        )
+                    ),
+                ]
+            )
+        else:
+            table.add_row(str(turn.turn), started, status, *cells)
     total_cells = [
         (
             "?"
@@ -97,9 +107,21 @@ def usage_view(turns: Sequence[TurnInfo]) -> RenderableType:
         )
         for index, value in enumerate(totals)
     ]
-    table.add_row("Totals", "", "", *total_cells, style="bold")
+    if width < 72:
+        narrow.append(
+            Text(
+                "Totals: "
+                + "; ".join(
+                    f"{k} {v}" for k, v in zip(labels, total_cells, strict=True)
+                ),
+                style="bold",
+            )
+        )
+    else:
+        table.add_row("Totals", "", "", *total_cells, style="bold")
     return Group(
-        table, Text("Totals include undone turns; ? is not recorded.", style="muted")
+        *(narrow if width < 72 else [table]),
+        Text("Totals include undone turns; ? is not recorded.", style="muted"),
     )
 
 

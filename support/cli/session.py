@@ -299,6 +299,10 @@ class CliSession:
     def _task_done(self, task: asyncio.Task[Any]) -> None:
         self._tasks.discard(task)
         if task.cancelled():
+            if self._work is task and self._state == "switching":
+                self._work, self._state = None, "idle"
+                if self.app is not None:
+                    self.app.invalidate()
             return
         exc = task.exception()
         if exc is not None:

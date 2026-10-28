@@ -13,9 +13,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   before the first message; `/undo` forgets the latest finished turn and
   keeps its typed history without reversing file changes; `/usage` shows
   recorded work and totals including undone turns, with missing counters
-  left unknown; `/memory` inspects the copied working window and explains
+  left unknown and a narrow-terminal layout; `/memory` inspects the copied working window and explains
   its actual restore mode. `/copy [turn]` copies stored, redacted Markdown
-  without thinking via bounded macOS `pbcopy` or an OSC 52 request when
+  without thinking, preserving indentation and newlines, via bounded turn
+  reads and macOS `pbcopy` or an OSC 52 request when
   remote, unsupported locally or on other platforms. Clipboard requests
   only happen on an explicit command; direct runs are unchanged ([#NN]).
 
