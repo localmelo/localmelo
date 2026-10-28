@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.gateway.task_store import (
     COMPONENT,
@@ -258,9 +259,11 @@ async def test_a_newer_scheduler_component_is_refused(
     async with store.component_transaction("newer") as conn:
         await conn.execute(
             "INSERT INTO schema_components (name, version) VALUES (?, ?)",
-            (COMPONENT, 3),
+            (COMPONENT, SCHEDULER_VERSION + 1),
         )
-    with pytest.raises(SessionStoreError, match="scheduler schema version 3"):
+    with pytest.raises(
+        SessionStoreError, match=f"scheduler schema version {SCHEDULER_VERSION + 1}"
+    ):
         await TaskStore(store, clock=clock).open()
     assert await one(store, "SELECT name FROM sqlite_master WHERE name='tasks'") is None
 
@@ -334,6 +337,10 @@ async def test_v1_migration_preserves_rows_and_pause_before_retention(
     before_log = await recent_log(tasks, record.task_id)
     async with store.component_transaction("make_v1") as conn:
         await conn.execute("DROP TABLE park_priority")
+        await conn.execute("DROP TABLE recovery_provenance")
+        await conn.execute("DROP TABLE recovery_operations")
+        await conn.execute("DROP TABLE recovery_crashes")
+        await conn.execute("DROP TABLE recovery_processes")
         await conn.execute(
             "UPDATE schema_components SET version = 1 WHERE name = ?", (COMPONENT,)
         )
@@ -354,7 +361,10 @@ async def test_v1_migration_preserves_rows_and_pause_before_retention(
     monkeypatch.undo()
     clock.advance(31 * 86_400)
     migrated = TaskStore(store, clock=clock)
-    assert await migrated.open() == 2
+    assert await migrated.open() == SCHEDULER_VERSION
+    assert (
+        await RecoveryStore(store).provenance(record.task_id)
+    ).first_start == "unknown"
     assert await migrated.get_task(record.task_id) == paused
     assert await one(
         store,
@@ -364,7 +374,7 @@ async def test_v1_migration_preserves_rows_and_pause_before_retention(
     snapshot = await one(
         store, "SELECT * FROM park_priority WHERE task_id = ?", (record.task_id,)
     )
-    assert await TaskStore(store, clock=clock).open() == 2
+    assert await TaskStore(store, clock=clock).open() == SCHEDULER_VERSION
     assert (
         await one(
             store, "SELECT * FROM park_priority WHERE task_id = ?", (record.task_id,)
