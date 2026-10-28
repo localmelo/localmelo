@@ -22,6 +22,14 @@ from localmelo.melo.memory.notes import (
         "The meeting was cancelled on 4/9!",
         "小王不再住在北京。",
         "小李住在上海。",
+        "会议不在20:00举行。",
+        "会议未在20:00举行。",
+        "会议不在20:00举行，请大家注意时间安排。",
+        "未来的会议在20:00举行。",
+        "The meeting can't start at 20:00.",
+        "The train won't stop at 20:00.",
+        "The train doesn't stop at 20:00.",
+        "The meeting isn't at 20:00.",
     ],
 )
 def test_explicit_assertions_keep_original_polarity(text: str) -> None:
@@ -80,11 +88,24 @@ def test_may_date_is_not_a_modal(text: str) -> None:
 
 
 @pytest.mark.parametrize(
+    "day",
+    [
+        f"{n}{'th' if 10 <= n % 100 <= 20 else {1: 'st', 2: 'nd', 3: 'rd'}.get(n % 10, 'th')}"
+        for n in range(1, 32)
+    ],
+)
+def test_may_ordinal_is_not_a_modal(day: str) -> None:
+    text = f"The meeting is on May {day}."
+    assert note_from_reply(text, writer="heuristic")[0].found == [text]
+
+
+@pytest.mark.parametrize(
     ("positive", "negative"),
     [
         ("The meeting is at 20:00.", "The meeting is not at 20:00."),
         ("The meeting is at 20:00.", "The meeting isn't at 20:00."),
         ("会议在20:00举行。", "会议不在20:00举行。"),
+        ("The meeting can start at 20:00.", "The meeting can't start at 20:00."),
     ],
 )
 def test_citation_rejects_opposite_polarity_both_ways(

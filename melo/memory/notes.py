@@ -662,29 +662,30 @@ _NEGATION_MARKERS = _english(
     r"no\s+longer",
     r"cancel+ed",
     r"cancel+ing",
-    r"(?:is|are|was|were|do|does|did|can|could|will|would|should)n['’]t",
+    r"\w+n['’]t",
     "cannot",
 )
-_CJK_NEGATION = ("不再", "取消", "没有", "不是", "不在", "未", "没")
+_CJK_NEGATION = re.compile(
+    r"不再|取消|没有|不是|不在|未(?=在|举行|完成|开始|参加|发生)|没(?=在|有|能|去|来|做)"
+)
 
 
 def has_negative_assertion(text: str) -> bool:
     """Conservative polarity signal for admission and source matching, not a parser."""
-    return bool(_NEGATION_MARKERS.search(text)) or any(
-        word in text for word in _CJK_NEGATION
-    )
+    return bool(_NEGATION_MARKERS.search(text) or _CJK_NEGATION.search(text))
 
 
 _CJK_ASSERTION = re.compile(
-    r"^[一-鿿]{2,12}(?:已取消|取消了|不再住在[一-鿿]{2,12}|住在[一-鿿]{2,12})[。.!！]?$"
+    r"^[一-鿿]{2,12}(?:已取消|取消了|不再住在[一-鿿]{2,12}|住在[一-鿿]{2,12}|"
+    r"(?:不在|未在)[^?？!！。]{1,80}举行(?:，[^?？!！。]{0,80})?)[。.!！]?$"
 )
 _EN_NEGATIVE_ASSERTION = re.compile(
     r"^[A-Za-z][^?？!！]*\b(?:is not|are not|was not|were not|does not|did not|"
-    r"no longer|was cancelled|was canceled|is cancelled|is canceled)\b[^?？!！]*[!！]?$",
+    r"\w+n['’]t|no longer|was cancelled|was canceled|is cancelled|is canceled)\b[^?？!！]*[!！]?$",
     re.IGNORECASE,
 )
 _UNCERTAIN_ASSERTION = re.compile(
-    r"\b(?:if|unless|whether|when|may(?!\s+\d{1,2}\b)|might|could|not only|not\s+(?:not|cancel+ed))\b|如果|假如|是否|不但|不仅|可能|也许",
+    r"\b(?:if|unless|whether|when|may(?!\s+\d{1,2}(?:st|nd|rd|th)?\b)|might|could|not only|not\s+(?:not|cancel+ed))\b|如果|假如|是否|不但|不仅|可能|也许",
     re.IGNORECASE,
 )
 _QUOTED = re.compile(r"""["“”‘’]|'[^']+\x27""")
@@ -707,7 +708,7 @@ def _eligible_fact(sentence: str) -> bool:
             and not _QUOTED.search(sentence)
             and bool(_EN_NEGATIVE_ASSERTION.fullmatch(sentence))
         )
-    if any(marker in sentence for marker in _CJK_NEGATION):
+    if _CJK_NEGATION.search(sentence):
         return bool(_CJK_ASSERTION.fullmatch(sentence))
     return True
 

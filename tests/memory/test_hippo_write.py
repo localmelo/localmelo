@@ -352,6 +352,11 @@ async def test_heuristic_nonfacts_are_not_admitted_with_user_signal(text: str) -
     "positive,negative",
     [
         ("The meeting is at 20:00.", "The meeting is not at 20:00."),
+        ("The meeting can start at 20:00.", "The meeting can't start at 20:00."),
+        ("The train will stop at 20:00.", "The train won't stop at 20:00."),
+        ("The train does stop at 20:00.", "The train doesn't stop at 20:00."),
+        ("The meeting is at 20:00.", "The meeting isn't at 20:00."),
+        ("The train stops at 20:00.", "The train no longer stops at 20:00."),
         (
             "会议在20:00举行，请大家注意时间安排。",
             "会议不在20:00举行，请大家注意时间安排。",
