@@ -257,7 +257,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   task, in a tool result, in recalled memory or in a reflection no longer
   offers that tool, so text in a run cannot put a tool the model never
   called back in front of it; the built-ins, the BM25 matches and the
-  re-offer after a refused call are unchanged ([#NN]).
+  re-offer after a refused call are unchanged ([#80]).
 - `python_exec` runs its code in a child Python in every mode, not only with
   a workspace root. Code that loops, sleeps or calls `os._exit()` no longer
   holds or ends `melo`: the tool's time limit (60 seconds by default, 10
@@ -490,3 +490,4 @@ earlier milestones.
 [#76]: https://github.com/localmelo/localmelo/pull/76
 [#78]: https://github.com/localmelo/localmelo/pull/78
 [#79]: https://github.com/localmelo/localmelo/pull/79
+[#80]: https://github.com/localmelo/localmelo/pull/80
