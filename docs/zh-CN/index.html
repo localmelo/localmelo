@@ -87,47 +87,47 @@ source .venv/bin/activate</code></pre>
         <h2>能做什么</h2>
         <p>每张卡片都会打开 GitHub 上对应的英文参考页面。</p>
         <div class="link-grid">
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">
             <strong>运行任务</strong>
             <span>一条命令完成一个任务：在步数上限内运行，两次尝试之间会进行反思，还可以设置运行时限；也可以运行 <code>melo</code> 在终端里对话：模型的思考、每个工具调用和运行进度都会实时显示；批准写文件之前，还会显示这次写入将做出的改动；运行命令或写文件之前会先询问；还可以用 <code>melo -c</code> 或 <code>melo -r</code> 恢复该文件夹里已保存的对话；<code>/title</code>、<code>/undo</code>、<code>/usage</code>、<code>/memory</code> 和 <code>/copy</code> 可以命名、撤销、查看和复制对话；整段对话还可以运行在推理和召回模式下（<code>--reasoning</code>、<code>--retriever</code> 和各个召回选项）。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">
             <strong>工具和 MCP</strong>
             <span>使用四个内置工具和本地 MCP 服务器提供的工具（网关和控制台会话只有三个，没有 <code>shell_exec</code>）；每一步提供内置工具、模型已经调用过的工具和与任务最接近的匹配，并且只运行这些工具；子进程只拿到最小环境加上 <code>tool_env</code>，Python 调用在子进程中运行，时间限制可以终止它。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#backends">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">
             <strong>模型服务器</strong>
             <span>连接你自己运行的 Ollama、oMLX、MLC LLM、vLLM 或 SGLang 服务器，或者 OpenAI、Anthropic、Google Gemini、NVIDIA 的 API。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">
             <strong>网关和网页工作区</strong>
             <span>通过 HTTP 提供智能体服务，会话在重启后仍然保留；网页控制台的实时页面在 <code>http://127.0.0.1:8401/</code>：会话列表、每个回合为每个工具调用显示一张工作卡片、进度行、Stop 和优先级标签；页面只访问 <code>/api</code>。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#worker-histories">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">
             <strong>Worker 历史</strong>
             <span>可以选择保存直接运行或导入 dsh 日志，再通过本地网关 API 只读查询和筛选。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">
             <strong>API v2</strong>
             <span>通过 <code>/api</code> 读取网页控制台的会话、回合、已存事件（也有 Server-Sent Events 流）、图片 blob、提交查询、工具、授权、记忆和运行记录，也可以创建会话，开始、重试、停止和审批它的回合；只在回环地址上提供，并且只增不改。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">
             <strong>记忆</strong>
             <span>工作记忆、任务和步骤的历史记录，以及配置了嵌入服务器时的长期记忆；开启持久化后会保存到 SQLite，保存的文字会先做脱敏，长期记忆记录带类型、只有排练、用户陈述或可选的结果摘要才能写入，compress 推理模式会在内存中为每条回复保留一条简短的笔记，并在起始、尝试和步骤召回它，启发式笔记只保留真实事实并引用确立它的记录；在 Python 中还可以忘掉一个任务或全部记忆。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">
             <strong>嵌入模型设置</strong>
             <span>为长期记忆添加嵌入模型：第一次运行或配置向导会提供聊天服务器已经列出的模型，并给出 Ollama、oMLX、vLLM、SGLang 和 MLC 的步骤。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md">
             <strong>Python API <span class="tag experimental">实验性</span></strong>
             <span>在 Python 代码中运行任务：以事件形式跟踪每一步，停止运行，审批工具调用，并把文件工具限制在一个目录内。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/retrieval.md">
             <strong>记忆检索</strong>
             <span>用 <code>melo-retrieve</code> 在带标注的查询上比较 <code>bm25</code>、<code>llm</code> 和 <code>embedding</code> 三种记忆检索器；compress 推理模式在循环中使用同一组检索器，由 <code>auto</code> 选择。</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#use-melo-in-scripts">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#use-melo-in-scripts">
             <strong>脚本和基准测试</strong>
             <span>每次运行输出一行 JSON 和固定的退出码，脚本可以放心依赖运行结果；还可以选择后续回合如何发送或保留回复的推理（<code>--reasoning legacy</code>、<code>drop</code>、<code>replay</code>、<code>compress</code> 或 <code>compress+replay</code>）。</span>
           </a>
@@ -156,7 +156,7 @@ source .venv/bin/activate</code></pre>
         <div class="callout warning">
           <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。新建的记忆文件只有你能读取（权限 0600）。网关没有身份验证，所以请让它只监听 <code>127.0.0.1</code>（默认值）：在这个地址上，它会拒绝其他网站的网页通过浏览器向它的 API 发来的请求。</p>
         </div>
-        <p>请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#what-the-checks-do">检查能做什么（英文）</a>。</p>
+        <p>请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">检查能做什么（英文）</a>。</p>
       </section>
     </article>
   </main>

@@ -224,7 +224,7 @@ uv run mypy .</code></pre>
             在 <code>tests/backends/</code> 中添加测试。连接检查要 mock：测试绝不能连接真实服务器。
           </li>
           <li>
-            写文档：<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#backends">docs/configuration.md（英文）</a>中的后端表和示例。
+            写文档：<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">docs/configuration.md（英文）</a>中的后端表和示例。
           </li>
         </ol>
       </section>
@@ -248,7 +248,7 @@ uv run mypy .</code></pre>
             在 <code>tests/executor/</code> 中添加测试。
           </li>
           <li>
-            写文档：<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">docs/tools.md（英文）</a>；智能体需要知道时，也更新 <code>docs/for-agents.md</code> 和 <code>docs/llms.txt</code>。
+            写文档：<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">docs/tools.md（英文）</a>；智能体需要知道时，也更新 <code>docs/for-agents.md</code> 和 <code>docs/llms.txt</code>。
           </li>
         </ol>
       </section>
@@ -310,7 +310,7 @@ uv run mypy .</code></pre>
           <code>docs/</code> 中的 Markdown 页面只有英文；GitHub Pages 发布的是 <code>main</code> 分支的 <code>docs/</code> 目录。网站页面在 <code>docs/en/</code> 和 <code>docs/zh-CN/</code> 中：英文页面和它的中文版本共用相同的元素 id、相同的章节和顺序，代码块保持一致。<code>docs/</code> 中的页面用绝对的 <code>github.com</code> 地址链接目录之外的文件，这样在 GitHub 上和渲染后的网站上都能打开。
         </p>
         <p>
-          添加 Markdown 页面时，请把它加进 <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">docs/README.md（英文）</a>的索引。网站页面要在两种语言中各加一份，并加入每个页面的导航。<a href="https://github.com/localmelo/localmelo/blob/main/docs/maintaining.md">docs/maintaining.md（英文）</a>里说明了目录结构、发布方式和翻译规范。
+          添加 Markdown 页面时，请把它加进 <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">docs/README.md（英文）</a>的索引。网站页面要在两种语言中各加一份，并加入每个页面的导航。<a href="https://github.com/localmelo/localmelo/blob/main/docs/project/documentation.md">docs/maintaining.md（英文）</a>里说明了目录结构、发布方式和翻译规范。
         </p>
         <p>在本地预览网站：</p>
         <figure class="terminal">
@@ -326,10 +326,10 @@ uv run mypy .</code></pre>
         <h2>设计笔记</h2>
         <ul>
           <li>
-            <a href="https://github.com/localmelo/localmelo/blob/main/docs/how-it-works.md">localmelo 如何工作（英文）</a>：运行循环、反思、记忆和超时。
+            <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/how-it-works.md">localmelo 如何工作（英文）</a>：运行循环、反思、记忆和超时。
           </li>
           <li>
-            <a href="https://github.com/localmelo/localmelo/blob/main/docs/evaluations.md">评测（英文）</a>：各项默认设置背后的对照实验，例如继续判定。
+            <a href="https://github.com/localmelo/localmelo/blob/main/docs/project/evaluations.md">评测（英文）</a>：各项默认设置背后的对照实验，例如继续判定。
           </li>
           <li>
             <a href="./memory-design.html">记忆设计</a>：维护者的记忆设计，其中一部分尚未实现。
