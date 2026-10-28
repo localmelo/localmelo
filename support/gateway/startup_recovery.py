@@ -92,7 +92,7 @@ class StartupRecovery:
                 and bool(turn.run_id)
                 and not turn.undone
                 and turn.status in RUN_STATUSES
-                and turn.cause in {"run", "crash"}
+                and turn.cause in {"run", "crash", "user_stop"}
                 and turn.result
                 and finished
                 and finished[-1].event.get("run_id") == turn.run_id
