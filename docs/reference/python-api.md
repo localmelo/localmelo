@@ -199,14 +199,21 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
   with `aclose()` on early exit. Deltas and the final message can contain
   sensitive text: do not persist raw deltas, and do not display them directly.
   `localmelo.melo.checker.stream_filter.StreamFilter` is the separate display
-  policy: feed it only content fragments, not a separate reasoning field. It
-  buffers the response, separates inline thinking and applies pattern-based
-  redaction at `finish()`; call `finish()` only after a completed reply, and
-  call `abort()` on error or cancellation to discard provisional text. It does
-  not guarantee secret removal,
-  and emits no live text. This contract has no agent or UI consumer yet;
-  existing `chat()` behavior is unchanged. Callers must not silently retry a
-  stream after showing provisional output.
+  policy. Without a declared framing hint it buffers the whole response; with
+  `reasoning_tags="explicit"`, `"closing_only"` or `"none"`, it can release
+  redacted complete lines. An unreviewed redaction rule change forces whole
+  buffering. These hints are trusted guarantees for a model and template, not
+  guesses: `none` treats tags literally, `closing_only` treats everything before
+  the first closing tag as thinking, and `explicit` recognizes a leading opening
+  tag. `split_thinking(..., reasoning_tags=...)` uses the same rule for the
+  completed reply; omitting it keeps the existing whole-reply behavior. A trusted
+  separate reasoning field can instead use `StreamFilter(separate_reasoning=True)`
+  and `feed_reasoning()`; it never enters content. Thinking is held until finish.
+  Redaction is pattern-based and does not guarantee secret removal. This contract
+  has no agent or UI consumer yet; existing `chat()` behavior is unchanged.
+  Callers must not silently retry a stream after showing provisional output.
+  Call `finish()` only after a completed reply; call `abort()` on error or
+  cancellation to discard buffered text (already released text cannot be recalled).
 - Set `model` on a chat provider to the id of the model it uses, as the
   built-in providers do. Procedural memory keeps what runs did per model;
   with the default `""`, or `"default"`, past runs' facts are shown but a

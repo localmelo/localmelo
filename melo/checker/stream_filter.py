@@ -1,21 +1,17 @@
-"""Conservative incremental input filter for text shown to a user.
+"""Reasoning-aware display release with conservative line-based redaction.
 
-The existing redactor has unbounded token patterns, and an implicit thinking
-block may end with a closing tag anywhere in the response. Consequently this
-filter buffers the entire response: no display text is available until finish.
-This trades streaming latency for consistent decisions across fragment
-boundaries. A response above the character limit is refused.
-
-Redaction only covers the patterns in :func:`redact_secrets`; it is not a
-secrecy guarantee. Thinking is also sensitive even after redaction and should
-only be displayed when the caller explicitly wants to show it.
+A declared framing hint allows completed safe lines to be released. Without
+one, the entire reply is buffered because a later closing tag can reclassify
+all prior text. Redaction is pattern-based, not a guarantee against secrets.
 """
 
 from __future__ import annotations
 
 import re
 
+from localmelo.melo.checker._stream_redaction import LineRedactor
 from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.schema import ReasoningTags, split_thinking
 
 _TAG = re.compile(r"</?think>", re.IGNORECASE)
 _TAGS = ("<think>", "</think>")
@@ -69,24 +65,98 @@ def _split_for_display(text: str) -> tuple[str, str]:
     return "".join(thinking).strip(), "".join(content)
 
 
-class StreamFilter:
-    """Collect fragments and return ``(thinking, content)`` display deltas.
+def split_framed(text: str, reasoning_tags: ReasoningTags) -> tuple[str, str]:
+    """Split a whole reply according to a caller-declared model framing rule.
 
-    Feed only content fragments, never a provider's separate reasoning field.
-    ``feed(fragment)`` always returns ``('', '')``. Call ``finish()`` only after
-    a completed reply; on error call ``abort()`` to discard the buffered text.
-    ``finish()`` returns separately redacted thinking and content exactly once;
-    subsequent feed or finish calls raise RuntimeError. Content whitespace is preserved, while
-    thinking is stripped, matching split_thinking's strip_answer=False mode
-    for ordinary single-block responses. Use a fresh instance per response.
+    In ``explicit`` only a leading opening tag starts reasoning. In
+    ``closing_only`` everything before the first closing tag is reasoning.
+    In ``none`` tags are ordinary content. These declarations are trusted;
+    use the conservative no-hint filter for unknown model formats.
+    """
+    return split_thinking(text, strip_answer=False, reasoning_tags=reasoning_tags)
+
+
+class StreamFilter:
+    """Return safe ``(thinking_delta, content_delta)`` display fragments.
+
+    Without a framing hint all output waits for finish. With a declared hint,
+    redaction releases safe complete lines. Thinking remains buffered and is
+    returned at finish; callers choose whether to display it. A hint is a
+    trusted model-format declaration, not an observation of an earlier reply.
+    Call finish only on completion; abort on failure to discard buffered text.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        reasoning_tags: ReasoningTags | None = None,
+        *,
+        separate_reasoning: bool = False,
+    ) -> None:
+        if reasoning_tags not in (None, "explicit", "closing_only", "none"):
+            raise ValueError("unknown reasoning_tags")
+        if separate_reasoning and reasoning_tags not in (None, "none"):
+            raise ValueError("separate reasoning conflicts with inline tag framing")
+        self._separate = separate_reasoning
+        reasoning_tags = "none" if separate_reasoning else reasoning_tags
+        self._hint = reasoning_tags
         self._parts: list[str] = []
         self._length = 0
         self._finished = False
+        self._raw = LineRedactor()
+        self._content = LineRedactor()
+        self._thinking: list[str] = []
+        self._pending = ""
+        self._state = {
+            None: "buffer",
+            "none": "content",
+            "explicit": "start",
+            "closing_only": "thinking",
+        }[reasoning_tags]
 
-    def feed(self, fragment: str) -> tuple[str, str]:
+    def _accept(self, text: str, *, final: bool = False) -> str:
+        self._pending += text
+        if self._state == "start":
+            stripped = self._pending.lstrip()
+            lower = stripped.lower()
+            if not final and (not stripped or "<think>".startswith(lower)):
+                return ""
+            if lower.startswith("<think>"):
+                self._pending = stripped[len("<think>") :]
+                self._state = "thinking"
+            else:
+                self._state = "content"
+        if self._state == "thinking":
+            close = "</think>"
+            match = re.search(re.escape(close), self._pending, re.IGNORECASE)
+            if match:
+                self._thinking.append(self._pending[: match.start()])
+                self._pending = self._pending[match.end() :]
+                self._state = "content"
+            elif final:
+                self._thinking.append(self._pending)
+                self._pending = ""
+            else:
+                keep = max(
+                    (
+                        n
+                        for n in range(1, len(close))
+                        if self._pending.lower().endswith(close[:n])
+                    ),
+                    default=0,
+                )
+                if keep:
+                    self._thinking.append(self._pending[:-keep])
+                    self._pending = self._pending[-keep:]
+                else:
+                    self._thinking.append(self._pending)
+                    self._pending = ""
+                return ""
+        if self._state == "content":
+            text, self._pending = self._pending, ""
+            return self._content.feed(text)
+        return ""
+
+    def _check_fragment(self, fragment: str) -> None:
         if self._finished:
             raise RuntimeError("stream filter already finished")
         if not isinstance(fragment, str):
@@ -94,21 +164,45 @@ class StreamFilter:
         self._length += len(fragment)
         if self._length > 1_048_576:
             self._parts.clear()
+            self._thinking.clear()
             self._finished = True
             raise ValueError("stream display exceeds size limit")
-        self._parts.append(fragment)
+
+    def feed_reasoning(self, fragment: str) -> tuple[str, str]:
+        """Buffer a trusted separate reasoning field; never emit it as content."""
+        if not self._separate:
+            raise ValueError("separate reasoning was not declared")
+        self._check_fragment(fragment)
+        self._thinking.append(fragment)
         return "", ""
 
     def abort(self) -> None:
-        """Discard provisional text after a failed or cancelled stream."""
+        """Discard buffered text; already released content cannot be recalled."""
         self._parts.clear()
+        self._thinking.clear()
+        self._pending = ""
+        self._raw = LineRedactor()
+        self._content = LineRedactor()
         self._finished = True
+
+    def feed(self, fragment: str) -> tuple[str, str]:
+        self._check_fragment(fragment)
+        if self._hint is None:
+            self._parts.append(fragment)
+            return "", ""
+        return "", self._accept(self._raw.feed(fragment))
 
     def finish(self) -> tuple[str, str]:
         if self._finished:
             raise RuntimeError("stream filter already finished")
         self._finished = True
-        text = "".join(self._parts)
-        self._parts.clear()
-        thinking, content = _split_for_display(redact_secrets(text)[0])
-        return redact_secrets(thinking)[0], redact_secrets(content)[0]
+        if self._hint is None:
+            text = "".join(self._parts)
+            self._parts.clear()
+            thinking, content = _split_for_display(redact_secrets(text)[0])
+            return redact_secrets(thinking)[0], redact_secrets(content)[0]
+        content = self._accept(self._raw.finish(), final=True)
+        content += self._content.finish()
+        thinking = redact_secrets("".join(self._thinking).strip())[0]
+        self._thinking.clear()
+        return thinking, content
