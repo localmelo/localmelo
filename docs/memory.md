@@ -11,6 +11,7 @@ page.
 
 | To | Do this |
 |---|---|
+| Keep each reply as a short note (no recall yet) | `melo --reasoning compress "<task>"` |
 | Keep memory between runs | `export LOCALMELO_PERSIST_MEMORY=1` |
 | Choose the directory | `export LOCALMELO_MEMORY_DIR=…` (default `~/.cache/localmelo/memory`) |
 | Keep the memory of one run in a directory | `melo --memory-dir ~/melo-memory "<task>"` |
@@ -27,10 +28,73 @@ page.
 | History | Every task with its status and result, and every step with its tool call and result. In `history.db`, also every reply of the model with its reasoning; the history in RAM keeps no model calls. | RAM, or `history.db`. |
 | Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an [embedding backend](embedding.md). | RAM, or `long_term.db`. |
 | Procedural memory | What the runs of each recurring task did: the classes and short labels of their tool calls, their step counts and times. Written at the end of every run; never put in a prompt. See [Procedural memory](procedures.md). | RAM, or `procedures.db`. |
+| Reasoning notes | In the compress modes only, what each reply planned, found, decided and left open, its code drafts, and one digest per attempt. See [Reasoning notes](#reasoning-notes). | RAM only. |
 
 By default everything stays in RAM and is lost when the process ends. In RAM,
 long-term memory lasts as long as its agent: one direct run, one `melo ""`
 loop, or one gateway session.
+
+## Reasoning notes
+
+`melo --reasoning compress "<task>"` makes the loop keep a short **note** of
+every model reply instead of its reasoning. With the default
+`--note-writer auto`, the model writes the note itself before a tool call:
+
+```text
+<note>
+plan: your next step and why, in one line
+found: what you have established (file contents, test results)
+open: what is still unknown
+remember: yes if a fact or decision here should be kept after this task, else no
+</note>
+```
+
+With no block, and always with `--note-writer heuristic`, localmelo writes the
+note from the reply's text and reasoning. A reply whose text names none of
+those things (a plain answer, or a reflection that is only its JSON) still
+gets a minimal note from its first sentences or, for a reflection, its
+`summary`. A note has at most about 1,200 characters and holds `plan`,
+`found`, `decided`, `hypotheses`, `open`, `observed` (what the tools
+returned) and `outcome`. The model's own
+`<note>` block stays in the working-memory copy of its reply, so the next
+step reads it; a reply with no text gets the checked note as its copy instead.
+
+- The notes, drafts and digests live in a **note store** beside the
+  conversation window, in RAM, as long as the agent: one direct run, one
+  `melo ""` loop, one interactive UI session or one Python-API `Agent`.
+  The gateway keeps `legacy` in this release, so its sessions have none.
+  The store holds at most 300 documents or 300,000 characters. Window
+  eviction does not evict notes. Each entry has a short alias (`n4`,
+  `d1`, `g1`) that a prompt uses.
+- A **draft** is a reply's fenced code, with the file it is meant for. A
+  pending draft with a target is pinned once, after its turn's tool
+  results, in a delimited `[localmelo recall: …]` block at most 6,000
+  characters long. A write that covers at least 60% of its lines marks it
+  written, and a newer draft for the same target supersedes it; neither is
+  pinned again.
+- Notes are **rehearsed** when a later note restates their facts, when a
+  successful tool call acts on a path or command they name, or when a
+  reflection cites them in `used_notes`. A rehearsed note feeds the
+  attempt's **digest**: the task, the outcome, the facts, the observed
+  lines and the open questions, at most 1,500 characters. An unrehearsed
+  note stays out of it. Notes of an attempt are superseded after its
+  digest.
+- Nothing here is written to `history.db` or `sessions.db` as a note.
+  `history.db` keeps no notes table and its schema is unchanged; it still
+  keeps the model's raw reply in `steps` and `llm_calls`. The only new
+  session field is the turn's `note` column, which gets the last attempt
+  digest of the turn.
+- In every explicit reasoning mode (`drop`, `replay`, `compress`,
+  `compress+replay`) the raw per-step summary is no longer written to
+  long-term memory, and a run no longer promotes its final reflection
+  there; `legacy` is unchanged. Long-term recall is off in those modes too.
+- **No retrieval yet.** `compress` recalls nothing: the notes are kept for
+  the reflection and for the later retrieval release, and a later step
+  reads only what its own turn's window copy carries. The Python API's
+  `Agent.notes()` and `Agent.load_notes()` read and replace the store in
+  RAM; they are internal and experimental.
+- In the session store, `resume()` does not read `turns.note` yet: it loads
+  the conversation as before.
 
 ## Keep memory between runs
 
@@ -158,7 +222,7 @@ Every run saves one row in the `tasks` table of history:
 | Column | Value |
 |---|---|
 | `task_id` | The run's `task_id`: 32 hex characters. |
-| `query` | The task as given. |
+| `query` | The task as given, with the secrets of [Redaction](#model-calls) replaced. |
 | `status` | `running` during the run, then how it ended; see [Run results](run-results.md#statuses). `cancelled` appears only for interactive runs: in the Python API, and in the web workspace's history. |
 | `result` | The run's result, or its error when the result is empty. |
 
@@ -181,7 +245,10 @@ Every run saves one row in the `tasks` table of history:
 
 The `steps` table holds one row per tool call: `step_id`, `task_id`,
 `thought` (the model's text), `tool_call_json`, `tool_result_json`,
-`timestamp` and `seq` (the order within the task).
+`timestamp` and `seq` (the order within the task). The `thought`, every
+string in the call's arguments and the result's output and error are stored
+with the secrets of [Redaction](#model-calls) replaced; the run itself and
+the model keep the text.
 
 ## Model calls
 
@@ -230,17 +297,22 @@ planning and reflection requests alike. The history in RAM keeps none.
   unlinked; each belongs to the task's latest `plan` row before its
   `timestamp`. A cancelled interactive run in the Python API links the rows
   that its clean-up writes.
-- **Redaction.** `content` and `thinking` pass a minimal redaction of
-  secrets, the same as the Python API's events: well-known key shapes
+- **Redaction.** Every text that memory stores passes a minimal redaction
+  of secrets, the same as the Python API's events: well-known key shapes
   (`sk-` keys, GitHub tokens, AWS access key ids), the token after `Bearer`,
   and a code of 4 to 8 digits within 20 characters of `verification code`,
   `passcode`, `OTP` or `验证码`, on the same line, each become `[redacted]`.
-  It is minimal: tool-call arguments are not redacted, in
-  `tool_calls_json` or in `steps`, and a key glued to the text before it
-  stays: an `sk-` key right after a letter, a digit, `_` or `-`, a GitHub
-  token right after a letter, a digit or `_`, and an AWS access key id
-  right after a letter or a digit. `tasks` and `steps` keep every text as
-  it was.
+  It covers `tasks.query`, `tasks.result`, `steps.thought`, every string
+  in `steps.tool_call_json`'s arguments, `steps.tool_result_json`'s output
+  and error, `llm_calls.content` and `llm_calls.thinking`, and the text
+  long-term memory keeps (each step's summary and the promoted
+  reflections). What the model reads is not redacted: working memory, the
+  requests a run sends, `assistant.message` events and a run's `result`
+  keep the original text, so only the stored copies change.
+  It is minimal: other secret shapes stay, and so does a key glued to the
+  text before it: an `sk-` key right after a letter, a digit, `_` or `-`, a
+  GitHub token right after a letter, a digit or `_`, and an AWS access key
+  id right after a letter or a digit.
 - **Retention.** Reasoning older than 30 days, or than
   `LOCALMELO_THINKING_RETENTION_DAYS`, is cleared: `thinking` becomes `""`,
   and the reasoning that `content` holds goes too, by the row's
@@ -301,7 +373,9 @@ not use a store yet.
   thinking, the tool calls and their output), the images the tools returned,
   the final answer, and a window checkpoint per session: the working window
   at the end of the latest turn, with the tool calls and their results but
-  not the tools' output, which the events keep.
+  not the tools' output, which the events keep. Each turn's `note` column
+  holds the final attempt digest of a compress-mode turn (empty in the
+  other modes).
 - **Redaction.** The final answer is stored three times: in the turn's
   `run.finished` event, and as the turn's answer and result. Each copy, and
   the assistant text and thinking of the checkpoint, passes the minimal
@@ -426,11 +500,12 @@ that directory instead.
 ## Privacy
 
 - The files are not encrypted. `history.db` holds your tasks, the model's
-  text, every tool call with its arguments, and every tool result. It also
+  text, every tool call with its arguments, and every tool result, each
+  after the redaction of [Model calls](#model-calls). It also
   holds the model's reasoning for every call, redacted and kept 30 days by
   default; see [Model calls](#model-calls).
-  `long_term.db` holds step summaries and reflections, with their embedding
-  vectors. `procedures.db` holds each task's query, normalized, the folder
+  `long_term.db` holds step summaries and reflections, redacted, with their
+  embedding vectors. `procedures.db` holds each task's query, normalized, the folder
   it ran in, and its tool calls' labels: file names and program names,
   never their content or output. The query and the labels pass a minimal
   redaction: the key shapes, bearer tokens and one-time codes of

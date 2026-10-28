@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal, get_args
 
@@ -13,7 +13,8 @@ from localmelo.melo.schema import MAX_AGENT_STEPS, MAX_ATTEMPTS, STEPS_PER_ATTEM
 AttemptPolicy = Literal["reflect", "none"]
 ReflectionGate = Literal["flags", "utility"]
 ToolExposure = Literal["retrieve", "all"]
-ReasoningMode = Literal["legacy", "drop", "replay"]
+ReasoningMode = Literal["legacy", "drop", "replay", "compress", "compress+replay"]
+NoteWriter = Literal["auto", "heuristic"]
 
 # The reasoning a replay request carries for one turn is capped at this many
 # characters. At the plan's 3.45 characters per token that is about 11,600
@@ -115,6 +116,14 @@ class AgentOptions:
       ``None`` keeps their defaults, 30 s for a shell command and the
       executor's 60 s for Python. It needs a ``workspace_root``. The file
       tools keep the executor's limit, and provided tools their own.
+    - ``tool_env``: extra variables for the ``shell_exec`` and
+      ``python_exec`` children, with or without a ``workspace_root``. A
+      child does not inherit this process's environment: it gets ``PATH``,
+      ``HOME``, ``USER``, ``LOGNAME``, ``SHELL``, ``TERM``, ``LANG``, every
+      ``LC_*`` variable and ``TMPDIR``, then this mapping on top. So an API
+      key in the agent's environment reaches no tool; ``VIRTUAL_ENV``,
+      ``PYTHONPATH``, ``SSH_AUTH_SOCK`` and the proxy variables pass only
+      when this mapping names them.
     - ``reasoning``: how the run sends a reply's reasoning back.
       ``"legacy"``, the default, keeps the behavior before this option: an
       OpenAI-compatible provider sends none, Ollama native sends its own
@@ -126,6 +135,19 @@ class AgentOptions:
     - ``replay_scope``: ``"task"`` (default) replays only the current
       task's turns; ``"window"`` replays every turn in the window, earlier
       tasks included. It is API-only in R2.
+    - ``compress`` (R4): sends no thinking, asks the model for a short
+      note before each tool call, keeps the notes and drafts in the
+      working-memory note store, pins a pending draft once after its
+      turn's tool results, and puts the attempt's notes in the reflection
+      request. ``compress+replay`` does the same and replays thinking as
+      ``replay`` does. A provider that requires replay runs ``compress``
+      as ``compress+replay``, and the effective mode is what the run
+      reports. Neither mode recalls anything yet (R5).
+    - ``note_writer``: who writes a reply's note in the compress modes:
+      ``"auto"`` (default) parses the model's ``<note>`` block and falls
+      back to the heuristic, ``"heuristic"`` always writes it from the
+      reply's text and thinking. It is accepted and inert in the other
+      modes.
     """
 
     max_steps: int = MAX_AGENT_STEPS
@@ -141,9 +163,11 @@ class AgentOptions:
     workspace_root: str | None = None
     record_answers: bool = False
     tool_timeout_s: float | None = None
+    tool_env: Mapping[str, str] | None = None
     reasoning: ReasoningMode = "legacy"
     replay_turns: int | None = None
     replay_scope: Literal["task", "window"] = "task"
+    note_writer: NoteWriter = "auto"
 
     def __post_init__(self) -> None:
         for name in ("max_steps", "steps_per_attempt", "max_attempts"):
@@ -157,6 +181,7 @@ class AgentOptions:
             ("tool_exposure", get_args(ToolExposure)),
             ("reasoning", get_args(ReasoningMode)),
             ("replay_scope", ("task", "window")),
+            ("note_writer", get_args(NoteWriter)),
         ):
             value = getattr(self, name)
             if value not in allowed:
@@ -210,6 +235,25 @@ class AgentOptions:
             if self.workspace_root is None:
                 raise ValueError("tool_timeout_s needs a workspace_root")
 
+        if self.tool_env is not None:
+            object.__setattr__(self, "tool_env", self._checked_env(self.tool_env))
+
+    @staticmethod
+    def _checked_env(value: object) -> dict[str, str]:
+        if not isinstance(value, Mapping):
+            raise ValueError(
+                f"tool_env must be None or a mapping of names to values, "
+                f"got {value!r}"
+            )
+        env: dict[str, str] = {}
+        for name, text in value.items():
+            if not isinstance(name, str) or not name or "=" in name or "\0" in name:
+                raise ValueError(f"tool_env has an invalid variable name {name!r}")
+            if not isinstance(text, str):
+                raise ValueError(f"tool_env[{name!r}] must be a str, got {text!r}")
+            env[name] = text
+        return env
+
     @staticmethod
     def _checked_builtins(value: object) -> frozenset[str]:
         if isinstance(value, str) or not isinstance(value, Iterable):
@@ -246,12 +290,12 @@ def reasoning_refusal(
     if mode == "drop" and requires_replay:
         return (
             "this backend requires reasoning replay, so drop is not possible: "
-            "use replay"
+            "use replay or compress+replay"
         )
-    if mode == "replay" and not reasoning_field:
+    if mode in ("replay", "compress+replay") and not reasoning_field:
         return (
-            "replay needs a reasoning field: give --reasoning-field "
-            "(auto, reasoning_content or reasoning) with --base-url, or set "
-            "reasoning_field in the backend's config"
+            "replay and compress+replay need a reasoning field: give "
+            "--reasoning-field (auto, reasoning_content or reasoning) with "
+            "--base-url, or set reasoning_field in the backend's config"
         )
     return None

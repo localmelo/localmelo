@@ -334,6 +334,7 @@ async def check_guarantees(
     agent: Agent,
     *,
     usage_matches: bool = True,
+    usage_extra: frozenset[str] = frozenset(),
 ) -> None:
     """E-1, E-2, E-4 and E-5, the pinned keys, and JSON for every event."""
     events = recorder.events
@@ -366,7 +367,12 @@ async def check_guarantees(
     assert types.count("tool.started") == result.n_tool
     assert events[-1].data["result"] == result.to_dict()
     if usage_matches:
-        assert _event_usage(events) == result.usage
+        # *usage_extra* names keys the run result adds beside the replies'
+        # usage (an explicit mode's reasoning_chars), not a counter to skip.
+        expected = {
+            key: value for key, value in result.usage.items() if key not in usage_extra
+        }
+        assert _event_usage(events) == expected
     # E-5: one run id, the task's.
     assert {event.run_id for event in events} == {result.task_id}
     assert await agent.hippo.history.get_task(result.task_id) is not None
@@ -512,6 +518,18 @@ class TestFields:
                 "approval",
                 "exit_code",
             },
+            "note": {
+                "step",
+                "attempt",
+                "note_id",
+                "kind",
+                "source",
+                "text",
+                "chars",
+                "drafts",
+                "remember",
+                "stage",
+            },
             "notice": {"kind", "message", "step", "attempt", "detail"},
             "reflection.started": {"attempt", "failure_type"},
             "reflection": {
@@ -577,10 +595,38 @@ class TestFields:
         assert result.status == "stuck"
         await check_guarantees(stuck, result, agent)
         assert stuck.notices() == ["stuck"]
+        # R4's compress mode emits the note event, for the notes and the
+        # attempt digest.
+        compress = Recorder()
+        agent = _agent(
+            ScriptedLLM(
+                [
+                    _echo("a", content="<note>plan: echo a</note>"),
+                    _answer("The test passed because the fix works."),
+                ]
+            ),
+            reasoning="compress",
+        )
+        result = await agent.run_task("echo a", on_event=compress)
+        assert result.status == "completed"
+        await check_guarantees(
+            compress,
+            result,
+            agent,
+            usage_extra=frozenset(
+                {"reasoning_chars", "reasoning_tokens", "cached_tokens"}
+            ),
+        )
+        assert {event.data["kind"] for event in compress.of("note")} == {
+            "step",
+            "answer",
+            "digest",
+        }
 
-        seen = {event.type for event in reflect.events + stuck.events}
+        events = reflect.events + stuck.events + compress.events
+        seen = {event.type for event in events}
         assert seen == set(EVENT_FIELDS)
-        for event in reflect.events + stuck.events:
+        for event in events:
             assert set(event.data) == EVENT_FIELDS[event.type]
         details = {
             event.data["kind"]: set(event.data["detail"])
@@ -1480,11 +1526,12 @@ class TestRedaction:
             REDACTED_TEXT,
         )
         assert (last.data["content"], last.data["thinking"]) == (clipped, clipped)
-        # Working memory, history and the RunResult keep the text.
+        # Working memory and the RunResult keep the text; history stores
+        # the step's thought redacted, as it does every copy it keeps.
         [call] = [m for m in agent.hippo.working.get_window() if m.tool_calls]
         assert (call.content, call.thinking) == (SECRET_TEXT, SECRET_TEXT)
         steps = await agent.hippo.history.get_steps(result.task_id)
-        assert steps[0].thought == SECRET_TEXT
+        assert steps[0].thought == REDACTED_TEXT
         assert result.result == long_text
         assert recorder.events[-1].data["result"]["result"] == long_text
 

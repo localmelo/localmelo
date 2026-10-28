@@ -154,6 +154,8 @@ class _Turn:
     # The RunResult of a turn that ended without run.finished (step 7.4).
     fallback: RunResult | None = None
     finished: asyncio.Event = field(default_factory=asyncio.Event)
+    # The checked text of the last digest note event of this turn (R4).
+    last_note: str = ""
     # Whether the writer still takes events; it stops at step 7.2.
     accepting: bool = True
     writer: asyncio.Task[None] | None = None
@@ -527,6 +529,12 @@ class SessionRunner:
                     turn.finished.set()
                     if self._finishing is turn:
                         self._finishing = None
+                if event.type == "note":
+                    data = event.data
+                    if data.get("kind") == "digest" and isinstance(
+                        data.get("text"), str
+                    ):
+                        turn.last_note = data["text"]
                 if turn.accepting:
                     turn.queue.put_nowait(("event", event.to_dict(), event.images))
             except Exception:
@@ -692,6 +700,7 @@ class SessionRunner:
             "answer": answer,
             "window": window,
             "error": error,
+            "note": turn.last_note,
         }
         delays: Sequence[float] = GATEWAY_FINISH_RETRY_DELAYS_S
         if self._store.writer == "cli":

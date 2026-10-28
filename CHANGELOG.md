@@ -20,6 +20,41 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   event pages, and quitting prints a saved session's resume command.
   Direct runs keep their legacy parsing and output ([#NN]).
 
+- Reasoning notes for the compress modes: `--reasoning compress` and
+  `compress+replay`, `--note-writer auto|heuristic`, and the `[agent]`
+  `note_writer` key. `compress` sends no reasoning; instead each reply is
+  compressed into a short note (what it planned, found, decided and left
+  open, plus what its tools returned), with its code drafts, in a RAM-only
+  note store beside the working window. A pending targeted draft is pinned
+  once after its turn's tool results; a successful later write of 60% of
+  its lines marks it written. Notes are rehearsed when a later note
+  restates them, a successful call acts on a path or command they name, or
+  a reflection cites them, and each attempt gets a digest from its rehearsed
+  notes. `compress+replay` also sends thinking as `replay` does; a backend
+  that requires replay runs `compress` as `compress+replay` and the JSON
+  line reports that. Every document passes the new
+  `check_memory_candidate` boundary (redact, sanitize, cap) before it
+  reaches the window or the store. Nothing is recalled from the notes yet
+  (retrieval is a later release), no notes table or schema change reaches
+  `history.db`, the explicit modes stop writing raw step summaries and
+  promoting reflections to long-term memory, and a session turn's `note`
+  column gets the final digest. Legacy is byte-identical, goldens included
+  ([#85]).
+- The gateway opens its console session store and serves API v2 reads under
+  `/api`: health with the versions, limits, store state and a cached
+  model-server check; the sessions list and one session, a pending
+  `file_write` approval's `target` and each session grant's `granted_at`;
+  a session's turns with their events; a Server-Sent Events stream with
+  `Last-Event-ID` and one-shot catch-up; image blobs whose CSP merges into
+  the gateway's framing rule; and submission lookups by `client_request_id`.
+  The console holds each session's Agent, keeps its conversation when an
+  idle MCP session or the open cap closes it, and resumes it on reopen.
+  When the store cannot open, health still serves and the reads answer 503
+  `store_unavailable` while the gateway retries the open every 5 s. `/api`
+  is loopback-only, carries the one error envelope and `Cache-Control:
+  no-store`, and is additive-only and documented in
+  [docs/api.md](docs/api.md); `/` and every `/v1/*` route are unchanged, and
+  no turn starts yet ([#84]).
 - A reasoning mode for direct runs: `--reasoning legacy|drop|replay`
   (default `legacy`), `--reasoning-field auto|reasoning_content|reasoning`
   and `--replay-turns N`, or the same `[agent]` keys in `config.toml`.
@@ -264,6 +299,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- `shell_exec` and `python_exec` start their child with a minimal
+  environment instead of inheriting melo's: `PATH`, `HOME`, `USER`,
+  `LOGNAME`, `SHELL`, `TERM`, `LANG`, every `LC_*` variable and `TMPDIR`,
+  then the new `AgentOptions(tool_env={...})`, and nothing else. An API key
+  in melo's environment reaches no tool; `VIRTUAL_ENV`, `PYTHONPATH`,
+  `SSH_AUTH_SOCK` and the proxy variables pass only through `tool_env`. MCP
+  servers keep their minimal environment, which now takes every `LC_*`
+  variable too, from the same list ([#81]).
+- Tool hints come from the model's tool calls only. A tool named in the
+  task, in a tool result, in recalled memory or in a reflection no longer
+  offers that tool, so text in a run cannot put a tool the model never
+  called back in front of it; the built-ins, the BM25 matches and the
+  re-offer after a refused call are unchanged ([#80]).
 - `python_exec` runs its code in a child Python in every mode, not only with
   a workspace root. Code that loops, sleeps or calls `os._exit()` no longer
   holds or ends `melo`: the tool's time limit (60 seconds by default, 10
@@ -428,6 +476,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- Secrets no longer stay in stored memory. `tasks.query` and `tasks.result`,
+  `steps.thought`, a tool call's arguments and a tool result's output and
+  error, and the text long-term memory keeps (each step's summary and the
+  promoted reflections) are written with the same redaction `llm_calls` and
+  events already use: `sk-` keys, GitHub tokens, AWS access key ids, the
+  token after `Bearer` and a one-time code next to its keyword. The run and
+  the model keep the text: working memory, the requests a run sends, its
+  events and its `result` are unchanged, and the stored images stay
+  references ([#83]).
 - On `localhost` or a loopback IP address, the gateway refuses requests that
   are not addressed to it, before any route runs. A `Host` other than
   `127.0.0.1`, `localhost` or `[::1]` with the gateway's port gets HTTP 421
@@ -496,3 +553,8 @@ earlier milestones.
 [#76]: https://github.com/localmelo/localmelo/pull/76
 [#78]: https://github.com/localmelo/localmelo/pull/78
 [#79]: https://github.com/localmelo/localmelo/pull/79
+[#80]: https://github.com/localmelo/localmelo/pull/80
+[#81]: https://github.com/localmelo/localmelo/pull/81
+[#83]: https://github.com/localmelo/localmelo/pull/83
+[#84]: https://github.com/localmelo/localmelo/pull/84
+[#85]: https://github.com/localmelo/localmelo/pull/85

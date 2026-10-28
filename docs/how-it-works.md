@@ -31,6 +31,15 @@ A reply with neither text nor a tool call is an empty reply. localmelo asks
 the model to continue, and the step still counts. Two empty replies in a row
 end the run as `failed`.
 
+With `--reasoning compress`, each reply is compressed into a short note
+before the next step: the note asks what the reply planned, found, decided
+and left open, plus what its tools returned, and the model may write it
+itself in a `<note>` block. The notes, the reply's code drafts and one digest
+per attempt stay in a RAM-only note store beside the window; a pending draft
+is pinned once after its tool results. Nothing is recalled from earlier steps
+yet, and nothing harness-derived is written to `history.db`. See
+[Reasoning notes](memory.md#reasoning-notes).
+
 ## Reflection
 
 With the default `reflect` policy, an attempt that runs out of steps, or
@@ -74,8 +83,8 @@ More about reflections:
 
 Each step offers the model a list of tools, and only those tools can run in
 that step. By default the list holds every built-in tool plus the few other
-tools that match the task or the conversation. See
-[How tools are offered](tools.md#how-tools-are-offered).
+tools that match the task or that the model has already called in this
+conversation. See [How tools are offered](tools.md#how-tools-are-offered).
 
 ## Memory in the loop
 

@@ -3,6 +3,8 @@
 The golden corpus was generated from AST-extracted parser/check functions in
 ``git show d232b9e:__main__.py`` (before the UI), plus ``a4599e0`` for R2a.
 Only shared namespace defaults are factored out; every case's result is recorded.
+The three explicit R4 overrides were captured from upstream cb250c6 before U2b,
+not from the new parser: compress became valid, and two replay errors name it.
 Dispatch is mocked: no model, MCP process, session store or gateway is started.
 """
 
@@ -26,7 +28,11 @@ GOLDEN = json.loads(
 )
 SOURCES = GOLDEN["sources"]
 CASES = [
-    pytest.param(source, case, id=f"{source[:7]}-{case['id']}")
+    pytest.param(
+        source,
+        {**case, **GOLDEN["upstream_overrides"].get(source, {}).get(case["id"], {})},
+        id=f"{source[:7]}-{case['id']}",
+    )
     for source, record in SOURCES.items()
     for case in record["cases"]
 ]
@@ -35,6 +41,7 @@ R2A_DEFAULTS = {
     key: SOURCES[GOLDEN["reasoning_baseline"]]["namespace_defaults"][key]
     for key in ("reasoning", "reasoning_field", "replay_turns")
 }
+R4_DEFAULTS = GOLDEN["upstream_namespace_defaults"]  # recorded from upstream #85
 
 
 @pytest.fixture
@@ -97,6 +104,7 @@ def test_historical_dispatch(
     expected = {
         **SOURCES[source]["namespace_defaults"],
         **R2A_DEFAULTS,
+        **R4_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:

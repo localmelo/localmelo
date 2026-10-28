@@ -18,7 +18,6 @@ import logging
 from dataclasses import dataclass
 from types import ModuleType
 from typing import Any
-from unittest import mock
 
 import pytest
 
@@ -36,6 +35,7 @@ from localmelo.support.config import (  # noqa: E402
     LocalBackendConfig,
 )
 from localmelo.support.gateway import GatewayServer  # noqa: E402
+from localmelo.support.gateway.console import ConsoleOptions  # noqa: E402
 from localmelo.support.gateway.guard import LoopbackGuard, is_loopback  # noqa: E402
 from localmelo.support.gateway.session import AgentLike, SessionManager  # noqa: E402
 
@@ -138,6 +138,16 @@ class RecordingSessions(SessionManager):
         return RecordingAgent(self.runs)
 
 
+class QuietProbe:
+    """A health probe that never contacts a model server."""
+
+    def snapshot(self) -> None:
+        return None
+
+    async def aclose(self) -> None:
+        pass
+
+
 class RecordingPlayground:
     """Stands in for SmokePlayground: records each call, contacts no server."""
 
@@ -198,7 +208,7 @@ def _build_gateway(
         ),
         gateway=GatewayConfig(port=port, host=host),
     )
-    server = GatewayServer(cfg)
+    server = GatewayServer(cfg, console_options=ConsoleOptions(probe=QuietProbe()))
     sessions = RecordingSessions()
     server.sessions = sessions
     client = TestClient(
@@ -650,8 +660,8 @@ def test_no_response_carries_cors_headers(
             200,
             id="web-ui-in-a-frame-on-another-site",
         ),
-        pytest.param("/docs", {}, 200, id="docs"),
-        pytest.param("/redoc", {}, 200, id="redoc"),
+        pytest.param("/docs", {}, 404, id="docs"),
+        pytest.param("/redoc", {}, 404, id="redoc"),
         pytest.param("/v1/health", {}, 200, id="health"),
         pytest.param("/no/such/route", {}, 404, id="404"),
         pytest.param("/v1/health", {"Host": FOREIGN_HOST}, 421, id="421"),
@@ -693,7 +703,8 @@ def test_a_loopback_host_installs_the_guard(
 ) -> None:
     with caplog.at_level(logging.WARNING, logger="localmelo.gateway"):
         gateway = _build_gateway(monkeypatch, host=host)
-    assert [m.cls for m in gateway.server.app.user_middleware] == [LoopbackGuard]
+    # The guard is outermost; the console's error middleware is inside it.
+    assert gateway.server.app.user_middleware[0].cls is LoopbackGuard
     assert not caplog.records
     resp = gateway.client.get("/v1/health", headers={"Host": FOREIGN_HOST})
     assert resp.status_code == 421
@@ -704,9 +715,7 @@ def test_a_host_in_brackets_listens_without_them(
 ) -> None:
     gateway = _build_gateway(monkeypatch, host="[::1]")
     assert gateway.server.host == "::1"
-    with mock.patch("localmelo.support.gateway.uvicorn.run") as run:
-        gateway.server.run()
-    assert run.call_args.kwargs["host"] == "::1"
+    assert gateway.server.uvicorn_server().config.host == "::1"
 
 
 def test_a_non_loopback_host_has_no_guard_and_logs_a_warning(
@@ -845,3 +854,45 @@ def test_the_standalone_playground_server_is_guarded(
     resp = client.post("/v1/playground/session", json=body, headers={"Origin": GATEWAY})
     assert resp.status_code == 200
     assert playground.calls == ["create_session"]
+
+
+# ---------------------------------------------------------------------------
+# /api
+# ---------------------------------------------------------------------------
+
+
+def test_a_cross_site_api_request_is_refused(gateway: Gateway) -> None:
+    resp = gateway.client.get("/api/health", headers={"Sec-Fetch-Site": "cross-site"})
+    assert resp.status_code == 403
+    assert resp.headers["cache-control"] == "no-store"
+    assert resp.json() == {
+        "error": {
+            "code": "foreign_origin",
+            "message": ORIGIN_ERROR["error"],
+            "details": {},
+        }
+    }
+
+
+def test_a_same_origin_or_none_api_request_passes(gateway: Gateway) -> None:
+    for site in ("same-origin", "none"):
+        resp = gateway.client.get("/api/health", headers={"Sec-Fetch-Site": site})
+        assert resp.status_code == 200
+
+
+def test_a_navigation_to_the_api_without_fetch_metadata_passes(
+    gateway: Gateway,
+) -> None:
+    assert gateway.client.get("/api/health").status_code == 200
+
+
+def test_a_foreign_host_is_refused_on_the_health_route(gateway: Gateway) -> None:
+    resp = gateway.client.get("/api/health", headers={"Host": FOREIGN_HOST})
+    assert resp.status_code == 421
+    assert resp.json() == {
+        "error": {
+            "code": "misdirected_request",
+            "message": HOST_ERROR["error"],
+            "details": {},
+        }
+    }

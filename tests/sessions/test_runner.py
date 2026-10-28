@@ -1509,6 +1509,54 @@ def test_the_lease_is_refreshed_every_third_of_it() -> None:
     assert runner_mod._LEASE_REFRESH_S == LEASE_S / 3 == 10.0
 
 
+async def test_a_compress_turn_stores_its_digest_in_turns_note(tmp_path: Path) -> None:
+    """R4 writes the turn's final attempt digest through finish_turn."""
+    from localmelo.melo.schema import Message, ToolCall
+
+    path = tmp_path / "sessions.db"
+    store = SessionStore(path, writer="gateway", clock=Clock())  # type: ignore[arg-type]
+    llm = ScriptedLLM(
+        [
+            Message(
+                role="assistant",
+                content="<note>plan: read notes.txt</note>",
+                tool_calls=[
+                    ToolCall(
+                        tool_name="file_read",
+                        arguments={"path": "notes.txt"},
+                        id="call_1",
+                    )
+                ],
+            ),
+            answer("The test passed because the notes say buy milk."),
+        ]
+    )
+    agent = await started_agent(tmp_path / "ws", llm, reasoning="compress")
+    s = Setup(path, store, llm, agent)
+    try:
+        result = await s.runner.run_turn("What do my notes say?")
+        assert result.status == "completed"
+        with sqlite3.connect(path) as conn:
+            note = conn.execute(
+                "SELECT note FROM turns WHERE session_id = ? AND turn = 1",
+                (s.runner.session_id,),
+            ).fetchone()[0]
+        assert note.startswith("task: What do my notes say?")
+        assert "outcome: completed" in note
+        events = await stored_events(s)
+        notes = [
+            event
+            for event in events
+            if event.event["type"] == "note" and event.event["data"]["kind"] == "digest"
+        ]
+        assert len(notes) == 1
+        assert notes[0].event["data"]["text"] == note
+        # resume() still loads the conversation, not the note.
+        assert await s.runner.resume() is not None
+    finally:
+        await s.aclose()
+
+
 async def test_turn_finished_reaches_on_event_after_the_run(tmp_path: Path) -> None:
     """The committed turn.finished, with its cause, follows run.finished."""
     s = await setup(tmp_path, [answer("done")])

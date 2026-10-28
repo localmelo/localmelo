@@ -49,13 +49,16 @@ refuses requests that are not addressed to it:
 | HTTP status | `code` | When |
 |---|---|---|
 | 421 | `misdirected_request` | The `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`. This stops a page on another site that reaches the gateway under its own domain name (DNS rebinding). |
-| 403 | `foreign_origin` | A web page at another origin sent the request: a `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS` request whose `Origin` is not `http://127.0.0.1:<port>`, `http://localhost:<port>` or `http://[::1]:<port>`, or a request under `/v1/` whose `Sec-Fetch-Site` is `cross-site` or `same-site`. |
+| 403 | `foreign_origin` | A web page at another origin sent the request: a `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS` request whose `Origin` is not `http://127.0.0.1:<port>`, `http://localhost:<port>` or `http://[::1]:<port>`, or a request under `/v1/` or `/api/` whose `Sec-Fetch-Site` is `cross-site` or `same-site`. |
 
 The body is the usual error with a `code`:
 
 ```json
 {"error":"Host header must be 127.0.0.1:8401, localhost:8401 or [::1]:8401","code":"misdirected_request"}
 ```
+
+A refused request under `/api/` uses [API v2](api.md)'s envelope instead:
+`{"error": {"code": "misdirected_request", "message": "...", "details": {}}}`.
 
 - Open the web workspace as `http://127.0.0.1:8401/` or
   `http://localhost:8401/`, with your port; with `host = "::1"`, use
@@ -64,9 +67,11 @@ The body is the usual error with a `code`:
 - curl and scripts send no `Origin` header, so only the `Host` check applies
   to them.
 - Every response tells the browser not to show it in a frame, with
-  `X-Frame-Options: DENY` and
-  `Content-Security-Policy: frame-ancestors 'none'`, so a page on another
-  site cannot embed the web workspace and trick you into clicking in it.
+  `X-Frame-Options: DENY` and a `Content-Security-Policy` that ends
+  `frame-ancestors 'none'`, so a page on another site cannot embed the web
+  workspace and trick you into clicking in it. A response with a policy of
+  its own, such as a blob's `default-src 'none'; sandbox`, keeps one header
+  with both.
 - The checks are on when the host is `localhost` or a loopback IP address:
   `127.0.0.1`, `::1` or another address in `127.0.0.0/8`. Requests must
   still name the gateway as `127.0.0.1`, `localhost` or `[::1]`, so use one
@@ -84,6 +89,21 @@ The body is the usual error with a `code`:
 Requests and responses are JSON. The examples use the default address. Any
 route can also answer 421 or 403; see
 [Keep the gateway private](#keep-the-gateway-private).
+
+### API v2 (web console)
+
+The web console's own API is under `/api/`. It is served only when the
+gateway listens on a loopback address, and it is documented separately in
+[API v2](api.md). API v2 only grows: endpoints, optional request fields and
+response keys are added, never renamed or removed.
+
+This version serves `GET /api/health`, the sessions list and one session,
+a session's turns, its Server-Sent Events stream, its blobs and a
+submission lookup. A turn cannot be started, stopped or retried through
+`/api` yet, and settings and model listing come later. The `/api` routes
+answer the same 421 and 403 as `/v1/`, and add
+`Cache-Control: no-store` and the error shape
+`{"error": {"code", "message", "details"}}` to every response.
 
 ### GET /v1/health
 

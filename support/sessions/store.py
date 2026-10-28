@@ -1430,6 +1430,22 @@ class SessionStore:
             StoredEvent(row[0], session_id, row[1], json.loads(row[2])) for row in rows
         ]
 
+    async def latest_event_id(self, session_id: str) -> int:
+        """The id of the session's newest stored event, or 0 when it has none.
+
+        A one-shot event read snapshots this id at its request time, then
+        serves only events at or below it, so a turn that starts while the
+        response pages does not add frames to it.
+        """
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                "SELECT COALESCE(MAX(id), 0) FROM events WHERE session_id = ?",
+                (session_id,),
+            )
+        return int(rows[0][0])
+
     async def get_blob(self, session_id: str, sha256: str) -> tuple[str, bytes] | None:
         """The MIME type and bytes of an image a turn's tool returned, or ``None``."""
         async with self._lock:
@@ -1861,6 +1877,7 @@ class SessionStore:
         answer: str,
         window: Sequence[Message] | None = None,
         error: str | None = None,
+        note: str = "",
         on_stored: Callable[[StoredEvent], None] | None = None,
     ) -> TurnInfo:
         """End a turn that runs under *holder*, in one transaction (T-8).
@@ -1919,6 +1936,7 @@ class SessionStore:
                         status=status,
                         cause=cause,
                         answer=stored_answer,
+                        note=note,
                         result=result_text,
                         error=error,
                         now=now,
@@ -1952,6 +1970,7 @@ class SessionStore:
         status: str,
         cause: str,
         answer: str,
+        note: str,
         result: str | None,
         error: str,
         now: float,
@@ -2007,8 +2026,9 @@ class SessionStore:
             )
         await conn.execute(
             "UPDATE turns SET status = ?, cause = ?, answer = ?, result = ?, "
-            "finished_at = ? WHERE session_id = ? AND turn = ? AND status = 'running'",
-            (status, cause, answer, result, now, session_id, turn),
+            "note = ?, finished_at = ? WHERE session_id = ? AND turn = ? "
+            "AND status = 'running'",
+            (status, cause, answer, result, note, now, session_id, turn),
         )
         await self._insert_event(
             conn,
@@ -2522,6 +2542,7 @@ class SessionStore:
             status=status,
             cause=cause,
             answer=answer,
+            note="",
             result=result_text,
             error=error,
             now=now,

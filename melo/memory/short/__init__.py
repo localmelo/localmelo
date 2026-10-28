@@ -6,6 +6,7 @@ from collections import deque
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
+from localmelo.melo.memory.short.note_store import NoteStore
 from localmelo.melo.schema import EMPTY_REPLY_LABEL, EMPTY_REPLY_NUDGE, Message
 
 if TYPE_CHECKING:
@@ -16,28 +17,35 @@ def _opens_tool_turn(msg: Message) -> bool:
     return msg.role == "assistant" and bool(msg.tool_calls)
 
 
-def _is_empty_reply_label(msg: Message) -> bool:
-    """Whether *msg* is the agent's stand-in for an empty planning reply."""
-    return (
-        msg.role == "assistant"
-        and not msg.tool_calls
-        and msg.content == EMPTY_REPLY_LABEL
-    )
+def _is_empty_reply_label(msg: Message, empty_prefix: bool = False) -> bool:
+    """Whether *msg* is the agent's stand-in for an empty planning reply.
+
+    With *empty_prefix*, a label that carries the reply's note after a
+    line break (the compress modes) still counts, by prefix; ``legacy``
+    keeps the exact match.
+    """
+    if msg.role != "assistant" or msg.tool_calls:
+        return False
+    if msg.content == EMPTY_REPLY_LABEL:
+        return True
+    return empty_prefix and msg.content.startswith(EMPTY_REPLY_LABEL + "\n")
 
 
-def _joins(unit: Sequence[Message], msg: Message) -> bool:
+def _joins(unit: Sequence[Message], msg: Message, empty_prefix: bool = False) -> bool:
     """Whether *msg*, directly after *unit*, belongs to that unit."""
     if _opens_tool_turn(unit[0]):
         return msg.role == "tool"
     return (
         len(unit) == 1
-        and _is_empty_reply_label(unit[0])
+        and _is_empty_reply_label(unit[0], empty_prefix)
         and msg.role == "user"
         and msg.content == EMPTY_REPLY_NUDGE
     )
 
 
-def group_turns(messages: Iterable[Message]) -> list[list[Message]]:
+def group_turns(
+    messages: Iterable[Message], *, empty_prefix: bool = False
+) -> list[list[Message]]:
     """Split *messages* into units that must stay together.
 
     An assistant message with tool calls opens a unit that also owns the
@@ -49,26 +57,31 @@ def group_turns(messages: Iterable[Message]) -> list[list[Message]]:
     OpenAI-compatible servers reject, nor a nudge from its label: left at
     the start of the window, the nudge would follow the task query, which
     the agent puts back in front of the window, and some chat templates
-    reject two user messages in a row.
+    reject two user messages in a row. *empty_prefix* matches a label by
+    prefix, for the compress modes' label that carries a note (see
+    :func:`_is_empty_reply_label`).
     """
     units: list[list[Message]] = []
     for msg in messages:
-        if units and _joins(units[-1], msg):
+        if units and _joins(units[-1], msg, empty_prefix):
             units[-1].append(msg)
         else:
             units.append([msg])
     return units
 
 
-def tail_turns(messages: Sequence[Message], max_messages: int) -> list[Message]:
+def tail_turns(
+    messages: Sequence[Message], max_messages: int, *, empty_prefix: bool = False
+) -> list[Message]:
     """Return the newest whole units of *messages* that fit *max_messages*.
 
     The newest unit is always included, even when it alone is larger than
     the budget, so the latest tool call is never cut off from its results.
+    *empty_prefix* is passed to :func:`group_turns`.
     """
     kept: list[list[Message]] = []
     count = 0
-    for unit in reversed(group_turns(messages)):
+    for unit in reversed(group_turns(messages, empty_prefix=empty_prefix)):
         if kept and count + len(unit) > max_messages:
             break
         kept.append(unit)
@@ -91,12 +104,20 @@ class WorkingMemory:
     rather than a log keeps the planning prompt bounded across attempts.
     """
 
-    def __init__(self, max_len: int) -> None:
+    def __init__(self, max_len: int, *, empty_prefix: bool = False) -> None:
         if max_len < 0:
             raise ValueError("max_len must be non-negative")
         self._max_len = max_len
+        self._empty_prefix = empty_prefix
         self._buf: deque[Message] = deque()
         self._reflection: ReflectionEntry | None = None
+        # The run's reasoning notes and drafts (R4), RAM only, bounded.
+        self.notes = NoteStore()
+
+    @property
+    def empty_prefix(self) -> bool:
+        """Whether an empty reply's label is matched by prefix (compress modes)."""
+        return self._empty_prefix
 
     # ── Conversation buffer ──
 
@@ -173,7 +194,7 @@ class WorkingMemory:
         """Messages in the unit that starts at *start* (see :func:`group_turns`)."""
         unit = [self._buf[start]]
         for msg in itertools.islice(self._buf, start + 1, None):
-            if not _joins(unit, msg):
+            if not _joins(unit, msg, self._empty_prefix):
                 break
             unit.append(msg)
         return len(unit)
@@ -190,7 +211,7 @@ class WorkingMemory:
         """Messages in the oldest unit of the buffer (see :func:`group_turns`)."""
         unit = [self._buf[0]]
         for msg in itertools.islice(self._buf, 1, None):
-            if not _joins(unit, msg):
+            if not _joins(unit, msg, self._empty_prefix):
                 break
             unit.append(msg)
         return len(unit)

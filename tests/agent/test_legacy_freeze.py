@@ -75,8 +75,9 @@ BASE_OPTIONS = [
 ]
 
 # Options added after R1, each by a stage whose spec calls for it: P3's
-# progress line (progress_spec.md section 11, "New flags only") and U2a.1's
-# interactive UI and U2b's session selection (u2_spec.md section 1, "Flags").
+# progress line (progress_spec.md section 11, "New flags only"), U2a.1's
+# interactive UI and U2b's session selection (u2_spec.md section 1, "Flags"),
+# and R4's note writer (r4_spec.md Requirement 12).
 LATER_OPTIONS = [
     "--progress",
     "--routine",
@@ -86,6 +87,7 @@ LATER_OPTIONS = [
     "--continue",
     "-r",
     "--resume",
+    "--note-writer",
 ]
 
 

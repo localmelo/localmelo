@@ -19,11 +19,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import json
 import os
 import signal
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -78,11 +79,13 @@ def _executor(
     *,
     rooted_tools: bool = True,
     tool_timeout_s: float | None = None,
+    tool_env: Mapping[str, str] | None = None,
 ) -> Executor:
     """An executor with every built-in, fenced by *root*.
 
     With *rooted_tools*, the built-ins are the ones ``register_builtins``
-    gives for *root*; otherwise Phase 1a's.
+    gives for *root*; otherwise Phase 1a's. *tool_env* adds variables to
+    the environment of the ``shell_exec`` and ``python_exec`` children.
     """
     hippo = Hippo()
     workspace_root = None if root is None else str(root)
@@ -92,6 +95,7 @@ def _executor(
         hippo,
         workspace_root=workspace_root if rooted_tools else None,
         tool_timeout_s=tool_timeout_s,
+        tool_env=tool_env,
     )
     return executor
 
@@ -1082,6 +1086,134 @@ async def test_python_without_an_interpreter(
 
     assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
     assert outcome.error == "No Python interpreter is available for python_exec"
+
+
+# ── The environment of a tool's child process ──────────────────────────────
+
+SECRET = "LOCALMELO_TEST_SECRET"
+
+# Variables a tool's child must not inherit: a secret of the agent's own,
+# an API key, the proxy settings and PYTHONPATH.
+PRIVATE_VARS = (SECRET, "OPENAI_API_KEY", "HTTPS_PROXY", "PYTHONPATH")
+
+
+@pytest.fixture
+def private_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set the variables of :data:`PRIVATE_VARS`, and a locale that passes."""
+    monkeypatch.setenv(SECRET, "hunter2")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.test:3128")
+    monkeypatch.setenv("PYTHONPATH", "/tmp/path")
+    monkeypatch.setenv("LC_TIME", "de_DE.UTF-8")
+
+
+class TestChildEnvironment:
+    @pytest.mark.parametrize("rooted", [True, False], ids=["rooted", "unrooted"])
+    async def test_the_shell_child_gets_the_allowlist_only(
+        self, root: Path, private_vars: None, rooted: bool
+    ) -> None:
+        executor = _executor(root if rooted else None, rooted_tools=rooted)
+
+        outcome = await _run(executor, "shell_exec", command="env")
+
+        assert outcome.status == ExecutionStatus.SUCCESS
+        seen = dict(
+            line.split("=", 1) for line in outcome.output.splitlines() if "=" in line
+        )
+        for name in PRIVATE_VARS:
+            assert name not in seen
+        assert seen["PATH"] == os.environ["PATH"]
+        assert seen["HOME"] == os.environ["HOME"]
+        # Every LC_* variable passes.
+        assert seen["LC_TIME"] == "de_DE.UTF-8"
+
+    @pytest.mark.parametrize("rooted", [True, False], ids=["rooted", "unrooted"])
+    async def test_the_python_child_gets_the_allowlist_only(
+        self, root: Path, private_vars: None, rooted: bool
+    ) -> None:
+        executor = _executor(root if rooted else None, rooted_tools=rooted)
+
+        outcome = await _run(
+            executor,
+            "python_exec",
+            code="import json, os; print(json.dumps(dict(os.environ)))",
+        )
+
+        assert outcome.status == ExecutionStatus.SUCCESS
+        seen = json.loads(outcome.output)
+        for name in PRIVATE_VARS:
+            assert name not in seen
+        assert seen["PATH"] == os.environ["PATH"]
+        assert seen["LC_TIME"] == "de_DE.UTF-8"
+
+    async def test_the_extras_reach_both_children(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TMPDIR", "/inherited")
+        executor = _executor(root, tool_env={"MY_VALUE": "42", "TMPDIR": "/mine"})
+
+        shell = await _run(
+            executor, "shell_exec", command='printf "%s %s" "$MY_VALUE" "$TMPDIR"'
+        )
+        python = await _run(
+            executor,
+            "python_exec",
+            code=(
+                "import os\n" "print(os.environ['MY_VALUE'], os.environ['TMPDIR'])\n"
+            ),
+        )
+
+        expected = (ExecutionStatus.SUCCESS, "42 /mine")
+        assert (shell.status, shell.output) == expected
+        assert (python.status, python.output) == expected
+
+
+class _ShellCaller(BaseLLMProvider):
+    """Calls ``shell_exec`` once with *command*, then ends the run."""
+
+    def __init__(self, command: str) -> None:
+        self.replies = [
+            Message(
+                role="assistant",
+                tool_calls=[ToolCall("shell_exec", arguments={"command": command})],
+            ),
+            Message(role="assistant", content="done"),
+        ]
+        self.calls: list[list[Message]] = []
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        self.calls.append(list(messages))
+        return self.replies.pop(0)
+
+    async def close(self) -> None:
+        pass
+
+
+async def test_the_agent_options_give_the_children_their_extras(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("LOCALMELO_PERSIST_MEMORY", raising=False)
+    monkeypatch.delenv("LOCALMELO_MEMORY_DIR", raising=False)
+    monkeypatch.setenv(SECRET, "hunter2")
+    llm = _ShellCaller('printf "%s|%s" "$MY_VALUE" "$LOCALMELO_TEST_SECRET"')
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset({"shell_exec"}),
+            attempt_policy="none",
+            max_steps=2,
+            workspace_root=str(root),
+            tool_env={"MY_VALUE": "42"},
+        ),
+    )
+
+    result = await agent.run_task("print the value")
+
+    assert (result.status, result.result) == ("completed", "done")
+    # The extra reached the child; the secret of melo's own environment did not.
+    assert [m.content for m in llm.calls[1] if m.role == "tool"] == ["42|"]
 
 
 # ── What the model is told ──────────────────────────────────────────────────

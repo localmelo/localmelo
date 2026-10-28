@@ -497,11 +497,10 @@ class TestRetrieveAllowlist:
     async def test_refused_tool_is_offered_on_the_next_step(self) -> None:
         """Known limit: the allowlist holds within one step only.
 
-        The refused call and its error put the tool's name into working
-        memory, so hint extraction offers it on the next step and the same
-        call then runs. Since C1 this concerns only the tools other than
-        the built-ins, which every step offers; hint extraction stays as
-        it was for those tools. Revisit this test with the hints rework.
+        The refused call is itself a tool call in working memory, so hint
+        extraction offers that tool on the next step and the same call then
+        runs. Since C1 this concerns only the tools other than the
+        built-ins, which every step offers.
         """
         llm = FakeLLM([_call("zeta", "1"), _call("zeta", "2"), _answer("done")])
         agent, ran = _agent(llm, AgentOptions(builtins=frozenset()), ECHO_AND_ZETA)

@@ -30,7 +30,8 @@ VALID_CHAT_BACKENDS = (
     "nvidia",
 )
 VALID_EMBEDDING_BACKENDS = ("mlc", "ollama", "vllm", "sglang", "none")
-REASONING_MODES = ("legacy", "drop", "replay")
+REASONING_MODES = ("legacy", "drop", "replay", "compress", "compress+replay")
+NOTE_WRITERS = ("auto", "heuristic")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
 
 
@@ -85,8 +86,9 @@ class SessionsConfig:
 class AgentConfig:
     """The ``[agent]`` table: how a direct run or a session reasons."""
 
-    reasoning: str = "legacy"  # legacy | drop | replay
+    reasoning: str = "legacy"  # legacy | drop | replay | compress | compress+replay
     replay_turns: int | None = None  # None: every turn in scope
+    note_writer: str = "auto"  # auto | heuristic (compress modes)
 
 
 @dataclass
@@ -272,12 +274,17 @@ class Config:
             return [f"chat_backend {self.chat_backend!r}: no registered adapter found."]
 
     def _validate_agent(self) -> list[str]:
-        """``[agent]`` holds a known mode and a positive ``replay_turns``."""
+        """``[agent]`` holds known values for its mode and note writer."""
         errors: list[str] = []
         if self.agent.reasoning not in REASONING_MODES:
             errors.append(
                 f"[agent] reasoning {self.agent.reasoning!r} is not recognised. "
                 f"Must be one of {REASONING_MODES}."
+            )
+        if self.agent.note_writer not in NOTE_WRITERS:
+            errors.append(
+                f"[agent] note_writer {self.agent.note_writer!r} is not "
+                f"recognised. Must be one of {NOTE_WRITERS}."
             )
         turns: object = self.agent.replay_turns
         if turns is not None and (
@@ -434,6 +441,7 @@ def load() -> Config:
         for k, v in data["agent"].items():
             if hasattr(cfg.agent, k):
                 setattr(cfg.agent, k, v)
+
     # A [scheduler] that is not a table is ignored, like an unknown key; a
     # malformed value inside a real table is left for Config.validate.
     if isinstance(data.get("scheduler"), dict):
@@ -651,11 +659,17 @@ def save(cfg: Config) -> None:
     lines.append(f"host = {_toml_string(cfg.gateway.host)}")
     lines.append("")
 
-    if cfg.agent.reasoning != "legacy" or cfg.agent.replay_turns is not None:
+    if (
+        cfg.agent.reasoning != "legacy"
+        or cfg.agent.replay_turns is not None
+        or cfg.agent.note_writer != "auto"
+    ):
         lines.append("[agent]")
         lines.append(f"reasoning = {_toml_string(cfg.agent.reasoning)}")
         if cfg.agent.replay_turns is not None:
             lines.append(f"replay_turns = {cfg.agent.replay_turns}")
+        if cfg.agent.note_writer != "auto":
+            lines.append(f"note_writer = {_toml_string(cfg.agent.note_writer)}")
         lines.append("")
 
     if cfg.sessions.resume_mode != "pairs":

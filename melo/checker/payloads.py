@@ -86,3 +86,22 @@ class MemoryWritePayload:
     role: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
     images: list[ImagePart] = field(default_factory=list)
+
+
+@dataclass
+class MemoryCandidatePayload:
+    """One document offered to memory, before it reaches a prompt or a store.
+
+    The reasoning-notes candidate boundary (R4): ``source`` says what kind
+    of document it is, ``target`` where it is going, and ``kind`` the long
+    store's entry kind when the target is ``long`` (R6-lite).
+    """
+
+    text: str = ""
+    # reasoning_note | draft | thought | digest | reflection | user | recall | sleep
+    source: str = ""
+    # candidate | prompt | long
+    target: str = ""
+    # target "long" only: the kind Hippo assigned (R6-lite)
+    kind: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
