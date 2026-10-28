@@ -149,11 +149,17 @@ class QuietProbe:
         pass
 
 
+class _QuietGate:
+    async def close(self) -> None:
+        pass
+
+
 class RecordingPlayground:
     """Stands in for SmokePlayground: records each call, contacts no server."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.gate = _QuietGate()
 
     def scenarios_payload(self) -> list[dict[str, Any]]:
         self.calls.append("scenarios")
@@ -176,6 +182,9 @@ class RecordingPlayground:
         return True
 
     async def close_all(self) -> None:
+        pass
+
+    async def close_sessions(self) -> None:
         pass
 
 

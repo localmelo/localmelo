@@ -100,7 +100,8 @@ def _pending_approvals(console: Console, session_id: str) -> list[dict[str, Any]
     return [approval_json(request) for request in console.broker.pending(session_id)]
 
 
-def _agent_state(console: Console, session_id: str) -> str:
+def agent_state(console: Console, session_id: str) -> str:
+    """``open``, ``paused`` or ``not_loaded``, as the session routes report it."""
     entry = console.sessions.get(session_id)
     if entry is None:
         return "not_loaded"
@@ -127,7 +128,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 f"kind must be one of {', '.join(sorted(SESSION_KINDS))}",
             )
         # A row with no turn is a create that never got its message (a
-        # shutdown in the middle of one); the list starts at one turn.
+        # shutdown in the middle of one); the list starts at one turn, a
+        # running one included, so a session appears as it is created.
         sessions = await _store_call(
             console,
             console.store.list_sessions(
@@ -172,7 +174,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "grants": grants,
                 "granted_at": granted_at,
                 "mcp_error": "" if entry is None else entry.mcp_error,
-                "agent": _agent_state(console, session_id),
+                "agent": agent_state(console, session_id),
                 "tokens": tokens,
             }
         )

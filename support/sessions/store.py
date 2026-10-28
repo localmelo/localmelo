@@ -1343,8 +1343,7 @@ class SessionStore:
         *query* matches the title or any turn's user text (``LIKE``, with
         ``%`` and ``_`` taken literally); *workspace* the stored workspace
         exactly; *min_turns* keeps the sessions with at least that many
-        turns that are neither running nor undone. *kinds* ``None`` means
-        every kind.
+        turns, running ones included. *kinds* ``None`` means every kind.
         """
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
             raise ValueError(f"limit must be an int >= 1, got {limit!r}")
@@ -1363,9 +1362,11 @@ class SessionStore:
             clauses.append("AND s.workspace = ?")
             args.append(workspace)
         if min_turns > 0:
+            # Any turn counts, a running or an undone one too: a session
+            # with a turn is a session the list shows, from the moment its
+            # first turn's row exists.
             clauses.append(
-                "AND (SELECT COUNT(*) FROM turns m WHERE m.session_id = s.id "
-                "AND m.status != 'running' AND m.undone = 0) >= ?"
+                "AND (SELECT COUNT(*) FROM turns m WHERE m.session_id = s.id) >= ?"
             )
             args.append(min_turns)
         async with self._lock:

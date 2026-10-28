@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.events import json_safe_payload
 from localmelo.melo.schema import Message, ToolInfo
@@ -149,11 +150,17 @@ def submission_json(
 
 
 def memory_json(message: Message, *, limit: int) -> dict[str, Any]:
-    """One working-memory row: role, text, tool names and image count."""
+    """One working-memory row: role, text, tool names and image count.
+
+    The text is what the conversation holds: a tool's output can carry a
+    key, and a row the browser reads passes the same redaction the stored
+    events do.
+    """
     text = message.content
     if message.role == "assistant":
         # The page shows what was said, not how the model got there.
         _, text = display.split_thinking(text)
+    text, _ = redact_secrets(text)
     if len(text) > limit:
         text = f"{text[:limit]}… (+{len(text) - limit} chars)"
     return {

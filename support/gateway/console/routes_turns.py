@@ -3,9 +3,10 @@
 Every route here writes. A turn starts under the session's lock and returns
 as soon as its row exists (202); its events arrive on the stream of
 ``routes_sessions``. A ``client_request_id`` makes a send safe to repeat:
-the same key again answers 200 with the turn it started. Console turns run
-without the scheduler gate until the next change (3b) adds its provider
-wrapper.
+the same key again answers 200 with the turn it started. A console turn
+passes the scheduler gate: ``default_builder`` wraps the Agent's providers
+with ``GatedLLM``/``GatedEmbedding``, so its model calls wait for a slot on
+the one gate this gateway shares with the workspace page.
 """
 
 from __future__ import annotations

@@ -118,7 +118,9 @@ scheduler gate like a workspace chat: the gateway builds one gate from the
 `n_srv` budget and one call log, and the monitor the workspace page runs
 feeds both (a foreign GPU lock holds a console turn under
 `lock_gate = "wait"`; the battery is read for the page's chip and never
-holds a call).
+holds a call). The gateway closes that gate last at shutdown, after both
+surfaces' sessions, so a turn waiting for its slot ends `cancelled` with
+cause `shutdown`.
 
 ### GET /v1/health
 

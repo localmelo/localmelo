@@ -117,6 +117,20 @@ async def test_the_kind_filters_the_list(
     assert client.get("/api/sessions?kind=everything").status_code == 400
 
 
+async def test_a_running_first_turn_lists_its_session(
+    client: TestClient, console: Console, workspace: str
+) -> None:
+    turn = await seed_turn(console.store, workspace, status="running")
+
+    listed = client.get("/api/sessions").json()["sessions"]
+
+    # The list shows a session from the moment its first turn's row exists,
+    # so a create's session is there while it works or waits for a card.
+    assert [session["id"] for session in listed] == [turn.session_id]
+    found = client.get("/api/sessions?query=hello").json()["sessions"]
+    assert [session["id"] for session in found] == [turn.session_id]
+
+
 async def test_a_session_with_its_tokens_and_agent_state(
     client: TestClient, console: Console, workspace: str
 ) -> None:

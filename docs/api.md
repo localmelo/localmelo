@@ -102,9 +102,11 @@ curl 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
 - `limit` is 1 to 200 (default 50). `query` is at most 200 characters and
   matches a session's title or any turn's user text. `has_more` says that
   older sessions exist beyond the page.
-- A session is listed once it has a turn: a row made by a create that
-  never sent its message (a shutdown in the middle, say) is left out, and
-  `GET /api/sessions/{id}` still shows it.
+- A session is listed once it has a turn, a running one included: a
+  session appears as soon as its create has stored its first turn's row.
+  A row a create made without ever starting its message (a shutdown in the
+  middle, say) has no turn and is left out; `GET /api/sessions/{id}` still
+  shows it.
 - `kind` is `chat` (default), `front`, `front_bg` or `task`; any other
   value is 400 `invalid_request`.
 - `workspace_label` is the workspace with the home folder written as `~`.
@@ -507,9 +509,9 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/tools
 - This route opens the session, because a provider's tools appear only once
   its Agent started. It can take seconds, and a start that fails is 502
   `agent_start_failed`.
-- `mcp_config_label` is the config's `mcp_config` with the home folder as
-  `~`, or `""`. `mcp_error` is why this session runs without MCP tools, or
-  `""`; MCP in the console is not built yet, so it is always `""`.
+- MCP in the console is not built yet, so no MCP tools load:
+  `mcp_config_label` is always `""` and `mcp_error` always says
+  `MCP is not built in the console yet`.
 
 ## DELETE /api/sessions/{id}/grants/{tool}
 
@@ -542,6 +544,8 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/memory
 - An assistant row's `text` has its `<think>` block removed, and every text
   stops at 2,000 characters with `… (+N chars)` when longer; the page
   expands the message itself.
+- Every text is redacted like a stored event: a key a tool's output
+  carried comes back as `[redacted]`. Tool rows are part of the window.
 - `tool_calls` lists the names a message called, `images` counts its image
   references.
 - `working_max` is the window's message bound. `long_term.enabled` is

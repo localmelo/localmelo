@@ -12,9 +12,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Console session details over API v2, and the scheduler gate in front of
   a console turn: `GET /api/sessions/{id}/tools` lists each tool's source,
   whether it asks first and whether the session allows it, `/memory` the
-  conversation the gateway holds (thinking stripped, text cut at 2,000
-  characters) and `/runs` each finished turn's `RunResult` without its
-  answer, while `DELETE /api/sessions/{id}/grants/{tool}` and `/grants`
+  conversation the gateway holds (thinking stripped, every text redacted,
+  text cut at 2,000 characters) and `/runs` each finished turn's `RunResult`
+  without its answer, while `DELETE /api/sessions/{id}/grants/{tool}` and `/grants`
   take a session grant back. Every model call of a console turn now waits
   for its slot under `[scheduler]`, like a workspace chat's: the console
   shares the gateway's one `ChatGate` and wraps the Agent's providers

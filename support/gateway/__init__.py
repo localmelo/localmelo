@@ -135,10 +135,18 @@ class GatewayServer:
                     # providers here as well.
                     playground = getattr(app.state, "smoke_playground", None)
                     if playground is not None:
-                        await playground.close_all()
+                        await playground.close_sessions()
                 finally:
-                    if self.console is not None:
-                        await self.console.aclose()
+                    try:
+                        if self.console is not None:
+                            await self.console.aclose()
+                    finally:
+                        # The one shared gate goes last: a console turn
+                        # waiting for its slot must end `cancelled`, cause
+                        # `shutdown`, not fail on a closed gate.
+                        playground = getattr(app.state, "smoke_playground", None)
+                        if playground is not None:
+                            await playground.gate.close()
 
     # ── Routes ──
 

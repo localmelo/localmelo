@@ -3,25 +3,24 @@
 These are the drawer's three tabs. `tools` opens the session, because the
 list is the Agent's and a provider's tools appear only once it started;
 `memory` never opens it, so a paused session shows the conversation the
-gateway kept; `runs` reads the turns it has, with each `RunResult` but its
-answer text. The two `DELETE` routes take back a session grant, which lives
+gateway kept, every text redacted; `runs` reads the turns it has, with each
+`RunResult` but its answer text. The two `DELETE` routes take back a session grant, which lives
 in the registry's `RememberingPolicy` and never in the store.
 """
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any
 
 from fastapi import FastAPI, Query
 from fastapi.responses import JSONResponse, Response
 
 from localmelo.melo.schema import SHORT_TERM_MAX, Message, ToolInfo
-from localmelo.support.sessions import display
 from localmelo.support.sessions.store import SessionInfo, SessionStoreError, TurnInfo
 
 from .errors import ApiError
 from .registry import OpenSession
+from .routes_sessions import agent_state
 from .shapes import memory_json, run_json, tool_json
 
 if TYPE_CHECKING:
@@ -77,18 +76,10 @@ async def _open_session(console: Console, session_id: str) -> OpenSession:
     return entry
 
 
-def _state(console: Console, session_id: str) -> str:
-    entry = console.sessions.get(session_id)
-    if entry is None:
-        return "not_loaded"
-    return "open" if entry.agent is not None else "paused"
-
-
-def _mcp_label(console: Console) -> str:
-    path = getattr(console.cfg, "mcp_config", "") or ""
-    if not path:
-        return ""
-    return display.home_label(os.path.expanduser(path))
+# MCP in the console is deferred (U3 decision 5B): no MCP tools load, and
+# the Tools tab says so rather than showing a configured path that does
+# nothing.
+MCP_DEFERRED = "MCP is not built in the console yet"
 
 
 # ── Routes ──
@@ -108,8 +99,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
         return JSONResponse(
             content={
                 "tools": [tool_json(tool, tool.name in granted) for tool in tools],
-                "mcp_config_label": _mcp_label(console),
-                "mcp_error": entry.mcp_error,
+                "mcp_config_label": "",
+                "mcp_error": MCP_DEFERRED,
             }
         )
 
@@ -144,7 +135,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         backend = getattr(console.cfg, "embedding_backend", "") or "none"
         return JSONResponse(
             content={
-                "agent": _state(console, session_id),
+                "agent": agent_state(console, session_id),
                 "working": [
                     memory_json(message, limit=MEMORY_TEXT_CHARS)
                     for message in messages

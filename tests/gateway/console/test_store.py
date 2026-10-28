@@ -152,6 +152,11 @@ async def test_aclose_is_idempotent(
     assert probe.closed is True
 
 
+class _QuietGate:
+    async def close(self) -> None:
+        pass
+
+
 async def test_the_console_closes_when_a_later_close_raises(
     tmp_path: Path, builder: FakeBuilder, probe: FakeProbe
 ) -> None:
@@ -162,7 +167,9 @@ async def test_the_console_closes_when_a_later_close_raises(
     )
 
     class BadPlayground:
-        async def close_all(self) -> None:
+        gate = _QuietGate()
+
+        async def close_sessions(self) -> None:
             raise RuntimeError("playground close failed")
 
     server.app.state.smoke_playground = BadPlayground()

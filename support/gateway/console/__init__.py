@@ -21,14 +21,13 @@ import contextlib
 import logging
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.routing import Match
 
-from localmelo.support.gateway.chat_gate import DEFAULT_CALL_LOG_DIR, ChatGate
+from localmelo.support.gateway.chat_gate import ChatGate, call_log_dir
 from localmelo.support.gateway.machine_monitor import MachineMonitor
 from localmelo.support.sessions import display
 from localmelo.support.sessions.approvals import ApprovalBroker
@@ -54,7 +53,7 @@ from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
 
 if TYPE_CHECKING:
-    from localmelo.support.config import Config, SchedulerConfig
+    from localmelo.support.config import Config
 
 logger = logging.getLogger(__name__)
 
@@ -96,19 +95,6 @@ class ConsoleOptions:
     dev_reload: bool = False
 
 
-def _call_log_dir(scheduler: SchedulerConfig) -> Path | None:
-    """The scheduler's call-log directory, or None when the file is off.
-
-    The same rule as the workspace page's, kept here so the console's gate
-    writes the same log without the page.
-    """
-    if not scheduler.call_log:
-        return None
-    if scheduler.call_log_dir:
-        return Path(scheduler.call_log_dir).expanduser()
-    return DEFAULT_CALL_LOG_DIR
-
-
 class Console:
     """The console's server state and the ``/api`` routes over it."""
 
@@ -126,6 +112,9 @@ class Console:
         self.hub = SessionHub(self.store)
         self.broker = ApprovalBroker(timeout_s=None)
         self.gate = self.options.gate or self._build_gate()
+        # A gate the console built is its own to close; a shared one belongs
+        # to the gateway, which closes it after both surfaces' sessions.
+        self._owns_gate = self.options.gate is None
         self._monitor = None if self.options.gate is not None else self._build_monitor()
         self.sessions = ConsoleSessions(
             self.store,
@@ -156,7 +145,7 @@ class Console:
             n_srv=scheduler.n_srv,
             r_f=scheduler.r_f,
             n_fg=scheduler.n_fg,
-            call_log_dir=_call_log_dir(scheduler),
+            call_log_dir=call_log_dir(scheduler),
             lock_gate=scheduler.lock_gate,
         )
 
@@ -284,8 +273,10 @@ class Console:
             await self.sessions.close_all()
         finally:
             # Every live call leaves its one line; the log's files close.
-            with contextlib.suppress(Exception):
-                await self.gate.close()
+            # A shared gate stays open: the gateway closes it last.
+            if self._owns_gate:
+                with contextlib.suppress(Exception):
+                    await self.gate.close()
             try:
                 await self.hub.aclose()
             finally:

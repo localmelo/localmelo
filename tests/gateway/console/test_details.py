@@ -10,7 +10,13 @@ from localmelo.support.gateway.console.registry import default_builder
 from localmelo.tests.sessions.helpers import answer, tool_call
 
 from .conftest import make_cfg
-from .test_turn_writes import _create, _wait_pending, _wait_turn, console_with
+from .test_turn_writes import (
+    _create,
+    _post_turn,
+    _wait_pending,
+    _wait_turn,
+    console_with,
+)
 
 # ── Tools ──
 
@@ -35,7 +41,8 @@ async def test_tools_list_each_tool_and_whether_it_is_granted(
         listed = (await client.get(f"/api/sessions/{session_id}/tools")).json()
 
         assert listed["mcp_config_label"] == ""
-        assert listed["mcp_error"] == ""
+        # MCP in the console is deferred: the tab says so (decision 5B).
+        assert listed["mcp_error"] == "MCP is not built in the console yet"
         by_name = {tool["name"]: tool for tool in listed["tools"]}
         assert set(by_name) >= {"file_write", "shell_exec", "file_read"}
         assert by_name["file_write"]["granted"] is True
@@ -115,6 +122,33 @@ async def test_forgetting_an_unknown_grant_is_404(tmp_path: Path) -> None:
         assert response.json()["error"]["code"] == "not_found"
 
 
+async def test_forgetting_every_grant_takes_them_back(tmp_path: Path) -> None:
+    target = tmp_path / "ws" / "todo.md"
+    async with console_with(
+        tmp_path,
+        tool_call("file_write", {"path": str(target), "content": "# TODO"}),
+        answer("done"),
+    ) as (_console, client, _):
+        body = await _create(client, tmp_path, "Write the todo file")
+        session_id = body["session"]["id"]
+        [pending] = await _wait_pending(client, session_id)
+        await client.post(
+            f"/api/approvals/{pending['request_id']}", json={"choice": "session"}
+        )
+        await _wait_turn(client, session_id)
+        assert (await client.get(f"/api/sessions/{session_id}")).json()["grants"] == (
+            ["file_write"]
+        )
+
+        forgotten = await client.delete(f"/api/sessions/{session_id}/grants")
+
+        assert forgotten.status_code == 204
+        detail = (await client.get(f"/api/sessions/{session_id}")).json()
+        assert detail["grants"] == [] and detail["granted_at"] == {}
+        listed = (await client.get(f"/api/sessions/{session_id}/tools")).json()
+        assert all(tool["granted"] is False for tool in listed["tools"])
+
+
 async def test_forgetting_every_grant_is_204_even_without_any(
     tmp_path: Path,
 ) -> None:
@@ -171,6 +205,41 @@ async def test_memory_shows_the_conversation_without_thinking(
         assert all("images" in row and "tool_calls" in row for row in memory["working"])
 
 
+async def test_memory_shows_the_kept_copy_and_cuts_long_texts(
+    tmp_path: Path,
+) -> None:
+    async with console_with(tmp_path, answer("x" * 2_500)) as (console, client, _):
+        body = await _create(client, tmp_path, "How long?")
+        session_id = body["session"]["id"]
+        await _wait_turn(client, session_id)
+        await console.sessions.keep(session_id)
+
+        memory = (await client.get(f"/api/sessions/{session_id}/memory")).json()
+
+        assert memory["agent"] == "paused"
+        [reply] = [row for row in memory["working"] if row["role"] == "assistant"]
+        assert reply["text"].endswith("… (+500 chars)")
+        assert len(reply["text"]) == 2_500 - 500 + len("… (+500 chars)")
+
+
+async def test_memory_redacts_a_secret(tmp_path: Path) -> None:
+    secret = "sk-" + "a" * 24
+    async with console_with(tmp_path, answer(f"the key is {secret}")) as (
+        _console,
+        client,
+        _,
+    ):
+        body = await _create(client, tmp_path, "Which key?")
+        session_id = body["session"]["id"]
+        await _wait_turn(client, session_id)
+
+        memory = (await client.get(f"/api/sessions/{session_id}/memory")).json()
+
+        [reply] = [row for row in memory["working"] if row["role"] == "assistant"]
+        assert secret not in reply["text"]
+        assert "[redacted]" in reply["text"]
+
+
 # ── Runs ──
 
 
@@ -197,6 +266,28 @@ async def test_runs_list_finished_turns_without_their_answer(
         assert newest["result"]["status"] == "completed"
         assert "result" not in newest["result"]
         assert "user_text" not in newest
+
+
+async def test_runs_report_whether_earlier_turns_exist(tmp_path: Path) -> None:
+    async with console_with(
+        tmp_path, answer("one"), answer("two"), answer("three")
+    ) as (_console, client, _):
+        body = await _create(client, tmp_path, "One")
+        session_id = body["session"]["id"]
+        await _wait_turn(client, session_id)
+        await _post_turn(client, session_id, "Two")
+        await _wait_turn(client, session_id)
+        await _post_turn(client, session_id, "Three")
+        await _wait_turn(client, session_id)
+
+        page = (await client.get(f"/api/sessions/{session_id}/runs?limit=2")).json()
+        assert [run["turn"] for run in page["runs"]] == [2, 3]
+        assert page["has_earlier"] is True
+        older = (
+            await client.get(f"/api/sessions/{session_id}/runs?limit=2&before=2")
+        ).json()
+        assert [run["turn"] for run in older["runs"]] == [1]
+        assert older["has_earlier"] is False
 
 
 async def test_runs_leave_a_running_turn_out(tmp_path: Path) -> None:
