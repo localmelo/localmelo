@@ -28,7 +28,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `history.db`, the explicit modes stop writing raw step summaries and
   promoting reflections to long-term memory, and a session turn's `note`
   column gets the final digest. Legacy is byte-identical, goldens included
-  ([#NN]).
+  ([#85]).
 - The gateway opens its console session store and serves API v2 reads under
   `/api`: health with the versions, limits, store state and a cached
   model-server check; the sessions list and one session, a pending
@@ -546,4 +546,4 @@ earlier milestones.
 [#81]: https://github.com/localmelo/localmelo/pull/81
 [#83]: https://github.com/localmelo/localmelo/pull/83
 [#84]: https://github.com/localmelo/localmelo/pull/84
-[#NN]: https://github.com/localmelo/localmelo/pull/NN
+[#85]: https://github.com/localmelo/localmelo/pull/85
