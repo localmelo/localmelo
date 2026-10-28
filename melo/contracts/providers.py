@@ -53,10 +53,12 @@ class ProviderError(Exception):
         *,
         status_code: int | None = None,
         retryable: bool = False,
+        context_overflow: bool = False,
     ) -> None:
         super().__init__(message)
         self.status_code = status_code
         self.retryable = retryable
+        self.context_overflow = context_overflow
 
 
 class BaseLLMProvider(ABC):
