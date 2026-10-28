@@ -30,6 +30,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   instead of arbitrary output. Hidden paths and agent scratch notes are omitted;
   Python file writes are not inferred ([#149]).
 
+- Direct workers report agent construction failures, including refused
+  config-file values and invalid TOML, as `startup_error` with a redacted
+  cause (`$HOME` shown as `~`), and attempt a `transport_error` result on
+  event-output failure; a broken output pipe exits 1. ([#157])
+
 - Correct the API v2 response formats and tools example, and update the bilingual
   quickstart to reflect the shipped console settings and approvals ([#122], [#124]).
   Clarify task validation and read-only worker details ([#119], [#123], [#130], [#133]).
@@ -45,6 +50,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - `melo-task` creates, inspects and controls gateway tasks, with authenticated
   loopback requests and an optional event follow stream that prints one readable
   line per event and a terminal snapshot. ([#NN])
+- Scheduler component v4 adds dormant process capture state, identity checks
+  and a gated subprocess primitive; worker behavior and Resume are unchanged. [#158]
 
 - Interactive terminal text attachments: `/attach PATH`, `/attachments`,
   `/detach N|all`, and explicit `@` file-completion selection stage bounded
@@ -1015,3 +1022,5 @@ earlier milestones.
 [#152]: https://github.com/localmelo/localmelo/pull/152
 [#153]: https://github.com/localmelo/localmelo/pull/153
 [#155]: https://github.com/localmelo/localmelo/pull/155
+[#157]: https://github.com/localmelo/localmelo/pull/157
+[#158]: https://github.com/localmelo/localmelo/pull/158

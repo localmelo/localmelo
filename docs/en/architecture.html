@@ -183,7 +183,7 @@
           <code>support/sessions/agents.py</code>.
         </p>
 
-        <p>Direct workers can read a brief file and report a versioned JSON result or NDJSON event stream. Inbox steering is not implemented yet.</p>
+        <p>Direct workers can read a brief file and report a versioned JSON result or NDJSON event stream. Startup failures report an error; output failures may prevent the final record. Inbox steering is not implemented yet.</p>
         <p>Direct runs can opt into a one-turn worker session with <code>--save-session</code>; dsh JSONL logs can be imported. The gateway reads worker history from the CLI file without allowing edits or live follow. The web workspace lists those runs with server-side filters and paging and opens each as a read-only snapshot with explicit refresh.</p>
         <h3 id="c-gateway">Gateway</h3>
         <p><code>melo-task</code> is a separate authenticated loopback client for gateway tasks and their event streams; it does not change direct runs.</p>
