@@ -122,9 +122,10 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `n_aux` | Of those, requests without tools: reflections, and planning requests in a step that offered no tool. |
 | `n_tool` | Tool calls handed to the executor, including refused calls. |
 | `llm_errors` | Model requests that failed, counting each failed attempt of a retried request. `n_llm + llm_errors` is the number of requests sent. |
-| `usage` | Token counts of all responses, summed by name, such as `prompt_tokens`, `completion_tokens` and `total_tokens`. |
+| `usage` | Token counts of all responses, summed by name, such as `prompt_tokens`, `completion_tokens` and `total_tokens`. Outside `legacy`, it also has `reasoning_chars` (the reasoning received, after an inline `<think>` block is split out) and `cached_tokens` or `reasoning_tokens` when the server reported them. |
 | `duration_s` | Wall-clock time of the run, in seconds. |
 | `config` | The options the run used (below). |
+| `memory_stats` | Outside `legacy`, the replay counters `replayed_chars`, `replay_skipped` and `replay_stripped`; absent from a `legacy` line. |
 
 `config` holds:
 
@@ -134,6 +135,20 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `builtins` | The registered built-in tools, sorted by name. |
 | `memory_dir` | The directory of the SQLite files, or `null` when memory stays in RAM. |
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
+| `reasoning`, `replay_turns` | Outside `legacy`, the reasoning mode and its turn cap (`null` for every turn in scope). They are absent from a `legacy` line. |
+
+`memory_stats` holds, in order:
+
+| Key | Meaning |
+|---|---|
+| `replayed_chars` | Characters of reasoning the planning and reflection requests carried. |
+| `replay_skipped` | Assistant turns whose reasoning was over the 40,000-character per-turn cap and was left out, summed over the requests sent. |
+| `replay_stripped` | Assistant turns whose reasoning the fit-to-cap eviction cleared, summed over the requests sent. |
+
+All three are `0` in `drop`. A `legacy` line has no `memory_stats`, no
+`reasoning_chars` and no `cached_tokens`/`reasoning_tokens` in `usage`, and
+no `reasoning`/`replay_turns` in `config`, so it is byte-identical to the
+line before these fields.
 
 The chat request timeout is a setting of the model connection, not of the
 run, so it is not part of `config`.

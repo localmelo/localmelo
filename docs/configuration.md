@@ -129,6 +129,10 @@ tables of the chosen backends.
 | `embedding_url` | local backend | not set | The embedding server's URL. |
 | `embedding_model` | local backend | not set | The embedding model to use. |
 | `extra_body` | local or cloud backend | not set | Extra fields for every chat request; see [Extra request fields](#extra-request-fields-extra_body). |
+| `reasoning_field` | local or cloud backend | not set | The request key reasoning is sent back under: `auto`, `reasoning_content` or `reasoning`; `[ollama]` also takes `thinking`. See [Reasoning](#reasoning). |
+| `requires_reasoning_replay` | local or cloud backend | `false` | `true` when the server rejects a request that omits a reply's reasoning. See [Reasoning](#reasoning). |
+| `reasoning` | `[agent]` | `"legacy"` | `legacy`, `drop` or `replay`; the default is direct mode's `--reasoning`. See [Reasoning](#reasoning). |
+| `replay_turns` | `[agent]` | not set | With `replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. |
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
 | `host` | `[gateway]` | `"127.0.0.1"` | The address the gateway listens on: keep `127.0.0.1`, or use `localhost` or `::1`. On a host that is not `localhost` or a loopback IP address, such as `0.0.0.0`, the gateway does not check the `Host` and `Origin` of requests; see [Keep the gateway private](gateway.md#keep-the-gateway-private). |
@@ -141,6 +145,44 @@ Top-level keys must come before the first `[table]` line. How URLs are used:
 - `ollama`: chat uses Ollama's own `/api/chat`, so `chat_url` is used without
   `/v1` (a trailing `/v1` is removed). `embedding_url` gets `/v1` added.
 - Cloud backends: `base_url` is used as given.
+
+### Reasoning
+
+`legacy` is the default: an OpenAI-compatible backend sends no reasoning,
+and Ollama native sends its own `thinking` field and inline copy as before.
+`drop` never sends reasoning; `replay` sends it on the assistant turns in
+scope, under one key, at most 40,000 characters per turn (a longer turn's
+reasoning is skipped and counted). Both explicit modes also stop reading
+`[RECALL]` and remove an inline `<think>` block from the answer.
+
+```toml
+[agent]
+reasoning = "replay"      # legacy, drop, replay
+replay_turns = 3          # optional; omit for every turn
+```
+
+A direct-mode flag wins over `[agent]`, and a `--base-url` run uses only the
+flags (it does not read this file). The gateway does not read `[agent]` in
+this release.
+
+Each backend section can name the request key and say that the server
+requires replay:
+
+```toml
+[vllm]
+chat_url = "http://127.0.0.1:8000/v1"
+chat_model = "MODEL"
+reasoning_field = "auto"              # or reasoning_content, reasoning
+requires_reasoning_replay = false     # true for a server that rejects a
+                                      # request without the reasoning
+```
+
+`auto` follows the key the last reply's reasoning came from, so a backend
+that emits either `reasoning_content` or `reasoning` works as it is; it
+sends no key before the first reply. The `[ollama]` backend fixes its field
+to `thinking` (it may still write `"thinking"` or `"auto"`). With
+`requires_reasoning_replay = true`, `--reasoning drop` is refused and the
+agent evicts whole working-memory units instead of cutting reasoning.
 
 ## Backends
 

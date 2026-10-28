@@ -9,6 +9,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A reasoning mode for direct runs: `--reasoning legacy|drop|replay`
+  (default `legacy`), `--reasoning-field auto|reasoning_content|reasoning`
+  and `--replay-turns N`, or the same `[agent]` keys in `config.toml`.
+  `legacy` is byte-identical to before; `drop` never sends reasoning, and
+  `replay` sends it on the assistant turns in scope under one key, with a
+  40,000-character per-turn cap and strip-first eviction. The JSON line
+  reports the mode, `usage.reasoning_chars`, and the `memory_stats` replay
+  counters outside `legacy` ([#NN]).
 - A session runner can ask its turns for progress events, and the progress
   line's past facts are available alone. `SessionRunner(..., progress=True)`
   asks each turn's run for `run.progress` and stores it with the turn; the
