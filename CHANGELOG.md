@@ -47,7 +47,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   workspace snapshots. Best-effort redaction and cleaning require confirmation
   when they change a snapshot; saved snapshots support retry without rereading
   files, but resume budgets and retained windows can omit a turn. No image
-  attachments; direct mode is unchanged ([#NN]).
+  attachments; direct mode is unchanged ([#155]).
 - Startup recovery classifies task rows without replay, retains pending pause
   and reconciles execution-linked terminal results. Recovered tasks with
   uncertain history remain fenced until controlled recovery is wired; Stop is
@@ -1010,3 +1010,4 @@ earlier milestones.
 [#149]: https://github.com/localmelo/localmelo/pull/149
 [#152]: https://github.com/localmelo/localmelo/pull/152
 [#153]: https://github.com/localmelo/localmelo/pull/153
+[#155]: https://github.com/localmelo/localmelo/pull/155
