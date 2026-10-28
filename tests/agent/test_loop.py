@@ -207,7 +207,13 @@ class TestBlockedToolCall:
 
     @pytest.mark.asyncio
     async def test_blocked_shell_command(self) -> None:
-        """rm -rf / must be blocked by the checker."""
+        """In direct mode, rm -rf / must be blocked by the checker.
+
+        P13a leaves direct mode's blocklist in place, so this is still the
+        refusal it was before the tool mode existed. The Python API's
+        default mode is ``python``, whose exec policy is the tier, not a
+        spelling rule; a run there must not be given a destructive command.
+        """
         llm = FakeLLM()
         llm.enqueue(
             Message(
@@ -222,12 +228,20 @@ class TestBlockedToolCall:
         # After blocked result, LLM provides final answer
         llm.enqueue(Message(role="assistant", content="aborted"))
 
-        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        agent = Agent(
+            llm=llm,
+            embedding=FakeEmbedding(),
+            options=AgentOptions(mode="direct"),
+        )
         result = await agent.run("delete everything with shell_exec")
 
         # The built-in shell_exec is registered, but rm -rf / is blocked.
         # The agent should still produce a result (the second LLM turn).
         assert result == "aborted"
+        tasks = list(agent.hippo.history._tasks.values())
+        steps = await agent.hippo.history.get_steps(tasks[0].task_id)
+        assert steps[0].tool_result is not None
+        assert steps[0].tool_result.error == "Blocked: Blocked command: rm -rf /"
 
     @pytest.mark.asyncio
     async def test_unknown_tool_returns_error(self) -> None:

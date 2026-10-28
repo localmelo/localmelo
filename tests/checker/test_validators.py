@@ -558,6 +558,55 @@ class TestAsyncBoundaryChecks:
         result = await checker.pre_execute(tc, None)
         assert not result.allowed
 
+
+class TestPreExecuteByMode:
+    """P13a: the gateway asks the tier policy; direct mode keeps the blocklist."""
+
+    @pytest.mark.asyncio
+    async def test_a_gateway_refuses_shell_exec_by_name_and_flag(self) -> None:
+        checker = Checker(mode="gateway")
+        td = ToolDef(name="shell_exec", description="", parameters={})
+        tc = ToolCall(tool_name="shell_exec", arguments={"command": "ls -la"})
+        result = await checker.pre_execute(tc, td)
+        assert not result.allowed
+        assert "gateway" in result.reason
+        assert "--builtins all" in result.reason
+
+    @pytest.mark.asyncio
+    async def test_a_gateway_keeps_python_exec(self) -> None:
+        # python_exec is in every default set and runs in a child process.
+        checker = Checker(mode="gateway")
+        td = ToolDef(name="python_exec", description="", parameters={})
+        tc = ToolCall(tool_name="python_exec", arguments={"code": "print(1)"})
+        assert (await checker.pre_execute(tc, td)).allowed
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", ["interactive", "python"])
+    async def test_an_approving_mode_lets_an_exec_tool_run(self, mode: str) -> None:
+        # The executor asks before it runs when the run has a policy; the
+        # six-pattern blocklist is no longer a second, hidden policy.
+        checker = Checker(mode=mode)  # type: ignore[arg-type]
+        td = ToolDef(name="shell_exec", description="", parameters={})
+        tc = ToolCall(tool_name="shell_exec", arguments={"command": "rm -rf /"})
+        assert (await checker.pre_execute(tc, td)).allowed
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", ["direct", "interactive", "gateway", "python"])
+    async def test_a_read_tool_runs_in_every_mode(self, mode: str) -> None:
+        checker = Checker(mode=mode)  # type: ignore[arg-type]
+        td = ToolDef(name="file_read", description="", parameters={})
+        tc = ToolCall(tool_name="file_read", arguments={"path": "notes.txt"})
+        assert (await checker.pre_execute(tc, td)).allowed
+
+    @pytest.mark.asyncio
+    async def test_direct_mode_keeps_the_six_patterns(self) -> None:
+        checker = Checker(mode="direct")
+        td = ToolDef(name="shell_exec", description="", parameters={})
+        tc = ToolCall(tool_name="shell_exec", arguments={"command": "rm -rf /"})
+        result = await checker.pre_execute(tc, td)
+        assert not result.allowed
+        assert result.reason == "Blocked command: rm -rf /"
+
     def test_check_result_dataclass(self) -> None:
         from localmelo.melo.schema import CheckResult
 

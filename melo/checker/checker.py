@@ -12,6 +12,7 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
     ValidationResult,
 )
+from localmelo.melo.checker.policy import ToolMode, exec_refusal
 from localmelo.melo.checker.tiers import tier_of
 from localmelo.melo.checker.validators import (
     _BLOCKED_RE,
@@ -45,7 +46,15 @@ def _prompt_chars(msg: Message, *, count_thinking: bool = False) -> int:
 
 
 class Checker:
-    def __init__(self) -> None:
+    def __init__(self, mode: ToolMode = "direct") -> None:
+        """A checker for a run of *mode*.
+
+        The default keeps the pre-P13 behaviour for a checker built on its
+        own, which is direct mode's; :class:`Agent` always passes its
+        ``AgentOptions.mode``. Direct mode still applies the six-pattern
+        blocklist in this release; every other mode asks the tier policy instead.
+        """
+        self._mode = mode
         self._blocked = _BLOCKED_RE
 
     # ── Permission tiers ──
@@ -89,21 +98,29 @@ class Checker:
                 allowed=False, reason=f"Unknown tool: {tool_call.tool_name}"
             )
 
-        # The six-pattern blocklist stands in for P13's exec policy. Of the
-        # exec built-ins only shell_exec takes a command line, so the tier
-        # scopes the same patterns to the same inputs as before.
-        if self.tier(tool_def) == "exec" and tool_call.tool_name == "shell_exec":
-            cmd = tool_call.arguments.get("command", "")
-            if not isinstance(cmd, str):
-                return CheckResult(
-                    allowed=False, reason="shell_exec command must be a string"
-                )
-            for pattern in self._blocked:
-                if pattern.search(cmd):
+        tier = self.tier(tool_def)
+        if self._mode == "direct":
+            # P13a keeps direct mode byte-identical: the six-pattern
+            # blocklist still decides, and P13b replaces it with the tier
+            # policy below. Of the exec built-ins only shell_exec takes a
+            # command line, so the tier scopes the patterns to the same
+            # inputs as before.
+            if tier == "exec" and tool_call.tool_name == "shell_exec":
+                cmd = tool_call.arguments.get("command", "")
+                if not isinstance(cmd, str):
                     return CheckResult(
-                        allowed=False, reason=f"Blocked command: {cmd[:100]}"
+                        allowed=False, reason="shell_exec command must be a string"
                     )
+                for pattern in self._blocked:
+                    if pattern.search(cmd):
+                        return CheckResult(
+                            allowed=False, reason=f"Blocked command: {cmd[:100]}"
+                        )
+            return CheckResult(allowed=True)
 
+        refusal = exec_refusal(tool_call.tool_name, tier, self._mode)
+        if refusal is not None:
+            return CheckResult(allowed=False, reason=refusal)
         return CheckResult(allowed=True)
 
     # ── Structured boundary validators ──

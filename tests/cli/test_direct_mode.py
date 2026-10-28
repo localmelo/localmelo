@@ -114,14 +114,16 @@ class TestFlags:
     def test_no_flags_keep_the_defaults(self) -> None:
         ran = _main("what", "is", "6*7")
         assert ran.code == 0
-        assert ran.options == AgentOptions()
+        assert ran.options == AgentOptions(mode="direct")
         assert ran.tool_providers == []
         ran.agent.run_task.assert_awaited_once_with("what is 6*7")
 
     def test_workspace_sets_the_root(self, tmp_path: Path) -> None:
         ran = _main("--workspace", str(tmp_path), "q")
         assert ran.code == 0
-        assert ran.options == AgentOptions(workspace_root=os.path.realpath(tmp_path))
+        assert ran.options == AgentOptions(
+            mode="direct", workspace_root=os.path.realpath(tmp_path)
+        )
 
     def test_workspace_is_resolved_like_the_ui(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -156,6 +158,7 @@ class TestFlags:
         )
         assert ran.code == 0
         assert ran.options == AgentOptions(
+            mode="direct",
             max_steps=7,
             attempt_policy="none",
             reflection_gate="utility",
@@ -186,7 +189,7 @@ class TestFlags:
         ran = _main("--attempt-policy", "none", "--reflection-gate", "utility", "q")
         assert ran.code == 0
         assert ran.options == AgentOptions(
-            attempt_policy="none", reflection_gate="utility"
+            mode="direct", attempt_policy="none", reflection_gate="utility"
         )
 
     def test_reflection_gate_help(self) -> None:
@@ -210,7 +213,7 @@ class TestFlags:
     ) -> None:
         ran = _main("--request-timeout", value, "q")
         assert ran.code == 0
-        assert ran.options == AgentOptions()  # not a run option
+        assert ran.options == AgentOptions(mode="direct")  # not a run option
         [args] = ran.build.call_args.args
         assert args.request_timeout == seconds
 
@@ -223,7 +226,7 @@ class TestFlags:
     ) -> None:
         ran = _main("--mcp-config", str(_mcp_config(tmp_path)), "q")
         assert ran.code == 0
-        assert ran.options == AgentOptions()
+        assert ran.options == AgentOptions(mode="direct")
         [provider] = ran.tool_providers
         assert isinstance(provider, McpToolProvider)
         assert provider.clients == []  # the agent starts it in its first run
@@ -231,7 +234,9 @@ class TestFlags:
     def test_mcp_only_offers_only_the_mcp_tools(self, tmp_path: Path) -> None:
         ran = _main("--mcp-only", "--mcp-config", str(_mcp_config(tmp_path)), "q")
         assert ran.code == 0
-        assert ran.options == AgentOptions(builtins=frozenset(), tool_exposure="all")
+        assert ran.options == AgentOptions(
+            mode="direct", builtins=frozenset(), tool_exposure="all"
+        )
         [provider] = ran.tool_providers
         assert isinstance(provider, McpToolProvider)
 
