@@ -105,7 +105,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">
             <strong>API v2</strong>
-            <span>通过 <code>/api</code> 读取网页控制台的会话、回合、已存事件（也有 Server-Sent Events 流）、图片 blob 和提交查询；只在回环地址上提供，并且只增不改。</span>
+            <span>通过 <code>/api</code> 读取网页控制台的会话、回合、已存事件（也有 Server-Sent Events 流）、图片 blob、提交查询、工具、授权、记忆和运行记录，也可以创建会话，开始、重试、停止和审批它的回合；只在回环地址上提供，并且只增不改。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">
             <strong>记忆</strong>
@@ -136,7 +136,7 @@ source .venv/bin/activate</code></pre>
         <p>计划中：</p>
         <ul>
           <li>交互式命令行的后续部分：可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
-          <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
+          <li>一个实时显示智能体工作的控制台页面，以及网关重启后仍然保留的网页工作区对话（控制台的会话已经可以持久保存并在重启后恢复）；</li>
           <li>让后续运行可以检索推理笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
           <li>进度行上的百分比进度条，用于反复运行的任务；在重放证明它可靠之前保持关闭。</li>
