@@ -66,7 +66,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   clock and limit, and on a session's first turn a dim row of the past
   runs (the direct-mode line's wording). `/expand [turn.call]` prints a
   call's whole output, `/progress` the latest facts with the memory they
-  rest on ([#NN]).
+  rest on ([#68]).
 - A first run in a terminal: `melo` with no config file looks for a model
   server on this computer, asks for its URL and for a model from the
   server's list, saves them and opens the chat. It looks with
@@ -392,3 +392,4 @@ earlier milestones.
 [#64]: https://github.com/localmelo/localmelo/pull/64
 [#66]: https://github.com/localmelo/localmelo/pull/66
 [#67]: https://github.com/localmelo/localmelo/pull/NN
+[#68]: https://github.com/localmelo/localmelo/pull/68
