@@ -344,10 +344,21 @@ class Executor:
         deadline = asyncio.timeout(timeout_s)
         try:
             async with deadline:
-                mismatch = _parameter_mismatch(fn, request.arguments)
-                if mismatch:
-                    raise TypeError(mismatch)
                 capture = TOOL_ENTRY.get()
+                # Only a captured task execution is checked: direct mode and
+                # chat turns call the tool exactly as they did before.
+                if capture is not None:
+                    mismatch = _parameter_mismatch(fn, request.arguments)
+                    if mismatch:
+                        return ExecutionOutcome(
+                            tool_name=request.tool_name,
+                            status=ExecutionStatus.ERROR,
+                            error=(
+                                f"Arguments for {request.tool_name} do not match "
+                                f"its parameters: {mismatch}"
+                            ),
+                            error_category=ErrorCategory.INVALID_ARGUMENTS,
+                        )
                 marked = False
                 if capture is not None and request.tool_name not in self._process_free:
                     await capture()

@@ -60,10 +60,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   loopback requests and an optional event follow stream that prints one readable
   line per event and a terminal snapshot. ([#159])
 - Wire process capture into task launches: the gated launcher records the
-  process group and start time before releasing a child, arbitrary-code tool
-  entries mark capture incomplete, and a task-store outage retries for up to
-  10 seconds before refusing that one call. Resume stays fenced and nothing
-  reads the evidence yet. [#NN]
+  process group and start time before releasing a child, tool-provider starts
+  and arbitrary-code tool entries mark capture incomplete, and a task-store
+  outage retries for up to 10 seconds before refusing that one call. Resume
+  stays fenced and nothing reads the evidence yet. [#NN]
 - Scheduler component v4 adds dormant process capture state, identity checks
   and a gated subprocess primitive; worker behavior and Resume are unchanged. [#158]
 

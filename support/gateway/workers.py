@@ -162,7 +162,6 @@ class TaskWorkers:
         self._restart_fenced: set[str] = set()
         self._restart_first: set[str] = set()
         self._pending_execution: dict[str, str] = {}
-        self._live_execution: dict[str, str] = {}
         self._runs: dict[str, asyncio.Task[None]] = {}
         self._runners: dict[str, SessionRunner] = {}
         self._stopping: set[str] = set()
@@ -505,13 +504,14 @@ class TaskWorkers:
                         else self.tasks.resume(task_id)
                     )
                 if state == "resume" and record.level != 5 and task_id in self._runs:
-                    execution = self._live_execution.get(task_id)
+                    # TaskStore.change adopts the live capture of a
+                    # running/held -> running transition. A resume after a
+                    # full park goes back through _run, which launches a new
+                    # execution with capture incomplete.
                     record = await self.tasks.change(
                         task_id,
                         state="running",
                         actor="scheduler",
-                        _capture_execution=execution,
-                        _capture_existing=execution is not None,
                     )
                 if state == "resume":
                     self._pause_requested.discard(task_id)
@@ -540,16 +540,11 @@ class TaskWorkers:
             )
             if state == "stop" and task_id not in self._runs:
                 desired = "cancelled"
-            execution = (
-                self._live_execution.get(task_id) if desired == "running" else None
-            )
             record = await self.tasks.change(
                 task_id,
                 priority=level,
                 state=desired,
                 actor="user",
-                _capture_execution=execution,
-                _capture_existing=execution is not None,
             )
             self._register(current)
             if level is not None:
@@ -1240,7 +1235,6 @@ class TaskWorkers:
                             ),
                         )
                         turn_started = True
-                        self._live_execution[task_id] = execution_id
                         self._pending_execution.pop(task_id, None)
             if phase != "cancelled" and not deferred:
                 result = await runner.wait()
@@ -1411,7 +1405,6 @@ class TaskWorkers:
                 self._points.pop(task_id, None)
                 self._approval_points.pop(task_id, None)
                 self._runners.pop(task_id, None)
-                self._live_execution.pop(task_id, None)
                 self._runs.pop(task_id, None)
                 await self._schedule()
 

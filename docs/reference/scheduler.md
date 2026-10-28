@@ -118,8 +118,9 @@ The internal legacy-adoption seam records explicit orphan-risk confirmation but
 does not itself queue or launch a task. Version 4 adds per-execution
 capture state, process identity checks and a gated subprocess primitive. Workers
 record a launch's process group through that gate before releasing the child and
-mark capture incomplete at each arbitrary-code tool entry; a store outage retries
-the marker for up to 10 seconds, then refuses that one call. An unsupported
+mark capture incomplete before the first tool provider starts (an MCP provider
+can spawn a server itself) and at each arbitrary-code tool entry; a store outage
+retries the marker for up to 10 seconds, then refuses that one call. An unsupported
 platform, or an identity/record failure, releases the child only after the marker
 commits. Nothing reads this evidence yet, so Resume stays fenced; process verification, controlled restart
 scheduling and user-facing confirmation remain later work.

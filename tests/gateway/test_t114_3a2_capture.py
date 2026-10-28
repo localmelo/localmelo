@@ -412,11 +412,59 @@ async def test_current_execution_guard_only_preserves_its_own_capture(
     await tasks.change(
         other, state="running", actor="scheduler", _capture_execution="new"
     )
+    async with store.component_transaction("capture_row") as conn:
+        row = await (
+            await conn.execute(
+                "SELECT complete, trusted FROM recovery_capture "
+                "WHERE task_id = ? AND execution_id = ? AND active = 1",
+                (other, "new"),
+            )
+        ).fetchone()
+    assert row == (0, 0)  # the row exists and is incomplete
     assert not await recovery.capture_complete(other, execution_id="new")
 
     # Leaving running retires the execution's capture.
     await tasks.change(task, state="done")
     assert not await recovery.capture_complete(task, execution_id="run")
+
+
+async def test_park_resume_starts_a_new_incomplete_execution(
+    setup: CaptureSetup, tmp_path: Path
+) -> None:
+    store, tasks, _ = setup
+    task = await create(tasks, tmp_path, proof=True)
+    recovery = RecoveryStore(store)
+    generation, previous = await tasks.park_identity(task)
+    await recovery.start(
+        task,
+        operation_id="start",
+        execution_id="run",
+        expected_generation=generation,
+        expected_operation_id=previous,
+        _capture=True,
+    )
+    await recovery.record_process(
+        task,
+        execution_id="run",
+        pgid=11,
+        leader_pid=11,
+        boot_id="boot",
+        start_token="old",
+    )
+    await tasks.pause(task)
+    assert (await tasks.get_task(task)).state == "parked"
+    await tasks.resume(task)
+    assert (await tasks.get_task(task)).state == "queued"
+
+    # The launch after a park is a new execution with incomplete capture; the
+    # parked execution keeps its process rows as its own evidence.
+    await tasks.change(
+        task, state="running", actor="scheduler", _capture_execution="next"
+    )
+    assert not await recovery.capture_complete(task, execution_id="next")
+    assert await recovery.processes(task, execution_id="run") == [
+        (11, 11, "boot", "old")
+    ]
 
 
 # A separate process crashes with os._exit, so no Python cleanup runs between

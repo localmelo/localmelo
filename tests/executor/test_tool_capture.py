@@ -13,7 +13,11 @@ from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.executor import Executor, register_builtins
 from localmelo.melo.executor.builtins import _run_python, _run_shell
-from localmelo.melo.executor.models import ExecutionRequest, ExecutionStatus
+from localmelo.melo.executor.models import (
+    ErrorCategory,
+    ExecutionRequest,
+    ExecutionStatus,
+)
 from localmelo.melo.executor.process_gate import (
     PROCESS_RECORD,
     UnsupportedProcessGateError,
@@ -140,6 +144,7 @@ async def test_wrapped_callable_mismatch_cannot_run_without_entry() -> None:
             ExecutionRequest(tool_name="wrapped", arguments={})
         )
         assert outcome.status == ExecutionStatus.ERROR
+        assert outcome.error_category == ErrorCategory.INVALID_ARGUMENTS
         assert "required" in outcome.error
         assert calls == []
         outcome = await executor.execute_structured(
@@ -149,6 +154,31 @@ async def test_wrapped_callable_mismatch_cannot_run_without_entry() -> None:
         assert calls == ["entry", "wrapper"]
     finally:
         TOOL_ENTRY.reset(token)
+
+
+async def test_wrapped_callable_mismatch_runs_without_a_captured_task() -> None:
+    # Direct mode and chat turns set no TOOL_ENTRY: main's behavior stands,
+    # so a callable whose wrapper signature hides **kwargs still runs.
+    hippo = Hippo()
+    executor = Executor(hippo, Checker(mode="interactive"))
+    hippo.register_tool(ToolDef(name="wrapped", description="Wrapped", parameters={}))
+    calls: list[str] = []
+
+    async def original(required: str) -> str:
+        return required
+
+    @functools.wraps(original)
+    async def wrapper(**kwargs: Any) -> str:
+        calls.append("wrapper")
+        return "executed"
+
+    executor.register("wrapped", wrapper)
+    outcome = await executor.execute_structured(
+        ExecutionRequest(tool_name="wrapped", arguments={})
+    )
+    assert outcome.status == ExecutionStatus.SUCCESS
+    assert outcome.output == "executed"
+    assert calls == ["wrapper"]
 
 
 @pytest.mark.parametrize("entry_fails", [False, True])
