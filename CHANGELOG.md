@@ -48,7 +48,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Added
 
 - Direct workers can read an explicit append-only inbox at planning boundaries,
-  with per-line acceptance events and redacted saved history. ([#NN])
+  with per-line acceptance events and redacted saved history. An inbox inside the
+  workspace is refused as `setup_error` before any model call; a slow event
+  reader is waited for rather than dropped; input errors are `setup_error`, not
+  `crashed`. ([#NN])
 - Experimental Python opt-in typed memory assertions: conservative evidence
   checks (timezone-aware `timestamp`/`date` records), ordered same-task updates
   (record time or per-task user order), cancellation markers, exact-duplicate-only

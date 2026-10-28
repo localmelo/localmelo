@@ -368,7 +368,9 @@ def test_cli_brief_inbox_stream(
     from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
     monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.chdir(tmp_path)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
     (tmp_path / "brief").write_text("Task", encoding="utf-8")
     (tmp_path / "inbox").write_text("Instruction\n", encoding="utf-8")
     transport = httpx.MockTransport(
@@ -390,9 +392,9 @@ def test_cli_brief_inbox_stream(
     args = [
         "melo",
         "--brief",
-        "brief",
+        str(tmp_path / "brief"),
         "--inbox",
-        "inbox",
+        str(tmp_path / "inbox"),
         "--output-format",
         "stream-json",
     ]
@@ -408,3 +410,265 @@ def test_cli_brief_inbox_stream(
     ]
     assert acknowledgements == [{"offset": 12, "step": 1, "attempt": 1}]
     assert frames[-1]["result"]["status"] == "completed"
+
+
+def test_prefix_preserving_rewrite_is_accepted_as_an_append(tmp_path: Path) -> None:
+    path = tmp_path / "inbox"
+    path.write_bytes(b"first\npartial")
+    inbox = Inbox(path)
+    assert inbox.poll() == [(6, "first")]
+    inbox.accept(6)
+    path.write_bytes(b"first\npartial\nsecond\n")
+    assert inbox.poll() == [(14, "partial"), (21, "second")]
+
+
+async def test_workspace_inbox_is_refused_before_a_tool_can_inject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import json
+
+    import httpx
+
+    from localmelo.melo.agent import Agent, AgentOptions
+    from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    path = workspace / "inbox"
+    requests: list[dict] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            message = {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call1",
+                        "type": "function",
+                        "function": {
+                            "name": "python_exec",
+                            "arguments": (
+                                "{\"code\":\"open('inbox', 'a').write("
+                                "'tool injected\\n')\"}"
+                            ),
+                        },
+                    }
+                ],
+            }
+        else:
+            message = {"role": "assistant", "content": "Done"}
+        return httpx.Response(200, json={"choices": [{"message": message}]})
+
+    agent = Agent(
+        llm=OpenAICompatLLM(
+            base_url="http://llm.test/v1",
+            model="stub",
+            transport=httpx.MockTransport(reply),
+        ),
+        options=AgentOptions(
+            memory=False,
+            workspace_root=str(workspace),
+            max_steps=2,
+            attempt_policy="none",
+        ),
+    )
+    source = Inbox(path)
+    try:
+        result = await agent.run_task("do it", inbox=source)
+    finally:
+        await agent.close()
+    assert result.status == "setup_error"
+    assert result.error == (
+        "inbox is inside the agent workspace; move it outside the workspace"
+    )
+    assert "InboxError" not in result.error
+    assert source.offset == 0
+    assert requests == []
+    assert not path.exists()
+
+
+def test_cli_brief_inbox_200_lines_acknowledges_every_one(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import json
+    import sys
+
+    import httpx
+
+    import localmelo.__main__ as cli
+    from localmelo.melo.agent import Agent, AgentOptions
+    from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    (tmp_path / "brief").write_text("Task", encoding="utf-8")
+    lines = [f"instruction {index}\n" for index in range(200)]
+    (tmp_path / "inbox").write_text("".join(lines), encoding="utf-8")
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "Done"}}]},
+        )
+    )
+    monkeypatch.setattr(
+        cli,
+        "_build_direct_mode_agent",
+        lambda *args, **kwargs: Agent(
+            llm=OpenAICompatLLM(
+                base_url="http://llm.test/v1", model="stub", transport=transport
+            ),
+            options=AgentOptions(memory=False),
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "melo",
+            "--brief",
+            str(tmp_path / "brief"),
+            "--inbox",
+            str(tmp_path / "inbox"),
+            "--output-format",
+            "stream-json",
+        ],
+    )
+    cli.main()
+    frames = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    acknowledgements = [
+        frame["event"]["data"]
+        for frame in frames
+        if frame.get("type") == "event" and frame["event"]["type"] == "inbox.accepted"
+    ]
+    assert len(acknowledgements) == 200
+    assert [ack["offset"] for ack in acknowledgements] == [
+        sum(len(line.encode()) for line in lines[: index + 1]) for index in range(200)
+    ]
+    assert frames[-1]["type"] == "result"
+    assert frames[-1]["result"]["status"] == "completed"
+    assert sum(frame["type"] == "result" for frame in frames) == 1
+
+
+@pytest.mark.parametrize("fmt", ["json", "stream-json"])
+@pytest.mark.parametrize("kind", ["symlink", "fifo", "directory", "oversize"])
+def test_invalid_inbox_is_a_clean_setup_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fmt: str,
+    kind: str,
+) -> None:
+    import json
+    import sys
+
+    import httpx
+
+    import localmelo.__main__ as cli
+    from localmelo.melo.agent import Agent, AgentOptions
+    from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    brief = tmp_path / "brief"
+    brief.write_text("Task", encoding="utf-8")
+    bad = tmp_path / "inbox"
+    if kind == "symlink":
+        target = tmp_path / "target"
+        target.write_text("instruction\n", encoding="utf-8")
+        bad.symlink_to(target)
+    elif kind == "fifo":
+        os.mkfifo(bad)
+    elif kind == "directory":
+        bad.mkdir()
+    else:
+        bad.write_bytes(b"x" * (MAX_INBOX_BYTES + 1))
+    agent = Agent(
+        llm=OpenAICompatLLM(
+            base_url="http://llm.test/v1",
+            model="stub",
+            transport=httpx.MockTransport(
+                lambda request: pytest.fail("model must not run")
+            ),
+        ),
+        options=AgentOptions(memory=False),
+    )
+    monkeypatch.setattr(cli, "_build_direct_mode_agent", lambda *a, **k: agent)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "melo",
+            "--brief",
+            str(brief),
+            "--inbox",
+            str(bad),
+            "--output-format",
+            fmt,
+        ],
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
+    output = capsys.readouterr()
+    frames = [json.loads(line) for line in output.out.splitlines()]
+    result = frames[-1]["result"] if fmt == "stream-json" else frames[-1]
+    assert result["status"] == "setup_error"
+    assert result["exit_code"] == 2
+    assert "InboxError" not in result["error"] + output.err
+
+
+def test_brief_without_inbox_reads_no_default_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import json
+    import sys
+
+    import httpx
+
+    import localmelo.__main__ as cli
+    from localmelo.melo.agent import Agent, AgentOptions
+    from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    (workspace / "inbox.md").write_text("default instruction\n", encoding="utf-8")
+    brief = tmp_path / "brief"
+    brief.write_text("Task", encoding="utf-8")
+    requests: list[dict] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        requests.append(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "Done"}}]},
+        )
+
+    agent = Agent(
+        llm=OpenAICompatLLM(
+            base_url="http://llm.test/v1",
+            model="stub",
+            transport=httpx.MockTransport(reply),
+        ),
+        options=AgentOptions(memory=False),
+    )
+    monkeypatch.setattr(cli, "_build_direct_mode_agent", lambda *a, **k: agent)
+    monkeypatch.setattr(
+        sys, "argv", ["melo", "--brief", str(brief), "--output-format", "json"]
+    )
+    cli.main()
+    frames = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert frames[-1]["status"] == "completed"
+    assert "default instruction" not in json.dumps(requests)

@@ -62,7 +62,9 @@ def coalesce_user_messages(messages: list[Message]) -> list[Message]:
     for message in messages:
         if result and result[-1].role == message.role == "user":
             result[-1] = dataclasses.replace(
-                result[-1], content=result[-1].content + "\n\n" + message.content
+                result[-1],
+                content=result[-1].content + "\n\n" + message.content,
+                images=[*result[-1].images, *message.images],
             )
         else:
             result.append(message)

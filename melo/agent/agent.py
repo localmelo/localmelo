@@ -69,7 +69,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
 )
 from localmelo.melo.contracts.events import EventSink
-from localmelo.melo.contracts.inbox import InboxSource
+from localmelo.melo.contracts.inbox import InboxError, InboxSource
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
@@ -4884,6 +4884,8 @@ class Agent:
                 approval=approval is not None,
             )
             try:
+                if run.inbox is not None:
+                    run.inbox.validate(self.executor.workspace_root or os.getcwd())
                 async with deadline:
                     try:
                         await self._look_up(run, query)
@@ -4948,6 +4950,11 @@ class Agent:
                         await self._run_reflective_attempts(task, query, run)
             except _ToolSetupError as exc:
                 # Reported in the result, not a crash: no traceback.
+                logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
+                run.end("setup_error", error=str(exc))
+            except InboxError as exc:
+                # An inbox that became unreadable mid-run is a setup failure,
+                # not a crash: report its message without a class prefix.
                 logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
                 run.end("setup_error", error=str(exc))
             except ContextFitError as exc:

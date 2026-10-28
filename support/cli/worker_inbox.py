@@ -6,12 +6,10 @@ import os
 import stat
 from pathlib import Path
 
+from localmelo.melo.contracts.inbox import InboxError
+
 MAX_INBOX_BYTES = 1024 * 1024
 MAX_MESSAGE_BYTES = 16 * 1024
-
-
-class InboxError(ValueError):
-    """The inbox cannot be read safely as an append-only file."""
 
 
 class Inbox:
@@ -21,6 +19,37 @@ class Inbox:
         self.snapshot = b""
         self.offset = 0
         self.pending: list[int] = []
+
+    def _check_location(self, workspace: str | None) -> None:
+        """Refuse a path the worker's own file tools could write."""
+        if workspace is None:
+            return
+        root = Path(os.path.realpath(os.path.expanduser(workspace)))
+        target = Path(os.path.realpath(self.path))
+        if target == root or root in target.parents:
+            raise InboxError(
+                "inbox is inside the agent workspace; move it outside the workspace"
+            )
+
+    def validate(self, workspace: str | None = None) -> None:
+        """Check the path and target once before the first model call."""
+        self._check_location(workspace)
+        try:
+            fd = os.open(self.path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise InboxError("cannot open inbox as a regular file") from exc
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise InboxError("inbox is not a regular file")
+            if info.st_size > MAX_INBOX_BYTES:
+                raise InboxError("inbox exceeds 1 MiB")
+        except OSError as exc:
+            raise InboxError("cannot read inbox") from exc
+        finally:
+            os.close(fd)
 
     def poll(self) -> list[tuple[int, str]]:
         """Snapshot complete messages; caller explicitly commits each insertion."""

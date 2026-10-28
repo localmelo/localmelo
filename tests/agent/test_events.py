@@ -689,6 +689,9 @@ class TestFields:
         await agent.close()
 
         class OneInstruction:
+            def validate(self, workspace: str | None = None) -> None:
+                pass
+
             def poll(self) -> list[tuple[int, str]]:
                 return [(6, "hello")]
 

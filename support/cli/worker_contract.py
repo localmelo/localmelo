@@ -159,10 +159,15 @@ class WorkerObserver:
         if len(line.encode("utf-8")) > MAX_EVENT_BYTES:
             self._fail(ValueError("worker event exceeds 1 MiB"))
             return
-        try:
-            self.lines.put_nowait(line)
-        except queue.Full:
-            self._fail(ValueError("worker event output queue is full"))
+        # Backpressure, never loss: a slow reader stalls the worker at the
+        # planning boundary, while a failed writer sets ``error`` and lets the
+        # blocked producer fall through to the transport failure path.
+        while self.error is None:
+            try:
+                self.lines.put(line, timeout=0.05)
+                return
+            except queue.Full:
+                continue
 
     def __call__(self, event: AgentEvent) -> None:
         try:
@@ -258,11 +263,15 @@ class WorkerObserver:
     def close(self) -> None:
         if self.thread is None:
             return
-        try:
-            self.lines.put(None, timeout=1)
-        except queue.Full:
-            self.error = self.error or ValueError("worker event output queue is full")
-        self.thread.join(timeout=2)
+        # Wait for the writer rather than give up on a full queue: a slow
+        # reader stalls the worker, and a failed writer has set ``error``.
+        while self.thread.is_alive():
+            try:
+                self.lines.put(None, timeout=0.05)
+                break
+            except queue.Full:
+                continue
+        self.thread.join()
         if self.thread.is_alive():
             self.error = self.error or TimeoutError("worker event output did not drain")
 
