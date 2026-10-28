@@ -9,6 +9,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- An unsigned arm64 macOS development bundle wraps the local web console in a
+  native window and menu-bar host. It owns its gateway child and checks the page
+  instance for accidental port collisions; the check is not authentication ([#NN]).
+
 - Opt-in context-window request accounting reports estimated and measured planning/reflection
   tokens in events and run results; it does not prune or enforce an output cap ([#126]).
 
