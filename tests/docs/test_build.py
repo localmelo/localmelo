@@ -37,6 +37,22 @@ def test_markdown_never_executes_raw_html_or_dangerous_links() -> None:
     assert 'href="../other.md#part"' in html
 
 
+def test_standalone_explicit_anchors_are_safe() -> None:
+    html = build_docs.render_markdown(
+        '<a id="before-you-begin"></a>\n\n## 开始之前\n\n'
+        '<a id="bad" onclick="alert(1)"></a>\n\n'
+        'Text <a id="inline"></a> text\n\n'
+        '```html\n<a id="code"></a>\n```\n\n'
+        "<script>alert(1)</script>\n"
+    )
+    assert '<a id="before-you-begin"></a>' in html
+    assert '<h2 id="开始之前">' in html
+    assert '<a id="bad" onclick=' not in html
+    assert '<a id="inline"></a>' not in html
+    assert '<a id="code"></a>' not in html
+    assert "<script>" not in html
+
+
 @pytest.mark.parametrize(
     "url",
     [
