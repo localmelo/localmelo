@@ -111,7 +111,7 @@ Model server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
-│ model      qwen3:8b · vLLM · http://127.0.0.1:11434/v1                   │
+│ model      qwen3:8b · Ollama · http://127.0.0.1:11434/v1                 │
 │            saved as the default                                          │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
@@ -122,8 +122,9 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ```
 
 Type a message and press Enter, or `/exit` to leave. From then on, `melo`
-goes straight in and `melo "<task>"` uses the saved server. It is saved as
-the `vllm` backend, the key for any OpenAI-compatible server, without
+goes straight in and `melo "<task>"` uses the saved server. The server here
+is Ollama, so it is saved as the `ollama` backend; any other
+OpenAI-compatible server is saved as `vllm`, the key for those, without
 embeddings; see [First run](configuration.md#first-run).
 
 ### With the setup wizard

@@ -546,18 +546,18 @@ class CliSession:
                 self.factory.use_model(model)
                 done = f"Model: {model} ({self.factory.backend.label})."
             else:
-                self.factory.use_url(url, model)
+                await self.factory.use_url(url, model)
                 done = f"Backend: {url} · {model}."
             if self.runner is not None and self.runner.session_id is not None:
                 await self.store.update_session(self.runner.session_id, model=model)
             await self.factory.close(old)
-            self._report_switch(done)
+            await self._report_switch(done)
             return True
         finally:
             self._state, self.activity, self._work = "idle", None, None
 
-    def _report_switch(self, done: str) -> None:
-        problem = self.factory.save()
+    async def _report_switch(self, done: str) -> None:
+        problem = await self.factory.save()
         if problem:
             self.out.print(
                 self._text(f"{done} {problem[0].upper()}{problem[1:]}.", style="warn")

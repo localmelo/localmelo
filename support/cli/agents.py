@@ -91,11 +91,19 @@ class AgentFactory:
         self.saves = saves
         # A configured session moved to a server /backend chose, not yet saved.
         self._new_server = False
+        # Whether each server asked about answered like Ollama, by URL.
+        self._ollama: dict[str, bool] = {}
         self._live: list[Agent] = []
 
     @property
     def memory(self) -> bool:
         return self._options.memory
+
+    async def _is_ollama(self, url: str) -> bool:
+        """Whether *url* is an Ollama server; asked once per URL, then remembered."""
+        if url not in self._ollama:
+            self._ollama[url] = await discovery.is_ollama(url)
+        return self._ollama[url]
 
     async def build(self, model: str | None = None, *, url: str | None = None) -> Agent:
         """A started Agent on the backend, with *model* and on *url* when given.
@@ -116,8 +124,11 @@ class AgentFactory:
                 request_timeout_s=self._request_timeout_s,
             )
         else:
+            cfg = self._cfg
+            if url is not None:
+                cfg = self._with_server(url, model, ollama=await self._is_ollama(url))
             agent = await build_session_agent(
-                cfg=self._cfg if url is None else self._with_server(url, model),
+                cfg=cfg,
                 base_url=None,
                 model=model,
                 workspace=self._workspace,
@@ -127,18 +138,25 @@ class AgentFactory:
         self._live.append(agent)
         return agent
 
-    def _with_server(self, url: str, model: str) -> config.Config:
+    def _with_server(self, url: str, model: str, *, ollama: bool) -> config.Config:
         """The session's config with its chat on *url*, as /backend saves it.
 
-        Only the chat backend changes (``vllm``, the key for any
-        OpenAI-compatible server); embedding, the request timeout and the
-        ``[vllm]`` table's other values stay.
+        *ollama* (the server answered like Ollama) makes the chat backend
+        ``ollama``, which chats on Ollama's native API with its 300 s
+        timeout; otherwise it is ``vllm``, the key for any OpenAI-compatible
+        server. Embedding, the request timeout and the other table's values
+        stay.
         """
         assert self._cfg is not None
         cfg = copy.deepcopy(self._cfg)
-        cfg.chat_backend = "vllm"
-        cfg.vllm.chat_url = url
-        cfg.vllm.chat_model = model
+        if ollama:
+            cfg.chat_backend = "ollama"
+            cfg.ollama.chat_url = url
+            cfg.ollama.chat_model = model
+        else:
+            cfg.chat_backend = "vllm"
+            cfg.vllm.chat_url = url
+            cfg.vllm.chat_model = model
         return cfg
 
     async def close(self, agent: Agent) -> None:
@@ -163,10 +181,10 @@ class AgentFactory:
     def use_model(self, model: str) -> None:
         self.backend = replace(self.backend, model=model, listed=0)
 
-    def use_url(self, url: str, model: str) -> None:
+    async def use_url(self, url: str, model: str) -> None:
         """Talk to the server at *url* from now on, with *model*."""
         if self._cfg is not None:
-            self._cfg = self._with_server(url, model)
+            self._cfg = self._with_server(url, model, ollama=await self._is_ollama(url))
             self._new_server = True
             self.backend = config_backend(self._cfg, model)
             return
@@ -177,14 +195,14 @@ class AgentFactory:
             embedding=self.backend.embedding,
         )
 
-    def save(self) -> str:
+    async def save(self) -> str:
         """Save the backend as the default; ``""``, or why it was not saved.
 
         A configured backend keeps its key and gets the new model. A server
-        /backend chose in a configured session is saved as the ``vllm``
-        backend, the rest of the config kept; any other server is saved as
-        an OpenAI-compatible one with embedding off, as the first run saves
-        it.
+        /backend chose in a configured session is saved as the ``ollama``
+        backend when it answered like Ollama, else as ``vllm``, the rest of
+        the config kept; any other server is saved as an OpenAI-compatible
+        one with embedding off, as the first run saves it.
         """
         backend = self.backend
         if not self.saves:
@@ -192,9 +210,13 @@ class AgentFactory:
         captured = io.StringIO()
         try:
             if self._new_server:
+                ollama = await self._is_ollama(backend.base_url)
                 with contextlib.redirect_stdout(captured):
-                    saved = onboard.save_chat_server(
-                        backend.base_url, backend.model, keep_embedding=True
+                    saved = await onboard.save_chat_server(
+                        backend.base_url,
+                        backend.model,
+                        keep_embedding=True,
+                        ollama=ollama,
                     )
                 if not saved:
                     return captured.getvalue().strip() or "not saved"
@@ -214,8 +236,11 @@ class AgentFactory:
                 section.chat_model = backend.model
                 config.save(cfg)
                 return ""
+            ollama = await self._is_ollama(backend.base_url)
             with contextlib.redirect_stdout(captured):
-                saved = onboard.save_chat_server(backend.base_url, backend.model)
+                saved = await onboard.save_chat_server(
+                    backend.base_url, backend.model, ollama=ollama
+                )
         except (OSError, ValueError, config.ConfigError) as exc:
             # ValueError: a config file that is no longer valid TOML.
             return f"not saved: {exc}"

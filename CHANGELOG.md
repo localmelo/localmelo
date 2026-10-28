@@ -27,8 +27,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   resuming them comes later ([#53]).
 - A first run in a terminal: `melo` with no config file looks for a model
   server on this computer, asks for its URL and for a model from the
-  server's list, saves them and opens the chat. It sends only
-  `GET /v1/models`, to ports 8000, 8400, 11434 and 30000 of `127.0.0.1`
+  server's list, saves them and opens the chat. It sends `GET /v1/models`,
+  and `GET /api/version` once when saving to tell an Ollama server apart,
+  to ports 8000, 8400, 11434 and 30000 of `127.0.0.1`
   (`LOCALMELO_DETECT_URLS` replaces them); a server that cannot be used is
   named with the reason, and you can retry, start without saving or quit
   ([#52]).
@@ -196,6 +197,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A server picked at the first run, at
+  `Save URL · MODEL as the default backend?` or with `/backend` was always
+  saved as the `vllm` backend. An Ollama server, saved that way, ran with
+  vLLM's 120 s chat timeout instead of Ollama's 300 s, and the banner said
+  vLLM. A server that answers `GET /api/version` like Ollama is saved as the
+  `ollama` backend now; any other OpenAI-compatible server is still saved as
+  `vllm` ([#NN]).
 - `melo --serve` with no config file and no terminal, as under launchd,
   ended in an `EOFError` traceback, again every few seconds; it prints one
   line and exits with code 1. Ctrl-D or Ctrl+C in the setup wizard prints
