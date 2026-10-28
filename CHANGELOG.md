@@ -52,7 +52,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   retains pending pause intent; explicit legacy adoption records orphan-risk
   acceptance. Process capture completeness and controlled Resume are deferred. [#147]
 - Experimental opt-in provider streaming and OpenAI-compatible SSE assembly;
-  display filtering buffers complete replies, and no CLI or agent uses it yet ([#145]).
+  no CLI or agent uses it yet ([#145]).
+- With a trusted reasoning-framing declaration, the streaming display policy can
+  release redacted complete lines; unknown framing still buffers the reply ([#153]).
 - Direct workers can read a brief file and emit a versioned JSON result or an
   NDJSON event stream; inbox steering remains future work. ([#143])
 
@@ -1001,3 +1003,4 @@ earlier milestones.
 [#147]: https://github.com/localmelo/localmelo/pull/147
 [#149]: https://github.com/localmelo/localmelo/pull/149
 [#152]: https://github.com/localmelo/localmelo/pull/152
+[#153]: https://github.com/localmelo/localmelo/pull/153
