@@ -171,7 +171,6 @@ class AgentOptions:
       modes.
     """
 
-    fixed_prefix: bool = False
     context_window: int | None = None
     output_reserve: int | None = None
     safety_margin: int | None = None
@@ -208,6 +207,7 @@ class AgentOptions:
     keep_decision_text: bool = False
     # The surface the run belongs to; it decides the default built-ins.
     mode: ToolMode = "python"
+    fixed_prefix: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):

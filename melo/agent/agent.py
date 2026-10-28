@@ -5507,8 +5507,8 @@ class Agent:
                     "version": PREFIX_VERSION,
                     "schema_changes": stats.schema_changes,
                     **(
-                        {"reported_cached_tokens": stats.details["cached_tokens"]}
-                        if "cached_tokens" in stats.details
+                        {"reported_cached_tokens": stats.prefix_cached_tokens}
+                        if stats.prefix_cached_tokens is not None
                         else {}
                     ),
                 }

@@ -214,10 +214,11 @@ the independent character guard still applies.
 `fixed-prefix-v1`; `--fixed-prefix on|off` overrides it for a direct or interactive
 run. It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
+An explicit end delimiter leaves the task and reflection request outside that data.
 `all` freezes sorted tool definitions for that run; `retrieve` keeps selecting tools
 as before. The JSON result's `prefix_cache.schema_changes` counts changes to the
 offered planning schemas within the run, not actual cache misses; an optional
-`reported_cached_tokens` is the server-reported total across responses. Providers
+`reported_cached_tokens` is the server-reported total for planning and reflection responses only. Providers
 may not report caching, and byte-stable prefixes do not guarantee a cache hit.
 The legacy `/v1` API and the default-off request bytes remain unchanged.
 
