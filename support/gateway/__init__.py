@@ -9,8 +9,8 @@ from typing import Any
 
 try:
     import uvicorn
-    from fastapi import FastAPI
-    from fastapi.responses import JSONResponse
+    from fastapi import FastAPI, Request
+    from fastapi.responses import JSONResponse, Response
 except ImportError as e:
     raise ImportError(
         "Gateway requires fastapi and uvicorn: pip install fastapi uvicorn"
@@ -18,6 +18,7 @@ except ImportError as e:
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload, SessionTransition
 from localmelo.support import config
+from localmelo.support.gateway.auth import COOKIE_TTL, GatewayAuth
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.gateway.guard import LoopbackGuard, is_loopback
 from localmelo.support.gateway.session import SessionBusyError, SessionManager
@@ -45,6 +46,9 @@ class GatewayServer:
         self.port = cfg.gateway.port
         self._started_at: float | None = None
         self._checker = Checker()
+        if not is_loopback(self.host):
+            raise ValueError("The gateway must listen on a loopback address.")
+        self.auth = GatewayAuth()
 
         # SessionManager now builds providers from Config directly
         self.sessions = SessionManager(
@@ -67,29 +71,21 @@ class GatewayServer:
 
         from localmelo.support.gateway.webapp import mount as mount_webapp
 
-        mount_webapp(self.app, self.cfg)
+        mount_webapp(
+            self.app,
+            self.cfg,
+            enable_playground=getattr(cfg, "_enable_playground", False),
+        )
 
-        # The console is mounted only on loopback: API v2 has no login. Its
-        # error middleware must be added before the guard, so the guard stays
-        # outermost and refuses a foreign request before any route sees it.
-        self.console: Console | None = None
-        if is_loopback(self.host):
-            self.console = Console(
-                self.cfg,
-                port=self.port,
-                options=self._console_options(console_options),
-            )
-            self.console.mount(self.app)
-            self.app.add_middleware(LoopbackGuard, port=self.port)
-        else:
-            logger.warning(
-                "Gateway host %s is not localhost or a loopback IP address, so "
-                "requests are not checked. The gateway has no authentication: "
-                "anything that can reach it, web pages through DNS rebinding "
-                'included, can run tasks with tools. Use host = "127.0.0.1" '
-                "(the default).",
-                self.host,
-            )
+        # The guard stays outermost, before console error middleware, so it
+        # rejects foreign and unauthenticated requests before any route runs.
+        self.console: Console | None = Console(
+            self.cfg,
+            port=self.port,
+            options=self._console_options(console_options),
+        )
+        self.console.mount(self.app)
+        self.app.add_middleware(LoopbackGuard, port=self.port, auth=self.auth)
 
     def _console_options(self, options: ConsoleOptions | None) -> ConsoleOptions:
         """*options*, with the workspace page's gate when it built one.
@@ -153,6 +149,68 @@ class GatewayServer:
     def _register_routes(self) -> None:
         app = self.app
 
+        @app.post("/api/auth/login")
+        async def login(body: dict[str, Any]) -> Response:
+            code = body.get("code")
+            cookie = (
+                self.auth.consume_login(code, self.port)
+                if isinstance(code, str)
+                else None
+            )
+            if cookie is None:
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": {
+                            "code": "unauthorized",
+                            "message": "Invalid or expired login code.",
+                            "details": {},
+                        }
+                    },
+                    headers={"Cache-Control": "no-store"},
+                )
+            response = Response(status_code=204, headers={"Cache-Control": "no-store"})
+            response.set_cookie(
+                f"melo_session_{self.port}",
+                cookie,
+                max_age=COOKIE_TTL,
+                httponly=True,
+                samesite="strict",
+                path="/",
+            )
+            return response
+
+        @app.post("/api/auth/logout")
+        async def logout(request: Request) -> Response:
+            name = f"melo_session_{self.port}"
+            cookie = request.cookies.get(name, "")
+            if cookie:
+                self.auth.revoke_cookie(cookie)
+                self.auth.invalidate_streams()
+            response = Response(status_code=204, headers={"Cache-Control": "no-store"})
+            response.delete_cookie(name, path="/", httponly=True, samesite="strict")
+            return response
+
+        @app.post("/api/auth/rotate")
+        async def rotate(request: Request) -> Response:
+            header = request.headers.get("authorization", "")
+            if not header.startswith("Bearer ") or not self.auth.valid_bearer(
+                header[7:]
+            ):
+                return JSONResponse(
+                    status_code=401,
+                    content={
+                        "error": {
+                            "code": "unauthorized",
+                            "message": "Bearer token required.",
+                            "details": {},
+                        }
+                    },
+                    headers={"Cache-Control": "no-store", "WWW-Authenticate": "Bearer"},
+                )
+            self.auth.rotate()
+            return Response(status_code=204, headers={"Cache-Control": "no-store"})
+
         @app.post("/v1/agent/run")
         async def agent_run(body: dict[str, Any]) -> JSONResponse:
             query = body.get("query", "")
@@ -172,7 +230,12 @@ class GatewayServer:
             query = sanitized.query
             session_id = sanitized.session_id
 
-            session = await self.sessions.get_or_create(session_id)
+            try:
+                session = await self.sessions.get_or_create(session_id)
+            except SessionBusyError as exc:
+                return JSONResponse(
+                    status_code=409, content={"error": str(exc), "code": "session_busy"}
+                )
 
             # Per-session serialization: only one run at a time per session
             async with session._lock:
@@ -246,7 +309,11 @@ class GatewayServer:
             except SessionBusyError as e:
                 return JSONResponse(
                     status_code=409,
-                    content={"error": str(e), "session_id": session_id},
+                    content={
+                        "error": str(e),
+                        "code": "session_busy",
+                        "session_id": session_id,
+                    },
                 )
             if not closed:
                 return JSONResponse(

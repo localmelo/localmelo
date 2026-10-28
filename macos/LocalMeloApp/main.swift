@@ -31,6 +31,9 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
     private var quitPending = false
     private var ready = false
     private var checking = false
+    private let healthSession = URLSession(configuration: .ephemeral)
+    private var healthAuthenticated = false
+    private var browserLoginCode: String?
     // Instance collision check, not authentication against another local process.
     private let instance = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     private var port = defaultPort
@@ -212,7 +215,65 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 self.checking = false
                 return
             }
-            self.fetchHealth(child: child)
+            if self.healthAuthenticated {
+                self.fetchHealth(child: child)
+            } else {
+                self.authenticateHealth(child: child)
+            }
+        }
+    }
+
+    private func authenticateHealth(child: Process) {
+        guard let python = Bundle.main.resourceURL?.appendingPathComponent("runtime/bin/python/bin/python3") else {
+            checking = false
+            return
+        }
+        let port = self.port
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let process = Process()
+            process.executableURL = python
+            process.arguments = ["-P", "-c", "from localmelo.support.gateway.auth import GatewayAuth; import sys; a=GatewayAuth(); print(a.issue_login(int(sys.argv[1]))); print(a.issue_login(int(sys.argv[1]))); a.close()", String(port)]
+            var env = ProcessInfo.processInfo.environment
+            env.removeValue(forKey: "PYTHONPATH")
+            env.removeValue(forKey: "PYTHONHOME")
+            env["PYTHONNOUSERSITE"] = "1"
+            process.environment = env
+            process.standardInput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            let output = Pipe()
+            process.standardOutput = output
+            do { try process.run() } catch {
+                DispatchQueue.main.async { self?.checking = false }
+                return
+            }
+            let limit = Date().addingTimeInterval(3)
+            while process.isRunning && Date() < limit { usleep(20_000) }
+            if process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            process.waitUntilExit()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            let codes = String(decoding: data, as: UTF8.self).split(whereSeparator: \.isNewline).map(String.init)
+            guard process.terminationStatus == 0, codes.count == 2,
+                  codes.allSatisfy({ $0.count <= 256 }) else {
+                DispatchQueue.main.async { self?.checking = false }
+                return
+            }
+            let url = URL(string: "http://127.0.0.1:\(port)/api/auth/login")!
+            var request = URLRequest(url: url)
+            request.httpMethod = "POST"
+            request.timeoutInterval = 2
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("http://127.0.0.1:\(port)", forHTTPHeaderField: "Origin")
+            request.httpBody = try? JSONSerialization.data(withJSONObject: ["code": codes[0]])
+            self?.healthSession.dataTask(with: request) { [weak self] _, response, _ in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    self.checking = false
+                    guard !self.stopping, child.isRunning,
+                          (response as? HTTPURLResponse)?.statusCode == 204 else { return }
+                    self.healthAuthenticated = true
+                    self.browserLoginCode = codes[1]
+                }
+            }.resume()
         }
     }
 
@@ -220,7 +281,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         let url = URL(string: "http://127.0.0.1:\(port)/api/health")!
         var request = URLRequest(url: url)
         request.timeoutInterval = 2
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+        healthSession.dataTask(with: request) { [weak self] data, response, _ in
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.checking = false
@@ -237,9 +298,12 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                         self.fail(storeFailureMessage(health))
                         return
                     }
+                    guard let code = self.browserLoginCode,
+                          let url = URL(string: "http://127.0.0.1:\(self.port)/#login=\(code)") else { return }
+                    self.browserLoginCode = nil
                     self.ready = true
                     self.timer?.invalidate()
-                    self.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(self.port)/")!))
+                    self.webView.load(URLRequest(url: url))
                 }
             }
         }.resume()
@@ -308,7 +372,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         quitPending = true
         var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)/api/health")!)
         request.timeoutInterval = 2
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+        healthSession.dataTask(with: request) { [weak self] data, response, _ in
             var running: Int?
             if let data = data, (response as? HTTPURLResponse)?.statusCode == 200,
                let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],

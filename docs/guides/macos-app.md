@@ -26,9 +26,12 @@ asks before stopping the gateway and any running tasks. If the listener is a mel
 
 The app sends a random launch identifier to its child and checks it on main-frame page responses
 to catch accidental port collisions. **This is an instance check, not authentication:** any local
-process can read the response header and replay it. Malicious same-user processes are outside this
-development prototype's threat model; the gateway has no authentication and tools run as the
-user. Do not expose it on a network or use it with untrusted tasks.
+process can read the response header and replay it. The gateway separately requires authentication:
+for its own health checks and web view the app obtains short-lived, single-use login codes without
+logging them or placing the bearer token in a URL. The browser code is carried in a URL fragment,
+which the console removes after sign-in. Same-user processes and other localhost services remain
+outside the authentication boundary, and tools run as the user. Do not expose it on a network or
+use it with untrusted tasks.
 
 The app and console use the regular localmelo config and session store under `~/.cache/localmelo`;
 first-run setup is the web console's settings dialog. The app does not install or remove the

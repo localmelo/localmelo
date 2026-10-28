@@ -16,6 +16,8 @@ from typing import Any, cast
 
 import pytest
 
+from localmelo.support.gateway.auth import GatewayAuth
+
 pytest.importorskip("fastapi")
 pytest.importorskip("uvicorn")
 
@@ -32,15 +34,17 @@ def _available_port() -> int:
     raise RuntimeError("Unable to choose a non-reserved test port")
 
 
-def _health(port: int, child: subprocess.Popen[bytes]) -> dict[str, Any]:
+def _health(port: int, child: subprocess.Popen[bytes], token: str) -> dict[str, Any]:
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
         if child.poll() is not None:
             raise AssertionError(f"Gateway exited with status {child.returncode}")
         try:
-            with urllib.request.urlopen(
-                f"http://127.0.0.1:{port}/api/health", timeout=1
-            ) as response:
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{port}/api/health",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            with urllib.request.urlopen(request, timeout=1) as response:
                 return cast(dict[str, Any], json.load(response))
         except (OSError, urllib.error.URLError):
             time.sleep(0.05)
@@ -54,6 +58,11 @@ def test_second_gateway_reports_owned_session_store(tmp_path: Path) -> None:
         "LOCALMELO_DETECT_URLS": "",
         "LOCALMELO_APP_INSTANCE": "0123456789abcdef" * 2,
     }
+    auth = GatewayAuth(tmp_path / ".cache/localmelo/gateway/auth")
+    try:
+        token = auth.read_token().decode("ascii")
+    finally:
+        auth.close()
     children: list[subprocess.Popen[bytes]] = []
     try:
         for _ in range(2):
@@ -77,7 +86,7 @@ def test_second_gateway_reports_owned_session_store(tmp_path: Path) -> None:
                 stderr=subprocess.DEVNULL,
             )
             children.append(child)
-            health = _health(port, child)
+            health = _health(port, child, token)
             if len(children) == 1:
                 assert health["sessions"]["store"] == "ok"
             else:

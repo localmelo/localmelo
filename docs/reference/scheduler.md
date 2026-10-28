@@ -54,18 +54,28 @@ the lane by code.
 ## Tasks, workers and the scheduler store (S3a)
 
 The gateway's `sessions.db` has a `scheduler` component beside the session
-tables. `support/gateway/task_store.py` creates version 2 with `tasks`,
+tables. `support/gateway/task_store.py` creates version 3 with `tasks`,
 `task_deps`, `priority_events`, `questions`, `sched_rules`, `sched_log`,
-`idle_windows` and `park_priority`, with indexes on `tasks(state, level_eff)`,
+`idle_windows`, `park_priority` and recovery storage, with indexes on `tasks(state, level_eff)`,
 `priority_events(task_id, ts)` and `sched_log(ts)`, in one `BEGIN IMMEDIATE`
-transaction. `TaskStore.open()` also migrates version 1 to 2 atomically and
+transaction. `TaskStore.open()` also migrates versions 1 and 2 atomically and
 records the component version in `schema_components`. `PRAGMA user_version`
 stays the session schema's, and a terminal `melo` never creates the component
-or reads its tables; a component newer than 2 is refused. The console calls
+or reads its tables; a component newer than 3 is refused. The console calls
 `TaskStore.open()` after opening the store. A
 gateway takes the session file's owner
 lock: a second gateway process is refused rather than concurrently migrating
 or writing the same file.
+
+Version 3 adds dormant recovery provenance, durable operation receipts and
+process identity records. Recovery prepare and commit both advance the shared
+park generation; interrupted recovery preserves a pending pause until explicit
+resume or a terminal outcome. Missing provenance and missing process records
+are unknown, not proof that a task never ran or that its processes are gone.
+The internal legacy-adoption seam records explicit orphan-risk confirmation but
+does not itself queue or launch a task. Process capture has no completeness
+proof. The existing gateway startup behavior is unchanged; runtime recovery,
+process verification and user-facing confirmation arrive in later work.
 
 A task row's id is its `kind="task"` session's id. `create_task()` writes the
 session, the task, its first `priority_events` row and a `sched_log` row in
@@ -129,7 +139,7 @@ write priority changes through the store.
 
 S3a.2 adds [task routes](api-v2.md#scheduler-tasks-s3a2) and in-process workers.
 New user tasks are queued by effective priority, rank and creation time, with
-at most four resident workers; a parked running worker still occupies its slot.
+at most four resident workers; a successfully parked worker releases its slot.
 Each uses `mode="gateway"`, `memory=False` and the console's shared gate for
 LLM and embedding calls. Stop cancels the runner and finishes the gate task.
 A retention sweep discards terminal gate identities whose task rows have
@@ -141,9 +151,11 @@ failed with `gateway restarted; recovery arrives in S3b`. Full recovery is
 deferred. A repeat `request_key` only returns the existing task. Workspace
 validity is checked at creation and again at run or resume; a folder that
 becomes invalid fails the task with `invalid_workspace`. Deadlines are rejected
-and service, wait and tool accounting is deferred. Pause parks a task at P5
-and takes effect at the next model call: running tools finish and an answered
-pending approval waits until resume. A task paused before it starts does not
+and service, wait and tool accounting is deferred. Pause requests P5 and
+waits for a safe point while running providers and tools finish. A held plan,
+reflection or undelivered approval can park and release its resident worker;
+undelivered approvals are withdrawn and re-asked on resume. Resume uses a card
+built from persisted evidence. A task paused before it starts does not
 start a worker until resumed. Resume restores the prior priority unless a new
 level is supplied; without a saved pause snapshot (such as a task created or
 set at P5), resume falls back to computed P2. Resuming an unpaused task returns
@@ -161,10 +173,9 @@ for later `task.level`, `task.first` and `task.resume` audit entries; a later
 runnable priority may instead leave the task no longer paused. Explicit
 priority changes can update or invalidate the snapshot. The row also carries a
 monotonic `generation` and an `operation_id` for guarded transitions; it remains
-across resume and is removed with the task. `pause_pending` is reserved for
-S3b.1b and is not set by worker code in S3b.1a. Before a task's first pause or
-park creates its identity row, preventing stale worker safe-point callbacks relies
-on the S3b.1b worker coordinator; these foundations do not provide that fence.
+across resume and is removed with the task. `pause_pending` records a pause
+requested while a worker is still running. Before the first identity row exists,
+the worker coordinator fences stale safe-point callbacks.
 
 `ChatGate.try_park()` is an internal, synchronous primitive for a single
 pending, unadmitted task plan or reflection call bound to a turn. On the same
@@ -179,12 +190,18 @@ atomically. Task-store pause emits `sched.pause_requested`; resume and terminal
 transitions also emit committed events with their identity. `ParkStore` uses the
 same transaction seam for internal hold, resume and park transitions,
 recording hold coordinates supplied by the caller and emitting `sched.held`,
-`sched.resumed` or `sched.parked`; its returned record includes the current
+`sched.resumed`, `sched.parked`, `sched.park_retrying` or `sched.interrupted`;
+its returned record includes the current
 `pause_pending` marker. It does not change priority. Its card builder
 uses the task spec and persisted events only, bounds and redacts text, omits
 tool outputs and arguments other than file paths, and treats completion as
-unverified. These primitives do not implement worker hold/park integration or
-ship a new API. Worker API pause behavior remains as in #119; S3b.1b follows.
+unverified. Worker integration holds the provider or approval delivery fence
+until the matching durable transition is committed, and resumes a parked worker
+through its card. An unsaved park is retried without opening the fence; after
+three failures an interrupted card is saved. If persistence remains unavailable,
+the worker stays held and resume/stop return 503 until finalization succeeds.
+Cleanup failures quarantine the worker, retain its slot, and report interruption
+if retries fail; shutdown gives quarantined cleanup a bounded final attempt.
 
 ## Import bench traces
 

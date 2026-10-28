@@ -40,13 +40,30 @@ func record(_ text: String) {
 var quitPhase = 0
 """
 
-FAKE_GATEWAY = r"""import http.server, os, pathlib, sys, threading, time
+FAKE_GATEWAY = r"""import http.server, json, os, pathlib, sys, threading, time
+from localmelo.support.gateway.auth import GatewayAuth
 port = int(sys.argv[sys.argv.index("--port") + 1])
 home = pathlib.Path(os.environ["HOME"])
 mode = os.environ["TEST_MODE"]
 pidfile = home / "gateway-pid"
 pidfile.write_text(str(os.getpid()))
 class Handler(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path != "/api/auth/login":
+            self.send_error(404)
+            return
+        data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
+        auth = GatewayAuth()
+        try:
+            cookie = auth.consume_login(data.get("code", ""), port)
+        finally:
+            auth.close()
+        if self.headers.get("Origin") != f"http://127.0.0.1:{port}" or not cookie:
+            self.send_error(403)
+            return
+        self.send_response(204)
+        self.send_header("Set-Cookie", "test_session=ok; HttpOnly; Path=/")
+        self.end_headers()
     def do_GET(self):
         if self.path == "/api/health":
             if mode == "store":
@@ -115,6 +132,10 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     runtime.parent.mkdir(parents=True)
     runtime.write_text(f"#!{sys.executable}\n" + FAKE_GATEWAY)
     runtime.chmod(0o755)
+    python = runtime.parent / "python/bin/python3"
+    python.parent.mkdir(parents=True)
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    python.chmod(0o755)
     source = (ROOT / "macos/LocalMeloApp/main.swift").read_text()
     injections = {
         "        webView = nil": '        webView = nil\n        record("removed")',
@@ -170,7 +191,7 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
     quit_at = source.index("    func applicationShouldTerminate(")
     prefix, quit_source = source[:quit_at], source[quit_at:]
     callback = (
-        "URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in"
+        "healthSession.dataTask(with: request) { [weak self] data, response, _ in"
     )
     assert quit_source.count(callback) == 1
     quit_source = quit_source.replace(

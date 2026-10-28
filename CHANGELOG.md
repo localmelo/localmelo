@@ -7,6 +7,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
+### Security
+
+- Gateway authentication is in progress: loopback-only binding, a private bearer
+  token for API clients, and a one-use terminal sign-in link for browser sessions.
+  Existing unauthenticated API clients must migrate; see the gateway guide.
+  Same-user processes and localhost services on other ports remain outside the
+  isolation guarantee. ([#136])
+
+- Gateway security-1b is in progress: disable the legacy playground by default;
+  `melo --serve --enable-playground` opts in behind authentication and uses
+  saved local backend/model settings. Authenticated settings and model probes
+  accept typed HTTP/HTTPS endpoints without following redirects. Explicit
+  close/delete refuses running or queued starts with 409 rather than cancelling
+  them ([#141]).
+
 ### Fixed
 
 - Correct the API v2 response formats and tools example, and update the bilingual
@@ -24,6 +39,32 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - An unsigned arm64 macOS development bundle wraps the local web console in a
   native window and menu-bar host. It owns its gateway child and checks the page
   instance for accidental port collisions; the check is not authentication ([#NN]).
+- Scheduler component v3 adds dormant recovery provenance, guarded durable
+  intents and receipts, and process identity records. Interrupted recovery
+  retains pending pause intent; explicit legacy adoption records orphan-risk
+  acceptance. Startup behavior remains unchanged; process capture completeness
+  and runtime recovery are deferred. [#147]
+- Experimental opt-in provider streaming and OpenAI-compatible SSE assembly;
+  display filtering buffers complete replies, and no CLI or agent uses it yet ([#145]).
+- Direct workers can read a brief file and emit a versioned JSON result or an
+  NDJSON event stream; inbox steering remains future work. ([#143])
+
+- Opt-in fixed system prefix with a local-date snapshot and schema-change telemetry;
+  dynamic recall and reflection remain labelled data ([#142]).
+- Opt-in bounded, pattern-redacted captured tool-result history, separate from the
+  model preview, with capture and acquisition omission metadata ([#144]).
+- Heuristic notes retain a bounded set of explicit English negative and Chinese
+  residence/cancellation assertions, and item attribution rejects conflicting
+  event times, rejects opposing detected polarity and requires the full negative
+  assertion ([#137]). Similar opposing assertions are retained as conflicts;
+  structured polarity-aware supersession is not yet implemented.
+
+- Worker park integration fences held provider and approval delivery, persists
+  pause intent and evidence-based cards, releases cleanly parked worker slots,
+  and re-asks withdrawn approvals on resume. Failed park writes retry and can
+  interrupt with a card; unavailable storage keeps the fence closed, and failed
+  cleanup quarantines the slot until restart. Restart replay and accounting are
+  deferred. [#135]
 - Opt-in context fitting shortens request copies and retries one classified overflow without rerunning tools; impossible requests end with a specific status ([#131]).
 - Read-only worker history in the web workspace, with server-side filters,
   paging, recorded transcripts and explicit refresh for unfinished runs. ([#130])
@@ -58,6 +99,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A documentation inventory, bilingual style guide and experimental offline
   preview builder lay the groundwork for a later site migration; published
   pages and existing URLs are unchanged ([#120]).
+
 - S3a.2 adds `/api/tasks` creation, inspection and control and in-process
   workers sharing the console's scheduler gate. Creation is idempotent with
   `request_key`; workers disable memory, omit `shell_exec`, and have at most
@@ -941,3 +983,12 @@ earlier milestones.
 [#131]: https://github.com/localmelo/localmelo/pull/131
 [#132]: https://github.com/localmelo/localmelo/pull/132
 [#133]: https://github.com/localmelo/localmelo/pull/133
+[#135]: https://github.com/localmelo/localmelo/pull/135
+[#136]: https://github.com/localmelo/localmelo/pull/136
+[#137]: https://github.com/localmelo/localmelo/pull/137
+[#141]: https://github.com/localmelo/localmelo/pull/141
+[#142]: https://github.com/localmelo/localmelo/pull/142
+[#143]: https://github.com/localmelo/localmelo/pull/143
+[#144]: https://github.com/localmelo/localmelo/pull/144
+[#145]: https://github.com/localmelo/localmelo/pull/145
+[#147]: https://github.com/localmelo/localmelo/pull/147

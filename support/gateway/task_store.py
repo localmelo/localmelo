@@ -1,4 +1,4 @@
-"""The scheduler's task store: component version 2 of the gateway's file.
+"""The scheduler's task store: component version 3 of the gateway's file.
 
 The eight tables of design 4.2 arrive as the ``scheduler`` component of the
 gateway's ``sessions.db``, never of the CLI's file. :meth:`TaskStore.open`
@@ -38,7 +38,7 @@ from localmelo.support.scheduler.model import TERMINAL_PHASES, Origin
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 COMPONENT: Final = "scheduler"
-SCHEDULER_VERSION: Final = 2
+SCHEDULER_VERSION: Final = 3
 
 TASK_ORIGINS: Final = frozenset(get_args(Origin))
 _TERMINAL_STATES: Final = TERMINAL_PHASES
@@ -101,6 +101,27 @@ _SNAPSHOT_SCHEMA: Final = """CREATE TABLE park_priority (
   user_rank REAL, pause_pending INTEGER NOT NULL DEFAULT 0,
   generation INTEGER NOT NULL DEFAULT 0, operation_id TEXT,
   snapshot_active INTEGER NOT NULL DEFAULT 1)"""
+
+_RECOVERY_SCHEMA: Final = (
+    """CREATE TABLE IF NOT EXISTS recovery_provenance (
+  task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE CASCADE,
+  first_start TEXT NOT NULL DEFAULT 'unknown', execution_id TEXT,
+  unsafe_resume INTEGER NOT NULL DEFAULT 1, reason TEXT NOT NULL DEFAULT '')""",
+    """CREATE TABLE IF NOT EXISTS recovery_operations (
+  task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  operation_id TEXT NOT NULL, kind TEXT NOT NULL, request TEXT NOT NULL,
+  phase TEXT NOT NULL, generation INTEGER, pending_operation_id TEXT,
+  task_state TEXT, PRIMARY KEY (task_id, operation_id))""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS recovery_one_intent ON recovery_operations(task_id) WHERE kind = 'recovery' AND phase = 'prepared'",
+    """CREATE TABLE IF NOT EXISTS recovery_crashes (
+  task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  execution_id TEXT NOT NULL, PRIMARY KEY (task_id, execution_id))""",
+    """CREATE TABLE IF NOT EXISTS recovery_processes (
+  task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  execution_id TEXT NOT NULL, pgid INTEGER NOT NULL, leader_pid INTEGER NOT NULL,
+  boot_id TEXT NOT NULL, start_token TEXT NOT NULL,
+  PRIMARY KEY (task_id, execution_id, pgid, leader_pid, boot_id, start_token))""",
+)
 
 _TASK_COLUMNS: Final = (
     "task_id",
@@ -316,13 +337,18 @@ class TaskStore:
                 for statement in _SCHEMA:
                     await conn.execute(statement)
                 await conn.execute(_SNAPSHOT_SCHEMA)
+                for statement in _RECOVERY_SCHEMA:
+                    await conn.execute(statement)
                 await conn.execute(
                     "INSERT INTO schema_components (name, version) VALUES (?, ?)",
                     (COMPONENT, SCHEDULER_VERSION),
                 )
-            elif current == 1:
-                await conn.execute(_SNAPSHOT_SCHEMA)
-                await self._migrate_snapshots(conn)
+            elif current in (1, 2):
+                if current == 1:
+                    await conn.execute(_SNAPSHOT_SCHEMA)
+                    await self._migrate_snapshots(conn)
+                for statement in _RECOVERY_SCHEMA:
+                    await conn.execute(statement)
                 await conn.execute(
                     "UPDATE schema_components SET version = ? WHERE name = ?",
                     (SCHEDULER_VERSION, COMPONENT),
@@ -549,6 +575,7 @@ class TaskStore:
         task_id: str | None = None,
         meta: Mapping[str, Any] | None = None,
         deadline: float | None = None,
+        _recovery_proof: bool = False,
     ) -> tuple[TaskRecord, bool]:
         """Create the task and its ``kind="task"`` session in one transaction.
 
@@ -557,8 +584,11 @@ class TaskStore:
         row with ``repeated=True``; a different payload raises
         :class:`TaskConflictError`. The session shares the task's id and stores
         *workspace*, the real path already validated by trusted code; the
-        original workspace request remains in ``tasks.spec``.
+        original workspace request remains in ``tasks.spec``. The private
+        recovery proof is dormant until all worker launches use its fence.
         """
+        if not isinstance(_recovery_proof, bool):
+            raise ValueError("recovery proof must be boolean")
         if not isinstance(workspace, str) or not os.path.isabs(workspace):
             raise ValueError("workspace must be a validated absolute path")
         meta_text, body = _validate_create_request(
@@ -627,6 +657,12 @@ class TaskStore:
                     now,
                 ),
             )
+            if _recovery_proof:
+                await conn.execute(
+                    "INSERT INTO recovery_provenance (task_id, first_start, unsafe_resume) "
+                    "VALUES (?, 'never_started', 0)",
+                    (identifier,),
+                )
             await self._event(
                 conn,
                 identifier,
@@ -927,6 +963,14 @@ class TaskStore:
                 raise TaskConflictError("operation ID reused or superseded")
             if current.state in _TERMINAL_STATES:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
+            if state == "running" and await _first(
+                conn,
+                "SELECT 1 FROM recovery_provenance WHERE task_id = ? AND first_start = 'never_started'",
+                (task_id,),
+            ):
+                raise TaskConflictError(
+                    "first start requires the recovery launch fence"
+                )
             if state == "parked" and await _first(
                 conn,
                 "SELECT 1 FROM park_priority WHERE task_id = ? AND pause_pending = 1",
@@ -947,9 +991,7 @@ class TaskStore:
                     operation_id=operation_id,
                     request=request,
                 )
-            elif (
-                choice is not None or (state is not None and state != "parked")
-            ) and await _first(
+            elif (choice is not None or state is not None) and await _first(
                 conn, "SELECT 1 FROM park_priority WHERE task_id = ?", (task_id,)
             ):
                 if await _first(
@@ -959,7 +1001,15 @@ class TaskStore:
                 ):
                     raise TaskConflictError("task has a pending pause")
                 await self._identity_transition(
-                    conn, events, task_id, "sched.priority_changed"
+                    conn,
+                    events,
+                    task_id,
+                    (
+                        "sched.priority_changed"
+                        if choice is not None
+                        else "sched.state_changed"
+                    ),
+                    state=state or "",
                 )
             if choice is not None:
                 if choice == "first":
@@ -1175,12 +1225,30 @@ class TaskStore:
         assert result is not None
         return result
 
+    async def resume_interrupted(
+        self,
+        task_id: str,
+        *,
+        expected_generation: int | None,
+        expected_operation_id: str | None,
+        operation_id: str,
+        actor: str = "user",
+    ) -> TaskRecord:
+        """Restore an interrupted task's saved priority and queue its card."""
+        return await self.resume(
+            task_id,
+            actor=actor,
+            _guard=(expected_generation, expected_operation_id, operation_id),
+            _interrupted=True,
+        )
+
     async def resume(
         self,
         task_id: str,
         *,
         actor: str = "user",
         _guard: tuple[int | None, str | None, str] | None = None,
+        _interrupted: bool = False,
     ) -> TaskRecord:
         """Restore a pause priority; a parked P5 without a pause falls back to P2."""
         now = self._clock()
@@ -1195,7 +1263,7 @@ class TaskStore:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
             request = (
                 {
-                    "kind": "cancel",
+                    "kind": "resume_interrupted" if _interrupted else "cancel",
                     "generation": _guard[0],
                     "previous": _guard[1],
                     "actor": actor,
@@ -1212,7 +1280,18 @@ class TaskStore:
                 "SELECT 1 FROM park_priority WHERE task_id = ? AND snapshot_active = 1 AND pause_pending = 1",
                 (task_id,),
             )
-            if (
+            if _interrupted:
+                active = await self._has_snapshot(conn, task_id)
+                if (
+                    not _guard
+                    or current.state != "interrupted"
+                    or not current.card.strip()
+                    or not active
+                    or current.level != 5
+                    or current.reason != "pause"
+                ):
+                    raise TaskNotPausedError(f"Task {task_id} is not resumable")
+            elif (
                 current.level != 5
                 or (
                     _guard
@@ -1242,7 +1321,13 @@ class TaskStore:
                 operation_id=_guard[2] if _guard else None,
                 request=request,
                 state=(
-                    current.state if _guard else ("parked" if level == 5 else "queued")
+                    "queued"
+                    if _interrupted
+                    else (
+                        current.state
+                        if _guard
+                        else ("parked" if level == 5 else "queued")
+                    )
                 ),
             )
             await self._clear_snapshot(conn, task_id)
@@ -1261,10 +1346,17 @@ class TaskStore:
                     pinned=_pinned(source),
                     ts=now,
                 )
-            if not _guard:
+            if not _guard or _interrupted:
                 await conn.execute(
                     "UPDATE tasks SET state = ?, wait_reason = '', hold_site = '' WHERE task_id = ?",
-                    ("parked" if level == 5 else "queued", task_id),
+                    (
+                        (
+                            "queued"
+                            if _interrupted
+                            else ("parked" if level == 5 else "queued")
+                        ),
+                        task_id,
+                    ),
                 )
             await self._log(
                 conn, "task.resume", task_id, {"level": level, "source": source}, ts=now

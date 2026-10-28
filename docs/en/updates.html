@@ -71,7 +71,7 @@
         <p>Website sync landed in <a href="https://github.com/localmelo/localmelo/pull/118">#118</a>; Task scheduler-2: task API and workers (S3a.2) landed in <a href="https://github.com/localmelo/localmelo/pull/119">#119</a>.</p>
         <p>In flight, landing in this order:</p>
         <ul>
-          <li>Headless worker support-3: read-only worker history on the web (<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>); the details drawer landed in <a href="https://github.com/localmelo/localmelo/pull/124">#124</a>.</li>
+          <li>Worker contract PR 1: brief files and event streams; worker history landed in <a href="https://github.com/localmelo/localmelo/pull/130">#130</a>.</li>
         </ul>
         <p>Next, in order:</p>
         <ul>
@@ -83,7 +83,7 @@
           <li>Headless worker support-4: worker contract (#107 W2);</li>
           <li>Gateway security-1: access token (<a href="https://github.com/localmelo/localmelo/issues/29">#29</a> P11-P12);</li>
           <li>Terminal UI-2: attachments, shell commands, streaming (U2c, U4);</li>
-          <li>Memory facts-2: Chinese and negative facts;</li>
+          <li>Memory facts-2: polarity-aware updates, cross-session links and worker memory (extraction started);</li>
           <li>Headless worker support-5: task API workers and Claude Code (#107 W3-W4);</li>
           <li>Docs-1: organized, readable, bilingual docs on the website (<a href="https://github.com/localmelo/localmelo/issues/117">#117</a>);</li>
           <li>Later: further scheduler phases, the sleep pipeline (<a href="https://github.com/localmelo/localmelo/issues/14">#14</a>) and the rest of Track 6 (<a href="https://github.com/localmelo/localmelo/issues/29">#29</a>).</li>
@@ -101,10 +101,34 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-worker-brief">
+          <h3>Worker briefs and event streams</h3>
+          <p class="update-date">Unreleased</p>
+          <p>Direct workers read a brief and return a versioned JSON result or stream events; inbox steering follows separately.</p>
+        </article>
+
+        <article class="update-entry" id="u-facts2-extraction">
+          <h3>Negative and Chinese notes</h3>
+          <p class="update-date">Unreleased</p>
+          <p>Heuristic notes can retain some English negative and Chinese residence or cancellation assertions verbatim; source matching is more conservative for negatives and conflicting event times. Coverage is limited; similar assertions with opposite detected polarity are kept as conflicts, not silently deduplicated.</p>
+        </article>
+
         <article class="update-entry" id="u-worker-view">
           <h3>Worker history in the workspace</h3>
-          <p class="update-date">Unreleased</p>
+          <p class="update-date">2026-10-28 · #130</p>
           <p>Workers lists saved and imported runs with filters and paging. Each run opens as a read-only snapshot; refresh unfinished runs manually. Review redacted records before sharing.</p>
+        </article>
+
+        <article class="update-entry" id="u-fixed-prefix">
+          <h3>Optional fixed prefix</h3>
+          <p class="update-date">Unreleased</p>
+          <p>A versioned prefix freezes the local date and stable instructions per run. Schema changes are reported as expected invalidations, not measured cache misses.</p>
+        </article>
+
+        <article class="update-entry" id="u-captured-history">
+          <h3>Optional captured history</h3>
+          <p class="update-date">Unreleased</p>
+          <p>Keep a bounded, pattern-redacted tool-result copy separate from the model preview. Tool-side acquisition omissions may be unknown, and redaction can miss secrets.</p>
         </article>
 
         <article class="update-entry" id="u-2026-10-28-context-accounting">
@@ -776,7 +800,7 @@
           <ul>
             <li>On <code>localhost</code> or a loopback IP address, such as the default <code>127.0.0.1</code>, the gateway refuses requests whose <code>Host</code> is not <code>127.0.0.1</code>, <code>localhost</code> or <code>[::1]</code> with its port (HTTP 421), and requests that web pages at another origin send through your browser (HTTP 403). A web page can no longer reach the gateway through DNS rebinding and run tasks with your tools.</li>
             <li>No web page can show the gateway's pages in a frame.</li>
-            <li>On any other host, such as <code>0.0.0.0</code>, the gateway makes no such checks and logs a warning when it starts: it has no authentication.</li>
+            <li>At that release, non-loopback hosts were not protected; current versions refuse non-loopback binds.</li>
           </ul>
         </article>
 

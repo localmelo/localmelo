@@ -71,7 +71,7 @@ async def client(tmp_path: Path) -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
     manager = SmokePlayground(memory_dir=tmp_path)
     app.state.smoke_playground = manager
-    webapp.mount(app)
+    webapp.mount(app, enable_playground=True)
     try:
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=app), base_url="http://test"

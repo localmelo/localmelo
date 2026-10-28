@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
+from typing import cast
 
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
-from localmelo.support.gateway.chat_gate import ChatGate
+from localmelo.support.gateway.chat_gate import ChatGate, GateCall
 from localmelo.support.gateway.workers import _WorkerEmbedding, _WorkerLLM
+from localmelo.support.sessions.runner import SessionRunner
 
 
 class RecordingLLM(BaseLLMProvider):
@@ -42,7 +45,19 @@ async def test_worker_providers_wait_and_release() -> None:
     llm = RecordingLLM()
     embedding = RecordingEmbedding()
     client = gate.client("worker")
-    worker_llm = _WorkerLLM(llm, client, ready)
+    runner = cast(
+        SessionRunner, SimpleNamespace(current_turn=SimpleNamespace(id="turn"))
+    )
+
+    async def hold(call: GateCall, owner: SessionRunner, turn: str, kind: str) -> None:
+        assert owner is runner and call.turn_id == turn == "turn"
+
+    async def release(call: GateCall, owner: SessionRunner, turn: str) -> None:
+        assert owner is runner and call.turn_id == turn == "turn"
+
+    worker_llm = _WorkerLLM(
+        llm, client, ready, lambda: runner, hold, release, lambda _: None
+    )
     worker_embedding = _WorkerEmbedding(embedding, client, ready)
     messages = [Message(role="user", content="hello")]
     chat = asyncio.create_task(worker_llm.chat(messages))
@@ -50,7 +65,9 @@ async def test_worker_providers_wait_and_release() -> None:
     try:
         await asyncio.sleep(0)
         assert not chat.done() and not embed.done()
-        assert not llm.calls and not embedding.calls and not gate._calls
+        assert not llm.calls and not embedding.calls
+        assert len(gate._calls) == 1
+        assert next(iter(gate._calls.values())).turn_id == "turn"
         ready.set()
         async with asyncio.timeout(3):
             reply, vectors = await asyncio.gather(chat, embed)

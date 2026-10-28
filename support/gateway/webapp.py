@@ -13,6 +13,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from localmelo.melo.contracts.providers import ProviderError
+from localmelo.support import config
 from localmelo.support.config import Config, SchedulerConfig
 from localmelo.support.gateway.chat_gate import call_log_dir
 from localmelo.support.gateway.machine_monitor import read_pmset
@@ -49,28 +50,53 @@ def _body_text(body: dict[str, Any], key: str, default: str = "") -> str:
     return value
 
 
-def mount(app: FastAPI, cfg: Config | None = None) -> None:
-    """Register the smoke playground routes on the app."""
+def _saved_endpoints(app: FastAPI, body: dict[str, Any]) -> dict[str, str]:
+    if any(
+        key in body
+        for key in (
+            "chat_url",
+            "chat_model",
+            "embedding_url",
+            "embedding_model",
+            "adapter",
+            "backend",
+            "base_url",
+        )
+    ):
+        raise ValueError(
+            "Playground endpoints and models must come from saved settings"
+        )
+    saved = config.load() if Path(config.config_path()).is_file() else app.state.config
+    if not isinstance(saved, Config) or saved.chat_backend not in {
+        "mlc",
+        "ollama",
+        "vllm",
+        "sglang",
+    }:
+        raise ValueError("Playground requires a saved local chat backend")
+    chat = getattr(saved, saved.chat_backend)
+    embedding = getattr(saved, saved.embedding_backend, None)
+    return {
+        "chat_url": chat.chat_url,
+        "chat_model": chat.chat_model,
+        "embedding_url": getattr(embedding, "embedding_url", ""),
+        "embedding_model": getattr(embedding, "embedding_model", ""),
+        "adapter": saved.chat_backend,
+    }
+
+
+def mount(
+    app: FastAPI, cfg: Config | None = None, *, enable_playground: bool = False
+) -> None:
+    """Mount the public shell and, when explicitly enabled, playground routes."""
     if getattr(app.state, "_localmelo_webapp_mounted", False):
         return
     app.state._localmelo_webapp_mounted = True
     app.state.config = cfg
 
-    from localmelo.support.gateway.playground import SessionBusyError
-
-    _manager(app)
     app.mount("/assets", StaticFiles(directory=_STATIC), name="workspace-assets")
 
-    @app.on_event("startup")
-    async def _start_smoke_playground() -> None:
-        await _manager(app).start()
-
-    @app.on_event("shutdown")
-    async def _close_smoke_playground() -> None:
-        await _manager(app).close_all()
-
-    # This identifies an app-started instance, not a secret or authentication:
-    # any local client can read the header from the page response.
+    # The header identifies this app-started instance; it is not authentication.
     instance = os.environ.get("LOCALMELO_APP_INSTANCE", "")
     if not re.fullmatch(r"[0-9a-f]{32}", instance):
         instance = ""
@@ -85,6 +111,21 @@ def mount(app: FastAPI, cfg: Config | None = None) -> None:
         return HTMLResponse(
             (_STATIC / "index.html").read_text(encoding="utf-8"), headers=headers
         )
+
+    if not enable_playground:
+        return
+
+    from localmelo.support.gateway.playground import SessionBusyError
+
+    _manager(app)
+
+    @app.on_event("startup")
+    async def _start_smoke_playground() -> None:
+        await _manager(app).start()
+
+    @app.on_event("shutdown")
+    async def _close_smoke_playground() -> None:
+        await _manager(app).close_all()
 
     @app.post("/v1/playground/presence")
     async def playground_presence(body: dict[str, Any]) -> JSONResponse:
@@ -121,10 +162,11 @@ def mount(app: FastAPI, cfg: Config | None = None) -> None:
     @app.post("/v1/playground/discover")
     async def playground_discover(body: dict[str, Any]) -> JSONResponse:
         try:
+            endpoints = _saved_endpoints(app, body)
             payload = await _manager(app).discover(
-                chat_url=_body_text(body, "chat_url", ""),
-                embedding_url=_body_text(body, "embedding_url", ""),
-                adapter=_body_text(body, "adapter", "auto"),
+                chat_url=endpoints["chat_url"],
+                embedding_url=endpoints["embedding_url"],
+                adapter=endpoints["adapter"],
             )
             return JSONResponse(content=payload)
         except SessionBusyError as e:
@@ -138,11 +180,7 @@ def mount(app: FastAPI, cfg: Config | None = None) -> None:
     async def playground_session(body: dict[str, Any]) -> JSONResponse:
         try:
             payload = await _manager(app).create_session(
-                chat_url=_body_text(body, "chat_url", ""),
-                chat_model=_body_text(body, "chat_model", ""),
-                embedding_url=_body_text(body, "embedding_url", ""),
-                embedding_model=_body_text(body, "embedding_model", ""),
-                adapter=_body_text(body, "adapter", "auto"),
+                **_saved_endpoints(app, body),
                 scenario_id=_body_text(body, "scenario_id", ""),
             )
             return JSONResponse(content=payload)
@@ -209,7 +247,9 @@ def mount(app: FastAPI, cfg: Config | None = None) -> None:
         try:
             closed = await _manager(app).close(session_id)
         except SessionBusyError as e:
-            return JSONResponse(status_code=409, content={"error": str(e)})
+            return JSONResponse(
+                status_code=409, content={"error": str(e), "code": "session_busy"}
+            )
         if not closed:
             return JSONResponse(status_code=404, content={"error": "session not found"})
         return JSONResponse(content={"closed": session_id})
