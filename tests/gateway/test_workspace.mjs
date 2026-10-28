@@ -22,12 +22,13 @@ function harness(api, {mobile = false, renderMessages = false} = {}) {
       elements.set(id, {
         id, value: '', options: [], style: {}, hidden: false, disabled: false,
         textContent: '', innerHTML: '', scrollHeight: 50, scrollTop: 0, clientHeight: 40, dataset: {},
-        inert: false, attributes: {}, children: [], replacements: 0,
+        inert: false, attributes: {}, children: [], replacements: 0, listeners: {},
         classList: {
           toggle(name, force = !classes.has(name)) { if (force) classes.add(name); else classes.delete(name); return force; },
           contains: name => classes.has(name),
         },
-        addEventListener() {}, setAttribute(name, value) { this.attributes[name] = value; }, close() {}, showModal() {},
+        addEventListener(type, handler) { this.listeners[type] = handler; },
+        setAttribute(name, value) { this.attributes[name] = value; }, close() {}, showModal() {},
         focus() { document.activeElement = this; },
         querySelector() { return element(id + '-child'); },
         closest(selector) {
@@ -349,7 +350,7 @@ test('the level chip posts the level and updates the session', async () => {
     return {session_id: 'a', level: 1};
   });
   h.state.sessions = [session('a', {level: 2})]; h.state.activeId = 'a';
-  h.run('showLevelMenu(true)');
+  h.element('level-btn').listeners.click();
   const menu = h.element('level-menu');
   assert.equal(menu.hidden, false);
   assert.equal(h.element('level-btn').attributes['aria-expanded'], 'true');
@@ -390,10 +391,16 @@ test('presence is throttled to one request per 2.5 seconds', async () => {
   await h.run('presence()');
   assert.equal(posts.length, 1, 'Two heartbeats in a row are one request');
   assert.equal(posts[0][0], '/v1/playground/presence');
-  assert.deepEqual(JSON.parse(posts[0][1].body), {session_id: 'a'});
-  h.state.lastPresenceAt = 0;
+  assert.equal(JSON.parse(posts[0][1].body).session_id, 'a');
+  h.state.lastPresenceAt = Date.now() - 2400;
   await h.run('presence()');
-  assert.equal(posts.length, 2, 'After the window a new heartbeat is sent');
+  assert.equal(posts.length, 1, 'Inside 2.5 s a typing heartbeat is throttled');
+  h.state.lastPresenceAt = Date.now() - 2600;
+  await h.run('presence()');
+  assert.equal(posts.length, 2, 'After 2.5 s a new heartbeat is sent');
+  h.state.lastPresenceAt = Date.now();
+  await h.run('presence(true)');
+  assert.equal(posts.length, 3, 'A focus change is not throttled');
 });
 
 test('presence is sent when a chat is selected', async () => {

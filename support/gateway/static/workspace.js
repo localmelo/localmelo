@@ -161,11 +161,11 @@ async function setLevel(level) {
   }
   syncUI();
 }
-function presence() {
+function presence(force = false) {
   const s = active();
   if (!s) return;
   const now = Date.now();
-  if (now - S.lastPresenceAt < 2500) return;
+  if (!force && now - S.lastPresenceAt < 2500) return;
   S.lastPresenceAt = now;
   try {
     const request = fetch("/v1/playground/presence", {
@@ -400,7 +400,7 @@ async function selectSession(id, { saveCurrent = true } = {}) {
   renderSessions();
   renderMessages(true);
   syncUI();
-  presence();
+  presence(true);
   try {
     await refreshSession(id, true);
   } catch (error) {
@@ -561,7 +561,7 @@ async function send() {
   renderMessages(true);
   renderSessions();
   syncUI();
-  presence();
+  presence(true);
   try {
     await api("/session/" + encodeURIComponent(id) + "/run", { query });
   } catch (error) {
@@ -692,6 +692,9 @@ $("stop-btn").addEventListener("click", stop);
 $("level-btn").addEventListener("click", () => {
   if (!active()) return;
   showLevelMenu(!S.levelsOpen);
+});
+document.addEventListener("click", (event) => {
+  if (S.levelsOpen && !event.target.closest(".level-picker")) showLevelMenu(false);
 });
 $("search").addEventListener("input", renderSessions);
 $("sidebar-toggle").addEventListener("click", () =>
