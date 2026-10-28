@@ -85,8 +85,8 @@ run.
 - The directory is created when an agent starts: at the start of a direct
   run or of the `melo ""` loop, or when a gateway session is created.
 - A new directory gets mode 0700, so only you can open the files in it, and
-  a new `history.db` or `procedures.db`, with its `-wal` and `-shm`, gets
-  mode 0600.
+  a new `history.db`, `long_term.db` or `procedures.db`, with its `-wal` and
+  `-shm`, gets mode 0600.
 - The default directory, `~/.cache/localmelo/memory`, is also set to 0700
   when it exists, you own it, and it is open to group or others, as earlier
   versions left it. One INFO line in the log says so.
@@ -96,9 +96,9 @@ run.
   ```bash
   chmod 700 ~/melo-memory
   chmod 600 ~/melo-memory/history.db*
+  chmod 600 ~/melo-memory/long_term.db*
   ```
 
-- `long_term.db` is created with the default file mode, usually 0644.
 - `procedures.db` holds [procedural memory](procedures.md). With
   persistence on, the first run that ends creates it, and every run adds
   its record at its end, `--memory off` included. With persistence off,

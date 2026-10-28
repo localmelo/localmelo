@@ -8,7 +8,7 @@ from typing import Any
 import aiosqlite
 import numpy as np
 
-from localmelo.melo.memory._sqlite import prepare_connection
+from localmelo.melo.memory._sqlite import create_private_file, prepare_connection
 from localmelo.melo.memory.long import LongTerm
 
 _SCHEMA = """
@@ -25,7 +25,8 @@ class SqliteLongTerm(LongTerm):
     """Persistent long-term memory backed by SQLite via aiosqlite.
 
     Vectors are stored as raw float32 ``BLOB``s. The connection is
-    opened lazily on first awaited call. Writes serialize through
+    opened lazily on first awaited call; a missing file is created with
+    mode 0600, an existing one keeps its mode. Writes serialize through
     ``_write_lock``; the cosine-similarity scan inside :meth:`search`
     runs in a worker thread so a long fetch does not stall the loop.
     """
@@ -42,6 +43,8 @@ class SqliteLongTerm(LongTerm):
         async with self._init_lock:
             if self._conn is not None:
                 return self._conn
+            if self._db_path != ":memory:":
+                create_private_file(self._db_path)
             conn = await aiosqlite.connect(self._db_path)
             await prepare_connection(conn, _SCHEMA)
             self._conn = conn
