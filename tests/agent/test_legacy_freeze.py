@@ -108,6 +108,7 @@ LATER_OPTIONS = [
     "--import-session",
     "--title",
     "--fixed-prefix",
+    "--captured-history",
     "--context-window",
     "--output-reserve",
     "--safety-margin",
