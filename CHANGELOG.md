@@ -57,7 +57,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   native window and menu-bar host. It owns its gateway child, checks the
   instance before sending any login code, binds the code to the launch instance
   and checks page responses, re-signs in after a token rotation, and offers
-  "Sign In Again"; the check is not authentication ([#NN]).
+  "Sign In Again"; the check is not authentication ([#167]).
 - Direct workers can read an explicit append-only inbox at planning boundaries,
   with per-line acceptance events and redacted saved history. An inbox inside the
   workspace is refused as `setup_error` before any model call; a slow event
@@ -1053,3 +1053,4 @@ earlier milestones.
 [#164]: https://github.com/localmelo/localmelo/pull/164
 [#165]: https://github.com/localmelo/localmelo/pull/165
 [#166]: https://github.com/localmelo/localmelo/pull/166
+[#167]: https://github.com/localmelo/localmelo/pull/167
