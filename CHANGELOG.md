@@ -197,6 +197,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A `shell_exec` command no longer inherits melo's standard input: it reads
+  `/dev/null` in every mode. A shell whose stdin was a pty that was not
+  melo's controlling terminal took that pty as its controlling terminal at
+  start-up and hung it up when it exited, so `melo` ended a completed run
+  with exit code 120 instead of 0 ([#NN]).
 - A server picked at the first run, at
   `Save URL · MODEL as the default backend?` or with `/backend` was always
   saved as the `vllm` backend. An Ollama server, saved that way, ran with

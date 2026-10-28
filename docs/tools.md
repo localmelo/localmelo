@@ -7,7 +7,7 @@ from MCP servers, which tools each step offers, and what the checks do.
 
 | Tool | What it does | Limits |
 |---|---|---|
-| `shell_exec` | Runs a shell command and returns its output. | Killed with every process it started after 30 seconds. Six destructive command patterns are refused. |
+| `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. Six destructive command patterns are refused. |
 | `python_exec` | Runs Python code inside the localmelo process and returns what it prints. | No time limit: it cannot be interrupted. |
 | `file_read` | Reads a text file. | Any file your account can read. |
 | `file_write` | Writes text to a file, creating or replacing it. | Any file your account can write. |
@@ -210,9 +210,11 @@ Direct mode and the gateway never set a workspace root.
   `... [truncated: the file has <size> bytes]`.
 - **Commands.** `shell_exec` and `python_exec` start in the root, each in a
   child process with a process group of its own, which a timeout or a
-  cancellation kills with every process it started. `python_exec` code runs
-  in a child Python, so a time limit can stop it. These two tools are not
-  fenced: they can reach any path.
+  cancellation kills with every process it started. A shell command's
+  standard input is `/dev/null`, with or without a root, so it never reads
+  the terminal melo runs in. `python_exec` code runs in a child Python, so a
+  time limit can stop it. These two tools are not fenced: they can reach any
+  path.
 - **Exit status.** A `shell_exec` command that exits with a non-zero status
   starts its text with the line `[exit code <n>]` (`-<signal>` for a command
   that a signal ended), and the call still succeeds. The line comes first,

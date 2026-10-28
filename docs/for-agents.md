@@ -155,7 +155,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 
 ## Tools and MCP
 
-- `shell_exec(command)`: process group killed after 30 s; refuses `rm -rf /...`, `mkfs`, `dd if=`, fork bombs, `shutdown`, `reboot`.
+- `shell_exec(command)`: stdin `/dev/null`; process group killed after 30 s; refuses `rm -rf /...`, `mkfs`, `dd if=`, fork bombs, `shutdown`, `reboot`.
 - `python_exec(code)`: `exec` in the agent's process, on its event loop, so it cannot be interrupted (a child process with a workspace root).
 - `file_read(path)`: any file the user can read. `file_write(path, content)`: creates or replaces any file the user can write; in the interactive UI, only inside the workspace.
 - A Python run with an approval policy, and the interactive UI (bare `melo`, unless `--yolo`), gate `shell_exec`, `python_exec` and `file_write`; direct mode, `melo ""` and the gateway have none. Output is cut at 50,000 characters.

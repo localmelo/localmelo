@@ -391,8 +391,9 @@ Both lines print the real path of `~/melo-work`, such as
 - **`shell_exec` and `python_exec`** start in the root, each in a child
   process with a process group of its own, which a timeout or a
   cancellation kills as a whole. A shell command's standard input is
-  `/dev/null`. Python code runs in a child Python, so a time limit can stop
-  it, and `sys.exit()` or `os.chdir()` stays in the child.
+  `/dev/null`, with or without a root. Python code runs in a child Python,
+  so a time limit can stop it, and `sys.exit()` or `os.chdir()` stays in
+  the child.
 - **They can still reach any path.** Only the file tools are limited to the
   root. Use an [approval policy](#approve-tool-calls) to control
   `shell_exec` and `python_exec`.
