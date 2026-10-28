@@ -186,6 +186,22 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
 - To connect another kind of server, subclass `BaseLLMProvider` (or
   `BaseEmbeddingProvider`) from `localmelo.melo.contracts.providers`, and
   implement `chat()` and `close()` (or `embed()` and `close()`).
+- An optional `stream_chat(messages, tools=None)` returns an async generator of
+  `StreamFragment` values: provisional `content` and `reasoning` text, `tool`
+  indices (never partial arguments), `usage`, then one `reply` containing a
+  completed `Message` and `finish_reason`. Providers without streaming call
+  `chat()` and yield one `reply`. `OpenAICompatLLM` sends `stream=true` only
+  for this method and validates complete tool calls before returning them.
+  Failures raise `ProviderError`; after any fragment is yielded, transport or
+  premature-end errors are not retryable. Cancellation propagates. Close the generator
+  with `aclose()` on early exit. Deltas and the final message can contain
+  sensitive text: do not persist raw deltas, and do not display them directly.
+  `localmelo.melo.checker.stream_filter.StreamFilter` is the separate display
+  policy: it buffers a complete text response, separates thinking and applies
+  pattern-based redaction at `finish()`. It does not guarantee secret removal,
+  and emits no live text. This contract has no agent or UI consumer yet;
+  existing `chat()` behavior is unchanged. Callers must not silently retry a
+  stream after showing provisional output.
 - Set `model` on a chat provider to the id of the model it uses, as the
   built-in providers do. Procedural memory keeps what runs did per model;
   with the default `""`, or `"default"`, past runs' facts are shown but a

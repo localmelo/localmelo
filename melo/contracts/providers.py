@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import contextvars
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import AsyncGenerator, Mapping
+from dataclasses import dataclass
 from types import MappingProxyType
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from localmelo.melo.schema import Message, ToolDef
 
@@ -59,6 +60,23 @@ class ProviderError(Exception):
         self.status_code = status_code
         self.retryable = retryable
         self.context_overflow = context_overflow
+
+
+@dataclass(frozen=True)
+class StreamFragment:
+    """A provisional delta or completed reply from an opted-in provider stream.
+
+    Deltas are untrusted and must be filtered before display; they must not be
+    persisted. Tool fragments contain only an index, never partial arguments.
+    Only ``reply`` carries complete tool calls. Failures raise ProviderError.
+    """
+
+    kind: Literal["content", "reasoning", "tool", "usage", "reply"]
+    text: str = ""
+    tool_index: int | None = None
+    usage: dict[str, int] | None = None
+    finish_reason: str = ""
+    reply: Message | None = None
 
 
 class BaseLLMProvider(ABC):
@@ -127,6 +145,18 @@ class BaseLLMProvider(ABC):
         A failed request should raise :class:`ProviderError`; the agent
         retries it when ``retryable`` is true.
         """
+
+    async def stream_chat(
+        self,
+        messages: list[Message],
+        tools: list[ToolDef] | None = None,
+    ) -> AsyncGenerator[StreamFragment, None]:
+        """Opt in to streaming; providers without it return one whole reply.
+
+        Close the iterator on early exit. Cancellation propagates and releases
+        the provider's in-flight response; errors raise ``ProviderError``.
+        """
+        yield StreamFragment(kind="reply", reply=await self.chat(messages, tools))
 
     @abstractmethod
     async def close(self) -> None:

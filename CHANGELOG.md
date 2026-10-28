@@ -21,6 +21,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Experimental opt-in provider streaming and OpenAI-compatible SSE assembly;
+  display filtering buffers complete replies, and no CLI or agent uses it yet ([#NN]).
+
 - Worker park integration fences held provider and approval delivery, persists
   pause intent and evidence-based cards, releases cleanly parked worker slots,
   and re-asks withdrawn approvals on resume. Failed park writes retry and can
