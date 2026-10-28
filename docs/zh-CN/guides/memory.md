@@ -102,7 +102,7 @@ asyncio.run(main())
 `agent.hippo` 是对智能体已打开存储的同一封装接口，因此运行中的脚本也可以通过它调用 `forget`；上面的脚本即使在智能体没有嵌入提供方时也会打开这两个文件。`SqliteHistory` 和 `SqliteLongTerm` 本身也有 `forget(task_id)` 和 `forget_all()`，内存中的 `History` 和 `LongTerm` 同样如此。
 
 - **`forget(task_id)` 删除的内容。** 历史记录的 `tasks`、`steps` 和 `llm_calls` 表中属于该任务的行。长期记忆中则删除元数据指明该任务的条目：反思的元数据有 `"task_id"`，各步摘要只有 `"step_id"`，因此按任务遗忘会从长期记忆中删除该任务的反思，但保留其各步摘要。`forget_all()` 删除所有长期记忆条目以及历史记录中这三张表的所有行。
-- **不涉及的内容。** 工作记忆（当前对话）、程序性记忆（由 `melo-procedures forget` 清除）以及会话存储（`sessions.db`；网页工作区的聊天记录位于 `~/.cache/localmelo/playground/`）。
+- **不涉及的内容。** 工作记忆（当前对话）、程序性记忆（由 `melo-procedures forget` 清除）、会话存储（控制台的聊天记录位于 `~/.cache/localmelo/gateway/sessions.db`），以及启用旧版 playground 时保存在 `~/.cache/localmelo/playground/` 中的记忆。
 - **实现方式。** 在存储的写锁下执行一次 `BEGIN IMMEDIATE` 事务。删除操作会覆盖释放的空间（`PRAGMA secure_delete=ON`），随后检查点会截断 WAL，因此遗忘的文本不会留在数据库文件或其 `-wal` 文件中。如果另一个连接阻止 WAL 截断，检查点会跳过，并在日志中记录 WARNING；之后的检查点会将其清除。localmelo 运行时可以安全地遗忘，但不能安全地删除文件。
 
 要删除全部内容，包括 API 不涉及的内容，请停止所有 localmelo 进程并删除文件：
@@ -123,7 +123,10 @@ asyncio.run(main())
    # Only procedural memory
    rm ~/.cache/localmelo/memory/procedures.db*
 
-   # The web workspace's memory
+   # The console's session store (including chats)
+   rm -f ~/.cache/localmelo/gateway/sessions.db*
+
+   # The legacy playground's memory, if it was enabled
    rm -rf ~/.cache/localmelo/playground
    ```
 
@@ -154,4 +157,4 @@ sqlite3 ~/.cache/localmelo/memory/history.db "UPDATE llm_calls SET thinking = ''
 - 工具返回的图像只存储引用：MIME 类型、SHA-256 摘要和大小，绝不存储图像本身。
 - 交互式界面将每个轮次及其工具调用和输出保存在 `~/.cache/localmelo/cli/sessions.db`，将你的消息保存在 `~/.cache/localmelo/cli_history`（两者均为 `0600`，明文，未加密）；`~/.cache/localmelo/logs/cli.log` 记录请求 URL 和错误。
 - 这些文件的私密程度取决于你的主目录。删除方法见[重置记忆](#reset-memory)。Python API 的 `forget` 会覆盖所删除的单元并截断 WAL，因此文本不会留在数据库文件的空闲页或 `history.db-wal`/`long_term.db-wal` 中。
-- 网关的网页工作区始终将聊天的历史记录和程序性记忆保存在 `~/.cache/localmelo/playground/`；选择了嵌入模型时，也会在那里保存长期记忆。
+- 控制台将会话行和轮次存储在 `~/.cache/localmelo/gateway/sessions.db`。旧版 playground 默认禁用；使用 `melo --serve --enable-playground` 启用后，它会将聊天的历史记录和程序性记忆保存在 `~/.cache/localmelo/playground/`；选择了嵌入模型时，也会在那里保存长期记忆。

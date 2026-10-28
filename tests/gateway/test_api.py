@@ -99,7 +99,9 @@ def _build_server(
         # ~/.cache/localmelo/scheduler.
         gate=ChatGate(policy="off", call_log_dir=None),
     )
-    with patch("localmelo.support.gateway.webapp.mount", lambda app, cfg=None: None):
+    with patch(
+        "localmelo.support.gateway.webapp.mount", lambda app, cfg=None, **kwargs: None
+    ):
         server = GatewayServer(cfg, console_options=options)
 
     # Replace the real SessionManager with our fake
@@ -352,6 +354,7 @@ async def test_delete_busy_session_returns_409_and_keeps_it() -> None:
         assert resp.status_code == 409
         body = resp.json()
         assert "busy-delete" in body["error"]
+        assert body["code"] == "session_busy"
         assert body["session_id"] == "busy-delete"
         # The session and its run are untouched.
         assert sessions.get("busy-delete") is session

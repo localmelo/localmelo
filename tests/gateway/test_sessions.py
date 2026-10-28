@@ -48,6 +48,63 @@ class FakeSessionManager(SessionManager):
 # ── Session tests ──
 
 
+async def test_queued_start_blocks_close_and_eviction() -> None:
+    mgr = FakeSessionManager(idle_ttl=0)
+    session = await mgr.create("queued")
+    await mgr._creation_lock.acquire()
+    task = asyncio.create_task(mgr.get_or_create("queued"))
+    await asyncio.sleep(0)
+    try:
+        with pytest.raises(SessionBusyError):
+            await mgr.close("queued")
+        await mgr._evict_idle()
+        assert mgr.get("queued") is session
+    finally:
+        mgr._creation_lock.release()
+    assert await task is session
+    await mgr.close("queued")
+
+
+async def test_first_queued_start_blocks_close() -> None:
+    mgr = FakeSessionManager()
+    await mgr._creation_lock.acquire()
+    task = asyncio.create_task(mgr.get_or_create("new"))
+    await asyncio.sleep(0)
+    try:
+        with pytest.raises(SessionBusyError):
+            await mgr.close("new")
+        assert mgr.get("new") is None
+    finally:
+        mgr._creation_lock.release()
+    session = await task
+    assert mgr.get("new") is session
+    assert await mgr.close("new")
+
+
+async def test_close_removes_before_awaiting_agent() -> None:
+    mgr = FakeSessionManager()
+    session = await mgr.create("closing")
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def close() -> None:
+        entered.set()
+        await release.wait()
+
+    session.agent.close = close  # type: ignore[method-assign]
+    first = asyncio.create_task(mgr.close("closing"))
+    await entered.wait()
+    assert not await mgr.close("closing")
+    with pytest.raises(SessionBusyError):
+        await mgr.get_or_create("closing")
+    with pytest.raises(SessionBusyError):
+        await mgr.create("closing")
+    release.set()
+    assert await first
+
+
+# ── Session tests ──
+
+
 class TestSession:
     def test_touch_updates_last_active(self) -> None:
         s = Session(agent=FakeAgent())  # type: ignore[arg-type]

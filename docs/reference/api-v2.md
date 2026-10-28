@@ -188,7 +188,10 @@ sessions.
 
 Check candidate settings with a one-message chat ping and, when an
 embedding backend is selected, a one-word embedding ping, bounded to 30
-seconds. Takes the `PUT /api/settings` body without `revision`.
+seconds. Takes the `PUT /api/settings` body without `revision`. In the
+in-progress security-1b changes, authenticated probes accept explicitly
+typed absolute HTTP or HTTPS URLs and do not follow redirects; a redirect
+is a failed probe. These probes can contact the supplied host.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/api/settings/test \
@@ -222,6 +225,9 @@ Never returns the variable's value.
 ## GET /api/models
 
 List the models of a local backend (`GET <url>/models` with a 5 s timeout).
+In the in-progress security-1b changes, authenticated requests may supply an
+absolute HTTP or HTTPS URL; redirects are not followed. The supplied host
+can be contacted.
 
 ```bash
 { printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- 'http://127.0.0.1:8401/api/models?backend=ollama&url=http%3A%2F%2F127.0.0.1%3A11434%2Fv1'
@@ -752,11 +758,12 @@ Rename the session, move it to another folder, or both.
 
 - A task session returns 409 `task_session_read_only`; it cannot be deleted as a chat.
 - 204 with no body: the session's row, turns, events and blobs are gone.
-- A running turn is stopped first, finished `cancelled` with cause
-  `closed`; its card is withdrawn.
-- 404 `not_found` for an unknown session. 409 `session_busy` when a turn
-  is still running after this gateway stopped it — rare: the row, its
-  turns and its events stay as they were, and the call can be repeated.
+- In the in-progress security-1b changes, 409 `session_busy` refuses a
+  delete while a turn is running or a start is queued; it does not cancel
+  the turn or delete its row. Cancel or wait for it to finish, then retry.
+  A maintenance operation holding the session lock can also briefly return
+  this error, even when no turn is running; wait and retry.
+- 404 `not_found` for an unknown session.
 
 ## POST /api/sessions/{id}/level
 
