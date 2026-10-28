@@ -256,3 +256,64 @@ class TestRegistryDelegation:
         errors = cfg.validate()
         assert errors == []
         assert stub.validate_called
+
+
+class TestReasoningConfig:
+    """The two reasoning keys on each backend section, and [agent]."""
+
+    @pytest.fixture(autouse=True)
+    def _defaults(self):  # type: ignore[no-untyped-def]
+        from localmelo.support.backends.registry import ensure_defaults_registered
+
+        ensure_defaults_registered()
+        yield
+
+    def test_a_known_field_and_the_bool_validate(self) -> None:
+        cfg = Config(
+            chat_backend="vllm",
+            embedding_backend="none",
+            vllm=LocalBackendConfig(
+                chat_url="http://127.0.0.1:1/v1",
+                chat_model="m",
+                reasoning_field="reasoning_content",
+                requires_reasoning_replay=True,
+            ),
+        )
+        assert cfg.validate() == []
+
+    def test_an_unknown_field_is_an_error(self) -> None:
+        cfg = Config(
+            chat_backend="vllm",
+            embedding_backend="none",
+            vllm=LocalBackendConfig(
+                chat_url="http://127.0.0.1:1/v1",
+                chat_model="m",
+                reasoning_field="thinking",
+            ),
+        )
+        errors = cfg.validate()
+        assert any("[vllm] reasoning_field" in e for e in errors)
+
+    def test_ollama_accepts_thinking_and_auto_only(self) -> None:
+        cfg = Config(
+            chat_backend="ollama",
+            embedding_backend="none",
+            ollama=LocalBackendConfig(
+                chat_url="http://127.0.0.1:1",
+                chat_model="m",
+                reasoning_field="thinking",
+            ),
+        )
+        assert cfg.validate() == []
+        cfg.ollama.reasoning_field = "auto"
+        assert cfg.validate() == []
+        cfg.ollama.reasoning_field = "reasoning_content"
+        assert any("[ollama] reasoning_field" in e for e in cfg.validate())
+
+    def test_agent_values_validate(self) -> None:
+        cfg = Config(chat_backend="vllm", embedding_backend="none")
+        cfg.agent.reasoning = "compress"
+        cfg.agent.replay_turns = 0
+        errors = cfg.validate()
+        assert any("[agent] reasoning" in e for e in errors)
+        assert any("[agent] replay_turns" in e for e in errors)

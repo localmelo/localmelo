@@ -64,6 +64,10 @@ class GeminiBackend(BaseBackend):
             api_key=api_key,
             extra_body=cfg.gemini.extra_body,
             timeout=cfg.request_timeout_s,
+            reasoning_field=getattr(cfg.gemini, "reasoning_field", "") or None,
+            requires_reasoning_replay=getattr(
+                cfg.gemini, "requires_reasoning_replay", False
+            ),
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

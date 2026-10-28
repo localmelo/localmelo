@@ -64,6 +64,10 @@ class NvidiaBackend(BaseBackend):
             api_key=api_key,
             extra_body=cfg.nvidia.extra_body,
             timeout=cfg.request_timeout_s,
+            reasoning_field=getattr(cfg.nvidia, "reasoning_field", "") or None,
+            requires_reasoning_replay=getattr(
+                cfg.nvidia, "requires_reasoning_replay", False
+            ),
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:

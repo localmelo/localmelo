@@ -63,6 +63,10 @@ class VllmBackend(BaseBackend):
             model=cfg.vllm.chat_model,
             extra_body=cfg.vllm.extra_body,
             timeout=cfg.request_timeout_s,
+            reasoning_field=getattr(cfg.vllm, "reasoning_field", "") or None,
+            requires_reasoning_replay=getattr(
+                cfg.vllm, "requires_reasoning_replay", False
+            ),
         )
 
     def build_embedding_provider(self, cfg: Config) -> BaseEmbeddingProvider | None:
