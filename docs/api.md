@@ -7,16 +7,25 @@ gateway. See [Gateway and HTTP API](gateway.md#keep-the-gateway-private).
 
 The API only grows: endpoints, optional request fields and response keys
 are added, never renamed or removed. A client may ignore keys it does not
-know. This page documents the routes that exist now: the reads, and the
-writes that create a session and start, retry, stop and approve its
-turns. Settings and model listing come in a later change.
+know. This page documents every API v2 route: health, settings, key status,
+connection test, model listing, sessions, turns, SSE events, blobs,
+submissions, approvals, tools, grants, memory and runs.
 
 A console turn passes the same scheduler gate a workspace chat does: every
 model call waits for its slot under `[scheduler]`, and the call log records
 it under the session's id. See [Scheduler](scheduler.md#the-gate-on-chats-s2).
 
-Requests and responses are JSON in UTF-8. A successful read carries
-`Cache-Control: no-store`. A refused request carries one error shape:
+Requests and responses are JSON in UTF-8. A request with a non-empty body
+needs `Content-Type: application/json`, and a body may have at most 1 MiB
+(1,048,576 bytes). Every string in a request must be valid UTF-8 without
+lone surrogates. Responses carry `Cache-Control: no-store`,
+`Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`
+(except blobs, whose policy is `default-src 'none'; sandbox; frame-ancestors 'none'`),
+`X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer`,
+`Cross-Origin-Opener-Policy: same-origin`,
+`Cross-Origin-Resource-Policy: same-origin`, `X-Frame-Options: DENY` and
+`Permissions-Policy: camera=(), microphone=(), geolocation=()`. A refused
+request carries one error shape:
 
 ```json
 {"error": {"code": "not_found", "message": "Session not found.", "details": {}}}
@@ -27,12 +36,17 @@ every route below:
 
 | Status | `code` | When |
 |---|---|---|
-| 400 | `invalid_request` | a malformed query parameter, a malformed `client_request_id`, or a string that is not UTF-8 (a lone surrogate) |
+| 400 | `invalid_request` | malformed JSON, a wrong type, an unknown field, a control character or lone surrogate, a relative `workspace` in settings, a bad query parameter, or a malformed `client_request_id` |
+| 400 | `invalid_settings` | `Config.validate()` failed on the candidate settings; `details.errors` lists the messages |
 | 403 | `foreign_origin` | a request under `/api/` from another site (`Sec-Fetch-Site` is neither `same-origin` nor `none`), or a state-changing request from another origin |
 | 404 | `not_found` | an unknown session, blob or route |
 | 405 | `method_not_allowed` | a known path with a method it does not serve; the `Allow` header names the methods it does |
+| 409 | `settings_changed` | `config.toml` changed on disk since `GET /api/settings` read its `revision` |
+| 413 | `too_large` | the request body is over 1 MiB |
+| 415 | `unsupported_media_type` | a non-empty request body without `Content-Type: application/json` |
 | 421 | `misdirected_request` | the `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>` |
 | 500 | `internal_error` | an unexpected failure; the message is `Internal error; see the gateway log.` and never a traceback or a value from the request |
+| 502 | `backend_unreachable` | listing models failed or returned no models |
 | 503 | `store_unavailable` | the gateway's session store could not open, or stopped recording changes; restart the gateway in the second case |
 
 The gateway logs the cause of a 500, whose response carries a fixed
@@ -61,7 +75,7 @@ curl http://127.0.0.1:8401/api/health
   "config_errors": [],
   "model": {"backend": "ollama", "backend_label": "Ollama", "name": "qwen3:8b", "embedding": "none"},
   "model_server": {"url_label": "http://127.0.0.1:11434/v1", "reachable": true, "error": "", "checked_s_ago": 4},
-  "limits": {"text_chars": 100000, "attachment_budget_chars": 8000},
+  "limits": {"text_chars": 100000, "attachment_budget_chars": 8000, "body_bytes": 1048576},
   "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_error": "", "resume_mode": "pairs"},
   "uptime_s": 132.4
 }
@@ -81,11 +95,136 @@ curl http://127.0.0.1:8401/api/health
   `url_label` is empty and `reachable` is `false` when `chat_url` is not an
   absolute `http` or `https` URL; such a value is never probed and its text,
   user info included, is not echoed.
-- `limits` are the ingress text limit and the session text budget.
+- `limits` are the ingress text limit, the session text budget and the API
+  body limit in bytes.
 - `sessions.store` is `ok`, `unavailable` (the store could not open and the
   gateway retries every 5 s) or `failed` (a write failed; restart the
   gateway). `store_error` says why, with the home folder written as `~`.
 - `sessions.resume_mode` is the resume arm in use; it is `pairs` today.
+
+## GET /api/settings
+
+The saved configuration from `~/.cache/localmelo/config.toml`, without API
+key values, plus the wizard's per-section defaults, backend choices and the
+file's revision.
+
+```bash
+curl http://127.0.0.1:8401/api/settings
+```
+
+```json
+{
+  "chat_backend": "mlc",
+  "embedding_backend": "none",
+  "workspace": "~/localmelo-workspace",
+  "sections": {
+    "mlc": {"chat_url": "http://127.0.0.1:8400/v1", "chat_model": "qwen3-1.7b", "embedding_url": "", "embedding_model": ""},
+    "openai": {"api_key_env": "OPENAI_API_KEY", "api_key_set": false, "chat_model": "gpt-4o", "base_url": ""}
+  },
+  "defaults": {
+    "mlc": {"chat_url": "http://localhost:8400/v1", "chat_model": "qwen3-1.7b", "embedding_url": "http://localhost:8400/v1", "embedding_model": "nomic-embed"},
+    "openai": {"api_key_env": "OPENAI_API_KEY", "chat_model": "gpt-4o"}
+  },
+  "errors": [],
+  "choices": {
+    "chat_backends": [{"key": "mlc", "label": "MLC (local endpoint)", "kind": "local"}, {"key": "openai", "label": "OpenAI", "kind": "cloud"}],
+    "embedding_backends": [{"key": "mlc", "label": "MLC (local endpoint)"}, {"key": "none", "label": "None (no long-term memory)"}]
+  },
+  "file_label": "~/.cache/localmelo/config.toml",
+  "revision": "5d41402abc4b2a76"
+}
+```
+
+- `sections` holds all four local sections (`mlc`, `ollama`, `vllm`,
+  `sglang`) and all four cloud sections (`openai`, `gemini`, `anthropic`,
+  `nvidia`). Cloud sections report `api_key_env` (the variable name) and
+  `api_key_set` (whether that variable is non-empty in the gateway's
+  environment), never a key or a mask of one.
+- `workspace` is `[gateway] workspace`, or `~/localmelo-workspace` when it
+  is unset.
+- `revision` is the first 16 hex characters of the file's SHA-256, or `""`
+  when the file does not exist yet.
+
+## PUT /api/settings
+
+Save settings atomically to `config.toml` and apply them to new console
+sessions.
+
+```bash
+curl -X PUT http://127.0.0.1:8401/api/settings \
+  -H "Content-Type: application/json" \
+  -d '{"chat_backend":"ollama","embedding_backend":"none","workspace":"~/localmelo-workspace","sections":{"ollama":{"chat_url":"http://127.0.0.1:11434","chat_model":"qwen3:8b"}},"revision":""}'
+```
+
+- Every string must be a single line with no control characters, and
+  `workspace` is required and must be an absolute path or start with `~/`;
+  otherwise 400 `invalid_request`. `api_key_set` is not accepted in
+  `sections`.
+- A `revision` that does not match the file on disk returns 409
+  `settings_changed`. Two concurrent `PUT` requests that read the same
+  `revision` can both pass the check; the last writer wins, and `os.replace`
+  keeps the file from being torn.
+- The server loads `config.toml` fresh so CLI `--host` and `--port`
+  overrides are never written to disk, preserves other sections,
+  `extra_body`, `mcp_config`, `request_timeout_s`, `[agent]` and
+  `[scheduler]`, validates the candidate (`400 invalid_settings` with
+  `details.errors` on failure), writes `config.toml` atomically, closes
+  idle session Agents so the next turn opens with the new settings, and
+  returns the updated `GET /api/settings` body.
+
+## POST /api/settings/test
+
+Check candidate settings with a one-message chat ping and, when an
+embedding backend is selected, a one-word embedding ping, bounded to 30
+seconds. Takes the `PUT /api/settings` body without `revision`.
+
+```bash
+curl -X POST http://127.0.0.1:8401/api/settings/test \
+  -H "Content-Type: application/json" \
+  -d '{"chat_backend":"ollama","embedding_backend":"none","workspace":"~/localmelo-workspace","sections":{"ollama":{"chat_url":"http://127.0.0.1:11434","chat_model":"qwen3:8b"}}}'
+```
+
+```json
+{"ok": true}
+```
+
+- Field or validation errors return 400 first. A failed or timed-out probe
+  returns HTTP 200 with `{"ok": false, "error": "..."}`.
+
+## GET /api/settings/key-status
+
+Whether an environment variable is non-empty in the gateway's environment.
+Never returns the variable's value.
+
+```bash
+curl 'http://127.0.0.1:8401/api/settings/key-status?name=OPENAI_API_KEY'
+```
+
+```json
+{"set": false}
+```
+
+- `name` must match `^[A-Za-z_][A-Za-z0-9_]{0,127}$`; any other value is 400
+  `invalid_request`.
+
+## GET /api/models
+
+List the models of a local backend (`GET <url>/models` with a 5 s timeout).
+
+```bash
+curl 'http://127.0.0.1:8401/api/models?backend=ollama&url=http%3A%2F%2F127.0.0.1%3A11434%2Fv1'
+```
+
+```json
+{"models": ["qwen3:8b"]}
+```
+
+- Without `backend` or `url`, the saved chat backend and its `chat_url` are
+  used.
+- A cloud backend returns 400 `invalid_request`:
+  `Listing models works for local backends only; type the model name.`
+- An unreachable server or an empty model list returns 502
+  `backend_unreachable`.
 
 ## GET /api/sessions
 
@@ -737,8 +876,9 @@ the `turns` read after the stream ends sees the answer.
 
 ## Not in this version
 
-There are no settings or model-list routes yet. They arrive in a later
-change; the shapes above are the ones it extends.
+File attachments in `POST /api/sessions` and `POST /api/sessions/{id}/turns`
+and MCP tools in the console are not built yet; the shapes above are the
+ones later changes extend.
 
 FastAPI's `/docs`, `/redoc` and `/openapi.json` are off: this page is the
 reference. Run the API only on the loopback address. A gateway on `0.0.0.0`

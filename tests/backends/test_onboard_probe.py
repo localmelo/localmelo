@@ -324,3 +324,23 @@ async def test_probe_embedding_rejects_empty_vector() -> None:
 
     with pytest.raises(ProbeError, match="empty vector"):
         await probe_embedding(cfg)
+
+
+def test_backend_defaults_matches_onboarding_tables() -> None:
+    from localmelo.support import onboard
+
+    defaults = onboard.backend_defaults()
+    assert set(defaults) == set(onboard._LOCAL_DEFAULTS) | set(onboard._CLOUD_DEFAULTS)
+    for key, (chat_url, chat_model) in onboard._LOCAL_DEFAULTS.items():
+        emb_url, emb_model = onboard._EMBEDDING_DEFAULTS[key]
+        assert defaults[key] == {
+            "chat_url": chat_url,
+            "chat_model": chat_model,
+            "embedding_url": emb_url,
+            "embedding_model": emb_model,
+        }
+    for key, (api_key_env, chat_model) in onboard._CLOUD_DEFAULTS.items():
+        assert defaults[key] == {
+            "api_key_env": api_key_env,
+            "chat_model": chat_model,
+        }

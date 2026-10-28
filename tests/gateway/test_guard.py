@@ -912,3 +912,123 @@ def test_a_foreign_host_is_refused_on_the_health_route(gateway: Gateway) -> None
             "details": {},
         }
     }
+
+
+def test_every_response_carries_the_console_security_headers(
+    gateway: Gateway,
+) -> None:
+    expected_api_csp = (
+        "default-src 'none'; script-src 'self'; style-src 'self'; "
+        "img-src 'self'; connect-src 'self'; font-src 'self'; "
+        "manifest-src 'self'; base-uri 'none'; form-action 'none'; "
+        "frame-ancestors 'none'"
+    )
+    for path in ("/", "/v1/health", "/api/health", "/no/such/route", "/api/nope"):
+        resp = gateway.client.get(path)
+        assert resp.headers["x-frame-options"] == "DENY"
+        assert resp.headers["x-content-type-options"] == "nosniff"
+        assert resp.headers["referrer-policy"] == "no-referrer"
+        assert resp.headers["cross-origin-opener-policy"] == "same-origin"
+        assert resp.headers["cross-origin-resource-policy"] == "same-origin"
+        assert (
+            resp.headers["permissions-policy"]
+            == "camera=(), microphone=(), geolocation=()"
+        )
+        if path.startswith("/api"):
+            assert resp.headers.get_list("content-security-policy") == [
+                expected_api_csp
+            ]
+        else:
+            assert resp.headers.get_list("content-security-policy") == [
+                "frame-ancestors 'none'"
+            ]
+    refused = gateway.client.get("/api/health", headers={"Host": FOREIGN_HOST})
+    assert refused.status_code == 421
+    assert refused.headers.get_list("content-security-policy") == [expected_api_csp]
+
+
+def test_a_body_over_1_mib_is_refused_with_413(gateway: Gateway) -> None:
+    huge = b"x" * (1_048_576 + 1)
+    api_resp = gateway.client.put(
+        "/api/settings",
+        content=huge,
+        headers={"Content-Type": "application/json"},
+    )
+    assert api_resp.status_code == 413
+    assert api_resp.headers["cache-control"] == "no-store"
+    assert api_resp.json()["error"]["code"] == "too_large"
+
+    v1_resp = gateway.client.post(
+        "/v1/agent/run",
+        content=huge,
+        headers={"Content-Type": "application/json"},
+    )
+    assert v1_resp.status_code == 413
+    assert v1_resp.json()["code"] == "too_large"
+    assert gateway.ran_nothing()
+
+
+async def test_a_streamed_body_over_1_mib_without_content_length_is_refused() -> None:
+    inner = InnerApp()
+    sent: list[Message] = []
+    chunks = [b"a" * 600_000, b"b" * 600_000]
+
+    async def receive() -> Message:
+        body = chunks.pop(0) if chunks else b""
+        return {"type": "http.request", "body": body, "more_body": bool(chunks)}
+
+    async def send(message: Message) -> None:
+        sent.append(message)
+
+    scope: Scope = {
+        "type": "http",
+        "method": "PUT",
+        "path": "/api/settings",
+        "headers": [
+            (b"host", f"127.0.0.1:{PORT}".encode()),
+            (b"content-type", b"application/json"),
+        ],
+    }
+    await LoopbackGuard(inner, port=PORT)(scope, receive, send)
+    assert sent[0]["status"] == 413
+    assert json.loads(sent[1]["body"])["error"]["code"] == "too_large"
+    assert inner.scopes == []
+
+
+@pytest.mark.parametrize(
+    "content_type",
+    [
+        None,
+        "text/plain",
+        "application/x-www-form-urlencoded",
+        "application/json; charset=latin-1",
+    ],
+)
+def test_a_non_empty_api_body_without_json_content_type_is_415(
+    gateway: Gateway, content_type: str | None
+) -> None:
+    headers = {} if content_type is None else {"Content-Type": content_type}
+    resp = gateway.client.put("/api/settings", content=b"{}", headers=headers)
+    assert resp.status_code == 415
+    assert resp.headers["cache-control"] == "no-store"
+    assert resp.json()["error"]["code"] == "unsupported_media_type"
+
+
+def test_an_empty_api_body_needs_no_content_type(gateway: Gateway) -> None:
+    # An unknown POST route with an empty body reaches the router (404), not 415.
+    resp = gateway.client.post("/api/no/such/route")
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "not_found"
+
+
+def test_a_non_json_v1_body_reaches_fastapi_as_422_not_415(
+    gateway: Gateway,
+) -> None:
+    resp = gateway.client.post(
+        "/v1/agent/run",
+        content=b"not json",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert resp.status_code == 422
+    assert "detail" in resp.json()
+    assert gateway.ran_nothing()

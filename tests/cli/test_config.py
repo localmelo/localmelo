@@ -1190,3 +1190,120 @@ class TestSchedulerConfig:
         loaded = load()
         assert loaded.scheduler.lock_gate == "wait"
         assert not hasattr(loaded.scheduler, "lock_future")
+
+
+class TestGatewayWorkspaceAndAtomicSave:
+    def test_gateway_workspace_round_trips(self, config_path: Path) -> None:
+        cfg = _timeout_cfg()
+        cfg.gateway.workspace = "~/demo-project"
+        save(cfg)
+        assert 'workspace = "~/demo-project"' in config_path.read_text(encoding="utf-8")
+        loaded = load()
+        assert loaded.gateway.workspace == "~/demo-project"
+        cfg.gateway.workspace = ""
+        save(cfg)
+        assert config_path.read_text(encoding="utf-8") == _SAVED_BEFORE_REQUEST_TIMEOUT
+
+    def test_every_string_field_round_trips_quotes_backslashes_brackets_and_non_bmp(
+        self, config_path: Path
+    ) -> None:
+        tricky = 'a"b\\c]d\U0001f680\x7f'
+        cfg = Config(
+            chat_backend="vllm",
+            embedding_backend="ollama",
+            mcp_config=tricky,
+            vllm=LocalBackendConfig(
+                chat_url=tricky,
+                chat_model=tricky,
+                embedding_url=tricky,
+                embedding_model=tricky,
+            ),
+            openai=CloudVendorConfig(
+                api_key_env=tricky,
+                chat_model=tricky,
+                base_url=tricky,
+            ),
+            gateway=GatewayConfig(port=8401, host=tricky, workspace=tricky),
+        )
+        save(cfg)
+        loaded = load()
+        assert loaded.mcp_config == tricky
+        assert loaded.vllm.chat_url == tricky
+        assert loaded.vllm.chat_model == tricky
+        assert loaded.vllm.embedding_url == tricky
+        assert loaded.vllm.embedding_model == tricky
+        assert loaded.openai.api_key_env == tricky
+        assert loaded.openai.chat_model == tricky
+        assert loaded.openai.base_url == tricky
+        assert loaded.gateway.host == tricky
+        assert loaded.gateway.workspace == tricky
+
+    def test_save_replaces_atomically_and_leaves_old_file_on_failure(
+        self, config_path: Path
+    ) -> None:
+        save(_timeout_cfg())
+        before = config_path.read_bytes()
+        changed = _timeout_cfg(900)
+        with (
+            mock.patch(
+                "localmelo.support.config.os.replace",
+                side_effect=OSError("disk full"),
+            ),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            save(changed)
+        assert config_path.read_bytes() == before
+        assert list(config_path.parent.glob("*.tmp")) == []
+
+    def test_save_preserves_existing_file_mode_and_follows_symlink(
+        self, tmp_path: Path
+    ) -> None:
+        real_dir = tmp_path / "dotfiles"
+        real_dir.mkdir()
+        real_file = real_dir / "config.toml"
+        real_file.write_text('chat_backend = "vllm"\n', encoding="utf-8")
+        os.chmod(real_file, 0o644)
+
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        link_path = cache_dir / "config.toml"
+        os.symlink(real_file, link_path)
+
+        with (
+            mock.patch("localmelo.support.config.CONFIG_PATH", str(link_path)),
+            mock.patch("localmelo.support.config.CONFIG_DIR", str(cache_dir)),
+        ):
+            save(_timeout_cfg())
+            loaded = load()
+
+        assert link_path.is_symlink()
+        assert os.path.realpath(link_path) == str(real_file.resolve())
+        assert (real_file.stat().st_mode & 0o777) == 0o644
+        assert loaded.chat_backend == "vllm"
+
+    @pytest.mark.parametrize(
+        "bad_ws",
+        [5, "relative/path", "~/bad\nline", "~/bad\x85line", "~/bad\x00"],
+        ids=["int", "relative", "newline", "nel-c1", "nul"],
+    )
+    def test_validate_rejects_invalid_gateway_workspace(
+        self, config_path: Path, bad_ws: Any
+    ) -> None:
+        cfg = _timeout_cfg()
+        cfg.gateway.workspace = bad_ws
+        errors = cfg.validate()
+        assert any(err.startswith("[gateway] workspace") for err in errors)
+        with pytest.raises(ConfigError, match=r"\[gateway\] workspace"):
+            cfg.validate_or_raise()
+
+        if isinstance(bad_ws, int):
+            config_path.write_text(
+                'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+                '[vllm]\nchat_url = "http://127.0.0.1:8000/v1"\nchat_model = "m"\n\n'
+                f"[gateway]\nworkspace = {bad_ws}\n",
+                encoding="utf-8",
+            )
+            loaded = load()
+            assert any(
+                err.startswith("[gateway] workspace") for err in loaded.validate()
+            )

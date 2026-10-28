@@ -16,6 +16,11 @@ melo --serve
   Without a terminal it cannot ask, so it prints
   `melo: no backend is configured; run melo --reconfigure in a terminal`
   and exits with code 1.
+- `melo --serve --allow-unconfigured` starts the gateway without running
+  the wizard even when no backend is configured or the config file has
+  validation errors, so a client or the web console can inspect
+  `GET /api/health` and save a configuration through `PUT /api/settings`.
+  It cannot be combined with `--reconfigure`.
 - `--base-url` and `--chat-model` are usage errors with `--serve`: the
   gateway uses the config file.
 - It listens on `127.0.0.1:8401`, the `[gateway]` defaults of the config
@@ -50,6 +55,8 @@ refuses requests that are not addressed to it:
 |---|---|---|
 | 421 | `misdirected_request` | The `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`. This stops a page on another site that reaches the gateway under its own domain name (DNS rebinding). |
 | 403 | `foreign_origin` | A web page at another origin sent the request: a `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS` request whose `Origin` is not `http://127.0.0.1:<port>`, `http://localhost:<port>` or `http://[::1]:<port>`, or a request under `/v1/` or `/api/` whose `Sec-Fetch-Site` is `cross-site` or `same-site`. |
+| 413 | `too_large` | The request body exceeds 1 MiB (1,048,576 bytes). |
+| 415 | `unsupported_media_type` | A request under `/api/` has a non-empty body without `Content-Type: application/json`. |
 
 The body is the usual error with a `code`:
 
@@ -71,7 +78,10 @@ A refused request under `/api/` uses [API v2](api.md)'s envelope instead:
   `frame-ancestors 'none'`, so a page on another site cannot embed the web
   workspace and trick you into clicking in it. A response with a policy of
   its own, such as a blob's `default-src 'none'; sandbox`, keeps one header
-  with both.
+  with both. Every response also carries `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: no-referrer`, `Cross-Origin-Opener-Policy: same-origin`,
+  `Cross-Origin-Resource-Policy: same-origin` and
+  `Permissions-Policy: camera=(), microphone=(), geolocation=()`.
 - The checks are on when the host is `localhost` or a loopback IP address:
   `127.0.0.1`, `::1` or another address in `127.0.0.0/8`. Requests must
   still name the gateway as `127.0.0.1`, `localhost` or `[::1]`, so use one
@@ -97,14 +107,17 @@ gateway listens on a loopback address, and it is documented separately in
 [API v2](api.md). API v2 only grows: endpoints, optional request fields and
 response keys are added, never renamed or removed.
 
-This version serves the reads — `GET /api/health`, the sessions list and
-one session, a session's turns, its Server-Sent Events stream, its blobs
-and a submission lookup — and the writes that run a session: create it,
-with or without a first turn, start, retry and stop its turns, cancel a
-message by its key, answer an approval, rename or move it, and delete it.
-Settings and model listing come later. The `/api` routes answer the same
-421 and 403 as `/v1/`, and add `Cache-Control: no-store` and the error
-shape `{"error": {"code", "message", "details"}}` to every response.
+This version serves the reads — `GET /api/health`, `GET /api/settings`,
+`GET /api/settings/key-status`, `GET /api/models`, the sessions list and
+one session, a session's turns, its Server-Sent Events stream, its blobs,
+its tools, memory and runs, and a submission lookup — and the writes that
+configure the gateway and run a session: `PUT /api/settings`,
+`POST /api/settings/test`, create a session with or without a first turn,
+start, retry and stop its turns, cancel a message by its key, answer an
+approval, forget a session grant, rename or move a session, and delete it.
+The `/api` routes answer the same 421, 403 and 413 as `/v1/` (plus 415 for
+a non-JSON body), and add `Cache-Control: no-store` and the error shape
+`{"error": {"code", "message", "details"}}` to every response.
 
 A console session runs its turns in the gateway process, one at a time: a
 second turn while one runs is 409 `session_busy`. Its Agent is built when
