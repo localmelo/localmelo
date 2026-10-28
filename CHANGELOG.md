@@ -14,6 +14,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Startup recovery classifies task rows without replay, retains pending pause
+  and reconciles execution-linked terminal results. Recovered nonterminal tasks
+  remain fenced from resume and priority changes until controlled recovery is
+  wired; Stop remains available. [#NN]
+
 - Scheduler component v3 adds dormant recovery provenance, guarded durable
   intents and receipts, and process identity records. Interrupted recovery
   retains pending pause intent; explicit legacy adoption records orphan-risk

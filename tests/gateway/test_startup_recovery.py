@@ -1,11 +1,14 @@
 """Restart classification preserves uncertainty without launching workers."""
 
+import asyncio
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import ChatGate
+from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_policy import TaskSpec
@@ -81,7 +84,11 @@ async def test_started_work_is_interrupted_once_with_recorded_evidence(
 
 @pytest.mark.parametrize(
     "proven,card,expected",
-    [(True, "", "parked"), (False, "", "interrupted"), (False, "saved card", "parked")],
+    [
+        (True, "", "parked"),
+        (False, "", "interrupted"),
+        (False, "saved card", "interrupted"),
+    ],
 )
 async def test_parked_matrix_preserves_proof_and_cards(
     tmp_path: Path,
@@ -110,8 +117,95 @@ async def test_parked_matrix_preserves_proof_and_cards(
                 )
         await StartupRecovery(store, tasks).run()
         record = await tasks.get_task(task.task_id)
-        assert record.state == expected and record.card == card
+        assert record.state == expected and not record.card
         assert record.level == 5
+    finally:
+        await store.aclose()
+
+
+async def test_new_evidence_replaces_old_card_on_interruption(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    try:
+        tasks = TaskStore(store)
+        await tasks.open()
+        task, _ = await tasks.create_task(
+            TaskSpec.from_payload({"objective": "work"}),
+            origin="user",
+            workspace=str(tmp_path),
+            _recovery_proof=True,
+        )
+        generation, previous = await tasks.park_identity(task.task_id)
+        await RecoveryStore(store).start(
+            task.task_id,
+            operation_id="start",
+            execution_id="run-1",
+            expected_generation=generation,
+            expected_operation_id=previous,
+        )
+        async with store.component_transaction("seed_old_card") as conn:
+            await conn.execute(
+                "UPDATE tasks SET card = 'old card' WHERE task_id = ?", (task.task_id,)
+            )
+        turn = await store.begin_turn(task.task_id, "work", holder="worker")
+        await store.append_events(
+            task.task_id,
+            turn.turn,
+            [
+                core_event("run.started"),
+                core_event("tool.started", seq=2, name="file_write"),
+            ],
+            holder="worker",
+        )
+        await StartupRecovery(store, tasks).run()
+        card = (await tasks.get_task(task.task_id)).card
+        assert "file_write started" in card and "without a recorded finish" in card
+        assert card != "old card"
+    finally:
+        await store.aclose()
+
+
+async def test_committed_park_card_is_preserved(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    try:
+        tasks = TaskStore(store)
+        await tasks.open()
+        task, _ = await tasks.create_task(
+            TaskSpec.from_payload({"objective": "work"}),
+            origin="user",
+            workspace=str(tmp_path),
+        )
+        await tasks.change(task.task_id, state="running")
+        parks = ParkStore(store)
+        generation, previous = await tasks.park_identity(task.task_id)
+        await parks.hold(
+            task.task_id,
+            site="plan",
+            step=1,
+            attempt=1,
+            reason="waiting",
+            operation_id="hold",
+            expected_generation=generation,
+            expected_operation_id=previous,
+        )
+        generation, previous = await tasks.park_identity(task.task_id)
+        await parks.park(
+            task.task_id,
+            card="valid evidence card",
+            operation_id="park",
+            expected_generation=generation,
+            expected_operation_id=previous,
+        )
+        await StartupRecovery(store, tasks).run()
+        task = await tasks.get_task(task.task_id)
+        assert task.state == "parked" and task.card == "valid evidence card"
     finally:
         await store.aclose()
 
@@ -245,6 +339,89 @@ async def test_completed_outcome_requires_matching_execution(
         )
     finally:
         await reopened.aclose()
+
+
+async def test_startup_supersedes_stale_settled_intent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    try:
+        tasks = TaskStore(store)
+        await tasks.open()
+        task, _ = await tasks.create_task(
+            TaskSpec.from_payload({"objective": "work"}),
+            origin="user",
+            workspace=str(tmp_path),
+        )
+        recovery = RecoveryStore(store)
+        generation, previous = await tasks.park_identity(task.task_id)
+        await recovery.prepare(
+            task.task_id,
+            operation_id="stale",
+            execution_id="old",
+            expected_generation=generation,
+            expected_operation_id=previous,
+            outcome="interrupted",
+            card="",
+            reason="restart",
+            crash=False,
+            unsafe_resume=True,
+        )
+        await tasks.change(task.task_id, state="parked")
+        await StartupRecovery(store, tasks).run()
+        receipt = await recovery.receipt(task.task_id, "stale")
+        assert receipt is not None and receipt[0]["phase"] == "superseded"
+        assert (await tasks.get_task(task.task_id)).state == "interrupted"
+    finally:
+        await store.aclose()
+
+
+async def test_commit_then_cancel_does_not_duplicate_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    try:
+        tasks = TaskStore(store)
+        await tasks.open()
+        task, _ = await tasks.create_task(
+            TaskSpec.from_payload({"objective": "work"}),
+            origin="user",
+            workspace=str(tmp_path),
+            _recovery_proof=True,
+        )
+        generation, previous = await tasks.park_identity(task.task_id)
+        await RecoveryStore(store).start(
+            task.task_id,
+            operation_id="start",
+            execution_id="execution",
+            expected_generation=generation,
+            expected_operation_id=previous,
+        )
+        original = store._commit
+        fired = False
+
+        async def commit_then_cancel(conn: Any, events: Any, label: str) -> None:
+            nonlocal fired
+            await original(conn, events, label)
+            if label == "recovery_commit" and not fired:
+                fired = True
+                raise asyncio.CancelledError()
+
+        monkeypatch.setattr(store, "_commit", commit_then_cancel)
+        startup = StartupRecovery(store, tasks)
+        with pytest.raises(asyncio.CancelledError):
+            await startup.run()
+        await startup.run()
+        assert (await tasks.get_task(task.task_id)).crashes == 1
+        assert [
+            event.event["type"] for event in await store.list_events(task.task_id)
+        ].count("sched.recovered") == 1
+    finally:
+        await store.aclose()
 
 
 async def test_startup_failure_stays_unavailable_and_retries(

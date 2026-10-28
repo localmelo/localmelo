@@ -29,7 +29,19 @@ class StartupRecovery:
                 continue
             intent = await self.recovery.active_intent(task.task_id)
             if intent is not None:
-                await self.recovery.commit(task.task_id, operation_id=intent[0])
+                receipt = await self.recovery.receipt(task.task_id, intent[0])
+                if receipt is None:
+                    raise RuntimeError("prepared recovery receipt is missing")
+                if receipt[1]:
+                    await self.recovery.commit(task.task_id, operation_id=intent[0])
+                else:
+                    generation, previous = await self.tasks.park_identity(task.task_id)
+                    await self.recovery.supersede(
+                        task.task_id,
+                        intent[0],
+                        expected_generation=generation,
+                        expected_operation_id=previous,
+                    )
                 task = await self.tasks.get_task(task.task_id)
                 if task.state in TERMINAL_PHASES:
                     continue
@@ -41,9 +53,7 @@ class StartupRecovery:
             return
         if task.state == "queued" and provenance.first_start == "never_started":
             return
-        if task.state == "parked" and (
-            task.card.strip() or provenance.first_start == "never_started"
-        ):
+        if task.state == "parked" and provenance.first_start == "never_started":
             return
         events: list[StoredEvent] = []
         after = 0
@@ -54,6 +64,23 @@ class StartupRecovery:
                 break
             assert page[-1].id is not None
             after = page[-1].id
+        if task.state == "parked" and task.card.strip():
+            parks = [
+                event
+                for event in events
+                if event.event.get("type")
+                in {
+                    "sched.parked",
+                    "sched.resumed",
+                    "sched.held",
+                    "sched.priority_changed",
+                    "turn.started",
+                }
+            ]
+            if parks and parks[-1].event.get("type") == "sched.parked":
+                data = parks[-1].event.get("data")
+                if isinstance(data, dict) and data.get("card") == task.card:
+                    return
         turns = await self.store.list_turns(task.task_id, limit=1)
         if task.state in {"running", "held"} and turns and provenance.execution_id:
             turn = turns[0]
@@ -109,7 +136,11 @@ class StartupRecovery:
                 "reflection",
             }
         ]
-        card = task.card or (build_park_card(task.spec, evidence) if evidence else "")
+        card = (
+            build_park_card(task.spec, evidence)
+            if evidence
+            else ("" if task.state == "parked" else task.card)
+        )
         generation, previous = await self.tasks.park_identity(task.task_id)
         operation_id = uuid.uuid4().hex
         await self.recovery.prepare(

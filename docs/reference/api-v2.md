@@ -283,10 +283,13 @@ becomes invalid before a run or resume fails the task with
 `wait_reason="invalid_workspace"` instead of running it.
 
 At most four workers are resident at once, including quarantined workers.
-Task rows persist across gateway restarts. At startup, surviving nonterminal
-tasks are marked failed with `gateway restarted; recovery arrives in S3b`;
-full recovery is deferred to S3b. Retrying the same `request_key` returns the
-existing task and does not restart it.
+Task rows persist across gateway restarts. Startup interrupts uncertain tasks,
+retains valid parked cards and preserves pending pause, without replay. Proved
+never-started queued tasks remain queued but are not automatically scheduled in
+this slice. Recovered nonterminal tasks reject resume and priority changes until
+controlled recovery is implemented; Stop remains available. A failure to persist
+startup recovery keeps the store unavailable. Retrying the same `request_key`
+returns the existing task and does not restart it.
 
 ## GET /api/sessions
 
