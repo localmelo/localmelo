@@ -140,6 +140,7 @@ def banner(
     yolo: bool,
     width: int,
     symbols: Symbols,
+    session_title: str | None = None,
 ) -> RenderableType:
     """The startup banner: a box of rows, its warnings and the key hints."""
     rows: list[tuple[str, str, str]] = []
@@ -151,7 +152,15 @@ def banner(
         ("workspace", clean_output(home_label(workspace)), ""),
         ("tools", tools_text(tools), ""),
         ("memory", memory_text(backend, memory=memory), ""),
-        ("session", "new", ""),
+        (
+            "session",
+            (
+                f'"{clean_output(session_title)}" (resumed)'
+                if session_title is not None
+                else "new"
+            ),
+            "",
+        ),
     ]
     # The rows join their parts with " · ": the symbol set's dot.
     rows = [

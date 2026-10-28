@@ -76,6 +76,10 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `tool_timeout_s` | `None` | The time limit of `shell_exec` and `python_exec`, in seconds. Needs a `workspace_root`. `None` keeps 30 seconds for a shell command and 60 seconds for Python. |
 | `tool_env` | `None` | Extra variables for the `shell_exec` and `python_exec` children, on top of the minimal environment; see [Work in a directory](#work-in-a-directory). |
 | `record_answers` | `False` | `True` keeps each run's answer in working memory for the next run; see [Keep answers between runs](#keep-answers-between-runs). |
+| `reasoning` | `"legacy"` | How a reply's reasoning is sent back: `"legacy"`, `"drop"`, `"replay"`, `"compress"` or `"compress+replay"`; see [Reasoning modes](cli.md#direct-mode). |
+| `replay_turns` | `None` | With `"replay"` or `"compress+replay"`, the newest N assistant turns whose reasoning is replayed; `None` keeps every turn in scope. |
+| `replay_scope` | `"task"` | `"task"` replays only the current task's turns; `"window"` replays every turn in the window, earlier tasks included. API-only. |
+| `note_writer` | `"auto"` | In the compress modes, `"auto"` reads the model's `<note>` block, else the heuristic; `"heuristic"` always writes the note from the reply's text and thinking. |
 
 `AgentOptions` cannot be changed after it is created. A value that is not
 valid raises `ValueError` and names the field:
@@ -85,8 +89,8 @@ ValueError: max_steps must be an int >= 1, got 0
 ```
 
 The [command-line options](cli.md#direct-mode) set the same fields, except
-`steps_per_attempt` and `max_attempts`. Direct mode never sets
-`workspace_root`, `tool_timeout_s`, `tool_env` or `record_answers`.
+`steps_per_attempt`, `max_attempts` and `replay_scope`. Direct mode never
+sets `workspace_root`, `tool_timeout_s`, `tool_env` or `record_answers`.
 
 ## Results
 
@@ -303,6 +307,7 @@ The request (`ApprovalRequest`):
 | `arguments` | A copy of exactly what will run. A file tool's `path` is the resolved path inside the workspace root. |
 | `preview` | A one-line summary of the call; see [tool.started](events.md#toolstarted). |
 | `workspace_root` | The agent's workspace root, or `None`. |
+| `tier` | The tool's permission tier (`read`, `write`, `exec` or `network`), or `None` when the request was built by hand; an agent always fills it. |
 
 The decision (`ApprovalDecision`):
 

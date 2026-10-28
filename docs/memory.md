@@ -68,8 +68,9 @@ step reads it; a reply with no text gets the checked note as its copy instead.
   `d1`, `g1`) that a prompt uses.
 - A **draft** is a reply's fenced code, with the file it is meant for. A
   pending draft with a target is pinned once, after its turn's tool
-  results, in a delimited `[localmelo recall: …]` block at most 6,000
-  characters long. A write that covers at least 60% of its lines marks it
+  results, in a delimited `[localmelo recall: …]` block: a short header,
+  the draft's title, and at most 6,000 characters of its text, then an end
+  marker. A write that covers at least 60% of its lines marks it
   written, and a newer draft for the same target supersedes it; neither is
   pinned again.
 - Notes are **rehearsed** when a later note restates their facts, when a
@@ -307,8 +308,11 @@ planning and reflection requests alike. The history in RAM keeps none.
   and error, `llm_calls.content` and `llm_calls.thinking`, and the text
   long-term memory keeps (each step's summary and the promoted
   reflections). What the model reads is not redacted: working memory, the
-  requests a run sends, `assistant.message` events and a run's `result`
-  keep the original text, so only the stored copies change.
+  requests a run sends and a run's `result` keep the original text, so
+  only the stored copies change. The run's events redact their own fields:
+  `assistant.message`'s `content` and `thinking`, and `reflection`'s
+  `rationale`, `summary` and `best_effort_result`; see
+  [Events](events.md#assistantmessage).
   It is minimal: other secret shapes stay, and so does a key glued to the
   text before it: an `sk-` key right after a letter, a digit, `_` or `-`, a
   GitHub token right after a letter, a digit or `_`, and an AWS access key

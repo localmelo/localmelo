@@ -140,7 +140,7 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 
 | Request field | Required | Description |
 |---|---|---|
-| `query` | yes | The task, up to 100,000 characters. Leading and trailing whitespace is removed. |
+| `query` | yes | The task, up to 100,000 characters after leading and trailing whitespace is removed. |
 | `session_id` | no | 1 to 64 letters, digits, `_` or `-`. Uses that session, and creates it if needed. Without it, a new session is created. |
 
 | HTTP status | Body | When |
@@ -153,7 +153,8 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 
 The 400 errors read `Query must be a non-empty string`,
 `Query too large: <n> chars (max 100000)` or
-`Invalid session_id format: '<id>'`.
+`Invalid session_id format: '<id>'`; an id that is not a string gets the
+last one too.
 
 `result` is the answer or the run's best effort. When that is empty, it is
 `[<status>] <error>`, for example
@@ -355,6 +356,6 @@ melo --daemon uninstall
 
 Stopping closes every session, a session running a task included: if one is
 still busy, its agent is closed and the task ends as `crashed`. SIGTERM
-normally waits for runs in flight first, so they finish before the sessions
-close. A `DELETE` request no longer closes a busy session: it returns 409
-until the task ends.
+first waits up to 3 seconds for runs in flight, then cancels the ones left:
+the client's request fails and the run ends `crashed`. A `DELETE` request no
+longer closes a busy session: it returns 409 until the task ends.

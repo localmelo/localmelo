@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import sys
+from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from localmelo.support.cli.render import ToolOutput
@@ -31,26 +33,29 @@ class SessionNavigation:
         self.mark = SessionMark(0, 0)
         self.refs: tuple[str, ...] = ()
 
-    async def startup(self, continue_session: bool, ref: str | None) -> None:
+    async def startup(
+        self,
+        continue_session: bool,
+        ref: str | None,
+        on_choice: Callable[[SessionInfo | None], None] | None = None,
+    ) -> None:
+        """Choose first, announce the chosen session, then restore its conversation."""
         s = self.session
+        announced = False
         try:
+            info: SessionInfo | None = None
+            note = ""
             if continue_session:
                 rows = await s.store.list_sessions(
                     workspace=s.agent.workspace_root,
                     limit=1,
                     min_turns=1,
                 )
-                if rows:
-                    await self.resume(rows[0])
-                else:
-                    s.out.print(
-                        s._text(
-                            f"No earlier session in {home_label(s.agent.workspace_root or '')}; starting a new one."
-                        )
-                    )
+                info = rows[0] if rows else None
+                if info is None:
+                    note = f"No earlier session in {home_label(s.agent.workspace_root or '')}; starting a new one."
             elif ref:
-                rows = await self.resolve(ref)
-                if not rows:
+                if not await self.resolve(ref):
                     print(
                         f"melo: no session matches '{ref}' (melo -r lists them)",
                         file=sys.stderr,
@@ -58,20 +63,30 @@ class SessionNavigation:
                     s.exit_code = 2
                     assert s.app is not None
                     s.app.exit()
-                else:
-                    await self.select(ref=ref)
+                    return
+                info = await self.choose(ref=ref)
             elif await s.store.list_sessions(
                 workspace=s.agent.workspace_root, limit=1, min_turns=1
             ):
-                await self.select()
+                info = await self.choose()
             else:
-                s.out.print(
-                    s._text(
-                        f"No sessions yet in {home_label(s.agent.workspace_root or '')}."
-                    )
-                )
+                note = f"No sessions yet in {home_label(s.agent.workspace_root or '')}."
+            if on_choice is not None:
+                on_choice(info)
+            announced = True
+            if note:
+                s.out.print(s._text(note))
+            if info is not None:
+                await self.resume(info)
+        except asyncio.CancelledError:
+            if not announced and not s._closed and on_choice is not None:
+                on_choice(None)
+            raise
         except (ValueError, UnknownSessionError) as exc:
-            s.out.print(s._text(str(exc)))
+            if not announced and on_choice is not None:
+                on_choice(None)
+            message = DELETED if isinstance(exc, UnknownSessionError) else str(exc)
+            s.out.print(s._text(f"✗ {message}", style="error"))
         finally:
             s._state, s._work = "idle", None
 
@@ -90,6 +105,30 @@ class SessionNavigation:
             rows = await store.list_sessions(query=ref, limit=50, min_turns=1)
         return rows
 
+    async def choose(
+        self,
+        *,
+        ref: str | None = None,
+        query: str = "",
+        choices: list[SessionInfo] | None = None,
+    ) -> SessionInfo | None:
+        """Resolve or pick an identity without changing the active conversation."""
+        s = self.session
+        if ref:
+            choices = await self.resolve(ref, exact_only=True)
+            if len(choices) == 1:
+                return choices[0]
+            choices = choices or await self.resolve(ref)
+            if not choices:
+                raise ValueError(f"No session matches '{ref}'.")
+        assert s.app is not None
+        return await s.app.choose_session(
+            s.store,
+            s.agent.workspace_root or "",
+            query=query,
+            choices=choices,
+        )
+
     async def select(
         self,
         *,
@@ -97,22 +136,7 @@ class SessionNavigation:
         query: str = "",
         choices: list[SessionInfo] | None = None,
     ) -> bool:
-        s = self.session
-        if ref:
-            choices = await self.resolve(ref, exact_only=True)
-            if len(choices) == 1:
-                await self.resume(choices[0])
-                return True
-            choices = choices or await self.resolve(ref)
-            if not choices:
-                raise ValueError(f"No session matches '{ref}'.")
-        assert s.app is not None
-        info = await s.app.choose_session(
-            s.store,
-            s.agent.workspace_root or "",
-            query=query,
-            choices=choices,
-        )
+        info = await self.choose(ref=ref, query=query, choices=choices)
         if info is None:
             return False
         await self.resume(info)
@@ -150,7 +174,7 @@ class SessionNavigation:
         s.approvals.reset()
         s.session_tools.reset()
         s.title = current.title
-        s.renderer.new_session()
+        s.renderer.clear_session()
         s.renderer.context_tokens = 0
         assert candidate.last_resume is not None
         s.out.print(

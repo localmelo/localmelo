@@ -245,7 +245,8 @@ def run_interactive(
         print("\nSetup cancelled.")
         return 130
     except (OSError, tomllib.TOMLDecodeError) as exc:
-        print(f"melo: cannot read {config.CONFIG_PATH}: {exc}", file=sys.stderr)
+        path = os.path.expanduser(config.CONFIG_PATH)
+        print(f"melo: cannot read {path}: {exc}", file=sys.stderr)
         return 1
     if isinstance(choice, int):
         return choice
@@ -327,7 +328,11 @@ async def main_async(
     from localmelo.support.cli.views import banner
     from localmelo.support.sessions.display import home_label, localmelo_version
     from localmelo.support.sessions.runner import ResumeMode
-    from localmelo.support.sessions.store import SessionStore, SessionStoreError
+    from localmelo.support.sessions.store import (
+        SessionInfo,
+        SessionStore,
+        SessionStoreError,
+    )
 
     log_label = home_label(log_path)
     no_color = wants_no_color()
@@ -409,38 +414,50 @@ async def main_async(
             resume_mode=cast(ResumeMode, "pairs" if invalid_mode else raw_mode),
             out=out,
         )
-        out.print(
-            banner(
-                version=localmelo_version(),
-                backend=factory.backend,
-                workspace=agent.workspace_root or workspace,
-                tools=agent.list_tools(),
-                memory=factory.memory,
-                yolo=args.yolo,
-                width=out.width,
-                symbols=symbols,
-            )
-        )
-        if invalid_mode:
-            out.print(
-                Text(
-                    f"{symbols.warn} Invalid [sessions] resume_mode; using pairs.",
-                    style="warn",
-                )
-            )
-        if choice.warning:
-            out.print(Text(f"{symbols.warn} {choice.warning}", style="warn"))
-        if factory.mcp_error:
-            from localmelo.melo.checker.redaction import redact_secrets
 
-            problem = redact_secrets(factory.mcp_error)[0]
+        def show_banner(selected: SessionInfo | None = None) -> None:
             out.print(
-                Text(
-                    f"{symbols.warn} MCP servers failed to start: {problem}. "
-                    "Continuing without MCP tools; /mcp has details.",
-                    style="warn",
+                banner(
+                    version=localmelo_version(),
+                    backend=factory.backend,
+                    workspace=agent.workspace_root or workspace,
+                    tools=agent.list_tools(),
+                    memory=factory.memory,
+                    yolo=args.yolo,
+                    width=out.width,
+                    symbols=symbols,
+                    session_title=selected.title if selected is not None else None,
                 )
             )
+            if invalid_mode:
+                out.print(
+                    Text(
+                        f"{symbols.warn} Invalid [sessions] resume_mode; using pairs.",
+                        style="warn",
+                    )
+                )
+            if choice.warning:
+                out.print(Text(f"{symbols.warn} {choice.warning}", style="warn"))
+            if factory.mcp_error:
+                from localmelo.melo.checker.redaction import redact_secrets
+
+                problem = redact_secrets(factory.mcp_error)[0]
+                out.print(
+                    Text(
+                        f"{symbols.warn} MCP servers failed to start: {problem}. "
+                        "Continuing without MCP tools; /mcp has details.",
+                        style="warn",
+                    )
+                )
+            if not choice.checked and factory.listable():
+                session.spawn(session.check_server())
+
+        starting = (
+            getattr(args, "continue_session", False)
+            or getattr(args, "resume", None) is not None
+        )
+        if not starting:
+            show_banner()
         history: History
         try:
             history = open_history(os.path.expanduser(HISTORY_FILE))
@@ -481,19 +498,15 @@ async def main_async(
             restore_terminal=restore,
         )
         signals.install()
-        if not choice.checked and factory.listable():
-            session.spawn(session.check_server())
         app = asyncio.ensure_future(ui.run())
         session.spawn(session.navigation.refresh_refs())
-        if (
-            getattr(args, "continue_session", False)
-            or getattr(args, "resume", None) is not None
-        ):
+        if starting:
             session._state = "switching"
             session._work = session.spawn(
                 session.navigation.startup(
                     getattr(args, "continue_session", False),
                     getattr(args, "resume", None),
+                    on_choice=show_banner,
                 )
             )
         arrived = asyncio.ensure_future(signals.arrived.wait())

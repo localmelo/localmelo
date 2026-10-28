@@ -11,10 +11,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - Resume saved terminal chats with `melo -c`, `melo -r [ID|TITLE]`,
   `/sessions [filter]` or `/resume [ID|TITLE]`. The inline picker filters
-  eligible chats by folder or across folders; the recap explains what
+  eligible chats by folder or across folders before the startup banner,
+  which names the chosen chat; the recap explains what
   was restored with `[sessions] resume_mode = "pairs"` (default) or
   `"window"`. Resuming keeps the current model/workspace and clears
-  approval grants. Changes in another terminal are reloaded before the
+  approval grants, while retaining `/verbose` and `/thinking` preferences.
+  Changes in another terminal are reloaded before the
   next turn; a busy or deleted session keeps the draft. `/retry` preserves
   a resumed turn's typed text, `/expand` reads stored tool output across
   event pages, and quitting prints a saved session's resume command.
@@ -399,6 +401,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The test suite no longer writes into the user's own `~/.cache/localmelo`:
+  every test runs with `HOME` in a temporary directory, the defaults of the
+  gateway's call log, the web workspace's memory and `config.toml` resolve
+  when they are used instead of at import, and a session guard fails a test
+  that resolves the real home or writes the real cache
+  (`@pytest.mark.allow_real_cache` opts a test out of the home rule)
+  ([#90]).
+- `POST /v1/agent/run` answers a non-string `session_id` (a number, a list)
+  with the route's own 400 `Invalid session_id format` instead of FastAPI's
+  plain-text 500, and its 100,000-character limit counts the query after the
+  surrounding whitespace is removed, which is the text the agent runs: a
+  whitespace-padded query whose trimmed text fits is accepted ([#89]).
 - A held chat's header still said `● Working` while the sidebar, status
   label and message area said it was waiting, and a chat that had just sent
   kept `Working on your request…` in the message area for the whole hold
@@ -558,3 +572,5 @@ earlier milestones.
 [#83]: https://github.com/localmelo/localmelo/pull/83
 [#84]: https://github.com/localmelo/localmelo/pull/84
 [#85]: https://github.com/localmelo/localmelo/pull/85
+[#89]: https://github.com/localmelo/localmelo/pull/89
+[#90]: https://github.com/localmelo/localmelo/pull/90

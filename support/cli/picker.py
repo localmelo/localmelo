@@ -129,7 +129,11 @@ class SessionPicker:
                 self.answer.set_exception(exc)
 
     def _header(self) -> str:
-        scope = "all folders" if self.all_folders else home_label(self.workspace)
+        scope = (
+            "matching sessions"
+            if self.choices is not None
+            else "all folders" if self.all_folders else home_label(self.workspace)
+        )
         return cut_cells(
             clean_output(
                 in_symbols(

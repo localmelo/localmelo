@@ -195,6 +195,14 @@ uv run melo --serve</code></pre>
           To run one directory directly, name it:
           <code>uv run pytest tests/agent -q</code>.
         </p>
+        <p>
+          Every test runs with <code>HOME</code> in a temporary directory. A
+          test that resolves the real home, or that writes under the real
+          <code>~/.cache/localmelo</code>, fails instead of touching your
+          config, memory, sessions or call logs. Writing the real cache is
+          never allowed; a test that genuinely needs the real home is marked
+          <code>@pytest.mark.allow_real_cache</code>.
+        </p>
         <div class="table-wrap">
           <table>
             <thead>
