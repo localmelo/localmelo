@@ -40,6 +40,7 @@ from localmelo.melo.agent._chat import (
     RETRY_HOOK,
     Chat,
     RequestStats,
+    coalesce_user_messages,
     lacks_task_query,
 )
 from localmelo.melo.agent._context_fit import ContextFitError
@@ -68,6 +69,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
 )
 from localmelo.melo.contracts.events import EventSink
+from localmelo.melo.contracts.inbox import InboxError, InboxSource
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
@@ -993,6 +995,8 @@ class _RunState:
     task_id: str = ""
     # The query Message this run appended to the window, for replay scope.
     task_query_msg: Message | None = None
+    # An opt-in source of parent instructions at planning boundaries.
+    inbox: InboxSource | None = None
     # Replay counters (see memory_stats on RunResult).
     replayed_chars: int = 0
     replay_skipped: int = 0
@@ -3221,8 +3225,11 @@ class Agent:
                 task_query=task_query,
                 requires_replay=self._requires_replay,
             )
+            planned = _as_planned(sent, query, query_block)
+            if run is not None and run.inbox is not None:
+                planned = coalesce_user_messages(planned)
             check = await self.checker.pre_plan(
-                others + _as_planned(sent, query, query_block),
+                others + planned,
                 count_thinking=self._counts_thinking,
             )
             return check.allowed
@@ -3392,11 +3399,10 @@ class Agent:
             task_query=task_query,
             requires_replay=self._requires_replay,
         )
-        all_msgs = (
-            long_context
-            + _as_planned(sent, query, "" if run is None else run.boundary_block)
-            + reflection_msgs
-        )
+        planned = _as_planned(sent, query, "" if run is None else run.boundary_block)
+        if run is not None and run.inbox is not None:
+            planned = coalesce_user_messages(planned)
+        all_msgs = long_context + planned + reflection_msgs
         check = await self.checker.pre_plan(
             all_msgs, count_thinking=self._counts_thinking
         )
@@ -3420,6 +3426,7 @@ class Agent:
         *,
         task_query: Message | None = None,
         run: _RunState | None = None,
+        on_ready: Callable[[list[Message]], None] | None = None,
     ) -> tuple[Message, str | None]:
         """Stage 3: LLM planning step with post-plan check.
 
@@ -3452,6 +3459,11 @@ class Agent:
             recall_records = run.pending_recall_records
             run.pending_recalls = []
             run.pending_recall_records = []
+        plan_args: dict[str, Any] = {}
+        if run is not None and run.inbox is not None:
+            plan_args["coalesce_users"] = True
+        if on_ready is not None:
+            plan_args["on_ready"] = on_ready
         response = await self.chat.plan_step(
             context=long_context,
             short=sent,
@@ -3460,6 +3472,7 @@ class Agent:
             reflections=reflections,
             query_block=query_block,
             recalls=recalls,
+            **plan_args,
         )
         if run is not None and recall_records:
             self._commit_recalls(recall_records, run)
@@ -4431,6 +4444,13 @@ class Agent:
         run.attempt_calls.clear()
 
         for step in range(budget):
+            pending = run.inbox.poll() if run.inbox is not None else []
+            inserted = None
+            if pending:
+                inserted = Message(
+                    role="user", content="\n\n".join(text for _, text in pending)
+                )
+                self.hippo.working.append(inserted)
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(
                 query, task_query=run.task_query_msg, run=run
@@ -4438,6 +4458,30 @@ class Agent:
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""
+            on_ready = None
+            if inserted is not None:
+                if not any(message is inserted for message in short_window):
+                    run.end("failed", error="inbox instructions do not fit the prompt")
+                    return step + 1, ""
+
+                def on_ready(
+                    messages: list[Message],
+                    *,
+                    inserted: Message = inserted,
+                    pending: list[tuple[int, str]] = pending,
+                ) -> None:
+                    assert run.inbox is not None
+                    if (
+                        not messages
+                        or messages[-1].role != "user"
+                        or not messages[-1].content.endswith(inserted.content)
+                    ):
+                        raise ContextFitError(
+                            "Inbox instructions do not fit the request"
+                        )
+                    for offset, text in pending:
+                        run.inbox.accept(offset)
+                        run.events.inbox_accepted(offset, text, run.steps, run.attempts)
 
             # LLM planning step (with reflection context). The step counts
             # once the planning call is made, even if it then raises.
@@ -4452,6 +4496,7 @@ class Agent:
                 reflections=reflections,
                 task_query=run.task_query_msg,
                 run=run,
+                **({"on_ready": on_ready} if on_ready is not None else {}),
             )
             # Also a reply the post-plan check refuses.
             run.events.assistant_message(response)
@@ -4599,6 +4644,7 @@ class Agent:
         observe: EventSink | None = None,
         progress: bool = False,
         routine: str | None = None,
+        inbox: InboxSource | None = None,
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -4802,6 +4848,7 @@ class Agent:
             ),
             approval=approval,
             routine=routine,
+            inbox=inbox,
             place=place,
             limits=self._limits() if progress else None,
         )
@@ -4837,6 +4884,8 @@ class Agent:
                 approval=approval is not None,
             )
             try:
+                if run.inbox is not None:
+                    run.inbox.validate(self.executor.workspace_root or os.getcwd())
                 async with deadline:
                     try:
                         await self._look_up(run, query)
@@ -4901,6 +4950,11 @@ class Agent:
                         await self._run_reflective_attempts(task, query, run)
             except _ToolSetupError as exc:
                 # Reported in the result, not a crash: no traceback.
+                logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
+                run.end("setup_error", error=str(exc))
+            except InboxError as exc:
+                # An inbox that became unreadable mid-run is a setup failure,
+                # not a crash: report its message without a class prefix.
                 logger.info("Task %s ended with setup_error: %s", task.task_id, exc)
                 run.end("setup_error", error=str(exc))
             except ContextFitError as exc:

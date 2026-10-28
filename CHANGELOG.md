@@ -49,9 +49,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - An unsigned arm64 macOS development bundle wraps the local web console in a
   native window and menu-bar host. It owns its gateway child, checks the
-  instance before sending any login code and on page responses, re-signs in
-  after a token rotation, and offers "Sign In Again"; the check is not
-  authentication ([#NN]).
+  instance before sending any login code, binds the code to the launch instance
+  and checks page responses, re-signs in after a token rotation, and offers
+  "Sign In Again"; the check is not authentication ([#NN]).
+- Direct workers can read an explicit append-only inbox at planning boundaries,
+  with per-line acceptance events and redacted saved history. An inbox inside the
+  workspace is refused as `setup_error` before any model call; a slow event
+  reader is waited for rather than dropped; input errors are `setup_error`, not
+  `crashed`. ([#164])
 - Experimental Python opt-in typed memory assertions: conservative evidence
   checks (timezone-aware `timestamp`/`date` records), ordered same-task updates
   (record time or per-task user order), cancellation markers, exact-duplicate-only
@@ -81,7 +86,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - With a trusted reasoning-framing declaration, the streaming display policy can
   release redacted complete lines; unknown framing still buffers the reply ([#153]).
 - Direct workers can read a brief file and emit a versioned JSON result or an
-  NDJSON event stream; inbox steering remains future work. ([#143])
+  NDJSON event stream. ([#143])
 
 - Opt-in fixed system prefix with a local-date snapshot and schema-change telemetry;
   dynamic recall and reflection remain labelled data ([#142]).
@@ -1034,3 +1039,4 @@ earlier milestones.
 [#158]: https://github.com/localmelo/localmelo/pull/158
 [#159]: https://github.com/localmelo/localmelo/pull/159
 [#162]: https://github.com/localmelo/localmelo/pull/162
+[#164]: https://github.com/localmelo/localmelo/pull/164

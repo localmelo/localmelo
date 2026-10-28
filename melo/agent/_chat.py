@@ -56,6 +56,21 @@ BUDGET_HOOK: contextvars.ContextVar[
 ] = contextvars.ContextVar("BUDGET_HOOK", default=None)
 
 
+def coalesce_user_messages(messages: list[Message]) -> list[Message]:
+    """Join adjacent user instructions in a request copy, preserving order."""
+    result: list[Message] = []
+    for message in messages:
+        if result and result[-1].role == message.role == "user":
+            result[-1] = dataclasses.replace(
+                result[-1],
+                content=result[-1].content + "\n\n" + message.content,
+                images=[*result[-1].images, *message.images],
+            )
+        else:
+            result.append(message)
+    return result
+
+
 PREFIX_RUN: contextvars.ContextVar[tuple[object, str] | None] = contextvars.ContextVar(
     "PREFIX_RUN", default=None
 )
@@ -465,6 +480,7 @@ class Chat:
         kind: str = "",
         retry: bool = True,
         recall: Sequence[Any] = (),
+        on_ready: Callable[[list[Message]], None] | None = None,
     ) -> Message:
         """Send one request to the LLM and count it in :attr:`stats`.
 
@@ -534,6 +550,8 @@ class Chat:
                 estimate=estimate,
                 requires_replay=self.llm.requires_reasoning_replay,
             )
+        if on_ready is not None:
+            on_ready(messages)
         while True:
             record = None
             proxy = 0
@@ -709,7 +727,12 @@ class Chat:
         *,
         query_block: str = "",
         recalls: Sequence[Any] = (),
+        coalesce_users: bool = False,
+        on_ready: Callable[[list[Message]], None] | None = None,
     ) -> Message:
+        ready_args: dict[str, Any] = (
+            {"on_ready": on_ready} if on_ready is not None else {}
+        )
         if self.fixed_prefix:
             all_context = [*context, *short]
             memory = [
@@ -749,8 +772,14 @@ class Chat:
             if lacks_task_query(short, query):
                 messages.append(Message(role="user", content=query))
             messages.extend(m for m in all_context if m.role != "system")
+            if coalesce_users:
+                messages = coalesce_user_messages(messages)
             return await self._request(
-                messages, tools=tools, kind="plan", recall=recalls
+                messages,
+                tools=tools,
+                kind="plan",
+                recall=recalls,
+                **ready_args,
             )
         system_prompt, other_msgs = _build_system_prompt(
             context, short, reflections, self.system_notes, self.note_instruction
@@ -771,7 +800,15 @@ class Chat:
             else other_msgs
         )
 
-        return await self._request(messages, tools=tools, kind="plan", recall=recalls)
+        if coalesce_users:
+            messages = coalesce_user_messages(messages)
+        return await self._request(
+            messages,
+            tools=tools,
+            kind="plan",
+            recall=recalls,
+            **ready_args,
+        )
 
     async def retrieve(self, messages: list[Message]) -> Message:
         """One retrieval request: no tools, no retry, kind ``retrieve``."""

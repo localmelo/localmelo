@@ -199,7 +199,7 @@ page, a term may carry the English in parentheses, as in 嵌入（embedding）.
 | `budget_exhausted` | budget exhausted | 预算用尽 |
 | `stuck` | stuck | 卡住 |
 | `provider_error` | model-server error | 模型服务错误 |
-| `setup_error` | tool setup failed | 工具准备失败 |
+| `setup_error` | tool or inbox setup failed | 工具或收件箱准备失败 |
 | `timeout` | timed out | 超时 |
 | `crashed` | crashed | 异常终止 |
 | `cancelled` (interactive runs only) | cancelled | 已取消 |
