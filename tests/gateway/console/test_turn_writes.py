@@ -22,6 +22,7 @@ import pytest
 from fastapi import FastAPI
 
 from localmelo.melo.schema import Message
+from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.tests.sessions.helpers import (
     ScriptedLLM,
@@ -30,19 +31,21 @@ from localmelo.tests.sessions.helpers import (
     tool_call,
 )
 
-from .conftest import PORT, FakeProbe, make_cfg, seed_turn
+from .conftest import PORT, FakeProbe, make_cfg, quiet_gate, seed_turn
 
 TIMEOUT_S = 10.0
 
 
 @contextlib.asynccontextmanager
 async def console_with(
-    tmp_path: Path, *replies: Message
+    tmp_path: Path, *replies: Message, gate: ChatGate | None = None
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, list[ScriptedLLM]]]:
     """A started console whose builder scripts every Agent with *replies*."""
     llms: list[ScriptedLLM] = []
 
-    async def build(settings: Any, workspace: str, mcp_config: str | None) -> Any:
+    async def build(
+        settings: Any, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Any:
         # A rebuilt Agent takes the replies its predecessors did not use:
         # every Agent here answers with one reply per turn.
         llm = ScriptedLLM(list(replies[len(llms) :]))
@@ -56,6 +59,7 @@ async def console_with(
             store_path=str(tmp_path / "sessions.db"),
             builder=build,
             probe=FakeProbe(),
+            gate=quiet_gate(),
         ),
     )
     await console.start()
@@ -184,7 +188,9 @@ async def test_a_bad_workspace_is_invalid_workspace(tmp_path: Path) -> None:
 
 
 async def test_a_builder_that_fails_is_agent_start_failed(tmp_path: Path) -> None:
-    async def build(settings: Any, workspace: str, mcp_config: str | None) -> Any:
+    async def build(
+        settings: Any, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Any:
         raise RuntimeError("no model server")
 
     console = Console(
@@ -194,6 +200,7 @@ async def test_a_builder_that_fails_is_agent_start_failed(tmp_path: Path) -> Non
             store_path=str(tmp_path / "sessions.db"),
             builder=build,
             probe=FakeProbe(),
+            gate=quiet_gate(),
         ),
     )
     await console.start()

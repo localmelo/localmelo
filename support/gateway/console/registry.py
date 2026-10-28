@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Final, Literal
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.schema import Message
+from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import build_session_agent
 from localmelo.support.sessions.approvals import (
@@ -39,7 +40,6 @@ from localmelo.support.sessions.runner import (
     SessionRunner,
 )
 from localmelo.support.sessions.store import (
-    NewSession,
     SessionBusyError,
     SessionInfo,
     SessionStore,
@@ -72,7 +72,10 @@ SWEEP_INTERVAL_S: Final = 60.0
 DEFAULT_WORKSPACE: Final = "~/localmelo-workspace"
 
 SettingsSource = Callable[[], "Config"]
-AgentBuilder = Callable[["Config", str, str | None], Awaitable[Agent]]
+# A builder gets the settings, the workspace, the MCP config and the
+# session id the Agent is made for: the scheduler gate tags its calls with
+# that id, so it must exist before the first model call.
+AgentBuilder = Callable[["Config", str, str | None, str], Awaitable[Agent]]
 
 
 class SessionLock(asyncio.Lock):
@@ -96,20 +99,32 @@ class SessionLock(asyncio.Lock):
 
 
 async def default_builder(
-    settings: Config, workspace: str, mcp_config: str | None
+    settings: Config,
+    workspace: str,
+    mcp_config: str | None,
+    session_id: str,
+    gate: ChatGate | None = None,
 ) -> Agent:
     """A started Agent for *workspace*, from the shared session builder.
 
     MCP is deferred to U4, so *mcp_config* is not read yet; a caller that
-    needs it passes its own builder in :class:`ConsoleOptions`.
+    needs it passes its own builder in :class:`ConsoleOptions`. With *gate*,
+    the providers are wrapped in :class:`GatedLLM` and
+    :class:`GatedEmbedding` for *session_id*, so every call this Agent makes
+    waits for its slot like a workspace chat's.
     """
 
+    llm = None if gate is None else gate.client(session_id)
     return await build_session_agent(
         cfg=settings,
         base_url=None,
         model=None,
         workspace=workspace,
         options=AgentOptions(),
+        wrap_llm=None if llm is None else (lambda inner: GatedLLM(inner, llm)),
+        wrap_embedding=(
+            None if llm is None else (lambda inner: GatedEmbedding(inner, llm))
+        ),
     )
 
 
@@ -153,6 +168,7 @@ class ConsoleSessions:
         settings: SettingsSource,
         *,
         builder: AgentBuilder | None = None,
+        gate: ChatGate | None = None,
         idle_close_s: float = IDLE_CLOSE_S,
         max_open: int = MAX_OPEN,
         clock: Callable[[], float] = time.time,
@@ -162,7 +178,8 @@ class ConsoleSessions:
         self._store = store
         self._broker = broker
         self._settings = settings
-        self._builder: AgentBuilder = builder or default_builder
+        self._gate = gate
+        self._builder: AgentBuilder = builder or self._default_builder
         self._idle_close_s = idle_close_s
         self._max_open = max_open
         self._clock = clock
@@ -176,6 +193,13 @@ class ConsoleSessions:
         self._closed = False
 
     # ── Reading ──
+
+    async def _default_builder(
+        self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
+    ) -> Agent:
+        return await default_builder(
+            settings, workspace, mcp_config, session_id, gate=self._gate
+        )
 
     @property
     def store(self) -> SessionStore:
@@ -268,7 +292,7 @@ class ConsoleSessions:
         is_new = entry is None
         settings = self._settings()
         mcp_config = getattr(settings, "mcp_config", "") or None
-        agent = await self._build_agent(settings, workspace, mcp_config)
+        agent = await self._build_agent(settings, workspace, mcp_config, session_id)
 
         if self._closed:
             with contextlib.suppress(Exception):
@@ -281,6 +305,7 @@ class ConsoleSessions:
                 session_id,
                 holder=self._holder,
                 resume_mode=DEFAULT_RESUME_MODE,
+                progress=True,
             )
             granted_at: dict[str, float] = {}
             policy = RememberingPolicy(
@@ -436,12 +461,17 @@ class ConsoleSessions:
 
     # ── Turns ──
 
+    async def _drop_unopened(self, session_id: str) -> None:
+        """Delete a row whose Agent or first turn never came up, best effort."""
+        with contextlib.suppress(Exception):
+            await self._store.delete_session(session_id)
+
     async def _build_agent(
-        self, settings: Config, workspace: str, mcp_config: str | None
+        self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
     ) -> Agent:
         """The builder's Agent, with a failed start mapped as 2.2 says."""
         try:
-            return await self._builder(settings, workspace, mcp_config)
+            return await self._builder(settings, workspace, mcp_config, session_id)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -564,81 +594,53 @@ class ConsoleSessions:
         model = self._settings_model()
         # A create opens an Agent too, so the cap counts it like an open.
         await self._make_room("")
-        # MCP is deferred (U3 decision 5 B): the builder gets no config.
-        agent = await self._build_agent(settings, path, None)
-        if self._closed:
-            with contextlib.suppress(Exception):
-                await agent.close()
-            raise RuntimeError("The console's sessions are closed")
+        # The row comes before the Agent: the scheduler gate tags every call
+        # with the session id, so the id must exist before the first one.
+        info = await self._store.create_session(model=model, workspace=path)
+        try:
+            # MCP is deferred (U3 decision 5 B): the builder gets no config.
+            agent = await self._build_agent(settings, path, None, info.id)
+        except BaseException:
+            await self._drop_unopened(info.id)
+            raise
         granted_at: dict[str, float] = {}
-        if first is None:
-            try:
-                info = await self._store.create_session(model=model, workspace=path)
-            except BaseException:
-                with contextlib.suppress(Exception):
-                    await agent.close()
-                raise
-            if self._closed:
-                # close_all() ran while the row was made: register nothing,
-                # and drop the empty row the shutdown never saw.
-                with contextlib.suppress(Exception):
-                    await self._store.delete_session(info.id)
-                with contextlib.suppress(Exception):
-                    await agent.close()
-                raise RuntimeError("The console's sessions are closed")
-            runner = SessionRunner(
-                agent,
-                self._store,
-                info.id,
-                holder=self._holder,
-                resume_mode=DEFAULT_RESUME_MODE,
-            )
-            policy = RememberingPolicy(
-                ask=runner.observe(self._timed_ask(info.id, granted_at))
-            )
-            entry = OpenSession(
-                session_id=info.id,
-                runner=runner,
-                policy=policy,
-                granted_at=granted_at,
-                agent=agent,
-                built_with_mcp=False,
-                lock=self.lock(info.id),
-                last_used=self._clock(),
-            )
-            self._sessions[info.id] = entry
-            return entry, None
         runner = SessionRunner(
             agent,
             self._store,
-            None,
-            new_session=NewSession(model=model, workspace=path),
+            info.id,
             holder=self._holder,
             resume_mode=DEFAULT_RESUME_MODE,
+            progress=True,
+            # A create's key stays where a create looks it up, even though
+            # the row was made before the Agent.
+            create_scope_key=client_request_id is not None,
         )
         policy = RememberingPolicy(
-            ask=runner.observe(self._timed_ask(lambda: runner.session_id, granted_at))
+            ask=runner.observe(self._timed_ask(info.id, granted_at))
         )
-        try:
-            turn = await runner.start_turn(
-                composed or "",
-                approval=policy,
-                title=typed,
-                client_request_id=client_request_id,
-            )
-        except BaseException:
-            with contextlib.suppress(Exception):
-                await agent.close()
-            raise
-        session_id = runner.session_id
-        assert session_id is not None
+        turn: TurnInfo | None = None
+        if first is not None:
+            try:
+                turn = await runner.start_turn(
+                    composed or "",
+                    approval=policy,
+                    title=typed,
+                    client_request_id=client_request_id,
+                )
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    await agent.close()
+                await self._drop_unopened(info.id)
+                raise
+        session_id = info.id
         if self._closed:
-            # close_all() ran while the first turn started: end that turn
-            # and the Agent, and register nothing the shutdown cannot see.
+            # close_all() ran while the row was made: register nothing, end
+            # a turn that started, and drop the row the shutdown never saw.
             with contextlib.suppress(Exception):
                 await runner.close(cause="shutdown")
             with contextlib.suppress(Exception):
                 await agent.close()
+            await self._drop_unopened(session_id)
             raise RuntimeError("The console's sessions are closed")
         entry = OpenSession(
             session_id=session_id,
@@ -747,7 +749,7 @@ class ConsoleSessions:
                 )
             settings = self._settings()
             old_root = entry.agent.workspace_root
-            agent = await self._build_agent(settings, path, None)
+            agent = await self._build_agent(settings, path, None, session_id)
             try:
                 agent.load_conversation(entry.agent.conversation())
                 # The row names the new folder before the swap, so a store

@@ -13,7 +13,13 @@ from fastapi.testclient import TestClient
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.events import EVENT_FIELDS
 from localmelo.melo.schema import ImagePart, Message
-from localmelo.support.config import Config, GatewayConfig, LocalBackendConfig
+from localmelo.support.config import (
+    Config,
+    GatewayConfig,
+    LocalBackendConfig,
+    SchedulerConfig,
+)
+from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.sessions.store import (
     NewSession,
@@ -37,6 +43,11 @@ class FakeProbe:
 
     async def aclose(self) -> None:
         self.closed = True
+
+
+def quiet_gate() -> ChatGate:
+    """A pass-through gate that records and writes nothing."""
+    return ChatGate(policy="off", call_log_dir=None)
 
 
 class FakeAgent:
@@ -76,7 +87,7 @@ class FakeBuilder:
         self.agents: list[FakeAgent] = []
 
     async def __call__(
-        self, settings: Config, workspace: str, mcp_config: str | None
+        self, settings: Config, workspace: str, mcp_config: str | None, session_id: str
     ) -> Agent:
         self.calls.append((settings, workspace, mcp_config))
         if self.fail:
@@ -94,6 +105,8 @@ def make_cfg() -> Config:
             chat_url="http://127.0.0.1:9/v1", chat_model="stub-model"
         ),
         gateway=GatewayConfig(port=PORT, host="127.0.0.1"),
+        # No call log: a test never writes the user's scheduler directory.
+        scheduler=SchedulerConfig(call_log=False),
     )
 
 
@@ -127,6 +140,9 @@ async def console(
             store_path=str(tmp_path / "sessions.db"),
             builder=builder,
             probe=probe,
+            # A gate with no call log: a test never writes the user's
+            # scheduler directory.
+            gate=quiet_gate(),
         ),
     )
     await console.start()

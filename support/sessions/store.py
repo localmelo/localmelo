@@ -1599,11 +1599,15 @@ class SessionStore:
         title: str | None = None,
         client_request_id: str | None = None,
         new_session: NewSession | None = None,
+        create_scope: bool = False,
     ) -> TurnInfo:
         """Start a turn of *user_text* under *holder*, in one transaction (T-5).
 
         Takes *session_id*, or *new_session* to create the session with the
-        turn. With *client_request_id*, the key decides first: a stored
+        turn. *create_scope* stores the turn's key in the create scope, as
+        one begun with *new_session* is stored: that is what a client that
+        lost the response to a create looks up without a session id.
+        With *client_request_id*, the key decides first: a stored
         submission of it raises ``SubmissionConflict`` (another text),
         ``SubmissionWithdrawn`` or ``SubmissionRepeated`` (with the turn it
         started), and nothing is written. Then a running turn raises
@@ -1704,7 +1708,11 @@ class SessionStore:
                         "state, session_id, turn, created_at) "
                         "VALUES (?, ?, ?, 'accepted', ?, ?, ?)",
                         (
-                            "" if new_session is not None else session_id,
+                            (
+                                ""
+                                if new_session is not None or create_scope
+                                else session_id
+                            ),
                             client_request_id,
                             text_sha256(user_text),
                             session_id,
