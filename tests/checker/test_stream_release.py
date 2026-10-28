@@ -52,6 +52,25 @@ def test_byte_splits_equal_whole_policy(hint: ReasoningTags, text: str) -> None:
     ) == expected
 
 
+def test_redaction_rules_are_snapshotted_per_stream(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import re
+
+    from localmelo.melo.checker import redaction
+
+    stream = StreamFilter(reasoning_tags="none")
+    assert stream.feed("first\n") == ("", "first\n")
+    monkeypatch.setattr(redaction, "_KEY", re.compile(r"new-secret"))
+    assert stream.feed("new-secret\n") == ("", "new-secret\n")
+    assert stream.finish() == ("", "")
+    assert stream.redact_for_storage("first\nnew-secret\n") == "first\n[redacted]\n"
+
+    later = StreamFilter(reasoning_tags="none")
+    assert later.feed("new-secret\n") == ("", "")
+    assert later.finish() == ("", "[redacted]\n")
+
+
 def test_declared_none_releases_and_unknown_buffers() -> None:
     known = StreamFilter(reasoning_tags="none")
     assert known.feed("safe line\n") == ("", "safe line\n")

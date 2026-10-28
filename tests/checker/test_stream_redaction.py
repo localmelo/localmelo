@@ -43,10 +43,34 @@ def test_completed_line_releases_and_open_bearer_waits() -> None:
 def test_unknown_rules_force_whole_response(monkeypatch: pytest.MonkeyPatch) -> None:
     from localmelo.melo.checker import _stream_redaction
 
-    monkeypatch.setattr(_stream_redaction, "_known_rules", lambda: False)
+    monkeypatch.setattr(_stream_redaction, "_known_rules", lambda bindings: False)
     release = LineRedactor()
     assert release.feed("first\nsecond\n") == ""
     assert release.finish() == "first\nsecond\n"
+
+
+def test_changed_active_rule_buffers_and_uses_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import re
+
+    monkeypatch.setattr(redaction, "_KEY", re.compile(r"start\nsecret"))
+    release = LineRedactor()
+    assert release.feed("start\n") == ""
+    monkeypatch.setattr(redaction, "_KEY", re.compile(r"different"))
+    assert release.feed("secret\n") == ""
+    assert release.finish() == "[redacted]\n"
+
+
+def test_changed_active_function_buffers(monkeypatch: pytest.MonkeyPatch) -> None:
+    def changed(text: str) -> tuple[str, int]:
+        return text.replace("first\nsecond", "[redacted]"), 1
+
+    monkeypatch.setattr(redaction, "redact_secrets", changed)
+    release = LineRedactor()
+    assert release.feed("first\n") == ""
+    assert release.feed("second\n") == ""
+    assert release.finish() == "[redacted]\n"
 
 
 def test_rule_inventory_requires_deliberate_update() -> None:

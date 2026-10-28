@@ -4,24 +4,72 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 from pathlib import Path
+from types import CodeType, FunctionType, SimpleNamespace
 
 from localmelo.melo.checker import redaction
-from localmelo.melo.checker.redaction import redact_secrets
+
+Redact = Callable[[str], tuple[str, int]]
 
 # Any unreviewed change to the rules disables incremental release.
 _RULES_SHA256 = "7f17ad11ae7be99bb8095a0cb398b8e5233d2937ee0171a724a1768070a1110f"
 
 
-def _known_rules() -> bool:
+def _known_rules(bindings: dict[str, object]) -> bool:
     try:
-        return (
-            bool(redaction.__file__)
-            and hashlib.sha256(Path(redaction.__file__).read_bytes()).hexdigest()
-            == _RULES_SHA256
+        source_file = bindings.get("__file__")
+        if not isinstance(source_file, str):
+            return False
+        source = Path(source_file).read_bytes()
+        if hashlib.sha256(source).hexdigest() != _RULES_SHA256:
+            return False
+        module_code = compile(source, source_file, "exec")
+        expected = {
+            code.co_name: code
+            for code in module_code.co_consts
+            if isinstance(code, CodeType)
+        }
+        rules = SimpleNamespace(**bindings)
+        for name in ("redact_secrets", "_redact_codes", "_near_a_keyword"):
+            function = getattr(rules, name)
+            if (
+                not isinstance(function, FunctionType)
+                or function.__code__ != expected[name]
+            ):
+                return False
+        return bool(
+            rules._KEY.pattern == r"(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{20,}"
+            r"|(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})"
+            r"|(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])"
+            and rules._KEY.flags == re.UNICODE
+            and rules._BEARER.pattern == r"(\bbearer\s+)[A-Za-z0-9._~+/=-]{16,}"
+            and rules._BEARER.flags == re.UNICODE | re.IGNORECASE
+            and rules._CODE_KEYWORD.pattern
+            == r"verification code|passcode|(?<![A-Za-z0-9_])otp(?![A-Za-z0-9_])|验证码"
+            and rules._CODE_KEYWORD.flags == re.UNICODE | re.IGNORECASE
+            and rules._CODE.pattern == r"(?<![A-Za-z0-9])[0-9]{4,8}(?![A-Za-z0-9])"
+            and rules._CODE.flags == re.UNICODE
+            and rules._CODE_REACH == 20
+            and rules.REDACTED == "[redacted]"
         )
-    except OSError:
+    except (OSError, KeyError, AttributeError, TypeError, SyntaxError):
         return False
+
+
+def snapshot_rules() -> tuple[Redact, bool]:
+    """Freeze the current redaction functions and their module bindings."""
+    bindings = vars(redaction).copy()
+    for name, value in list(bindings.items()):
+        if isinstance(value, FunctionType) and value.__globals__ is vars(redaction):
+            bindings[name] = FunctionType(
+                value.__code__,
+                bindings,
+                value.__name__,
+                value.__defaults__,
+                value.__closure__,
+            )
+    return bindings["redact_secrets"], _known_rules(bindings)
 
 
 # Rule inventory: key shapes start at sk-/gh.../github_pat_/AKIA/ASIA and
@@ -41,10 +89,12 @@ class LineRedactor:
     run on the same context as whole-response redaction.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, snapshot: tuple[Redact, bool] | None = None) -> None:
         self._pending = ""
         self._finished = False
-        self._known = _known_rules()
+        self._redact, self._known = (
+            snapshot if snapshot is not None else snapshot_rules()
+        )
 
     def feed(self, text: str) -> str:
         if self._finished:
@@ -59,11 +109,11 @@ class LineRedactor:
         if match:
             end = self._pending.rfind("\n", 0, match.start()) + 1
         prefix, self._pending = self._pending[:end], self._pending[end:]
-        return redact_secrets(prefix)[0]
+        return self._redact(prefix)[0]
 
     def finish(self) -> str:
         if self._finished:
             raise RuntimeError("redactor already finished")
         self._finished = True
         text, self._pending = self._pending, ""
-        return redact_secrets(text)[0]
+        return self._redact(text)[0]

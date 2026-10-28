@@ -209,7 +209,11 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
   completed reply; omitting it keeps the existing whole-reply behavior. A trusted
   separate reasoning field can instead use `StreamFilter(separate_reasoning=True)`
   and `feed_reasoning()`; it never enters content. Thinking is held until finish.
-  Redaction is pattern-based and does not guarantee secret removal. This contract
+  Redaction rules are snapshotted at stream start; changes apply to the next
+  stream. At commit, apply `redact_for_storage()` separately to each completed
+  display channel: it applies the snapshot and then the current rules, so newer
+  rules can add masking. Redaction is pattern-based and does not guarantee secret
+  removal. This contract
   has no agent or UI consumer yet; existing `chat()` behavior is unchanged.
   Callers must not silently retry a stream after showing provisional output.
   Call `finish()` only after a completed reply; call `abort()` on error or

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import re
 
-from localmelo.melo.checker._stream_redaction import LineRedactor
-from localmelo.melo.checker.redaction import redact_secrets
+from localmelo.melo.checker import redaction
+from localmelo.melo.checker._stream_redaction import LineRedactor, snapshot_rules
 from localmelo.melo.schema import ReasoningTags, split_thinking
 
 _TAG = re.compile(r"</?think>", re.IGNORECASE)
@@ -102,8 +102,10 @@ class StreamFilter:
         self._parts: list[str] = []
         self._length = 0
         self._finished = False
-        self._raw = LineRedactor()
-        self._content = LineRedactor()
+        self._snapshot = snapshot_rules()
+        self._redact = self._snapshot[0]
+        self._raw = LineRedactor(self._snapshot)
+        self._content = LineRedactor(self._snapshot)
         self._thinking: list[str] = []
         self._pending = ""
         self._state = {
@@ -181,9 +183,17 @@ class StreamFilter:
         self._parts.clear()
         self._thinking.clear()
         self._pending = ""
-        self._raw = LineRedactor()
-        self._content = LineRedactor()
+        self._raw = LineRedactor(self._snapshot)
+        self._content = LineRedactor(self._snapshot)
         self._finished = True
+
+    def redact_for_storage(self, text: str) -> str:
+        """Apply the stream snapshot, then the rules current at storage time.
+
+        Call this separately for each completed display channel. Pattern-based
+        redaction cannot guarantee detection of arbitrary secrets.
+        """
+        return redaction.redact_secrets(self._redact(text)[0])[0]
 
     def feed(self, fragment: str) -> tuple[str, str]:
         self._check_fragment(fragment)
@@ -199,10 +209,10 @@ class StreamFilter:
         if self._hint is None:
             text = "".join(self._parts)
             self._parts.clear()
-            thinking, content = _split_for_display(redact_secrets(text)[0])
-            return redact_secrets(thinking)[0], redact_secrets(content)[0]
+            thinking, content = _split_for_display(self._redact(text)[0])
+            return self._redact(thinking)[0], self._redact(content)[0]
         content = self._accept(self._raw.finish(), final=True)
         content += self._content.finish()
-        thinking = redact_secrets("".join(self._thinking).strip())[0]
+        thinking = self._redact("".join(self._thinking).strip())[0]
         self._thinking.clear()
         return thinking, content
