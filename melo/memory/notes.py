@@ -45,6 +45,7 @@ NOTE_PLAN_CHARS = 300  # ≈ 87 tokens
 NOTE_ITEM_CHARS = 200  # ≈ 58 tokens: one found, decided, hypothesis or open item
 NOTE_OBSERVED_CHARS = 160  # ≈ 46 tokens: one observed line, and the outcome
 NOTE_MAX_FOUND = 4  # items per field, not characters
+NOTE_MAX_FACTS = 12  # factual lines read from a reply with no note block
 NOTE_MAX_DECIDED = 3
 NOTE_MAX_HYPOTHESES = 3
 NOTE_MAX_OPEN = 3
@@ -146,7 +147,7 @@ class ReasoningNote:
     kind: str = "step"
     source: str = "heuristic"  # model | heuristic | sleep | user
     plan: str = ""  # <= 300: the next action and why
-    # <= 4 x 200: what the model says it established
+    # <= 12 x 200: what the model says it established
     found: list[str] = field(default_factory=list)
     decided: list[str] = field(default_factory=list)  # <= 3 x 200
     # <= 3 x 200: "open: ", "confirmed: ", "refuted: "
@@ -249,7 +250,7 @@ _NOTE_KEY_RE = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 _NOTE_LIST_FIELDS = {
-    "found": NOTE_MAX_FOUND,
+    "found": NOTE_MAX_FACTS,
     "decided": NOTE_MAX_DECIDED,
     "hypotheses": NOTE_MAX_HYPOTHESES,
     "open": NOTE_MAX_OPEN,
@@ -294,7 +295,7 @@ def parse_note_block(block: str) -> ReasoningNote:
     joined with a space; lines before the first key go to ``plan``. A key
     given twice adds to its field. ``found``, ``decided``, ``hypotheses``
     and ``open`` are split into items at ``;`` and ``；``, empty items
-    dropped, and keep their first 4, 3, 3 and 3 items, each shortened to
+    dropped, and keep their first 12, 3, 3 and 3 items, each shortened to
     :data:`NOTE_ITEM_CHARS`; ``plan`` is shortened to
     :data:`NOTE_PLAN_CHARS`.
 
@@ -944,8 +945,13 @@ def note_from_reply(
     - ``open_questions``: the last 3 sentences that end in ``?`` or ``？``
       or say they are not sure;
     - ``hypotheses``: the last 3 hedged sentences, prefixed ``open: ``;
-    - ``found``: the last 4 sentences with a finding marker that start in
-      the last :data:`FOUND_WINDOW_CHARS` of the text.
+    - ``found``: every bullet, numbered item or table row, and every
+      sentence of a plain paragraph, that carries a strong key
+      (:func:`_item_keys`), in text order, up to :data:`NOTE_MAX_FACTS`;
+      then the last 4 sentences with a finding marker that start in the
+      last :data:`FOUND_WINDOW_CHARS` of the text, as far as the 12-item
+      cap leaves room. A line that becomes a fact is not used by another
+      field.
 
     In both cases ``observed``, ``outcome`` and ``source_ids`` come from
     the calls and their results, paired by index; ``reasoning_chars`` is
@@ -987,7 +993,9 @@ def note_from_reply(
             if writer == "heuristic":
                 visible = _NOTE_TAG_RE.sub("", content)
             text = _without_fences(thinking + "\n\n" + visible)
-            note = _heuristic_note(text, tool_calls)
+            note = _heuristic_note(
+                text, tool_calls, factual_text=visible if block is None else ""
+            )
         minimal = _without_fences(fallback or visible).strip()
 
     empty = not (
@@ -1026,10 +1034,74 @@ def note_from_reply(
     return note, rest
 
 
-def _heuristic_note(text: str, tool_calls: Sequence[ToolCall]) -> ReasoningNote:
-    """The content fields that the heuristic reads off *text*."""
+_BULLET_RE = re.compile(r"^\s*(?:[-*+•]|\d{1,3}[.)])\s+\S")
+_TABLE_ROW_RE = re.compile(r"^\s*\|.*\|\s*$")
+_TABLE_RULE_RE = re.compile(r"^\s*\|?[\s:|-]*-[\s:|-]*\|?\s*$")
+
+
+def _plain_line(text: str) -> str:
+    """*text* without bullet or emphasis markers, whitespace collapsed."""
+    return _collapse(text.replace("**", "").replace("|", " "))
+
+
+def _factual_lines(text: str) -> list[str]:
+    """The factual lines of *text*, in text order.
+
+    Every bullet, numbered item and table row is one line, and every
+    sentence of a plain paragraph is one; a heading is a paragraph line
+    too. A line is factual when :func:`_strong_keys` finds a strong key in
+    it.
+    """
+    items: list[str] = []
+    seen_lines: set[int] = set()
+    for offset, sentence in split_sentences(text):
+        line_start = text.rfind("\n", 0, offset) + 1
+        line_end = text.find("\n", offset)
+        if line_end == -1:
+            line_end = len(text)
+        line = text[line_start:line_end]
+        if _BULLET_RE.match(line) or _TABLE_ROW_RE.match(line):
+            if line_start in seen_lines:
+                continue
+            seen_lines.add(line_start)
+            if _TABLE_RULE_RE.match(line):
+                continue
+            if _TABLE_ROW_RE.match(line):
+                line = line.strip().strip("|")
+            else:
+                line = _LIST_MARKER_RE.sub("", line.strip(), count=1)
+            item = _plain_line(line)
+        else:
+            item = _plain_line(sentence)
+        if item and any(not _ITEM_CJK_RE.fullmatch(key) for key in _strong_keys(item)):
+            items.append(item)
+    return items
+
+
+def _heuristic_note(
+    text: str, tool_calls: Sequence[ToolCall], *, factual_text: str = ""
+) -> ReasoningNote:
+    """The content fields that the heuristic reads off *text*.
+
+    *factual_text* is the reply's visible text; only its bullets, table
+    rows and plain sentences become facts, so a *thinking* sentence never
+    takes a field from a later ``<note>`` block or from a question.
+    """
     sentences = split_sentences(text)
-    taken: set[int] = set()
+    facts = _factual_lines(factual_text) if factual_text else []
+    fact_keys = {_normalized_item(item) for item in facts}
+
+    def is_fact(sentence: str) -> bool:
+        key = _normalized_item(_plain_line(sentence))
+        return bool(key) and any(
+            key == fact_key or key in fact_key for fact_key in fact_keys
+        )
+
+    taken: set[int] = {
+        index
+        for index, (_offset, sentence) in enumerate(sentences)
+        if is_fact(sentence)
+    }
 
     def take(test: Callable[[str], bool], limit: int, start: float = 0) -> list[str]:
         """The last *limit* sentences left that pass *test* and start at *start*."""
@@ -1041,7 +1113,11 @@ def _heuristic_note(text: str, tool_calls: Sequence[ToolCall]) -> ReasoningNote:
         taken.update(chosen)
         return [sentences[i][1] for i in chosen]
 
-    intent = [i for i, (_, sentence) in enumerate(sentences) if _has_intent(sentence)]
+    intent = [
+        i
+        for i, (_, sentence) in enumerate(sentences)
+        if i not in taken and _has_intent(sentence)
+    ]
     preferred = [
         i for i in intent if path_spans(sentences[i][1]) or _has_action(sentences[i][1])
     ]
@@ -1062,7 +1138,16 @@ def _heuristic_note(text: str, tool_calls: Sequence[ToolCall]) -> ReasoningNote:
         f"open: {sentence}" for sentence in take(_has_hedge, NOTE_MAX_HYPOTHESES)
     )
     window = len(text) - FOUND_WINDOW_CHARS
-    note.found = _items(take(_has_finding, NOTE_MAX_FOUND, window))
+    found = _items(facts)[:NOTE_MAX_FACTS]
+    seen = {_normalized_item(item) for item in found}
+    for item in _items(take(_has_finding, NOTE_MAX_FOUND, window)):
+        key = _normalized_item(item)
+        if len(found) >= NOTE_MAX_FACTS:
+            break
+        if key and key not in seen:
+            seen.add(key)
+            found.append(item)
+    note.found = found
     return note
 
 
@@ -1311,17 +1396,76 @@ CANDIDATE_TEXT_CHARS = 600  # a note's candidate text
 REFLECTION_CANDIDATE_CHARS = 2_000  # a reflection's
 RECORD_TEXT_CHARS = 500  # a source record's text in ReasoningNote.source_records
 
-_ITEM_STRONG_RE = re.compile(
-    r"(?P<datetime>\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}"
-    r"(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b)"
-    r"|(?P<time>\b\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\b)"
-    r"|(?P<identifier>\b(?=[A-Za-z0-9_]*\d)(?=[A-Za-z0-9_]*[A-Za-z_])[A-Za-z0-9_]+\b)"
-    r"|(?P<number>\b\d+(?:\.\d+)?\b)"
-)
 _ITEM_NAME_RE = re.compile(r"\b[A-Z][a-z]{2,}\b")
+_ITEM_IDENT_RE = re.compile(
+    r"(?<![A-Za-z0-9_])"
+    r"(?=[A-Za-z0-9_]*\d)(?=[A-Za-z0-9_]*[A-Za-z_])"
+    r"[A-Za-z0-9_]{3,}"
+    r"(?![A-Za-z0-9_])"
+)
 _ITEM_WORD_RE = re.compile(r"[A-Za-z0-9_]{4,}")
 _ITEM_CJK_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
 _SENTENCE_BREAK_RE = re.compile(r"(?:[.!?](?=\s|$))|\n")
+
+# A strong key is typed so that a date, a time, an amount and a number are
+# compared after normalisation, not as the text that happened to carry them.
+_KEY_PREFIXES = ("date:", "time:", "amount:", "number:")
+
+_MONTHS = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+_MONTH_WORD = r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t|tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)"
+_WEEKDAYS = frozenset(
+    {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"}
+)
+_DATE_ISO_RE = re.compile(r"(?<!\d)(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?!\d)")
+_DATE_SLASH_RE = re.compile(r"(?<![\d/])(\d{1,2})/(\d{1,2})(?:/(\d{2,4}))?(?![\d/])")
+_MONTH_DAY_RE = re.compile(
+    rf"(?<![A-Za-z])({_MONTH_WORD})(?![A-Za-z])\s+(\d{{1,2}})"
+    r"(?:st|nd|rd|th)?(?:,?\s*\d{4})?(?!\d)",
+    re.IGNORECASE,
+)
+_DAY_MONTH_RE = re.compile(
+    rf"(?<!\d)(\d{{1,2}})(?:st|nd|rd|th)?\s+({_MONTH_WORD})(?![A-Za-z])",
+    re.IGNORECASE,
+)
+_TIME_COLON_RE = re.compile(
+    r"(?<![\d:])(\d{1,2}):(\d{2})(?::\d{2})?\s*(a\.?m\.?|p\.?m\.?)?",
+    re.IGNORECASE,
+)
+_TIME_AMPM_RE = re.compile(
+    r"(?<![\d:])(\d{1,2})\s*(a\.?m\.?|p\.?m\.?)(?![A-Za-z])",
+    re.IGNORECASE,
+)
+_CURRENCY_RE = r"(?:US\$|[$€£¥₹]|USD|EUR|GBP|JPY|CNY|RMB)"
+_AMOUNT_BEFORE_RE = re.compile(
+    rf"(?:{_CURRENCY_RE})\s*(\d[\d,]*(?:\.\d+)?)", re.IGNORECASE
+)
+_AMOUNT_UNITS = (
+    r"(?:dollars?|cents?|euros?|pounds?|USD|EUR|GBP|kg|g|lb|lbs|km|mi|miles?"
+    r"|hours?|minutes?|days?|weeks?|months?|years?"
+    r"|hundred|thousand|million|billion)"
+)
+_AMOUNT_AFTER_RE = re.compile(
+    rf"(\d[\d,]*(?:\.\d+)?)\s*(?:%|{_AMOUNT_UNITS}\b)", re.IGNORECASE
+)
+_AMOUNT_FIELD_RE = re.compile(
+    r"(?:amount|total|price|cost|balance|rent|charge|fee|salary)"
+    r"[\"']?\s*[:=]\s*[\"']?(\d[\d,]*(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+_NUMBER_RE = re.compile(r"(?<![\w.])(\d[\d,]*(?:\.\d+)?)(?![\w.])")
 
 
 @dataclass(frozen=True)
@@ -1333,6 +1477,191 @@ class _ItemKeys:
 
     def __bool__(self) -> bool:
         return bool(self.strong or self.weak)
+
+
+def _is_typed(key: str) -> bool:
+    return key.startswith(_KEY_PREFIXES)
+
+
+def _month_number(name: str) -> int:
+    return _MONTHS[name[:3].lower()]
+
+
+def _date_key(month: int, day: int) -> str | None:
+    if 1 <= month <= 12 and 1 <= day <= 31:
+        return f"date:{month:02d}-{day:02d}"
+    return None
+
+
+def _date_keys(text: str) -> set[str]:
+    """Every date in *text* as one ``MM-DD`` form, a year ignored.
+
+    An ISO date, a ``M/D`` (or unambiguous ``D/M``) pair and ``April 9``
+    or ``9 April`` all give the same key, so a reply's ``4/9`` matches a
+    record's ``2026-04-09``. When both parts are at most 12 the pair is
+    read month first, the same reading on both sides, so an ambiguous
+    day-first date never matches a different ISO day.
+    """
+    keys: set[str] = set()
+    for match in _DATE_ISO_RE.finditer(text):
+        year, month, day = (int(part) for part in match.groups())
+        if year >= 1 and (key := _date_key(month, day)) is not None:
+            keys.add(key)
+    for match in _DATE_SLASH_RE.finditer(text):
+        first, second = int(match.group(1)), int(match.group(2))
+        key = _date_key(second, first) if first > 12 else _date_key(first, second)
+        if key is not None:
+            keys.add(key)
+    for match in _MONTH_DAY_RE.finditer(text):
+        key = _date_key(_month_number(match.group(1)), int(match.group(2)))
+        if key is not None:
+            keys.add(key)
+    for match in _DAY_MONTH_RE.finditer(text):
+        key = _date_key(_month_number(match.group(2)), int(match.group(1)))
+        if key is not None:
+            keys.add(key)
+    return keys
+
+
+def _hour24(hour: int, suffix: str) -> int | None:
+    if suffix:
+        if hour > 12:
+            return None
+        return hour % 12 + (12 if suffix.startswith("p") else 0)
+    return hour if hour < 24 else None
+
+
+def _time_keys(text: str) -> set[str]:
+    """Every clock time in *text* as ``HH:MM``; a colon or am/pm is required."""
+    keys: set[str] = set()
+    for match in _TIME_COLON_RE.finditer(text):
+        hour = _hour24(int(match.group(1)), (match.group(3) or "").lower())
+        minute = int(match.group(2))
+        if hour is not None and minute < 60:
+            keys.add(f"time:{hour:02d}:{minute:02d}")
+    for match in _TIME_AMPM_RE.finditer(text):
+        hour = _hour24(int(match.group(1)), match.group(2).lower())
+        if hour is not None:
+            keys.add(f"time:{hour:02d}:00")
+    return keys
+
+
+def _amount_value(value: str) -> str:
+    text = value.replace(",", "")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _amount_keys(text: str) -> set[str]:
+    """Every amount with a currency or a unit, its number normalised."""
+    keys: set[str] = set()
+    for pattern in (_AMOUNT_BEFORE_RE, _AMOUNT_AFTER_RE, _AMOUNT_FIELD_RE):
+        for match in pattern.finditer(text):
+            keys.add(f"amount:{_amount_value(match.group(1))}")
+    return keys
+
+
+def _number_keys(text: str) -> set[str]:
+    """Every number of at least three integer digits, commas and zeros normalised."""
+    keys: set[str] = set()
+    for match in _NUMBER_RE.finditer(text):
+        value = match.group(1)
+        integer = value.split(".", 1)[0].replace(",", "")
+        if len(integer) >= 3 and not (
+            len(integer) == 4 and 1900 <= int(integer) <= 2099
+        ):
+            keys.add(f"number:{_amount_value(value)}")
+    return keys
+
+
+def _typed_keys(text: str) -> set[str]:
+    return {
+        *_date_keys(text),
+        *_time_keys(text),
+        *_amount_keys(text),
+        *_number_keys(text),
+    }
+
+
+def _strong_keys(item: str) -> set[str]:
+    """The strong keys of *item*: dates, times, amounts, numbers, names.
+
+    A strong key is a date, a time with a colon or am/pm, an amount with a
+    currency or unit, an identifier of three or more characters holding a
+    digit, a number of three or more integer digits, a capitalised name
+    that does not start its sentence, or a CJK run. A bare one- or two-digit
+    number is never a key.
+    """
+    strong = _typed_keys(item)
+    stable = _DATE_WORDS | _NAME_SKIP | _ITEM_STOPWORDS
+    for match in _ITEM_IDENT_RE.finditer(item):
+        strong.add(match.group(0).lower())
+    for match in _ITEM_NAME_RE.finditer(item):
+        name = match.group(0).lower()
+        if name in stable:
+            continue
+        if not _sentence_initial(item, match.start()):
+            strong.add(name)
+    strong.update(
+        run for run in _ITEM_CJK_RE.findall(item) if run not in _ITEM_STOPWORDS
+    )
+    return strong
+
+
+_NAME_SKIP = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "and",
+        "but",
+        "or",
+        "for",
+        "from",
+        "in",
+        "on",
+        "at",
+        "to",
+        "of",
+        "with",
+        "by",
+        "as",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "all",
+        "each",
+        "every",
+        "next",
+        "last",
+    }
+)
+_DATE_WORDS = frozenset(
+    {*_MONTHS, *_WEEKDAYS}
+    | {
+        "january",
+        "february",
+        "march",
+        "april",
+        "june",
+        "july",
+        "august",
+        "september",
+        "october",
+        "november",
+        "december",
+    }
+)
 
 
 def _sentence_initial(item: str, start: int) -> bool:
@@ -1347,26 +1676,16 @@ def _sentence_initial(item: str, start: int) -> bool:
 def _item_keys(item: str) -> _ItemKeys:
     """The strong keys and distinctive words an item shares with a record.
 
-    A strong key is a number, a date or time, an identifier containing a
-    digit, a capitalised name that does not start its sentence, or a CJK
-    run. A distinctive word is four or more ASCII letters or digits that
-    are not a stopword; one such word is not enough to source a record.
+    Strong keys are :func:`_strong_keys`; a distinctive word is four or
+    more ASCII letters or digits that are not a stopword. One such word is
+    not enough to source a record.
     """
-    strong: set[str] = {
-        match.group(0).lower() for match in _ITEM_STRONG_RE.finditer(item)
-    }
-    for match in _ITEM_NAME_RE.finditer(item):
-        if not _sentence_initial(item, match.start()):
-            strong.add(match.group(0).lower())
-    strong.update(
-        run for run in _ITEM_CJK_RE.findall(item) if run not in _ITEM_STOPWORDS
-    )
     weak = {
         word.lower()
         for word in _ITEM_WORD_RE.findall(item)
         if not word.isdigit() and word.lower() not in _ITEM_STOPWORDS
     }
-    return _ItemKeys(frozenset(strong), frozenset(weak))
+    return _ItemKeys(frozenset(_strong_keys(item)), frozenset(weak))
 
 
 _ITEM_STOPWORDS = frozenset(
@@ -1445,30 +1764,115 @@ def _has_key(folded: str, key: str) -> bool:
     return re.search(pattern, folded) is not None
 
 
+_META_DONE_RE = re.compile(
+    r"^(?:the\s+)?(?:task|session|run|work)\b[^.!?]{0,40}"
+    r"\b(?:complete|completed|done|finished)\b"
+    r"|^(?:all\s+)?(?:done|complete|completed|finished)\b[.!]*$"
+    r"|^all\s+set\b[.!]*$",
+    re.IGNORECASE,
+)
+_META_WORK_VERB = (
+    r"(?:read|review\w*|remember\w*|memoriz\w*|memoris\w*|stor\w*|record\w*"
+    r"|captur\w*|summariz\w*|summaris\w*|process\w*|not(?:e|ed|ing)\w*"
+    r"|internaliz\w*|internalis\w*|complet\w*|finish\w*|submit\w*)"
+)
+_META_NOUN = (
+    r"(?:records?|facts?|notes?|memor(?:y|ies)|session|task|run|today|everything)"
+)
+_META_RE = re.compile(
+    rf"(?:\b(?:i|we)\b[^.!?]{{0,80}}?\b{_META_WORK_VERB}"
+    rf"[^.!?]{{0,80}}?\b{_META_NOUN}\b"
+    rf"|\b(?:all|the)\b[^.!?]{{0,60}}?\b(?:records?|facts?|notes?|memories)\b"
+    rf"[^.!?]{{0,80}}?\b{_META_WORK_VERB}"
+    rf"|\b(?:records?|facts?|notes?)\b[^.!?]{{0,60}}?\b(?:have|has|were|are)\b"
+    rf"[^.!?]{{0,40}}?\b{_META_WORK_VERB}"
+    r"|\b(?:i will|i'll|i’ll)\b[^.!?]{0,30}?\bremember\b)",
+    re.IGNORECASE,
+)
+_META_SEPARATORS = ("—", "–", ":", ";")
+
+
+def _is_meta_sentence(sentence: str) -> bool:
+    """Whether one sentence only reports the agent's own reading or completion."""
+    if not (_META_RE.search(sentence) or _META_DONE_RE.search(sentence)):
+        return False
+    # A time, an amount or an identifier is a fact the frame does not own.
+    if any(
+        key.startswith(("time:", "amount:")) for key in _typed_keys(sentence)
+    ) or _ITEM_IDENT_RE.search(sentence):
+        return False
+    # "I've read the record: yoga 4/11" carries its fact after a separator.
+    for separator in _META_SEPARATORS:
+        head, found, tail = sentence.partition(separator)
+        if found and _META_RE.search(head) and _strong_keys(tail):
+            return False
+    return True
+
+
+def is_meta_claim(text: str) -> bool:
+    """Whether *text* is only a completion or self-work claim, and no fact.
+
+    "I've read and remembered all of Jamie's records from today
+    (2026-04-06)…" is meta even though it names a date and a person; the
+    date and the name belong to the frame, not to a fact. A sentence that
+    also carries an amount, a time, an identifier, or a fact after a
+    ``:``, ``—`` or ``;`` is not meta, and a text with any non-meta
+    sentence is not a meta claim.
+    """
+    sentences = split_sentences(text)
+    return bool(sentences) and all(
+        _is_meta_sentence(sentence) for _offset, sentence in sentences
+    )
+
+
+def _item_score(keys: _ItemKeys, folded: str) -> int:
+    """How strongly *folded* matches *item*: 0 when it does not.
+
+    A typed key (a date, time, amount or number) weighs most, then a name
+    or an identifier, then each distinctive word; the score picks the
+    record that fits an item best instead of the first that shares its
+    user's name.
+    """
+    score = 0
+    if any(_is_typed(key) for key in keys.strong):
+        typed = _typed_keys(folded)
+        if any(_is_typed(key) and key in typed for key in keys.strong):
+            score += 8
+    for key in keys.strong:
+        if not _is_typed(key) and _has_key(folded, key):
+            score += 2
+    weak = sum(1 for word in keys.weak if _has_key(folded, word))
+    if weak >= 2:
+        score += weak
+    return score
+
+
 def _item_matches(keys: _ItemKeys, folded: str) -> bool:
     """Whether *folded* shares a strong key or two distinctive words."""
-    if any(_has_key(folded, key) for key in keys.strong):
-        return True
-    return sum(1 for word in keys.weak if _has_key(folded, word)) >= 2
+    return _item_score(keys, folded) > 0
 
 
 def _item_source_ids(item: str, records: Sequence[tuple[str, str]]) -> list[str]:
-    """The first record id whose text shares a strong key or two words with *item*.
+    """The record id whose text matches *item* best, or none.
 
-    A strong key is a number, a date or time, an identifier containing a
-    digit, or a capitalised name that is not sentence-initial; otherwise
-    the record must share at least two distinctive words (not stopwords,
-    at least four characters). *records* is in the precedence order
+    A typed key (a date, time, amount or number) outweighs a name or an
+    identifier, which outweighs two or more distinctive words (not
+    stopwords, at least four characters; a bare one- or two-digit number
+    is never a key). *records* is in the precedence order
     :func:`note_from_reply` gives it: the reply's own results, the
-    window's, then the rest of the task's.
+    window's, then the rest of the task's; an equal score goes to the
+    earlier record.
     """
     keys = _item_keys(item)
     if not keys:
         return []
+    best_id = ""
+    best_score = 0
     for record_id, text in records:
-        if _item_matches(keys, text.lower()):
-            return [record_id]
-    return []
+        score = _item_score(keys, text.lower())
+        if score > best_score:
+            best_id, best_score = record_id, score
+    return [best_id] if best_id else []
 
 
 def candidate_items(note: ReasoningNote) -> tuple[CandidateItem, ...]:

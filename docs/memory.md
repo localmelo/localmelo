@@ -59,6 +59,18 @@ returned) and `outcome`. The model's own
 `<note>` block stays in the working-memory copy of its reply, so the next
 step reads it; a reply with no text gets the checked note as its copy instead.
 
+A reply with no block that answers with a factual summary now fills `found`
+from its visible text: every bullet, numbered item or table row, and every
+sentence of a plain paragraph, that carries a strong key (see
+[Long-term memory](#long-term-memory)) becomes one item, in text order, up to
+12 per reply. The rendered note keeps its 1,200-character budget, so it may
+show fewer than it stores; the 12 items are what long-term memory offers. An
+explicit `<note>` may also list up to 12 `found` items. A reply that only
+reports the agent's own work ("The session is complete.", "I've read and
+remembered all of the records…") is not stored as a fact: the policy ignores
+it with the reason `meta claim about the agent's own work`, even when the
+claim names a date or a person.
+
 - The notes, drafts and digests live in a **note store** beside the
   conversation window, in RAM, as long as the agent: one direct run, one
   `melo ""` loop, one interactive UI session or one Python-API `Agent`.
@@ -217,15 +229,23 @@ in this order, and the first match wins: the records of this reply's own
 tool results; then those of results still in the working-memory window,
 newest first; then the rest of the same task's results, newest first. Only
 the task's last 200 records are kept, and another task's records are never
-used. A record matches only when it shares with the item a strong key (a
-number, a date or time, an identifier containing a digit, or a capitalised
-name that does not start its sentence) or at least two distinctive words
-(not a stopword, four or more characters). Fillers such as `done`, `ok`,
-`good`, `thanks`, `好的`, `完成` and `可以` are stopwords, so an item that
-says only "Done." takes no source. When the note has no record text at
-all, the item keeps the note's own `source_ids`; when it has records and
-none matches, the item gets none. A digest's ids are the union of its
-notes' ids and the records behind their items.
+used. A record matches when it shares with the item a strong key or at least
+two distinctive words (not a stopword, four or more characters); the record
+that matches most strongly wins, and an equal score goes to the earlier
+record. A strong key is a date (ISO, `m/d`, or `April 9`, normalised to one
+month-day form so `4/9` matches `2026-04-09`), a time with a colon or am/pm,
+an amount with a currency or unit (or an amount field), an identifier of
+three or more characters containing a digit, a number of three or more
+digits, or a capitalised name that does not start its sentence. A bare one-
+or two-digit number is never a key, so `3-4 Room 4B` no longer cites a
+`1-3PM … Apt 3` record. Fillers such as `done`, `ok`, `good`, `thanks`, `好的`,
+`完成` and `可以` are stopwords, so an item that says only "Done." takes no
+source. When the note has no record text at all, the item keeps the note's
+own `source_ids`; when it has records and none matches, the item gets none.
+A digest's ids are the union of its notes' ids and the records behind their
+items. A completion or self-work claim with no fact beyond its frame is
+`IGNORE`d with the reason `meta claim about the agent's own work`, whether it
+comes from a note or from a digest.
 
 Nothing is written without a signal:
 
@@ -249,7 +269,7 @@ one action:
 
 | Action | Rule | Write |
 |---|---|---|
-| `IGNORE` | A short fact (under 20 normalised characters), a fact that names only this task's files, or a duplicate (normalised equality, text overlap >= 0.9, or cosine >= 0.95). | No entry; a duplicate target's `uses` grows. |
+| `IGNORE` | A short fact (under 20 normalised characters), a fact that names only this task's files, a completion or self-work claim with no fact beyond its frame, or a duplicate (normalised equality, text overlap >= 0.9, or cosine >= 0.95). | No entry; a duplicate target's `uses` grows. |
 
 An episodic item's subject is its candidate plus its item index, so two
 different items of one note are two entries; a restatement re-proposes the

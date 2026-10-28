@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from localmelo.melo.memory.bm25 import tokenize
-from localmelo.melo.memory.notes import path_spans
+from localmelo.melo.memory.notes import is_meta_claim, path_spans
 
 ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE")
 
@@ -497,6 +497,13 @@ def decide(
     item_key = _item_key(provenance)
     subject = subjects(text, kind, task_text=task_text, item_key=item_key)
     content = content_tokens(text)
+    if is_meta_claim(text):
+        return PolicyDecision(
+            action="IGNORE",
+            kind=kind,
+            subject=subject,
+            reason="meta claim about the agent's own work",
+        )
     if len(folded) < MIN_FACT_CHARS:
         return PolicyDecision(
             action="IGNORE",

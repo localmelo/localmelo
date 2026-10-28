@@ -272,8 +272,10 @@ def test_parse_note_block_caps() -> None:
     # 399 characters cut at 299, where a space follows a whole "step".
     assert note.plan == "step " * 59 + "step…"
     assert len(note.plan) == 300
-    # The first item, 249 characters, is cut at 199; empty items are dropped.
-    assert note.found == ["long " * 39 + "long…", "b", "c", "d"]
+    # The first item, 249 characters, is cut at 199; empty items are
+    # dropped. An explicit note keeps up to 12 found items (T68): its cap
+    # is not lower than the 12 a factual reply may carry.
+    assert note.found == ["long " * 39 + "long…", "b", "c", "d", "e"]
     assert note.decided == ["a", "b", "c"]
     assert note.hypotheses == ["a", "b", "c"]
     assert note.open_questions == ["a", "b", "c"]

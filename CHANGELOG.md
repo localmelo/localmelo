@@ -514,6 +514,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The heuristic note writer reads a factual bullet reply: with no `<note>`
+  block, every bullet, numbered item, table row and sentence of a plain
+  paragraph that carries a strong key becomes a `found` item, in text order,
+  up to 12 per reply (an explicit `<note>` may list 12 too). The rendered
+  note keeps its 1,200-character budget, so it shows fewer than it stores.
+  A completion or self-work claim ("The session is complete.", "I've read
+  and remembered all of Jamie's records…") is not admitted as a fact; the
+  policy `IGNORE`s it with the reason `meta claim about the agent's own
+  work`, for a note and for the episodic digest. Strong keys are now a date
+  (ISO, `m/d`, `April 9`, normalised so `4/9` matches `2026-04-09`), a time
+  with a colon or am/pm, an amount with a currency or unit, an identifier of
+  three or more characters with a digit, a number of three or more digits,
+  or a non-sentence-initial capitalised name; a bare one- or two-digit number
+  is never a key, so `4/9 3-4 Room 4B` no longer cites `1-3PM … Apt 3`. An
+  item's record is now the best match rather than the first that shares its
+  user's name. ([#NN])
 - A note's items now take their `source_ids` from the observation that
   established them, even when it came in an earlier reply of the same task:
   the reply's own tool results first, then the results still in the window,
