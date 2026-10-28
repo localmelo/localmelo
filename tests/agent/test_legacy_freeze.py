@@ -103,9 +103,12 @@ LATER_OPTIONS = [
     "--keep-decision-text",
     "--allow-unconfigured",
     "--save-session",
+    "--brief",
     "--parent-run",
     "--import-session",
     "--title",
+    "--fixed-prefix",
+    "--captured-history",
     "--context-window",
     "--output-reserve",
     "--safety-margin",
@@ -219,7 +222,7 @@ def test_run_result_and_message_keep_their_fields() -> None:
     assert [
         f.name
         for f in dataclasses.fields(RunResult)
-        if f.name not in ("memory_stats", "context_budget")
+        if f.name not in ("memory_stats", "context_budget", "prefix_cache")
     ] == [
         "task_id",
         "status",

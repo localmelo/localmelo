@@ -82,7 +82,13 @@ def configured_session_options(
             setattr(cfg.agent, name, getattr(options, name))
     fields: dict[str, Any] = {
         name: getattr(cfg.agent, name)
-        for name in ("reasoning", "replay_turns", "note_writer")
+        for name in (
+            "reasoning",
+            "replay_turns",
+            "note_writer",
+            "fixed_prefix",
+            "captured_history",
+        )
         if name not in explicit
     }
     if fields.get("reasoning", options.reasoning) != "legacy":
