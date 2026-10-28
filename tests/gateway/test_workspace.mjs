@@ -58,11 +58,12 @@ function harness(api, {mobile = false, renderMessages = false} = {}) {
   vm.runInContext(source, context, {filename: 'workspace.js'});
   // Most tests isolate production state and API flows. The snapshot test opts
   // into message rendering; Markdown and browser layout have separate coverage.
+  const renderSessionsOriginal = vm.runInContext('renderSessions', context);
   vm.runInContext('renderSessions = () => {};', context);
   if (!renderMessages) vm.runInContext('renderMessages = () => {};', context);
   context.api = api;
   return {
-    element, context,
+    element, context, renderSessions: () => renderSessionsOriginal(),
     state: vm.runInContext('S', context),
     run: expression => vm.runInContext(expression, context),
     local: context.localStorage,
@@ -395,17 +396,55 @@ test('presence is throttled to one request per 2.5 seconds', async () => {
   assert.equal(posts.length, 2, 'After the window a new heartbeat is sent');
 });
 
+test('presence is sent when a chat is selected', async () => {
+  const posts = [];
+  const h = harness(async () => session('a'));
+  h.context.fetch = (path, options) => {
+    posts.push([path, options]);
+    return Promise.resolve({ok: true});
+  };
+  h.state.sessions = [session('a')];
+  h.state.lastPresenceAt = 0;
+  await h.run('selectSession("a")');
+  assert.equal(posts.length, 1);
+  assert.equal(JSON.parse(posts[0][1].body).session_id, 'a');
+});
+
 test('the send path is not blocked by presence', async () => {
   const paths = [];
+  let presenceCalls = 0;
   const pending = new Promise(() => {});
   const h = harness(async path => {
     paths.push(path);
     if (path.endsWith('/run')) return {result: 'Completed'};
     return session('a', {last_active: 2, messages: [{role: 'user', content: 'Hi'}, {role: 'assistant', content: 'Completed'}]});
   });
-  h.context.fetch = () => pending;  // presence never answers
+  h.context.fetch = () => {
+    presenceCalls++;
+    return pending;  // presence never answers
+  };
   h.state.sessions = [session('a')]; h.state.activeId = 'a'; h.element('input').value = 'Hi';
   await h.run('send()');
+  assert.equal(presenceCalls, 1, 'A send sends one heartbeat');
   assert.equal(paths.includes('/session/a/run'), true, 'The run must not wait for presence');
   assert.equal(h.state.pending.size, 0);
+});
+
+test('the sidebar and the bubble follow a change of held', () => {
+  const h = harness(async () => ({}), {renderMessages: true});
+  h.state.sessions = [session('a', {is_busy: true, held: 'Resources', messages: [{role: 'user', content: 'Hi'}]})];
+  h.state.activeId = 'a';
+  h.renderSessions();
+  const info = h.element('session-list').children[0].children[0];
+  assert.match(info.innerHTML, /● Waiting · /);
+  h.run('renderMessages()');
+  let rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Waiting: Resources…');
+  h.state.sessions[0].held = '';
+  h.renderSessions();
+  const released = h.element('session-list').children[0].children[0];
+  assert.match(released.innerHTML, /● Working · /, 'A released hold returns the sidebar marker');
+  h.run('renderMessages()');
+  rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Working on your request…');
 });

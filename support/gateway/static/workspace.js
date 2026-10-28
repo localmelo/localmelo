@@ -225,6 +225,7 @@ function renderSessions() {
       title(s),
       s.chat_model,
       s.is_busy,
+      s.held || "",
       s.last_active,
       S.pending.has(s.session_id),
     ]),
@@ -279,6 +280,7 @@ function renderMessages(forceScroll = false) {
     s?.chat_model,
     messages,
     s?.is_busy,
+    s?.held || "",
     s && S.pending.has(s.session_id),
   ]);
   if (snapshot === messageSnapshot) {
