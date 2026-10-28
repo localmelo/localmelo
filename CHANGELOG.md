@@ -25,7 +25,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   its key still lands in the create scope, so a client without the id finds
   it, and a create whose Agent or first turn never came up deletes the row
   it made. Console runners ask each turn for `run.progress`. `/`, the
-  workspace page and every `/v1/*` route are unchanged ([#89]).
+  workspace page and every `/v1/*` route are unchanged ([#NN]).
 - Console turns over API v2: `POST /api/sessions` (with an optional first
   turn), `POST /api/sessions/{id}/turns`, `/retry` and `/turns/{id}/cancel`,
   the two cancel-by-key routes, `POST /api/approvals/{request_id}`, and
@@ -581,4 +581,4 @@ earlier milestones.
 [#84]: https://github.com/localmelo/localmelo/pull/84
 [#85]: https://github.com/localmelo/localmelo/pull/85
 [#88]: https://github.com/localmelo/localmelo/pull/88
-[#89]: https://github.com/localmelo/localmelo/pull/89
+[#NN]: https://github.com/localmelo/localmelo/pull/NN
