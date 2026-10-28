@@ -6,11 +6,13 @@ This page lists the events, the order they come in, and the rules for the
 function that receives them.
 
 > [!NOTE]
-> Events are part of the Python API, which is experimental and may change
-> before v0.1.0. Direct mode (`melo "<task>"`), the `melo ""` loop and the
-> HTTP API do not use them. The gateway's web workspace runs each chat with
-> an event sink so that Stop ends the run as `cancelled`, but it keeps only
-> `run.finished` and shows no events.
+> Events are part of the experimental Python API and may change before
+> v0.1.0. A direct task uses an `observe` sink when its progress line is
+> enabled; the `melo ""` loop runs without a sink. The interactive UI and
+> the gateway's `/api` console run turns with event sinks and save events in
+> sessions; the console exposes them over SSE and shows them in the web
+> workspace. The legacy `/v1/playground` sink keeps only the `run.finished`
+> outcome for Stop and does not show live events.
 
 ## Follow a run
 
@@ -542,10 +544,14 @@ and `"run_id": ""`.
 | `turn.finished` | The turn ends: its last event. | `turn`, `turn_id`, `status`, `error`, `cause` |
 | `turn.undone` | A turn is undone; the event belongs to no turn. | `turn`, `turn_id` |
 | `session.title` | The first turn sets the session's title, or it is renamed. | `title` |
-| `session.updated` | The session's model, workspace or `meta` changes. | `model`, `workspace`, `meta` |
+| `session.updated` | The session's model, workspace or `meta` changes. | `model`, `workspace`, `workspace_label`, `meta` |
 | `approval.requested` | A person is asked about a tool call (`SessionRunner.observe`). | `request_id`, `call_id`, `tool_name`, `arguments`, `preview`, `workspace_root` |
 | `approval.resolved` | That request is answered or withdrawn. | `request_id`, `call_id`, `tool_name`, `outcome`, `origin`, `reason`, `remember` |
 
+- `workspace_label` is the workspace with the home directory abbreviated to
+  `~`, or an empty string when no workspace is set. Older stored
+  `session.updated` events may not have this key; clients must tolerate its
+  absence.
 - `client_request_id` is the message id of the turn's
   [submission](sessions.md#message-ids-and-submissions), or `null`.
 - `cause` says what ended the turn: `run`, `user_stop`, `closed`,

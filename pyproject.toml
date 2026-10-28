@@ -36,6 +36,7 @@ dev = [
     "ruff",
     "black",
     "mypy",
+    "markdown-it-py==4.2.0",
     "pytest",
     "pytest-asyncio",
     "pytest-testmon>=2.2.0",
