@@ -15,7 +15,8 @@ submissions, approvals, tools, grants, memory, runs and scheduler tasks.
 `POST /api/auth/logout` revokes the cookie. `POST /api/auth/rotate` requires
 the bearer and rotates it. The login exchange requires a matching Origin. When
 the macOS app started the gateway, it also requires the app's
-`X-LocalMelo-Instance` header; a missing or different value is refused before
+`X-LocalMelo-Instance` header, and a code is valid only for the instance it was
+issued for; a missing, different or differently bound value is refused before
 the code is consumed. See [gateway security](../guides/gateway.md#keep-the-gateway-private).
 
 A console turn passes the same scheduler gate a workspace chat does: every

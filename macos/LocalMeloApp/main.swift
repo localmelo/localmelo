@@ -150,6 +150,30 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         }
     }
 
+    // A probe response can arrive just before another process takes the port,
+    // so check the kernel's listener again immediately before a code leaves
+    // the app: a listener the app's child does not own must receive none.
+    private func sendWhenOwned(child: Process, _ send: @escaping () -> Void) {
+        listenerPIDs { [weak self] pids in
+            guard let self = self, !self.stopping else { return }
+            guard child.isRunning else {
+                self.checking = false
+                return
+            }
+            guard let pids = pids else {
+                self.checking = false
+                self.fail("Cannot inspect port \(self.port). No login code was sent.")
+                return
+            }
+            guard ownsListener(pids, child: child.processIdentifier) else {
+                self.checking = false
+                self.fail("Port \(self.port) is held by another process. Stop the existing listener and try again.")
+                return
+            }
+            send()
+        }
+    }
+
     private func startGateway() {
         listenerPIDs { [weak self] listeners in self?.startGateway(listeners: listeners) }
     }
@@ -281,7 +305,7 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let process = Process()
             process.executableURL = python
-            process.arguments = ["-P", "-c", "from localmelo.support.gateway.auth import GatewayAuth; import sys; a=GatewayAuth(); print(a.issue_login(int(sys.argv[1]))); print(a.issue_login(int(sys.argv[1]))); a.close()", String(port)]
+            process.arguments = ["-P", "-c", "from localmelo.support.gateway.auth import GatewayAuth; import sys; a=GatewayAuth(); print(a.issue_login(int(sys.argv[1]), instance=sys.argv[2])); print(a.issue_login(int(sys.argv[1]), instance=sys.argv[2])); a.close()", String(port), instance]
             var env = ProcessInfo.processInfo.environment
             env.removeValue(forKey: "PYTHONPATH")
             env.removeValue(forKey: "PYTHONHOME")
@@ -306,29 +330,34 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 DispatchQueue.main.async { self?.retryLogin() }
                 return
             }
-            let url = URL(string: "http://127.0.0.1:\(port)/api/auth/login")!
-            var request = URLRequest(url: url)
-            request.httpMethod = "POST"
-            request.timeoutInterval = 2
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue("http://127.0.0.1:\(port)", forHTTPHeaderField: "Origin")
-            request.setValue(instance, forHTTPHeaderField: "X-LocalMelo-Instance")
-            request.httpBody = try? JSONSerialization.data(withJSONObject: ["code": codes[0]])
-            self?.healthSession.dataTask(with: request) { [weak self] _, response, _ in
-                DispatchQueue.main.async {
-                    guard let self = self else { return }
-                    guard !self.stopping, child.isRunning,
-                          (response as? HTTPURLResponse)?.statusCode == 204 else {
-                        self.retryLogin()
-                        return
-                    }
-                    // The cookie is presumed, not proven: fetchHealth verifies
-                    // it and clears the flag on 401 so sign-in runs again.
-                    self.healthAuthenticated = true
-                    self.browserLoginCode = codes[1]
-                    self.fetchHealth(child: child, reload: reload)
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.sendWhenOwned(child: child) {
+                    let url = URL(string: "http://127.0.0.1:\(port)/api/auth/login")!
+                    var request = URLRequest(url: url)
+                    request.httpMethod = "POST"
+                    request.timeoutInterval = 2
+                    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    request.setValue("http://127.0.0.1:\(port)", forHTTPHeaderField: "Origin")
+                    request.setValue(instance, forHTTPHeaderField: "X-LocalMelo-Instance")
+                    request.httpBody = try? JSONSerialization.data(withJSONObject: ["code": codes[0]])
+                    self.healthSession.dataTask(with: request) { [weak self] _, response, _ in
+                        DispatchQueue.main.async {
+                            guard let self = self else { return }
+                            guard !self.stopping, child.isRunning,
+                                  (response as? HTTPURLResponse)?.statusCode == 204 else {
+                                self.retryLogin()
+                                return
+                            }
+                            // The cookie is presumed, not proven: fetchHealth verifies
+                            // it and clears the flag on 401 so sign-in runs again.
+                            self.healthAuthenticated = true
+                            self.browserLoginCode = codes[1]
+                            self.fetchHealth(child: child, reload: reload)
+                        }
+                    }.resume()
                 }
-            }.resume()
+            }
         }
     }
 
@@ -377,12 +406,14 @@ final class App: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigation
                 guard let url = URL(
                     string: "http://127.0.0.1:\(self.port)/?auth=\(self.signInAttempts)#login=\(code)&instance=\(self.instance)"
                 ) else { return }
-                if replacing {
-                    // A fresh web view avoids a stalled second navigation that
-                    // WebKit can leave uncommitted after the first page loaded.
-                    self.loadConsole(url)
-                } else {
-                    self.webView.load(URLRequest(url: url))
+                self.sendWhenOwned(child: child) {
+                    if replacing {
+                        // A fresh web view avoids a stalled second navigation that
+                        // WebKit can leave uncommitted after the first page loaded.
+                        self.loadConsole(url)
+                    } else {
+                        self.webView.load(URLRequest(url: url))
+                    }
                 }
             }
         }.resume()

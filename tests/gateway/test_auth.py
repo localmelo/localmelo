@@ -39,6 +39,12 @@ def test_login_codes_are_single_use_persistent_and_rotated(tmp_path: Path) -> No
         assert not other.valid_cookie(cookie, 1234, now=101 + 30 * 86400)
         expired = auth.issue_login(1234, now=100)
         assert other.consume_login(expired, 1234, now=160) is None
+        # A code is bound to the instance it was issued for: the app's launch
+        # identifier, or none for a gateway the user started directly.
+        bound = auth.issue_login(1234, instance="f" * 32, now=100)
+        assert other.consume_login(bound, 1234, now=101) is None
+        assert other.consume_login(bound, 1234, instance="e" * 32, now=101) is None
+        assert other.consume_login(bound, 1234, instance="f" * 32, now=101)
         auth.rotate()
         assert not other.valid_cookie(cookie, 1234, now=102)
         assert not auth.valid_bearer(token.decode())
@@ -56,8 +62,18 @@ def test_app_login_requires_the_launch_instance_header(
     client = TestClient(server.app, base_url="http://127.0.0.1:8401")
     try:
         assert client.get("/").headers["x-localmelo-instance"] == instance
-        code = server.auth.issue_login(8401)
+        code = server.auth.issue_login(8401, instance=instance)
         origin = {"Origin": "http://127.0.0.1:8401"}
+        # A code minted without the instance (as for a directly started
+        # gateway) is not accepted by the app's gateway.
+        unbound = server.auth.issue_login(8401)
+        response = client.post(
+            "/api/auth/login",
+            json={"code": unbound},
+            headers={**origin, "X-LocalMelo-Instance": instance},
+        )
+        assert response.status_code == 401
+        assert response.json()["error"]["code"] == "unauthorized"
         for headers in (
             origin,
             {**origin, "X-LocalMelo-Instance": "f" * 32},

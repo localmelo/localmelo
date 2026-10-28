@@ -53,6 +53,7 @@ pidfile.write_text(str(os.getpid()))
 auth = GatewayAuth()
 requests = home / "requests"
 logins = home / "logins"
+closing = False
 
 def record(text):
     with requests.open("a") as stream:
@@ -61,6 +62,22 @@ def record(text):
 def note_login():
     with logins.open("a") as stream:
         stream.write("login\n")
+
+# Let a plain listener take the port, then answer from the accepted connection
+# only once it holds the port. The app must notice the new owner.
+def handoff():
+    global closing
+    if closing:
+        return
+    closing = True
+    def close():
+        server.shutdown()
+        server.server_close()
+        (home / "port-free").write_text("yes")
+    threading.Thread(target=close, daemon=True).start()
+    deadline = time.monotonic() + 5
+    while not (home / "foreign-ready").exists() and time.monotonic() < deadline:
+        time.sleep(.02)
 
 def cookie_ok(header):
     cookie = SimpleCookie()
@@ -77,15 +94,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_error(404)
             return
         record("POST " + self.path)
-        note_login()
         if self.headers.get("X-LocalMelo-Instance") != instance:
             self.send_error(421)
             return
         data = json.loads(self.rfile.read(int(self.headers.get("Content-Length", "0"))))
-        cookie = auth.consume_login(data.get("code", ""), port)
+        cookie = auth.consume_login(data.get("code", ""), port, instance=instance)
         if self.headers.get("Origin") != f"http://127.0.0.1:{port}" or not cookie:
             self.send_error(403)
             return
+        note_login()
         if self.headers.get("X-Test-Browser") == "1":
             (home / "browser-login-ok").write_text("yes")
         if mode == "no-cookie":
@@ -118,6 +135,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             else:
                 body = b'{"api":2,"sessions":{"store":"ok","store_error":"","running":0}}'
                 status = 200
+            if mode == "handoff-health" and status == 200:
+                handoff()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             if status == 200 and mode in ("correct", "quit", "idlequit", "keys", "rotate", "signin"):
@@ -130,6 +149,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             (home / "requested-page").write_text("yes")
         page = '<html><body id="test-page">test page</body></html>'
         body = page.encode()
+        if mode == "handoff-probe" and self.path == "/":
+            handoff()
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -141,7 +162,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
     def log_message(self, *args): pass
-server = http.server.HTTPServer(("127.0.0.1", port), Handler)
+server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 while not (home / "exit-child").exists(): time.sleep(.05)
 server.shutdown()
@@ -197,6 +218,13 @@ def app(tmp_path_factory: pytest.TempPathFactory) -> Path:
         record("loaded " + (webView.url?.absoluteString ?? ""))
         if let menu = NSApp.mainMenu?.items.last?.submenu {
             record("edit " + menu.items.map { $0.title + ":" + $0.keyEquivalent }.joined(separator: ","))
+        }
+        if let item = NSApp.mainMenu?.items.first?.submenu?.items.first(where: { $0.title == "Sign In Again" }) {
+            let name = item.action.map { NSStringFromSelector($0) } ?? "none"
+            let resolved = item.action.flatMap { NSApp.target(forAction: $0, to: item.target, from: item) } != nil
+            record("signin-menu " + name + (resolved ? " resolved" : " unresolved"))
+        } else {
+            record("signin-menu missing")
         }
         if let hash = webView.url?.fragment {
             let fields = hash.split(separator: "&")
@@ -410,6 +438,79 @@ def test_reauthentication_gets_a_new_session(
 def test_command_select_all_in_webview(app: Path, tmp_path: Path) -> None:
     with running(app, tmp_path, "keys") as (process, _):
         wait_for(tmp_path / "events", "selection 5", process)
+
+
+def test_sign_in_again_menu_item_is_wired(app: Path, tmp_path: Path) -> None:
+    with running(app, tmp_path, "correct") as (process, _):
+        events = wait_for(tmp_path / "events", "signin-menu ", process)
+        assert "signin-menu signInAgain resolved" in events
+
+
+@pytest.mark.parametrize("mode", ["handoff-probe", "handoff-health"])
+def test_listener_that_takes_the_port_after_the_probe_receives_no_code(
+    app: Path, tmp_path: Path, mode: str
+) -> None:
+    sock = safe_socket()
+    port = sock.getsockname()[1]
+    sock.close()
+    received: list[str] = []
+    servers: list[HTTPServer] = []
+
+    class ForeignHandler(BaseHTTPRequestHandler):
+        def do_POST(self) -> None:
+            received.append("POST " + self.path)
+            self.send_response(204)
+            self.end_headers()
+
+        def do_GET(self) -> None:
+            received.append("GET " + self.path)
+            self.send_response(401)
+            self.end_headers()
+
+        def log_message(self, *args: object) -> None:
+            pass
+
+    def take_port() -> None:
+        # The fake child holds the port until its handoff closes the listener.
+        deadline = time.monotonic() + 10
+        while not (tmp_path / "port-free").exists() and time.monotonic() < deadline:
+            time.sleep(0.005)
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            candidate = socket.socket()
+            candidate.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            try:
+                candidate.bind(("127.0.0.1", port))
+            except OSError:
+                candidate.close()
+                time.sleep(0.005)
+                continue
+            server = HTTPServer(
+                ("127.0.0.1", port), ForeignHandler, bind_and_activate=False
+            )
+            server.socket.close()
+            server.socket = candidate
+            server.server_address = candidate.getsockname()
+            server.server_activate()
+            servers.append(server)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            (tmp_path / "foreign-ready").write_text("yes")
+            return
+        (tmp_path / "foreign-ready").write_text("failed")
+
+    threading.Thread(target=take_port, daemon=True).start()
+    process = launch(app, tmp_path, port, mode)
+    try:
+        events = wait_for(tmp_path / "events", "alert ", process)
+        assert f"Port {port} is held by another process" in events
+        assert not (tmp_path / "browser-login-ok").exists()
+        time.sleep(0.5)
+        assert not received, f"the foreign listener received {received}"
+    finally:
+        stop(process, tmp_path)
+        for server in servers:
+            server.shutdown()
+            server.server_close()
 
 
 def test_child_exit_removes_loaded_webview(app: Path, tmp_path: Path) -> None:

@@ -24,9 +24,11 @@ quitting always asks before stopping the gateway and any running tasks. If the l
 service, `melo --daemon status` checks it and `melo --daemon uninstall` stops and removes it. Child output goes to
 `~/Library/Logs/LocalMelo/gateway.log`. This prototype has no log rotation.
 
-The app sends a random launch identifier to its child and checks it on a `GET /` probe before it sends any login
-code, and again on main-frame page responses, to catch accidental port collisions. Its login request carries the
-identifier, so a gateway started by the app refuses a mismatched exchange. **This is an instance check, not
+The app sends a random launch identifier to its child and checks it on a `GET /` probe, and again on main-frame page
+responses, to catch accidental port collisions. It also re-checks that the child still owns the port immediately
+before it sends each login code, so a listener that takes the port after the probe receives none, and the code is
+bound to the launch identifier, so only the app's own gateway accepts it. Its login request carries the identifier,
+so a gateway started by the app refuses a mismatched exchange. **This is an instance check, not
 authentication:** any local process can read the response header and replay it. The gateway separately requires
 authentication: for its own health checks and web view the app obtains short-lived, single-use login codes without
 logging them or placing the bearer token in a URL. The browser code is carried in a URL fragment, which the console

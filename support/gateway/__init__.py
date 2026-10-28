@@ -49,6 +49,9 @@ class GatewayServer:
         if not is_loopback(self.host):
             raise ValueError("The gateway must listen on a loopback address.")
         self.auth = GatewayAuth()
+        # The per-launch identifier the macOS app passes to its child; empty
+        # for a gateway the user started directly.
+        self.instance = app_instance()
 
         # SessionManager now builds providers from Config directly
         self.sessions = SessionManager(
@@ -89,7 +92,7 @@ class GatewayServer:
             LoopbackGuard,
             port=self.port,
             auth=self.auth,
-            instance=app_instance(),
+            instance=self.instance,
         )
 
     def _console_options(self, options: ConsoleOptions | None) -> ConsoleOptions:
@@ -158,7 +161,7 @@ class GatewayServer:
         async def login(body: dict[str, Any]) -> Response:
             code = body.get("code")
             cookie = (
-                self.auth.consume_login(code, self.port)
+                self.auth.consume_login(code, self.port, instance=self.instance)
                 if isinstance(code, str)
                 else None
             )
