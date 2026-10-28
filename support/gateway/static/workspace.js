@@ -664,11 +664,8 @@ function applyOutcome(outcome) {
   if (outcome.clientRequestId) {
     for (const [slot, entry] of Object.entries(S.outbox)) {
       if (entry.clientRequestId !== outcome.clientRequestId) continue;
-      // A text this page restored to the draft on a failed or unknown send
-      // is now a real turn, so it is not a draft any more.
-      if (entry.state === "failed" || entry.state === "checking") {
-        forgetDraft(slot, entry.text);
-      }
+      // An accepted message is no longer a draft, including during a retry.
+      forgetDraft(slot, entry.text);
       delete S.outbox[slot];
     }
   }
@@ -813,8 +810,14 @@ async function loadEarlier() {
   const id = S.activeId;
   const first = view?.turns[0];
   if (!view || !id || !first || earlierLoading) return;
+  const scroller = $("scroll");
+  const restoreFocus = document.activeElement?.classList?.contains("earlier-turns") === true;
   earlierLoading = true;
   renderMessages(false, true);
+  if (restoreFocus) {
+    scroller.tabIndex = -1;
+    scroller.focus({preventScroll: true});
+  }
   try {
     const page = await api(`/sessions/${encodeURIComponent(id)}/turns?before=${encodeURIComponent(first.turn)}&limit=10&events=true`);
     if (S.view !== view || S.activeId !== id) return;
@@ -827,7 +830,6 @@ async function loadEarlier() {
     const existing = new Set(view.turns.map((turn) => turn.turn));
     view.turns = [...history.turns.filter((turn) => !existing.has(turn.turn)), ...view.turns];
     view.hasEarlier = page.has_earlier === true;
-    const scroller = $("scroll");
     const top = scroller.scrollTop;
     const height = scroller.scrollHeight;
     earlierLoading = false;
@@ -838,6 +840,15 @@ async function loadEarlier() {
   } finally {
     earlierLoading = false;
     renderMessages(false, true);
+    if (restoreFocus && S.view === view && S.activeId === id && document.activeElement === scroller) {
+      const children = Array.from($("messages").children);
+      const target = children.find((node) => node.classList.contains("earlier-turns"))
+        || children.find((node) => node.classList.contains("turn"));
+      if (target) {
+        if (!target.classList.contains("earlier-turns")) target.tabIndex = -1;
+        target.focus({preventScroll: true});
+      }
+    }
   }
 }
 
@@ -937,7 +948,6 @@ function statusNode(turn) {
     }
     if (hint) node.append(el("p", "failure-hint", hint));
     if (turn.status === "provider_error") node.append(button("link-button", "Open settings", () => openSettings()));
-    if (turn.status === "setup_error") node.append(button("link-button", "Show tools", showTools));
   }
   const actions = el("div", "failure-actions");
   const newest = S.view?.turns[S.view.turns.length - 1] === turn;
@@ -982,16 +992,6 @@ async function retryTurn(turn) {
     notify("Could not retry the turn: " + error.message, {sticky: true});
   } finally {
     retrying = false;
-  }
-}
-
-async function showTools() {
-  if (!S.activeId) return;
-  try {
-    const result = await api(`/sessions/${encodeURIComponent(S.activeId)}/tools`);
-    notify(JSON.stringify(result), {sticky: true});
-  } catch (error) {
-    notify("Could not load tools: " + error.message, {sticky: true});
   }
 }
 
@@ -1100,7 +1100,9 @@ function approvalCard(request) {
     const path = target?.path_label || String(args.path ?? "the file");
     content = String(args.content ?? "");
     title = target
-      ? `file_write wants to ${target.exists ? `overwrite ${path} (${formatBytes(target.size_bytes)})` : `create ${path}`} with ${content.length} chars:`
+      ? target.exists
+        ? `file_write wants to overwrite ${path} (${formatBytes(target.size_bytes)}) with ${content.length} chars:`
+        : `file_write wants to create ${path} (${content.length} chars):`
       : `file_write wants to write ${path} (checking target):`;
   }
   card.append(el("p", "approval-title", title));

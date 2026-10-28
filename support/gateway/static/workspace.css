@@ -847,6 +847,9 @@ dialog::backdrop {
   border-radius: 8px;
   font-size: 12px;
 }
+#create-error {
+  white-space: pre-line;
+}
 .sr-only {
   position: absolute;
   width: 1px;

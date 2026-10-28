@@ -131,6 +131,7 @@ export function setupSettings({ api, onSaved }) {
       renderEmbedding();
       enable(true);
       status.textContent = loaded.errors?.length ? "Review your settings before saving." : "";
+      if (Array.isArray(loaded.errors)) showError(loaded.errors.filter((item) => typeof item === "string" && item).join("\n"));
     } catch (err) {
       if (currentGeneration !== generation || !dialog.open) return;
       busy = false;
@@ -226,7 +227,9 @@ export function setupSettings({ api, onSaved }) {
       if (currentGeneration !== generation || !dialog.open) return;
       status.textContent = "";
       const conflict = err.status === 409 && err.code === "settings_changed";
-      showError(conflict ? "The settings file changed since it was loaded. Reload and retry." : (err.message || "Could not save settings."), conflict);
+      const errors = err.code === "invalid_settings" && Array.isArray(err.details?.errors)
+        ? err.details.errors.filter((item) => typeof item === "string" && item).join("\n") : "";
+      showError(conflict ? "The settings file changed since it was loaded. Reload and retry." : (errors || err.message || "Could not save settings."), conflict);
     } finally {
       if (currentGeneration === generation && dialog.open) {
         busy = false;

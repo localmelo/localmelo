@@ -784,6 +784,38 @@ test('file approval can be denied while target details are unavailable', async (
   assert.equal(h.net.callsTo('/approvals/missing')[0].body.choice, 'deny');
 });
 
+for (const succeeds of [true, false]) {
+  test(`approval detail refresh ${succeeds ? 'enables verified details' : 'fails closed'}`, async () => {
+    let detail = {session: session('a'), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0};
+    const h = harness(baseRoutes({'GET /sessions/a': () => detail}));
+    await h.run('init()');
+    h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'two', user_text: 'Run'}});
+    h.stream().emit({id: 21, turn: 2, ts: 51, type: 'tool.started', data: {call_id: 'c', name: 'file_write', arguments: {path: 'a', content: 'x'}}});
+    h.stream().emit({id: 22, turn: 2, ts: 52, type: 'approval.requested', data: {request_id: 'refresh', call_id: 'c', tool_name: 'file_write', arguments: {path: 'a', content: 'x'}}});
+    await new Promise((resolve) => setImmediate(resolve));
+    h.run('approvalStates.get("refresh").mountedAt -= 1000');
+    h.timers.findLast((timer) => timer.ms <= 500).handler();
+    let card = h.context.document.getElementById('approval-card-refresh');
+    assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
+    assert.equal(findNode(card, (node) => node.textContent === 'Deny…').disabled, false);
+    detail = succeeds
+      ? {pending_approvals: [{request_id: 'refresh', arguments_complete: true, target: {path_label: 'a', exists: true, size_bytes: 7}}]}
+      : new Error('details unavailable');
+    await findNode(card, (node) => node.textContent === 'Reload approval details').click();
+    card = h.context.document.getElementById('approval-card-refresh');
+    assert.equal(h.net.callsTo('/sessions/a').length, 3);
+    assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, !succeeds);
+    assert.equal(h.net.callsTo('/approvals/refresh').length, 0);
+    if (succeeds) {
+      assert.match(flatten(card), /overwrite a \(7 bytes\)/);
+      assert.equal(findNode(card, (node) => node.textContent === 'Reload approval details'), null);
+    } else {
+      assert.match(h.element('notice').textContent, /Could not load approval details: details unavailable/);
+      assert.equal(findNode(card, (node) => node.textContent === 'Deny…').disabled, false);
+    }
+  });
+}
+
 test('earlier paging preserves the scroll position on a short page', async () => {
   const earlier = turnRow({id: 'old', turn: 1, user_text: 'Earlier'});
   earlier.events = [];
@@ -797,6 +829,55 @@ test('earlier paging preserves the scroll position on a short page', async () =>
   assert.equal(h.element('scroll').scrollTop, 0);
 });
 
+test('earlier paging adjusts scroll height and restores keyboard focus', async () => {
+  for (const hasEarlier of [false, true]) {
+    const older = turnRow({id: 'old', turn: 1});
+    older.events = [];
+    let resolvePage;
+    const page = new Promise((resolve) => { resolvePage = resolve; });
+    const h = harness(baseRoutes({
+      'GET /sessions/a/turns?limit=10': {turns: [turnRow({id: 'new', turn: 2})], has_earlier: true, replay_from: 10},
+      'GET /sessions/a/turns?before=2&limit=10&events=true': () => page,
+    }));
+    await h.run('init()');
+    const messages = h.element('messages');
+    const scroller = h.element('scroll');
+    // Model actual layout: a turn adds 220px; the paging control adds 30px.
+    Object.defineProperty(scroller, 'scrollHeight', {get: () => 300 + messages.children.reduce((n, child) => n + (child.classList.contains('turn') ? 220 : child.classList.contains('earlier-turns') ? 30 : 0), 0)});
+    const replace = messages.replaceChildren;
+    messages.replaceChildren = (...items) => {
+      if (messages.contains(h.context.document.activeElement)) h.context.document.activeElement = null;
+      replace(...items);
+    };
+    scroller.scrollTop = 130;
+    const oldHeight = scroller.scrollHeight;
+    const earlier = findNode(messages, (node) => node.classList.contains('earlier-turns'));
+    earlier.focus();
+    const pending = earlier.click();
+    assert.equal(h.context.document.activeElement, scroller);
+    resolvePage({turns: [older], has_earlier: hasEarlier});
+    await pending;
+    assert.equal(scroller.scrollTop, 130 + scroller.scrollHeight - oldHeight);
+    const focus = h.context.document.activeElement;
+    assert.equal(focus.classList.contains(hasEarlier ? 'earlier-turns' : 'turn'), true);
+    if (!hasEarlier) assert.equal(focus.dataset.turnId, 'old');
+  }
+});
+
+test('failed earlier paging restores the paging button focus', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions/a/turns?limit=10': {turns: [turnRow({id: 'new', turn: 2})], has_earlier: true, replay_from: 10},
+    'GET /sessions/a/turns?before=2&limit=10&events=true': new Error('network down'),
+  }));
+  await h.run('init()');
+  const earlier = findNode(h.element('messages'), (node) => node.classList.contains('earlier-turns'));
+  earlier.focus();
+  await earlier.click();
+  assert.equal(h.context.document.activeElement.classList.contains('earlier-turns'), true);
+  assert.equal(h.context.document.activeElement.disabled, false);
+  assert.match(h.element('notice').textContent, /network down/);
+});
+
 test('approval cards display each tool and confirm file target before enabling', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
@@ -804,7 +885,7 @@ test('approval cards display each tool and confirm file target before enabling',
     ['shell_exec', {command: 'echo hello'}, null, /command in ~\/w/],
     ['python_exec', {code: 'print(1)'}, null, /Python in ~\/w/],
     ['file_write', {path: 'a.txt', content: 'abc'}, {path_label: 'a.txt', exists: true, size_bytes: 7}, /overwrite a\.txt \(7 bytes\) with 3 chars/],
-    ['file_write', {path: 'b.txt', content: 'abc'}, {path_label: 'b.txt', exists: false, size_bytes: 0}, /create b\.txt with 3 chars/],
+    ['file_write', {path: 'b.txt', content: 'abc'}, {path_label: 'b.txt', exists: false, size_bytes: 0}, /create b\.txt \(3 chars\)/],
     ['custom', {value: 1}, null, /custom wants to run/],
   ]) {
     h.context.request = {request_id: `req-${name}-${target?.exists}`, tool_name: name, arguments: args, workspace_label: '~/w', target};
@@ -816,6 +897,26 @@ test('approval cards display each tool and confirm file target before enabling',
   h.run('approvalStates.get("file-unchecked").mountedAt -= 1000');
   h.timers.findLast((timer) => timer.ms <= 500).handler();
   assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
+});
+
+test('API errors retain validation details', async () => {
+  const h = harness(baseRoutes({'PUT /settings': {status: 400, body: {error: {code: 'invalid_settings', message: 'first', details: {errors: ['first', 'second']}}}}}));
+  await h.run('init()');
+  await assert.rejects(h.run('api("/settings", {method: "PUT", body: {}})'), (error) => {
+    assert.equal(error.code, 'invalid_settings');
+    assert.deepEqual(Array.from(error.details.errors), ['first', 'second']);
+    return true;
+  });
+});
+
+test('setup failure keeps its hint without a premature tools action', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const turn = turns.newTurn(turnRow({status: 'setup_error', result: {error: 'MCP failed'}}));
+  h.context.turn = turn;
+  const node = h.run('statusNode(turn)');
+  assert.match(flatten(node), /MCP server failed to start/);
+  assert.equal(findNode(node, (item) => item.textContent === 'Show tools'), null);
 });
 
 test('failure actions are limited to the newest eligible turn', async () => {
@@ -879,6 +980,26 @@ test('earlier turns replay separately without disturbing current cursor or appro
   assert.equal(h.state().view.pending.has('current'), true);
   assert.match(h.text('messages'), /Earlier/);
   assert.equal(h.state().view.hasEarlier, false);
+});
+
+test('accepted retry clears only the matching restored draft when SSE wins', async () => {
+  for (const draft of ['Retry me', 'New unsent text']) {
+    let release;
+    const waiting = new Promise((resolve) => { release = resolve; });
+    const h = harness(baseRoutes({'POST /sessions/a/turns': () => waiting}));
+    await h.run('init()');
+    h.state().outbox.a = {clientRequestId: 'retry-key', text: 'Retry me', state: 'failed'};
+    h.state().drafts.a = draft;
+    h.element('input').value = draft;
+    const card = h.run('outboxNode(S.outbox.a, "a")');
+    findNode(card, (node) => node.textContent === 'Retry').click();
+    h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'two', user_text: 'Retry me', client_request_id: 'retry-key'}});
+    release({turn: {id: 'two'}});
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.state().outbox.a, undefined);
+    assert.equal(h.state().drafts.a || '', draft === 'Retry me' ? '' : draft);
+    assert.equal(h.element('input').value, draft === 'Retry me' ? '' : draft);
+  }
 });
 
 test('a late outbox check cannot replace a newer message', async () => {

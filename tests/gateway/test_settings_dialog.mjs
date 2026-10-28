@@ -168,6 +168,24 @@ test('stale discovery and key-status responses cannot overwrite current backend'
   assert.equal(h.element('s-chat-url').value, 'http://vllm/v1');
 });
 
+test('settings load displays every existing validation error', async () => {
+  const h = harness({'GET /settings': fixture({errors: ['Bad chat URL', 'Bad embedding URL']})});
+  await h.open();
+  assert.equal(h.element('create-error').textContent, 'Bad chat URL\nBad embedding URL');
+  assert.equal(h.element('create-error').hidden, false);
+});
+
+test('validation displays all errors and retains edits', async () => {
+  const invalid = Object.assign(new Error('Bad chat URL'), {status: 400, code: 'invalid_settings', details: {errors: ['Bad chat URL', 'Bad embedding URL']}});
+  const h = harness({'GET /settings': fixture(), 'PUT /settings': () => { throw invalid; }});
+  await h.open();
+  await change(h, 's-chat-model', 'draft');
+  await h.element('create-btn').emit('click');
+  assert.equal(h.element('create-error').textContent, 'Bad chat URL\nBad embedding URL');
+  assert.equal(h.element('s-chat-model').value, 'draft');
+  assert.equal(h.element('settings-dialog').open, true);
+});
+
 test('closing during load invalidates its response; save errors remain in dialog', async () => {
   const first = deferred();
   let count = 0;
