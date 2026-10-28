@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from localmelo.support.cli.worker_contract import WorkerObserver, read_brief
+from localmelo.support.cli.worker_contract import (
+    WorkerObserver,
+    read_brief,
+    workspace_head,
+)
 
 
 def test_read_brief_preserves_text_and_rejects_empty_and_invalid(
@@ -21,6 +25,66 @@ def test_read_brief_preserves_text_and_rejects_empty_and_invalid(
     path.write_bytes(b"\xff")
     with pytest.raises(ValueError):
         read_brief(path)
+    path.write_bytes(b"x" * (1024 * 1024 + 1))
+    with pytest.raises(ValueError):
+        read_brief(path)
+
+
+def test_workspace_head_uses_workspace_not_git_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import subprocess
+
+    assert workspace_head(str(tmp_path)) == (None, None)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(tmp_path),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "Initial",
+        ],
+        check=True,
+    )
+    monkeypatch.setenv("GIT_DIR", "/nonexistent")
+    head, dirty = workspace_head(str(tmp_path))
+    assert head is not None and len(head) == 40 and dirty is False
+    (tmp_path / "new-file").write_text("untracked")
+    assert workspace_head(str(tmp_path)) == (head, True)
+
+
+def test_slow_stream_fails_instead_of_dropping_events(tmp_path: Path) -> None:
+    import threading
+
+    entered, release = threading.Event(), threading.Event()
+
+    class Slow(io.StringIO):
+        def write(self, value: str) -> int:
+            entered.set()
+            assert release.wait(2)
+            return super().write(value)
+
+    failures = []
+    observer = WorkerObserver(
+        Slow(), str(tmp_path), stream=True, on_failure=lambda: failures.append(True)
+    )
+    observer._enqueue({"v": 1})
+    assert entered.wait(1)
+    for _ in range(65):
+        observer._enqueue({"v": 1})
+    assert observer.error is not None and failures == [True]
+    release.set()
+    observer.close()
 
 
 def test_stream_redacts_identified_sensitive_read(tmp_path: Path) -> None:
@@ -85,6 +149,7 @@ def test_test_evidence_uses_latest_check_in_current_attempt(tmp_path: Path) -> N
         error="",
     )
     assert observer.tests()["state"] == "recorded"
+    assert observer.tests()["items"][0]["exit_code"] == 0
     event("step.started", attempt=2)
     assert observer.tests()["state"] == "not_recorded"
     event(
@@ -219,3 +284,32 @@ async def test_broken_stream_returns_nonzero_without_final(
         agent, "task", output_format="stream-json", out=Broken(), worker_brief=True
     )
     assert code == 1
+
+
+async def test_noncompleted_stream_reports_exit_two(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import httpx
+
+    import localmelo.__main__ as cli
+    from localmelo.melo.agent import Agent, AgentOptions
+    from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200, json={"choices": [{"message": {"role": "assistant", "content": ""}}]}
+        )
+    )
+    agent = Agent(
+        llm=OpenAICompatLLM(
+            base_url="http://llm.test/v1", model="stub", transport=transport
+        ),
+        options=AgentOptions(memory=False, max_steps=1, attempt_policy="none"),
+    )
+    out = io.StringIO()
+    code = await cli._run(
+        agent, "task", output_format="stream-json", out=out, worker_brief=True
+    )
+    result = json.loads(out.getvalue().splitlines()[-1])["result"]
+    assert code == 2 and result["exit_code"] == 2 and result["status"] != "completed"

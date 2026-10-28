@@ -41,7 +41,9 @@ def read_brief(path: str | Path) -> str:
 
 def workspace_head(workspace: str) -> tuple[str | None, bool | None]:
     """Return the workspace HEAD and dirty flag, or unknown on failure."""
-    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env = {
+        key: value for key, value in os.environ.items() if not key.startswith("GIT_")
+    }
     env["GIT_OPTIONAL_LOCKS"] = "0"
 
     def git(*args: str) -> str:
@@ -126,6 +128,7 @@ class WorkerObserver:
             if attempt != self.attempt:
                 self.attempt = attempt
                 self.checks.clear()
+                self.check_exit = None
         if event.type == "tool.started":
             call = ToolCall(
                 str(data.get("name", "")),
@@ -150,6 +153,8 @@ class WorkerObserver:
                     result.error = result.error or "check did not pass"
                 if _is_check(call, (), self.workspace):
                     self.checks.append((call, result))
+                    exit_code = data.get("exit_code")
+                    self.check_exit = exit_code if type(exit_code) is int else None
         if not self.stream:
             return
         payload = redact_worker(event.to_dict())
@@ -174,7 +179,14 @@ class WorkerObserver:
         command, _, outcome = evidence.partition(" -> ")
         return {
             "state": "recorded",
-            "items": [{"command": command, "result": outcome, "source": "tool_event"}],
+            "items": [
+                {
+                    "command": command,
+                    "result": outcome,
+                    "exit_code": self.check_exit,
+                    "source": "tool_event",
+                }
+            ],
         }
 
     def close(self) -> None:
