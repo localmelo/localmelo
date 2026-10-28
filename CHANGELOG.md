@@ -20,7 +20,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   without thinking, preserving indentation and newlines, via bounded turn
   reads and macOS `pbcopy` or an OSC 52 request when
   remote, unsupported locally or on other platforms. Clipboard requests
-  only happen on an explicit command; direct runs are unchanged ([#NN]).
+  only happen on an explicit command; direct runs are unchanged ([#101]).
 
 - `--workspace DIR` in direct mode: a task run keeps its file tools inside
   the folder and starts `shell_exec` and `python_exec` there. Without the
@@ -706,3 +706,4 @@ earlier milestones.
 [#90]: https://github.com/localmelo/localmelo/pull/90
 [#97]: https://github.com/localmelo/localmelo/pull/97
 [#100]: https://github.com/localmelo/localmelo/pull/100
+[#101]: https://github.com/localmelo/localmelo/pull/101
