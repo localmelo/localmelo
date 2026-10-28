@@ -93,7 +93,12 @@ _DIRECT_FLAGS = {
 }
 
 # Flags of the interactive UI (bare melo), by dest.
-_UI_FLAGS = {"workspace": "--workspace", "yolo": "--yolo"}
+_UI_FLAGS = {
+    "workspace": "--workspace",
+    "yolo": "--yolo",
+    "continue_session": "-c",
+    "resume": "-r",
+}
 
 # Direct-mode flags the interactive UI refuses: its Agents offer every tool,
 # an approval's wait would count toward a timeout, it has no machine output,
@@ -878,13 +883,18 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
     ui_given = [
         flag
         for dest, flag in _UI_FLAGS.items()
-        if getattr(args, dest) not in (None, False)
+        if getattr(args, dest, None) not in (None, False)
     ]
     if ui_given and not interactive:
         parser.error(
             "only for the interactive UI (melo without a query, --serve or --daemon): "
             + ", ".join(ui_given)
         )
+    if (
+        getattr(args, "continue_session", False)
+        and getattr(args, "resume", None) is not None
+    ):
+        parser.error("-c and -r cannot be combined")
     if interactive and (args.host is not None or args.port is not None):
         parser.error(
             "--host and --port are for --serve and --daemon; "
@@ -1004,8 +1014,36 @@ def _direct_tool_providers(
     parser.exit(EXIT_NOT_COMPLETED, f"{parser.prog}: error: {problem}\n")
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="melo", description="localmelo agent")
+class _DirectParser(argparse.ArgumentParser):
+    """Probe legacy argv without printing usage or exiting the process."""
+
+    validation_error: str | None = None
+
+    def error(self, message: str) -> NoReturn:
+        original = sys.exception()
+        if isinstance(original, argparse.ArgumentError) and original.args:
+            action = original.args[0]
+            if isinstance(action, argparse.Action) and (
+                action.type is not None or action.choices is not None
+            ):
+                self.validation_error = message
+        raise argparse.ArgumentError(None, message)
+
+
+class _InteractiveParser(argparse.ArgumentParser):
+    """Report a legacy value error without reinterpreting an abbreviated option."""
+
+    validation_error: str | None = None
+
+    def error(self, message: str) -> NoReturn:
+        super().error(self.validation_error or message)
+
+
+def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
+    parser_type = _DirectParser if direct_only else _InteractiveParser
+    parser = parser_type(
+        prog="melo", description="localmelo agent", add_help=not direct_only
+    )
     parser.add_argument("query", nargs="*", help="Task to execute (direct mode)")
     parser.add_argument("--base-url", default=None, help="LLM API base URL")
     parser.add_argument("--chat-model", default=None, help="Chat model name")
@@ -1196,26 +1234,42 @@ def _build_parser() -> argparse.ArgumentParser:
         "object, in memory only)",
     )
 
-    interactive = parser.add_argument_group(
-        "interactive mode",
-        "Options for bare melo, which opens the interactive UI on a terminal. "
-        "It also takes --base-url, --chat-model, --max-steps, --attempt-policy, "
-        "--reflection-gate, --builtins, --memory, --memory-dir, "
-        "--request-timeout, --reasoning, --replay-turns, --note-writer, "
-        "--retriever, --recall-*, --retrieval-extra-body and the "
-        "--embedding-* options. It refuses --reasoning-field and "
-        "--retrieval-extra-body until a later release wires them.",
-    )
-    interactive.add_argument(
-        "--workspace",
-        metavar="DIR",
-        help="The folder melo works in (default: the current directory)",
-    )
-    interactive.add_argument(
-        "--yolo",
-        action="store_true",
-        help="Run every tool without asking for approval",
-    )
+    if not direct_only:
+        interactive = parser.add_argument_group(
+            "interactive mode",
+            "Options for bare melo, which opens the interactive UI on a terminal. "
+            "It also takes --base-url, --chat-model, --max-steps, --attempt-policy, "
+            "--reflection-gate, --builtins, --memory, --memory-dir, "
+            "--request-timeout, --reasoning, --replay-turns, --note-writer, "
+            "--retriever, --recall-*, --retrieval-extra-body and the "
+            "--embedding-* options. It refuses --reasoning-field and "
+            "--retrieval-extra-body until a later release wires them.",
+        )
+        interactive.add_argument(
+            "--workspace",
+            metavar="DIR",
+            help="The folder melo works in (default: the current directory)",
+        )
+        interactive.add_argument(
+            "--yolo",
+            action="store_true",
+            help="Run every tool without asking for approval",
+        )
+        interactive.add_argument(
+            "-c",
+            "--continue",
+            dest="continue_session",
+            action="store_true",
+            help="Resume the newest session in this workspace",
+        )
+        interactive.add_argument(
+            "-r",
+            "--resume",
+            nargs="?",
+            const="",
+            metavar="ID|TITLE",
+            help="Resume a session, or open the session picker without a value",
+        )
 
     # gateway mode
     parser.add_argument("--serve", action="store_true", help="Run as gateway server")
@@ -1237,8 +1291,18 @@ def _build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     _register_backends()
 
+    legacy = _build_parser(direct_only=True)
+    try:
+        args, unknown = legacy.parse_known_args()
+    except argparse.ArgumentError:
+        args, unknown = None, []
+    # Keep the legacy namespace for direct runs (even query == [""]). The
+    # full parser reports errors, but must not reinterpret --c or task text.
     parser = _build_parser()
-    args = parser.parse_args()
+    if isinstance(parser, _InteractiveParser) and isinstance(legacy, _DirectParser):
+        parser.validation_error = legacy.validation_error
+    if args is None or unknown or not args.query or args.serve or args.daemon:
+        args = parser.parse_args()
     _check_args(parser, args)
 
     # daemon commands

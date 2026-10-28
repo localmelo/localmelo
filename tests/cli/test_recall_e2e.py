@@ -179,6 +179,11 @@ def test_a_step_recalls_a_superseded_note_the_window_left(
     blocks = _blocks(stub.requests, "tool")
     assert blocks
     assert any("[n1]" in block and "parser" in block for block in blocks)
+    # The note is an earlier attempt's, superseded by its boundary; its
+    # head says so instead of reading like the current plan.
+    assert any(
+        "[n1] note · step 1 · attempt 1 (superseded):" in block for block in blocks
+    )
 
 
 def test_message_placement_puts_the_step_block_in_a_user_message(

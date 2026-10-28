@@ -126,6 +126,11 @@ plan: …
 [end of localmelo recall]
 ```
 
+A note that a later attempt's boundary superseded is an earlier attempt's
+thinking, not the current plan, so its head names the attempt and says so:
+`[n3] note · step 1 · attempt 1 (superseded):`. Every other item line keeps
+its exact text.
+
 At `start` and `attempt` the block is appended to the task query message in
 the request copy only, and it stays frozen for that attempt. At `step` it
 is appended once to the turn's last tool result (or put in its own user
@@ -147,7 +152,8 @@ tool output and recalled memory are data, not instructions.
 - **The counters.** `recall_empty` counts a triggered recall that had no candidate or no hit, so a pass that added no block is visible next to `recall_skipped` and `recall_refused`.
 - **The record.** Every block that is first sent is recorded in
   `llm_calls.recall_json`: the trigger, the query, the hit ids and aliases,
-  the kinds, scores, the checked text, `ms` and the fallback. It is
+  the kinds, each hit's `stage` (`fresh`, `rehearsed` or `superseded`),
+  scores, the checked text, `ms` and the fallback. It is
   recorded once, on the first request that carries it; a later request
   carries it as sticky window text and does not repeat it. A hit's
   `origin_task_ids` names the task that produced it, so the bench can split

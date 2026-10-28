@@ -37,6 +37,7 @@ from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import Approvals, Mode, TerminalApprover
 from localmelo.support.cli.output import Out
 from localmelo.support.cli.render import EXPAND_LINES, ToolOutput, TurnRenderer
+from localmelo.support.cli.sessions import BUSY, DELETED, SessionNavigation
 from localmelo.support.cli.text import expand_tabs, wrap_cells
 from localmelo.support.cli.theme import ASCII, in_symbols
 from localmelo.support.progress_line import run_elapsed, wall_range
@@ -46,13 +47,16 @@ from localmelo.support.sessions.display import (
     format_tokens,
     home_label,
 )
-from localmelo.support.sessions.runner import SessionRunner
+from localmelo.support.sessions.runner import ResumeMode, SessionRunner
 from localmelo.support.sessions.store import (
     NewSession,
     SessionBusyError,
     SessionStore,
+    SessionStoreError,
+    UnknownSessionError,
     title_from_text,
 )
+from localmelo.support.sessions.sync import SessionMark
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +159,7 @@ State = Literal["idle", "running", "stopping", "switching"]
 
 _STATE_HINTS: Final = {
     "stopping": "Stopping the turn; enter sends once it has stopped.",
-    "switching": "Switching the model; esc cancels it.",
+    "switching": "Switching the session or model; esc cancels it.",
 }
 
 
@@ -172,6 +176,7 @@ class CliSession:
         approver: TerminalApprover,
         mode: Mode,
         out: Out,
+        resume_mode: ResumeMode = "pairs",
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.store = store
@@ -194,6 +199,9 @@ class CliSession:
         self._stop_wanted = False
         self._stop_landed = False
         self._closed = False
+        self.navigation = SessionNavigation(self, resume_mode)
+        self.exit_code = 0
+        self.saved_resume_hint = ""
 
     # ── What the app reads ──
 
@@ -246,7 +254,13 @@ class CliSession:
             )
             if self._state != "idle" and not allowed:
                 return f"/{command.name} is not available while a turn runs (esc stops it)."
-            self.spawn(self._run_command(command.name, arguments, text))
+            if command.name in ("sessions", "resume", "retry"):
+                self._state = "switching"
+                self._work = self.spawn(
+                    self._run_command(command.name, arguments, text)
+                )
+            else:
+                self.spawn(self._run_command(command.name, arguments, text))
             return None
         if self._state == "idle":
             self.submit(text)
@@ -309,7 +323,7 @@ class CliSession:
             return await self.approver.ask(request)
         return await self.runner.observe(self.approver.ask)(request)
 
-    async def _turn(self, text: str) -> None:
+    async def _turn(self, text: str, *, typed_text: str | None = None) -> None:
         started = self._clock()
         if self.runner is None:
             self.runner = SessionRunner(
@@ -322,16 +336,22 @@ class CliSession:
                 ),
                 on_event=self.renderer.on_event,
                 progress=True,
+                resume_mode=self.navigation.mode,
+                before_turn=self.navigation.synchronize,
             )
         runner = self.runner
         result: RunResult | None = None
         error: BaseException | None = None
         try:
             result = await runner.run_turn(
-                text, approval=self.approvals.policy(), title=text
+                text,
+                approval=self.approvals.policy(),
+                title=text if typed_text is None else typed_text,
             )
-        except SessionBusyError as exc:
-            error = exc
+        except UnknownSessionError:
+            error = UnknownSessionError(DELETED)
+        except SessionBusyError:
+            error = SessionBusyError(BUSY)
         except Exception as exc:
             # The ✗ line says it on the screen; an ERROR would add a ⚠ line.
             logger.warning("The turn could not run", exc_info=True)
@@ -342,6 +362,8 @@ class CliSession:
             await asyncio.sleep(0.05)
         cause = "user_stop" if self._stop_wanted else ""
         self.renderer.end_turn(result, error, cause=cause)
+        with contextlib.suppress(SessionStoreError):
+            await self.navigation.refresh_refs()
         self._state = "idle"
         self._work = None
         if self.app is not None:
@@ -429,7 +451,14 @@ class CliSession:
         self.renderer.echo(text)
         try:
             await self._command(name, arguments)
+        except (ValueError, SessionStoreError, SessionBusyError) as exc:
+            message = DELETED if isinstance(exc, UnknownSessionError) else str(exc)
+            self.out.print(self._text(f"✗ {message}", style="error"))
+            if self.app is not None:
+                self._give_back(text)
         finally:
+            if self._work is asyncio.current_task():
+                self._work, self._state = None, "idle"
             self.out.print(Text(""))
 
     async def _command(self, name: str, arguments: str) -> None:
@@ -449,7 +478,11 @@ class CliSession:
         elif name == "thinking":
             self.toggle_thinking(arguments)
         elif name == "expand":
-            self.expand(arguments)
+            await self.expand(arguments)
+        elif name == "sessions":
+            await self.navigation.select(query=arguments)
+        elif name == "resume":
+            await self.navigation.select(ref=arguments)
         elif name == "progress":
             self.progress()
         elif name == "approvals":
@@ -487,9 +520,9 @@ class CliSession:
             self._text(f"Thinking excerpts {'on' if state else 'off'}.", "muted")
         )
 
-    def expand(self, arguments: str) -> None:
+    async def expand(self, arguments: str) -> None:
         """``/expand [turn.call]``: a tool call's whole output or error."""
-        calls = self.renderer.tool_outputs
+        calls = await self.navigation.tool_outputs(arguments)
         if not calls:
             self.out.print(self._text("✗ No tool calls yet.", style="error"))
             return
@@ -506,24 +539,26 @@ class CliSession:
             if not (turn.isdigit() and number.isdigit()):
                 self.out.print(self._text("✗ Use /expand [turn.call].", style="error"))
                 return
-            call = self.renderer.tool_output(f"{int(turn)}.{int(number)}")
+            call = next(
+                (c for c in calls if c.ref == f"{int(turn)}.{int(number)}"), None
+            )
             if call is None:
-                self._expand_missing(int(turn))
+                self._expand_missing(int(turn), calls)
                 return
         elif argument.isdigit():
-            call = self.renderer.tool_output(f"{latest_turn}.{int(argument)}")
+            call = next(
+                (c for c in calls if c.ref == f"{latest_turn}.{int(argument)}"), None
+            )
             if call is None:
-                self._expand_missing(int(latest_turn))
+                self._expand_missing(int(latest_turn), calls)
                 return
         else:
             self.out.print(self._text("✗ Use /expand [turn.call].", style="error"))
             return
         self._print_expanded(call.text)
 
-    def _expand_missing(self, turn: int) -> None:
-        count = sum(
-            1 for call in self.renderer.tool_outputs if call.ref.startswith(f"{turn}.")
-        )
+    def _expand_missing(self, turn: int, calls: list[ToolOutput]) -> None:
+        count = sum(1 for call in calls if call.ref.startswith(f"{turn}."))
         if count:
             self.out.print(
                 self._text(
@@ -655,23 +690,39 @@ class CliSession:
 
     async def retry(self) -> None:
         """``/retry``: undo the newest turn and run it again, keeping its title."""
-        if self.runner is None or self.state != "idle":
+        if self.runner is None:
             self.out.print(self._text("✗ Nothing to retry.", style="error"))
             return
+        self._state = "switching"
         try:
-            turn = await self.runner.undo()
+            await self.navigation.synchronize()
+            undo = asyncio.ensure_future(self.runner.undo())
+            try:
+                turn = await asyncio.shield(undo)
+            except asyncio.CancelledError:
+                turn = await undo
+                if turn is not None:
+                    mark = self.navigation.mark
+                    self.navigation.mark = SessionMark(
+                        mark.foreign_newest, mark.undone + 1
+                    )
+                    if self.app is not None:
+                        self._give_back(turn.user_text)
+                raise
         except SessionBusyError:
             self.out.print(self._text("✗ Nothing to retry.", style="error"))
             return
         if turn is None:
             self.out.print(self._text("✗ Nothing to retry.", style="error"))
             return
-        first = " ".join(turn.user_text.split())[:60]
+        mark = self.navigation.mark
+        self.navigation.mark = SessionMark(mark.foreign_newest, mark.undone + 1)
+        first = " ".join(turn.typed_text.split())[:60]
         self.out.print(self._text(f"↻ Retrying turn {turn.turn}: {first}"))
         self._state = "running"
         self._stop_wanted = self._stop_landed = False
         self.renderer.begin_turn(turn.user_text, first_turn=False)
-        self._work = self.spawn(self._turn(turn.user_text))
+        self._work = self.spawn(self._turn(turn.user_text, typed_text=turn.typed_text))
 
     def mcp(self) -> None:
         """``/mcp``: the MCP servers, their tools, and where the file came from."""
@@ -763,6 +814,7 @@ class CliSession:
         if self.runner is not None:
             await self.runner.close()
         self.runner = None
+        self.navigation.mark = SessionMark(0, 0)
         self.agent.load_conversation([])
         self.approvals.reset()
         self.title = ""
@@ -1046,6 +1098,8 @@ class CliSession:
                 task.cancel()
         if self.runner is not None:
             await self.runner.close(reason=reason, cause=cause)
+        with contextlib.suppress(SessionStoreError):
+            self.saved_resume_hint = await self.navigation.saved_hint()
         for agent in self.factory.live_agents():
             with contextlib.suppress(Exception):
                 await self.factory.close(agent)

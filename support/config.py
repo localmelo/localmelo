@@ -95,6 +95,13 @@ class GatewayConfig:
 
 
 @dataclass
+class SessionsConfig:
+    """How an interactive surface restores a saved conversation."""
+
+    resume_mode: str = "pairs"
+
+
+@dataclass
 class AgentConfig:
     """The ``[agent]`` table: how a direct run or a session reasons."""
 
@@ -176,6 +183,7 @@ class Config:
 
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
+    sessions: SessionsConfig = field(default_factory=SessionsConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
@@ -542,6 +550,9 @@ def load() -> Config:
                 setattr(cfg.scheduler, k, v)
 
     # A bad value is left for Config.validate to report.
+    if isinstance(data.get("sessions"), dict):
+        cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
+
     cfg.request_timeout_s = data.get("request_timeout_s")
     cfg.mcp_config = str(data.get("mcp_config") or "")
 
@@ -651,6 +662,9 @@ def _migrate_legacy(data: dict) -> Config:
         for k, v in data["agent"].items():
             if hasattr(cfg.agent, k):
                 setattr(cfg.agent, k, v)
+
+    if isinstance(data.get("sessions"), dict):
+        cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
 
     cfg.request_timeout_s = data.get("request_timeout_s")
 
@@ -764,6 +778,14 @@ def save(cfg: Config) -> None:
             lines.append("admit_on_outcome = true")
         lines.append("")
 
+    if cfg.sessions.resume_mode != "pairs":
+        lines.extend(
+            [
+                "[sessions]",
+                f"resume_mode = {_toml_value(cfg.sessions.resume_mode)}",
+                "",
+            ]
+        )
     retrieval = cfg.retrieval
     if retrieval != RetrievalConfig():
         lines.append("[retrieval]")

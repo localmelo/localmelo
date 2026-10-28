@@ -376,6 +376,53 @@ def test_render_recall_block_names_each_item_and_ends_the_delimiter() -> None:
     assert block.endswith(RECALL_END)
 
 
+def test_a_superseded_note_names_its_attempt_and_says_so() -> None:
+    old = docs_from_notes(
+        [
+            _entry(
+                "note",
+                "plan: read build.log",
+                "n3",
+                stage="superseded",
+                step=1,
+                attempt=1,
+                note=_note("plan: read build.log"),
+            )
+        ],
+        task_id=TASK,
+        include_superseded=True,
+    )[0]
+    current = docs_from_notes(
+        [
+            _entry(
+                "note",
+                "plan: read a.py",
+                "n4",
+                step=2,
+                attempt=2,
+                note=_note("plan: read a.py"),
+            )
+        ],
+        task_id=TASK,
+    )[0]
+    old_hit = hit_from_doc(old, score=1.0, rank=1)
+    current_hit = hit_from_doc(current, score=0.9, rank=2)
+    assert old_hit.stage == "superseded"
+    assert current_hit.stage == "fresh"
+    block = render_recall_block(
+        [old_hit, current_hit],
+        trigger="step",
+        retriever="bm25",
+        ms=1,
+        placement="tool",
+    )
+    assert "[n3] note · step 1 · attempt 1 (superseded):\nplan: read build.log" in block
+    # A note the store has not superseded keeps its line byte for byte.
+    assert "[n4] note · step 2 · this task:\nplan: read a.py" in block
+    record = RecallRecord(trigger="step", retriever="bm25", hits=[old_hit])
+    assert record_to_dict(record)["hits"][0]["stage"] == "superseded"
+
+
 def test_the_header_names_earlier_tasks_at_start() -> None:
     block = render_recall_block(
         [_hit("m1", "long", "x", rank=1, origin="task t-old")],

@@ -340,6 +340,10 @@ class LongTerm:
             and entry.task_id not in excluded
         ]
 
+    async def count_entries(self) -> int:
+        """The number of entries held (see SqliteLongTerm.count_entries)."""
+        return len(self._entries)
+
     async def search(
         self,
         query_embedding: list[float],
@@ -400,10 +404,6 @@ class LongTerm:
         ]
         rows.sort(key=lambda entry: (entry.created_at, entry.id))
         return [_stored(entry) for entry in rows]
-
-    async def count_entries(self) -> int:
-        """The number of entries held (see SqliteLongTerm.count_entries)."""
-        return len(self._entries)
 
     async def decisions(self) -> list[dict[str, Any]]:
         return list(self._decisions)

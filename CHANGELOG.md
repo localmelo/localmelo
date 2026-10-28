@@ -33,6 +33,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   bench. Legacy requests, JSON line, window, `tasks`/`steps` and search
   order are unchanged; an existing `long_term.db` migrates with its rows
   intact. ([#NN])
+- Resume saved terminal chats with `melo -c`, `melo -r [ID|TITLE]`,
+  `/sessions [filter]` or `/resume [ID|TITLE]`. The inline picker filters
+  eligible chats by folder or across folders before the startup banner,
+  which names the chosen chat; the recap explains what
+  was restored with `[sessions] resume_mode = "pairs"` (default) or
+  `"window"`. Resuming keeps the current model/workspace and clears
+  approval grants, while retaining `/verbose` and `/thinking` preferences.
+  Changes in another terminal are reloaded before the
+  next turn; a busy or deleted session keeps the draft. `/retry` preserves
+  a resumed turn's typed text, `/expand` reads stored tool output across
+  event pages, and quitting prints a saved session's resume command.
+  Direct runs keep their legacy parsing and output ([#95]).
 - Recall in the loop: `--retriever auto|off|bm25|llm|embedding`,
   `--recall-at`, `--recall-k`, `--recall-kinds`, `--recall-placement`,
   `--recall-min-score` and `--retrieval-extra-body`, plus the `[retrieval]`
@@ -50,7 +62,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `recall` event and `memory_stats.recall_log`. A step's query carries the
   latest note's plan, what it found and its open questions and outcome, and
   its candidates include a superseded note whose turn the window no longer
-  shows, so a later attempt's earlier thinking stays reachable.
+  shows, so a later attempt's earlier thinking stays reachable; such a line
+  names its attempt and is marked `(superseded)`, and `recall_json` records
+  each hit's `stage`.
   `memory_stats.recall_empty` counts a triggered recall that found nothing.
   `history.db` is schema
   version 2: a v1 file gains the `recall_json` column in the same
@@ -59,7 +73,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   new flags, the block and the data note are off there (and `drop`/`replay`
   recall only when a retriever is named). The JSON line gains
   `config.retriever`/`retriever_effective`/`recall_*` and the recall
-  counters ([#NN]).
+  counters ([#94]).
 - Console session details over API v2, and the scheduler gate in front of
   a console turn: `GET /api/sessions/{id}/tools` lists each tool's source,
   whether it asks first and whether the session allows it, `/memory` the
@@ -649,5 +663,7 @@ earlier milestones.
 [#91]: https://github.com/localmelo/localmelo/pull/91
 [#92]: https://github.com/localmelo/localmelo/pull/92
 [#89]: https://github.com/localmelo/localmelo/pull/89
+[#94]: https://github.com/localmelo/localmelo/pull/94
+[#95]: https://github.com/localmelo/localmelo/pull/95
 [#90]: https://github.com/localmelo/localmelo/pull/90
 [#NN]: https://github.com/localmelo/localmelo/pull/NN

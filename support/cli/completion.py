@@ -17,8 +17,13 @@ class SlashCompleter(Completer):
     ``/model``.
     """
 
-    def __init__(self, models: Callable[[], Sequence[str]] = lambda: ()) -> None:
+    def __init__(
+        self,
+        models: Callable[[], Sequence[str]] = lambda: (),
+        sessions: Callable[[], Sequence[str]] = lambda: (),
+    ) -> None:
         self._models = models
+        self._sessions = sessions
 
     def get_completions(
         self, document: Document, complete_event: CompleteEvent
@@ -45,8 +50,9 @@ class SlashCompleter(Completer):
                 if value.startswith(argument) and argument != value:
                     yield Completion(value, start_position=-len(argument))
             return
-        if name == "model":
+        if name in ("model", "resume"):
             argument = argument.lstrip()
-            for model in self._models():
+            values = self._models() if name == "model" else self._sessions()
+            for model in values:
                 if model.startswith(argument):
                     yield Completion(model, start_position=-len(argument))
