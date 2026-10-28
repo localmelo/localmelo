@@ -61,6 +61,8 @@ async def test_missing_file_then_live_worker(
         assert [item["id"] for item in items] == [turn.session_id]
         assert items[0]["meta"] == {"source": "dsh"}
         assert items[0]["running_here"] is False
+        assert isinstance(items[0]["started_at"], float)
+        assert items[0]["duration_s"] is None
         assert items[0]["busy"] is True
         assert client.get("/api/sessions").json()["sessions"] == []
         assert client.get(f"/api/sessions/{chat.session_id}").status_code == 404
@@ -79,6 +81,10 @@ async def test_missing_file_then_live_worker(
             cause="run",
             result=run_result(),
             answer="done",
+        )
+        assert (
+            client.get("/api/sessions?kind=worker").json()["sessions"][0]["duration_s"]
+            == 0.5
         )
         assert (
             client.get(f"/api/sessions/{turn.session_id}/turns").json()["turns"][0][

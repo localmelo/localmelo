@@ -125,6 +125,8 @@ def _worker_body(
     for key in ("status", "steps"):
         body[key] = getattr(record, key) if record is not None else meta.get(key)
     body["tokens"] = record.tokens if record is not None else _total_tokens(meta, {})
+    body["started_at"] = record.started_at if record is not None else None
+    body["duration_s"] = record.duration_s if record is not None else None
     return body
 
 

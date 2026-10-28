@@ -27,6 +27,7 @@ from localmelo.melo.schema import (  # noqa: E402
     TaskRecord,
     ToolDef,
 )
+from localmelo.support.config import Config, LocalBackendConfig  # noqa: E402
 from localmelo.support.gateway.chat_gate import GatedLLM  # noqa: E402
 from localmelo.support.gateway.playground import (  # noqa: E402
     SessionBusyError,
@@ -342,7 +343,13 @@ async def test_replacement_preserves_chat_that_becomes_busy(
 async def client(manager: SmokePlayground) -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
     app.state.smoke_playground = manager
-    mount(app)
+    cfg = Config(
+        chat_backend="vllm",
+        vllm=LocalBackendConfig(
+            chat_url="http://localhost:8000/v1", chat_model="Qwen-27B"
+        ),
+    )
+    mount(app, cfg, enable_playground=True)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -354,7 +361,7 @@ async def test_http_transcript_recovery_and_delete(
 ) -> None:
     response = await client.post(
         "/v1/playground/session",
-        json={"chat_url": "http://localhost:8000/v1", "chat_model": "Qwen-27B"},
+        json={},
     )
     assert response.status_code == 200
     sid = response.json()["session_id"]

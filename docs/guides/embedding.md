@@ -1,18 +1,25 @@
 # Set up an embedding model
 
-Long-term memory needs an embedding model. localmelo never downloads or
-starts one: you run a model server, and localmelo calls a model that server
-already serves.
+An embedding model is optional. localmelo never downloads or starts one: you
+run a model server, and localmelo calls a model that server already serves.
 
 ## What it buys
 
-With an embedding backend, a run writes short summaries and reflections to
-long-term memory and recalls the closest entries on each step; see
-[Memory](../concepts/memory.md#what-localmelo-remembers). Without one, long-term memory
-is inert: nothing is recalled and nothing is written.
+Without an embedding backend, working memory and history still work. With
+memory on, explicit reasoning modes can admit text-only long-term entries and
+find them with BM25; persistence keeps those entries between processes. For
+explicit-mode recall, the trigger must be enabled and include the `long` kind.
+In `legacy`, long-term writes and recall require an embedding backend. See
+[Memory](../concepts/memory.md#what-localmelo-remembers).
 
-Embedding recall itself is planned, not part of this setup. The retriever
-that compares memory offline measures the three arms at capped grade-2
+An embedding backend adds vector-similarity search for entries with vectors.
+Text-only entries are still found with BM25. In `compress` and
+`compress+replay`, the `auto` retriever also uses the embedding provider to
+rank task-local recall; without one, `auto` uses the LLM at start and attempt
+and BM25 at step and tool. The [recall reference](../concepts/memory.md#recall-in-the-loop)
+explains the triggers and other modes.
+
+An offline comparison measured the three retrievers at capped grade-2
 recall@3 over 97 gold queries: `bm25` 0.284, `llm` 0.576 and `embedding`
 0.636. The difference between `embedding` and `llm` is +0.06 with a 95%
 confidence interval of [−0.055, +0.179], so at that size the two are not
@@ -180,23 +187,26 @@ See [Mix backends](model-servers.md#mix-backends).
 - The interactive banner's memory row names the backend and model, for
   example `long-term memory · vLLM · Qwen3-Embedding-0.6B`; without one it
   says `no long-term memory · melo --reconfigure adds one` (or
-  `--embedding-base-url adds one` in a `--base-url` session).
-- Long-term memory starts empty. It fills as runs end and steps complete;
-  earlier runs are not re-embedded.
+  `--embedding-base-url adds one` in a `--base-url` session). This row
+  describes the embedding configuration, not whether explicit modes can use
+  text-only long-term memory.
+- A new long-term store starts empty. Eligible entries may be admitted as runs
+  end and steps complete; existing text-only entries are not re-embedded.
 - Changing the model changes the vector space. A stored vector whose
   dimension differs from the new model's is skipped, so old entries stop
   ranking instead of breaking recall. To reclaim the space, stop localmelo
   and remove `~/.cache/localmelo/memory/long_term.db*`; see
   [Reset memory](memory.md#reset-memory).
-- The web workspace has its own embedding selector; this setting does not
-  change it. See [the web workspace](web-console.md#web-workspace).
+- The web workspace also has connection settings. See
+  [the web workspace](web-console.md#web-workspace).
 
 ## Check it works
 
 - Start `melo` in a terminal and look at the banner's memory row.
 - Once `/status` is available, its `memory` row comes from the same text.
-- Run a task that uses a tool, end it, then run a related task: the second
-  run recalls the first if persistence is on. See
+- Run a task that uses a tool, end it, then run a related task. Persistence
+  can make admitted entries available to later runs; recall also depends on
+  the mode, enabled triggers and relevant matches. See
   [Keep memory between runs](memory.md#keep-memory-between-runs).
 - To measure a model on your own corpus, use
   `melo-retrieve --retriever embedding …`; see

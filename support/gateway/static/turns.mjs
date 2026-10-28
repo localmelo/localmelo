@@ -273,6 +273,7 @@ const STATUS_TEXT = {
     title: "Stopped after reflection",
   },
   budget_exhausted: {word: "Out of steps", severity: "warn", title: "Ran out of steps"},
+  context_budget_exceeded: {word: "Context too large", severity: "warn", title: "Context budget exceeded"},
   timeout: {word: "Timed out", severity: "warn", title: "Timed out"},
   provider_error: {
     word: "Model server error",
@@ -343,7 +344,7 @@ export function statusLine(status, error) {
 /** Continue keeps tool side effects and is only safe to offer on the newest turn. */
 export function canContinue(turn, newest) {
   return newest && !!turn.finishedAt && !turn.undone && Number(turn.result?.n_tool) > 0 &&
-    ["budget_exhausted", "gate_stopped", "provider_error", "timeout", "cancelled"].includes(turn.status);
+    ["budget_exhausted", "context_budget_exceeded", "gate_stopped", "provider_error", "timeout", "cancelled"].includes(turn.status);
 }
 
 /** A retry undoes the newest finished turn, never an earlier or undone one. */
