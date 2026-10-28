@@ -18,7 +18,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   runs in one `BEGIN IMMEDIATE` transaction under the write lock, overwrites
   what it deletes and truncates the WAL, and leaves working memory,
   procedural memory and sessions alone. There is no command or UI yet
-  ([#NN]).
+  ([#64]).
 - A session runner can ask its turns for progress events, and the progress
   line's past facts are available alone. `SessionRunner(..., progress=True)`
   asks each turn's run for `run.progress` and stores it with the turn; the
@@ -354,3 +354,4 @@ earlier milestones.
 [#61]: https://github.com/localmelo/localmelo/pull/61
 [#62]: https://github.com/localmelo/localmelo/pull/62
 [#63]: https://github.com/localmelo/localmelo/pull/63
+[#64]: https://github.com/localmelo/localmelo/pull/64
