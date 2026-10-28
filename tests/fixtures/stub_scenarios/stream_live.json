@@ -1,0 +1,15 @@
+{
+  "models": ["stub-model"],
+  "replies": [
+    {
+      "stream": {
+        "chunks": [
+          "The first line of the answer.\n",
+          "The second line is still arriving.\n",
+          "The final line closes it.\n"
+        ],
+        "delay_s": 0.25
+      }
+    }
+  ]
+}

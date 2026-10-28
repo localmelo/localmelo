@@ -54,6 +54,8 @@ tables of the chosen backends.
 | `host` | `[gateway]` | `"127.0.0.1"` | Loopback listen address; non-loopback binds are refused. |
 | `port` | `[gateway]` | `8401` | The port the gateway listens on. |
 | `workspace` | `[gateway]` | `""` | The default workspace folder for web console sessions (`~/localmelo-workspace` when empty); written only when set. |
+| `stream` | `[cli]` | `false` | Opt-in live streaming in the interactive UI only; direct mode and stdin-closed runs never stream. See [Streamed replies](../guides/terminal.md#streamed-replies). |
+| `reasoning_tags` | `[cli]` | not set | A `MODEL = "explicit" \| "closing_only" \| "none"` table: the trusted framing declaration for a model's streamed reply. A model with no entry keeps the conservative rule (content is held until the reply ends). |
 | `resume_mode` | `[sessions]` | `"pairs"` | Terminal conversation restoration: `pairs` loads recent user/answer pairs; `window` loads the saved working window plus later pairs, falling back when no checkpoint is usable. Invalid values warn/fall back only in the UI; direct runs do not consume this setting. |
 | `policy` | `[scheduler]` | `"off"` | How the web workspace's calls reach the model server: `off` records only, `fcfs` admits first come and `class` admits P1 before P2 (and so on); see [Scheduler](../guides/scheduler.md#the-gate-on-chats-s2). |
 | `n_srv` | `[scheduler]` | `8` | The model server's slots. |

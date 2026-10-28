@@ -816,7 +816,7 @@ class InteractiveApp:
         rows = size.rows - 1
         rows -= sum(
             (
-                self._live_visible(),
+                self._live_rows(),
                 self.controller.queued is not None,
                 bool(getattr(self.controller, "attachment_line", "")),
                 self._hint_visible(),

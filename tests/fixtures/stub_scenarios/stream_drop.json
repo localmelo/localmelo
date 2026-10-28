@@ -1,0 +1,6 @@
+{
+  "models": ["stub-model"],
+  "replies": [
+    {"stream": {"chunks": ["Partial line before the break.\n"], "drop": true}}
+  ]
+}

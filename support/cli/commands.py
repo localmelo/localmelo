@@ -57,6 +57,7 @@ COMMANDS: Final[tuple[Command, ...]] = (
     Command("copy", (), "[turn]", "Copy a stored answer to the clipboard", True),
     Command("verbose", (), "[on|off]", "Toggle verbose rendering", True),
     Command("thinking", (), "[on|off]", "Toggle thinking excerpts", True),
+    Command("stream", (), "[on|off]", "Toggle live streamed replies", True),
     Command("expand", (), "[turn.call]", "Show a tool call's full output", True),
     Command(
         "approvals",

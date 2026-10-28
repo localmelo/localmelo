@@ -1087,6 +1087,15 @@ async def test_verbose_and_thinking_toggle(setup: Setup) -> None:
     session.enter("/thinking yes")
     await _until(lambda: "✗ Use /thinking on or /thinking off." in out.text())
     assert session.renderer.thinking
+    session.enter("/stream on")
+    await _until(lambda: "Live streaming on" in out.text())
+    assert session.stream
+    session.enter("/stream off")
+    await _until(lambda: "Live streaming off." in out.text())
+    assert not session.stream
+    session.enter("/stream maybe")
+    await _until(lambda: "✗ Use /stream on or /stream off." in out.text())
+    assert not session.stream
 
 
 async def test_expand_prints_a_call_in_full(setup: Setup) -> None:

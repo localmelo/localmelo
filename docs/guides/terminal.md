@@ -123,6 +123,7 @@ type more letters to narrow them, Tab or Enter to take one.
 | `/copy [turn]` | Copy a stored answer's Markdown, not the wrapped display. Without a number, use the latest finished, non-undone turn. |
 | `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's summary and whole rationale; without an argument, flips it. |
 | `/thinking [on\|off]` | The thinking excerpt on (the default) or off, leaving only `Thought for 1.2s`; without an argument, flips it. |
+| `/stream [on\|off]` | Live streamed replies for later turns on or off; without an argument, flips it. See [Streamed replies](#streamed-replies). |
 | `/expand [turn.call]` | A tool call's whole output or error, including stored calls after resuming: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
 | `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). Under `--yolo`, says how to turn prompts on. |
@@ -293,6 +294,40 @@ happens without the explicit `/copy` command.
 - **The answer** prints as Markdown after `●`. A run that did not complete
   prints its best effort, the [status line](../reference/cli.md#output) and a hint, such as
   `Is the model server running at URL?` for a server that does not answer.
+
+### Streamed replies
+
+Streaming is off by default. Turn it on in `config.toml`:
+
+```toml
+[cli]
+stream = true
+
+[cli.reasoning_tags]
+"Qwen3-8B" = "closing_only"
+```
+
+With it on, the interactive UI asks the provider for a streamed planning
+reply and draws only text the release filter has already redacted, in the
+live area, at the app's redraw rate; it never writes raw deltas to the
+terminal. The per-model hint says how that model frames reasoning:
+`explicit` (a leading `<think>` starts it), `closing_only` (everything
+before `</think>` is reasoning) or `none` (tags are literal text). A model
+with no hint keeps the conservative rule: content is held until the reply
+ends, so the live area shows `✻ thinking…` rather than text. The same hint
+splits the completed reply, so the stream and the stored answer do not
+disagree. A model field the server sends separately is always treated as
+reasoning and is never drawn as content; `/thinking off` hides its excerpt
+as before.
+
+Streamed text is provisional. If the reply becomes a tool call, a retry,
+a run that fails, or a stop, melo closes the live text and prints it once
+as `↳ partial reply (tool call)`, `(retrying)`, `(not the final answer)` or
+`(stopped)`; the completed final answer prints once after `●`. A reply a
+provider sends in one piece (or a provider without streaming) silently
+falls back to the ordinary complete reply. `/stream on|off` flips the
+setting for later turns without saving it. Direct mode and stdin-closed
+runs never stream, so their output and request bodies are unchanged.
 
 ### Approvals
 

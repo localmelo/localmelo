@@ -98,6 +98,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | `/copy [turn]` | 复制已存储回答的 Markdown，而不是终端中换行后的显示内容。不带编号时使用最近已完成且未撤销的轮次。 |
 | `/verbose [on\|off]` | 详细显示：40 行思考、工具调用参数、20 行输出、反思摘要及完整理由；不带参数时切换开关。 |
 | `/thinking [on\|off]` | 开启（默认）或关闭思考摘录；关闭时只保留 `Thought for 1.2s`；不带参数时切换开关。 |
+| `/stream [on\|off]` | 开启或关闭后续轮次的实时流式回复；不带参数时切换开关。见[流式回复](#streamed-replies)。 |
 | `/expand [turn.call]` | 显示工具调用的完整输出或错误，包括恢复会话后存储的调用：最近一次调用、最近一轮的第 N 次调用，或第 T 轮的第 C 次调用（最多 200 行，之后显示剩余行数）。 |
 | `/progress` | 显示当前轮次最新的进度信息：级别、步骤、尝试、阶段和周期、测试、过去的运行、每个具名步骤及其依据的记忆。 |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | 显示审批模式和本会话的授权；切换模式，或忘记某个工具的授权（仅用 `forget` 则忘记全部）。使用 `--yolo` 时说明如何开启询问。 |
@@ -160,6 +161,24 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 - **工具调用**在完成时各输出一个区块：`✓` 表示已运行，`✗` 表示失败，`⊘` 表示被拦截或拒绝，`◌` 表示已停止或未运行；还显示耗时；命令运行后以非 0 退出码结束时显示 `exit N`（`grep` 以 1 退出并不代表失败）；审批结果；以及最多 3 行输出（使用 `/verbose` 时为 20 行），之后显示 `… +N lines (/expand T.C)`（若只剩一行则直接显示该行）。`/verbose` 还显示调用参数，图片则显示为 `▪ image/png · 312 KB · not shown`。输出中的转义序列会被移除，因此工具无法移动光标、设置标题或写入剪贴板。
 - **通知和反思。**`↻` 标记重试，延迟在实时区域倒计时；`·` 表示空回复；`⚠` 表示卡住或预算用尽通知。反思显示为 `✻ Reflected after attempt 1: continue · Read the test before editing. (2.3s)`；`/verbose` 还会显示其摘要和完整理由，以及在询问了两次时显示 `asked twice`；无法读取的反思会说明运行是否继续。
 - **回答**在 `●` 后以 Markdown 输出。未完成的运行会输出尽力生成的结果、[状态行](../../reference/cli.md#output)（英文）和提示，例如服务器无响应时显示 `Is the model server running at URL?`。
+
+<a id="streamed-replies"></a>
+
+### 流式回复
+
+流式默认关闭。在 `config.toml` 中开启：
+
+```toml
+[cli]
+stream = true
+
+[cli.reasoning_tags]
+"Qwen3-8B" = "closing_only"
+```
+
+开启后，交互式界面会向提供方请求流式规划回复，并只在实时区域中绘制发布过滤器已经脱敏的文本，按应用的刷新频率重绘；它从不把原始增量直接写到终端。按模型的提示说明该模型如何标记推理：`explicit`（开头的 `<think>` 开始推理）、`closing_only`（`</think>` 之前都是推理）或 `none`（标签是普通文本）。没有提示的模型使用保守规则：内容一直保留到回复结束，因此实时区域显示 `✻ thinking…` 而不显示文本。同一个提示也会切分完整回复，因此流式显示和存储的回答不会不一致。服务器单独返回的推理字段始终按推理处理，绝不会作为正文绘制；`/thinking off` 仍像以前一样只隐藏思考摘录。
+
+流式文本是临时的。如果回复变成工具调用、重试、失败的运行或停止，melo 会关闭实时文本并只打印一次，标为 `↳ partial reply (tool call)`、`(retrying)`、`(not the final answer)` 或 `(stopped)`；完成的最终回答会在 `●` 后只打印一次。提供方一次性发送完整回复（或不支持流式）时会静默回退到普通完整回复。`/stream on|off` 只切换后续轮次，不写入配置。直接模式和 stdin 关闭的运行从不流式，因此输出和请求体保持不变。
 
 <a id="approvals"></a>
 

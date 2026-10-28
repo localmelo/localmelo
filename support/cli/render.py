@@ -16,7 +16,7 @@ import re
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import Any, Final, cast
 
 from rich.console import (
     Console,
@@ -30,7 +30,7 @@ from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
 
-from localmelo.melo.schema import RunResult, split_thinking
+from localmelo.melo.schema import ReasoningTags, RunResult, split_thinking
 from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import EditSnapshots, Snapshot
 from localmelo.support.cli.output import Out
@@ -130,6 +130,10 @@ class LiveState:
     retry_until: float = 0.0
     finished: bool = False
     waiting: bool = False
+    # Released provisional text of the planning reply being streamed, and
+    # whether text is held (nothing safe to show yet).
+    stream_text: str = ""
+    stream_held: bool = False
 
 
 @dataclass(frozen=True)
@@ -271,6 +275,35 @@ def stopped_line(cause: str, symbols: Symbols) -> Text:
     return Text(f"{symbols.stopped} {text}", style="warn")
 
 
+def _same_display_text(left: str, right: str) -> bool:
+    """Whether two texts would read the same after cleaning and whitespace."""
+    return " ".join(clean_output(left).split()) == " ".join(clean_output(right).split())
+
+
+class StreamFeed:
+    """One turn's stream display: the agent's seam onto :class:`TurnRenderer`.
+
+    Deltas only update the live region, which the app redraws on its tick,
+    so a stream costs no direct terminal writes.
+    """
+
+    def __init__(self, renderer: TurnRenderer) -> None:
+        self._renderer = renderer
+        self.reasoning_tags = renderer.stream_hint()
+
+    def opened(self) -> None:
+        self._renderer.stream_opened()
+
+    def held(self) -> None:
+        self._renderer.stream_held()
+
+    def content(self, delta: str) -> None:
+        self._renderer.stream_content(delta)
+
+    def closed(self) -> None:
+        self._renderer.stream_closed()
+
+
 class TurnRenderer:
     """Turns a turn's events into scrollback blocks and the live area's state."""
 
@@ -282,6 +315,7 @@ class TurnRenderer:
         backend: Callable[[], BackendInfo],
         verbose: bool = False,
         thinking: bool = True,
+        reasoning_tags: Mapping[str, str] | None = None,
         snapshots: EditSnapshots | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -292,6 +326,10 @@ class TurnRenderer:
         # Per session, not saved: /verbose and /thinking flip them.
         self.verbose = verbose
         self.thinking = thinking
+        # Per model, from [cli.reasoning_tags]: trusted framing declarations
+        # for the stream and for the whole-reply display.
+        self.reasoning_tags = dict(reasoning_tags or {})
+        self._stream_text = ""
         self._backend = backend
         self._clock = clock
         self.live: LiveState | None = None
@@ -352,8 +390,81 @@ class TurnRenderer:
         self._tool_count = 0
         self._stop_cause = ""
         self._held = ""
+        self._stream_text = ""
         self._turn += 1
         self._call_number = 0
+
+    # ── Streamed provisional text ──
+
+    def stream_hint(self) -> ReasoningTags | None:
+        """The model's declared framing, or ``None`` for the conservative rule."""
+        hint = self.reasoning_tags.get(self._backend().model)
+        if hint in ("explicit", "closing_only", "none"):
+            return cast(ReasoningTags, hint)
+        return None
+
+    def stream_feed(self) -> StreamFeed:
+        """A display for one turn's planning streams (set around the run)."""
+        return StreamFeed(self)
+
+    def stream_opened(self) -> None:
+        """A provider stream or its complete-reply fallback started."""
+        self._stream_text = ""
+        if self.live is not None:
+            self.live.stream_text = ""
+            self.live.stream_held = True
+            self.live.activity = "Thinking"
+
+    def stream_held(self) -> None:
+        """Text arrived but the release filter holds all of it for now."""
+        if self.live is not None:
+            self.live.stream_held = True
+
+    def stream_content(self, delta: str) -> None:
+        """Keep and show a released, already-redacted content delta."""
+        self._stream_text += delta
+        if self.live is not None:
+            self.live.stream_text = (self.live.stream_text + delta)[-STREAM_LIVE_CHARS:]
+            self.live.stream_held = False
+            self.live.activity = "Replying"
+
+    def stream_closed(self) -> None:
+        if self.live is not None:
+            self.live.stream_held = False
+
+    def _clear_stream(self) -> None:
+        """Drop provisional text without printing it."""
+        self._stream_text = ""
+        if self.live is not None:
+            self.live.stream_text = ""
+            self.live.stream_held = False
+
+    def _flush_stream(self, label: str, *, answer: str = "") -> str:
+        """Print held provisional text once, its label saying how it ended.
+
+        Returns the text printed, empty when there was none or it equals
+        *answer*. A held assistant message with the same text is dropped: it
+        is the completed copy of the same reply, not a second one.
+        """
+        text, self._stream_text = self._stream_text, ""
+        if self.live is not None:
+            self.live.stream_text = ""
+            self.live.stream_held = False
+        shown = clean_output(text).strip()
+        if not shown:
+            return ""
+        if self._held and _same_display_text(self._held, shown):
+            self._held = ""
+        if answer and _same_display_text(answer, shown):
+            return ""
+        self.out.print(
+            Text(
+                f"{self.symbols.queued} partial reply ({label})",
+                style="muted",
+            )
+        )
+        self.out.print(_marked(self.symbols.assistant, "", markdown(shown)))
+        return shown
 
     @property
     def finished(self) -> bool:
@@ -381,6 +492,10 @@ class TurnRenderer:
         cause: str = "",
     ) -> None:
         """Close the live area and print what no event covered."""
+        if result is not None and result.status == "completed":
+            self._clear_stream()  # the final answer prints below, once
+        else:
+            self._flush_stream("stopped")
         if not self._finished:
             if error is not None:
                 message = str(error)
@@ -431,6 +546,7 @@ class TurnRenderer:
         live.retry_until = 0.0
 
     def _on_step_started(self, data: Mapping[str, Any]) -> None:
+        self._flush_stream("not the final answer")
         self._print_held()
         self._print_unstarted()
         if self.live is not None:
@@ -451,7 +567,7 @@ class TurnRenderer:
                     )
         self._clear_retry()
         content = str(data.get("content") or "")
-        block, text = split_thinking(content)
+        block, text = split_thinking(content, reasoning_tags=self.stream_hint())
         thinking = str(data.get("thinking") or "")
         if not thinking.strip():
             thinking = block
@@ -464,7 +580,16 @@ class TurnRenderer:
             self._held = text
             return
         self._held = ""
+        streamed = bool(self._stream_text.strip())
+        self._clear_stream()
         if text:
+            if streamed:
+                self.out.print(
+                    Text(
+                        f"{self.symbols.queued} partial reply (tool call)",
+                        style="muted",
+                    )
+                )
             self.out.print(_marked(self.symbols.assistant, "", markdown(text)))
 
     def _print_thinking(self, text: str, duration_s: float) -> None:
@@ -544,6 +669,7 @@ class TurnRenderer:
         kind = str(data.get("kind") or "")
         message = plain(str(data.get("message") or ""))
         if kind == "retry":
+            self._flush_stream("retrying")
             line = Text(f"{self.symbols.retry} {message}", style="muted")
             line.truncate(self.out.width, overflow="ellipsis")
             self.out.print(line)
@@ -644,8 +770,22 @@ class TurnRenderer:
         self._print_unstarted()
         # The last message prints when the answer differs from it (section 3).
         held, self._held = self._held, ""
-        _, answer = split_thinking(result.result)
-        if held and held.strip() != answer.strip():
+        _, answer = split_thinking(result.result, reasoning_tags=self.stream_hint())
+        shown = ""
+        if result.status == "completed":
+            # The final answer prints from the result, once; streamed text was
+            # only ever provisional in the live region.
+            self._clear_stream()
+        else:
+            shown = self._flush_stream(
+                "stopped" if result.status == "cancelled" else "not the final answer",
+                answer=answer,
+            )
+        if (
+            held
+            and held.strip() != answer.strip()
+            and not (shown and _same_display_text(held, shown))
+        ):
             self.out.print(_marked(self.symbols.assistant, "", markdown(held)))
         if result.status == "cancelled":
             # The cause is turn.finished's, which comes after this event.
@@ -931,7 +1071,7 @@ class TurnRenderer:
 
     def _print_result(self, result: RunResult, *, footer: bool) -> None:
         symbols = self.symbols
-        _, answer = split_thinking(result.result)
+        _, answer = split_thinking(result.result, reasoning_tags=self.stream_hint())
         answer = clean_output(answer)
         if result.status == "completed":
             body: RenderableType = (
@@ -1070,6 +1210,39 @@ def _image_lines(images: object, symbols: Symbols) -> Text | None:
 # ── The live area ──
 
 SPINNER_FRAME_S: Final = 0.12
+# Released provisional text keeps at most this many live rows, so the draft
+# and the approval panel always fit. The live copy keeps a bounded tail; the
+# full text is kept separately for the one flush.
+STREAM_LIVE_LINES: Final = 8
+STREAM_LIVE_CHARS: Final = 16_384
+
+
+def _stream_rows(
+    text: str, width: int, symbols: Symbols
+) -> list[list[tuple[str, str]]]:
+    """The tail of released provisional text, wrapped and cut to *width*."""
+    lines: list[str] = []
+    for line in expand_tabs(clean_output(text)).split("\n"):
+        if line:
+            lines.extend(wrap_words(line, max(1, width)) or [""])
+        else:
+            lines.append("")
+    while lines and not lines[0]:
+        lines.pop(0)
+    shown = lines[-STREAM_LIVE_LINES:]
+    rows: list[list[tuple[str, str]]] = []
+    if len(lines) > len(shown):
+        rows.append(
+            [
+                (
+                    "class:muted",
+                    f"{symbols.ellipsis} +{len(lines) - len(shown)} lines",
+                )
+            ]
+        )
+    for line in shown:
+        rows.append([("class:muted", cut_cells(line, width, symbols.ellipsis))])
+    return rows
 
 
 def live_rows(
@@ -1148,6 +1321,21 @@ def live_rows(
             extras = [part for part in extras if part != drop]
     first = cut_cells(compose(extras), width, symbols.ellipsis)
     rows = [[("class:accent", first)]]
+    if live.stream_text:
+        rows.extend(_stream_rows(live.stream_text, width, symbols))
+    elif live.stream_held and not live.waiting:
+        rows.append(
+            [
+                (
+                    "class:muted",
+                    cut_cells(
+                        f"{symbols.thought} thinking{symbols.ellipsis}",
+                        width,
+                        symbols.ellipsis,
+                    ),
+                )
+            ]
+        )
     if live.tool and not live.waiting:
         clock = tool_elapsed(now - live.tool_started)
         if live.tool_limit_s:

@@ -13,6 +13,7 @@ import pytest
 
 from localmelo.support.backends.registry import ensure_defaults_registered
 from localmelo.support.config import (
+    CliConfig,
     CloudVendorConfig,
     Config,
     ConfigError,
@@ -1322,3 +1323,77 @@ class TestGatewayWorkspaceAndAtomicSave:
             assert any("[gateway] workspace" in error for error in cfg.validate()), path
         cfg.gateway.workspace = str(home / "project")
         assert not any("[gateway] workspace" in error for error in cfg.validate())
+
+
+class TestCliStreamConfig:
+    def test_the_default_is_off_and_not_written(self, config_path: Path) -> None:
+        save(_timeout_cfg())
+        assert "[cli]" not in config_path.read_text(encoding="utf-8")
+        assert load().cli == CliConfig()
+
+    def test_stream_and_hints_round_trip(self, config_path: Path) -> None:
+        cfg = _timeout_cfg()
+        cfg.cli = CliConfig(
+            stream=True, reasoning_tags={"stub-model": "none", "qwen3": "explicit"}
+        )
+        save(cfg)
+        loaded = load()
+        assert loaded.cli.stream is True
+        assert loaded.cli.reasoning_tags == {
+            "stub-model": "none",
+            "qwen3": "explicit",
+        }
+        assert loaded.validate() == []
+
+    def test_a_reasoning_tags_subtable_loads(self, config_path: Path) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+            '[vllm]\nchat_url = "http://127.0.0.1:8000/v1"\nchat_model = "m"\n\n'
+            "[cli]\nstream = true\n\n[cli.reasoning_tags]\n"
+            '"stub-model" = "closing_only"\n',
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert loaded.cli.reasoning_tags == {"stub-model": "closing_only"}
+        assert loaded.validate() == []
+
+    @pytest.mark.parametrize(
+        ("stream", "tags"),
+        [
+            ("yes", {}),
+            (False, {"stub-model": "maybe"}),
+            (False, {"": "none"}),
+            (False, {"bad\nmodel": "none"}),
+        ],
+        ids=["stream-not-bool", "unknown-hint", "empty-model", "control-model"],
+    )
+    def test_invalid_cli_values_are_reported(
+        self, stream: Any, tags: dict[str, str]
+    ) -> None:
+        cfg = _timeout_cfg()
+        cfg.cli = CliConfig(reasoning_tags=tags)
+        cfg.cli.stream = stream
+        assert any(error.startswith("[cli]") for error in cfg.validate())
+        assert cfg.cli_errors()
+
+    @pytest.mark.parametrize(
+        "section",
+        [
+            'stream = "no"',
+            'reasoning_tags = "stub-model"',
+            '[cli.reasoning_tags]\n"stub-model" = "sometimes"',
+        ],
+        ids=["stream-string", "tags-string", "unknown-hint"],
+    )
+    def test_a_bad_cli_table_is_loaded_for_validation(
+        self, config_path: Path, section: str
+    ) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+            '[vllm]\nchat_url = "http://127.0.0.1:8000/v1"\nchat_model = "m"\n\n'
+            f"[cli]\n{section}\n",
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert loaded.cli_errors()
+        assert any(error.startswith("[cli]") for error in loaded.validate())
