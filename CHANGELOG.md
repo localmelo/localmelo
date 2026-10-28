@@ -11,7 +11,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - A documentation inventory, bilingual style guide and experimental offline
   preview builder lay the groundwork for a later site migration; published
-  pages and existing URLs are unchanged ([#NN]).
+  pages and existing URLs are unchanged ([#121]).
   pages and existing URLs are unchanged ([#120]).
 - S3a.2 adds `/api/tasks` creation, inspection and control and in-process
   workers sharing the console's scheduler gate. Creation is idempotent with
@@ -633,7 +633,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Fixed
 
 - Correct documentation of retrieval option validation, persistent memory,
-  interface event streams and current architecture status ([#NN]).
+  interface event streams and current architecture status ([#121]).
 
 - The heuristic note writer reads factual replies without a `<note>` into up
   to 12 `found` items, and an explicit note can also hold 12. Questions,
@@ -880,3 +880,4 @@ earlier milestones.
 [#116]: https://github.com/localmelo/localmelo/pull/116
 [#119]: https://github.com/localmelo/localmelo/pull/119
 [#120]: https://github.com/localmelo/localmelo/pull/120
+[#121]: https://github.com/localmelo/localmelo/pull/121
