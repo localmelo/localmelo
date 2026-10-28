@@ -9,6 +9,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- S3b.1a foundations: scheduler component v2 adds a durable pause priority
+  snapshot and atomic v1 migration; durable generation and operation IDs guard
+  transitions and identify committed receipts. The internal synchronous gate
+  `try_park` fences an eligible pending call and cancels only its bound turn.
+  An atomic component event transaction supports `ParkStore` hold/resume/park
+  records, including the current pending-pause flag. Guarded terminal retries
+  return their matching committed record. An evidence-only card builder derives
+  bounded, redacted cards from the task spec and persisted events. Worker API
+  pause behavior remains as in #119; there is no worker hold/park integration or
+  new API in this slice.
+  S3b.1b follows ([#125]).
+
 - Workspace settings gain connection testing and an immediately applied theme;
   a session details drawer shows tools, grant revocation, memory and runs.
   Store, model and stream banners no longer replace other notices. ([#124])
@@ -895,3 +907,4 @@ earlier milestones.
 [#122]: https://github.com/localmelo/localmelo/pull/122
 [#123]: https://github.com/localmelo/localmelo/pull/123
 [#124]: https://github.com/localmelo/localmelo/pull/124
+[#125]: https://github.com/localmelo/localmelo/pull/125
