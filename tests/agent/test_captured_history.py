@@ -59,6 +59,15 @@ def test_second_preview_keeps_exact_omitted_count() -> None:
     assert int(marker.split()[0]) == len(original) - len(body)
 
 
+def test_multibyte_preview_cut_counts_characters() -> None:
+    original = "🙂汉" * 40_000
+    result, _ = preview_result(ToolResult("sample", output=original))
+    body, marker = result.output.split("\n... [truncated: ", 1)
+    assert len(result.output) <= PREVIEW_LIMIT
+    assert int(marker.split()[0]) == len(original) - len(body)
+    assert result.output.encode("utf-8").decode("utf-8") == result.output
+
+
 def test_preview_bounds_errors_and_preserves_image_drop_notes() -> None:
     raw = ToolResult("sample", output="unused" * 20_000, error="failed🙂" * 20_000)
     preview, _ = preview_result(raw, ["[1 image dropped: invalid]"])
@@ -82,7 +91,7 @@ async def test_history_is_separate_from_model_and_event_preview(
     tmp_path: Path, memory: bool
 ) -> None:
     secret = "sk-" + "a" * 32
-    text = "x" * (PREVIEW_LIMIT + 500) + " " + secret + " tail"
+    text = secret + " " + "x" * (PREVIEW_LIMIT + 500) + " tail"
     provider = Provider()
     agent = Agent(
         llm=provider,
@@ -114,11 +123,136 @@ async def test_history_is_separate_from_model_and_event_preview(
         assert history[0].capture_metadata is not None
         tool = next(m for m in provider.requests[1] if m.role == "tool")
         assert len(tool.content) <= PREVIEW_LIMIT and "tail" not in tool.content
+        assert secret in tool.content
         assert tool.tool_result is not None and "tail" not in tool.tool_result.output
+        assert secret not in tool.tool_result.output
         finished = next(event for event in events if event.type == "tool.finished")
-        assert "tail" not in str(finished.data)
+        assert "tail" not in str(finished.data) and secret not in str(finished.data)
     finally:
         await agent.close()
+
+
+async def test_redaction_precedes_preview_cut() -> None:
+    secret = "sk-" + "a" * 80
+    text = "x" * (PREVIEW_LIMIT - 80) + " " + secret + " tail"
+    provider = Provider()
+    agent = Agent(
+        llm=provider,
+        options=AgentOptions(
+            captured_history=True, tool_exposure="all", builtins=frozenset()
+        ),
+    )
+    agent.hippo.register_tool(ToolDef("sample", "sample", {}))
+
+    async def sample() -> str:
+        return text
+
+    agent.executor.register("sample", sample)
+    events: list[AgentEvent] = []
+    try:
+        assert (
+            await agent.run_task("run sample", on_event=events.append)
+        ).status == "completed"
+        tool = next(m for m in provider.requests[1] if m.role == "tool")
+        assert "sk-" in tool.content and secret not in tool.content
+        assert tool.tool_result is not None and "sk-" not in tool.tool_result.output
+        assert "sk-" not in str(
+            next(event.data for event in events if event.type == "tool.finished")
+        )
+    finally:
+        await agent.close()
+
+
+async def test_reopen_preserves_metadata_and_reads_legacy_row(tmp_path: Path) -> None:
+    from localmelo.melo.memory.history.sqlite import SqliteHistory
+    from localmelo.melo.schema import StepRecord, TaskRecord
+
+    path = tmp_path / "history.db"
+    history = SqliteHistory(path)
+    task = TaskRecord("task")
+    await history.save_task(task)
+    await history.add_step(
+        task.task_id, StepRecord(tool_result=ToolResult("sample", output="legacy"))
+    )
+    metadata = {"output_omitted_chars": 3, "acquisition_omitted_chars": None}
+    await history.add_step(
+        task.task_id,
+        StepRecord(
+            tool_result=ToolResult("sample", output="checked"),
+            capture_metadata=metadata,
+        ),
+    )
+    await history.aclose()
+    reopened = SqliteHistory(path)
+    try:
+        rows = await reopened.get_steps(task.task_id)
+        assert [row.capture_metadata for row in rows] == [None, metadata]
+        assert [row.tool_result.output for row in rows if row.tool_result] == [
+            "legacy",
+            "checked",
+        ]
+    finally:
+        await reopened.aclose()
+
+
+async def test_failed_history_write_does_not_persist_raw_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = "sk-" + "a" * 32
+    agent = Agent(
+        llm=Provider(),
+        options=AgentOptions(
+            captured_history=True,
+            memory_dir=str(tmp_path),
+            tool_exposure="all",
+            builtins=frozenset(),
+        ),
+    )
+    agent.hippo.register_tool(ToolDef("sample", "sample", {}))
+
+    async def sample() -> str:
+        return secret + " raw"
+
+    async def fail_write(task_id: str, step: object) -> str:
+        raise RuntimeError("injected history failure")
+
+    agent.executor.register("sample", sample)
+    monkeypatch.setattr(agent.hippo, "store_step", fail_write)
+    events: list[AgentEvent] = []
+    try:
+        result = await agent.run_task("run sample", on_event=events.append)
+        assert result.status == "crashed"
+        assert await agent.hippo.history.get_steps(result.task_id) == []
+        assert secret not in str(
+            next(event.data for event in events if event.type == "tool.finished")
+        )
+    finally:
+        await agent.close()
+    assert all(
+        secret.encode() not in path.read_bytes()
+        for path in tmp_path.iterdir()
+        if path.is_file()
+    )
+
+
+async def test_run_tool_keeps_legacy_result_with_capture_enabled() -> None:
+    outputs = []
+    for enabled in (False, True):
+        agent = Agent(
+            llm=Provider(),
+            options=AgentOptions(captured_history=enabled, builtins=frozenset()),
+        )
+        agent.hippo.register_tool(ToolDef("sample", "sample", {}))
+
+        async def sample() -> str:
+            return "x" * 60_000
+
+        agent.executor.register("sample", sample)
+        try:
+            outputs.append((await agent.run_tool("sample", {})).output)
+        finally:
+            await agent.close()
+    assert outputs[0] == outputs[1]
 
 
 async def test_crash_after_capture_keeps_only_redacted_history(tmp_path: Path) -> None:
@@ -200,11 +334,69 @@ async def test_overflow_retry_does_not_duplicate_capture() -> None:
         rows = await agent.hippo.history.get_steps(result.task_id)
         assert result.status == "completed" and calls == 1 and len(rows) == 1
         assert rows[0].capture_metadata is not None
+        assert rows[0].capture_metadata["output_omitted_chars"] == 0
+        assert rows[0].capture_metadata["acquisition_omitted_chars"] is None
+    finally:
+        await agent.close()
+
+
+async def test_multiple_calls_record_exact_success_and_error_omissions() -> None:
+    class TwoCalls(Provider):
+        async def chat(
+            self, messages: list[Message], tools: list[ToolDef] | None = None
+        ) -> Message:
+            self.requests.append(copy.deepcopy(messages))
+            if len(self.requests) == 1:
+                return Message(
+                    "assistant",
+                    tool_calls=[
+                        ToolCall("sample", {"n": 1}, id="c1"),
+                        ToolCall("sample", {"n": 2}, id="c2"),
+                    ],
+                )
+            return Message("assistant", "done")
+
+    agent = Agent(
+        llm=TwoCalls(),
+        options=AgentOptions(
+            captured_history=True, tool_exposure="all", builtins=frozenset()
+        ),
+    )
+    agent.hippo.register_tool(
+        ToolDef(
+            "sample",
+            "sample",
+            {"type": "object", "properties": {"n": {"type": "integer"}}},
+        )
+    )
+
+    async def sample(n: int) -> ToolOutput:
+        return ToolOutput(
+            "文" * (CAPTURE_LIMIT + (17 if n == 1 else 29)), is_error=n == 2
+        )
+
+    agent.executor.register("sample", sample)
+    try:
+        result = await agent.run_task("run sample")
+        rows = await agent.hippo.history.get_steps(result.task_id)
+        assert len(rows) == 2
+        first, second = [row.capture_metadata for row in rows]
+        assert first is not None and second is not None
+        assert (first["output_omitted_chars"], first["error_omitted_chars"]) == (17, 0)
+        assert (second["output_omitted_chars"], second["error_omitted_chars"]) == (
+            0,
+            29,
+        )
+        assert (
+            first["acquisition_omitted_chars"] is None
+            and second["acquisition_omitted_chars"] is None
+        )
     finally:
         await agent.close()
 
 
 async def test_tool_error_is_bounded_and_stored_with_status(tmp_path: Path) -> None:
+    secret = "sk-" + "a" * 32
     provider = Provider()
     agent = Agent(
         llm=provider,
@@ -218,11 +410,14 @@ async def test_tool_error_is_bounded_and_stored_with_status(tmp_path: Path) -> N
     agent.hippo.register_tool(ToolDef("sample", "sample", {}))
 
     async def sample() -> ToolOutput:
-        return ToolOutput("failure " * 10_000 + " error-end", is_error=True)
+        return ToolOutput(
+            secret + " " + "failure " * 10_000 + " error-end", is_error=True
+        )
 
     agent.executor.register("sample", sample)
+    events: list[AgentEvent] = []
     try:
-        result = await agent.run_task("run sample")
+        result = await agent.run_task("run sample", on_event=events.append)
         rows = await agent.hippo.history.get_steps(result.task_id)
         assert (
             rows[0].tool_result is not None and "error-end" in rows[0].tool_result.error
@@ -234,7 +429,12 @@ async def test_tool_error_is_bounded_and_stored_with_status(tmp_path: Path) -> N
         tool = next(m for m in provider.requests[1] if m.role == "tool")
         assert len(tool.content) <= PREVIEW_LIMIT and "error-end" not in tool.content
         assert (
-            tool.tool_result is not None and "error-end" not in tool.tool_result.error
+            tool.tool_result is not None
+            and "error-end" not in tool.tool_result.error
+            and secret not in tool.tool_result.error
+        )
+        assert secret not in str(
+            next(event.data for event in events if event.type == "tool.finished")
         )
         assert (tmp_path / "history.db").stat().st_mode & 0o077 == 0
     finally:
@@ -292,7 +492,8 @@ async def test_image_drop_notice_survives_model_fitting() -> None:
             for tool in tools
         )
         assert all(
-            tool.tool_result is not None and tool.tool_result.output in tool.content
+            tool.tool_result is not None
+            and len(tool.tool_result.output) <= PREVIEW_LIMIT
             for tool in tools
         )
     finally:

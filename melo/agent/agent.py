@@ -3509,7 +3509,7 @@ class Agent:
             else:
                 result, cut = outcome.to_tool_result(), 0
             captured = None
-            if self.options.captured_history:
+            if self.options.captured_history and run.inflight is not None:
                 kept, notes = _sanitize_images(outcome.images)
                 original = outcome.to_tool_result()
                 original.images = kept
@@ -3531,16 +3531,19 @@ class Agent:
         finally:
             if slot is not None:
                 TOOL_EXIT_CODE.reset(slot)
+        exported = (
+            preview_result(captured[0], notes)[0] if captured is not None else result
+        )
         events.tool_finished(
             call,
             outcome,
-            result,
+            exported,
             exit_codes=exit_codes,
             approval=None if gate is None else gate.asked,
         )
         run.note(
             lambda trace: trace.tool(
-                call.tool_name, call.arguments, outcome.status.value, result.output
+                call.tool_name, call.arguments, outcome.status.value, exported.output
             )
         )
         if not result.error.strip() and call.tool_name in ("file_read", "file_write"):
@@ -3642,6 +3645,7 @@ class Agent:
                 response,
                 kept,
                 step.cut_before,
+                captured=step.captured,
                 content=content,
                 thinking=thinking,
             )
@@ -3691,7 +3695,7 @@ class Agent:
             run.pending_shown.clear()
             return
         assistant_msg, tool_msgs = self._checked_tool_turn(
-            response, kept, step.cut_before
+            response, kept, step.cut_before, captured=step.captured
         )
         recall_aliases = set(run.pending_shown)
         block, _hits = await self._step_recall(
@@ -3749,6 +3753,7 @@ class Agent:
         results: Sequence[ToolResult],
         cut_before: Sequence[int],
         *,
+        captured: Sequence[tuple[ToolResult, dict[str, Any]]] = (),
         content: str | None = None,
         thinking: str | None = None,
     ) -> tuple[Message, list[Message]]:
@@ -3862,10 +3867,21 @@ class Agent:
         def message_result(result: ToolResult, text: str, index: int) -> ToolResult:
             if not self.options.captured_history:
                 return result
+            if index in withheld:
+                safe_text = "[Tool result withheld from working memory]"
+            elif index < len(captured):
+                safe, _ = preview_result(captured[index][0])
+                safe_text = _tool_result_text(safe)[: len(text)]
+            else:
+                safe_text = (
+                    text
+                    if result.error in (CALL_INTERRUPTED, CALL_NOT_STARTED)
+                    else "[Tool result unavailable]"
+                )
             return dataclasses.replace(
                 result,
-                output="" if result.error else text,
-                error=text.removeprefix("Error: ") if result.error else "",
+                output="" if result.error else safe_text,
+                error=safe_text.removeprefix("Error: ") if result.error else "",
                 images=[] if index in withheld else result.images,
             )
 
@@ -5258,6 +5274,7 @@ class Agent:
                 step.response,
                 closed,
                 cut_before,
+                captured=step.captured[: len(step.results)],
                 content=content,
                 thinking=thinking,
             )
@@ -5269,7 +5286,10 @@ class Agent:
             )
             return
         assistant_msg, tool_msgs = self._checked_tool_turn(
-            step.response, closed, cut_before
+            step.response,
+            closed,
+            cut_before,
+            captured=step.captured[: len(step.results)],
         )
         self.hippo.working.append_turn(
             assistant_msg, tool_msgs, aliases=step.thought_aliases

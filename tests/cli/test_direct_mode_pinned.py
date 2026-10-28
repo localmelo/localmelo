@@ -22,7 +22,9 @@ is pinned for the first time: it returns every built-in explicitly for
 the notice, so ``_run`` has a new hash again. Worker history adds opt-in
 ``--save-session`` and import dispatch to ``_run_direct`` and ``_run``.
 Context accounting resolves its opt-in budget before Agent construction, so
-``_build_direct_mode_agent`` has a new hash. ``_check_args`` is not pinned.
+``_build_direct_mode_agent`` has a new hash. Captured history adds an opt-in
+flag and config fallback to ``_direct_options`` and ``_build_direct_mode_agent``;
+the default wire remains covered by the legacy golden. ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -44,12 +46,12 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "fd3cc1dc9eaf214d5680fc4b97110c13b2a9e0df5c91a0aca1a6bab20667db8d",
+    "_build_direct_mode_agent": "eaf5c45b3526573628add001e1ed5dd7110608055c988daa66873a37d762f5dd",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
-    "_direct_options": "8dfc68c99329cdfcd18f490be57160210143efa2402bfde409a1bc64e4c53b59",
+    "_direct_options": "bfc1b40bda69886d0262b6f417dafe043d164fecc3f9e9113afd7877d98743a6",
     "_parse_builtins": "fe4a7f24ab1f970fc094ebb737d29a9bec9de742165ae68743a312496dd98877",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",
