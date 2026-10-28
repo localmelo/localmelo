@@ -244,7 +244,10 @@
         <p>
           The run loop. Each step builds a prompt from the task, working
           memory, recalled long-term memory and the latest reflection, offers
-          the model a list of tools, sends one planning request, and runs the
+          the model a list of tools (in the default <code>retrieve</code>
+          mode, the built-ins, the ones it has already called in this
+          conversation and the three closest matches for the task), sends one
+          planning request, and runs the
           tool calls of the reply. A reply with text and no tool call is the
           answer, and the run ends as <code>completed</code>. With the default
           <code>reflect</code> policy, steps come in attempts of up to 10; after
@@ -501,9 +504,10 @@
       <section class="section" id="status">
         <h2>What exists today</h2>
         <ul>
-          <li>Direct mode with run options, nine run statuses, text or JSON output, and fixed exit codes.</li>
+          <li>Direct mode with run options, including how a reply's reasoning is sent back (<code>legacy</code>, <code>drop</code> or <code>replay</code>), nine run statuses, text or JSON output, and fixed exit codes.</li>
           <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals with the diff a file write will make, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>, <code>/approvals</code>, <code>/status</code>, <code>/mcp</code> and <code>/retry</code>, and an MCP servers file (<code>--mcp-config</code> or the config's <code>mcp_config</code>); and the plain conversation loop (<code>melo ""</code>).</li>
-          <li>Four built-in tools, and tools from local MCP servers in direct mode, the Python API and the interactive UI.</li>
+          <li>Four built-in tools, with <code>python_exec</code> in a child process in every mode, and tools from local MCP servers in direct mode, the Python API and the interactive UI.</li>
+          <li>A step offers the built-in tools, the tools the model has already called in the conversation and the three closest matches for the task (the default <code>retrieve</code> mode); <code>all</code> offers every tool on every step.</li>
           <li>The Python API (experimental): run events, stopping a run, approval policies for tool calls, a workspace root for the file tools, and conversations that carry over between runs.</li>
           <li>Sessions (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>); a runner can ask its turns for progress events. The interactive UI keeps its turns in them; the gateway does not use them yet.</li>
           <li>The gateway: the HTTP API, sessions that close on request only when idle, the web workspace, whose chats pass through the scheduler's policy (<code>off</code> by default) and whose header shows the GPU lock and the battery, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
