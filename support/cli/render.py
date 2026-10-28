@@ -51,6 +51,7 @@ from localmelo.support.sessions.display import (
     format_duration,
     format_tokens,
     status_line,
+    status_text,
 )
 from localmelo.support.sessions.store import StoredEvent
 
@@ -78,9 +79,6 @@ _HTTP_STATUS: Final = re.compile(r"failed with HTTP (\d{3})")
 # Markdown that starts a block: a fence, a heading, a list, a quote, a table.
 _BLOCK_START: Final = re.compile(r"\s*(```|~~~|#|[-*+] |\d+[.)] |>|\|)")
 _FAILED_WITH: Final = re.compile(r"failed: (\w+)")
-
-# The severity of each status that ended a run, for its status line.
-_SEVERE: Final = frozenset({"provider_error", "setup_error", "crashed"})
 
 
 class _LeftHeading(Heading):
@@ -671,9 +669,7 @@ class TurnRenderer:
         elif status:
             # A crash is a bug only when the run raised it; a crash cause
             # means the process stopped (section 3's severity table).
-            severe = status in {"provider_error", "setup_error"} or (
-                status == "crashed" and cause != "crash"
-            )
+            severe = status_text(status, cause).severity == "error"
             mark = self.symbols.failed if severe else self.symbols.warn
             line = Text(
                 f"{mark} {status_line(status, plain(error))}",
@@ -926,7 +922,7 @@ class TurnRenderer:
                 )
                 self.out.print(_marked(symbols.assistant, "", effort))
             # A run that crashes as it runs is a bug (cause run): an error.
-            severe = result.status in _SEVERE
+            severe = status_text(result.status).severity == "error"
             mark = symbols.failed if severe else symbols.warn
             line = Text(
                 f"{mark} {status_line(result.status, plain(result.error))}",

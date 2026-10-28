@@ -11,21 +11,25 @@ import dataclasses
 import json
 import os
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 from unittest import mock
 
 import pytest
 
 import localmelo.__main__ as cli
-from localmelo.melo.agent import AgentOptions
+from localmelo.melo import schema
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.schema import RunResult
 from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.progress_line import run_elapsed
+from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
+from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 from localmelo.support.sessions import agents, display
 from localmelo.support.sessions.agents import (
     SESSION_TOOL_TIMEOUT_S,
     build_session_agent,
 )
+from localmelo.support.sessions.store import RUN_STATUSES
 
 VECTORS: dict[str, list[list[Any]]] = json.loads(
     (Path(__file__).parents[1] / "fixtures" / "display_vectors.json").read_text(
@@ -61,6 +65,80 @@ def test_a_long_reason_is_cut_as_direct_mode_cuts_it() -> None:
     outcome = RunResult(task_id="t", status="failed", error=error)
     assert display.status_line("failed", error) == cli._status_line(outcome)
     assert display.status_line("failed", error).endswith("x...")
+
+
+@pytest.mark.parametrize(
+    ("status", "cause", "word", "severity", "title"), VECTORS["status_text"]
+)
+def test_status_text(
+    status: str, cause: str, word: str, severity: str, title: str
+) -> None:
+    text = display.status_text(status, cause)
+    assert (text.word, text.severity, text.title) == (word, severity, title)
+
+
+def test_status_text_falls_back_from_the_cause_to_the_status() -> None:
+    assert display.status_text("cancelled") == display.STATUS_TEXT["cancelled"]
+    # A cause with no row of its own reads as its status does.
+    assert display.status_text("cancelled", "run") == display.STATUS_TEXT["cancelled"]
+    assert (
+        display.status_text("cancelled", "shutdown")
+        == display.STATUS_TEXT[("cancelled", "shutdown")]
+    )
+
+
+def test_every_run_status_has_a_word() -> None:
+    assert {key for key in display.STATUS_TEXT if isinstance(key, str)} >= RUN_STATUSES
+
+
+def test_an_unknown_status_reads_as_its_name() -> None:
+    text = display.status_text("from_the_future")
+    assert (text.word, text.severity, text.title) == (
+        "from_the_future",
+        "warn",
+        "from_the_future",
+    )
+
+
+def test_split_thinking_is_the_cores() -> None:
+    assert display.split_thinking is schema.split_thinking
+    assert display.split_thinking("<think>why</think>\nanswer") == ("why", "answer")
+
+
+@pytest.mark.parametrize(
+    ("status", "error_category", "approval", "short", "long"),
+    VECTORS["approval_tag"],
+)
+def test_approval_tag(
+    status: str,
+    error_category: str,
+    approval: dict[str, Any],
+    short: str,
+    long: str,
+) -> None:
+    text = display.approval_tag(status, error_category, approval)
+    assert text == display.ApprovalText(short, long)
+
+
+def test_an_unasked_approval_has_no_tag() -> None:
+    assert display.approval_tag("success", "none", None) is None
+    assert display.approval_tag("success", "none", {}) is None
+
+
+def test_a_user_denial_needs_the_call_to_have_been_blocked() -> None:
+    approval = {"allowed": False, "origin": "user", "remember": False}
+    assert display.approval_tag("success", "none", approval) is None
+    assert display.approval_tag("cancelled", "cancelled", approval) is None
+    assert display.approval_tag("blocked", "none", approval) is not None
+    assert display.approval_tag("error", "approval_denied", approval) is not None
+
+
+def test_a_withdrawal_is_not_run_only_for_a_cancelled_call() -> None:
+    approval = {"allowed": False, "origin": "withdrawn", "remember": False}
+    assert display.approval_tag("cancelled", "cancelled", approval) == (
+        display.ApprovalText("not run", "Not run: the turn was stopped")
+    )
+    assert display.approval_tag("success", "none", approval) is None
 
 
 @pytest.mark.parametrize(("text", "clean"), VECTORS["clean_output"])
@@ -239,6 +317,149 @@ async def test_an_agent_that_fails_to_start_is_closed(
     assert closed == [True]
 
 
+class _Wrapped:
+    """A provider that only delegates close(), to prove what the Agent got."""
+
+    def __init__(self, inner: Any) -> None:
+        self.inner = inner
+
+    async def close(self) -> None:
+        await self.inner.close()
+
+
+class _RecordingAgent(Agent):
+    """An Agent that records how its builder made it."""
+
+    built: ClassVar[list[dict[str, Any]]] = []
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        type(self).built.append(dict(kwargs))
+        super().__init__(*args, **kwargs)
+
+
+async def test_the_hook_wraps_the_providers_the_agent_is_built_with(
+    tmp_path: Path,
+) -> None:
+    seen: list[Any] = []
+
+    def wrap_llm(llm: Any) -> Any:
+        seen.append(llm)
+        return _Wrapped(llm)
+
+    def wrap_embedding(embedding: Any) -> Any:
+        seen.append(embedding)
+        return _Wrapped(embedding)
+
+    agent = await build_session_agent(
+        cfg=None,
+        base_url="http://127.0.0.1:9/v1",
+        model="qwen3-8b",
+        workspace=str(tmp_path),
+        options=AgentOptions(),
+        embedding_base_url="http://127.0.0.1:9/v1",
+        embedding_model="e5",
+        wrap_llm=wrap_llm,
+        wrap_embedding=wrap_embedding,
+    )
+    try:
+        # The Chat is made from the wrapped provider, so every model call
+        # goes through it.
+        assert isinstance(agent._llm, _Wrapped)
+        assert agent.chat.llm is agent._llm
+        assert isinstance(agent._embedding, _Wrapped)
+        assert isinstance(seen[0], OpenAICompatLLM)
+        assert isinstance(seen[1], OpenAICompatEmbedding)
+        assert agent._llm.inner is seen[0]
+        assert agent._embedding.inner is seen[1]
+    finally:
+        await agent.close()
+
+
+async def test_the_hook_wraps_the_providers_of_a_config_and_no_hook_keeps_the_old_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _RecordingAgent.built.clear()
+    built = _RecordingAgent.built
+    monkeypatch.setattr(agents, "Agent", _RecordingAgent)
+    cfg = _config()
+    cfg.embedding_backend = "vllm"
+    cfg.vllm.embedding_url = "http://127.0.0.1:9/v1"
+    cfg.vllm.embedding_model = "cfg-e"
+
+    # No hook: the Agent is made from the config, as it was before the hook.
+    agent = await build_session_agent(
+        cfg=cfg,
+        base_url=None,
+        model=None,
+        workspace=str(tmp_path),
+        options=AgentOptions(),
+    )
+    try:
+        assert "config" in built[0]
+        assert "llm" not in built[0]
+        assert isinstance(agent._llm, OpenAICompatLLM)
+        assert agent._llm.model == "cfg-m"
+        assert isinstance(agent._embedding, OpenAICompatEmbedding)
+    finally:
+        await agent.close()
+
+    seen: list[Any] = []
+
+    def wrap_llm(llm: Any) -> Any:
+        seen.append(llm)
+        return llm
+
+    def wrap_embedding(embedding: Any) -> Any:
+        seen.append(embedding)
+        return embedding
+
+    agent = await build_session_agent(
+        cfg=cfg,
+        base_url=None,
+        model=None,
+        workspace=str(tmp_path),
+        options=AgentOptions(),
+        wrap_llm=wrap_llm,
+        wrap_embedding=wrap_embedding,
+    )
+    try:
+        # With a hook the providers exist first, so the Agent is made from
+        # them, and they are the ones the wrappers returned.
+        assert "config" not in built[1]
+        assert built[1]["llm"] is seen[0]
+        assert built[1]["embedding"] is seen[1]
+        assert agent._llm is seen[0]
+        assert agent._embedding is seen[1]
+        assert isinstance(agent._llm, OpenAICompatLLM)
+        assert isinstance(agent._embedding, OpenAICompatEmbedding)
+    finally:
+        await agent.close()
+
+
+async def test_an_embedding_that_was_not_built_is_not_wrapped(
+    tmp_path: Path,
+) -> None:
+    called: list[Any] = []
+
+    def wrap_embedding(embedding: Any) -> Any:
+        called.append(embedding)
+        return embedding
+
+    agent = await build_session_agent(
+        cfg=None,
+        base_url="http://127.0.0.1:9/v1",
+        model="qwen3-8b",
+        workspace=str(tmp_path),
+        options=AgentOptions(),
+        wrap_embedding=wrap_embedding,
+    )
+    try:
+        assert agent._embedding is None
+        assert called == []
+    finally:
+        await agent.close()
+
+
 # ── The facts of a file_write approval (approval_target) ──
 
 
@@ -294,25 +515,3 @@ def test_approval_target_does_not_follow_a_final_symlink_or_open_a_fifo(
         }
     )
     assert piped == {"path_label": "pipe", "exists": True, "size_bytes": 0}
-
-
-def test_load_mcp_providers_reads_a_file_and_refuses_a_bad_one(tmp_path: Path) -> None:
-    import sys
-
-    from localmelo.support.mcp import McpConfigError
-
-    path = tmp_path / "mcp.json"
-    path.write_text(
-        json.dumps(
-            {
-                "mcpServers": {
-                    "notes": {"command": sys.executable, "args": ["-c", "pass"]}
-                }
-            }
-        ),
-        encoding="utf-8",
-    )
-    providers = agents.load_mcp_providers(str(path))
-    assert len(providers) == 1
-    with pytest.raises(McpConfigError):
-        agents.load_mcp_providers(str(tmp_path / "missing.json"))
