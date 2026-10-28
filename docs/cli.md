@@ -330,8 +330,10 @@ either starts a new session and says so; Esc in the startup picker also
 starts new, without creating an empty row. `melo -r REF` resolves an ID,
 a prefix of at least four characters, or an exact case-insensitive title;
 multiple matches, or a title/message search fallback, open the picker.
-An unknown reference exits 2. `-c` and `-r` cannot be combined, or used
-with a task, `--serve` or `--daemon`.
+An unknown reference exits 2. The startup choice, including the `-r` picker,
+happens before the banner: a chosen chat is labelled `"TITLE" (resumed)`;
+Esc or an empty list gives a new-session banner. `-c` and `-r` cannot be
+combined, or used with a task, `--serve` or `--daemon`.
 
 The picker lists at most 50 chats with finished, non-undone turns, newest
 first. The filter updates after 150 ms; Tab toggles this folder/all folders.
@@ -339,7 +341,8 @@ Enter resumes, Esc or Ctrl+D closes it, and the ordinary draft stays intact.
 `/sessions FILTER` and `/resume REF` use the same picker and resolution.
 Web and scheduler sessions are never offered. A resume keeps the current
 model and workspace, records them on the session and clears approval grants;
-a note says when the session previously worked in another folder.
+`/verbose` and `/thinking` preferences stay as they were. `/new` resets those
+display preferences. A note says when the session previously worked in another folder.
 
 After the banner, the recap shows the last three eligible turns from stored
 redacted copies. The line below its title says what reached model memory:
