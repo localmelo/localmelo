@@ -138,7 +138,7 @@
         <p>在 <code>/</code> 上，网页工作区使用控制台的 API v2 和持久会话库。它显示每轮的工作和答案、连接设置、较早的回合、停止或失败状态，并在收到审批请求时显示审批卡片；详情抽屉显示工具、会话授权、记忆和运行记录，设置包括连接测试和浏览器本地主题；控制台会话使用 <code>RememberingPolicy</code>，在 <code>file_write</code> 和 <code>python_exec</code> 前请求审批；旧版 <code>/v1</code> 没有审批策略。每个对话使用配置中的模型和三个内置工具 <code>file_read</code>、<code>file_write</code>、<code>python_exec</code>（没有 <code>shell_exec</code>）。模型调用共享调度器的门，标题栏显示 GPU 锁和电池状态。</p>
         <p>页面按最新在前列出会话，支持搜索和每个对话的草稿，显示工具工作、折叠的推理、通知、进度和答案，并从最后保存的事件重开事件流。会话保存在 <code>~/.cache/localmelo/gateway/sessions.db</code>，重启后仍然保留；智能体按需打开（最多同时 8 个，空闲 15 分钟后关闭但保留对话）。</p>
         <p>网页工作区也可筛选和分页查看 CLI 会话文件中的 worker 历史；每次运行以只读快照打开，未完成的运行可以手动刷新，不使用实时事件流。</p>
-        <p>网关没有身份验证。监听 <code>localhost</code> 或回环地址（例如默认的 <code>127.0.0.1:8401</code>）时，它会拒绝 <code>Host</code> 不是 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>[::1]</code> 加网关端口的请求（HTTP 421），以及其他来源的网页通过浏览器向它的 API 发来的请求（HTTP 403）。任何网页都不能在 frame 里显示网关的页面。监听其他地址（例如 <code>0.0.0.0</code>）时，它不做这些检查，并在启动时记录一条警告。</p>
+        <p>网关要求令牌或浏览器会话，并拒绝非回环监听。在终端运行 <code>melo --gateway-login</code> 获取一次性登录链接。持有令牌者可以你的权限操作；令牌无法隔离同一用户的进程，浏览器 cookie 也不按 localhost 端口隔离。</p>
         <p>关键文件：<code>support/gateway/__init__.py</code>、<code>session.py</code>、<code>guard.py</code>（<code>Host</code> 和 <code>Origin</code> 检查）、<code>webapp.py</code> 和 <code>playground.py</code>（旧的 <code>/v1/playground</code> 路由及其背后的对话）、<code>console/</code>（控制台的会话库、API v2 路由和页面的数据）、<code>static/</code>（页面：<code>workspace.js</code>、<code>turns.mjs</code> 和 <code>markdown.mjs</code>），以及用于 macOS 后台服务的 <code>daemon.py</code>。</p>
 
         <h3 id="c-mcp">MCP 服务器</h3>

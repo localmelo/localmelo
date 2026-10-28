@@ -56,22 +56,10 @@ those tools can do.
 - **To limit what a task can do,** use `--builtins none` or a subset of the
   tools, `--mcp-only`, a container or virtual machine, or a separate user
   account.
-- **The gateway has no authentication.** It listens on `127.0.0.1:8401` by
-  default, where any program on your computer can reach it and run tasks
-  with your tools, and the web workspace makes the gateway fetch any URL
-  that a client sends.
-  - On `localhost` or a loopback IP address, such as `127.0.0.1` or `::1`,
-    the gateway refuses requests whose `Host` header is not `127.0.0.1`,
-    `localhost` or `[::1]` with its port (HTTP 421), which stops web pages
-    that reach it through DNS rebinding. It also refuses requests from web
-    pages at another origin (HTTP 403): `POST`, `PUT`, `PATCH`, `DELETE` and
-    `OPTIONS` requests whose `Origin` is not the gateway's, and requests
-    under `/v1/` that the browser marks as cross-site or same-site. A link
-    from another site still opens the web workspace, but no page can show it
-    in a frame.
-  - On any other host, such as `0.0.0.0` or a host name other than
-    `localhost`, none of this applies: anything that can reach the port, web
-    pages included, can run tasks. Never bind it to other interfaces.
+- **Gateway:** The gateway accepts only loopback binds and requires a bearer token or browser session cookie for protected APIs. A token holder can act with your permissions. The private token file does not protect against malicious processes running as the same OS user, browser extensions, or compromised same-origin code. Browser cookies are not isolated by port: a port-specific name is not a security boundary against another service on the same host. Do not expose the gateway through a proxy.
+  See [gateway authentication](docs/guides/gateway.md#keep-the-gateway-private)
+  for sign-in and token rotation. Host, Origin and fetch-metadata checks remain
+  important browser defenses; authentication is not a sandbox.
 - **MCP servers** run as local processes, with a minimal environment plus
   the `env` you give them.
 - **Secrets.** The config file stores the *name* of the API-key variable,

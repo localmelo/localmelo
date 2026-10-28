@@ -109,7 +109,11 @@ def test_a_legacy_422_keeps_fastapis_body(console: Console) -> None:
             probe=console.options.probe,
         ),
     )
-    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    client = TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    )
     resp = client.post("/v1/agent/run", json=["not", "an", "object"])
     assert resp.status_code == 422
     assert "detail" in resp.json()

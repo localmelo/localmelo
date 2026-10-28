@@ -153,7 +153,7 @@ source .venv/bin/activate</code></pre>
       <section class="section" id="security">
         <h2>安全</h2>
         <div class="callout warning">
-          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。新建的记忆文件只有你能读取（权限 0600）。网关没有身份验证，所以请让它只监听 <code>127.0.0.1</code>（默认值）：在这个地址上，它会拒绝其他网站的网页通过浏览器向它的 API 发来的请求。</p>
+          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。新建的记忆文件只有你能读取（权限 0600）。网关要求令牌或浏览器会话，并拒绝非回环监听。在终端运行 <code>melo --gateway-login</code> 获取一次性登录链接。持有令牌者可以你的权限操作；令牌无法隔离同一用户的进程，浏览器 cookie 也不按 localhost 端口隔离。</p>
         </div>
         <p>请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">检查能做什么（英文）</a>。</p>
       </section>

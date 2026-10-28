@@ -46,7 +46,8 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 ```
 
 Run `melo` in a terminal to chat and save a configuration on the first run;
-`melo --serve` starts the gateway, with the HTTP API and the web workspace at
+`melo --serve` starts the gateway; run `melo --gateway-login` in a terminal
+and open the one-use link within 60 seconds. The HTTP API and web workspace are at
 `http://127.0.0.1:8401/`.
 The interactive UI accepts the same [reasoning and recall options](docs/reference/cli.md#interactive-ui)
 as a task, with saved `[agent]` and `[retrieval]` defaults; console sessions
@@ -74,8 +75,8 @@ also honor the saved reasoning mode (default `legacy`).
 > [!WARNING]
 > Tools run with your account's permissions, and there is no sandbox: the
 > model can run shell commands and Python code, and read or write any file you
-> can. The gateway has no authentication, so keep it on `127.0.0.1` (the
-> default). See [SECURITY.md](SECURITY.md) and
+> can. The gateway requires authentication and refuses non-loopback binds, but
+> its token does not protect against malicious processes under your own OS user. See [SECURITY.md](SECURITY.md) and
 > [what the checks do](docs/guides/tools-mcp.md#what-the-checks-do).
 
 ## Contributing
