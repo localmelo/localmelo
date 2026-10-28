@@ -120,6 +120,10 @@ source .venv/bin/activate</code></pre>
             <strong>Gateway and web workspace</strong>
             <span>Serve the agent over HTTP, with sessions that survive a restart, and use the web console's live page at <code>http://127.0.0.1:8401/</code>: the session list, a chat's turns with a work card for each tool call, the progress row, Stop and a level chip; the page talks only to <code>/api</code>.</span>
           </a>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#worker-histories">
+            <strong>Worker history</strong>
+            <span>Optionally save direct runs or import dsh logs, then read and filter their history through the local gateway API.</span>
+          </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">
             <strong>API v2</strong>
             <span>Read the web console's sessions, turns, stored events (a Server-Sent Events stream too), image blobs, submission lookups, tools, grants, memory and runs over <code>/api</code>, and create a session or start, retry, stop and approve its turns there; it is loopback-only and only grows.</span>
