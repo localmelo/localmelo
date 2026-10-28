@@ -1,0 +1,357 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>开发者说明 · localmelo</title>
+  <meta name="description" content="为 localmelo 搭建开发环境、运行测试和检查、添加后端、内置工具或检查，并提交改动。">
+  <link rel="alternate" hreflang="en" href="https://localmelo.github.io/localmelo/en/developers.html">
+  <link rel="alternate" hreflang="zh-CN" href="https://localmelo.github.io/localmelo/zh-CN/developers.html">
+  <link rel="alternate" hreflang="x-default" href="https://localmelo.github.io/localmelo/en/developers.html">
+  <link rel="icon" href="../assets/icon_small.png">
+  <link rel="stylesheet" href="../assets/site.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到正文</a>
+  <header class="site-header">
+    <div class="topbar">
+      <a class="brand" href="./index.html">
+        <img src="../assets/icon_small.png" alt="" width="30" height="30">
+        <strong><span>local</span>melo</strong>
+      </a>
+      <nav class="site-nav" aria-label="主导航">
+        <a href="./quickstart.html">快速开始</a>
+        <a href="./architecture.html">架构</a>
+        <a href="./updates.html">路线图</a>
+        <a href="./developers.html" aria-current="page">开发者</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">参考文档（英文）<span aria-hidden="true">↗</span></a>
+        <a href="https://github.com/localmelo/localmelo">GitHub <span aria-hidden="true">↗</span></a>
+      </nav>
+      <nav class="lang-toggle" aria-label="语言">
+        <a href="../en/developers.html" hreflang="en" lang="en">EN</a>
+        <a href="./developers.html" hreflang="zh-CN" lang="zh-CN" aria-current="true">中文</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main" class="page layout">
+    <nav class="sidebar" aria-label="本页内容">
+      <p class="sidebar-label">本页内容</p>
+      <a href="#repository">仓库</a>
+      <a href="#setup">开发环境</a>
+      <a href="#running">运行命令行</a>
+      <a href="#tests">测试</a>
+      <a href="#lint">代码检查和类型</a>
+      <a href="#backends">添加后端</a>
+      <a href="#tools">添加内置工具</a>
+      <a href="#boundaries">添加检查</a>
+      <a href="#changes">提交和 pull request</a>
+      <a href="#docs">文档和网站</a>
+      <a href="#design">设计笔记</a>
+    </nav>
+
+    <article class="content">
+      <header class="doc-hero">
+        <h1>开发者说明</h1>
+        <p class="lead">为 localmelo 搭建开发环境、运行测试和检查、添加后端、内置工具或检查，并提交改动。</p>
+      </header>
+
+      <section class="section" id="repository">
+        <h2>仓库</h2>
+        <p>
+          包含 <code>pyproject.toml</code> 的目录本身就是 <code>localmelo</code> 软件包：<code>package-dir</code> 把它映射为 <code>localmelo</code>，<code>packages.find</code> 则向上查找一层。因此没有 <code>localmelo/localmelo/</code> 这样的目录，<code>melo/agent/agent.py</code> 的导入名是 <code>localmelo.melo.agent.agent</code>，<code>support/config.py</code> 的导入名是 <code>localmelo.support.config</code>。不要再建一层嵌套目录，并保持克隆目录名为 <code>localmelo</code>。
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">目录结构</figcaption>
+          <pre><code>localmelo/
+  __main__.py     the melo command
+  melo/           the agent: run loop, checks, executor, memory, contracts
+  support/        backends, providers, gateway, terminal UI, sessions, MCP,
+                  config, setup wizard, melo-retrieve, melo-procedures,
+                  scheduler
+  tests/          tests, mirroring melo/ and support/
+  docs/           the documentation and the website
+  tests_result/   archived results of real-backend runs</code></pre>
+        </figure>
+        <ul>
+          <li>
+            <code>melo/</code> 是核心：运行循环、检查、执行器、记忆和提供方契约。
+          </li>
+          <li>
+            <code>support/</code> 是核心之外的部分：后端和模型提供方、网关、终端界面、MCP、配置和配置向导。
+          </li>
+          <li>
+            <code>tests/</code> 与这两部分一一对应。<code>docs/</code> 里是 Markdown 页面和网站。
+          </li>
+        </ul>
+        <p>
+          <strong>核心不导入 <code>support/</code>。</strong>唯一的桥梁是 <code>Agent(config=...)</code>：调用时它通过 <code>support/backends</code> 构建提供方。<code>tests/test_layering.py</code> 会读取 <code>melo/</code> 下每个模块的 AST，任何形式的 <code>support/</code> 导入都会让它失败：普通的、相对路径的，或者通过 <code>importlib.import_module</code> 的。测试记录了两个允许的例外：<code>Config</code>，只用于类型检查；以及 <code>get_backend</code>，在根据 <code>Config</code> 构建 <code>Agent</code> 时于 <code>_providers_from_config</code> 中导入。它还记录了一组其他规则：终端界面的库（<code>prompt_toolkit</code> 和 <code>rich</code>）不能进入核心和后端；会话和终端界面不能依赖网关。如果核心需要 <code>support/</code> 里的代码，请把契约放进 <code>melo/contracts/</code>。
+        </p>
+      </section>
+
+      <section class="section" id="setup">
+        <h2>开发环境</h2>
+        <p>
+          你需要 Python 3.11 或更高版本、Git 和 <a href="https://docs.astral.sh/uv/">uv</a>。只有网页工作区的 JavaScript 测试需要 Node（版本见 <code>.nvmrc</code>）。
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">开发环境</figcaption>
+          <pre><code>git clone https://github.com/localmelo/localmelo.git
+cd localmelo                 # keep this name: the package is built from it
+uv sync --extra dev --extra gateway</code></pre>
+        </figure>
+        <p>
+          <code>uv</code> 会根据提交的 <code>uv.lock</code> 创建 <code>.venv/</code>，Python 版本按 <code>.python-version</code> 固定为 3.13；localmelo 本身支持 Python 3.11 或更高版本。<code>--extra dev</code> 会安装 pytest、ruff、black、mypy 和 pre-commit；<code>--extra gateway</code> 会安装 <code>melo --serve</code> 需要的 FastAPI 和 uvicorn。
+        </p>
+        <p>
+          也可以运行 <code>uv run pre-commit install</code> 安装钩子。每次提交时，它们会运行 <code>ruff --fix</code>、<code>black</code>、<code>mypy</code> 和完整的 pytest 测试。提交失败通常意味着测试真的出了问题，而不是应该跳过钩子。
+        </p>
+      </section>
+
+      <section class="section" id="running">
+        <h2>运行命令行</h2>
+        <p>
+          <code>melo</code> 会被安装到 <code>.venv/bin/</code>，不在 PATH 中。在克隆目录里通过 uv 运行：
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">在克隆目录中运行</figcaption>
+          <pre><code>uv run melo "What is 6*7?"
+uv run melo --serve</code></pre>
+        </figure>
+        <p>
+          在其他目录运行时，请指明克隆目录：<code>uv run --project DIR melo …</code>。一次运行需要模型服务器：传入 <code>--base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b</code>，或者先运行一次 <code>uv run melo --reconfigure</code> 保存配置。如果某次运行或某个测试不能读写你自己的 <code>~/.cache/localmelo</code>，请把 <code>HOME</code> 指向一个临时目录。
+        </p>
+      </section>
+
+      <section class="section" id="tests">
+        <h2>测试</h2>
+        <p>
+          开发时只运行受改动影响的测试。<code>pytest-testmon</code> 会记录每个测试覆盖了哪些代码，第一次完整运行之后，就只运行受影响的测试：
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">开发时</figcaption>
+          <pre><code>uv run pytest --testmon -q</code></pre>
+        </figure>
+        <p>
+          提交 pull request 之前，把整套离线测试并行运行一次：
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">提交 pull request 之前</figcaption>
+          <pre><code>uv run pytest -n auto -q</code></pre>
+        </figure>
+        <p>
+          它不需要模型服务器，也不会向任何模型服务器发送请求。少数命令行测试会在本机回环地址上启动一个假的 API，用来测试超时和取消。要直接运行某个目录，请指明它：<code>uv run pytest tests/agent -q</code>。
+        </p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>目录</th><th>测试内容</th><th>需要</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>tests/agent</code></td><td>运行循环、运行选项、运行结果、反思、工具暴露方式、事件、取消和审批</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/backends</code></td><td>后端、模型提供方、请求超时、<code>extra_body</code></td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/checker</code></td><td>各项检查、权限级别、密钥脱敏和清理器</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/cli</code></td><td><code>melo</code> 命令、<code>melo ""</code> 对话循环和 <code>melo-retrieve</code></td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/contracts</code></td><td>事件和审批契约</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/executor</code></td><td>执行器、内置工具、审批和工作区根目录</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/memory</code></td><td>记忆、SQLite 持久化、BM25、记忆笔记和检索器</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/mcp</code></td><td>MCP 客户端和工具提供方</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/scheduler</code></td><td>调度策略、模拟器和轨迹导入器</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/sessions</code></td><td>保存在 SQLite 中的对话：存储、运行器、恢复、重启、审批和事件窗口</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/gateway</code></td><td>会话、HTTP API、<code>Host</code> 和 <code>Origin</code> 检查，以及网页工作区；<code>.mjs</code> 文件测试工作区的 JavaScript</td><td><code>dev</code> 和 <code>gateway</code>；<code>.mjs</code> 文件需要 Node</td></tr>
+              <tr><td><code>tests/integration</code></td><td>多个部分协同工作</td><td><code>dev</code> 和 <code>gateway</code></td></tr>
+              <tr><td><code>tests/smoke</code></td><td>冒烟测试工具的离线测试（解析、指标、日志），以及需要手动开启的 <code>test_backend_smoke.py</code></td><td><code>dev</code>；那个文件需要模型服务器</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          网页工作区的 JavaScript 有自己的测试。它们需要 Node（版本见 <code>.nvmrc</code>），pytest 不会运行它们：
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">JavaScript 测试</figcaption>
+          <pre><code>node --test tests/gateway/test_markdown.mjs tests/gateway/test_workspace.mjs</code></pre>
+        </figure>
+        <p>
+          需要连接真实模型服务器的测试是手动开启的。普通的 pytest 运行不会发送任何对话请求，连你正在开发时用的服务器也不会：
+        </p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">真实后端的冒烟测试</figcaption>
+          <pre><code>LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q</code></pre>
+        </figure>
+        <p>
+          它们会向 <code>127.0.0.1:11434</code> 上的 Ollama 和 <code>127.0.0.1:8400</code> 上的 MLC LLM 发送对话请求，并跳过没有响应的服务器。<code>tests/smoke/core_loop_test.py</code> 会在真实服务器上运行更长的记忆场景，详见它的<a href="https://github.com/localmelo/localmelo/blob/main/tests/smoke/README.md">说明（英文）</a>。
+        </p>
+      </section>
+
+      <section class="section" id="lint">
+        <h2>代码检查和类型</h2>
+        <figure class="terminal">
+          <figcaption class="terminal-title">检查</figcaption>
+          <pre><code>uv run ruff check .
+uv run black --check .
+uv run mypy .</code></pre>
+        </figure>
+        <p>
+          Black 按 88 列格式化。Ruff 启用 <code>E</code>、<code>W</code>、<code>F</code>、<code>I</code>、<code>N</code>、<code>UP</code>、<code>B</code> 和 <code>SIM</code>；<code>E501</code> 交给 black 处理。Mypy 要求每个函数都有类型标注（<code>disallow_untyped_defs</code>），并检查没有标注的函数体，<code>__main__.py</code> 除外。pre-commit 运行的是同样的三项检查。
+        </p>
+      </section>
+
+      <section class="section" id="backends">
+        <h2>添加后端</h2>
+        <p>
+          后端只是连接器：它们校验配置并构建提供方对象，从不启动或部署模型。添加一个后端：
+        </p>
+        <ol>
+          <li>
+            在 <code>support/backends/local/</code> 或 <code>support/backends/cloud/</code> 中写一个实现 <code>BaseBackend</code> 的类（<code>support/backends/base.py</code>）：<code>key</code>、<code>display_name</code>、<code>validate</code>、<code>validate_embedding</code>、<code>has_embedding</code>、<code>build_chat_provider</code> 和 <code>build_embedding_provider</code>。大多数服务器可以共用 <code>support/backends/openai_compat.py</code> 里兼容 OpenAI 的代码。
+          </li>
+          <li>
+            在 <code>support/backends/registry.py</code> 的 <code>ensure_defaults_registered()</code> 中注册它。
+          </li>
+          <li>
+            把它的 key 加到 <code>support/config.py</code> 的 <code>VALID_CHAT_BACKENDS</code>；如果它提供嵌入，也加到 <code>VALID_EMBEDDING_BACKENDS</code>。
+          </li>
+          <li>
+            为它添加配置表：在 <code>Config</code> 上加一个字段，并把名字写进 <code>_LOCAL_SECTIONS</code> 或 <code>_CLOUD_SECTIONS</code>，让 <code>load()</code> 和 <code>save()</code> 能处理它。修改配置结构时，请在 <code>load()</code> 里添加迁移，而不是让已有的配置文件失效。
+          </li>
+          <li>
+            把它加到 <code>support/onboard.py</code> 的配置向导中：<code>CHAT_BACKENDS</code>、<code>EMBEDDING_BACKENDS</code>、默认值（<code>_LOCAL_DEFAULTS</code>、<code>_CLOUD_DEFAULTS</code> 或 <code>_EMBEDDING_DEFAULTS</code>）和 <code>_CHAT_SETUP</code>。
+          </li>
+          <li>
+            在 <code>tests/backends/</code> 中添加测试。连接检查要 mock：测试绝不能连接真实服务器。
+          </li>
+          <li>
+            写文档：<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#backends">docs/configuration.md（英文）</a>中的后端表和示例。
+          </li>
+        </ol>
+      </section>
+
+      <section class="section" id="tools">
+        <h2>添加内置工具</h2>
+        <p>
+          一个内置工具由一个 <code>ToolDef</code>（名称、说明、JSON 参数和语义标签）和一个返回文本的异步函数组成。两者都放在 <code>melo/executor/builtins.py</code> 中，<code>_builtin()</code> 装饰器会把它们加入 <code>BUILTINS</code>。<code>melo/executor/__init__.py</code> 里的 <code>register_builtins()</code> 会把每一个都注册到执行器和记忆的工具注册表中，并把权限级别不是 <code>read</code> 的工具标记为需要审批。
+        </p>
+        <ol>
+          <li>
+            在 <code>melo/executor/builtins.py</code> 中添加 <code>ToolDef</code> 和函数，并用 <code>@_builtin(...)</code> 装饰。语义标签是任务里可能用来称呼这个工具的词。每个已注册的内置工具在每一步都会提供；任务的提示词和 BM25 搜索只在其他提供方工具之间排序。
+          </li>
+          <li>
+            为它指定权限级别：把名字加入 <code>melo/checker/tiers.py</code> 的 <code>BUILTIN_TIERS</code>（<code>read</code>、<code>write</code>、<code>exec</code> 或 <code>network</code>）。有一个测试保证这张表和内置工具名一致，所以新增内置工具必须同时指定级别。运行有审批策略时，级别不是 <code>read</code> 的调用都会先询问；<code>APPROVAL_BUILTINS</code> 由这张表推导得出。
+          </li>
+          <li>
+            如果它需要工作区根目录，请把它的受限版本加入同一个文件中的 <code>rooted_builtins()</code>。启动子进程的工具会把子进程的退出状态写入 <code>TOOL_EXIT_CODE</code>，<code>tool.finished</code> 事件因此带有 <code>exit_code</code>。
+          </li>
+          <li>
+            在 <code>tests/executor/</code> 中添加测试。
+          </li>
+          <li>
+            写文档：<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">docs/tools.md（英文）</a>；智能体需要知道时，也更新 <code>docs/for-agents.md</code> 和 <code>docs/llms.txt</code>。
+          </li>
+        </ol>
+      </section>
+
+      <section class="section" id="boundaries">
+        <h2>添加检查</h2>
+        <p>
+          检查器会在每个边界上校验。检查失败是控制流，不是异常：它返回 <code>allowed=False</code> 和一个原因，智能体会重新规划或进行反思。一个有明确数据结构的边界包含三部分和一个调用点：
+        </p>
+        <ol>
+          <li>
+            在 <code>melo/checker/payloads.py</code> 中添加一个描述输入的数据类。
+          </li>
+          <li>
+            在 <code>melo/checker/validators.py</code> 中添加返回 <code>ValidationResult</code> 的校验函数。
+          </li>
+          <li>
+            在 <code>melo/checker/checker.py</code> 的 <code>Checker</code> 上添加调用该函数的方法。
+          </li>
+          <li>
+            让调用点通过这个方法进行检查。
+          </li>
+        </ol>
+        <p>
+          检查器自身的检查点 <code>pre_plan</code>、<code>post_plan</code> 和 <code>pre_execute</code> 返回的是 <code>CheckResult</code>。现有的边界包括：网关入口、会话状态变化、工具解析、执行器结果、记忆写入、规划提示词以及工具调用的结构。测试加在 <code>tests/checker/</code> 中，并写明被拒绝的输入和原因。
+        </p>
+      </section>
+
+      <section class="section" id="changes">
+        <h2>提交和 pull request</h2>
+        <ul>
+          <li>
+            提交信息写成 <code>[Area] Imperative summary</code>，例如 <code>[Agent] Sort the retrieved extra tools by name</code>。常用的领域包括 CLI、Agent、Executor、Memory、Tests、Docs、Gateway、Backends、Sessions 和 Scheduler。
+          </li>
+          <li>
+            pull request 的标题要加类型，例如 <code>[Feature][CLI] …</code> 或 <code>[Bug][Memory] …</code>。
+          </li>
+          <li>
+            一个 pull request 只做一件事。改动较大时，请先开一个 issue；路线图见 <a href="https://github.com/localmelo/localmelo/issues/2">#2</a>。
+          </li>
+          <li>
+            行为改动需要测试。不要为了让改动通过而削弱或删除已有的测试；如果确实要改测试，请在 pull request 里说明原因。
+          </li>
+          <li>
+            在同一个 pull request 中更新文档：英文页面、对应的中文版本（<code>README.zh-CN.md</code> 和 <code>docs/zh-CN/</code>）、智能体依赖的行为所对应的 <code>docs/for-agents.md</code> 和 <code>docs/llms.txt</code>，以及 <code>CHANGELOG.md</code> 的 Unreleased 一节：写上 pull request 的编号，如 <code>([#NN])</code>，并在文件末尾加上对应的链接。
+          </li>
+          <li>
+            改动终端里 <code>melo</code> 的显示内容或网站时，请在 pull request 中附上截图。
+          </li>
+          <li>
+            代码、注释、测试和文档一律用英文。
+          </li>
+        </ul>
+      </section>
+
+      <section class="section" id="docs">
+        <h2>文档和网站</h2>
+        <p>
+          <code>docs/</code> 中的 Markdown 页面只有英文；GitHub Pages 发布的是 <code>main</code> 分支的 <code>docs/</code> 目录。网站页面在 <code>docs/en/</code> 和 <code>docs/zh-CN/</code> 中：英文页面和它的中文版本共用相同的元素 id、相同的章节和顺序，代码块保持一致。<code>docs/</code> 中的页面用绝对的 <code>github.com</code> 地址链接目录之外的文件，这样在 GitHub 上和渲染后的网站上都能打开。
+        </p>
+        <p>
+          添加 Markdown 页面时，请把它加进 <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">docs/README.md（英文）</a>的索引。网站页面要在两种语言中各加一份，并加入每个页面的导航。<a href="https://github.com/localmelo/localmelo/blob/main/docs/maintaining.md">docs/maintaining.md（英文）</a>里说明了目录结构、发布方式和翻译规范。
+        </p>
+        <p>在本地预览网站：</p>
+        <figure class="terminal">
+          <figcaption class="terminal-title">预览</figcaption>
+          <pre><code>python3 -m http.server 8080 --bind 127.0.0.1 --directory docs</code></pre>
+        </figure>
+        <p>
+          然后打开 <code>http://127.0.0.1:8080/en/</code>。
+        </p>
+      </section>
+
+      <section class="section" id="design">
+        <h2>设计笔记</h2>
+        <ul>
+          <li>
+            <a href="https://github.com/localmelo/localmelo/blob/main/docs/how-it-works.md">localmelo 如何工作（英文）</a>：运行循环、反思、记忆和超时。
+          </li>
+          <li>
+            <a href="https://github.com/localmelo/localmelo/blob/main/docs/evaluations.md">评测（英文）</a>：各项默认设置背后的对照实验，例如继续判定。
+          </li>
+          <li>
+            <a href="./memory-design.html">记忆设计</a>：维护者的记忆设计，其中一部分尚未实现。
+          </li>
+          <li>
+            <a href="./architecture.html">架构</a>：各部分如何组合在一起。
+          </li>
+        </ul>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <p>早期预览版（pre-alpha）：在 v0.1.0 之前，命令和 API 都可能变化。</p>
+      <nav class="footer-links" aria-label="项目">
+        <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">全部文档（英文）</a>
+        <a href="../for-agents.md">给 AI 智能体（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md">贡献指南（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>
+        <a href="https://github.com/localmelo/localmelo/blob/main/LICENSE">许可证（英文）</a>
+        <a href="https://github.com/localmelo/localmelo">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

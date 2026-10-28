@@ -60,6 +60,9 @@ tools and memory on your own model server or a cloud API. The website is at
 
 ## Project
 
+- [Developer guide](https://localmelo.github.io/localmelo/en/developers.html)
+  (website): the repository layout, the development setup, the tests and
+  checks, and how to add a backend, a built-in tool or a check.
 - [Contributing](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md)
 - [Maintaining the docs](maintaining.md): the layout, publishing,
   translation rules and glossary

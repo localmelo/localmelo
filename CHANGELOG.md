@@ -193,6 +193,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- The README is short, and the website carries the documentation. Its header
+  is two badge rows: one that goes to the website's pages (Website,
+  Quickstart, Docs, Developers, 简体中文) and a quieter row of facts
+  (pre-alpha, Python 3.11+, MIT, llms.txt for AI agents). Below it are what
+  localmelo is, install, a few commands, a "Learn more" list of the
+  website's pages and the security warning; everything else that was there
+  is on the website or in `docs/`. `CONTRIBUTING.md` is short too, and links
+  to a new developer guide, `docs/en/developers.html` and
+  `docs/zh-CN/developers.html`, linked from every page's navigation: the
+  repository layout and the `melo/` ↔ `support/` rule, the package layout,
+  setup, tests, ruff/black/mypy, adding a backend, a built-in tool or a
+  check, commits and pull requests, and the docs and website layout
+  ([#67]).
 - The `dev` extra installs `pytest-xdist` and `pytest-testmon`, so
   `uv run pytest -n auto -q` runs the offline suite in parallel before a
   pull request and `uv run pytest --testmon -q` runs only the tests a
@@ -378,3 +391,4 @@ earlier milestones.
 [#63]: https://github.com/localmelo/localmelo/pull/63
 [#64]: https://github.com/localmelo/localmelo/pull/64
 [#66]: https://github.com/localmelo/localmelo/pull/66
+[#67]: https://github.com/localmelo/localmelo/pull/NN
