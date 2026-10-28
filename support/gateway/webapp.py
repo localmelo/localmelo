@@ -25,7 +25,9 @@ def _call_log_dir(scheduler: SchedulerConfig) -> Path | None:
         return None
     if scheduler.call_log_dir:
         return Path(scheduler.call_log_dir).expanduser()
-    return DEFAULT_CALL_LOG_DIR
+    # Expand the default here, not at import: the gate may run under a HOME
+    # another one set since, as a test's temporary HOME does.
+    return Path(DEFAULT_CALL_LOG_DIR).expanduser()
 
 
 def _manager(app: FastAPI) -> SmokePlayground:

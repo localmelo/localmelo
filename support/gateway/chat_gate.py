@@ -100,8 +100,9 @@ def _trace_source(source: str) -> str:
     return _SOURCE.get(source, "unknown")
 
 
-# The default directory of the per-run call logs.
-DEFAULT_CALL_LOG_DIR = Path("~/.cache/localmelo/scheduler").expanduser()
+# The default directory of the per-run call logs, as a ``~`` string so it
+# resolves when a gate opens one: a test's temporary HOME then applies.
+DEFAULT_CALL_LOG_DIR = "~/.cache/localmelo/scheduler"
 
 # A run directory's name: UTC yyyymmddThhmmss, with "-N" on a same-second clash.
 _RUN_DIR = re.compile(r"^\d{8}T\d{6}(?:-\d+)?$")
