@@ -1023,7 +1023,7 @@ class ChatGate:
         level = changes.get("level", current.level)
         if level == 0 and source != "user":
             raise ValueError("P0 is the user's setting; level 0 needs a user source")
-        if source == "user" and current.origin != "user":
+        if "level_source" in changes and source == "user" and current.origin != "user":
             raise ValueError("only a user-origin task may carry a user-set level")
         if (
             current.level_source in ("user", "user_rule")
