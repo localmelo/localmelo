@@ -22,12 +22,31 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   console's Content-Security-Policy on `/api` and baseline security headers
   on every response; and `melo --serve --allow-unconfigured` so the gateway
   can boot before a backend is configured ([#NN]).
+- Terminal session commands: `/title [text]` shows or sets a title, including
+  before the first message; `/undo` forgets the latest finished turn and
+  keeps its typed history without reversing file changes (a committed undo
+  reports success even after Esc, and `/retry` re-runs that undone turn
+  without removing the previous live one); `/usage` shows
+  recorded work and totals including undone turns, with missing counters
+  left unknown and a narrow-terminal layout; `/memory` inspects the copied working window and explains
+  its actual restore mode. `/copy [turn]` copies stored, redacted Markdown
+  without thinking, preserving indentation and newlines, via bounded turn
+  reads and macOS `pbcopy` or an OSC 52 request when
+  remote, unsupported locally or on other platforms. Clipboard requests
+  only happen on an explicit command; direct runs are unchanged ([#101]).
+
 - `--workspace DIR` in direct mode: a task run keeps its file tools inside
   the folder and starts `shell_exec` and `python_exec` there. Without the
   flag a run keeps the current folder, exactly as before; `~` is expanded
   and the path is resolved like the interactive UI's. `melo ""` and
   `--serve` refuse it, and a path that is not a folder exits 2 with one
   line ([#98]).
+- A remember request (`Remember that …`, `记住…`) now also stores the fact
+  it carries after the marker, admitted by `user_request` beside the run's
+  episodic digest, instead of only the digest. The fact is classified as
+  `semantic` unless it is first-person (`profile`), and the redaction,
+  meta-noun and question rules apply to it; a to-do such as "remember to
+  buy milk" still stores no fact ([#100]).
 - R6-lite's typed long-term store: `long_term.db` migrates in place to
   `user_version` 1 with `kind`, `source`, `status`, `admitted_by`,
   provenance, task/session ids, links and uses beside the text and vector,
@@ -508,6 +527,30 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A note's items now take their `source_ids` from the observation that
+  established them, even when it came in an earlier reply of the same task:
+  the reply's own tool results first, then the results still in the window,
+  then the rest of the task's (newest first, last 200 records). A record
+  matches only on a strong key (a number, a date or time, an identifier
+  containing a digit, or a capitalised name that is not sentence-initial)
+  or two distinctive non-filler words, and a note with records but no
+  match gets no item source, so "Done." no longer cites an unrelated
+  "no harm done" record. This fills `provenance.source_ids` for facts
+  copied from an earlier tool result and for the digest built from them;
+  another task's records are never used ([#103]).
+- The model-facing recall header no longer carries the retrieval latency:
+  it is `(retriever bm25)`, not `(retriever bm25, 12 ms)`. Identical runs
+  now produce identical prompt bytes, so a block kept in the window does
+  not break the prefix cache. `ms` remains in `llm_calls.recall_json`, the
+  `recall` event and `memory_stats` ([#103]).
+- A thought chunk of an attempt is now superseded at the attempt boundary
+  together with that attempt's notes, so a chunk recalled later renders
+  with the `(superseded)` marker and names its attempt instead of passing
+  for the current attempt's thinking ([#100]).
+- `melo-retrieve --export-store DIR` and `--export-decisions DIR` print
+  zero entries and exit 0 when the directory has no `long_term.db` yet,
+  instead of failing with "No such file"; a path that is not a directory
+  keeps the missing-file usage error ([#100]).
 - A thought chunk recalled with `--recall-kinds thought` no longer replays
   the reply that produced it: its alias stays with that step's turn, so
   step recall and the `recall` tool return it only after the turn left the
@@ -601,6 +644,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- Gateway and console sessions no longer offer `shell_exec`: both run in the
+  new `gateway` tool mode, which registers `file_read`, `file_write` and
+  `python_exec` only: `/v1` and the workspace have no approval policy, and
+  the console's approvals arrive over the same unauthenticated loopback API,
+  so any local process could approve its own request. `AgentOptions` gains `mode` (`direct`,
+  `interactive`, `gateway` or `python`; `python` is the API default) and the
+  CLI sets its own surface's mode; the interactive UI keeps `shell_exec`
+  behind its existing approval panel, and direct mode is unchanged in this
+  release. The six-pattern command blocklist still applies to `direct` and
+  `python` mode, so a Python caller that passes no `approval=` is not weaker
+  than before: the `python` mode, like `direct`, refuses `rm -rf /`, `mkfs`,
+  `dd if=`, fork bombs, `shutdown` and `reboot` with or without a policy;
+  the interactive UI asks its panel instead. A gateway or
+  console session cannot be given `shell_exec` by the default set; an
+  explicit `AgentOptions(builtins=…)` still names it, and the checker then
+  refuses the call in `gateway` mode with the mode and `--builtins all` in
+  the reason ([#104]).
 - Secrets no longer stay in stored memory. `tasks.query` and `tasks.result`,
   `steps.thought`, a tool call's arguments and a tool result's output and
   error, and the text long-term memory keeps (each step's summary and the
@@ -691,3 +751,7 @@ earlier milestones.
 [#96]: https://github.com/localmelo/localmelo/pull/96
 [#90]: https://github.com/localmelo/localmelo/pull/90
 [#97]: https://github.com/localmelo/localmelo/pull/97
+[#100]: https://github.com/localmelo/localmelo/pull/100
+[#101]: https://github.com/localmelo/localmelo/pull/101
+[#103]: https://github.com/localmelo/localmelo/pull/103
+[#104]: https://github.com/localmelo/localmelo/pull/104

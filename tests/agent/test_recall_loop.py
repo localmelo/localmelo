@@ -766,9 +766,8 @@ async def test_a_long_entry_is_recalled_once_while_its_block_is_shown() -> None:
     )
 
 
-async def test_the_block_is_fitted_with_the_recorded_latency() -> None:
+async def test_the_block_bytes_do_not_carry_the_recording_latency() -> None:
     from localmelo.melo.agent.agent import _RunState
-    from localmelo.melo.memory import recall as library
     from localmelo.melo.memory.retrieval.base import Hit, RetrievalResult
 
     class NoClock:
@@ -786,29 +785,31 @@ async def test_the_block_is_fitted_with_the_recorded_latency() -> None:
         _options(reasoning="compress", retriever="bm25", max_steps=1),
     )
     assert agent.load_notes([_entry("n0", "plan: the answer is 42")]) == 1
-    seen: list[int] = []
 
-    def spy(items: Any, **kwargs: Any) -> Any:
-        seen.append(kwargs["ms"])
-        return library.fit_recall_block(items, **kwargs)
-
-    try:
+    async def recall_at(clock: list[float]) -> tuple[Any, str]:
         with (
             mock.patch.object(agent, "_get_retriever", return_value=NoClock()),
             mock.patch(
                 "localmelo.melo.agent.agent.time.perf_counter",
-                side_effect=[100.0, 102.345],
+                side_effect=clock,
             ),
-            mock.patch("localmelo.melo.agent.agent.fit_recall_block", spy),
         ):
-            _record, block, _hits = await agent._run_recall(
+            record, block, _hits = await agent._run_recall(
                 "step", "the answer 42", _RunState(task_id="t")
             )
+        assert record is not None
+        return record, block
+
+    try:
+        slow, slow_block = await recall_at([100.0, 102.345])
+        fast, fast_block = await recall_at([200.0, 200.001])
     finally:
         await agent.close()
-    # The fit sees the 2,345 ms the block is rendered with, not 0.
-    assert seen == [2_345]
-    assert "2345 ms" in block
+    # The latency stays in the record, but the prompt bytes are stable.
+    assert (slow.ms, fast.ms) == (2_345, 1)
+    assert slow_block == fast_block
+    assert "(retriever bm25)" in slow_block
+    assert " ms" not in slow_block.splitlines()[0]
 
 
 async def test_the_long_search_asks_the_store_for_the_pool() -> None:

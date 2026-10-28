@@ -10,6 +10,7 @@ import time
 
 import pytest
 
+from localmelo.support.config import Config, LocalBackendConfig
 from localmelo.support.gateway.session import (
     Session,
     SessionBusyError,
@@ -207,6 +208,26 @@ class TestSessionManager:
 
 
 # ── Per-session serialization test ──
+
+
+class TestTheAgentsASessionBuilds:
+    @pytest.mark.asyncio
+    async def test_a_gateway_session_registers_no_shell_exec(self) -> None:
+        cfg = Config(
+            chat_backend="mlc",
+            embedding_backend="none",
+            mlc=LocalBackendConfig(
+                chat_url="http://127.0.0.1:9/v1", chat_model="stub-model"
+            ),
+        )
+        manager = SessionManager(config=cfg)
+        agent = manager._create_agent()
+        try:
+            names = {tool.name for tool in agent.list_tools()}  # type: ignore[attr-defined]
+            assert "shell_exec" not in names
+            assert {"file_read", "file_write", "python_exec"} <= names
+        finally:
+            await agent.close()
 
 
 class TestSessionSerialization:

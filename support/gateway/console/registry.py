@@ -124,7 +124,7 @@ async def default_builder(
         base_url=None,
         model=None,
         workspace=workspace,
-        options=AgentOptions(),
+        options=AgentOptions(mode="gateway"),
         wrap_llm=None if llm is None else (lambda inner: GatedLLM(inner, llm)),
         wrap_embedding=(
             None if llm is None else (lambda inner: GatedEmbedding(inner, llm))

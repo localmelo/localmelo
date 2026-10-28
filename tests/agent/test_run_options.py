@@ -189,6 +189,28 @@ class TestBuiltinSelection:
         assert _tool_names(agent) == builtin_names()
         assert set(agent.executor._callables) == builtin_names()
 
+    def test_direct_mode_keeps_every_builtin_in_p13a(self) -> None:
+        agent = Agent(llm=FakeLLM(), options=AgentOptions(mode="direct"))
+        assert _tool_names(agent) == builtin_names()
+        # P13a's direct JSON line has no `mode` key yet.
+        assert "mode" not in agent._run_config()
+
+    def test_the_gateway_mode_registers_no_shell(self) -> None:
+        agent = Agent(llm=FakeLLM(), options=AgentOptions(mode="gateway"))
+        expected = builtin_names() - {"shell_exec"}
+        assert _tool_names(agent) == expected
+        assert set(agent.executor._callables) == expected
+        config = agent._run_config()
+        assert config["builtins"] == sorted(expected)
+        assert config["tools"] == sorted(expected)
+
+    def test_an_explicit_set_wins_over_the_mode(self) -> None:
+        agent = Agent(
+            llm=FakeLLM(),
+            options=AgentOptions(mode="gateway", builtins=frozenset({"shell_exec"})),
+        )
+        assert _tool_names(agent) == {"shell_exec"}
+
     @pytest.mark.parametrize(
         "selected",
         [

@@ -17,9 +17,12 @@ import pytest
 from localmelo.melo.memory import notes
 from localmelo.melo.memory.notes import (
     DRAFT_WRITTEN_SHARE,
+    TASK_SOURCE_RECORD_LIMIT,
     Draft,
     ReasoningNote,
+    SourceRecordLog,
     ThoughtChunk,
+    candidate_items,
     digest_note,
     draft_coverage,
     draft_title,
@@ -821,6 +824,153 @@ def test_source_ids_skip_built_ins_and_failed_calls() -> None:
     failed = ToolResult("search", '[{"id": "a"}]', error="boom")
     note = _note([search], [failed])
     assert (note.source_ids, note.observed) == ([], ["search: Error: boom"])
+
+
+# ── T62: an item's source is its own or an earlier observation ──
+
+FACT = "Yoga starts 2026-04-11T09:00:00-04:00 at Studio Verde."
+UNRELATED = "The cafeteria serves lunch at noon."
+
+
+def _record(record_id: str, text: str) -> str:
+    return json.dumps({"record_id": record_id, "text": text})
+
+
+def _item_note(
+    *,
+    found: str = FACT,
+    own: tuple[str, str] | None = None,
+    window: tuple[str, ...] = (),
+    task: tuple[str, ...] = (),
+    prior_text: str = FACT,
+) -> ReasoningNote:
+    calls = [ToolCall("search", {})] if own else []
+    results = [ToolResult("search", _record(*own))] if own else []
+    note, _ = note_from_reply(
+        f"<note>found: {found}</note>",
+        "",
+        calls,
+        results,
+        window_records=[(rid, _record(rid, prior_text)) for rid in window],
+        task_records=[(rid, _record(rid, prior_text)) for rid in task],
+    )
+    return note
+
+
+def test_an_item_sources_its_own_pairs_before_earlier_results() -> None:
+    note = _item_note(own=("own", FACT), window=("w1",), task=("t1",))
+    assert [item.source_ids for item in candidate_items(note)] == [("own",)]
+
+
+def test_an_item_sources_the_window_before_the_rest_of_the_task() -> None:
+    note = _item_note(own=("own", UNRELATED), window=("w1",), task=("t1",))
+    assert [item.source_ids for item in candidate_items(note)] == [("w1",)]
+
+
+def test_an_item_sources_the_rest_of_the_task_newest_first() -> None:
+    note = _item_note(own=("own", UNRELATED), task=("t-new", "t-old"))
+    assert [item.source_ids for item in candidate_items(note)] == [("t-new",)]
+
+
+def test_an_unrelated_earlier_record_is_not_attached() -> None:
+    note = _item_note(
+        window=("w1",),
+        task=("t1",),
+        prior_text=UNRELATED,
+    )
+    assert note.source_records == []
+    assert [item.source_ids for item in candidate_items(note)] == [()]
+
+
+def test_a_filler_word_does_not_source_an_earlier_record() -> None:
+    note = _item_note(
+        found="Done.",
+        window=("w1",),
+        task=("t1",),
+        prior_text="The task is complete; no harm done.",
+    )
+    assert note.source_records == []
+    assert [item.source_ids for item in candidate_items(note)] == [()]
+
+
+def test_a_filler_word_does_not_source_the_replys_own_record() -> None:
+    note = _item_note(
+        found="Done.",
+        own=("own", "The task is complete; no harm done."),
+    )
+    assert [record_id for record_id, _text in note.source_records] == ["own"]
+    assert [item.source_ids for item in candidate_items(note)] == [()]
+
+
+def test_the_yoga_fact_still_sources_its_record() -> None:
+    note = _item_note(window=("rec-yoga",))
+    assert [item.source_ids for item in candidate_items(note)] == [("rec-yoga",)]
+
+
+def test_one_plain_shared_word_is_not_enough() -> None:
+    note = _item_note(
+        found="alpha beta gamma",
+        window=("w1",),
+        prior_text="alpha only",
+    )
+    assert [item.source_ids for item in candidate_items(note)] == [()]
+
+
+def test_two_distinctive_words_source_a_record() -> None:
+    note = _item_note(
+        found="alpha beta gamma",
+        window=("w1",),
+        prior_text="alpha and beta",
+    )
+    assert [item.source_ids for item in candidate_items(note)] == [("w1",)]
+
+
+def test_a_non_initial_name_is_a_strong_key() -> None:
+    note = _item_note(
+        found="the discount applies at Main Street",
+        window=("w1",),
+        prior_text="Main Street has a sale",
+    )
+    assert [item.source_ids for item in candidate_items(note)] == [("w1",)]
+
+
+def test_an_identifier_with_a_digit_is_a_strong_key() -> None:
+    note = _item_note(
+        found="deploy build2 to staging",
+        window=("w1",),
+        prior_text="build2 failed at noon",
+    )
+    assert [item.source_ids for item in candidate_items(note)] == [("w1",)]
+
+
+def test_a_sentence_initial_name_alone_is_not_a_strong_key() -> None:
+    note = _item_note(
+        found="Yoga is a practice",
+        window=("w1",),
+        prior_text="Yoga mats are sold here",
+    )
+    assert [item.source_ids for item in candidate_items(note)] == [()]
+
+
+def test_the_task_record_log_keeps_only_its_last_records_newest_first() -> None:
+    assert TASK_SOURCE_RECORD_LIMIT == 200
+    log = SourceRecordLog(limit=3)
+    log.add("c1", [("a", "a"), ("b", "b")])
+    log.add("c2", [("c", "c"), ("d", "d")])
+    assert log.count == 3
+    window, rest = log.earlier({"c2"})
+    assert window == [("c", "c"), ("d", "d")]
+    assert rest == [("b", "b")]
+
+
+def test_a_digest_keeps_the_records_behind_its_notes_items() -> None:
+    note = ReasoningNote(
+        found=[FACT],
+        stage="rehearsed",
+        source_records=[("r1", _record("r1", FACT))],
+    )
+    digest = digest_note("q", "done", [note])
+    assert digest.source_ids == ["r1"]
 
 
 # ── render_note and note_title ───────────────────────────────────────────────

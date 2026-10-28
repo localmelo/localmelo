@@ -1361,6 +1361,9 @@ def main() -> None:
     if args.query and not args.serve:
         query = " ".join(args.query)
         options = _direct_options(parser, args)
+        # The surface is known here: direct mode keeps its default set and
+        # its six-pattern blocklist through P13a.
+        options = dataclasses.replace(options, mode="direct")
         if not query:
             # The loop keeps its answers, so each turn sees the earlier ones; a
             # single task's options stay as they were.
@@ -1385,6 +1388,8 @@ def main() -> None:
     # libraries are imported here only, never by direct mode.
     if not args.serve:
         options = _direct_options(parser, args)
+        # The UI asks before an exec call, so it keeps shell_exec.
+        options = dataclasses.replace(options, mode="interactive")
         from localmelo.support import cli as ui
 
         # Without a terminal the UI refuses: no folder is made for it.

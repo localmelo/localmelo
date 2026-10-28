@@ -62,7 +62,10 @@ class SessionManager:
         if self._config is None:
             raise RuntimeError("SessionManager requires a config to create agents")
         # A session keeps its answers, so a follow-up sees them (#37's option).
-        return Agent(config=self._config, options=AgentOptions(record_answers=True))
+        return Agent(
+            config=self._config,
+            options=AgentOptions(record_answers=True, mode="gateway"),
+        )
 
     def get(self, session_id: str) -> Session | None:
         s = self._sessions.get(session_id)
