@@ -662,19 +662,32 @@ _NEGATION_MARKERS = _english(
     r"no\s+longer",
     r"cancel+ed",
     r"cancel+ing",
+    r"(?:is|are|was|were|do|does|did|can|could|will|would|should)n['’]t",
+    "cannot",
 )
+_CJK_NEGATION = ("不再", "取消", "没有", "不是", "不在", "未", "没")
+
+
+def has_negative_assertion(text: str) -> bool:
+    """Conservative polarity signal for admission and source matching, not a parser."""
+    return bool(_NEGATION_MARKERS.search(text)) or any(
+        word in text for word in _CJK_NEGATION
+    )
+
+
 _CJK_ASSERTION = re.compile(
-    r"^[一-鿿]{2,12}(?:已取消|取消了|不再住在[一-鿿]{2,12}|住在[一-鿿]{2,12})[。.!]?$"
+    r"^[一-鿿]{2,12}(?:已取消|取消了|不再住在[一-鿿]{2,12}|住在[一-鿿]{2,12})[。.!！]?$"
 )
 _EN_NEGATIVE_ASSERTION = re.compile(
-    r"^[A-Za-z][^?！!]*\b(?:is not|are not|was not|were not|does not|did not|"
-    r"no longer|was cancelled|was canceled|is cancelled|is canceled)\b[^?！!]*$",
+    r"^[A-Za-z][^?？!！]*\b(?:is not|are not|was not|were not|does not|did not|"
+    r"no longer|was cancelled|was canceled|is cancelled|is canceled)\b[^?？!！]*[!！]?$",
     re.IGNORECASE,
 )
 _UNCERTAIN_ASSERTION = re.compile(
-    r"\b(?:if|unless|whether|may|might|could|not only|not\s+cancel+ed)\b|如果|假如|是否|不但|不仅|可能|也许",
+    r"\b(?:if|unless|whether|when|may(?!\s+\d{1,2}\b)|might|could|not only|not\s+(?:not|cancel+ed))\b|如果|假如|是否|不但|不仅|可能|也许",
     re.IGNORECASE,
 )
+_QUOTED = re.compile(r"""["“”‘’]|'[^']+\x27""")
 
 
 def _is_plan(sentence: str) -> bool:
@@ -691,10 +704,10 @@ def _eligible_fact(sentence: str) -> bool:
     if _NEGATION_MARKERS.search(sentence):
         return (
             len(sentence) <= NOTE_ITEM_CHARS
-            and not any(char in sentence for char in '"“”')
+            and not _QUOTED.search(sentence)
             and bool(_EN_NEGATIVE_ASSERTION.fullmatch(sentence))
         )
-    if any(marker in sentence for marker in ("不再", "取消", "没有", "不是")):
+    if any(marker in sentence for marker in _CJK_NEGATION):
         return bool(_CJK_ASSERTION.fullmatch(sentence))
     return True
 
@@ -2395,12 +2408,13 @@ def _item_source_ids(item: str, records: Sequence[tuple[str, str]]) -> list[str]
     best_score = 0
     tied = False
     # Shared dates or names alone cannot establish a denial.
-    negative = bool(_NEGATION_MARKERS.search(item)) or any(
-        marker in item for marker in ("取消", "不再", "没有", "不是")
-    )
+    negative = has_negative_assertion(item)
     assertion = _collapse(item).lower().rstrip(".。!！ ")
     for record_id, text in records:
-        # Abstain unless the complete negative assertion is present.
+        # Opposite polarity is not evidence, in either direction. This is
+        # deliberately conservative for records with several statements.
+        if negative != has_negative_assertion(text):
+            continue
         if negative and assertion not in _collapse(text).lower():
             continue
         score = _item_score(keys, text)

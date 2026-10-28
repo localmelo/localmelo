@@ -16,8 +16,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - Heuristic notes retain a bounded set of explicit English negative and Chinese
   residence/cancellation assertions, and item attribution rejects conflicting
-  event times and requires the full negative assertion ([#NN]). Admission is
-  not yet polarity-aware.
+  event times, rejects opposing detected polarity and requires the full negative
+  assertion ([#NN]). Similar opposing assertions are retained as conflicts;
+  structured polarity-aware supersession is not yet implemented.
 
 - Opt-in context-window request accounting reports estimated and measured planning/reflection
   tokens in events and run results; it does not prune or enforce an output cap ([#126]).

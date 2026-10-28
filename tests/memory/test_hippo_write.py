@@ -348,6 +348,31 @@ async def test_heuristic_nonfacts_are_not_admitted_with_user_signal(text: str) -
     assert await store.count_entries() == 0
 
 
+@pytest.mark.parametrize(
+    "positive,negative",
+    [
+        ("The meeting is at 20:00.", "The meeting is not at 20:00."),
+        (
+            "会议在20:00举行，请大家注意时间安排。",
+            "会议不在20:00举行，请大家注意时间安排。",
+        ),
+    ],
+)
+@pytest.mark.parametrize("reverse", [False, True])
+async def test_opposite_polarities_are_never_duplicates(
+    positive: str, negative: str, reverse: bool
+) -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    first, second = (negative, positive) if reverse else (positive, negative)
+    hippo.propose(_candidate(first, candidate_id="a"))
+    await hippo.admit("a", "rehearsal")
+    hippo.propose(_candidate(second, candidate_id="b"))
+    decisions = await hippo.admit("b", "rehearsal")
+    assert decisions[0].action != "IGNORE"
+    assert {entry.text for entry in await store.active_entries()} == {first, second}
+
+
 async def test_explicit_negative_fact_is_admitted_without_losing_negation() -> None:
     from localmelo.melo.memory.notes import note_from_reply
 

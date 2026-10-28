@@ -61,7 +61,9 @@ characters. The uniquely best score wins; equal top scores cite nothing.
 Each matching typed key adds to the score; conflicting dates, years when
 both are present, currencies, phone numbers or event times reject a record.
 For JSON records, time comparison uses body, text, notes, start and end, not
-message timestamps. A negative item must appear in full in the record (apart
+message timestamps. A polarity mismatch rejects a record in either direction;
+the detector is heuristic and may also reject records with unrelated negative
+clauses. A negative item must appear in full in the record (apart
 from final punctuation), or it is left unsourced; paraphrases can be missed.
 Other matching remains heuristic and is not verified evidence. Amounts retain
 their unit or currency. A strong key is a date, a time with a colon or am/pm,
