@@ -34,6 +34,15 @@ melo "What is 6*7?"
   recall must be enabled and include the `long` kind; `drop` and `replay`
   leave `auto` recall off by default.
 
+## Experimental typed facts
+
+Python callers can enable `AgentOptions(typed_assertions=True)` in an explicit
+reasoning mode. This opt-in retains supported short facts and can preserve an
+older assertion as labelled history when a verified, ordered change replaces it.
+Ambiguous or unlinked facts are not silently linked. The parser and source check
+are conservative and incomplete; recall is relevance-limited. See the
+[typed assertions reference](../reference/memory.md#experimental-typed-assertions).
+
 ## Turn long-term memory off
 
 `--memory off`, or `AgentOptions(memory=False)` in Python, turns long-term

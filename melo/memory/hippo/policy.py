@@ -24,6 +24,10 @@ from localmelo.melo.memory.notes import (
 
 ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE")
 
+# The reason for an IGNORE of identical text. Under the typed-assertion gate only this
+# IGNORE stands; a near-duplicate with different content is kept as a distinct note.
+EXACT_DUPLICATE_REASON = "exact duplicate"
+
 # A short fact is noise: fewer than this many normalised characters.
 MIN_FACT_CHARS = 20
 
@@ -616,7 +620,11 @@ def decide(
                 kind=kind,
                 subject=subject,
                 target_id=target_id,
-                reason=f"overlap {target.overlap:.2f}; duplicate",
+                reason=(
+                    EXACT_DUPLICATE_REASON
+                    if normalise(other_text) == folded
+                    else f"overlap {target.overlap:.2f}; near-duplicate"
+                ),
                 overlap=target.overlap,
                 cosine=target.cosine,
             )

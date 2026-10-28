@@ -490,7 +490,12 @@ def test_fixed_prefix_preserves_option_positional_order() -> None:
 
     names = [item.name for item in fields(AgentOptions)]
     assert names[0] == "context_window"
-    assert names[-3:] == ["mode", "fixed_prefix", "captured_history"]
+    assert names[-4:] == [
+        "mode",
+        "fixed_prefix",
+        "captured_history",
+        "typed_assertions",
+    ]
 
 
 def test_local_date_line_includes_local_offset(monkeypatch: pytest.MonkeyPatch) -> None:
