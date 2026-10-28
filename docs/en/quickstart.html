@@ -376,8 +376,9 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
           browser tabs on the same gateway see the same chats. Approval cards
           let you allow or deny tool calls; the settings dialog configures the
           connection. The Workers section shows saved worker runs read-only.
-          The gateway has no login, and approvals are not a security boundary
-          against other local processes.
+          The gateway requires authentication; use <code>melo --gateway-login</code>
+          to sign in. Approvals are not a security boundary against same-user
+          processes or other localhost services.
         </p>
       </section>
 

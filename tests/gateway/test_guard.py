@@ -217,6 +217,7 @@ def _build_gateway(
             embedding_model="e",
         ),
         gateway=GatewayConfig(port=port, host=host),
+        _enable_playground=True,
     )
     server = GatewayServer(
         cfg,
@@ -838,10 +839,24 @@ def test_the_standalone_playground_server_is_guarded(
     # python -m localmelo.support.gateway._test_webapp serves the same
     # playground routes, which run tasks with tools.
     playground = RecordingPlayground()
+    monkeypatch.setattr(
+        "localmelo.support.config.load",
+        lambda: Config(
+            chat_backend="mlc",
+            embedding_backend="none",
+            mlc=LocalBackendConfig(chat_url="http://llm.test/v1", chat_model="m"),
+        ),
+    )
     server = _standalone_playground_server(monkeypatch, playground)
     assert server.PORT == PORT
-    client = TestClient(server.app, base_url=GATEWAY)
-    body = {"chat_url": "http://evil.example/v1", "chat_model": "m"}
+    client = TestClient(
+        server.app,
+        base_url=GATEWAY,
+        headers={
+            "Authorization": "Bearer " + server.server.auth.read_token().decode("ascii")
+        },
+    )
+    body: dict[str, str] = {}
 
     resp = client.post(
         "/v1/playground/session", json=body, headers={"Host": FOREIGN_HOST}
