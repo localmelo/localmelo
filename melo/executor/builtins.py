@@ -93,7 +93,14 @@ def builtin_names() -> frozenset[str]:
     )
 )
 async def _shell_exec(command: str) -> str:
-    text, _ = await _run_shell(command)
+    # /dev/null, never this process's stdin: a shell whose stdin is a
+    # terminal that is not its controlling one (the pty slave of
+    # pty.openpty(), melo started with start_new_session) opens
+    # ttyname(stdin) without O_NOCTTY in its start-up check and takes it as
+    # its controlling terminal; when the shell exits, the pty is hung up
+    # and melo's own streams return EIO, so the flush at exit turns 0 into
+    # 120.  The rooted shell_exec passes /dev/null too.
+    text, _ = await _run_shell(command, stdin=subprocess.DEVNULL)
     return text
 
 

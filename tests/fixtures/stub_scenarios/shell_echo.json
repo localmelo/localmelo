@@ -1,0 +1,7 @@
+{
+  "match": ["run echo hi"],
+  "replies": [
+    {"tool_calls": [{"name": "shell_exec", "arguments": {"command": "echo hi"}}]},
+    {"content": "Ran echo hi."}
+  ]
+}

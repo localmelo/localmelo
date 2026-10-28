@@ -631,6 +631,20 @@ async def test_the_shell_starts_in_the_root_with_no_input(
     assert inherited == "read: 0"
 
 
+async def test_the_shell_tool_never_reads_this_process_stdin() -> None:
+    """Without a root too, ``shell_exec`` reads /dev/null.
+
+    A shell whose stdin is this process's terminal can take that terminal
+    as its controlling terminal at start-up (bash's ``check_dev_tty`` opens
+    ``ttyname(stdin)`` without ``O_NOCTTY``) and hang it up when it exits;
+    the flush at exit then fails and melo ends a completed run with 120.
+    """
+    read = 'read line; echo "read: $?"'
+    with _stdin_holding(b"hello\n"):
+        output = await asyncio.wait_for(builtin_tools._shell_exec(read), 10.0)
+    assert output == "read: 1"
+
+
 async def test_a_cwd_argument_never_runs(root: Path) -> None:
     executor = _executor(root)
     asked: list[ExecutionRequest] = []
