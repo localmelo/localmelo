@@ -2,8 +2,9 @@
 
 This foundation does not write generated pages into the repository. The
 manifest currently inventories old pages; missing Chinese sources are not
-fabricated. Markdown is untrusted: raw HTML is escaped and unsafe URLs are
-rendered as text, not links. Python 3.11+, markdown-it-py 4.2.0 (MIT).
+fabricated. Markdown is untrusted: raw HTML is escaped except for standalone
+ID anchors, and unsafe URLs are rendered as text. Python 3.11+, markdown-it-py
+4.2.0 (MIT).
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import html
 import json
 import os
 import posixpath
+import re
 import shutil
 import tempfile
 import unicodedata
@@ -64,6 +66,16 @@ def _parser(rewrite: Callable[[str], str] | None = None) -> MarkdownIt:
     def headings_and_links(state: Any) -> None:
         used: set[str] = set()
         for index, token in enumerate(state.tokens):
+            if (
+                token.type == "inline"
+                and index > 0
+                and state.tokens[index - 1].type == "paragraph_open"
+                and re.fullmatch(r'<a id="[\w-]+"></a>', token.content)
+                and len(token.children or []) == 1
+                and token.children[0].type == "text"
+            ):
+                token.children[0].type = "html_inline"
+                token.children[0].content = token.content
             if token.type == "heading_open":
                 inline = state.tokens[index + 1]
                 text = "".join(
@@ -97,7 +109,7 @@ def _parser(rewrite: Callable[[str], str] | None = None) -> MarkdownIt:
 
 
 def render_markdown(markdown: str) -> str:
-    """Render tables, code and headings with safe links and escaped HTML."""
+    """Render Markdown safely, including standalone explicit ID anchors."""
     return cast(str, _parser().render(markdown))
 
 

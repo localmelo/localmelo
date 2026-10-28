@@ -1419,6 +1419,33 @@ def test_digest_names_the_files_written_and_the_last_check(tmp_path: Path) -> No
     assert digest.verified == ""
 
 
+def test_digest_excludes_hidden_and_agent_note_files(tmp_path: Path) -> None:
+    calls = [
+        (ToolCall("file_write", {"path": path}), ToolResult("file_write", "written"))
+        for path in (
+            ".memory_note.md",
+            "memory_note.md",
+            ".private/output.py",
+            "visible.py",
+            "src/.hidden.py",
+        )
+    ]
+    assert digest_note("q", calls=calls, root=str(tmp_path)).files == ["visible.py"]
+
+
+def test_digest_never_uses_output_code_as_a_check_result() -> None:
+    write = ToolCall("file_write", {"path": "transpose.py", "content": "x"})
+    check = ToolCall("python_exec", {"code": 'open("transpose.py").read()'})
+    digest = digest_note(
+        "q",
+        calls=[
+            (write, ToolResult("file_write", "written")),
+            (check, ToolResult("python_exec", 'return "\\n".join(cols)')),
+        ],
+    )
+    assert digest.verified == "python check -> completed"
+
+
 def test_a_program_run_requires_an_earlier_write_and_success() -> None:
     run = ToolCall("shell_exec", {"command": "python transpose.py"})
     write = ToolCall("file_write", {"path": "transpose.py", "content": "x"})
@@ -1426,7 +1453,7 @@ def test_a_program_run_requires_an_earlier_write_and_success() -> None:
     output = ToolResult("shell_exec", "loading\nall rows transposed")
     assert digest_note("q", calls=[(run, output)]).verified == ""
     digest = digest_note("q", calls=[(write, wrote), (run, output)])
-    assert digest.verified == "python transpose.py -> all rows transposed"
+    assert digest.verified == "python transpose.py -> completed"
     exited = ToolResult("shell_exec", "[exit code 1]\nTraceback: boom")
     assert digest_note("q", calls=[(write, wrote), (run, exited)]).verified == ""
 
@@ -1472,6 +1499,61 @@ def test_digest_verification_rejects_trivial_import_and_failing_tests() -> None:
     ).verified
 
 
+@pytest.mark.parametrize(
+    ("code", "output", "expected"),
+    [
+        ("import unittest\nunittest.main()", "Ran 8 tests\nOK", "python unittest"),
+        (
+            "import unittest\nunittest.TextTestRunner().run(suite)",
+            "Ran 2 tests\nOK",
+            "python unittest",
+        ),
+        (
+            'import pytest\npytest.main(["-q", "tests/test_example.py::test_one"])',
+            "1 passed",
+            "python pytest test_example.py::test_one",
+        ),
+        ("import pytest\npytest.main(targets)", "1 passed", "python pytest"),
+        (
+            'import pytest\npytest.main(["/Users/alice/private-case-123"])',
+            "1 passed",
+            "python pytest",
+        ),
+        (
+            'import pytest\npytest.main(["tests/test_api_key.py"])',
+            "1 passed",
+            "python pytest",
+        ),
+    ],
+)
+def test_digest_python_runner_labels(code: str, output: str, expected: str) -> None:
+    call = ToolCall("python_exec", {"code": code})
+    digest = digest_note("q", calls=[(call, ToolResult("python_exec", output))])
+    assert digest.verified.startswith(f"{expected} -> ")
+
+
+def test_digest_python_check_fallback_and_runpy() -> None:
+    write = ToolCall("file_write", {"path": "example.py", "content": "x"})
+    wrote = ToolResult("file_write", "written")
+    check = ToolCall(
+        "python_exec", {"code": 'print("unrelated first line")\nopen("example.py")'}
+    )
+    result = ToolResult("python_exec", "done")
+    assert digest_note("q", calls=[(write, wrote), (check, result)]).verified == (
+        "python check -> completed"
+    )
+    runpy = ToolCall(
+        "python_exec", {"code": 'import runpy\nrunpy.run_path("example.py")'}
+    )
+    assert digest_note("q", calls=[(write, wrote), (runpy, result)]).verified == (
+        "python runpy example.py -> completed"
+    )
+    failed = ToolResult("python_exec", "Traceback: failed")
+    assert not digest_note(
+        "q", calls=[(write, wrote), (check, result), (runpy, failed)]
+    ).verified
+
+
 def test_written_test_file_passes_and_failed_checks_do_not() -> None:
     write = ToolCall(
         "file_write", {"path": "test_example.py", "content": "def test_one(): pass"}
@@ -1513,7 +1595,7 @@ def test_digest_written_module_import(code: str, matched: bool, tmp_path: Path) 
     digest = digest_note("q", calls=calls, root=str(tmp_path))
     assert bool(digest.verified) is matched
     if matched:
-        assert digest.verified == "python import proverb -> pass"
+        assert digest.verified == "python import proverb -> completed"
     calls[-1] = (run, ToolResult("python_exec", "Traceback (most recent call last):"))
     assert not digest_note("q", calls=calls, root=str(tmp_path)).verified
 

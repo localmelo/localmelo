@@ -108,7 +108,17 @@ def client_for(app: FastAPI) -> httpx.AsyncClient:
 def make_app(manager: SmokePlayground) -> FastAPI:
     app = FastAPI()
     app.state.smoke_playground = manager
-    webapp.mount(app)
+    cfg = Config(
+        chat_backend="mlc",
+        embedding_backend="mlc",
+        mlc=LocalBackendConfig(
+            chat_url=CHAT_URL,
+            chat_model="Qwen-27B",
+            embedding_url=CHAT_URL,
+            embedding_model="embed",
+        ),
+    )
+    webapp.mount(app, cfg, enable_playground=True)
     return app
 
 
@@ -468,7 +478,7 @@ async def test_the_playground_reads_the_scheduler_config(
         SmokePlayground, "_build_llm_provider", lambda self, *args: FakeLLM()
     )
     app = FastAPI()
-    webapp.mount(app, _scheduler_cfg(tmp_path / "scheduler"))
+    webapp.mount(app, _scheduler_cfg(tmp_path / "scheduler"), enable_playground=True)
     manager = app.state.smoke_playground
     try:
         assert manager._gate.policy == "fcfs"
@@ -508,7 +518,7 @@ async def test_call_log_false_disables_the_file(
     cfg = _scheduler_cfg(tmp_path / "scheduler")
     cfg.scheduler.call_log = False
     app = FastAPI()
-    webapp.mount(app, cfg)
+    webapp.mount(app, cfg, enable_playground=True)
     manager = app.state.smoke_playground
     try:
         assert manager._gate.call_log_path is None
@@ -726,7 +736,7 @@ async def test_the_playground_reads_lock_settings_and_starts_the_monitor(
     )
     monkeypatch.setattr(webapp, "read_pmset", fake_battery)
     app = FastAPI()
-    webapp.mount(app, cfg)
+    webapp.mount(app, cfg, enable_playground=True)
     manager = app.state.smoke_playground
     await manager.start()
     try:
@@ -850,12 +860,7 @@ async def test_a_create_that_would_seed_under_a_foreign_lock_returns_409_and_sen
         async with client_for(app) as client:
             response = await client.post(
                 "/v1/playground/session",
-                json={
-                    "chat_url": CHAT_URL,
-                    "chat_model": "Qwen-27B",
-                    "embedding_model": "embed",
-                    "scenario_id": "personal_preference",
-                },
+                json={"scenario_id": "personal_preference"},
             )
         assert response.status_code == 409
         assert "agent-benchmark session" in response.json()["error"]
