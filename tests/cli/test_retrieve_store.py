@@ -135,6 +135,35 @@ def test_route_redacts_the_provenance_and_the_export_shows_it(
     assert rows[0]["provenance"]["task_text"] == "deploy with [redacted]"
 
 
+def test_route_carries_an_optional_task_key_for_digests(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    directory = tmp_path / "m"
+    row = {
+        **CANDIDATES[0],
+        "source": "digest",
+        "signal": "rehearsal",
+        "text": "task: fix the parser\nfiles: parser.py",
+        "task_key": "a" * 64,
+    }
+    candidates = _candidates(tmp_path / "c.jsonl", [row])
+    assert retrieve.main(["--route", candidates, "--memory-dir", str(directory)]) == 0
+    capsys.readouterr()
+    assert retrieve.main(["--export-store", str(directory)]) == 0
+    rows = _lines(capsys)
+    assert rows[0]["provenance"]["task_key"] == "a" * 64
+
+
+def test_route_refuses_a_non_string_task_key(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    candidates = _candidates(tmp_path / "c.jsonl", [{**CANDIDATES[0], "task_key": 3}])
+    assert (
+        retrieve.main(["--route", candidates, "--memory-dir", str(tmp_path / "m")]) == 2
+    )
+    assert "task_key must be a string" in capsys.readouterr().err
+
+
 def test_export_decisions_prints_seq_order_and_text_null_by_default(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -169,6 +169,9 @@ async def test_replay_usage_adds_reasoning_and_reported_details() -> None:
         "recalls": 0,
         "recalls_by_trigger": {"start": 0, "attempt": 0, "step": 0, "tool": 0},
         "recall_hits": 0,
+        "recall_same_task": 0,
+        "recall_cross_task": 0,
+        "recall_task_notes": 0,
         "recall_chars": 0,
         "recall_ms": 0,
         "recall_fallbacks": 0,
@@ -196,7 +199,7 @@ async def test_replay_usage_adds_reasoning_and_reported_details() -> None:
         },
         "ignored": 0,
     }
-    assert list(result.config)[-12:] == [
+    assert list(result.config)[-15:] == [
         "reasoning",
         "replay_turns",
         "note_writer",
@@ -207,6 +210,9 @@ async def test_replay_usage_adds_reasoning_and_reported_details() -> None:
         "recall_kinds",
         "recall_placement",
         "recall_min_score",
+        "cross_task_ratio",
+        "cross_task_cap",
+        "cross_task_cold",
         "admit_on_outcome",
         "keep_decision_text",
     ]

@@ -346,16 +346,19 @@ directory with no `long_term.db` prints none and exits 0, with
 Each input line is one candidate:
 
 ```json
-{"candidate_id": "n1", "source": "user", "text": "…", "source_ids": ["r1"],
- "signal": "user_statement", "task_id": "t1", "session_id": "",
- "task_text": "plan the move"}
+{"candidate_id": "n1", "source": "digest", "text": "task: fix it\nfiles: a.py",
+ "source_ids": ["r1"], "signal": "rehearsal", "task_id": "t1",
+ "session_id": "", "task_text": "plan the move", "task_key": "…"}
 ```
 
 `source` is one of `reasoning_note`, `digest`, `reflection`, `user` or
 `sleep`; `signal` is one of `rehearsal`, `user_request`, `user_statement`,
-`outcome` or `sleep`; an unknown value is exit 2. The candidate goes through
-the same boundary and policy as a run, into a text-only store under
-`--memory-dir`, and one line comes out per input line, in input order:
+`outcome` or `sleep`; an unknown value is exit 2. The optional `task_key`
+string is stored in the candidate's provenance, so a routed digest can carry
+the same key a run's recall looks for; a routed digest without one is
+cross-task. The candidate goes through the same boundary and policy as a run,
+into a text-only store under `--memory-dir`, and one line comes out per input
+line, in input order:
 
 ```json
 {"candidate_id": "n1", "action": "NEW", "kind": "profile",
@@ -363,7 +366,9 @@ the same boundary and policy as a run, into a text-only store under
  "reason": "new", "source_ids": ["r1"]}
 ```
 
-A boundary refusal prints `"action": "REFUSED"` and the reason. `--memory-dir`
+A boundary or admission refusal prints `"action": "REFUSED"` and the reason;
+a digest without a nonempty `files:` or `verified:` line is refused at
+admission. `--memory-dir`
 is required and the command refuses the default `~/.cache/localmelo/memory`
 and the `LOCALMELO_MEMORY_DIR` value (resolved paths); the directory is
 created `0700`. `--route` appends to an existing scratch store rather than

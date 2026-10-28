@@ -55,6 +55,60 @@ async def _apply(
     )
 
 
+@pytest.mark.parametrize("persistent", [False, True])
+async def test_task_filtered_search_uses_the_full_corpus_scores(
+    tmp_path: Path, persistent: bool
+) -> None:
+    store = SqliteLongTerm(tmp_path / "long_term.db") if persistent else LongTerm()
+    try:
+        for i in range(22):
+            await _apply(
+                store,
+                "transpose transpose matrix " + str(i),
+                task_id=f"other{i}",
+                embedding=[1.0, 0.0],
+            )
+        await _apply(
+            store,
+            "transpose matrix",
+            task_id="same",
+            provenance={"task_key": "key"},
+            embedding=[0.8, 0.6],
+        )
+        all_text = await store.search_text("transpose matrix", top_k=100)
+        filtered = await store.search_text("transpose matrix", top_k=1, task_key="key")
+        assert len(filtered) == 1 and filtered[0][2]["task_id"] == "same"
+        assert filtered[0][1] == next(
+            row[1] for row in all_text if row[2]["task_id"] == "same"
+        )
+        vectors = await store.search_embedding(
+            [1.0, 0.0], top_k=1, task_key="key", exclude_task_ids={"excluded"}
+        )
+        assert len(vectors) == 1 and vectors[0][2]["task_id"] == "same"
+    finally:
+        if isinstance(store, SqliteLongTerm):
+            await store.aclose()
+    if persistent:
+        reopened = SqliteLongTerm(tmp_path / "long_term.db")
+        try:
+            rows = await reopened.search_text(
+                "transpose matrix", top_k=1, task_key="key"
+            )
+            assert len(rows) == 1 and rows[0][2]["provenance"]["task_key"] == "key"
+        finally:
+            await reopened.aclose()
+
+
+async def test_in_memory_filtered_search_indexes_its_rows() -> None:
+    store = SqliteLongTerm(":memory:")
+    try:
+        await _apply(store, "Berlin is the capital", kind="semantic")
+        rows = await store.search_text("Berlin", kinds=["semantic"])
+        assert [text for text, _score, _meta in rows] == ["Berlin is the capital"]
+    finally:
+        await store.aclose()
+
+
 async def test_add_keeps_its_signature_and_writes_the_legacy_defaults(
     tmp_path: Path,
 ) -> None:

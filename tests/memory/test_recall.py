@@ -323,6 +323,7 @@ def _hit(
     origin: str = "this task",
     origin_ids: tuple[str, ...] = (TASK,),
     title: str = "",
+    task_relation: str = "same",
 ) -> RecallHit:
     capped = text
     return RecallHit(
@@ -337,6 +338,7 @@ def _hit(
         step=step,
         title=title,
         origin=origin,
+        task_relation=task_relation,
     )
 
 
@@ -655,6 +657,31 @@ def test_compact_record_drops_the_item_text() -> None:
     full = record_to_dict(record)
     assert full["hits"][0]["text"] == "a secret plan"
     assert full["ms"] == 3
+
+
+def test_relation_counts_keep_task_notes_out_of_the_digest_counters() -> None:
+    hits = [
+        _hit("m1", "long", "same-task digest", rank=1, task_relation="same"),
+        _hit("m2", "long", "cross-task digest", rank=2, task_relation="cross"),
+        _hit("m3", "long", "an unscoped fact", rank=3, task_relation="unscoped"),
+        _hit("n1", "note", "a task-local note", rank=4),
+        _hit("d1", "draft", "a task-local draft", rank=5),
+    ]
+    record = RecallRecord(
+        trigger="step",
+        placement="tool",
+        retriever="bm25",
+        query="q",
+        k=5,
+        candidates=5,
+        hits=hits,
+        chars=sum(hit.chars for hit in hits),
+        ms=3,
+    )
+    for data in (compact_record(record), record_to_dict(record)):
+        assert data["same_task"] == 1
+        assert data["cross_task"] == 1
+        assert data["task_notes"] == 2
 
 
 def test_hit_from_doc_keeps_the_declared_alias_and_caps_the_text() -> None:

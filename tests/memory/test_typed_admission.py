@@ -104,7 +104,7 @@ async def test_the_gate_drops_only_an_exact_duplicate(
 ) -> None:
     store: LongTerm = SqliteLongTerm(tmp_path / "long.db") if sqlite else LongTerm()
     hippo = Hippo(long=store, typed_assertions=True)
-    exact = "Quarterly planning review is scheduled for 2026-05-04."
+    exact = "Quarterly planning review is scheduled for 2026-05-04.\nfiles: plan.md"
     shared = [f"token{index}" for index in range(9)]
     try:
         for name in ("a", "b"):
@@ -113,12 +113,43 @@ async def test_the_gate_drops_only_an_exact_duplicate(
         assert decision.action == "IGNORE"
         assert len(await store.active_entries()) == 1
         actions = []
-        near = (" ".join([*shared, "alpha"]), " ".join([*shared, "beta"]))
+        near = (
+            " ".join([*shared, "alpha", "\nfiles: plan.md"]),
+            " ".join([*shared, "beta", "\nfiles: plan.md"]),
+        )
         for name, text in zip(("c", "d"), near, strict=True):
             hippo.propose(MemoryCandidate(name, "digest", text, "rule", "task"))
             actions.append((await hippo.admit(name, "rehearsal"))[0].action)
         assert actions == ["NEW", "NEW"]
         assert len(await store.active_entries()) == 3
+    finally:
+        if isinstance(store, SqliteLongTerm):
+            await store.aclose()
+
+
+@pytest.mark.parametrize("sqlite", [False, True])
+async def test_a_same_key_digest_competes_with_its_task_digest(
+    tmp_path: Path, sqlite: bool
+) -> None:
+    store: LongTerm = SqliteLongTerm(tmp_path / "long.db") if sqlite else LongTerm()
+    hippo = Hippo(long=store, typed_assertions=True)
+    exact = "Quarterly planning review moved to 2026-06-01.\nfiles: plan.md"
+    key = "same-task-key"
+    try:
+        for name in ("a", "b"):
+            hippo.propose(
+                MemoryCandidate(
+                    name,
+                    "digest",
+                    exact,
+                    "rule",
+                    "task",
+                    provenance={"task_key": key},
+                )
+            )
+            decision = (await hippo.admit(name, "rehearsal"))[0]
+        assert decision.action == "IGNORE"
+        assert len(await store.active_entries()) == 1
     finally:
         if isinstance(store, SqliteLongTerm):
             await store.aclose()

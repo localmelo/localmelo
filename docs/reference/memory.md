@@ -21,6 +21,38 @@ page.
 | See past runs | `sqlite3` queries; see [Inspect memory](../guides/memory.md#inspect-memory) |
 | Delete memory | In Python, `await hippo.forget_all()` (one task: `forget(task_id)`); no command yet. See [Reset memory](../guides/memory.md#reset-memory) |
 
+## Digest recall
+
+A digest is eligible for long-term admission only when its checked text has a
+nonempty `files:` or `verified:` line. An admitted digest stores a hash of its
+run's normalized, redacted task line and of its workspace's realpath in its
+provenance, so a sanitized or truncated rendered line cannot change the key and
+the same task text in another folder is a different task; a hash is not a
+privacy guarantee against guessing. Digests with no key, including old entries,
+are cross-task. The first meaningful sentence is bounded, so distinct tasks with
+the same task line in the same workspace can share a key. If the run's last
+attempt has no evidence but an earlier attempt does, the last evidence-bearing
+attempt digest is the one admitted, so checked work is not lost.
+
+Within the long-term candidate pool, same-task episodic digests rank first. The
+store also searches for the best matching same-task digests beyond that pool.
+A cross-task digest needs a score at least `cross_task_ratio` times the best
+same-task digest score from the same long-store backend; scores from BM25 and
+cosine are not compared. At most `cross_task_cap` cross-task digests are sent.
+If no same-task digest matches, `cross_task_cold` sets the cold allowance (0 by
+default, or 1 for an opt-in match above the existing backend floor). All remain
+subject to the existing two-long-hit limit, retriever selection and block budget.
+Non-digest memories, including user facts and notes, bypass this gate.
+
+The config keys are under `[retrieval]`: ratio 1–10 (default 1.1), cap 0–2
+(default 1), and cold 0–1 (default 0). They are inert in `legacy`. A delivered
+recall record includes `same_task` and `cross_task` counts for long-store
+digests only, plus `task_notes` for delivered task-local note-store hits
+(notes, drafts, thoughts and in-task digests); unscoped long hits count in none
+of the three. `memory_stats.recall_same_task`, `recall_cross_task` and
+`recall_task_notes` sum delivered records; a block that is not sent does not
+count.
+
 ## Long-term memory
 
 With `--reasoning compress` (or `compress+replay`) and memory on,
@@ -87,7 +119,8 @@ items. A completion or self-work claim with no fact beyond its frame is
 `IGNORE`d with the reason `meta claim about the agent's own work`, whether it
 comes from a note or from a digest. A `task:` line, a file, path or function
 name makes the text content instead. A final digest admitted by `outcome`
-for a completed run is exempt from this filter entirely.
+for a completed run is exempt from this filter entirely, but still needs a
+nonempty file or verification line for admission.
 
 ## Experimental typed assertions
 
