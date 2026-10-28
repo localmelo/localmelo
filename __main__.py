@@ -451,6 +451,75 @@ async def _run_one(
         progress.close()
 
 
+async def _run_worker_brief(
+    agent: Agent,
+    query: str,
+    output_format: str,
+    out: TextIO,
+    save_session: str | None,
+    parent_run: str | None,
+    routine: str | None,
+) -> int:
+    """Run one opt-in worker and write its versioned report."""
+    from localmelo.support.cli.worker_contract import WorkerObserver, result_record
+
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+    assert task is not None
+    workspace = agent.workspace_root or os.getcwd()
+    observer = WorkerObserver(
+        out,
+        workspace,
+        stream=output_format == "stream-json",
+        on_failure=lambda: loop.call_soon_threadsafe(task.cancel),
+    )
+    try:
+        if save_session is None:
+            outcome = await agent.run_task(query, observe=observer, routine=routine)
+        else:
+            from localmelo.support.sessions.worker import run_worker
+
+            outcome = await run_worker(
+                agent,
+                query,
+                title=save_session,
+                parent_run=parent_run,
+                observe=observer,
+                routine=routine,
+            )
+        code = _exit_code(outcome.status)
+        record = await asyncio.to_thread(
+            result_record, outcome, observer, workspace, code
+        )
+        if output_format == "stream-json":
+            observer._enqueue({"v": 1, "type": "result", "result": record})
+        else:
+            print(
+                json.dumps(record, ensure_ascii=False, allow_nan=False),
+                file=out,
+                flush=True,
+            )
+        await asyncio.to_thread(observer.close)
+        if observer.error is not None:
+            print(
+                f"melo: worker output failed: {_one_line(str(observer.error))}",
+                file=sys.stderr,
+            )
+            return EXIT_CRASHED
+        return code
+    except asyncio.CancelledError:
+        if observer.error is None:
+            raise
+        print(
+            f"melo: worker output failed: {_one_line(str(observer.error))}",
+            file=sys.stderr,
+        )
+        return EXIT_CRASHED
+    finally:
+        if observer.thread is not None and observer.thread.is_alive():
+            await asyncio.to_thread(observer.close)
+
+
 async def _run(
     agent: Agent,
     query: str | None,
@@ -463,6 +532,7 @@ async def _run(
     routine: str | None = None,
     save_session: str | None = None,
     parent_run: str | None = None,
+    worker_brief: bool = False,
 ) -> int:
     """Run *query*, or with no query the interactive loop; return the exit code.
 
@@ -479,6 +549,16 @@ async def _run(
         exit_signals.install()
     try:
         if query:
+            if worker_brief:
+                return await _run_worker_brief(
+                    agent,
+                    query,
+                    output_format,
+                    out or sys.stdout,
+                    save_session,
+                    parent_run,
+                    routine,
+                )
             if save_session is None:
                 outcome = await _run_one(
                     agent, query, progress=progress, routine=routine
@@ -588,6 +668,7 @@ def _run_direct(
     routine: str | None = None,
     save_session: str | None = None,
     parent_run: str | None = None,
+    worker_brief: bool = False,
 ) -> int:
     """Run *query*, or for an empty one the interactive loop; return the exit code.
 
@@ -626,6 +707,7 @@ def _run_direct(
                     routine=routine,
                     save_session=save_session,
                     parent_run=parent_run,
+                    **({"worker_brief": True} if worker_brief else {}),
                 )
             )
     except BaseException as exc:
@@ -1102,9 +1184,15 @@ def _direct_tool_providers(
 class _WorkerFlagParser(argparse.ArgumentParser):
     """Keep old abbreviations unambiguous; new options require full names."""
 
+    def _check_value(self, action: argparse.Action, value: str) -> None:
+        if action.dest == "output_format" and value == "stream-json":
+            return
+        super()._check_value(action, value)
+
     def _get_option_tuples(self, option_string: str) -> Any:
         full_name_only = {
             "--save-session",
+            "--brief",
             "--parent-run",
             "--import-session",
             "--title",
@@ -1160,6 +1248,9 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         direct.add_argument(
             f"--{name}", type=_positive_int, metavar="TOKENS", default=argparse.SUPPRESS
         )
+    direct.add_argument(
+        "--brief", metavar="FILE", help="Read a direct worker task from a UTF-8 file"
+    )
     direct.add_argument(
         "--save-session",
         nargs="?",
@@ -1240,7 +1331,7 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     direct.add_argument(
         "--output-format",
         choices=["text", "json"],
-        help="text (default), or one JSON line with the run's record",
+        help="text (default), one JSON line, or stream-json with --brief",
     )
     direct.add_argument(
         "--embedding-base-url",
@@ -1433,6 +1524,27 @@ def main() -> None:
         parser.validation_error = legacy.validation_error
     if args is None or unknown or not args.query or args.serve or args.daemon:
         args = parser.parse_args()
+    if args.brief is not None:
+        if (
+            args.query
+            or args.serve
+            or args.daemon
+            or args.reconfigure
+            or args.import_session
+        ):
+            parser.error("--brief cannot be combined with a task or another mode")
+        if args.output_format not in (None, "json", "stream-json"):
+            parser.error("--brief requires json or stream-json output")
+        from localmelo.support.cli.worker_contract import read_brief
+
+        try:
+            args.query = [read_brief(args.brief)]
+        except ValueError as exc:
+            parser.error(f"--brief: {_one_line(str(exc))}")
+        if args.output_format is None:
+            args.output_format = "json"
+    elif args.output_format == "stream-json":
+        parser.error("--output-format stream-json requires --brief")
     _check_args(parser, args)
 
     if args.import_session is not None:
@@ -1496,6 +1608,9 @@ def main() -> None:
         agent = _build_direct_mode_agent(
             args, options=options, tool_providers=tool_providers
         )
+        worker_args: dict[str, Any] = (
+            {"worker_brief": True} if args.brief is not None else {}
+        )
         code = _run_direct(
             agent,
             query,
@@ -1503,6 +1618,7 @@ def main() -> None:
             tool_providers,
             progress=args.progress,
             routine=args.routine,
+            **worker_args,
             **(
                 {"save_session": args.save_session, "parent_run": args.parent_run}
                 if args.save_session is not None

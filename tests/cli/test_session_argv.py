@@ -72,7 +72,7 @@ R6_DEFAULTS = {"admit_on_outcome": None, "keep_decision_text": False}
 # U3 PR 4 added --allow-unconfigured for --serve.
 U3_PR4_DEFAULTS = {"allow_unconfigured": False}
 WORKER_DEFAULTS = dict.fromkeys(
-    ("save_session", "parent_run", "import_session", "title")
+    ("save_session", "parent_run", "import_session", "title", "brief")
 )
 
 
