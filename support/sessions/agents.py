@@ -99,6 +99,9 @@ def configured_session_options(
             ("recall_kinds", "kinds"),
             ("recall_placement", "placement"),
             ("recall_min_score", "min_score"),
+            ("cross_task_ratio", "cross_task_ratio"),
+            ("cross_task_cap", "cross_task_cap"),
+            ("cross_task_cold", "cross_task_cold"),
         ):
             if name not in explicit:
                 value = getattr(cfg.retrieval, key)

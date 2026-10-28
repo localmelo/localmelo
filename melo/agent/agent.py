@@ -161,7 +161,15 @@ from localmelo.melo.memory.recall import (
     recall_span_chars,
     recall_spans,
     record_to_dict,
+    relation_counts,
     resolve_plan,
+)
+from localmelo.melo.memory.recall_gate import (
+    digest_has_evidence,
+    digest_task_key,
+    gate_long_docs,
+    is_task_digest,
+    same_task,
 )
 from localmelo.melo.memory.retrieval import build_retriever
 from localmelo.melo.memory.retrieval.base import Doc, RetrievalResult, Retriever
@@ -1098,6 +1106,9 @@ class _RunState:
         default_factory=lambda: {trigger: 0 for trigger in (*DEFAULT_TRIGGERS, "tool")}
     )
     recall_hits: int = 0
+    recall_same_task: int = 0
+    recall_cross_task: int = 0
+    recall_task_notes: int = 0
     recall_chars: int = 0
     recall_ms: int = 0
     recall_fallbacks: int = 0
@@ -1859,6 +1870,8 @@ class Agent:
                 query,
                 exclude_task_ids={run.task_id},
                 pool=LONG_POOL,
+                task_key=digest_task_key(run.task_text, run.place or ""),
+                min_score=self.options.recall_min_score,
             )
         except ProviderError as exc:
             run.retrieve_errors += 1
@@ -1876,21 +1889,45 @@ class Agent:
             min_score=self.options.recall_min_score,
             include_history=self.options.typed_assertions,
         )
-        # Keep the two best by score, then order and alias them by creation
-        # time so an appended entry never renumbers an old one.
-        docs.sort(key=lambda doc: float(doc.meta.get("score") or 0.0), reverse=True)
-        docs = docs[:RECALL_LONG_K]
+        key = digest_task_key(run.task_text, run.place or "")
+        docs = gate_long_docs(
+            docs,
+            key,
+            ratio=self.options.cross_task_ratio,
+            cap=self.options.cross_task_cap,
+            cold=self.options.cross_task_cold,
+        )[:RECALL_LONG_K]
+        docs = [
+            dataclasses.replace(
+                doc,
+                meta={
+                    **doc.meta,
+                    "task_relation": (
+                        "same"
+                        if same_task(doc, key)
+                        else "cross" if is_task_digest(doc) else "unscoped"
+                    ),
+                },
+            )
+            for doc in docs
+        ]
+        # Same-task digests first; within each group keep #162's assertion
+        # order (typed mode) or the creation-time order (default).
         if self.options.typed_assertions:
             docs.sort(
                 key=lambda doc: (
-                    float(doc.meta.get("assertion_order_time") or 0.0),
-                    int(doc.meta.get("entry_id") or 0),
-                ),
-                reverse=True,
+                    doc.meta["task_relation"] != "same",
+                    -float(doc.meta.get("assertion_order_time") or 0.0),
+                    -int(doc.meta.get("entry_id") or 0),
+                )
             )
         else:
             docs.sort(
-                key=lambda doc: (float(doc.meta.get("created_at") or 0.0), doc.doc_id)
+                key=lambda doc: (
+                    doc.meta["task_relation"] != "same",
+                    float(doc.meta.get("created_at") or 0.0),
+                    doc.doc_id,
+                )
             )
         return [
             dataclasses.replace(doc, meta={**doc.meta, "alias": f"m{index}"})
@@ -2032,6 +2069,7 @@ class Agent:
                 ):
                     continue
                 hits.append(hit_from_doc(doc, score=score, rank=len(hits) + 1))
+        hits.sort(key=lambda hit: hit.task_relation != "same")
         if self.options.typed_assertions:
             long_order = {doc.doc_id: index for index, doc in enumerate(long_docs)}
             ordered_long = iter(
@@ -2041,6 +2079,9 @@ class Agent:
                 )
             )
             hits = [next(ordered_long) if hit.kind == "long" else hit for hit in hits]
+        hits = [
+            dataclasses.replace(hit, rank=index) for index, hit in enumerate(hits, 1)
+        ]
         if fallback:
             run.recall_fallbacks += 1
             run.retrieve_errors += 1
@@ -2140,6 +2181,10 @@ class Agent:
                 run.recalls_by_trigger.get(record.trigger, 0) + 1
             )
             run.recall_hits += len(record.hits)
+            counts = relation_counts(record.hits)
+            run.recall_same_task += counts["same_task"]
+            run.recall_cross_task += counts["cross_task"]
+            run.recall_task_notes += counts["task_notes"]
             run.recall_chars += record.chars
             run.recall_ms += record.ms
             run.recall_log.append(compact_record(record))
@@ -2735,6 +2780,11 @@ class Agent:
             remember=True,
             stage=entry.stage,
         )
+        provenance = self._memory_provenance(run, note=note)
+        # Key the digest by the run's task, the same input recall hashes: the
+        # checked text may have escaped a role token or cut a long plan, and a
+        # key read from it would no longer match this run's task.
+        provenance["task_key"] = digest_task_key(query, run.place or "")
         candidate = MemoryCandidate(
             candidate_id=note.note_id,
             source="digest",
@@ -2742,12 +2792,16 @@ class Agent:
             remember_by="rule",
             task_id=task_id,
             session_id="",
-            provenance=self._memory_provenance(run, note=note),
+            provenance=provenance,
             created_at=note.created_at,
             remember=True,
         )
-        run.final_digest = candidate
-        self.hippo.propose(candidate)
+        if digest_has_evidence(checked):
+            # Keep the run's last evidence-bearing attempt. A final attempt
+            # without evidence must not drop an episode whose earlier attempt
+            # wrote a file or passed a check.
+            run.final_digest = candidate
+            self.hippo.propose(candidate)
         return checked
 
     async def _restate(self, note: ReasoningNote, run: _RunState) -> bool:
@@ -5662,6 +5716,9 @@ class Agent:
                 "recalls": run.recalls,
                 "recalls_by_trigger": dict(run.recalls_by_trigger),
                 "recall_hits": run.recall_hits,
+                "recall_same_task": run.recall_same_task,
+                "recall_cross_task": run.recall_cross_task,
+                "recall_task_notes": run.recall_task_notes,
                 "recall_chars": run.recall_chars,
                 "recall_ms": run.recall_ms,
                 "recall_fallbacks": run.recall_fallbacks,
@@ -5739,6 +5796,9 @@ class Agent:
             config["recall_kinds"] = sorted(self._effective_kinds)
             config["recall_placement"] = opts.recall_placement
             config["recall_min_score"] = opts.recall_min_score
+            config["cross_task_ratio"] = opts.cross_task_ratio
+            config["cross_task_cap"] = opts.cross_task_cap
+            config["cross_task_cold"] = opts.cross_task_cold
             config["admit_on_outcome"] = opts.admit_on_outcome
             config["keep_decision_text"] = opts.keep_decision_text
         return config

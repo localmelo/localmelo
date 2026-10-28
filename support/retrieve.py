@@ -823,7 +823,7 @@ def _route_line(line: str, number: int) -> dict[str, Any]:
         raise _InputError(
             f"--route: line {number}: source_ids must be a list of strings"
         )
-    for key in ("candidate_id", "task_id", "session_id", "task_text"):
+    for key in ("candidate_id", "task_id", "session_id", "task_key", "task_text"):
         item = value.get(key, "")
         if not isinstance(item, str):
             raise _InputError(f"--route: line {number}: {key} must be a string")
@@ -858,6 +858,7 @@ async def _route(candidates: str, memory_dir: str) -> int:
                     "task_id": task_id,
                     "session_id": str(value.get("session_id") or ""),
                     "task_text": str(value.get("task_text") or ""),
+                    "task_key": str(value.get("task_key") or ""),
                     "source_ids": list(value.get("source_ids") or ()),
                 },
                 remember=True,

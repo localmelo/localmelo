@@ -29,10 +29,11 @@ the ordinary direct path. Fixed prefix
 adds an opt-in flag and config fallback to ``_direct_options`` and
 ``_build_direct_mode_agent``; the default output and provider wire remain
 covered by the legacy golden. Captured history also adds an opt-in flag and
-config fallback to those two functions. ``_check_args`` is not pinned. T95bR's
-review fixes make a refused config value a worker ``startup_error`` after a
-valid brief, so ``_build_direct_mode_agent`` has a new hash; without
-``--brief`` it keeps the old usage error.
+config fallback to those two functions. Digest recall adds config-backed gate
+settings only for explicit reasoning modes, and T95bR's review fixes make a
+refused config value a worker ``startup_error`` after a valid brief, so
+``_build_direct_mode_agent`` has a new hash; legacy behavior remains covered by
+the golden and without ``--brief`` it keeps the old usage error. ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -54,7 +55,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "b8ca5200e85c5580b2de570627e38df0fbedce52c3ded145a2716c59fc9b317d",
+    "_build_direct_mode_agent": "8f29945472bcba2277cfcbb5bc4a45f329088fac484183065aa9af907a46ce89",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
