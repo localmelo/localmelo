@@ -701,6 +701,23 @@ asyncio.run(main())
   from `localmelo.support.providers.embedding.openai_compat`.
 - Close each provider with `await provider.close()` when you are done.
 
+## Recall in the loop
+
+The same three retrievers rank a run's own documents. `--reasoning compress`
+(and `compress+replay`) recalls at `start`, `attempt` and `step` by default;
+`--recall-at` replaces those triggers, and `tool` adds the `recall` tool.
+`--retriever auto` takes `embedding` when one is configured and otherwise
+`llm` at `start`/`attempt` and `bm25` at `step`/`tool`; `off` turns recall
+off, and a named retriever runs every trigger the user names. A retriever
+failure falls back to `bm25`, and the record names the reason.
+
+The offline command below is unchanged: it measures a retriever on a corpus
+of recorded calls. A run's blocks are recorded in
+`llm_calls.recall_json` (trigger, retriever, query, hits, `ms`, fallback),
+and `memory_stats` breaks out the loop's `recall_ms`,
+`aux_retrieve_calls` and `retrieve_*` token counts. See
+[Recall in the loop](memory.md#recall-in-the-loop).
+
 ## See also
 
 - [Memory](memory.md): what localmelo remembers, and where it keeps it.

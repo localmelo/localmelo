@@ -9,6 +9,28 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Recall in the loop: `--retriever auto|off|bm25|llm|embedding`,
+  `--recall-at`, `--recall-k`, `--recall-kinds`, `--recall-placement`,
+  `--recall-min-score` and `--retrieval-extra-body`, plus the `[retrieval]`
+  config table and the `recall` tool. The compress modes recall the task's
+  notes, drafts and thought chunks, and earlier tasks' long-term entries,
+  at `start`, `attempt` and `step`: a frozen boundary block on the task
+  query, one sticky block after a turn's tool results (or in its own user
+  message), and the model-requested tool. `auto` uses the embedding
+  retriever when configured and otherwise `llm` at `start`/`attempt` and
+  `bm25` at `step`/`tool`; every failure falls back to `bm25`. Blocks are
+  delimited, framed as data, checked by the candidate boundary and bounded
+  (9,500 per turn, 12,000 live, 4,000 boundary); the system prompt gains
+  one static data note. Each block is recorded once in
+  `llm_calls.recall_json` with its hits' `origin_task_ids`, and in the
+  `recall` event and `memory_stats.recall_log`. `history.db` is schema
+  version 2: a v1 file gains the `recall_json` column in the same
+  transaction, and the column is `NULL` in `legacy`. `legacy` keeps its
+  requests, JSON line, window and `tasks`/`steps` rows byte-identical; the
+  new flags, the block and the data note are off there (and `drop`/`replay`
+  recall only when a retriever is named). The JSON line gains
+  `config.retriever`/`retriever_effective`/`recall_*` and the recall
+  counters ([#NN]).
 - Reasoning notes for the compress modes: `--reasoning compress` and
   `compress+replay`, `--note-writer auto|heuristic`, and the `[agent]`
   `note_writer` key. `compress` sends no reasoning; instead each reply is
@@ -547,3 +569,4 @@ earlier milestones.
 [#83]: https://github.com/localmelo/localmelo/pull/83
 [#84]: https://github.com/localmelo/localmelo/pull/84
 [#85]: https://github.com/localmelo/localmelo/pull/85
+[#NN]: https://github.com/localmelo/localmelo/pull/NN
