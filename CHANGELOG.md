@@ -17,11 +17,25 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Correct the API v2 response formats and tools example, and update the bilingual
+  quickstart to reflect the shipped console settings and approvals ([#122], [#124]).
+  Clarify task validation and read-only worker details ([#119], [#123], [#130], [#133]).
+- Clarify that explicit reasoning modes can use text-only long-term memory
+  without an embedding backend, in the embedding guide and Chinese architecture
+  boundary ([#132]).
+
 - Attempt digests skip task headings and report verification only for passing
   checks, rather than treating trivial Python imports as tests ([#128]).
 
 ### Added
 
+- Worker park integration fences held provider and approval delivery, persists
+  pause intent and evidence-based cards, releases cleanly parked worker slots,
+  and re-asks withdrawn approvals on resume. Failed park writes retry and can
+  interrupt with a card; unavailable storage keeps the fence closed, and failed
+  cleanup quarantines the slot until restart. Restart replay and accounting are
+  deferred. [#135]
+- Opt-in context fitting shortens request copies and retries one classified overflow without rerunning tools; impossible requests end with a specific status ([#131]).
 - Read-only worker history in the web workspace, with server-side filters,
   paging, recorded transcripts and explicit refresh for unfinished runs. ([#130])
 
@@ -55,6 +69,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A documentation inventory, bilingual style guide and experimental offline
   preview builder lay the groundwork for a later site migration; published
   pages and existing URLs are unchanged ([#120]).
+
 - S3a.2 adds `/api/tasks` creation, inspection and control and in-process
   workers sharing the console's scheduler gate. Creation is idempotent with
   `request_key`; workers disable memory, omit `shell_exec`, and have at most
@@ -935,3 +950,7 @@ earlier milestones.
 [#128]: https://github.com/localmelo/localmelo/pull/128
 [#129]: https://github.com/localmelo/localmelo/pull/129
 [#130]: https://github.com/localmelo/localmelo/pull/130
+[#131]: https://github.com/localmelo/localmelo/pull/131
+[#132]: https://github.com/localmelo/localmelo/pull/132
+[#133]: https://github.com/localmelo/localmelo/pull/133
+[#135]: https://github.com/localmelo/localmelo/pull/135

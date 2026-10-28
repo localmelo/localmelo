@@ -106,6 +106,18 @@ async def test_an_answer_from_another_task_resolves_the_request() -> None:
         broker.answer(req.request_id, "yes")  # type: ignore[arg-type]
 
 
+async def test_synchronous_registration_cleans_up_if_cancelled_before_start() -> None:
+    broker = ApprovalBroker()
+    req = request()
+    task = broker.begin("s1", req)
+    assert broker.pending("s1") == [req]
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert broker.pending("s1") == []
+    assert broker.answer(req.request_id, ApprovalDecision(True)) == "already_resolved"
+
+
 async def test_pending_lists_the_oldest_first() -> None:
     broker = ApprovalBroker()
     ask = broker.asker("s1")

@@ -5,13 +5,19 @@ import contextvars
 import dataclasses
 import json
 import logging
+import math
 import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
-from localmelo.melo.agent._request_accounting import ContextBudget, RequestAccounting
+from localmelo.melo.agent._context_fit import ContextFitError, fit_request
+from localmelo.melo.agent._request_accounting import (
+    ContextBudget,
+    RequestAccounting,
+    request_proxy,
+)
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
     LLM_REQUEST_KIND,
@@ -436,17 +442,40 @@ class Chat:
         counted.
         """
         attempt = 1
-        while True:
-            scoped = BUDGET_ACCOUNTING.get()
-            accounting = (
-                (
-                    scoped[1]
-                    if scoped is not None and scoped[0] is self
-                    else self._accounting
-                )
-                if kind in ("plan", "reflect")
-                else None
+        retry_attempt = 1
+        scoped = BUDGET_ACCOUNTING.get()
+        accounting = (
+            (
+                scoped[1]
+                if scoped is not None and scoped[0] is self
+                else self._accounting
             )
+            if kind in ("plan", "reflect")
+            else None
+        )
+        pruned = {"tool_results": 0, "thinking": 0, "units": 0}
+        overflow_retried = False
+
+        def estimate(candidate: list[Message], offered: list[ToolDef] | None) -> int:
+            assert accounting is not None
+            size, _ = request_proxy(
+                candidate, offered, replay=bool(self.llm.reasoning_field)
+            )
+            ratio = accounting.ratios.get((self.llm.model, kind), 1.0)
+            return math.ceil(size * max(1.0, ratio))
+
+        if (
+            accounting is not None
+            and estimate(messages, tools) > accounting.budget.input_limit
+        ):
+            messages, pruned = fit_request(
+                messages,
+                tools,
+                limit=accounting.budget.input_limit,
+                estimate=estimate,
+                requires_replay=self.llm.requires_reasoning_replay,
+            )
+        while True:
             record = None
             proxy = 0
             if accounting is not None:
@@ -458,6 +487,7 @@ class Chat:
                     replay=bool(self.llm.reasoning_field),
                     attempt=attempt,
                 )
+                record["pruned"] = dict(pruned)
             sent = time.monotonic()
             try:
                 response = await self._send(messages, tools, attempt, kind)
@@ -467,9 +497,39 @@ class Chat:
                 if accounting is not None and record is not None:
                     accounting.finish(record, proxy, None)
                 self._emit_context_budget(record)
-                if not retry or not exc.retryable or attempt > len(self.retry_delays):
+                if (
+                    accounting is not None
+                    and exc.status_code == 400
+                    and exc.context_overflow
+                    and not overflow_retried
+                ):
+                    overflow_retried = True
+                    messages, more = fit_request(
+                        messages,
+                        tools,
+                        limit=accounting.budget.input_limit,
+                        estimate=estimate,
+                        requires_replay=self.llm.requires_reasoning_replay,
+                        force_smaller_than=proxy,
+                    )
+                    pruned = {name: pruned[name] + more[name] for name in pruned}
+                    attempt += 1
+                    continue
+                if (
+                    accounting is not None
+                    and exc.status_code == 400
+                    and exc.context_overflow
+                ):
+                    raise ContextFitError(
+                        "The model still reports context overflow after fitting; reduce the task or use a larger context."
+                    ) from exc
+                if (
+                    not retry
+                    or not exc.retryable
+                    or retry_attempt > len(self.retry_delays)
+                ):
                     raise
-                delay = self.retry_delays[attempt - 1]
+                delay = self.retry_delays[retry_attempt - 1]
                 logger.info(
                     "LLM request attempt %d failed, retrying in %g s: %s",
                     attempt,
@@ -487,6 +547,7 @@ class Chat:
                 self._emit_context_budget(record)
                 raise
             await self.sleep(delay)
+            retry_attempt += 1
             attempt += 1
         # Read right after the response arrived, with no await in between, so
         # the values belong to this response.
