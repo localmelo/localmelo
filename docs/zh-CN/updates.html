@@ -64,7 +64,7 @@
         </div>
         <p>计划中：</p>
         <ul>
-          <li>交互式命令行的后续部分：附加文件和 shell 命令；</li>
+          <li>交互式命令行剩下的部分：附加文件和 shell 命令；</li>
           <li>一个实时显示智能体工作的控制台页面，以及网关重启后仍然保留的网页工作区对话（控制台的会话已经可以持久保存并在重启后恢复）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
           <li>进度行上的百分比进度条，用于反复运行的任务；在重放证明它可靠之前保持关闭。</li>
@@ -75,6 +75,33 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-28-session-commands">
+          <h3>命名、撤销、查看和复制终端对话</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/101">#101</a>
+          </p>
+          <ul>
+            <li><code>/title [text]</code> 显示或设置 1–200 个字符的标题，第一条消息之前也可以设置：它会保留到会话创建时，<code>/new</code> 或成功恢复会话会清除尚未保存的标题。</li>
+            <li><code>/undo</code> 撤掉最新一个已完成的回合，并把它的输入文字保留在 ↑ 历史里；它运行过的文件和命令仍然保持改动。已提交的撤销在按 Esc 之后仍然报告成功，<code>/retry</code> 可以重新运行这个被撤销的回合，而不会移除之前仍在的回合。</li>
+            <li><code>/usage</code> 显示每个回合记录的步数、工具调用、令牌和用时（包括已撤销的工作），缺少的计数显示 <code>?</code>，部分总计以 <code>+?</code> 结尾，窄于 72 列时改用带标签的多行布局；<code>/memory</code> 查看工作窗口的副本、它的计数、长期记忆后端和实际使用的恢复方式，不调用模型，也不写入记忆。</li>
+            <li><code>/copy [turn]</code> 复制已保存、已脱敏回答的 Markdown，而不是终端换行后的显示，保留缩进和末尾换行；显式回合号也可以选择已撤销的回答。macOS 上使用 <code>pbcopy</code>，在 SSH 下、其他平台或调用失败时发送 OSC 52 请求并如实说明；没有这个命令就不会进行任何剪贴板操作。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#inspect-undo-or-copy-a-conversation">查看、撤销或复制对话（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-memory-followups">
+          <h3>记住请求会保存它携带的事实</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/100">#100</a>
+          </p>
+          <ul>
+            <li><code>Remember that …</code> 或 <code>记住…</code> 这样的请求现在还会保存标记之后携带的事实，由 <code>user_request</code> 与本次运行的情节摘要一起写入，而不是只保存摘要。除非是第一人称（<code>profile</code>），这条事实是 <code>semantic</code>；脱敏、元名词和问句规则同样适用于它，而 <code>remember to buy milk</code> 这样的待办仍然不会写入任何事实。</li>
+            <li>思考片段现在会和所属尝试的笔记一起，在该尝试的边界被标记为已取代，所以之后召回时会带上 <code>(superseded)</code> 标记并写明所属尝试，而不会被当成当前尝试的思考。</li>
+            <li>目录里还没有 <code>long_term.db</code> 时，<code>melo-retrieve --export-store DIR</code> 和 <code>--export-decisions DIR</code> 会输出零条记录并以 0 退出，而不是报 “No such file”；路径不是目录时仍然保留文件缺失的用法错误。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#long-term-memory">长期记忆（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">离线检索（英文）</a>。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-direct-workspace">
           <h3>任务运行可以工作于 <code>--workspace DIR</code></h3>
