@@ -61,7 +61,7 @@ async def console_with(
         )
         llm = ScriptedLLM(script)
         llms.append(llm)
-        return await started_agent(Path(workspace), llm)
+        return await started_agent(Path(workspace), llm, mode="gateway")
 
     console = Console(
         make_cfg(),
