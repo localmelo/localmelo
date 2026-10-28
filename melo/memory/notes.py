@@ -1518,12 +1518,10 @@ _DAY_MONTH_RE = re.compile(
     r"(?:,?\s*(\d{4}))?",
     re.IGNORECASE,
 )
-_DATE_CUE_RE = re.compile(
-    r"\b(?:on|by|due|until|from|date|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*[:]?\s*$",
-    re.IGNORECASE,
-)
 _QUANTITY_AFTER_RE = re.compile(
-    r"\s*(?:cups?|price|miles?|km|kg|lbs?|liters?|litres?|hours?|minutes?|days?|weeks?|people|off)\b",
+    r"\s*(?:cups?|price|miles?|km|kg|lbs?|liters?|litres?|hours?|minutes?|days?|weeks?|"
+    r"people|off|of|tests?|files?|steps?|items?|pages?|runs?|attempts?|passed|failed|done|"
+    r"majority|split|share)\b",
     re.IGNORECASE,
 )
 _TIME_COLON_RE = re.compile(
@@ -1594,17 +1592,19 @@ def _date_details(text: str) -> set[tuple[int, int, int | None]]:
     for match in _DATE_ISO_RE.finditer(text):
         year, month, day = (int(part) for part in match.groups())
         add(month, day, year)
-    first_content = len(text) - len(text.lstrip(" \t\n-*•|:"))
     for match in _DATE_SLASH_RE.finditer(text):
         first, second = int(match.group(1)), int(match.group(2))
         year_text = match.group(3)
-        if (first, second) == (24, 7) or _QUANTITY_AFTER_RE.match(text, match.end()):
-            continue
-        prefix = text[max(0, match.start() - 64) : match.start()]
+        before = match.start() - 1
+        while before >= 0 and text[before].isspace():
+            before -= 1
+        mixed_number = (
+            before < match.start() - 1 and before >= 0 and text[before].isdigit()
+        )
         if (
-            not year_text
-            and match.start() != first_content
-            and not _DATE_CUE_RE.search(prefix)
+            (first, second) == (24, 7)
+            or _QUANTITY_AFTER_RE.match(text, match.end())
+            or mixed_number
         ):
             continue
         slash_year = int(year_text) if year_text else None

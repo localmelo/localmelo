@@ -244,12 +244,14 @@ their unit or currency. A strong key is a date, a time with a colon or am/pm,
 an amount with a currency or unit (or an amount field), a phone number, an
 identifier of three or more characters containing a digit, a number of three
 or more digits, or a capitalised name that does not start its sentence.
-Dates include ISO, `April 9`, `9 April` and slash dates with a year, a date
-cue (`on`, `by`, `due`, `until`, `from`, `date` or a weekday), or at the
-start of an item. Ambiguous slash dates use US month-first order; unambiguous
-`13/4` is day-first. Thus `on 4/9` matches `2026-04-09`. Fractions followed
-by a quantity, `24/7`, invalid dates and lowercase `may`/`march` are not
-dates. Bare one- or two-digit numbers and ordinals are not keys. Fillers such
+Dates include ISO, `April 9`, `9 April` and bare slash dates such as `4/9`.
+Ambiguous slash dates use US month-first order; unambiguous `13/4` is
+day-first. Thus `offsite 4/9` matches `2026-04-09`. A slash pair is not a
+date when followed by a quantity or count word, or preceded by a number and
+space (a mixed number such as `2 1/2`); `24/7`, invalid dates and lowercase
+`may`/`march` are not dates either. These are heuristic rules, so other
+fraction formats can still be ambiguous. Bare one- or two-digit numbers and
+ordinals are not keys. Fillers such
 as `done`, `ok`, `good`, `thanks`, `好的`, `完成` and `可以` are stopwords,
 so an item that says only "Done." takes no source. When the note has no record
 text at all, the item keeps the note's own `source_ids`; when it has records

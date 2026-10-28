@@ -69,6 +69,51 @@ def test_date_context_and_order() -> None:
     assert not _date_keys("3/4 cup")
 
 
+def test_bare_slash_dates_and_fraction_context() -> None:
+    assert _item_source_ids(
+        "offsite 4/9 9:30",
+        [("wrong", "2026-04-10 9:30 offsite"), ("right", "2026-04-09 offsite")],
+    ) == ["right"]
+    assert "date:04-09" in _strong_keys("reading group 4/9 3-4 Room 4B")
+    assert _date_keys("Thursday, 4/9") == {"date:04-09"}
+    assert _date_keys("Thu 4/9") == {"date:04-09"}
+    assert _date_keys("from 4/9 to 4/16") == {"date:04-09", "date:04-16"}
+    assert _date_keys("meeting 4/9/2027") == {"date:04-09"}
+    assert not _date_keys("2 1/2")
+    for text in ("3/8 tests passed", "3/4 of the team", "2 1/2 cups"):
+        assert not _date_keys(text), text
+    for word in (
+        "cups",
+        "price",
+        "miles",
+        "km",
+        "kg",
+        "lbs",
+        "liters",
+        "hours",
+        "minutes",
+        "days",
+        "weeks",
+        "people",
+        "off",
+        "of",
+        "tests",
+        "files",
+        "steps",
+        "items",
+        "pages",
+        "runs",
+        "attempts",
+        "passed",
+        "failed",
+        "done",
+        "majority",
+        "split",
+        "share",
+    ):
+        assert not _date_keys(f"3/8 {word}"), word
+
+
 def test_numbers_are_not_accidental_keys() -> None:
     for text in ("3rd", "Parent: 3", "current: 5", "3-4", "4B", "v2.1"):
         assert not _strong_keys(text), text

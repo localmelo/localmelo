@@ -534,9 +534,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   clause follows the frame; `task:`/code markers and completed outcome
   digests remain exempt. Source matching scores typed keys independently,
   retains date years, currencies and whole phone numbers, rejects conflicts,
-  and leaves ties and unmatched items unsourced even after admission. Slash
-  dates require a date cue, year or item-start position, with US order for
-  ambiguous forms; digit runs over 20 characters are ignored as keys.
+  and leaves ties and unmatched items unsourced even after admission. Bare
+  slash dates use US order when ambiguous; quantity/count contexts, mixed
+  numbers and `24/7` are excluded. Digit runs over 20 characters are ignored
+  as keys.
   Factual extraction remains heuristic and does not extract CJK-only keys.
   ([#NN])
 - A note's items now take their `source_ids` from the observation that
