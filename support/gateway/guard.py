@@ -257,6 +257,8 @@ class LoopbackGuard:
             refusal = self._auth_refusal(scope)
         rotation = self.auth.rotation if self.auth is not None else None
         if refusal is None and scope["type"] == "http":
+            refusal = self._header_refusal(scope)
+        if refusal is None and scope["type"] == "http":
             receive, refusal = await self._read_body(scope, receive)
         if refusal is None and self.auth is not None:
             refusal = self._auth_refusal(scope)
@@ -483,6 +485,13 @@ class LoopbackGuard:
             for site in headers.get(b"sec-fetch-site", []):
                 if site.lower() not in _OWN_FETCH_SITES:
                     return 403, "foreign_origin", self._origin_error
+
+        return None
+
+    def _header_refusal(self, scope: Scope) -> tuple[int, str, str] | None:
+        headers: dict[bytes, list[str]] = {}
+        for name, value in scope.get("headers", ()):
+            headers.setdefault(name.lower(), []).append(value.decode("latin-1"))
 
         if scope["type"] == "http":
             content_lengths = headers.get(b"content-length", [])

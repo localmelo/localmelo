@@ -61,9 +61,13 @@ def address(url: str) -> str:
 def read_token(path: Path) -> str:
     """Read an existing private gateway token without creating any files."""
     path = Path(os.path.abspath(path))
-    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    boundary = (
+        path.parent if path.name == "auth" and path.parent.name == "gateway" else path
+    )
+    prefix = boundary.parent.resolve(strict=True)
+    fd = os.open(prefix, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        for part in path.parts[1:]:
+        for part in path.relative_to(boundary.parent).parts:
             child = os.open(
                 part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd
             )

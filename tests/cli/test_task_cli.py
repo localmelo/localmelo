@@ -47,6 +47,23 @@ def test_read_token_requires_existing_private_regular_file(tmp_path: Path) -> No
         read_token(auth)
 
 
+def test_token_path_matches_gateway_symlink_boundary(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    auth = home / "gateway" / "auth"
+    auth.mkdir(parents=True, mode=0o700)
+    token = auth / "token"
+    token.write_text("a" * 64, encoding="ascii")
+    token.chmod(0o600)
+    alias = tmp_path / "alias"
+    alias.symlink_to(home, target_is_directory=True)
+    assert read_token(alias / "gateway" / "auth") == "a" * 64
+    unsafe = tmp_path / "unsafe"
+    unsafe.mkdir()
+    (unsafe / "gateway").symlink_to(home / "gateway", target_is_directory=True)
+    with pytest.raises(OSError):
+        read_token(unsafe / "gateway" / "auth")
+
+
 def test_new_brief_sends_content_and_request_key(tmp_path: Path) -> None:
     brief = tmp_path / "brief"
     brief.write_text("ordinary work\n", encoding="utf-8")

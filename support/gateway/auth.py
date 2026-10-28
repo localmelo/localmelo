@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import contextlib
+import fcntl
 import hashlib
 import hmac
 import os
@@ -29,28 +30,46 @@ def _mac(key: bytes, purpose: str, payload: str) -> str:
 class GatewayAuth:
     """A private directory holding the bearer and consumed login-code markers."""
 
-    def __init__(self, path: Path | None = None) -> None:
+    def __init__(
+        self, path: Path | None = None, *, allow_corrupt: bool = False
+    ) -> None:
         self.path = path or Path.home() / ".cache" / "localmelo" / "gateway" / "auth"
         self._directory = self._open_directory(self.path)
+        self.rotation = asyncio.Event()
         try:
-            self._create_token()
+            with self._locked():
+                self._create_token(allow_corrupt=allow_corrupt)
         except BaseException:
             self.close()
             raise
-        self.rotation = asyncio.Event()
 
     @staticmethod
     def _open_directory(path: Path) -> int:
-        # Walk from / with O_NOFOLLOW: a symlink at any component is refused.
         path = Path(os.path.abspath(path))
-        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+        boundary = (
+            path.parent
+            if path.name == "auth" and path.parent.name == "gateway"
+            else path
+        )
+        prefix = boundary.parent
+        prefix.mkdir(mode=0o700, parents=True, exist_ok=True)
+        prefix = prefix.resolve(strict=True)
+        fd = os.open(prefix, os.O_RDONLY | os.O_DIRECTORY)
         try:
-            for component in path.parts[1:]:
+            for component in path.relative_to(boundary.parent).parts:
                 with contextlib.suppress(FileExistsError):
                     os.mkdir(component, 0o700, dir_fd=fd)
-                child = os.open(
-                    component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd
-                )
+                try:
+                    child = os.open(
+                        component,
+                        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                        dir_fd=fd,
+                    )
+                except OSError as exc:
+                    raise OSError(
+                        exc.errno,
+                        f"Unsafe gateway auth path (symlinks are not allowed at or below {boundary}): {path}",
+                    ) from exc
                 os.close(fd)
                 fd = child
             info = os.fstat(fd)
@@ -71,30 +90,31 @@ class GatewayAuth:
     def __del__(self) -> None:
         self.close()
 
-    def _create_token(self) -> None:
+    @contextlib.contextmanager
+    def _locked(self):  # type: ignore[no-untyped-def]
+        fcntl.flock(self._directory, fcntl.LOCK_EX)
         try:
-            fd = os.open(
-                TOKEN_FILE,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
-                0o600,
-                dir_fd=self._directory,
-            )
-        except FileExistsError:
-            self.read_token()
-            return
-        try:
-            os.fchmod(fd, 0o600)
-            with os.fdopen(fd, "wb") as stream:
-                stream.write(secrets.token_hex(32).encode("ascii"))
-                stream.flush()
-                os.fsync(stream.fileno())
-        except BaseException:
-            with contextlib.suppress(FileNotFoundError):
-                os.unlink(TOKEN_FILE, dir_fd=self._directory)
-            raise
+            yield
+        finally:
+            fcntl.flock(self._directory, fcntl.LOCK_UN)
 
-    def read_token(self) -> bytes:
-        fd = os.open(TOKEN_FILE, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=self._directory)
+    def _create_token(self, *, allow_corrupt: bool) -> None:
+        try:
+            data = self._read_token_file()
+        except FileNotFoundError:
+            self._write_token(replace=False)
+            return
+        if not data:
+            self._write_token(replace=True)
+        elif not allow_corrupt:
+            self._validate_token(data)
+
+    def _read_token_file(self) -> bytes:
+        fd = os.open(
+            TOKEN_FILE,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+            dir_fd=self._directory,
+        )
         try:
             info = os.fstat(fd)
             if (
@@ -106,14 +126,29 @@ class GatewayAuth:
                 raise PermissionError(
                     "Gateway token must be a private 0600 regular file"
                 )
-            data = os.read(fd, 129)
-            if len(data) != 64 or any(c not in b"0123456789abcdef" for c in data):
-                raise ValueError("Gateway token is invalid")
-            return data
+            return os.read(fd, 129)
         finally:
             os.close(fd)
 
+    def _validate_token(self, data: bytes) -> bytes:
+        if len(data) != 64 or any(c not in b"0123456789abcdef" for c in data):
+            raise ValueError(
+                f"Gateway token at {self.path / TOKEN_FILE} is invalid; "
+                "run melo --gateway-rotate-token to replace it"
+            )
+        return data
+
+    def read_token(self) -> bytes:
+        return self._validate_token(self._read_token_file())
+
     def rotate(self) -> None:
+        with self._locked():
+            # Even a corrupt token must be a safe file before replacing it.
+            with contextlib.suppress(FileNotFoundError):
+                self._read_token_file()
+            self._write_token(replace=True)
+
+    def _write_token(self, *, replace: bool) -> None:
         name = ".token-" + secrets.token_hex(16)
         fd = os.open(
             name,
@@ -127,6 +162,17 @@ class GatewayAuth:
                 stream.write(secrets.token_hex(32).encode("ascii"))
                 stream.flush()
                 os.fsync(stream.fileno())
+            if not replace:
+                placeholder = os.open(
+                    TOKEN_FILE,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                    0o600,
+                    dir_fd=self._directory,
+                )
+                try:
+                    os.fchmod(placeholder, 0o600)
+                finally:
+                    os.close(placeholder)
             os.replace(
                 name, TOKEN_FILE, src_dir_fd=self._directory, dst_dir_fd=self._directory
             )
