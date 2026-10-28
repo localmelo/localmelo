@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from collections.abc import AsyncIterator, Sequence
 from dataclasses import replace
@@ -15,6 +16,7 @@ from localmelo.support.gateway.task_store import (
     COMPONENT,
     SCHEDULER_VERSION,
     TaskConflictError,
+    TaskNotPausedError,
     TaskRecord,
     TaskStore,
     TaskStoreError,
@@ -466,6 +468,169 @@ async def test_a_request_key_is_idempotent_and_a_reuse_conflicts(
         await create_task(tasks, spec("two"), origin="user", request_key="same")
     other, _ = await create_task(tasks, spec("one"), origin="user")
     assert other.task_id != first.task_id
+
+
+async def test_find_existing_request_before_workspace_revalidation(
+    tasks: TaskStore, tmp_path: Path
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    request = spec("same", workspace=str(workspace))
+    first, _ = await create_task(
+        tasks,
+        request,
+        origin="user",
+        request_key="key",
+        front_id="front",
+        workspace=str(workspace),
+        deadline=123.0,
+    )
+    workspace.rmdir()
+    assert (
+        await tasks.find_existing_request(
+            request, origin="user", request_key="key", front_id="front", deadline=123.0
+        )
+        == first
+    )
+    assert await tasks.find_existing_request(request, origin="user") is None
+    assert (
+        await tasks.find_existing_request(request, origin="agent", request_key="key")
+        is None
+    )
+    for front_id, deadline in (("other", 123.0), ("front", 124.0)):
+        with pytest.raises(TaskConflictError, match="different task"):
+            await tasks.find_existing_request(
+                request,
+                origin="user",
+                request_key="key",
+                front_id=front_id,
+                deadline=deadline,
+            )
+    with pytest.raises(TaskConflictError, match="different task"):
+        await tasks.find_existing_request(
+            spec("different"), origin="user", request_key="key"
+        )
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"origin": "invalid"},
+        {"origin": "user", "request_key": ""},
+        {"origin": "user", "request_key": 1},
+        {"origin": "user", "front_id": 1},
+        {"origin": "user", "task_id": 1},
+        {"origin": "user", "meta": {"x": object()}},
+    ],
+)
+async def test_find_existing_request_validates_create_arguments(
+    tasks: TaskStore, kwargs: dict[str, Any]
+) -> None:
+    with pytest.raises((ValueError, TypeError)):
+        await tasks.find_existing_request(spec(), **kwargs)
+
+
+async def test_lookup_miss_does_not_replace_atomic_create_check(
+    tasks: TaskStore,
+) -> None:
+    request = spec("concurrent")
+    assert (
+        await tasks.find_existing_request(request, origin="user", request_key="key")
+        is None
+    )
+    results = await asyncio.gather(
+        *(
+            create_task(tasks, request, origin="user", request_key="key")
+            for _ in range(2)
+        )
+    )
+    assert results[0][0].task_id == results[1][0].task_id
+    assert sorted(repeated for _, repeated in results) == [False, True]
+    assert (
+        await tasks.find_existing_request(request, origin="user", request_key="key")
+        == results[0][0]
+    )
+
+
+async def test_change_noop_priority_does_not_add_event(tasks: TaskStore) -> None:
+    record, _ = await create_task(tasks, spec(), origin="user")
+    await tasks.change(record.task_id, priority="P2")
+    await tasks.change(record.task_id, priority="auto")
+    assert len(await priority_events(tasks, record.task_id)) == 1
+    await tasks.change(record.task_id, priority="P1")
+    assert len(await priority_events(tasks, record.task_id)) == 2
+
+
+async def test_change_persists_failure_reason(tasks: TaskStore) -> None:
+    record, _ = await create_task(tasks, spec(), origin="user")
+    with pytest.raises(ValueError, match="failure_reason"):
+        await tasks.change(
+            record.task_id, state="running", failure_reason="invalid_workspace"
+        )
+    failed = await tasks.change(
+        record.task_id,
+        state="failed",
+        actor="scheduler",
+        failure_reason="invalid_workspace",
+    )
+    assert failed.state == "failed"
+    assert failed.wait_reason == "invalid_workspace"
+    assert (await tasks.get_task(record.task_id)).wait_reason == "invalid_workspace"
+
+
+async def test_pause_resume_restores_user_priority_and_honors_later_changes(
+    tasks: TaskStore,
+) -> None:
+    record, _ = await create_task(
+        tasks, spec("task", level=1, level_source="user"), origin="user"
+    )
+    paused = await tasks.pause(record.task_id)
+    assert (paused.level, paused.state) == (5, "parked")
+    assert (await priority_events(tasks, record.task_id))[-1].reason == "pause"
+    resumed = await tasks.resume(record.task_id)
+    assert (resumed.level, resumed.level_source, resumed.state) == (1, "user", "queued")
+    await tasks.pause(record.task_id)
+    await tasks.change(record.task_id, priority="P3")
+    with pytest.raises(TaskStoreError, match="not paused"):
+        await tasks.resume(record.task_id)
+    assert (await tasks.get_task(record.task_id)).level == 3
+
+
+async def test_resume_without_pause_and_restore_p0(tasks: TaskStore) -> None:
+    first, _ = await create_task(
+        tasks, spec("first", level=0, level_source="user"), origin="user"
+    )
+    await tasks.pause(first.task_id)
+    second, _ = await create_task(
+        tasks, spec("second", level=0, level_source="user"), origin="user"
+    )
+    assert (await tasks.resume(first.task_id)).level == 0
+    assert (await tasks.get_task(second.task_id)).level == 1
+    no_pause, _ = await create_task(
+        tasks, spec("no pause", level=4, level_source="user"), origin="user"
+    )
+    with pytest.raises(TaskNotPausedError, match="not paused"):
+        await tasks.resume(no_pause.task_id)
+
+
+async def test_restart_fails_only_nonterminal_tasks(
+    tasks: TaskStore, clock: Clock
+) -> None:
+    queued, _ = await create_task(tasks, spec("queued"), origin="user")
+    running, _ = await create_task(tasks, spec("running"), origin="user")
+    parked, _ = await create_task(tasks, spec("parked"), origin="user")
+    done, _ = await create_task(tasks, spec("done"), origin="user")
+    await tasks.change(running.task_id, state="running")
+    await tasks.pause(parked.task_id)
+    terminal = await tasks.change(done.task_id, state="done")
+    clock.advance(1)
+    assert await tasks.fail_nonterminal_on_restart() == 3
+    for record in (queued, running, parked):
+        failed = await tasks.get_task(record.task_id)
+        assert failed.state == "failed" and failed.finished_at == clock.now
+        assert failed.wait_reason == "gateway restarted; recovery arrives in S3b"
+    assert await tasks.get_task(done.task_id) == terminal
+    assert await tasks.fail_nonterminal_on_restart() == 0
 
 
 async def test_deferred_input_is_rejected_before_request_key_lookup(

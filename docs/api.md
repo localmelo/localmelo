@@ -9,7 +9,7 @@ The API only grows: endpoints, optional request fields and response keys
 are added, never renamed or removed. A client may ignore keys it does not
 know. This page documents every API v2 route: health, settings, key status,
 connection test, model listing, sessions, turns, SSE events, blobs,
-submissions, approvals, tools, grants, memory and runs.
+submissions, approvals, tools, grants, memory, runs and scheduler tasks.
 
 A console turn passes the same scheduler gate a workspace chat does: every
 model call waits for its slot under `[scheduler]`, and the call log records
@@ -226,6 +226,57 @@ curl 'http://127.0.0.1:8401/api/models?backend=ollama&url=http%3A%2F%2F127.0.0.1
   `Listing models works for local backends only; type the model name.`
 - An unreachable server or an empty model list returns 502
   `backend_unreachable`.
+
+## Scheduler tasks (S3a.2)
+
+These routes create and control user-origin tasks in the gateway process.
+They are separate from chat turns but use the same scheduler gate. Each task
+has a `kind="task"` session with the same id; its session events and turns
+can be inspected through the existing session routes. A worker uses gateway
+built-ins (`file_read`, `file_write`, `python_exec`, not `shell_exec`) with
+memory off. Tools run with the user's permissions, not in a sandbox.
+
+- `POST /api/tasks` accepts `objective` (or its alias `prompt`), optional
+  `title`, `workspace`, `level` and `request_key`. The objective must be
+  non-empty and at most 100,000 characters; title is at most 200 characters
+  and defaults to a title derived from the objective. Level is an integer
+  0–5 or `P0`–`P5`; omitted means computed P2. A supplied `deadline`, even
+  null, is rejected; deadlines are not supported yet. Other fields are
+  rejected. Returns 202 `{"task": ...}` for a new task. A non-empty
+  `request_key` makes a repeat of the same normalized request return 200
+  `{"task": ..., "repeated": true}`; reusing it for a different request
+  returns 409 `submission_conflict`. A repeat does not start a new worker.
+- `GET /api/tasks` returns `{"tasks": [...]}`; optional `state` and integer
+  `level` query parameters filter the rows. `GET /api/tasks/{task_id}`
+  returns `{"task": ...}` or 404 `not_found`.
+- `PATCH /api/tasks/{task_id}` accepts `level` (0–5, `P0`–`P5`, or
+  `auto`) and/or `state` (`pause`, `resume`, or `stop`). It returns
+  `{"task": ...}`. `first` is rejected with 400 `invalid_request`; it is
+  deferred to S6b. Pause parks at P5; resume restores the priority before
+  pause unless a new runnable level is supplied. If retention pruned the
+  pause log, resume falls back to computed P2. `auto` selects computed P2.
+  Pause cannot be combined with a level. Resuming a task that is not paused
+  returns 409 `not_paused`. Stop cancels a running worker or cancels a queued
+  task. Finished tasks cannot be changed (409 `invalid_transition`).
+
+Pause takes effect at the next model call: an already-running tool finishes,
+and an answered pending approval waits until resume before proceeding.
+
+Task objects include the task id, normalized `spec`, `state`, priority and
+source, `wait_reason`, timestamps, workspace and `priority_events`, along
+with reserved accounting fields. Service, wait and tool accounting are not
+implemented yet. Explicit user workspaces must be existing directories
+strictly inside home, outside hidden folders and `~/Library`; default
+workspace selection is described in [Scheduler](scheduler.md#tasks-workers-and-the-scheduler-store-s3a).
+Invalid workspace requests return 400 `invalid_workspace`; a workspace that
+becomes invalid before a run or resume fails the task with
+`wait_reason="invalid_workspace"` instead of running it.
+
+At most four workers are resident at once, including paused running workers.
+Task rows persist across gateway restarts. At startup, surviving nonterminal
+tasks are marked failed with `gateway restarted; recovery arrives in S3b`;
+full recovery is deferred to S3b. Retrying the same `request_key` returns the
+existing task and does not restart it.
 
 ## GET /api/sessions
 

@@ -6,6 +6,7 @@ import asyncio
 import json
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -364,7 +365,7 @@ async def test_terminal_or_invalid_target_does_not_demote_live_p0() -> None:
         {"wait_reason": "bogus"},
     ],
 )
-async def test_register_task_rejects_invalid_fields(changes: dict[str, object]) -> None:
+async def test_register_task_rejects_invalid_fields(changes: dict[str, Any]) -> None:
     gate = ChatGate(policy="class")
     with pytest.raises(ValueError):
         gate.register_task(replace(task(), **changes))
@@ -489,6 +490,24 @@ async def test_forget_idle_live_worker_preserves_policy_state(policy: str) -> No
     if policy != "off":
         assert state_task(gate) is not None
     gate.finish(call)
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "class"])
+async def test_discard_deleted_task_waits_for_its_live_calls(policy: str) -> None:
+    gate = ChatGate(policy=policy)
+    gate.register_task(task(phase="running"))
+    assert gate.discard_task("worker") is False
+    admitted = gate.submit("worker")
+    await gate.acquire(admitted)
+    gate.finish_task("worker", "done")
+    assert gate.discard_task("worker") is False
+    assert gate.registered_tasks[0].phase == "done"
+    gate.finish(admitted)
+    assert gate.discard_task("worker") is True
+    assert gate.registered_tasks == ()
+    assert gate.discard_task("worker") is False
+    assert "worker" not in gate._counts and "worker" not in gate._levels
     await gate.close()
 
 

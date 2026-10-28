@@ -291,6 +291,10 @@ class ConsoleSessions:
             ) from exc
         if info is None:
             raise ApiError(404, "not_found", "Session not found.")
+        if info.kind == "task":
+            raise ApiError(
+                409, "task_session_read_only", "A task session cannot run as a chat."
+            )
         workspace = info.workspace
         if workspace is None:
             workspace = self._default_workspace()
@@ -848,6 +852,13 @@ class ConsoleSessions:
         """
         path = self._resolve_workspace(workspace)
         async with self.lock(session_id):
+            current = await self._store.get_session(session_id)
+            if current is not None and current.kind == "task":
+                raise ApiError(
+                    409,
+                    "task_session_read_only",
+                    "A task workspace cannot be changed as a chat.",
+                )
             entry = self._sessions.get(session_id)
             if entry is None or entry.agent is None:
                 info = await self._store.update_session(session_id, workspace=path)
@@ -975,6 +986,13 @@ class ConsoleSessions:
     async def delete(self, session_id: str) -> None:
         """Close the session's runner and delete its row; 404 when unknown."""
         async with self.lock(session_id):
+            info = await self._store.get_session(session_id)
+            if info is not None and info.kind == "task":
+                raise ApiError(
+                    409,
+                    "task_session_read_only",
+                    "A task session cannot be deleted as a chat.",
+                )
             entry = self._sessions.get(session_id)
             if entry is not None:
                 await entry.runner.close(cause="closed")

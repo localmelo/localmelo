@@ -1232,6 +1232,22 @@ class ChatGate:
             ),
         )
 
+    def discard_task(self, task_id: str) -> bool:
+        """Drop a deleted task's identity only after it has no live calls.
+
+        The caller must first confirm that the durable task row is gone.
+        """
+        task = self._task_registry.get(task_id)
+        if (
+            task is None
+            or not is_terminal(task.phase)
+            or any(call.meta.session_id == task_id for call in self._calls.values())
+        ):
+            return False
+        self._task_registry.pop(task_id)
+        self.forget(task_id)
+        return True
+
     @property
     def closed(self) -> bool:
         """Whether this gate was closed; a closed gate admits without a hold."""

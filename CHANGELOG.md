@@ -9,6 +9,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- S3a.2 adds `/api/tasks` creation, inspection and control and in-process
+  workers sharing the console's scheduler gate. Creation is idempotent with
+  `request_key`; workers disable memory, omit `shell_exec`, and have at most
+  four resident at once. On startup, surviving nonterminal rows fail with
+  `gateway restarted; recovery arrives in S3b`; full recovery and accounting
+  are deferred, deadlines are rejected, and an invalid workspace fails at run
+  or resume. Pause takes effect at the next model call; running tools finish
+  and answered pending approvals wait until resume. Resume restores the
+  pre-pause priority, or computed P2 if retention pruned the pause log; an
+  unpaused task returns 409 `not_paused`. PATCH rejects `first` until S6b
+  ([#NN]).
+
 - The gateway's `sessions.db` can hold the scheduler's `scheduler` component
   version 1: `tasks`, `task_deps`, `priority_events`, `questions`,
   `sched_rules`, `sched_log` and `idle_windows` are created in one
@@ -25,8 +37,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `user_rule` origins get remembered approvals, unmarked MCP tools and session
   grants. `ChatGate` can register a worker task, so its calls are logged as
   `session_kind="task"`, its P0 is the user's single task P0, and only the
-  runner ends it. No `/api/tasks` route or worker runs yet; the console
-  wiring is S3a.2 ([#NN]).
+  runner ends it. S3a.1 supplied the store and task policy boundary ([#NN]).
 
 - The workspace page on API v2. `http://127.0.0.1:8401/` now talks only to
   `/api`: the session list with its machine snapshot, one chat's turns, its

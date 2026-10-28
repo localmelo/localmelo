@@ -115,6 +115,9 @@ configure the gateway and run a session: `PUT /api/settings`,
 `POST /api/settings/test`, create a session with or without a first turn,
 start, retry and stop its turns, cancel a message by its key, answer an
 approval, forget a session grant, rename or move a session, and delete it.
+Scheduler tasks also have `POST /api/tasks`, `GET /api/tasks`, and
+`GET` and `PATCH /api/tasks/{task_id}`; see
+[Scheduler tasks](api.md#scheduler-tasks-s3a2) for their fields and controls.
 The `/api` routes answer the same 421, 403 and 413 as `/v1/` (plus 415 for
 a non-JSON body), and add `Cache-Control: no-store` and the error shape
 `{"error": {"code", "message", "details"}}` to every response.
@@ -134,6 +137,18 @@ feeds both (a foreign GPU lock holds a console turn under
 holds a call). The gateway closes that gate last at shutdown, after both
 surfaces' sessions, so a turn waiting for its slot ends `cancelled` with
 cause `shutdown`.
+
+S3a.2 task workers use that same gate for model and embedding calls, with
+memory off and gateway tools (no `shell_exec`). Up to four workers can be
+resident; a paused running worker can still occupy a slot. Task rows survive
+restart, but startup marks surviving nonterminal tasks failed with the reason
+`gateway restarted; recovery arrives in S3b`. Full recovery, deadlines and worker
+accounting are deferred. Workspace validation also runs before a worker starts
+or resumes; a no-longer-valid folder fails the task rather than running it.
+Pause waits for the next model call: running tools finish, and an answered
+pending approval waits until resume. Resume restores the priority before pause,
+or computed P2 if retention pruned the pause log; an unpaused task returns
+409 `not_paused`. Task PATCH rejects `first` (400); it is deferred to S6b.
 
 ### GET /v1/health
 

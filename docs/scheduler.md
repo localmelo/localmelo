@@ -230,7 +230,7 @@ no lock shows nothing. A seeding create under a foreign lock in `wait` fails
 fast with HTTP 409 naming the holder, because the seed embeddings would
 otherwise send a model call before the chat exists.
 
-## Tasks, workers and the scheduler store (S3a.1)
+## Tasks, workers and the scheduler store (S3a)
 
 The gateway's `sessions.db` gains a `scheduler` component beside the session
 tables. `support/gateway/task_store.py` creates version 1 of it — `tasks`,
@@ -240,9 +240,8 @@ tables. `support/gateway/task_store.py` creates version 1 of it — `tasks`,
 `BEGIN IMMEDIATE` transaction, then records `('scheduler', 1)` in
 `schema_components`. `PRAGMA user_version` stays the session schema's, and a
 terminal `melo` never creates the component or reads its tables; a component
-newer than 1 is refused like a newer `user_version`. `TaskStore.open()` is
-the entry point S3a.2's console calls after it opens the store; this PR adds
-no route, worker or console wiring. A gateway takes the session file's owner
+newer than 1 is refused like a newer `user_version`. `TaskStore.open()` is called by the console after it opens the store. A
+gateway takes the session file's owner
 lock: a second gateway process is refused rather than concurrently migrating
 or writing the same file.
 
@@ -254,7 +253,7 @@ while the original request stays in `tasks.spec`. The current priority is in
 `tasks.level`, not the create-time value in `tasks.spec`. `UNIQUE(origin,
 request_key)` makes a repeated create idempotent: the same payload returns
 the stored row with `repeated=True`, a different payload raises
-`TaskConflictError`, which S3a.2 maps to 409. `set_level()` records actual
+`TaskConflictError`, which the task route maps to 409. `set_level()` records actual
 level changes in `priority_events` and writes `sched_log`; unchanged levels
 do not add priority labels. The user's P0 is single, so a
 second user P0 returns the prior one to P1 with no `user_rank` in the same
@@ -275,7 +274,7 @@ JSON:
   as an alias for `objective`) at computed P2, ignoring an untrusted `level`
   and rejecting a payload-supplied `level_source`. Deferred optional fields,
   including `inputs`, `deadline`, and `budget_s`, are rejected rather than
-  silently discarded; they are planned for S3a.2. After authorizing the actor,
+  silently discarded; the task route also rejects `deadline`. After authorizing the actor,
   `TaskSpec.from_user_payload()` pins an explicit user-selected P0–P5; without
   an explicit level it uses computed P2. The adapter does not itself
   authenticate or authorize a caller.
@@ -303,8 +302,28 @@ go through `finish_task()`; a repeat does not change its terminal phase.
 reason, but not level or source. Re-registering an existing task preserves its
 current priority, and forgetting it preserves its identity while its row exists;
 `set_task_level()` handles the chip's `P0`-`P5`, `auto` and `first`, and
-`held(task_id)` reports the gate's reason as it does for a chat. Gate levels
-remain in memory; S3a.2 writes them through the store.
+`held(task_id)` reports the gate's reason as it does for a chat. Task routes
+write priority changes through the store.
+
+S3a.2 adds [task routes](api.md#scheduler-tasks-s3a2) and in-process workers.
+New user tasks are queued by effective priority, rank and creation time, with
+at most four resident workers; a parked running worker still occupies its slot.
+Each uses `mode="gateway"`, `memory=False` and the console's shared gate for
+LLM and embedding calls. Stop cancels the runner and finishes the gate task.
+The gate registry discards a task after retention removes its row, not merely
+when it is forgotten.
+
+Rows survive gateway restart, but startup marks surviving nonterminal tasks
+failed with `gateway restarted; recovery arrives in S3b`. Full recovery is
+deferred. A repeat `request_key` only returns the existing task. Workspace
+validity is checked at creation and again at run or resume; a folder that
+becomes invalid fails the task with `invalid_workspace`. Deadlines are rejected
+and service, wait and tool accounting is deferred. Pause parks a task at P5
+and takes effect at the next model call: running tools finish and an answered
+pending approval waits until resume. Resume restores the prior priority unless
+a new level is supplied; if retention pruned the pause log it falls back to
+computed P2. Resuming an unpaused task returns 409 `not_paused`. The task
+PATCH route rejects `first` with 400; it is deferred to S6b.
 
 ## Run one simulation
 
