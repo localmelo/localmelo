@@ -155,8 +155,9 @@ def render_transcript(messages: Sequence[Message]) -> str:
     Tool calls read ``Assistant called <tool>(<JSON arguments>)`` and tool
     results ``Result of <tool>: <content>``. Images are not shown: a tool
     result's content already names its images, and a line counts the
-    images of any other message. Thinking is left out, as in every other
-    request.
+    images of any other message. Thinking is left out, as in legacy and in
+    this transcript; a ``replay`` planning or reflection request carries
+    it, but the retry's written-out turns do not.
     """
     paragraphs: list[str] = []
     for message in messages:

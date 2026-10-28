@@ -296,12 +296,18 @@ def _replay_plan(
     The first list is the one :func:`_as_sent` returns. The second holds the
     indexes in *window* of the assistant turns whose thinking was left out
     because it exceeds :data:`REPLAY_TURN_CAP` (empty on a replay-required
-    provider, and in ``legacy``/``drop``).
+    provider, and in ``legacy``/``drop``). On a replay-required provider the
+    whole window is replayed: the task scope and ``replay_turns`` do not
+    apply, since a turn the server needs is not one the caller can leave out.
     """
     if options.reasoning == "legacy":
         return window, []
     start = 0
-    if options.replay_scope != "window" and task_query is not None:
+    if (
+        not requires_replay
+        and options.replay_scope != "window"
+        and task_query is not None
+    ):
         for index, msg in enumerate(window):
             if msg is task_query:
                 start = index
@@ -313,7 +319,7 @@ def _replay_plan(
     ]
     keep = (
         set(in_scope)
-        if options.replay_turns is None
+        if requires_replay or options.replay_turns is None
         else set(in_scope[-options.replay_turns :])
     )
     sent: list[Message] = []
@@ -347,8 +353,10 @@ def _as_sent(
     ``replay``, in scope (the current task from *task_query* on, or the
     whole window), among the newest ``replay_turns`` such turns, and within
     :data:`REPLAY_TURN_CAP` (the cap does not apply to a provider that
-    requires replay). A message that fails one of these is a copy with an
-    empty thinking; one that passes is the original object.
+    requires replay). A provider that requires replay gets every assistant
+    turn in the window: the task scope and ``replay_turns`` are ignored
+    there. A message that fails one of these is a copy with an empty
+    thinking; one that passes is the original object.
     """
     return _replay_plan(
         window,
@@ -829,6 +837,12 @@ class _RunState:
     # answer of a reflection's "done" that gives none, and the result of a
     # final boundary whose reflection is unreadable (reflection_gate="flags").
     last_text: str = ""
+    # The thinking of the planning reply that set last_text, and of the last
+    # reflection reply read; _record_answer replays the one behind the result.
+    last_text_thinking: str = ""
+    reflection_thinking: str = ""
+    # The thinking of the reply that gave the result, once the run ends.
+    answer_thinking: str = ""
     # Planning replies in a row with neither a tool call nor text.
     empty_replies: int = 0
     # The run's task id ("" for a call without a task record).
@@ -1148,6 +1162,17 @@ class Agent:
             raise TypeError("Agent requires either config= or llm= to be provided")
 
         self.options = options if options is not None else AgentOptions()
+        if (
+            config is not None
+            and llm is None
+            and self.options.reasoning != "replay"
+            and config.chat_backend != "ollama"
+        ):
+            # The section's key is only for replay: legacy and drop send no
+            # reasoning, and the gateway, a configured UI session and a
+            # Python caller all build their provider here. Ollama keeps its
+            # fixed "thinking" field, whose native wire legacy already uses.
+            self._llm.reasoning_field = None
         # The API user's error; the CLI refuses the same pairs before it
         # builds an Agent, so direct mode never reaches this traceback.
         refusal = reasoning_refusal(
@@ -2316,6 +2341,12 @@ class Agent:
           agent stops chasing instead of carrying an ever-growing
           scratchpad. A ``done`` decision is left as it is: it ends the
           run, so no attempt would carry the reflection.
+
+        A reflection request that ``fit`` refuses (the explicit modes,
+        when even its newest tail unit is over the prompt cap) is a reply
+        that cannot be read: with ``"flags"`` this returns ``None``, and
+        with ``"utility"`` it reads ``stop`` as a reply without a JSON
+        object does.
         """
         flags = self.options.reflection_gate == "flags"
         short_window = self.hippo.working.get_window()
@@ -2345,7 +2376,11 @@ class Agent:
             fit=fit,
         )
         if response is None:
-            return None
+            # The fit refused the request before it was sent; read it as an
+            # unreadable reply (see the docstring and _parse_reflection).
+            return (
+                None if flags else self._parse_reflection("", attempt_id, failure_type)
+            )
         if self.options.reasoning != "legacy":
             before = response.thinking
             response = _split_inline_reasoning(response)
@@ -2372,7 +2407,11 @@ class Agent:
                 fit=fit,
             )
             if response is None:
-                return None
+                return (
+                    None
+                    if flags
+                    else self._parse_reflection("", attempt_id, failure_type)
+                )
             if self.options.reasoning != "legacy":
                 before = response.thinking
                 response = _split_inline_reasoning(response)
@@ -2380,6 +2419,8 @@ class Agent:
                     self.chat.stats.reasoning_chars += len(response.thinking)
             if replies is not None:
                 replies.append(response)
+        if run is not None:
+            run.reflection_thinking = response.thinking
         if flags:
             data = _find_reflection(response.content)
             if data is None:
@@ -2561,10 +2602,12 @@ class Agent:
                 return step + 1, ""
             if response.content.strip():
                 run.last_text = response.content
+                run.last_text_thinking = response.thinking
 
             if not response.tool_calls:
                 if response.content.strip():
                     # No tool call → direct answer
+                    run.answer_thinking = response.thinking
                     run.end("completed", result=response.content)
                     return step + 1, ""
                 # An empty reply is no answer: ask for one and plan again.
@@ -3089,9 +3132,11 @@ class Agent:
         :func:`~localmelo.melo.schema.clip_session_text`). A text that the
         memory-write check refuses is replaced by
         :data:`~localmelo.melo.schema.ANSWER_NOT_KEPT_LABEL` with the
-        check's reason. The result itself is not changed. A failure is
-        logged, not raised, so it cannot replace the run's outcome or skip
-        the save.
+        check's reason. The result itself is not changed. On a provider that
+        requires reasoning replay, ``replay`` also keeps the thinking of the
+        reply that gave the answer, so the next request can send it back. A
+        failure is logged, not raised, so it cannot replace the run's
+        outcome or skip the save.
         """
         if not self.options.record_answers or not run.query_in_memory:
             return
@@ -3103,7 +3148,14 @@ class Agent:
             )
             if not check.allowed:
                 text = ANSWER_NOT_KEPT_LABEL.format(reason=check.reason)
-            self.hippo.working.append(Message(role="assistant", content=text))
+            thinking = (
+                run.answer_thinking
+                if self.options.reasoning == "replay" and self._requires_replay
+                else ""
+            )
+            self.hippo.working.append(
+                Message(role="assistant", content=text, thinking=thinking)
+            )
         except Exception:
             logger.exception(
                 "Could not keep the answer of task %s in working memory", run.task_id
@@ -3628,6 +3680,7 @@ class Agent:
                         run.attempts,
                         out_of,
                     )
+                    run.answer_thinking = run.last_text_thinking
                     run.end("budget_exhausted", result=run.last_text, error=out_of)
                     return
                 logger.info(
@@ -3643,16 +3696,23 @@ class Agent:
             best_effort = decision.best_effort_result
             if decision.recommended_action == "done":
                 run.events.reflection(reflection, continue_run=False)
-                answer = best_effort if best_effort.strip() else run.last_text
+                if best_effort.strip():
+                    answer = best_effort
+                    run.answer_thinking = run.reflection_thinking
+                else:
+                    answer = run.last_text
+                    run.answer_thinking = run.last_text_thinking
                 run.end("completed", result=answer)
                 return
             if out_of:
                 run.events.reflection(reflection, continue_run=False)
+                run.answer_thinking = run.reflection_thinking
                 run.end("budget_exhausted", result=best_effort, error=out_of)
                 return
             if not _should_continue(decision, opts.reflection_gate):
                 run.events.reflection(reflection, continue_run=False)
                 stopped = f"Stopped after attempt {run.attempts}"
+                run.answer_thinking = run.reflection_thinking
                 run.end(
                     "gate_stopped",
                     result=best_effort,

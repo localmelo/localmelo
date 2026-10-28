@@ -863,3 +863,171 @@ async def test_replay_counters_match_what_the_requests_carried() -> None:
     )
     assert result.memory_stats is not None
     assert result.memory_stats["replayed_chars"] == carried
+
+
+@pytest.mark.asyncio
+async def test_a_replay_required_provider_replays_the_whole_window() -> None:
+    # The task scope and replay_turns would leave the two loaded turns out;
+    # a server that requires replay must get them, so both are exempt.
+    old = Message(role="assistant", content="old", thinking="old thought")
+    older = Message(role="assistant", content="older", thinking="older thought")
+    server = Scripted(
+        _reply("", thinking="new thought", calls=1),
+        _reply("done"),
+    )
+    llm = server.llm(
+        reasoning_field="reasoning_content", requires_reasoning_replay=True
+    )
+    agent = _agent(
+        llm,
+        _options(reasoning="replay", replay_turns=1),
+    )
+    agent.load_conversation([old, older])
+    await agent.run_task("q")
+    await agent.close()
+
+    sent = _assistant(server.bodies[0])
+    assert [m["content"] for m in sent] == ["old", "older"]
+    assert sent[0]["reasoning_content"] == "old thought"
+    assert sent[1]["reasoning_content"] == "older thought"
+
+
+@pytest.mark.asyncio
+async def test_a_replay_required_answer_keeps_its_thinking() -> None:
+    server = Scripted(
+        _reply("first answer", thinking="answer thought"),
+        _reply("second answer"),
+    )
+    llm = server.llm(
+        reasoning_field="reasoning_content", requires_reasoning_replay=True
+    )
+    agent = _agent(
+        llm,
+        _options(reasoning="replay", record_answers=True),
+    )
+    await agent.run_task("first")
+    await agent.run_task("second")
+    await agent.close()
+
+    sent = _assistant(server.bodies[1])
+    assert [m["content"] for m in sent] == ["first answer"]
+    assert sent[0]["reasoning_content"] == "answer thought"
+
+
+@pytest.mark.asyncio
+async def test_agent_config_clears_the_section_field_outside_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from localmelo.support.backends.local.vllm import VllmBackend
+    from localmelo.support.config import Config, LocalBackendConfig
+
+    server = Scripted(_reply("", thinking="plan thought", calls=1), _reply("done"))
+
+    def build(self: VllmBackend, cfg: Any) -> OpenAICompatLLM:
+        return server.llm(
+            reasoning_field=cfg.vllm.reasoning_field or None,
+            requires_reasoning_replay=cfg.vllm.requires_reasoning_replay,
+        )
+
+    monkeypatch.setattr(VllmBackend, "build_chat_provider", build)
+    cfg = Config(
+        chat_backend="vllm",
+        embedding_backend="none",
+        vllm=LocalBackendConfig(
+            chat_url="http://stub.test/v1",
+            chat_model="stub-model",
+            reasoning_field="reasoning_content",
+        ),
+    )
+    agent = Agent(config=cfg)
+    agent.hippo.register_tool(_echo())
+    agent.executor.register("echo", _run_echo)
+    result = await agent.run_task("q")
+    await agent.close()
+
+    assert result.status == "completed"
+    assert agent._llm.reasoning_field is None
+    assert not _has_reasoning(_assistant(server.bodies[1])[0])
+
+
+@pytest.mark.asyncio
+async def test_agent_config_keeps_the_section_field_in_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from localmelo.support.backends.local.vllm import VllmBackend
+    from localmelo.support.config import Config, LocalBackendConfig
+
+    server = Scripted(_reply("", thinking="plan thought", calls=1), _reply("done"))
+
+    def build(self: VllmBackend, cfg: Any) -> OpenAICompatLLM:
+        return server.llm(
+            reasoning_field=cfg.vllm.reasoning_field or None,
+            requires_reasoning_replay=cfg.vllm.requires_reasoning_replay,
+        )
+
+    monkeypatch.setattr(VllmBackend, "build_chat_provider", build)
+    cfg = Config(
+        chat_backend="vllm",
+        embedding_backend="none",
+        vllm=LocalBackendConfig(
+            chat_url="http://stub.test/v1",
+            chat_model="stub-model",
+            reasoning_field="reasoning_content",
+        ),
+    )
+    agent = Agent(config=cfg, options=_options(reasoning="replay"))
+    agent.hippo.register_tool(_echo())
+    agent.executor.register("echo", _run_echo)
+    result = await agent.run_task("q")
+    await agent.close()
+
+    assert result.status == "completed"
+    assert agent._llm.reasoning_field == "reasoning_content"
+    assert _assistant(server.bodies[1])[0]["reasoning_content"] == "plan thought"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("gate", "status", "bodies"),
+    [("flags", "completed", 2), ("utility", "gate_stopped", 1)],
+)
+async def test_a_reflection_that_fit_refuses_reads_as_unreadable(
+    gate: str,
+    status: str,
+    bodies: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def refuse(
+        self: Agent,
+        messages: list[Message],
+        run: _RunState | None,
+        *,
+        skipped: list[int] | None = None,
+        sent: list[Message] | None = None,
+    ) -> None:
+        return None
+
+    monkeypatch.setattr(Agent, "_fit_reflection_messages", refuse)
+    server = Scripted(_reply("", thinking="plan thought", calls=1), _reply("done"))
+    agent = _agent(
+        server.llm(reasoning_field="auto"),
+        _options(
+            reasoning="replay",
+            reflection_gate=gate,  # type: ignore[arg-type]
+            max_steps=5,
+            steps_per_attempt=1,
+            max_attempts=2,
+        ),
+    )
+    result = await agent.run_task("q")
+    await agent.close()
+
+    assert result.status == status
+    assert len(server.bodies) == bodies
+    # The refused request is never sent: flags starts the second attempt,
+    # utility keeps the unreadable stop and ends there.
+    assert result.steps == (2 if gate == "flags" else 1)
+    if gate == "utility":
+        assert result.error == "Could not parse reflection response"
+        assert result.result == ""
+        assert result.attempts == 1
