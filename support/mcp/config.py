@@ -25,9 +25,9 @@ per-server keys:
 Other keys are ignored so files written for other clients still load.
 
 A server does not inherit localmelo's environment. It gets only the
-variables named in ``DEFAULT_ENV_VARS`` (in
-:mod:`localmelo.support.mcp.client`: ``PATH``, ``HOME``, the locale and
-a few more), with its ``env`` on top. ``env`` values are used literally;
+variables :func:`localmelo.melo.executor.env.child_env` allows (``PATH``,
+``HOME``, the locale and a few more, as the built-in tools' children do),
+with its ``env`` on top. ``env`` values are used literally;
 ``${VAR}`` references are not expanded.
 """
 

@@ -207,6 +207,43 @@ def test_workspace_values_are_kept() -> None:
     assert opts.tool_timeout_s == 600
 
 
+def test_tool_env_defaults_to_none() -> None:
+    assert AgentOptions().tool_env is None
+
+
+def test_tool_env_is_a_copy() -> None:
+    given = {"MY_VALUE": "42"}
+    opts = AgentOptions(tool_env=given)
+    given["MY_VALUE"] = "changed"
+    assert opts.tool_env == {"MY_VALUE": "42"}
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        (
+            ["MY_VALUE=42"],
+            "tool_env must be None or a mapping of names to values, "
+            "got ['MY_VALUE=42']",
+        ),
+        (
+            "MY_VALUE=42",
+            "tool_env must be None or a mapping of names to values, "
+            "got 'MY_VALUE=42'",
+        ),
+        ({"": "1"}, "tool_env has an invalid variable name ''"),
+        ({"MY=VALUE": "1"}, "tool_env has an invalid variable name 'MY=VALUE'"),
+        ({"A\0B": "1"}, "tool_env has an invalid variable name 'A\\x00B'"),
+        ({"MY_VALUE": 42}, "tool_env['MY_VALUE'] must be a str, got 42"),
+        ({"MY_VALUE": None}, "tool_env['MY_VALUE'] must be a str, got None"),
+    ],
+)
+def test_tool_env_must_be_a_mapping_of_str_to_str(value: object, message: str) -> None:
+    with pytest.raises(ValueError) as caught:
+        AgentOptions(tool_env=value)  # type: ignore[arg-type]
+    assert str(caught.value) == message
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [

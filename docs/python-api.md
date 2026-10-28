@@ -74,6 +74,7 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `timeout_s` | `None` | A time limit for each run, in seconds. `None` means no limit. It also interrupts a `python_exec` call, whose child process it kills. |
 | `workspace_root` | `None` | The directory the built-in tools work in, and the only one the file tools reach; see [Work in a directory](#work-in-a-directory). |
 | `tool_timeout_s` | `None` | The time limit of `shell_exec` and `python_exec`, in seconds. Needs a `workspace_root`. `None` keeps 30 seconds for a shell command and 60 seconds for Python. |
+| `tool_env` | `None` | Extra variables for the `shell_exec` and `python_exec` children, on top of the minimal environment; see [Work in a directory](#work-in-a-directory). |
 | `record_answers` | `False` | `True` keeps each run's answer in working memory for the next run; see [Keep answers between runs](#keep-answers-between-runs). |
 
 `AgentOptions` cannot be changed after it is created. A value that is not
@@ -85,7 +86,7 @@ ValueError: max_steps must be an int >= 1, got 0
 
 The [command-line options](cli.md#direct-mode) set the same fields, except
 `steps_per_attempt` and `max_attempts`. Direct mode never sets
-`workspace_root`, `tool_timeout_s` or `record_answers`.
+`workspace_root`, `tool_timeout_s`, `tool_env` or `record_answers`.
 
 ## Results
 
@@ -408,7 +409,11 @@ Both lines print the real path of `~/melo-work`, such as
   The child also gets a CPU-time limit of one hour and an open-file limit of
   1,024 (`RLIMIT_CPU` and `RLIMIT_NOFILE` on POSIX), which only stop code
   that outlives the call; no address-space limit is set, because macOS
-  refuses one.
+  refuses one. Its environment is not melo's: it gets `PATH`, `HOME`,
+  `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, every `LC_*` variable and
+  `TMPDIR`, plus `tool_env`, so an API key in melo's environment reaches no
+  tool; `VIRTUAL_ENV`, `PYTHONPATH`, `SSH_AUTH_SOCK` and the proxy
+  variables pass only through `tool_env`.
 - **They can still reach any path.** Only the file tools are limited to the
   root. Use an [approval policy](#approve-tool-calls) to control
   `shell_exec` and `python_exec`.
