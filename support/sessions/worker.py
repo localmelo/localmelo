@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
@@ -26,11 +27,19 @@ def redact_worker(value: Any) -> Any:
     return value
 
 
-def sensitive_read(tool: str, arguments: Any) -> str | None:
-    """Identify direct reads of common secret, credential and settings files."""
-    if tool.lower() not in {"file_read", "read", "read_file"} or not isinstance(
-        arguments, dict
-    ):
+def sensitive_read(
+    tool: str, arguments: Any, workspace: str | None = None
+) -> str | None:
+    """Identify direct reads of common secret files, including symlink targets."""
+    name = tool.lower()
+    if name.startswith("mcp__") and "__" in name[5:]:
+        name = name.rsplit("__", 1)[-1]
+    if name not in {
+        "file_read",
+        "read",
+        "read_file",
+        "read_text_file",
+    } or not isinstance(arguments, dict):
         return None
     path = next(
         (
@@ -42,19 +51,23 @@ def sensitive_read(tool: str, arguments: Any) -> str | None:
     )
     if not path:
         return None
-    parts = path.replace("\\", "/").lower().split("/")
-    name = parts[-1]
-    sensitive = (
-        ".ssh" in parts
-        or name == ".env"
-        or name.startswith(".env.")
-        or "credential" in name
-        or "secret" in name
-        or "settings" in name
-        or name in {"config.toml", "config.json", "id_rsa", "id_ed25519"}
-        or name.endswith((".pem", ".key", ".p12", ".pfx"))
-    )
-    return redact_worker(path) if sensitive else None
+
+    def matches(candidate: str) -> bool:
+        parts = candidate.replace("\\", "/").lower().split("/")
+        name = parts[-1]
+        return (
+            ".ssh" in parts
+            or name == ".env"
+            or name.startswith(".env.")
+            or "credential" in name
+            or "secret" in name
+            or "settings" in name
+            or name in {"config.toml", "config.json", "id_rsa", "id_ed25519"}
+            or name.endswith((".pem", ".key", ".p12", ".pfx"))
+        )
+
+    resolved = os.path.realpath(os.path.join(workspace or os.getcwd(), path))
+    return redact_worker(path) if matches(path) or matches(resolved) else None
 
 
 def _git_metadata(workspace: str) -> dict[str, str]:
@@ -91,7 +104,7 @@ async def run_worker(
         title_from_text,
     )
 
-    workspace = agent.workspace_root
+    workspace = agent.workspace_root or os.getcwd()
     provider = agent._llm
     model = str(getattr(provider, "model", ""))
     http = getattr(provider, "_http", None)
@@ -135,7 +148,7 @@ async def run_worker(
                     else 1 if outcome.status == "crashed" else 2
                 ),
                 "steps": outcome.steps,
-                "tokens": outcome.usage,
+                "usage": outcome.usage,
             }
         )
         if runner.session_id:

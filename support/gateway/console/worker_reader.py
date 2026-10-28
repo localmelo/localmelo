@@ -29,7 +29,15 @@ class WorkerRecord:
     started_at: float
     status: str | None
     steps: Any
-    tokens: Any
+    tokens: int | None
+
+
+def _total_tokens(meta: dict[str, Any], result: dict[str, Any]) -> int | None:
+    usage = meta.get("usage", meta.get("tokens", result.get("usage")))
+    value = usage.get("total_tokens") if isinstance(usage, dict) else usage
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
 
 
 def encode_cursor(record: WorkerRecord) -> str:
@@ -149,7 +157,7 @@ class WorkerReader(SessionStore):
                             else row[13]
                         ),
                         steps=meta.get("steps", result.get("steps")),
-                        tokens=meta.get("tokens", result.get("usage")),
+                        tokens=_total_tokens(meta, result),
                     )
                 )
             return records

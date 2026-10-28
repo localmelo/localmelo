@@ -251,6 +251,8 @@ curl 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
   other value is 400 `invalid_request`. `worker` reads the CLI sessions file
   in SQLite read-only mode; it does not include terminal chat sessions. A
   missing CLI file gives an empty list and is not created by the gateway.
+  SQLite may create `-wal` and `-shm` bookkeeping sidecars during a read;
+  the reader does not open the main database for writing or use immutable mode.
 - Worker lists accept exact-match `status`, `source`, and `parent_run`
   filters, and an opaque `cursor` from the previous response's `next_cursor`.
   Results are ordered by the first turn's start time descending, then session
@@ -260,8 +262,10 @@ curl 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
   affect subsequent pages.
 - Worker list and detail session objects include nullable `source`,
   `parent_run`, `git_branch`, `git_head`, `exit_code`, `status`, `steps`, and
-  `tokens`. Status falls back to the first turn's status; steps and tokens
-  fall back to its stored result. Missing values are `null`, not zero.
+  `tokens`. `tokens` is the integer total token count, and `meta.usage` holds
+  the full usage map. Status falls back to the first turn's status; steps and
+  tokens fall back to its stored result. Missing values are `null`, not zero.
+  The detail response's top-level `tokens` separately counts completion tokens.
 - Worker sessions are read-only. Their session detail and turns (including
   `events=true`) and stored image blobs are available by id; write routes and the `/events` SSE
   route return 404. If an id exists in both files, the gateway session wins.

@@ -564,7 +564,9 @@ class SessionRunner:
                         data = payload.get("data", {})
                         if event.type == "tool.started":
                             path = sensitive_read(
-                                str(data.get("name", "")), data.get("arguments")
+                                str(event.data.get("name", "")),
+                                event.data.get("arguments"),
+                                turn.agent.workspace_root,
                             )
                             if path:
                                 self._sensitive_reads[str(data.get("call_id", ""))] = (

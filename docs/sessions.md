@@ -209,7 +209,8 @@ Worker sessions also use the CLI file: direct tasks save them only with
 `--save-session`, and dsh logs can be imported by content hash. They have one
 turn and are excluded from interactive chat selection. The gateway can read
 worker rows in this file through a read-only connection; it does not recover,
-modify, or follow them. See [Worker histories](cli.md#worker-histories) for
+modify, or follow them. SQLite may create `-wal` and `-shm` bookkeeping
+sidecars during a read. See [Worker histories](cli.md#worker-histories) for
 redaction limitations.
 
 - **A writer marker.** A new file records its writer. Opening the other

@@ -85,7 +85,8 @@ class ConsoleOptions:
     """What a test may replace; production reads every default.
 
     *store_path* is ``~/.cache/localmelo/gateway/sessions.db`` when None,
-    *builder* is :func:`~.registry.default_builder`, and *probe* is the
+    *worker_store_path* defaults to the CLI sessions file, *builder* is
+    :func:`~.registry.default_builder`, and *probe* is the
     real cached model-server probe. *dev_reload* is read by the static
     bundle of PR 5.
     """

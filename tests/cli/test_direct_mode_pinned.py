@@ -19,8 +19,11 @@ default options stay unchanged. P13b's loop notice (``shell_exec`` is off;
 ``--builtins all`` turns it on) moved ``_run`` again, and ``_parse_builtins``
 is pinned for the first time: it returns every built-in explicitly for
 ``--builtins all``. T65b's review fixes name ``melo "" --builtins all`` in
-the notice, so ``_run`` has a new hash again. The other pinned functions are
-unchanged. ``_check_args``, which carries the refusals, is not pinned.
+the notice, so ``_run`` has a new hash again. Worker history adds opt-in
+``--save-session`` and import dispatch to ``_run_direct`` and ``_run``; their
+reviewed hashes change while the unsaved direct path stays the same. The other
+pinned functions are unchanged. ``_check_args``, which carries the refusals,
+is not pinned.
 """
 
 from __future__ import annotations
@@ -34,8 +37,8 @@ import pytest
 MAIN = Path(__file__).resolve().parents[2] / "__main__.py"
 
 PINNED = {
-    "_run_direct": "945c0b4e897fac4b5005cef2758eb30587477c13f0adee6b456647d11a334551",
-    "_run": "dd9090b183a95ce694a5dc1cea414b70f088705e2d63de911cdc2320d483b626",
+    "_run_direct": "2d5eef84c5db1ed4b9e9708bfe911ab6ac1e2a17b63024d34073456cce110d7c",
+    "_run": "8c672aa79afb44802dc599e32f0d2f1b078d510c69048d031fd9bd7f763d745a",
     "_run_one": "0c323f5d879739c205efe3ac0c71d651be2496721b68437ac30c93c6b6f70f31",
     "_report": "5ce2d43919e8bea8c5cfdb9689acd104e4bf65d2a8c377d9913f25b2cd909ecf",
     "_status_line": "51cf6b34fa09e121214b0a06e29e74d3d7d38d68b8e19ba5c68b0809abc1821b",

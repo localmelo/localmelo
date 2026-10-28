@@ -1,4 +1,6 @@
+{"type":"session","sessionId":"synthetic-session","cwd":"/synthetic/workspace"}
 {"type":"thinking","text":"Synthetic reasoning"}
+{"type":"text","text":"Synthetic pre-tool text"}
 {"type":"tool_call","callId":"call-1","tool":"fixture_tool","input":{"file_path":"fixture"}}
 {"type":"tool_call","callId":"call-2","tool":"fixture_tool","input":{"file_path":"fixture"}}
 {"type":"tool_result","callId":"call-2","status":"error","result":"Synthetic result"}

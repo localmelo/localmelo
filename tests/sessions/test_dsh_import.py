@@ -92,7 +92,10 @@ async def test_import_mapping_idempotence_redaction_and_retention(
     assert sorted([first.imported, second.imported]) == [False, True]
     assert first.skipped == second.skipped == 3
     info = await store.get_session(first.session_id)
-    assert info is not None and info.kind == "worker" and info.meta == {"source": "dsh"}
+    assert info is not None and info.kind == "worker"
+    assert info.meta["source"] == "dsh"
+    assert info.meta["tokens"] == 37
+    assert info.meta["usage"]["completion_tokens"] == 7
     turns = await store.list_turns(first.session_id)
     assert len(turns) == 1 and turns[0].status == "completed"
     assert turns[0].answer == "answer"
@@ -195,14 +198,16 @@ async def test_missing_call_id_cannot_leak_sensitive_read(tmp_path: Path) -> Non
 
 @pytest.mark.asyncio
 async def test_scrubbed_real_log_fixture(tmp_path: Path) -> None:
-    fixture = Path(__file__).parents[1] / "fixtures/events/dsh-worker.jsonl"
+    fixture = Path(__file__).parents[1] / "fixtures/dsh/dsh-worker.jsonl"
     store = SessionStore(tmp_path / "sessions.db", writer="cli")
     first = await import_dsh(fixture, title="Fixture", store=store)
     second = await import_dsh(fixture, store=store)
     assert first.imported and not second.imported
-    assert first.session_id == second.session_id and first.skipped == second.skipped
+    assert (
+        first.session_id == second.session_id and first.skipped == second.skipped == 0
+    )
     records = [json.loads(line) for line in fixture.read_text().splitlines()]
-    assert len(records) == 30
+    assert len(records) == 32
     assert any("usage" in record for record in records)
     turns = await store.list_turns(first.session_id)
     assert len(turns) == 1 and turns[0].answer == "Synthetic answer"
@@ -224,6 +229,84 @@ async def test_scrubbed_real_log_fixture(tmp_path: Path) -> None:
         for event in data
         if event["type"] == "assistant.message"
     )
+    if shutil.which("node"):
+        reducer = Path(__file__).parents[2] / "support/gateway/static/turns.mjs"
+        script = """
+const {newView, applyEvent} = await import(process.argv[1]);
+let input = ''; for await (const chunk of process.stdin) input += chunk;
+const view = newView('test');
+for (const event of JSON.parse(input)) applyEvent(view, event);
+const turn = view.turns[0];
+if (!turn.items.some(item => item.kind === 'assistant_text' &&
+    item.text === 'Synthetic pre-tool text') || turn.outputTokens !== Number(process.argv[2]))
+    process.exit(1);
+"""
+        frames = [
+            {**event.event, "id": event.id, "turn": event.turn} for event in events
+        ]
+        subprocess.run(
+            [
+                "node",
+                "--input-type=module",
+                "-e",
+                script,
+                reducer.as_uri(),
+                str(expected_output),
+            ],
+            input=json.dumps(frames),
+            text=True,
+            check=True,
+            capture_output=True,
+        )
+    await store.aclose()
+
+
+@pytest.mark.asyncio
+async def test_session_workspace_git_and_invalid_line(tmp_path: Path) -> None:
+    workspace = tmp_path / ("sk-" + "a" * 30)
+    workspace.mkdir()
+    subprocess.run(["git", "init", "-q", str(workspace)], check=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(workspace),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "commit",
+            "--allow-empty",
+            "-qm",
+            "fixture",
+        ],
+        check=True,
+    )
+
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ["git", "-C", str(workspace), *args], text=True
+        ).strip()
+
+    path = tmp_path / "log.jsonl"
+    write_log(
+        path,
+        [
+            {"type": "session", "cwd": str(workspace)},
+            {"type": "session", "cwd": "/ignored"},
+            {"type": "status", "step": 1, "phase": "step_end"},
+            {"type": "final", "text": "done"},
+        ],
+        invalid=True,
+    )
+    store = SessionStore(tmp_path / "sessions.db", writer="cli")
+    imported = await import_dsh(path, store=store)
+    assert imported.skipped == 1
+    info = await store.get_session(imported.session_id)
+    assert info is not None
+    assert info.workspace == str(tmp_path / "[redacted]")
+    assert info.meta["git_branch"] == git("rev-parse", "--abbrev-ref", "HEAD")
+    assert info.meta["git_head"] == git("rev-parse", "HEAD")
     await store.aclose()
 
 

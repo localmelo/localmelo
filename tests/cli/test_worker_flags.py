@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -58,3 +59,48 @@ def test_import_mode_runs_without_configuration(
     assert "imported" in capsys.readouterr().out
     main()
     assert "already imported" in capsys.readouterr().out
+
+
+def test_main_save_session_records_worker_with_fake_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import localmelo.__main__ as cli
+    from localmelo.melo.agent import Agent, AgentOptions
+    from tests.sessions.helpers import ScriptedLLM, answer
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "_build_direct_mode_agent",
+        lambda *args, **kwargs: Agent(
+            llm=ScriptedLLM([answer("Done")]), options=AgentOptions(memory=False)
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "melo",
+            "--save-session",
+            "Saved task",
+            "--parent-run",
+            "parent",
+            "--",
+            "hello",
+        ],
+    )
+    main()
+    path = tmp_path / ".cache/localmelo/cli/sessions.db"
+    with sqlite3.connect(path) as conn:
+        kind, title, workspace, meta = conn.execute(
+            "SELECT kind, title, workspace, meta FROM sessions"
+        ).fetchone()
+        answer_text = conn.execute("SELECT answer FROM turns").fetchone()[0]
+    assert (kind, title, workspace, answer_text) == (
+        "worker",
+        "Saved task",
+        str(tmp_path),
+        "Done",
+    )
+    assert json.loads(meta)["parent_run"] == "parent"

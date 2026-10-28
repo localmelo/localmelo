@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -52,6 +53,7 @@ async def test_missing_file_then_live_worker(
         assert [item["id"] for item in items] == [turn.session_id]
         assert items[0]["meta"] == {"source": "dsh"}
         assert items[0]["running_here"] is False
+        assert items[0]["busy"] is True
         assert client.get("/api/sessions").json()["sessions"] == []
         assert client.get(f"/api/sessions/{chat.session_id}").status_code == 404
         detail = client.get(f"/api/sessions/{turn.session_id}").json()
@@ -134,7 +136,9 @@ async def test_read_does_not_recover_stale_turn(
         None, "stale", holder=HOLDER, new_session=NewSession(kind="worker")
     )
     await store.aclose()
+    before = hashlib.sha256(worker_path.read_bytes()).hexdigest()
     detail = client.get(f"/api/sessions/{turn.session_id}").json()
+    assert hashlib.sha256(worker_path.read_bytes()).hexdigest() == before
     assert detail["session"]["busy"] is False
     with sqlite3.connect(f"{worker_path.as_uri()}?mode=ro", uri=True) as conn:
         assert conn.execute("SELECT status FROM turns").fetchone() == ("running",)
@@ -158,7 +162,7 @@ async def test_worker_filters_and_cursor_over_200(
                     {
                         "status": "gate_stopped",
                         "steps": 0,
-                        "tokens": {"total_tokens": 0},
+                        "usage": {"total_tokens": 0, "completion_tokens": 0},
                         "exit_code": 2,
                         "git_head": "abc",
                         "git_branch": "main",
@@ -211,6 +215,24 @@ async def test_worker_filters_and_cursor_over_200(
     ]
     assert [row["id"] for row in filtered["sessions"]] == expected_filtered
     assert filtered["next_cursor"] is None
+    paged = []
+    next_cursor = None
+    while True:
+        params = {
+            "kind": "worker",
+            "source": "dsh",
+            "parent_run": "p1",
+            "status": "completed",
+            "limit": "7",
+        }
+        if next_cursor is not None:
+            params["cursor"] = next_cursor
+        page = client.get("/api/sessions", params=params).json()
+        paged.extend(row["id"] for row in page["sessions"])
+        next_cursor = page["next_cursor"]
+        if next_cursor is None:
+            break
+    assert paged == expected_filtered
     row = filtered["sessions"][0]
     assert row["status"] == "completed" and row["source"] == "dsh"
     assert all(
@@ -225,7 +247,11 @@ async def test_worker_filters_and_cursor_over_200(
         "sessions"
     ]
     assert len(exact) == 1 and exact[0]["id"] == "worker-0234"
-    assert exact[0]["steps"] == 0 and exact[0]["tokens"] == {"total_tokens": 0}
+    assert exact[0]["steps"] == 0 and exact[0]["tokens"] == 0
+    assert exact[0]["meta"]["usage"] == {"total_tokens": 0, "completion_tokens": 0}
+    detail = client.get("/api/sessions/worker-0234").json()
+    assert detail["session"]["tokens"] == 0
+    assert detail["session"]["meta"]["usage"] == exact[0]["meta"]["usage"]
     assert exact[0]["git_branch"] == "main" and exact[0]["exit_code"] == 2
     assert (
         client.get("/api/sessions?kind=worker&cursor=not-a-cursor").status_code == 400

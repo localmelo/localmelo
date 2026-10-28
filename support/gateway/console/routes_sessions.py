@@ -27,7 +27,7 @@ from localmelo.support.sessions.submissions import check_client_request_id
 from .errors import ApiError
 from .shapes import approval_json, session_json, submission_json, turn_json
 from .sse import EventStream, EventStreamResponse
-from .worker_reader import WorkerRecord, decode_cursor, encode_cursor
+from .worker_reader import WorkerRecord, _total_tokens, decode_cursor, encode_cursor
 
 if TYPE_CHECKING:
     from . import Console
@@ -122,8 +122,9 @@ def _worker_body(
     body = {**session_json(info, running_here=False), "meta": meta}
     for key in ("source", "parent_run", "git_branch", "git_head", "exit_code"):
         body[key] = meta.get(key)
-    for key in ("status", "steps", "tokens"):
+    for key in ("status", "steps"):
         body[key] = getattr(record, key) if record is not None else meta.get(key)
+    body["tokens"] = record.tokens if record is not None else _total_tokens(meta, {})
     return body
 
 

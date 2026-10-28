@@ -6,6 +6,7 @@ its concurrency key: no session or partial turn is visible until commit.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import uuid
@@ -21,7 +22,11 @@ from localmelo.support.sessions.store import (
     _session_event,
     title_from_text,
 )
-from localmelo.support.sessions.worker import redact_worker, sensitive_read
+from localmelo.support.sessions.worker import (
+    _git_metadata,
+    redact_worker,
+    sensitive_read,
+)
 
 _FALLBACK = "Imported dsh worker run"
 
@@ -74,6 +79,9 @@ class _Mapper:
         self.final: str | None = None
         self.skipped = 0
         self.tool_count = 0
+        self.workspace: str | None = None
+        self.seen_session = False
+        self.last_message: dict[str, Any] | None = None
         self.emit(
             "run.started",
             query=_FALLBACK,
@@ -100,19 +108,28 @@ class _Mapper:
         self.flush()
         self.step = step
         self.started_step = True
+        self.last_message = None
         self.emit("step.started", step=step, attempt=1)
 
-    def flush(self, usage: dict[str, int] | None = None) -> None:
+    def flush(
+        self, usage: dict[str, int] | None = None, call: dict[str, Any] | None = None
+    ) -> None:
+        if usage and not self.thinking and not self.text and self.last_message:
+            previous = self.last_message["data"]["usage"]
+            for key, value in usage.items():
+                previous[key] = previous.get(key, 0) + value
+            return
         if self.thinking or self.text or usage:
             self.emit(
                 "assistant.message",
                 step=self.step,
                 content=self.text,
                 thinking=self.thinking,
-                tool_calls=[],
+                tool_calls=[call] if call else [],
                 usage=usage or {},
                 duration_s=None,
             )
+            self.last_message = self.events[-1]
             self.thinking = self.text = ""
 
     def add(self, row: Any) -> None:
@@ -123,6 +140,10 @@ class _Mapper:
         if not isinstance(kind, str):
             self.skipped += 1
             return
+        if kind == "session" and not self.seen_session:
+            self.seen_session = True
+            cwd = row.get("cwd")
+            self.workspace = cwd if isinstance(cwd, str) and cwd else None
         step = row.get("step")
         if isinstance(step, int) and not isinstance(step, bool) and step > 0:
             self.start_step(step)
@@ -136,11 +157,11 @@ class _Mapper:
         elif kind == "text":
             self.text += _text(row.get("text"))
         elif kind == "tool_call":
-            self.flush()
             call_id = _text(row.get("callId")) or f"call-{self.tool_count + 1}"
             name = _text(row.get("tool")) or "unknown"
             args = row.get("input") if isinstance(row.get("input"), dict) else {}
-            sensitive = sensitive_read(name, args)
+            sensitive = sensitive_read(name, args, self.workspace)
+            self.flush(call={"id": call_id, "name": name, "arguments": _safe(args)})
             if call_id in self.calls and self.calls[call_id][2]:
                 sensitive = self.calls[call_id][2]
             args = _safe(args)
@@ -190,7 +211,7 @@ class _Mapper:
             )
         elif kind == "final":
             self.final = _text(row.get("text"))
-        elif kind != "usage":
+        elif kind not in {"usage", "status", "session"}:
             self.skipped += 1
         # dsh reports usage per model response, including on status records.
         current = _usage(row.get("usage") if kind != "usage" else row.get("usage", row))
@@ -239,6 +260,14 @@ async def import_dsh(
         mapper.add(row)
     result = mapper.finish()
     safe_title = title_from_text(_text(title) or _FALLBACK)
+    meta: dict[str, Any] = {
+        "source": "dsh",
+        "tokens": mapper.usage.get("total_tokens", 0),
+        "usage": mapper.usage,
+    }
+    if mapper.workspace:
+        meta.update(await asyncio.to_thread(_git_metadata, mapper.workspace))
+    workspace = _text(mapper.workspace) or None
     own = store is None
     store = store or SessionStore(writer="cli")
     if store.writer != "cli":
@@ -260,8 +289,8 @@ async def import_dsh(
                 holder = "dsh-import"
                 await conn.execute(
                     "INSERT INTO sessions (id, kind, title, created_at, updated_at, model, workspace, meta) "
-                    "VALUES (?, 'worker', ?, ?, ?, '', NULL, ?)",
-                    (session_id, safe_title, now, now, _dumps({"source": "dsh"})),
+                    "VALUES (?, 'worker', ?, ?, ?, '', ?, ?)",
+                    (session_id, safe_title, now, now, workspace, _dumps(_safe(meta))),
                 )
                 await conn.execute(
                     "INSERT INTO turns (session_id, turn, id, run_id, user_text, typed_text, holder, started_at) "

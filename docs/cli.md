@@ -57,7 +57,8 @@ again.
 CLI sessions file. Put the task after `--`; without a title, the first task
 line supplies one. `--parent-run ID` requires `--save-session` and links a
 launcher. Without the flag, direct runs do not open the session store. Workers
-are not offered by `-c`, `-r`, or the chat picker.
+are not offered by `-c`, `-r`, or the chat picker. Workspace and git metadata
+use `--workspace` when supplied, otherwise the current working directory.
 
 `--import-session dsh-jsonl FILE [--title TITLE]` imports a dsh JSONL log
 without a task. Reimporting identical file contents is a no-op; unknown or
