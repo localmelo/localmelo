@@ -1,4 +1,9 @@
-"""Bounded append-only inbox for a single live worker run."""
+"""Bounded append-only inboxes for a single live worker run.
+
+A file inbox is append-only on disk; an fd inbox reads an inherited pipe whose
+write end the parent keeps, so the worker's own tool subprocesses never get it.
+Both share the line, size and acknowledgement rules.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +15,33 @@ from localmelo.melo.contracts.inbox import InboxError
 
 MAX_INBOX_BYTES = 1024 * 1024
 MAX_MESSAGE_BYTES = 16 * 1024
+
+
+def _complete_messages(
+    data: bytes, offset: int
+) -> tuple[list[tuple[int, str]], list[int]]:
+    """Parse complete LF-terminated messages after *offset*.
+
+    The same rules for a file snapshot and a pipe: a partial last line waits,
+    each line is nonempty UTF-8 of at most 16 KiB, and the total is capped
+    before this is called. Returned offsets count bytes from the run's start.
+    """
+    messages: list[tuple[int, str]] = []
+    parts = data[offset:].split(b"\n")
+    if len(parts[-1]) > MAX_MESSAGE_BYTES:
+        raise InboxError("inbox message exceeds 16 KiB")
+    for raw in parts[:-1]:
+        if len(raw) > MAX_MESSAGE_BYTES:
+            raise InboxError("inbox message exceeds 16 KiB")
+        try:
+            text = raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise InboxError("inbox message is not UTF-8") from exc
+        if not text.strip():
+            raise InboxError("inbox message is empty")
+        offset += len(raw) + 1
+        messages.append((offset, text))
+    return messages, [end for end, _ in messages]
 
 
 class Inbox:
@@ -90,23 +122,72 @@ class Inbox:
             raise InboxError("inbox was truncated or modified")
         self.identity = identity
         self.snapshot = data
-        messages = []
-        offset = self.offset
-        parts = data[offset:].split(b"\n")
-        if len(parts[-1]) > MAX_MESSAGE_BYTES:
-            raise InboxError("inbox message exceeds 16 KiB")
-        for raw in parts[:-1]:
-            if len(raw) > MAX_MESSAGE_BYTES:
-                raise InboxError("inbox message exceeds 16 KiB")
+        messages, self.pending = _complete_messages(data, self.offset)
+        return messages
+
+    def accept(self, offset: int) -> None:
+        """Commit the next message only after insertion into live context."""
+        if not self.pending or offset != self.pending[0]:
+            raise InboxError("inbox messages must be accepted in order")
+        self.pending.pop(0)
+        self.offset = offset
+
+
+class FdInbox:
+    """An inherited pipe fd, shared with the parent and no tool subprocess.
+
+    The parent keeps the write end. ``validate`` makes the read end
+    close-on-exec before any tool provider starts, so python, shell and MCP
+    children get no copy; the parent can append lines to the same channel.
+    """
+
+    def __init__(self, fd: int) -> None:
+        self.fd = fd
+        self.identity: tuple[int, int] | None = None
+        self.snapshot = b""
+        self.offset = 0
+        self.pending: list[int] = []
+        self.eof = False
+
+    def _prepare(self) -> None:
+        """Check it is still our pipe, then make it nonblocking and CLOEXEC."""
+        try:
+            info = os.fstat(self.fd)
+        except OSError as exc:
+            raise InboxError("cannot open inbox fd") from exc
+        if not stat.S_ISFIFO(info.st_mode):
+            raise InboxError("inbox fd is not a pipe")
+        identity = (info.st_dev, info.st_ino)
+        if self.identity is not None and identity != self.identity:
+            raise InboxError("inbox fd was replaced")
+        self.identity = identity
+        try:
+            os.set_inheritable(self.fd, False)
+            os.set_blocking(self.fd, False)
+        except OSError as exc:
+            raise InboxError("cannot read inbox fd") from exc
+
+    def validate(self, workspace: str | None = None) -> None:
+        """Check the fd before the first model call; *workspace* is irrelevant."""
+        self._prepare()
+
+    def poll(self) -> list[tuple[int, str]]:
+        """Read what the pipe holds, then return its complete messages."""
+        self._prepare()
+        while not self.eof:
             try:
-                text = raw.decode("utf-8")
-            except UnicodeDecodeError as exc:
-                raise InboxError("inbox message is not UTF-8") from exc
-            if not text.strip():
-                raise InboxError("inbox message is empty")
-            offset += len(raw) + 1
-            messages.append((offset, text))
-        self.pending = [end for end, _ in messages]
+                chunk = os.read(self.fd, 65536)
+            except BlockingIOError:
+                break
+            except OSError as exc:
+                raise InboxError("cannot read inbox fd") from exc
+            if not chunk:
+                self.eof = True
+                break
+            self.snapshot += chunk
+            if len(self.snapshot) > MAX_INBOX_BYTES:
+                raise InboxError("inbox exceeds 1 MiB")
+        messages, self.pending = _complete_messages(self.snapshot, self.offset)
         return messages
 
     def accept(self, offset: int) -> None:

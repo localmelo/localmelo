@@ -57,6 +57,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Direct workers can read steering instructions from an inherited pipe with
+  `--inbox-fd N`: the same lines, size limits and acknowledgements as the file
+  inbox, but the read end is close-on-exec before tools start. Python, shell
+  and MCP subprocesses get no copy, so a tool cannot write the channel; use it
+  for untrusted tasks ([#169]).
 - An unsigned arm64 macOS development bundle wraps the local web console in a
   native window and menu-bar host. It owns its gateway child, checks the
   instance before sending any login code, binds the code to the launch instance
@@ -1059,3 +1064,4 @@ earlier milestones.
 [#166]: https://github.com/localmelo/localmelo/pull/166
 [#167]: https://github.com/localmelo/localmelo/pull/167
 [#168]: https://github.com/localmelo/localmelo/pull/168
+[#169]: https://github.com/localmelo/localmelo/pull/169

@@ -183,7 +183,7 @@
           <code>support/sessions/agents.py</code>.
         </p>
 
-        <p>Direct workers read a brief and an optional explicit inbox at planning boundaries, and report a versioned JSON result or NDJSON event stream. The inbox must sit outside the workspace and is refused before any model call otherwise; it is a steering channel, not a trust boundary. Startup failures report an error; output failures may prevent the final record.</p>
+        <p>Direct workers read a brief and an optional explicit inbox at planning boundaries, and report a versioned JSON result or NDJSON event stream. The inbox is either a file kept outside the workspace or an inherited pipe fd (<code>--inbox-fd N</code>); a file inbox must sit outside the workspace and is refused before any model call otherwise. The worker makes the fd close-on-exec before tools start, so python, shell and MCP subprocesses get no copy and cannot write it; use the fd for untrusted tasks. Both forms are steering channels, not trust boundaries, and acknowledgement offsets mean live context insertion, not model receipt. Startup failures report an error; output failures may prevent the final record.</p>
         <p>Direct runs can opt into a one-turn worker session with <code>--save-session</code>; dsh JSONL logs can be imported. The gateway reads worker history from the CLI file without allowing edits or live follow. The web workspace lists those runs with server-side filters and paging and opens each as a read-only snapshot with explicit refresh.</p>
         <h3 id="c-gateway">Gateway</h3>
         <p><code>melo-task</code> is a separate authenticated loopback client for gateway tasks and their event streams; it does not change direct runs.</p>
