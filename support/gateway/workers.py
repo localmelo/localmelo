@@ -30,6 +30,7 @@ from localmelo.support.gateway.chat_gate import (
 )
 from localmelo.support.gateway.park_card import build_park_card
 from localmelo.support.gateway.park_store import ParkStore
+from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_policy import (
     TaskSpec,
     WorkspaceError,
@@ -151,6 +152,7 @@ class TaskWorkers:
         self.parks = ParkStore(store)
         self._lock = asyncio.Lock()
         self._eligible: set[str] = set()
+        self._restart_fenced: set[str] = set()
         self._runs: dict[str, asyncio.Task[None]] = {}
         self._runners: dict[str, SessionRunner] = {}
         self._stopping: set[str] = set()
@@ -176,7 +178,15 @@ class TaskWorkers:
     async def open(self) -> None:
         if not self._opened:
             await self.tasks.open()
-            await self.tasks.fail_nonterminal_on_restart()
+            try:
+                await StartupRecovery(self.store, self.tasks).run()
+                self._restart_fenced = {
+                    record.task_id
+                    for record in await self.tasks.list_tasks()
+                    if record.state not in TERMINAL_PHASES
+                }
+            except Exception as exc:
+                raise SessionStoreError("startup recovery unavailable") from exc
             self.store.add_retention_hook(self._reconcile)
             self._opened = True
 
@@ -312,6 +322,8 @@ class TaskWorkers:
             if task_id in self._quarantined and state != "stop":
                 raise TaskStoreError("worker cleanup failed; slot held until restart")
             current = await self.tasks.get_task(task_id)
+            if task_id in self._restart_fenced and state != "stop":
+                raise TaskStoreError("restart recovery requires explicit safety review")
             if current.state in TERMINAL_PHASES:
                 raise TaskStoreError("task is finished")
             if task_id in self._quarantined:
