@@ -143,7 +143,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `replay_skipped` | Assistant turns whose reasoning was over the 40,000-character per-turn cap and was left out, summed over the requests sent. |
 | `replay_stripped` | Assistant turns whose reasoning the fit-to-cap eviction cleared, summed over the requests sent. |
 | `notes`, `notes_model`, `notes_heuristic` | Notes stored in the compress modes, and how many the model and the heuristic wrote. `notes` counts reflections too. |
-| `note_chars` | Characters of the checked note texts stored. |
+| `note_chars` | Characters of the checked note texts this run stored (a restatement that grows an earlier note is not counted again). |
 | `drafts`, `drafts_written` | Drafts stored, and how many a write covered. |
 | `candidates` | Documents offered to the candidate boundary. |
 | `remember_model`, `remember_heuristic` | Notes whose `remember` flag the model or the heuristic set. |

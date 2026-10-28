@@ -800,6 +800,7 @@ def note_from_reply(
     *,
     kind: str = "",
     writer: str = "auto",
+    fallback: str = "",
 ) -> tuple[ReasoningNote, str]:
     """Compress one model reply into a note; pure and deterministic.
 
@@ -835,6 +836,12 @@ def note_from_reply(
     is whether the note has a ``found`` or ``decided`` item
     (``remember_by = "heuristic"``).
 
+    When neither the model's block nor the heuristic finds a content
+    field, a minimal note is still made so that every reply has one: the
+    first sentences of *fallback* when it is non-empty (a reflection's
+    ``summary``), else of the reply's visible text, become ``found``
+    items. A reply with no visible text keeps an empty note.
+
     The note's identity fields stay at their defaults. Raises
     ``ValueError`` for a *writer* other than ``"auto"`` and
     ``"heuristic"``.
@@ -842,12 +849,35 @@ def note_from_reply(
     if writer not in ("auto", "heuristic"):
         raise ValueError(f"writer must be 'auto' or 'heuristic', not {writer!r}")
     block, rest = split_note(content)
-    if writer == "auto" and block is not None:
-        note = parse_note_block(block)
+    visible = rest
+    note: ReasoningNote
+    if fallback and not thinking.strip():
+        # A thinking-less reply is summarized from *fallback*, not read as
+        # its raw text: a reflection's JSON values are not a note.
+        note = ReasoningNote(source="heuristic")
+        minimal = _without_fences(fallback).strip()
     else:
-        visible = rest if writer == "auto" else _NOTE_TAG_RE.sub("", content)
-        text = _without_fences(thinking + "\n\n" + visible)
-        note = _heuristic_note(text, tool_calls)
+        if writer == "auto" and block is not None:
+            note = parse_note_block(block)
+        else:
+            if writer == "heuristic":
+                visible = _NOTE_TAG_RE.sub("", content)
+            text = _without_fences(thinking + "\n\n" + visible)
+            note = _heuristic_note(text, tool_calls)
+        minimal = _without_fences(fallback or visible).strip()
+
+    empty = not (
+        note.plan
+        or note.found
+        or note.decided
+        or note.hypotheses
+        or note.open_questions
+    )
+    if empty and minimal:
+        sentences = split_sentences(minimal)
+        note.found = _items(
+            sentence for _offset, sentence in sentences[:NOTE_MAX_FOUND]
+        )
 
     pairs = list(zip(tool_calls, tool_results, strict=False))
     note.observed = [

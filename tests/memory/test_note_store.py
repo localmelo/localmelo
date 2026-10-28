@@ -59,7 +59,7 @@ def test_add_assigns_aliases_per_kind_and_never_reuses_them() -> None:
     )
     store.clear()
     after = _add(store, "note", "three", note=_note("three"))
-    assert after.alias == "n1"
+    assert after.alias == "n3"  # the counters stay monotonic across clear()
 
 
 def test_entries_are_copies() -> None:
@@ -123,6 +123,35 @@ def test_pending_drafts_are_never_evicted_and_a_refused_add_is_counted() -> None
     assert refused is None
     assert store.refused == 1
     assert {entry.alias for entry in store.entries()} == {"d1", "d2"}
+
+
+def test_a_refused_add_evicts_nothing() -> None:
+    store = NoteStore(clock=Clock(), max_chars=50)
+    pending = _add(store, "draft", "p" * 45, draft=_draft())
+    fresh = _add(store, "note", "f" * 5, note=_note("f"))
+    assert store.chars() == 50
+    assert store.add("note", "n" * 10, note=_note("n")) is None
+    assert {entry.alias for entry in store.entries()} == {
+        pending.alias,
+        fresh.alias,
+    }
+    assert store.refused == 1
+
+
+def test_a_refused_restatement_evicts_nothing() -> None:
+    store = NoteStore(clock=Clock(), max_chars=50)
+    pending = _add(store, "draft", "p" * 45, draft=_draft())
+    target = _add(store, "note", "t", note=_note("t"))
+    other = _add(store, "note", "o", note=_note("o"))
+    assert store.replace_text(target.alias, "x" * 10) is False
+    assert {entry.alias for entry in store.entries()} == {
+        pending.alias,
+        target.alias,
+        other.alias,
+    }
+    restored = store.get(target.alias)
+    assert restored is not None and restored.text == "t"
+    assert store.refused == 1
 
 
 def test_touch_use_and_stage() -> None:

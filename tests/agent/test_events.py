@@ -334,6 +334,7 @@ async def check_guarantees(
     agent: Agent,
     *,
     usage_matches: bool = True,
+    usage_extra: frozenset[str] = frozenset(),
 ) -> None:
     """E-1, E-2, E-4 and E-5, the pinned keys, and JSON for every event."""
     events = recorder.events
@@ -366,7 +367,12 @@ async def check_guarantees(
     assert types.count("tool.started") == result.n_tool
     assert events[-1].data["result"] == result.to_dict()
     if usage_matches:
-        assert _event_usage(events) == result.usage
+        # *usage_extra* names keys the run result adds beside the replies'
+        # usage (an explicit mode's reasoning_chars), not a counter to skip.
+        expected = {
+            key: value for key, value in result.usage.items() if key not in usage_extra
+        }
+        assert _event_usage(events) == expected
     # E-5: one run id, the task's.
     assert {event.run_id for event in events} == {result.task_id}
     assert await agent.hippo.history.get_task(result.task_id) is not None
@@ -603,7 +609,14 @@ class TestFields:
         )
         result = await agent.run_task("echo a", on_event=compress)
         assert result.status == "completed"
-        await check_guarantees(compress, result, agent, usage_matches=False)
+        await check_guarantees(
+            compress,
+            result,
+            agent,
+            usage_extra=frozenset(
+                {"reasoning_chars", "reasoning_tokens", "cached_tokens"}
+            ),
+        )
         assert {event.data["kind"] for event in compress.of("note")} == {
             "step",
             "answer",

@@ -682,7 +682,9 @@ def test_the_compress_json_line_has_its_config_and_counters(
     record = json.loads(capsys.readouterr().out.strip())
     assert record["config"]["reasoning"] == "compress"
     assert record["config"]["note_writer"] == "heuristic"
-    assert record["memory_stats"]["notes"] == 0
+    assert record["memory_stats"]["notes"] == 1
+    assert record["memory_stats"]["note_chars"] == len("found: done")
+    assert record["memory_stats"]["candidates_refused"] == 0
     assert record["memory_stats"]["digests"] == 1
 
 

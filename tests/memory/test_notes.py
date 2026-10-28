@@ -329,6 +329,43 @@ def test_kind_is_derived_unless_given() -> None:
     assert note_from_reply("The answer.", kind="reflection")[0].kind == "reflection"
 
 
+def test_a_plain_answer_and_a_thinking_less_reflection_get_a_minimal_note() -> None:
+    answer, rest = note_from_reply("The directory holds notes.txt and todo.md.")
+    assert (answer.kind, rest) == (
+        "answer",
+        "The directory holds notes.txt and todo.md.",
+    )
+    assert answer.found == ["The directory holds notes.txt and todo.md."]
+    assert render_note(answer) == "found: The directory holds notes.txt and todo.md."
+
+    reflection, _ = note_from_reply(
+        '{"recommended_action": "done", "summary": "it works"}',
+        kind="reflection",
+        writer="heuristic",
+    )
+    assert reflection.kind == "reflection"
+    assert reflection.found == ['{"recommended_action": "done", "summary": "it works"}']
+    assert render_note(reflection).startswith("found: ")
+
+    fallback, _ = note_from_reply(
+        '{"recommended_action": "done"}',
+        kind="reflection",
+        writer="heuristic",
+        fallback="The fix works because the tests pass.",
+    )
+    assert fallback.found == ["The fix works because the tests pass."]
+
+
+def test_a_minimal_note_takes_at_most_four_items_of_two_hundred_characters() -> None:
+    text = " ".join(f"Sentence {index}." for index in range(6))
+    note, _ = note_from_reply(text)
+    assert len(note.found) == 4
+    assert note.found == [f"Sentence {index}." for index in range(4)]
+
+    long, _ = note_from_reply("x" * 500)
+    assert len(long.found) == 1 and len(long.found[0]) == 200
+
+
 def test_reasoning_chars_counts_the_thinking() -> None:
     assert note_from_reply("", "abc\n\ndef")[0].reasoning_chars == 8
 
@@ -1108,6 +1145,28 @@ def test_render_digest_is_capped_and_leaves_the_note_alone() -> None:
     text = render_digest(digest)
     assert len(text) <= notes.DIGEST_CHARS
     assert digest == before
+
+
+def test_render_digest_drops_open_then_observed_then_facts() -> None:
+    digest = ReasoningNote(
+        plan="task",
+        found=["f" * 100, "g" * 100],
+        observed=["o" * 100],
+        open_questions=["q" * 100, "r" * 100],
+    )
+    full = render_digest(digest)
+    limit = len(full) - len("open: " + "q" * 100 + "; " + "r" * 100 + "\n")
+    text = render_digest(digest, limit=limit + 1)
+    assert "open:" not in text
+    assert "observed: " + "o" * 100 in text
+    assert "facts: " + "f" * 100 in text
+
+    smaller = render_digest(digest, limit=limit - 120)
+    assert "observed:" not in smaller
+    assert "facts: " + "f" * 100 in smaller
+
+    smallest = render_digest(digest, limit=40)
+    assert smallest.startswith("task: ")
 
 
 def test_render_digest_lines() -> None:

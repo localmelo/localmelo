@@ -50,17 +50,22 @@ remember: yes if a fact or decision here should be kept after this task, else no
 ```
 
 With no block, and always with `--note-writer heuristic`, localmelo writes the
-note from the reply's text and reasoning. A note has at most about 1,200
-characters and holds `plan`, `found`, `decided`, `hypotheses`, `open`,
-`observed` (what the tools returned) and `outcome`. The model's own
+note from the reply's text and reasoning. A reply whose text names none of
+those things (a plain answer, or a reflection that is only its JSON) still
+gets a minimal note from its first sentences or, for a reflection, its
+`summary`. A note has at most about 1,200 characters and holds `plan`,
+`found`, `decided`, `hypotheses`, `open`, `observed` (what the tools
+returned) and `outcome`. The model's own
 `<note>` block stays in the working-memory copy of its reply, so the next
 step reads it; a reply with no text gets the checked note as its copy instead.
 
 - The notes, drafts and digests live in a **note store** beside the
   conversation window, in RAM, as long as the agent: one direct run, one
-  `melo ""` loop or one gateway session. The store holds at most 300
-  documents or 300,000 characters. Window eviction does not evict notes.
-  Each entry has a short alias (`n4`, `d1`, `g1`) that a prompt uses.
+  `melo ""` loop, one interactive UI session or one Python-API `Agent`.
+  The gateway keeps `legacy` in this release, so its sessions have none.
+  The store holds at most 300 documents or 300,000 characters. Window
+  eviction does not evict notes. Each entry has a short alias (`n4`,
+  `d1`, `g1`) that a prompt uses.
 - A **draft** is a reply's fenced code, with the file it is meant for. A
   pending draft with a target is pinned once, after its turn's tool
   results, in a delimited `[localmelo recall: …]` block at most 6,000

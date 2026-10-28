@@ -52,7 +52,7 @@ def _reflection(*, used_notes: list[str]) -> Message:
 async def test_a_restatement_compacts_into_the_older_note() -> None:
     server = FakeLLM(
         _note_reply("the bug is in list_ops.py"),
-        _note_reply("THE BUG IS IN list_ops.py"),
+        _note_reply("THE BUG IS IN list_ops.py\ndecided: use the fix"),
         _answer("The test passed because the fix works."),
     )
     agent = _agent(server, _options(reasoning="compress", max_steps=3))
@@ -70,11 +70,14 @@ async def test_a_restatement_compacts_into_the_older_note() -> None:
     assert older.uses == 1
     assert older.note is not None
     assert older.note.found == ["the bug is in list_ops.py"]
+    assert older.note.decided == ["use the fix"]
     assert newer.stage == "superseded"
     assert result.memory_stats is not None
     assert result.memory_stats["rehearsed"]["restated"] == 1
-    assert result.memory_stats["note_chars"] == sum(
-        len(entry.text) for entry in agent.notes() if entry.kind == "note"
+    # Per run: the restatement grew n1 after the run counted its first text.
+    growth = len("\ndecided: use the fix")
+    assert result.memory_stats["note_chars"] == (
+        sum(len(entry.text) for entry in agent.notes() if entry.kind == "note") - growth
     )
     digests = [entry for entry in agent.notes() if entry.kind == "digest"]
     assert len(digests) == 1
@@ -332,6 +335,165 @@ async def test_the_digest_never_uses_raw_fields_a_redaction_changed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_thinking_less_reflection_gets_a_note_from_its_summary() -> None:
+    server = FakeLLM(
+        _note_reply("the bug is in list_ops.py"),
+        Message(
+            role="assistant",
+            content=json.dumps(
+                {
+                    "recommended_action": "continue",
+                    "rationale": "the test still fails",
+                    "summary": "the fix works",
+                    "task_still_feasible": True,
+                    "next_step_is_concrete": True,
+                    "next_step_is_novel": True,
+                    "used_notes": [],
+                }
+            ),
+        ),
+        _answer("The test passed because the fix works."),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            attempt_policy="reflect",
+            steps_per_attempt=1,
+            max_attempts=2,
+        ),
+    )
+    result = await agent.run_task("q")
+    await agent.close()
+    assert result.memory_stats is not None
+    assert result.memory_stats["candidates_refused"] == 0
+    reflection = next(
+        entry
+        for entry in agent.notes()
+        if entry.note is not None and entry.note.kind == "reflection"
+    )
+    assert reflection.text == "found: the fix works"
+
+
+@pytest.mark.asyncio
+async def test_every_document_crosses_the_boundary_once() -> None:
+    reply = Message(
+        role="assistant",
+        content=(
+            "I will write list_ops.py.\n```\nprint(1)\n```\n"
+            "<note>found: list_ops.py holds it</note>"
+        ),
+        tool_calls=[ToolCall(tool_name="echo", arguments={"text": "a"}, id="call_1")],
+    )
+    server = FakeLLM(
+        reply,
+        _reflection(used_notes=[]),
+        _answer("The test passed because the fix works."),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            attempt_policy="reflect",
+            steps_per_attempt=1,
+            max_attempts=2,
+        ),
+    )
+    calls: list[tuple[str, str]] = []
+    original = agent.checker.check_memory_candidate
+
+    def spy(payload: Any) -> Any:
+        calls.append((payload.source, payload.text))
+        return original(payload)
+
+    agent.checker.check_memory_candidate = spy  # type: ignore[method-assign]
+    result = await agent.run_task("q")
+    await agent.close()
+    assert result.memory_stats is not None
+    assert result.memory_stats["candidates"] == len(calls)
+    assert result.memory_stats["candidates_refused"] == 0
+    by_source: dict[str, list[str]] = {}
+    for source, text in calls:
+        by_source.setdefault(source, []).append(text)
+    drafts = [entry for entry in agent.notes() if entry.kind == "draft"]
+    assert len(drafts) == 1
+    assert by_source["draft"].count(drafts[0].text) == 1
+    # The second draft document is the pinned block, not a second copy.
+    assert any(
+        text != drafts[0].text and drafts[0].text in text for text in by_source["draft"]
+    )
+    for entry in (item for item in agent.notes() if item.kind == "note"):
+        source = (
+            "reflection"
+            if entry.note is not None and entry.note.kind == "reflection"
+            else "reasoning_note"
+        )
+        assert by_source[source].count(entry.text) == 1
+    for entry in (item for item in agent.notes() if item.kind == "digest"):
+        assert by_source["digest"].count(entry.text) == 1
+
+
+@pytest.mark.asyncio
+async def test_the_reflection_block_keeps_twelve_notes_of_four_hundred_chars() -> None:
+    from localmelo.melo.agent.agent import (
+        REFLECTION_MAX_NOTES,
+        REFLECTION_NOTE_CHARS,
+        _RunState,
+    )
+    from localmelo.melo.memory.notes import ReasoningNote
+
+    agent = _agent(FakeLLM(), _options(reasoning="compress"))
+    for index in range(REFLECTION_MAX_NOTES + 3):
+        agent.hippo.working.notes.add(
+            "note",
+            "n" * 500,
+            note=ReasoningNote(plan=f"note {index}"),
+            attempt=1,
+        )
+    lines, _titles = agent._reflection_note_inputs(_RunState(attempts=1))
+    await agent.close()
+    assert len(lines) == REFLECTION_MAX_NOTES
+    assert all(line.endswith("n" * REFLECTION_NOTE_CHARS) for line in lines)
+
+
+@pytest.mark.asyncio
+async def test_a_reflection_refused_for_its_notes_block_sends_nothing() -> None:
+    from localmelo.melo.agent.agent import _RunState
+    from localmelo.melo.memory.notes import NOTES_START, ReasoningNote
+    from localmelo.melo.schema import CheckResult, TaskRecord
+
+    server = FakeLLM()
+    agent = _agent(server, _options(reasoning="compress"))
+    agent.hippo.working.notes.add(
+        "note",
+        "found: a fact",
+        note=ReasoningNote(found=["a fact"]),
+        attempt=1,
+    )
+    seen: list[bool] = []
+    original = agent.checker.pre_plan
+
+    async def pre_plan(messages: Any, **kwargs: Any) -> CheckResult:
+        has_notes = any(NOTES_START in message.content for message in messages)
+        seen.append(has_notes)
+        if has_notes:
+            return CheckResult(allowed=False, reason="Prompt too large: 100001 chars")
+        return await original(messages, **kwargs)
+
+    agent.checker.pre_plan = pre_plan  # type: ignore[method-assign]
+    result = await agent._do_reflect(
+        TaskRecord(query="q"),
+        attempt_id=1,
+        failure_type="",
+        run=_RunState(attempts=1),
+    )
+    await agent.close()
+    assert result is None
+    assert seen == [True]
+    assert server.requests == []
+
+
+@pytest.mark.asyncio
 async def test_live_and_exported_draft_targets_agree_on_recent_path(
     tmp_path: Path,
 ) -> None:
@@ -378,6 +540,67 @@ async def test_live_and_exported_draft_targets_agree_on_recent_path(
         doc.meta["target"] for doc in docs_from_calls(calls) if doc.kind == "draft"
     ]
     assert live == exported[0] == ""
+
+
+@pytest.mark.asyncio
+async def test_live_and_exported_draft_targets_use_the_recent_path(
+    tmp_path: Path,
+) -> None:
+    from localmelo.melo.memory.retrieval.corpus import (
+        docs_from_calls,
+        load_history_calls,
+    )
+
+    (tmp_path / "list_ops.py").write_text("def append(a, b):\n    return a + b\n")
+    (tmp_path / "README.md").write_text("readme\n")
+    memory_dir = tmp_path / "memory"
+    server = FakeLLM(
+        Message(
+            role="assistant",
+            content="I will read it.",
+            tool_calls=[
+                ToolCall(
+                    tool_name="file_read",
+                    arguments={"path": "list_ops.py"},
+                    id="call_1",
+                )
+            ],
+        ),
+        Message(
+            role="assistant",
+            content="Now the code.\n```\nprint(2)\n```",
+            tool_calls=[
+                ToolCall(
+                    tool_name="file_read",
+                    arguments={"path": "README.md"},
+                    id="call_2",
+                )
+            ],
+        ),
+        _answer("The test passed because the fix works."),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(memory_dir),
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_read"}),
+            max_steps=3,
+        ),
+    )
+    await agent.run_task("q")
+    await agent.close()
+    live = next(
+        entry.draft.target
+        for entry in agent.notes()
+        if entry.kind == "draft" and entry.draft is not None
+    )
+    calls, _missing = load_history_calls(memory_dir / "history.db")
+    exported = [
+        doc.meta["target"] for doc in docs_from_calls(calls) if doc.kind == "draft"
+    ]
+    assert live == exported[0] == "list_ops.py"
 
 
 def test_a_pending_draft_from_an_earlier_attempt_is_in_the_reflection() -> None:

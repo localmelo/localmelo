@@ -80,7 +80,7 @@ _UI_FLAGS = {"workspace": "--workspace", "yolo": "--yolo"}
 # Direct-mode flags the interactive UI refuses: its Agents offer every tool,
 # an approval's wait would count toward a timeout, it has no machine output,
 # it draws its own progress, and it does not wire the reasoning field yet
-# (which has its own message; R2b wires it).
+# (that one has its own message below; R2b wires it).
 _UI_REFUSED = (
     "tool_exposure",
     "timeout",

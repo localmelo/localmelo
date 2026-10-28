@@ -79,13 +79,15 @@ def test_tool_and_role_tokens_are_escaped() -> None:
 
 
 def test_a_surrogate_pair_is_never_cut() -> None:
-    # The cap's cut falls between the emoji's two halves.
-    text = "a" * 1_183 + "😀" + "b" * 100
+    # The cap's cut (keep = 1,185) falls between the pair's two halves:
+    # index 1,184 holds the high surrogate and 1,185 the low one.
+    text = "a" * 1_184 + "\ud83d\ude00" + "b" * 100
     result = validate_memory_candidate(_candidate(text))
     assert result.allowed
     kept = result.sanitized_payload.text[: -len(CANDIDATE_TRUNCATION_SUFFIX)]
     kept.encode("utf-8")  # no lone surrogate
-    assert not kept.endswith("\ud83d")
+    assert "\ud83d" not in kept and "\ude00" not in kept
+    assert kept == "a" * 1_184
 
 
 @pytest.mark.parametrize("text", ["", "   ", "\n\t"])

@@ -70,10 +70,11 @@ class NoteStore:
     would pass a cap, entries are evicted until it fits: thought chunks
     first (R5), then drafts that are not pending, then fresh notes, then
     rehearsed notes and digests, least recently used first within each
-    group. A pending draft is never evicted. When only pending drafts are
-    left and the cap is still passed, the new entry is not added, the
-    addition is counted in :attr:`refused`, and the reason is logged at
-    DEBUG.
+    group. A pending draft is never evicted. Whether a document can fit is
+    checked before anything is evicted: a document that cannot fit beside
+    the pending drafts is not added, the addition is counted in
+    :attr:`refused`, the reason is logged at DEBUG, and every entry stays
+    as it was.
 
     Aliases are assigned per kind in creation order and never reused
     within a store.
@@ -146,19 +147,12 @@ class NoteStore:
             raise ValueError(f"unknown note-store kind: {kind!r}")
         if not text.strip():
             return None
+        if not self._can_fit(len(text)):
+            self._refuse(kind, text)
+            return None
         self._evict_until_fits(len(text))
-        if len(self._entries) + 1 > self._max_entries or (
-            self.chars() + len(text) > self._max_chars
-        ):
-            self.refused += 1
-            logger.debug(
-                "Refused a %s of %d chars: the note store holds %d documents "
-                "and %d chars, with only pending drafts left to evict",
-                kind,
-                len(text),
-                len(self._entries),
-                self.chars(),
-            )
+        if not self._can_fit(len(text)):
+            self._refuse(kind, text)
             return None
         now = self._clock()
         prefix = _ALIAS_PREFIX[kind]
@@ -207,14 +201,19 @@ class NoteStore:
         entry = self.get(alias)
         if entry is None:
             return False
+        if not self._can_fit(len(text), replacing=alias):
+            self.refused += 1
+            logger.debug(
+                "Refused a restatement of %s: the store would pass its caps",
+                alias,
+            )
+            return False
         old_text, old_note = entry.text, entry.note
         entry.text = text
         if note is not None:
             entry.note = note
         self._evict_until_fits(0, extra_entries=0, exclude=alias)
-        if len(self._entries) + 0 > self._max_entries or (
-            self.chars() > self._max_chars
-        ):
+        if not self._can_fit(len(text), replacing=alias):
             entry.text, entry.note = old_text, old_note
             self.refused += 1
             logger.debug(
@@ -258,10 +257,12 @@ class NoteStore:
         return changed
 
     def clear(self) -> None:
-        """Remove every entry and reset the alias counters."""
+        """Remove every entry; the alias counters and refusals stay.
+
+        An alias names one document for the life of the store, so a later
+        addition never reuses one, also across :meth:`load`.
+        """
         self._entries.clear()
-        self._counters.clear()
-        self.refused = 0
 
     def load(self, entries: Sequence[NoteStoreEntry]) -> int:
         """Replace the store with copies of *entries*; returns how many fit.
@@ -305,6 +306,42 @@ class NoteStore:
             if number.isdigit():
                 self._counters[prefix] = max(self._counters.get(prefix, 0), int(number))
             return
+
+    @staticmethod
+    def _is_pending_draft(entry: NoteStoreEntry) -> bool:
+        return (
+            entry.kind == "draft"
+            and entry.draft is not None
+            and entry.draft.status == "pending"
+        )
+
+    def _can_fit(self, incoming: int, *, replacing: str = "") -> bool:
+        """Whether *incoming* chars fit beside the entries nothing may evict.
+
+        *replacing* is the alias whose current text *incoming* replaces; it
+        is not counted in the kept characters and does not add an entry.
+        """
+        kept = [
+            entry
+            for entry in self._entries
+            if self._is_pending_draft(entry) and entry.alias != replacing
+        ]
+        entries = len(kept) + (0 if replacing else 1)
+        chars = sum(len(entry.text) for entry in kept) + incoming
+        return entries <= self._max_entries and chars <= self._max_chars
+
+    def _refuse(self, kind: str, text: str) -> None:
+        """Count and log one addition the caps refused."""
+        self.refused += 1
+        logger.debug(
+            "Refused a %s of %d chars: the note store holds %d documents "
+            "and %d chars, with only pending drafts left to evict",
+            kind,
+            len(text),
+            len(self._entries),
+            self.chars(),
+        )
+        return None
 
     def _evict_groups(self) -> Iterable[list[NoteStoreEntry]]:
         """The eviction groups, in order (see the class docstring)."""

@@ -11,9 +11,7 @@ import pytest
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent.agent import ASSISTANT_TEXT_SHARE
 from localmelo.melo.contracts.providers import BaseLLMProvider
-from localmelo.melo.memory.notes import (
-    RECALL_START,
-)
+from localmelo.melo.memory.notes import RECALL_END, RECALL_START
 from localmelo.melo.schema import (
     EMPTY_REPLY_LABEL,
     EMPTY_REPLY_NUDGE,
@@ -132,9 +130,6 @@ async def test_compress_adds_the_instruction_and_stores_notes() -> None:
 
     assert result.status == "completed"
     assert "write a short note" in _system(server.requests[0])
-    assert "write a short note" not in _system(
-        [Message(role="system", content="legacy")]
-    )
     assert result.memory_stats is not None
     assert result.memory_stats["notes"] == 2
     assert result.memory_stats["notes_model"] == 1
@@ -168,15 +163,59 @@ async def test_the_instruction_is_stable_across_steps() -> None:
 
 
 @pytest.mark.asyncio
-async def test_compress_replay_instruction_names_the_kept_turns() -> None:
+@pytest.mark.parametrize(
+    ("turns", "sentence"),
+    [(1, "your last 1 step;"), (2, "your last 2 steps;")],
+)
+async def test_compress_replay_instruction_names_the_kept_turns(
+    turns: int, sentence: str
+) -> None:
     server = FakeLLM(_answer())
     agent = _agent(
         server,
-        _options(reasoning="compress+replay", replay_turns=2),
+        _options(reasoning="compress+replay", replay_turns=turns),
     )
     await agent.run_task("q")
     await agent.close()
-    assert "last 2 steps" in _system(server.requests[0])
+    system = _system(server.requests[0])
+    assert sentence in system
+    if turns == 1:
+        assert "last 1 steps" not in system
+
+
+@pytest.mark.asyncio
+async def test_a_plain_answer_gets_a_note() -> None:
+    server = FakeLLM(_answer("The directory holds notes.txt and todo.md."))
+    agent = _agent(server, _options(reasoning="compress"))
+    result = await agent.run_task("q")
+    await agent.close()
+    assert result.memory_stats is not None
+    assert result.memory_stats["notes"] == 1
+    assert result.memory_stats["candidates_refused"] == 0
+    note = next(entry for entry in agent.notes() if entry.kind == "note")
+    assert note.text == "found: The directory holds notes.txt and todo.md."
+    assert result.memory_stats["note_chars"] == len(note.text)
+
+
+@pytest.mark.asyncio
+async def test_note_chars_counts_only_this_runs_notes() -> None:
+    server = FakeLLM(
+        _answer("The test passed because the fix works."),
+        _answer("The test passed because the fix works."),
+    )
+    agent = _agent(server, _options(reasoning="compress"))
+    first = await agent.run_task("q")
+    second = await agent.run_task("q")
+    await agent.close()
+    notes = [entry for entry in agent.notes() if entry.kind == "note"]
+    assert len(notes) == 2
+    assert first.memory_stats is not None and second.memory_stats is not None
+    assert first.memory_stats["notes"] == second.memory_stats["notes"] == 1
+    assert first.memory_stats["note_chars"] == len(notes[0].text)
+    assert second.memory_stats["note_chars"] == len(notes[1].text)
+    assert sum(len(entry.text) for entry in notes) == (
+        first.memory_stats["note_chars"] + second.memory_stats["note_chars"]
+    )
 
 
 @pytest.mark.asyncio
@@ -186,6 +225,7 @@ async def test_a_replay_required_provider_runs_compress_as_compress_replay() -> 
     result = await agent.run_task("q")
     await agent.close()
     assert result.config["reasoning"] == "compress+replay"
+    assert "every step in the window" in _system(server.requests[0])
     assert any(
         message.role == "assistant" and message.thinking == "draft"
         for message in server.requests[1]
@@ -321,7 +361,8 @@ async def test_a_pending_targeted_draft_is_pinned_once(tmp_path: Any) -> None:
     tool_message = next(
         message for message in agent.conversation() if message.role == "tool"
     )
-    assert RECALL_START in tool_message.content
+    assert tool_message.content.count(RECALL_START) == 1
+    assert tool_message.content.count(RECALL_END) == 1
     drafts = [entry for entry in agent.notes() if entry.kind == "draft"]
     assert len(drafts) == 1
     assert drafts[0].draft is not None and drafts[0].draft.status == "pending"
@@ -464,7 +505,6 @@ async def test_a_cancelled_tool_turn_still_stores_and_places_its_note() -> None:
         response=response,
         rest="",
         has_model_note=True,
-        attempt=1,
     )
     step.results.append(ToolResult(tool_name="echo", output="echo: a"))
     step.cut_before.append(0)

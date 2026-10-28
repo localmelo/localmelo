@@ -182,9 +182,11 @@ async def test_a_note_naming_a_tool_does_not_offer_it() -> None:
     compress, compress_server = _build("compress")
     await compress.run_task("q")
     await compress.close()
-    # The query alone resolves nothing; the note would have hinted the tool.
+    # The query alone resolves nothing, and since #80 a tool hint is only a
+    # structured tool call: neither a window text nor a stored note offers it,
+    # in any mode.
     drop, drop_server = _build("drop")
     await drop.run_task("q")
     await drop.close()
-    assert "secret_tool" in drop_server.offers[0]
+    assert "secret_tool" not in drop_server.offers[0]
     assert "secret_tool" not in compress_server.offers[0]

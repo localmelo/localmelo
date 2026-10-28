@@ -867,10 +867,9 @@ class _InflightStep:
     # The result the closed step gives each call, once it is closed.
     closed: list[ToolResult] = dataclasses.field(default_factory=list)
     # In the compress modes, the reply's content without its <note> block,
-    # whether it carried a model note, and the attempt it belongs to.
+    # and whether it carried a model note.
     rest: str = ""
     has_model_note: bool = False
-    attempt: int = 0
     # The task's most recent successful read or write before this reply, a
     # draft target when the reply names none. The exporter takes the same
     # value: a path used in this reply is not the fallback for it.
@@ -917,6 +916,7 @@ class _RunState:
     notes: int = 0
     notes_model: int = 0
     notes_heuristic: int = 0
+    note_chars: int = 0
     drafts: int = 0
     drafts_written: int = 0
     candidates: int = 0
@@ -929,8 +929,6 @@ class _RunState:
     rehearsed: dict[str, int] = dataclasses.field(
         default_factory=lambda: {"restated": 0, "acted": 0, "cited": 0}
     )
-    # The checked text of the latest attempt digest, for sessions.
-    last_digest: str = ""
     # The path of the latest successful file read or write, a draft's target
     # when the reply names none.
     recent_path: str = ""
@@ -1370,13 +1368,16 @@ class Agent:
             instruction = NOTE_INSTRUCTION
             if self.options.reasoning == "compress+replay":
                 kept = self.options.replay_turns
-                sentence = (
-                    f"Your thinking is kept for your last {kept} steps; older "
-                    "steps keep only their notes."
-                    if kept is not None
-                    else "Your thinking is kept for every step of this task; "
-                    "older steps keep only their notes."
-                )
+                if kept is not None:
+                    step = "step" if kept == 1 else "steps"
+                    sentence = (
+                        f"Your thinking is kept for your last {kept} {step}; "
+                        "older steps keep only their notes."
+                    )
+                elif self._requires_replay:
+                    sentence = "Your thinking is kept for every step in the window."
+                else:
+                    sentence = "Your thinking is kept for every step of this task."
                 instruction = instruction.replace(NOTE_REPLAY_SENTENCE, sentence)
         self.chat = Chat(
             self._llm,
@@ -1666,6 +1667,7 @@ class Agent:
             run.candidates_refused += 1
             return None
         run.notes += 1
+        run.note_chars += len(checked)
         if note.source == "model":
             run.notes_model += 1
         elif note.source == "heuristic":
@@ -1863,7 +1865,6 @@ class Agent:
             run.candidates_refused += 1
             return ""
         run.digests += 1
-        run.last_digest = checked
         run.events.note(
             step=note.step,
             attempt=note.attempt,
@@ -3018,12 +3019,18 @@ class Agent:
     def _store_reflection_note(
         self, response: Message, task: TaskRecord, run: _RunState
     ) -> NoteStoreEntry | None:
-        """Store the heuristic note of the reflection reply that was read."""
+        """Store the heuristic note of the reflection reply that was read.
+
+        A reply that is only the JSON object, with no thinking that names
+        anything, still gets a note: its ``summary`` (else ``rationale``)
+        stands in for the missing text (see :func:`note_from_reply`).
+        """
         note, _rest = note_from_reply(
             response.content,
             response.thinking,
             kind="reflection",
             writer="heuristic",
+            fallback=self._reflection_summary(response.content),
         )
         note = dataclasses.replace(
             note,
@@ -3037,6 +3044,25 @@ class Agent:
             remember_by="rule",
         )
         return self._store_note(note, run, source="reflection")
+
+    @staticmethod
+    def _reflection_summary(content: str) -> str:
+        """The summary (else rationale) of a readable reflection reply, or ""."""
+        found = _find_reflection(content)
+        if found is not None:
+            data: object = found
+        else:
+            try:
+                data = _decode_reflection(_coerce_str(content))
+            except ValueError:
+                return ""
+        if not isinstance(data, dict):
+            return ""
+        for key in ("summary", "rationale"):
+            value = data.get(key)
+            if isinstance(value, str) and value.strip():
+                return value
+        return ""
 
     async def _do_reflect(
         self,
@@ -3431,7 +3457,6 @@ class Agent:
                 response=response,
                 rest=rest,
                 has_model_note=has_model_note,
-                attempt=run.attempts,
                 recent_path=run.recent_path,
             )
             for call in calls:
@@ -4373,10 +4398,7 @@ class Agent:
                 "notes": run.notes,
                 "notes_model": run.notes_model,
                 "notes_heuristic": run.notes_heuristic,
-                "note_chars": sum(
-                    len(entry.text)
-                    for entry in self.hippo.working.notes.of_kind("note")
-                ),
+                "note_chars": run.note_chars,
                 "drafts": run.drafts,
                 "drafts_written": run.drafts_written,
                 "candidates": run.candidates,
