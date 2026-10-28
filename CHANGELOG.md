@@ -585,6 +585,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The heuristic note writer reads factual replies without a `<note>` into up
+  to 12 `found` items, and an explicit note can also hold 12. Questions,
+  options, plans and negated or cancelled statements are not promoted as
+  positive facts. Self-work claims are filtered unless a keyed content
+  clause follows the frame; `task:`/code markers and completed outcome
+  digests remain exempt. Source matching scores typed keys independently,
+  retains date years, currencies and whole phone numbers, rejects conflicts,
+  and leaves ties and unmatched items unsourced even after admission. Bare
+  slash dates use US order when ambiguous; quantity/count contexts, mixed
+  numbers and `24/7` are excluded. Digit runs over 20 characters are ignored
+  as keys.
+  Factual extraction remains heuristic and does not extract CJK-only keys.
+  ([#114])
 - A note's items now take their `source_ids` from the observation that
   established them, even when it came in an earlier reply of the same task:
   the reply's own tool results first, then the results still in the window,
@@ -812,3 +825,4 @@ earlier milestones.
 [#110]: https://github.com/localmelo/localmelo/pull/110
 [#111]: https://github.com/localmelo/localmelo/pull/111
 [#113]: https://github.com/localmelo/localmelo/pull/113
+[#114]: https://github.com/localmelo/localmelo/pull/114

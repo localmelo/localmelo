@@ -254,6 +254,37 @@ async def test_admit_on_outcome_writes_the_digest_with_its_terminal_status(
 
 
 @pytest.mark.asyncio
+async def test_an_aider_final_digest_is_admitted_on_outcome(tmp_path: Path) -> None:
+    # T68b: the digest has a task: line, a file name and a function name
+    # but no dates or amounts; the meta filter must not drop it.
+    server = FakeLLM(_answer("done"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            max_steps=1,
+            admit_on_outcome=True,
+        ),
+    )
+    result = await agent.run_task(
+        "Implement the transpose function in transpose.py so that the tests "
+        "in transpose_test.py pass"
+    )
+    await agent.close()
+
+    assert result.status == "completed"
+    entries = await _entries(tmp_path)
+    assert [entry["source"] for entry in entries] == ["digest"]
+    assert entries[0]["admitted_by"] == "outcome"
+    assert entries[0]["provenance"]["final_status"] == "completed"
+    assert entries[0]["text"].startswith(
+        "task: Implement the transpose function in transpose.py"
+    )
+    assert "outcome: completed" in entries[0]["text"]
+
+
+@pytest.mark.asyncio
 async def test_the_memory_event_has_its_five_fields(tmp_path: Path) -> None:
     events: list[tuple[str, Any]] = []
 
