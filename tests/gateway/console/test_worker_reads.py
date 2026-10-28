@@ -23,8 +23,16 @@ from .conftest import HOLDER, core_event, run_result
 @pytest.fixture()
 def worker_path(tmp_path: Path, console: Console) -> Path:
     path = tmp_path / "cli" / "sessions.db"
-    console.workers = WorkerReader(str(path))
+    console.worker_history = WorkerReader(str(path))
     return path
+
+
+def test_default_console_keeps_task_workers_and_history_separate(
+    client: TestClient, console: Console
+) -> None:
+    assert isinstance(console.worker_history, WorkerReader)
+    assert client.get("/api/tasks").status_code == 200
+    assert client.get("/api/sessions?kind=worker").status_code == 200
 
 
 async def test_missing_file_then_live_worker(
@@ -79,7 +87,7 @@ async def test_missing_file_then_live_worker(
             == "completed"
         )
         with pytest.raises(SessionStoreError):
-            await console.workers.rename_session(turn.session_id, "no")
+            await console.worker_history.rename_session(turn.session_id, "no")
         stored_session = await store.get_session(turn.session_id)
         assert stored_session is not None and stored_session.title != "no"
         assert client.get(f"/api/sessions/{turn.session_id}/events").status_code == 404

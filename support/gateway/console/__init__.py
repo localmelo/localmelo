@@ -117,7 +117,7 @@ class Console:
         self.port = port
         self.options = options or ConsoleOptions()
         self.store = SessionStore(self.options.store_path, writer="gateway")
-        self.workers = WorkerReader(self.options.worker_store_path)
+        self.worker_history = WorkerReader(self.options.worker_store_path)
         self.hub = SessionHub(self.store)
         self.broker = ApprovalBroker(timeout_s=None)
         self.gate = self.options.gate or self._build_gate()
@@ -314,7 +314,7 @@ class Console:
                 except Exception:  # never opened, or already closed
                     logger.debug("Closing the session store failed", exc_info=True)
                 with contextlib.suppress(Exception):
-                    await self.workers.aclose()
+                    await self.worker_history.aclose()
                 with contextlib.suppress(Exception):
                     await self.probe.aclose()
 

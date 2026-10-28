@@ -71,10 +71,10 @@ async def _read_session(
     info = await _store_call(console, console.store.get_session(session_id), session_id)
     if info is not None:
         return info, console.store
-    info = await _store_call(console, console.workers.get_session(session_id))
+    info = await _store_call(console, console.worker_history.get_session(session_id))
     if info is None:
         raise ApiError(404, "not_found", "Session not found.")
-    return info, console.workers
+    return info, console.worker_history
 
 
 async def _turn_events(
@@ -166,7 +166,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 raise ApiError(400, "invalid_request", str(exc)) from None
             records = await _store_call(
                 console,
-                console.workers.workers(
+                console.worker_history.workers(
                     limit=limit + 1,
                     query=query,
                     status=status,
@@ -216,7 +216,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     async def get_session(session_id: str) -> JSONResponse:
         console.require_store()
         info, store = await _read_session(console, session_id)
-        worker = store is console.workers
+        worker = store is console.worker_history
         entry = None if worker else console.sessions.get(session_id)
         grants = sorted(entry.policy.allowed_tools) if entry is not None else []
         granted_at = (
@@ -239,7 +239,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         records = (
             await _store_call(
                 console,
-                console.workers.workers(limit=1, query="", session_id=session_id),
+                console.worker_history.workers(limit=1, query="", session_id=session_id),
             )
             if worker
             else []
@@ -271,7 +271,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     ) -> JSONResponse:
         console.require_store()
         _, store = await _read_session(console, session_id)
-        worker = store is console.workers
+        worker = store is console.worker_history
         turns = await _store_call(
             console,
             store.list_turns(session_id, limit=limit, before=before),
@@ -351,7 +351,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         blob = await _store_call(
             console,
             store.get_blob(session_id, sha256),
-            None if store is console.workers else session_id,
+            None if store is console.worker_history else session_id,
         )
         if blob is None:
             raise ApiError(404, "not_found", "Blob not found.")
