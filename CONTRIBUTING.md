@@ -40,6 +40,12 @@ server and sends no request to one (a few CLI tests serve a fake API on
 loopback). While you work, run only the tests a change affects with
 `uv run pytest --testmon -q`.
 
+Every test runs with `HOME` in a temporary directory. A test that resolves the
+real home, or that writes under the real `~/.cache/localmelo`, fails instead of
+touching your config, memory, sessions or call logs. Writing the real cache is
+never allowed; a test that genuinely needs the real home is marked
+`@pytest.mark.allow_real_cache`.
+
 ## Pull request checklist
 
 - [ ] One focused change, with tests for a behaviour change.
