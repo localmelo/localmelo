@@ -85,8 +85,10 @@ The `[scheduler]` table of `config.toml` sets the policy:
 | `lock_self` | `""` | the exact `holder:` (or `holder:run`) that is this bench's own lock |
 | `lock_gate` | `"record"` | `record` only shows the lock; `wait` holds every workspace call while a foreign lock is present |
 
-The lane is the chat being typed in: `POST /v1/playground/presence` sets it
-while you type, and every run sets it too. Its next call is admitted before
+The lane is the chat being typed in: `POST /api/presence` sets it while you
+type (the legacy `POST /v1/playground/presence` still does), and every run
+sets it too — a turn through the turn routes, a retry, and a create with a
+first turn. Its next call is admitted before
 the background calls and bypasses their limit, but never the server's
 `n_srv`. The non-lane limit is `max(1, n_srv - 1 - r_f)`; embedding,
 `retrieve` and `estimate` calls are never held by the policy and never

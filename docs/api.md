@@ -236,7 +236,7 @@ curl 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
 ```
 
 ```json
-{"sessions": [{"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0}], "has_more": false}
+{"sessions": [{"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""}], "machine": {"lock": "none", "holder": "", "purpose": "", "run": "", "eta": "", "stale": false, "readable": true, "on_ac": true, "battery_pct": 100, "battery_state": "charged", "band": 4, "gate": "record"}, "has_more": false}
 ```
 
 - `limit` is 1 to 200 (default 50). `query` is at most 200 characters and
@@ -254,6 +254,17 @@ curl 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
   gateway runs turns in its own sessions file.
 - `pending_approvals` counts this session's approval cards that wait for an
   answer.
+- `level` and `held` are the scheduler's view of the chat: its P1 to P4
+  (P2 until a chip sets it) and the reason its model call is waiting
+  (`Resources`, `Priority`, `Reservation`, …), `""` when nothing waits. They
+  are the same facts the web workspace's header shows; see
+  [Scheduler](scheduler.md#the-gate-on-chats-s2).
+- `machine` is the one gate's snapshot of the machine — the GPU lock's
+  `lock` (`none`, `self`, `foreign`), `holder`, `purpose`, `stale`,
+  `readable`, `on_ac`, `battery_pct`, `battery_state`, `band`, and `gate`
+  (`record` or `wait`) — the object the page's machine line reads; see
+  [The GPU lock and the battery](scheduler.md#the-gpu-lock-and-the-battery-s2b).
+  It is not `null`: the console always has one gate.
 
 ## GET /api/sessions/{id}
 
@@ -266,7 +277,7 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 
 ```json
 {
-  "session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0},
+  "session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""},
   "pending_approvals": [{"request_id": "0d6c2a9e8f7b41c3a5e9d1b3f5a7c9e1", "call_id": "call_1", "tool_name": "file_write", "arguments": {"path": "/home/me/demo-project/todo.md"}, "preview": "~/demo-project/todo.md", "workspace_root": "/home/me/demo-project", "workspace_label": "~/demo-project", "target": {"path_label": "todo.md", "exists": false, "size_bytes": 0}}],
   "grants": ["file_write"],
   "granted_at": {"file_write": 1761141604.9},
@@ -460,7 +471,7 @@ curl -X POST http://127.0.0.1:8401/api/sessions \
 ```
 
 ```json
-{"session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "list the folder", "created_at": 1793163786.21, "updated_at": 1793163786.21, "model": "qwen3:8b", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": true, "running_here": true, "pending_approvals": 0}, "turn_id": "9a840f8444e1452a9a25e5b6b804b20b", "turn": {"id": "9a840f8444e1452a9a25e5b6b804b20b", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
+{"session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "list the folder", "created_at": 1793163786.21, "updated_at": 1793163786.21, "model": "qwen3:8b", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": true, "running_here": true, "pending_approvals": 0, "level": 2, "held": ""}, "turn_id": "9a840f8444e1452a9a25e5b6b804b20b", "turn": {"id": "9a840f8444e1452a9a25e5b6b804b20b", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
 ```
 
 - `workspace` is optional. Absent or `null`, it is `~/localmelo-workspace`,
@@ -630,6 +641,51 @@ curl -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 - 404 `not_found` for an unknown session. 409 `session_busy` when a turn
   is still running after this gateway stopped it — rare: the row, its
   turns and its events stay as they were, and the call can be repeated.
+
+## POST /api/sessions/{id}/level
+
+Set a chat's scheduler level, P1 to P4.
+
+```bash
+curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/level \
+  -H 'Content-Type: application/json' -d '{"level": 1}'
+```
+
+```json
+{"session_id": "3f9c2a7b1d4e", "level": 1}
+```
+
+- `level` is a JSON integer from 1 to 4. A string or a boolean is 400
+  `invalid_request` (`body.level: Input should be a valid integer`); `0` and
+  `5` are 400 with `body.level: Input should be greater than or equal to 1`
+  and `body.level: Input should be less than or equal to 4`. P1 is the urgent
+  lane, P4 the background one; see
+  [Scheduler](scheduler.md#the-gate-on-chats-s2).
+- The route never opens the session: a level is a scheduler fact, not an
+  Agent's. An unknown session is 404 `not_found`, as on every read below
+  `/api/sessions/{id}`.
+- The level is kept in memory for the gateway's run, not in the session
+  file; the next `GET /api/sessions` reports it back.
+
+## POST /api/presence
+
+The page's typing heartbeat: this chat is the lane's focused chat.
+
+```bash
+curl -X POST http://127.0.0.1:8401/api/presence \
+  -H 'Content-Type: application/json' -d '{"session_id": "3f9c2a7b1d4e"}'
+```
+
+```json
+{"ok": true}
+```
+
+- 404 `not_found` for an unknown session. The call is a scheduler event for
+  the focused chat (the lane keeps its typing window); it does not open the
+  session and changes nothing else.
+- A turn started through the turn routes, and a create with a first turn,
+  also resets the chat's hold clock and focuses it, as a chat's own message
+  does.
 
 ## GET /api/sessions/{id}/tools
 
