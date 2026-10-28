@@ -20,7 +20,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   saved local backend/model settings. Authenticated settings and model probes
   accept typed HTTP/HTTPS endpoints without following redirects. Explicit
   close/delete refuses running or queued starts with 409 rather than cancelling
-  them ([#NN]).
+  them ([#141]).
 
 ### Fixed
 
@@ -969,3 +969,4 @@ earlier milestones.
 [#135]: https://github.com/localmelo/localmelo/pull/135
 [#136]: https://github.com/localmelo/localmelo/pull/136
 [#137]: https://github.com/localmelo/localmelo/pull/137
+[#141]: https://github.com/localmelo/localmelo/pull/141
