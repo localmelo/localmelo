@@ -590,6 +590,7 @@ class TestFields:
                 "input_limit",
                 "over_limit",
                 "image_allowance",
+                "pruned",
             },
             "run.finished": {"result"},
         } == {name: set(keys) for name, keys in EVENT_FIELDS.items()}
