@@ -1126,3 +1126,50 @@ class TestSchedulerConfig:
         assert loaded.scheduler.policy == "fcfs"
         assert loaded.scheduler.n_fg == 0
         assert not hasattr(loaded.scheduler, "future_key")
+
+    def test_a_non_default_lock_section_round_trips(self, config_path: Path) -> None:
+        cfg = _timeout_cfg()
+        cfg.scheduler = SchedulerConfig(
+            gpu_lock_file="~/Developer/mlsys/experiments/.gpu-lock",
+            lock_self="local_ai-benchmark session",
+            lock_gate="wait",
+        )
+        save(cfg)
+        text = config_path.read_text(encoding="utf-8")
+        assert 'gpu_lock_file = "~/Developer/mlsys/experiments/.gpu-lock"' in text
+        assert 'lock_self = "local_ai-benchmark session"' in text
+        assert 'lock_gate = "wait"' in text
+        loaded = load()
+        assert loaded.scheduler == cfg.scheduler
+        assert loaded.validate() == []
+
+    @pytest.mark.parametrize(
+        "changes",
+        [
+            {"lock_gate": "x"},
+            {"gpu_lock_file": 3},
+            {"lock_self": 3},
+            {"gpu_lock_file": "/tmp/a\x00b"},
+            {"lock_self": "a\x00b"},
+        ],
+        ids=["gate", "path", "self", "path-nul", "self-nul"],
+    )
+    def test_a_bad_lock_setting_is_a_config_error(
+        self, changes: dict[str, Any]
+    ) -> None:
+        cfg = _timeout_cfg()
+        cfg.scheduler = SchedulerConfig(**changes)
+        errors = cfg.validate()
+        assert any(error.startswith("[scheduler]") for error in errors)
+        with pytest.raises(ConfigError, match=r"\[scheduler\]"):
+            cfg.validate_or_raise()
+
+    def test_an_unknown_lock_key_is_ignored_on_load(self, config_path: Path) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+            '[scheduler]\nlock_gate = "wait"\nlock_future = 1\n',
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert loaded.scheduler.lock_gate == "wait"
+        assert not hasattr(loaded.scheduler, "lock_future")
