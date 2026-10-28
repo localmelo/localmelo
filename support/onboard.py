@@ -151,6 +151,25 @@ _EMBEDDING_DEFAULTS: dict[str, tuple[str, str]] = {
 }
 
 
+def backend_defaults() -> dict[str, dict[str, str]]:
+    """Default field values per backend section, as the setup wizard offers them."""
+    defaults: dict[str, dict[str, str]] = {}
+    for key, (chat_url, chat_model) in _LOCAL_DEFAULTS.items():
+        emb_url, emb_model = _EMBEDDING_DEFAULTS.get(key, ("", ""))
+        defaults[key] = {
+            "chat_url": chat_url,
+            "chat_model": chat_model,
+            "embedding_url": emb_url,
+            "embedding_model": emb_model,
+        }
+    for key, (api_key_env, chat_model) in _CLOUD_DEFAULTS.items():
+        defaults[key] = {
+            "api_key_env": api_key_env,
+            "chat_model": chat_model,
+        }
+    return defaults
+
+
 def _onboard_embedding_local(cfg: config.Config, key: str) -> None:
     """Set up a local embedding endpoint: URL and model name.
 

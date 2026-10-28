@@ -28,6 +28,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   runner ends it. No `/api/tasks` route or worker runs yet; the console
   wiring is S3a.2 ([#NN]).
 
+- API v2 settings, model listing, guard body limits and unconfigured gateway
+  startup: `GET /api/settings`, `PUT /api/settings`,
+  `POST /api/settings/test`, `GET /api/settings/key-status` and
+  `GET /api/models`; `[gateway] workspace` in `config.toml` (validated by
+  `Config.validate()`, read by console sessions, and written only when
+  non-empty) and atomic `config.save()` replacement via `os.replace`
+  (preserving file permissions and following a symlinked `config.toml`);
+  `onboard.backend_defaults()`; a 1 MiB request body cap (`413 too_large`),
+  `Content-Type: application/json` enforcement on non-empty `/api` bodies
+  (`415 unsupported_media_type`), UTF-8/lone-surrogate validation, the
+  console's Content-Security-Policy on `/api` and baseline security headers
+  on every response; and `melo --serve --allow-unconfigured` so the gateway
+  can boot before a backend is configured ([#106]).
+
 - Terminal session commands: `/title [text]` shows or sets a title, including
   before the first message; `/undo` forgets the latest finished turn and
   keeps its typed history without reversing file changes (a committed undo
@@ -761,3 +775,4 @@ earlier milestones.
 [#101]: https://github.com/localmelo/localmelo/pull/101
 [#103]: https://github.com/localmelo/localmelo/pull/103
 [#104]: https://github.com/localmelo/localmelo/pull/104
+[#106]: https://github.com/localmelo/localmelo/pull/106
