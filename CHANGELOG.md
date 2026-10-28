@@ -13,7 +13,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   token for API clients, and a one-use terminal sign-in link for browser sessions.
   Existing unauthenticated API clients must migrate; see the gateway guide.
   Same-user processes and localhost services on other ports remain outside the
-  isolation guarantee. Playground and lifecycle hardening are separate work.
+  isolation guarantee. Playground and lifecycle hardening are separate work. ([#NN])
 
 ### Fixed
 

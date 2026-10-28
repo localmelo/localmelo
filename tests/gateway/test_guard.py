@@ -504,9 +504,7 @@ def test_the_gateway_origin_and_no_origin_pass(
 
 
 @pytest.mark.parametrize("origin", [FOREIGN_ORIGIN, "null"])
-def test_a_get_with_a_foreign_origin_passes_the_origin_rule(
-    gateway: Gateway, origin: str
-) -> None:
+def test_a_get_with_a_foreign_origin_is_refused(gateway: Gateway, origin: str) -> None:
     for path in ("/", "/v1/health"):
         resp = gateway.client.get(path, headers={"Origin": origin})
         assert resp.status_code == 403

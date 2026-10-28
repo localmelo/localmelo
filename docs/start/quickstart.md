@@ -177,12 +177,13 @@ If you saved the configuration with `melo`, start the gateway with
 `melo --serve`; the wizard above starts it by itself. From a second
 terminal, check the gateway and run a task through it:
 
-The examples read the gateway bearer token from its private file. A command-line
-header can be visible to local processes; keep the token out of logs and history.
+The examples pipe the gateway bearer token from its private file to curl, keeping
+it out of command-line arguments and shell history. Do not enable verbose curl
+output or log the header; same-user processes can still read the token file.
 
 ```bash
-curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" http://127.0.0.1:8401/v1/health
-curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" -X POST http://127.0.0.1:8401/v1/agent/run \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
   -d '{"query": "What is 6*7?"}'
 ```
@@ -194,9 +195,10 @@ Example output (values vary):
 {"result":"42","session_id":"a7e8f646ca2e"}
 ```
 
-The health check does not contact the model server; a task does. Open
-`http://127.0.0.1:8401/` in a browser for the web workspace (see
-[Interactive conversations](#interactive-conversations)).
+The health check does not contact the model server; a task does. For the web
+workspace, run `melo --gateway-login` in a terminal and open the one-use link
+it prints within 60 seconds. Do not share the link. See
+[Interactive conversations](#interactive-conversations).
 
 Press Ctrl+C in the first terminal to stop the gateway. Tasks use the saved
 configuration:
