@@ -231,6 +231,15 @@ async def test_settings_module_is_served_as_javascript(
     assert "setupSettings" in response.text
 
 
+async def test_drawer_module_is_served_as_javascript(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/assets/drawer.mjs")
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    assert "setupDrawer" in response.text
+
+
 async def test_the_shell_has_a_machine_state_span_with_an_accessible_name(
     client: httpx.AsyncClient,
 ) -> None:

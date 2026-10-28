@@ -361,6 +361,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{[^}]*\} from "\.\/turns\.mjs";\n/m, '')
   .replace(/^import \{ renderMarkdown \} from "\.\/markdown\.mjs";\n/m, '')
   .replace(/^import \{ setupSettings \} from "\.\/settings\.mjs";\n/m, '')
+  .replace(/^import \{ setupDrawer \} from "\.\/drawer\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -528,6 +529,7 @@ function harness(routes, {mobile = false} = {}) {
     ...turns,
     renderMarkdown,
     setupSettings: () => async () => {},
+    setupDrawer: () => ({open() {}, close() { return false; }, selectTab() {}, sessionChanged() {}}),
     document,
     location: {hash: ''},
     localStorage: storage(),
@@ -909,14 +911,31 @@ test('API errors retain validation details', async () => {
   });
 });
 
-test('setup failure keeps its hint without a premature tools action', async () => {
+test('title and independent banners follow active state without replacing notices', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.state().health = {...health, configured: false, sessions: {...health.sessions, store: 'error', store_error: 'database offline'}};
+  h.state().view.pending.set('req', {});
+  h.run('notify("Other error", {sticky: true}); S.stream.status = "paused"; S.stream.retryAt = 0; syncUI()');
+  assert.match(h.context.document.title, /localmelo · New chat · 1/);
+  assert.match(h.element('store-banner').textContent, /database offline/);
+  assert.match(h.element('model-banner').textContent, /No model/);
+  assert.equal(h.element('stream-banner').hidden, false);
+  assert.equal(h.element('notice').textContent, 'Other error');
+  await h.element('reconnect-btn').click();
+  assert.equal(h.state().stream.status, 'live');
+  h.run('syncUI()');
+  assert.equal(h.element('stream-banner').hidden, true);
+});
+
+test('setup failure offers the details drawer tools action', async () => {
   const h = harness(baseRoutes());
   await h.run('init()');
   const turn = turns.newTurn(turnRow({status: 'setup_error', result: {error: 'MCP failed'}}));
   h.context.turn = turn;
   const node = h.run('statusNode(turn)');
   assert.match(flatten(node), /MCP server failed to start/);
-  assert.equal(findNode(node, (item) => item.textContent === 'Show tools'), null);
+  assert.ok(findNode(node, (item) => item.textContent === 'Show tools'));
 });
 
 test('failure actions are limited to the newest eligible turn', async () => {

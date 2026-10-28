@@ -11,6 +11,35 @@ export function setupSettings({ api, onSaved }) {
   const status = $("settings-status");
   const modelStatus = $("discover-status");
   const keyStatus = $("s-key-status");
+  const testButton = $("settings-test");
+  const testStatus = $("settings-test-status");
+  const themeIds = ["system", "light", "dark"];
+  let theme = "system";
+  try {
+    const stored = localStorage.getItem("localmelo-console.theme");
+    if (themeIds.includes(stored)) theme = stored;
+  } catch { /* Storage may be unavailable. */ }
+  function applyTheme(value) {
+    theme = value;
+    document.documentElement.dataset.theme = value;
+    for (const name of themeIds) $(`settings-theme-${name}`).checked = name === value;
+  }
+  applyTheme(theme);
+  for (const name of themeIds) {
+    $(`settings-theme-${name}`).addEventListener("change", (event) => {
+      if (!event.target.checked) return;
+      applyTheme(name);
+      try { localStorage.setItem("localmelo-console.theme", name); } catch { /* Keep the current theme. */ }
+    });
+  }
+  for (const name of ["model", "test", "theme"]) {
+    $(`settings-tab-${name}`).addEventListener("click", () => {
+      for (const item of ["model", "test", "theme"]) {
+        $(`settings-panel-${item}`).hidden = item !== name;
+        $(`settings-tab-${item}`).setAttribute("aria-pressed", String(item === name));
+      }
+    });
+  }
   const inputIds = ["s-adapter", "s-chat-url", "s-key-env", "s-base-url", "s-chat-model",
     "s-embed-backend", "s-embed-url", "s-embed-model", "s-workspace"];
   let settings = null;
@@ -18,7 +47,15 @@ export function setupSettings({ api, onSaved }) {
   let generation = 0;
   let discoveryVersion = 0;
   let keyVersion = 0;
+  let testVersion = 0;
   let busy = false;
+
+  function invalidateTest() {
+    testVersion += 1;
+    testStatus.textContent = "";
+    testStatus.dataset.state = "";
+    testButton.disabled = busy || !settings;
+  }
 
   function showError(message, conflict = false) {
     error.textContent = message;
@@ -30,6 +67,7 @@ export function setupSettings({ api, onSaved }) {
     for (const id of inputIds) $(id).disabled = !ready;
     save.disabled = !ready;
     discover.disabled = !ready || isCloud();
+    testButton.disabled = !ready;
   }
 
   function isCloud() {
@@ -103,6 +141,7 @@ export function setupSettings({ api, onSaved }) {
     keyVersion += 1;
     settings = null;
     busy = true;
+    invalidateTest();
     enable(false);
     showError("");
     status.textContent = "Loading settings…";
@@ -113,6 +152,8 @@ export function setupSettings({ api, onSaved }) {
       const loaded = await api("/settings");
       if (currentGeneration !== generation || !dialog.open) return;
       settings = loaded;
+      $("settings-file").textContent = `File: ${loaded.file_label || "~/.cache/localmelo/config.toml"}`;
+      $("settings-revision").textContent = `Revision: ${loaded.revision || "not saved"}`;
       sections = {};
       // Only writable fields go back to the server; never copy api_key_set.
       for (const choice of loaded.choices.chat_backends) {
@@ -144,14 +185,17 @@ export function setupSettings({ api, onSaved }) {
     generation += 1;
     discoveryVersion += 1;
     keyVersion += 1;
+    invalidateTest();
   });
   reload.addEventListener("click", open);
-  chat.addEventListener("change", renderChat);
-  embedding.addEventListener("change", renderEmbedding);
+  chat.addEventListener("change", () => { invalidateTest(); renderChat(); });
+  embedding.addEventListener("change", () => { invalidateTest(); renderEmbedding(); });
+  $("s-workspace").addEventListener("input", invalidateTest);
   for (const [id, field] of [["s-chat-url", "chat_url"], ["s-chat-model", "chat_model"],
     ["s-key-env", "api_key_env"], ["s-base-url", "base_url"]]) {
     $(id).addEventListener("input", () => {
       section(chat.value)[field] = $(id).value;
+      invalidateTest();
       if (id === "s-key-env") checkKey();
       if (id === "s-chat-url") {
         discoveryVersion += 1;
@@ -162,7 +206,7 @@ export function setupSettings({ api, onSaved }) {
     });
   }
   for (const [id, field] of [["s-embed-url", "embedding_url"], ["s-embed-model", "embedding_model"]]) {
-    $(id).addEventListener("input", () => { section(embedding.value)[field] = $(id).value; });
+    $(id).addEventListener("input", () => { section(embedding.value)[field] = $(id).value; invalidateTest(); });
   }
 
   discover.addEventListener("click", async () => {
@@ -194,9 +238,7 @@ export function setupSettings({ api, onSaved }) {
     }
   });
 
-  save.addEventListener("click", async () => {
-    if (busy || !settings) return;
-    const currentGeneration = generation;
+  function candidate() {
     const chatData = section(chat.value);
     const selectedSections = { [chat.value]: isCloud()
       ? { api_key_env: chatData.api_key_env, base_url: chatData.base_url, chat_model: chatData.chat_model }
@@ -209,9 +251,44 @@ export function setupSettings({ api, onSaved }) {
         embedding_model: data.embedding_model,
       };
     }
-    const body = { chat_backend: chat.value, embedding_backend: embedding.value,
-      workspace: $("s-workspace").value, sections: selectedSections, revision: settings.revision };
+    return { chat_backend: chat.value, embedding_backend: embedding.value,
+      workspace: $("s-workspace").value, sections: selectedSections };
+  }
+
+  testButton.addEventListener("click", async () => {
+    if (busy || !settings || testButton.disabled) return;
+    const version = ++testVersion;
+    const currentGeneration = generation;
+    testButton.disabled = true;
+    testStatus.textContent = "Testing…";
+    testStatus.dataset.state = "testing";
+    try {
+      const result = await api("/settings/test", { method: "POST", body: candidate() });
+      if (version !== testVersion || currentGeneration !== generation || !dialog.open) return;
+      if (result.ok === true) {
+        testStatus.textContent = "Backend reachable";
+        testStatus.dataset.state = "success";
+      } else {
+        const message = typeof result.error === "string" ? result.error.split(/\r?\n/)[0] : "Unknown error";
+        testStatus.textContent = `Could not connect: ${message || "Unknown error"}`;
+        testStatus.dataset.state = "error";
+      }
+    } catch (err) {
+      if (version !== testVersion || currentGeneration !== generation || !dialog.open) return;
+      const message = typeof err.message === "string" ? err.message.split(/\r?\n/)[0] : "Unknown error";
+      testStatus.textContent = `Could not connect: ${message || "Unknown error"}`;
+      testStatus.dataset.state = "error";
+    } finally {
+      if (version === testVersion && currentGeneration === generation && dialog.open) testButton.disabled = busy || !settings;
+    }
+  });
+
+  save.addEventListener("click", async () => {
+    if (busy || !settings) return;
+    const currentGeneration = generation;
+    const body = { ...candidate(), revision: settings.revision };
     busy = true;
+    invalidateTest();
     enable(false);
     showError("");
     status.textContent = "Saving settings…";

@@ -9,6 +9,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Workspace settings gain connection testing and an immediately applied theme;
+  a session details drawer shows tools, grant revocation, memory and runs.
+  Store, model and stream banners no longer replace other notices. ([#NN])
+
 - Workspace approval cards with a 500 ms guard, explicit allow/deny choices,
   and a jump-to-approval control; failure and stopped states with retry,
   continuation when eligible, copy-error and details; older-turn paging;

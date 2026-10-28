@@ -14,6 +14,7 @@
 
 import { renderMarkdown } from "./markdown.mjs";
 import { setupSettings } from "./settings.mjs";
+import { setupDrawer } from "./drawer.mjs";
 import {
   activity,
   applyEvent,
@@ -304,6 +305,15 @@ function syncUI() {
   }
   const model = S.health?.model ?? null;
   $("header-title").textContent = session ? title(session) : "New chat";
+  document.title = `localmelo · ${session ? title(session) : "New chat"}${pending ? ` · ${pending}` : ""}${turn ? " ●" : ""}`;
+  const storeBanner = $("store-banner");
+  const storeError = S.health?.sessions && S.health.sessions.store !== "ok";
+  storeBanner.textContent = storeError ? `Chats are unavailable: ${S.health.sessions.store_error || "Store unavailable."}` : (!S.online ? "Could not reach the gateway. Check that the gateway is running." : "");
+  storeBanner.hidden = !storeBanner.textContent;
+  const modelBanner = $("model-banner");
+  modelBanner.textContent = S.health?.configured === false ? "No model is configured yet. Open connection settings to connect one." : "";
+  modelBanner.hidden = !modelBanner.textContent;
+  refreshStreamNotice();
   $("header-model").textContent = session
     ? session.model || "Your configured model"
     : model?.name
@@ -335,6 +345,7 @@ function syncUI() {
   $("run-status").textContent = turn ? (held ? `Waiting: ${held}` : "Running on your backend") : "";
   $("level-btn").textContent = levelName(session?.level);
   $("level-btn").disabled = !session;
+  $("details-trigger").disabled = !session;
   if (!session && S.levelsOpen) showLevelMenu(false);
   $("new-btn").disabled = false;
   const welcome = $("welcome-description");
@@ -492,6 +503,7 @@ async function openSession(id, { saveCurrent = true, scroll = true } = {}) {
   if (S.activeId !== id) approvalStates.clear();
   closeStream();
   S.activeId = id;
+  drawer.sessionChanged();
   S.view = newView(id);
   restoreDraft();
   persist(KEY + "-view", { id });
@@ -519,6 +531,7 @@ function forgetSession(id) {
   if (S.activeId === id) {
     closeStream();
     S.activeId = null;
+    drawer.sessionChanged();
     S.view = null;
     const draft = S.drafts[id];
     delete S.drafts[id];
@@ -539,6 +552,7 @@ function newChat({ saveCurrent = true } = {}) {
   if (S.activeId !== null) approvalStates.clear();
   closeStream();
   S.activeId = null;
+  drawer.sessionChanged();
   S.view = null;
   setRoute(null);
   restoreDraft();
@@ -594,6 +608,7 @@ function startStream(id) {
     if (source.readyState === 2) {
       S.stream.status = "paused";
       scheduleReconnect();
+      refreshStreamNotice();
     }
   };
 }
@@ -711,14 +726,11 @@ function noteFrame(frame) {
 
 /** Keep the stream's banner honest while it is down. */
 function refreshStreamNotice() {
-  if (S.stream.status !== "paused") return;
-  // A sticky error outranks the banner; the banner returns once it goes.
-  if (S.noticeKind !== "" && S.noticeKind !== "stream") return;
+  const banner = $("stream-banner");
+  banner.hidden = S.stream.status !== "paused";
+  if (banner.hidden) return;
   const seconds = Math.max(0, Math.ceil(S.stream.retryAt - nowSeconds()));
-  notify(
-    `Live updates paused. Reconnecting in ${seconds}s…`,
-    { sticky: true, kind: "stream" },
-  );
+  $("stream-banner-text").textContent = `Live updates paused. Reconnecting in ${seconds}s…`;
 }
 
 // ── Rendering the turns ──
@@ -964,6 +976,7 @@ function statusNode(turn) {
       catch { notify("Clipboard unavailable. Select the error text to copy it."); }
     }));
   }
+  if (turn.status === "setup_error") actions.append(button("link-button", "Show tools", () => { drawer.open(); drawer.selectTab("tools"); }));
   node.append(actions);
   if (!stopped) {
     const details = el("details", "failure-details");
@@ -1456,6 +1469,7 @@ async function submit(slot, key, text) {
       if (S.activeId === null) {
         S.sessions.unshift(created);
         S.activeId = created.id;
+        drawer.sessionChanged();
         S.view = newView(created.id);
         S.view.session = created;
         moveDraft("new", created.id);
@@ -1529,6 +1543,7 @@ async function checkSubmission(slot, key) {
         await refreshList();
         if (S.activeId === null) {
           S.activeId = submission.session_id;
+          drawer.sessionChanged();
           S.view = newView(submission.session_id);
           persist(KEY + "-view", { id: submission.session_id });
           setRoute(submission.session_id);
@@ -1727,6 +1742,7 @@ function sidebar(open) {
   }
 }
 
+const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger") });
 const openSettings = setupSettings({
   api,
   onSaved: async () => {
@@ -1785,13 +1801,7 @@ async function init() {
     })
     .catch(() => null);
   await Promise.allSettled([health, refreshList()]);
-  if (!S.online) {
-    notify("Could not reach the gateway. Check that the gateway is running.", { sticky: true });
-  } else if (S.health && S.health.configured === false) {
-    notify("No model is configured yet. Open connection settings to connect one.", { sticky: true });
-  } else if (S.health?.sessions && S.health.sessions.store !== "ok") {
-    notify(S.health.sessions.store_error || "Chats are unavailable.", { sticky: true });
-  }
+  syncUI();
   // The hash wins: `#/s/<id>` opens that chat, `#/new` a new one. Without
   // one, the last chat this tab opened, else the newest. The hash id is
   // authoritative even when it is outside the list's first page: its 404
@@ -1820,7 +1830,10 @@ async function init() {
   }
   setInterval(tick, 1000);
   setInterval(() => {
-    if (!document.hidden) refreshList();
+    if (!document.hidden) {
+      refreshList();
+      api("/health").then((body) => { S.health = body; syncUI(); }).catch(() => {});
+    }
   }, LIST_POLL_MS);
   // The first load is done: a screenshot harness (and a curious person) can
   // tell the page is wired before they type into it.
@@ -1850,11 +1863,30 @@ for (const id of ["new-btn", "settings-btn", "connection-btn", "model-btn", "set
   if (id === "new-btn") node.addEventListener("click", () => newChat());
   else node.addEventListener("click", openSettings);
 }
-$("close-settings").addEventListener("click", () => {
+for (const id of ["close-settings", "cancel-settings"]) $(id).addEventListener("click", () => {
   const dialog = $("settings-dialog");
   if (dialog?.close) dialog.close();
 });
+$("details-trigger").addEventListener("click", () => {
+  if (!drawer.close()) drawer.open();
+});
 $("stop-btn").addEventListener("click", stop);
+$("reconnect-btn").addEventListener("click", async () => {
+  const id = S.activeId;
+  if (!id || S.stream.status !== "paused") return;
+  if (S.stream.timer !== null) clearTimeout(S.stream.timer);
+  S.stream.timer = null;
+  try {
+    await api(`/sessions/${encodeURIComponent(id)}`);
+  } catch (error) {
+    if (S.activeId === id && error.status === 404) {
+      forgetSession(id);
+      notify("This chat expired or the gateway restarted. Create a new chat to continue.", {sticky: true});
+      return;
+    }
+  }
+  if (S.activeId === id && S.stream.status === "paused") startStream(id);
+});
 $("approval-go").addEventListener("click", goToApproval);
 $("scroll").addEventListener("scroll", updateApprovalBar);
 $("level-btn").addEventListener("click", () => {
@@ -1897,13 +1929,18 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key !== "Escape") return;
   // Close what is open first; a stop is the last thing Escape does.
+  if (S.levelsOpen) {
+    showLevelMenu(false);
+    return;
+  }
   if ($("settings-dialog")?.open) {
     event.preventDefault();
     $("settings-dialog").close?.();
     return;
   }
-  if (S.levelsOpen) {
-    showLevelMenu(false);
+  if (drawer.close()) return;
+  if ($("app").classList.contains("sidebar-open")) {
+    sidebar(false);
     return;
   }
   for (const [id, state] of approvalStates) {
@@ -1912,10 +1949,6 @@ document.addEventListener("keydown", (event) => {
     messageSnapshot = "";
     renderMessages(false);
     document.getElementById(`approval-card-${id}`)?.querySelector("[data-approval-deny]")?.focus();
-    return;
-  }
-  if ($("app").classList.contains("sidebar-open")) {
-    sidebar(false);
     return;
   }
   if (runningTurn() !== null) stop();
