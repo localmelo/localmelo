@@ -5228,6 +5228,9 @@ class Agent:
                 )
             if self._plan.attempt is not None:
                 if continue_run:
+                    # The new attempt's block replaces the old one; do not
+                    # dedupe its long hits against the block being replaced.
+                    run.boundary_block = ""
                     _record, block, _hits = await self._run_recall(
                         "attempt",
                         build_attempt_query(

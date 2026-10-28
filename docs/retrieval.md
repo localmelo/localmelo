@@ -154,9 +154,11 @@ melo-retrieve --export-run DIR|FILE
 - `--k`: positive integers separated by commas, such as `1,3,10`. Repeated
   values count once, and the `recall@<k>` keys come in increasing order of k.
 - `--repeat 0` runs only the cold call of each query.
-- `--retrieval-timeout`: a number of seconds above 0. Other requests, the
-  interleave request and embedding requests, wait up to 120 seconds for the
-  server, or up to `--retrieval-timeout` when that is longer.
+- `--retrieval-timeout`: a number of seconds above 0, and only with
+  `--retriever llm`. A retrieval request that has not answered by then
+  falls back to `bm25`. The run's HTTP timeout is 120 seconds or
+  `--retrieval-timeout`, whichever is longer, and applies to the retrieval
+  and interleave requests; an embedding request waits up to 120 seconds.
 - `--retrieval-extra-body` must be a JSON object, and it cannot set `model`,
   `messages`, `tools`, `tool_choice` or `stream`. It does not apply to the
   interleave request.

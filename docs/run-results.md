@@ -47,8 +47,11 @@ Details:
   can start, the run ends as `budget_exhausted`, with the latest text the
   model wrote in the run as `result`. With `--reflection-gate utility`, any
   JSON object counts as readable, and a second reply without one ends the
-  run as `gate_stopped` with the error `Could not parse reflection response`,
-  or as `budget_exhausted` when no attempt was left anyway.
+  run as `gate_stopped`: the error is `Could not parse reflection response`
+  when the reply could not be read, or
+  `Reflection response was not a JSON object` when it was valid JSON that
+  is not an object. With no attempt left the run ends as
+  `budget_exhausted` instead.
 - **`budget_exhausted`.** The error is `Max steps reached` or
   `Max attempts reached`. With `--attempt-policy reflect`, a last reflection
   can still choose `done`; otherwise its best effort becomes `result`.

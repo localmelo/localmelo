@@ -163,13 +163,14 @@ def test_build_step_query_falls_back_when_the_note_is_empty() -> None:
     assert query == _shorten("x" * 2_000, RECALL_QUERY_CHARS)
 
 
-def test_build_step_query_cuts_before_the_names() -> None:
+def test_build_step_query_keeps_the_names_when_the_note_is_long() -> None:
     note = "plan: " + "word " * 300
     query = build_step_query(
         note, [ToolCall("file_read", {"path": "/work/a.py"}, "c1")]
     )
     assert len(query) <= RECALL_QUERY_CHARS
-    assert "/work/a.py" not in query
+    assert "/work/a.py" in query
+    assert query != "…"
 
 
 def test_build_start_query_is_the_task_cut_to_the_cap() -> None:
@@ -543,3 +544,24 @@ def test_docs_from_long_deduplicates_identical_texts() -> None:
     docs = docs_from_long(rows)
     assert len(docs) == 1
     assert docs[0].meta["alias"] == "m1"
+
+
+def test_docs_from_notes_skips_another_tasks_documents() -> None:
+    entries = [
+        _entry("note", "plan: old", "n1", note=_note("plan: old")),
+        _entry("note", "plan: mine", "n2", note=_note("plan: mine")),
+    ]
+    entries[0].task_id = "t-old"
+    docs = docs_from_notes(entries, task_id=TASK)
+    assert [doc.meta["alias"] for doc in docs] == ["n2"]
+
+
+def test_build_step_query_keeps_a_head_when_the_names_are_long() -> None:
+    command = "x" * 2_000
+    query = build_step_query(
+        "plan: read a.py\nfound: the answer is 42 and tests pass",
+        [ToolCall("shell_exec", {"command": command}, "c1")],
+    )
+    assert len(query) <= RECALL_QUERY_CHARS
+    assert query.startswith("read a.py")
+    assert query != _shorten("x" * 2_000, RECALL_QUERY_CHARS)

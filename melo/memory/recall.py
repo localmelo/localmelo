@@ -315,13 +315,16 @@ def build_step_query(
         for name in _call_names(call):
             if name not in names:
                 names.append(name)
+    if not names:
+        return _shorten(head, RECALL_QUERY_CHARS)
+    # Reserve at most half the query for the names, so a long command cannot
+    # shrink the note's head to nothing.
+    name_text = _shorten(" ".join(names), RECALL_QUERY_CHARS // 2)
     if not head:
-        return _shorten(" ".join(names), RECALL_QUERY_CHARS)
-    room = RECALL_QUERY_CHARS - len(names) - 1 if names else RECALL_QUERY_CHARS
-    head = _shorten(head, max(room, 1))
-    if names and len(head) + 1 + len(" ".join(names)) <= RECALL_QUERY_CHARS:
-        return f"{head} {' '.join(names)}"
-    return head
+        return name_text
+    room = max(RECALL_QUERY_CHARS - len(name_text) - 1, 1)
+    head = _shorten(head, room)
+    return f"{head} {name_text}"[:RECALL_QUERY_CHARS]
 
 
 def build_start_query(query: str) -> str:
@@ -507,6 +510,8 @@ def docs_from_notes(
             pending_keep = pending[-1].alias
     docs: list[Doc] = []
     for entry in entries:
+        if entry.task_id and task_id and entry.task_id != task_id:
+            continue
         kind = _doc_kind(entry)
         if allowed is not None and kind not in allowed:
             continue
