@@ -165,7 +165,11 @@ def test_a_first_run_offers_the_servers_embedding_model(
     models = ["Qwen3-8B", "Qwen3-Embedding-0.6B"]
     answers = _Answers("", "", "")  # URL, model, then Enter: yes
     probe = mock.AsyncMock()
-    with mock.patch.object(onboard, "probe_embedding", probe):
+    is_ollama = mock.AsyncMock(return_value=False)
+    with (
+        mock.patch.object(onboard, "probe_embedding", probe),
+        mock.patch.object(discovery, "is_ollama", is_ollama),
+    ):
         result, _, _ = _first_setup(answers, found=FoundServer(url=URL, models=models))
     assert result == FirstSetup(url=URL, model="Qwen3-8B", saved=True)
     assert answers.prompts == [
@@ -174,6 +178,8 @@ def test_a_first_run_offers_the_servers_embedding_model(
         "Use Qwen3-Embedding-0.6B for long-term memory? [Y/n]: ",
     ]
     probe.assert_awaited_once()
+    # The probe path answers GET /api/version once and passes it to the save.
+    is_ollama.assert_awaited_once_with(URL)
     assert probe.await_args is not None
     probed = probe.await_args.args[0]
     assert (
@@ -190,6 +196,30 @@ def test_a_first_run_offers_the_servers_embedding_model(
     )
     out = capsys.readouterr().out
     assert "Long-term memory off" not in out
+
+
+def test_a_first_run_on_ollama_saves_the_embedding_in_its_table(
+    config_path: Path,
+) -> None:
+    models = ["qwen3:8b", "qwen3-embedding:0.6b"]
+    is_ollama = mock.AsyncMock(return_value=True)
+    probe = mock.AsyncMock()
+    with (
+        mock.patch.object(onboard, "probe_embedding", probe),
+        mock.patch.object(discovery, "is_ollama", is_ollama),
+    ):
+        result, _, _ = _first_setup(
+            _Answers("", "", ""), found=FoundServer(url=URL, models=models)
+        )
+    assert result == FirstSetup(url=URL, model="qwen3:8b", saved=True)
+    is_ollama.assert_awaited_once_with(URL)
+    cfg = config.load()
+    assert (cfg.chat_backend, cfg.embedding_backend) == ("ollama", "ollama")
+    assert (cfg.ollama.embedding_url, cfg.ollama.embedding_model) == (
+        URL,
+        "qwen3-embedding:0.6b",
+    )
+    assert (cfg.vllm.embedding_url, cfg.vllm.embedding_model) == ("", "")
 
 
 def test_a_first_run_that_declines_saves_embedding_off(
@@ -466,6 +496,12 @@ def test_the_wizard_offers_the_chat_servers_embedding_model(
 
 def test_embedding_choices_are_pure_and_in_recommendation_order() -> None:
     cfg = _configured()
+    before = (
+        cfg.embedding_backend,
+        cfg.vllm.embedding_url,
+        cfg.vllm.embedding_model,
+        cfg.vllm.chat_model,
+    )
     choices = onboard._embedding_choices(
         cfg, ["bge-m3", "Qwen3-Embedding-0.6B", "chat-a", "nomic-embed-text"]
     )
@@ -474,7 +510,12 @@ def test_embedding_choices_are_pure_and_in_recommendation_order() -> None:
         ("vllm", URL, "nomic-embed-text"),
         ("vllm", URL, "bge-m3"),
     ]
-    assert cfg.embedding_backend == "none"  # nothing was written
+    assert (
+        cfg.embedding_backend,
+        cfg.vllm.embedding_url,
+        cfg.vllm.embedding_model,
+        cfg.vllm.chat_model,
+    ) == before
 
 
 def test_the_wizard_default_without_a_candidate_is_none(
@@ -487,7 +528,8 @@ def test_the_wizard_default_without_a_candidate_is_none(
         mock.patch.object(onboard, "_run_probes", return_value=True),
         mock.patch.object(discovery, "list_models", mock.AsyncMock(return_value=[])),
     ):
-        assert run_backend_setup() is not None
+        cfg = run_backend_setup()
+    assert cfg is not None and cfg.embedding_backend == "none"
     assert answers.prompts[4] == "  Embedding backend [5]: "
 
 
@@ -514,6 +556,36 @@ def test_the_wizard_falls_back_when_the_listing_fails(
         "  Embedding backend [5]: ",
     ]
     assert "Traceback" not in capsys.readouterr().out
+
+
+def test_a_failed_wizard_embedding_probe_does_not_save_the_model(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config.save(_configured())
+    answers = _Answers("", "", "", "", "6")
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "probe_chat", mock.AsyncMock()),
+        mock.patch.object(
+            onboard,
+            "probe_embedding",
+            mock.AsyncMock(side_effect=ProbeError("embedding probe failed: refused")),
+        ),
+        mock.patch.object(
+            discovery,
+            "list_models",
+            mock.AsyncMock(return_value=["Qwen3-Embedding-0.6B"]),
+        ),
+    ):
+        cfg = run_backend_setup()
+    assert cfg is not None and cfg.embedding_backend == "none"
+    assert (cfg.vllm.embedding_url, cfg.vllm.embedding_model) == ("", "")
+    saved = config.load()
+    assert (saved.embedding_backend, saved.vllm.embedding_url) == ("none", "")
+    assert saved.vllm.embedding_model == ""
+    out = capsys.readouterr().out
+    assert "Probe failed: embedding probe failed: refused" in out
+    assert "Saving with embedding off: no long-term memory" in out
 
 
 def test_the_wizard_keeps_a_saved_embedding(config_path: Path) -> None:

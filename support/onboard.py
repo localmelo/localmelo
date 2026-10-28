@@ -294,11 +294,15 @@ def run_backend_setup() -> config.Config | None:
     ]
     emb_choice = _ask_choice("Embedding backend", emb_display, default=default_emb)
 
+    picked_choice: EmbeddingChoice | None = None
+    old_embedding = ("", "")
     if emb_choice > len(emb_keys):
         picked = choices[emb_choice - len(emb_keys) - 1]
+        picked_choice = picked
         selected_emb_key = picked.key
         cfg.embedding_backend = selected_emb_key
         section = getattr(cfg, selected_emb_key)
+        old_embedding = (section.embedding_url, section.embedding_model)
         section.embedding_url = picked.url
         section.embedding_model = picked.model
     else:
@@ -312,6 +316,11 @@ def run_backend_setup() -> config.Config | None:
 
     if not _run_probes(cfg, retry=lambda: handler(cfg)):
         return None
+    if picked_choice is not None and cfg.embedding_backend == "none":
+        # The detected model failed its probe: never leave it in the saved
+        # file just because it was listed. Restore what the table had.
+        section = getattr(cfg, picked_choice.key)
+        section.embedding_url, section.embedding_model = old_embedding
 
     config.save(cfg)
     print(f"\n  Config saved to {_home_path(config.CONFIG_PATH)}")
