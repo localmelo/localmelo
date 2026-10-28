@@ -1,0 +1,52 @@
+› Check the demo project.
+
+  No approvals for this turn (--yolo).
+↻ Model request failed; retrying in 1 s: POST /chat/completions failed: Connect…
+↻ Model request failed; retrying in 4 s: POST /chat/completions failed: Connect…
+✗ melo: run ended with status provider_error: POST /chat/completions failed: Co…
+  Is the model server running at http://127.0.0.1:18431/v1? /status checks
+  again.
+✻ Worked for 0.1s · 0 tool calls
+
+› Check it once more.
+
+  No approvals for this turn (--yolo).
+↻ Model request failed; retrying in 1 s: POST /chat/completions failed: ReadTim…
+↻ Model request failed; retrying in 4 s: POST /chat/completions failed: ReadTim…
+✗ melo: run ended with status provider_error: POST /chat/completions failed: Re…
+  The model server did not answer in time; it may still be loading the model.
+  /retry tries again.
+✻ Worked for 0.1s · 0 tool calls
+
+› Try the missing model.
+
+  No approvals for this turn (--yolo).
+✗ melo: run ended with status provider_error: POST /chat/completions failed wit…
+  The server does not know the model 'stub-model'; check the name (/model lists
+  the models it has).
+✻ Worked for 0.1s · 0 tool calls
+
+› Send a request the server refuses.
+
+  No approvals for this turn (--yolo).
+✗ melo: run ended with status provider_error: POST /chat/completions failed wit…
+  The server refused the request; if it says the model does not support tools,
+  choose one that does.
+✻ Worked for 0.1s · 0 tool calls
+
+› Send a request with no key.
+
+  No approvals for this turn (--yolo).
+✗ melo: run ended with status provider_error: POST /chat/completions failed wit…
+  The server requires an API key; localmelo sends none to local servers. Turn
+  the key off in the server (oMLX: "Allow inference without API key").
+✻ Worked for 0.1s · 0 tool calls
+
+› Send a request that fails.
+
+  No approvals for this turn (--yolo).
+✗ melo: run ended with status provider_error: POST /chat/completions failed wit…
+  /status checks the model server at http://127.0.0.1:18431/v1; /retry tries
+  again.
+✻ Worked for 0.2s · 0 tool calls
+

@@ -168,6 +168,26 @@ tomllib.TOMLDecodeError: Illegal character '\n' (at line 1, column 21)
 - **Fix:** correct that line, or delete the file and run the setup wizard
   again.
 
+### An embedding model cannot be used
+
+```text
+  Probe failed: embedding probe failed: …
+  Saving with embedding off: no long-term memory (melo --reconfigure sets it again).
+```
+
+- **Cause:** the `POST /v1/embeddings` probe failed. **HTTP 404** means the
+  server does not serve that model id; **HTTP 400** means the id is a chat
+  model, not an embedding model; **connection refused** means nothing
+  listens at that URL.
+- **Fix:** list the server's models with `curl -sS <url>/v1/models`, use an
+  id it lists, and check that a `POST /v1/embeddings` with that id returns a
+  non-empty `data[0].embedding`. Then run `melo --reconfigure` again. See
+  [Set up an embedding model](embedding.md#check-the-server).
+- **Recall is empty after changing the model:** the old vectors have
+  another dimension and are skipped. Restore the old model, or stop
+  localmelo, remove `~/.cache/localmelo/memory/long_term.db*` and let the
+  store fill again. See [What changes](embedding.md#what-changes).
+
 ### Probe failed
 
 ```text

@@ -436,13 +436,13 @@ class TestUsageErrors:
             (b'{"mcpServers": {"x": {"command": "\xff"}}}', "Cannot read MCP config"),
             ('{"mcpServers": {}}'.encode("utf-16"), "Cannot read MCP config"),
             # Nested deeper than the JSON decoder can follow.
-            ("[" * 100_000, "Cannot parse MCP config"),
+            ("[" * 100_000, "is not valid JSON"),
             # An integer too long for Python to convert.
             (
                 '{"mcpServers": {"x": {"command": "c", "timeout": '
                 + "9" * 5_000
                 + "}}}",
-                "Cannot parse MCP config",
+                "is not valid JSON",
             ),
         ],
         ids=[

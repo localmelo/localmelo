@@ -344,20 +344,16 @@ def test_the_ui_refuses_the_direct_flags_it_cannot_honor(
 @pytest.mark.parametrize(
     "argv", [["--mcp-config", "x.json"], ["--mcp-config", "x.json", "--mcp-only"]]
 )
-def test_mcp_is_not_in_the_ui_yet(
-    capsys: pytest.CaptureFixture[str], argv: list[str]
-) -> None:
+def test_the_mcp_flags_reach_the_ui(argv: list[str]) -> None:
     with (
         mock.patch("sys.argv", ["melo", *argv]),
-        mock.patch("localmelo.support.cli.run_interactive") as ui,
-        pytest.raises(SystemExit) as exc,
+        mock.patch("localmelo.support.cli.run_interactive", return_value=0) as ui,
     ):
-        cli.main()
-    assert exc.value.code == 2
-    ui.assert_not_called()
-    assert "--mcp-config and --mcp-only are not in the interactive UI yet" in (
-        capsys.readouterr().err
-    )
+        try:
+            cli.main()
+        except SystemExit as exc:  # the UI's own exit code
+            assert exc.code == 0
+    ui.assert_called_once()
 
 
 def test_a_daemon_with_a_port_is_not_refused() -> None:

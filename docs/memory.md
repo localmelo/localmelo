@@ -25,7 +25,7 @@ page.
 |---|---|---|
 | Working memory | The conversation of a run, of the `melo ""` loop, of a gateway session or of a web workspace chat: the last 20 messages. | RAM only. |
 | History | Every task with its status and result, and every step with its tool call and result. In `history.db`, also every reply of the model with its reasoning; the history in RAM keeps no model calls. | RAM, or `history.db`. |
-| Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an embedding backend. | RAM, or `long_term.db`. |
+| Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an [embedding backend](embedding.md). | RAM, or `long_term.db`. |
 | Procedural memory | What the runs of each recurring task did: the classes and short labels of their tool calls, their step counts and times. Written at the end of every run; never put in a prompt. See [Procedural memory](procedures.md). | RAM, or `procedures.db`. |
 
 By default everything stays in RAM and is lost when the process ends. In RAM,
@@ -68,7 +68,8 @@ melo "What is 6*7?"
 memory off for a run: nothing is recalled from it or written to it, and
 reflections are not promoted. Working memory and history work as usual.
 `embedding_backend = "none"` in the config file has the same effect for every
-run.
+run; to set an embedding model instead, see
+[Set up an embedding model](embedding.md).
 
 ## Files on disk
 
@@ -470,7 +471,7 @@ that directory instead.
   a result left less than 200 characters is replaced by a short notice.
   History keeps the result as the tool returned it, up to 50,000 characters.
 
-**Long-term memory** needs an embedding backend:
+**Long-term memory** needs an [embedding backend](embedding.md):
 
 - After each tool call, a summary of the step is written to it: the model's
   text, the tool's name and the start of the tool's output.
@@ -478,6 +479,10 @@ that directory instead.
   id. This may take at most 10 seconds.
 - On each step, the 5 entries closest to the task are recalled into the
   prompt.
+- Stored vectors carry no model id. A vector whose dimension differs from
+  the query's is skipped, so changing the embedding model stops old entries
+  ranking instead of raising an error; see
+  [Set up an embedding model](embedding.md#what-changes).
 
 **History** is a record. localmelo writes every task and step to it, and,
 with persistence on, every model call, but never reads it back.

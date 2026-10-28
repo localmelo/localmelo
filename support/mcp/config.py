@@ -82,11 +82,11 @@ def load_mcp_config(path: str | Path) -> list[McpServerConfig]:
     """Read and validate an MCP config file."""
     try:
         text = Path(path).read_text(encoding="utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         raise McpConfigError(f"Cannot read MCP config {path}: {exc}") from exc
     try:
         data = json.loads(text)
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError, ValueError) as exc:
         raise McpConfigError(f"MCP config {path} is not valid JSON: {exc}") from exc
     return parse_mcp_config(data, source=str(path))
 

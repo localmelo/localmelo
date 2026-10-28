@@ -39,6 +39,12 @@ class SlashCompleter(Completer):
                             display_meta=command.line(alias),
                         )
             return
+        if name in ("verbose", "thinking"):
+            argument = argument.lstrip()
+            for value in ("on", "off"):
+                if value.startswith(argument) and argument != value:
+                    yield Completion(value, start_position=-len(argument))
+            return
         if name == "model":
             argument = argument.lstrip()
             for model in self._models():

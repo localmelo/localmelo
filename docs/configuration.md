@@ -6,8 +6,9 @@ settings you can change.
 
 ## First run
 
-In a terminal with no config file, `melo` asks two questions, saves the
-answers and opens the interactive UI:
+In a terminal with no config file, `melo` asks for a model server's URL and
+a chat model, saves the answers and opens the interactive UI. When the
+server also lists an embedding model, it asks once whether to use it:
 
 ```text
 $ melo
@@ -19,16 +20,22 @@ Models on http://127.0.0.1:8080/v1:
   [3] Qwen3-32B-4bit
 Model [2]:
 ✓ http://127.0.0.1:8080/v1 lists 3 models; using Qwen3-8B-4bit.
+Use nomic-embed-text for long-term memory? [Y/n]:
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ```
 
 - A server on this computer that lists a model on port 8000, 8400, 11434 or
   30000 fills in the URL; one with a chat model comes first. Listing a
-  server's models sends `GET /v1/models` only, and saving the choice asks
-  `GET /api/version` once, to tell an Ollama server apart: no chat request.
+  server's models sends `GET /v1/models` only. Saving the choice asks
+  `GET /api/version` once, to tell an Ollama server apart, and a `y` sends
+  one `POST /v1/embeddings` probe of the offered model.
+- The embedding question is asked only when the list holds an embedding
+  model other than the chat model. `y` saves three embedding values: the
+  chat backend's key, its URL and the offered model. A failed probe, `n`, or
+  no candidate saves `embedding_backend = "none"` as before.
 - It saves an Ollama server (one that answers `GET /api/version`) as the
-  `ollama` backend, and any other OpenAI-compatible server as `vllm`, with
-  `embedding_backend = "none"`, and keeps the file's other settings:
+  `ollama` backend, and any other OpenAI-compatible server as `vllm`, and
+  keeps the file's other settings. With no embedding it writes:
 
   ```toml
   # an Ollama server
@@ -50,6 +57,19 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   chat_model = "Qwen3-8B-4bit"
   ```
 
+  A `y` writes the chat backend's embedding fields instead of `"none"`:
+
+  ```toml
+  chat_backend = "vllm"
+  embedding_backend = "vllm"
+
+  [vllm]
+  chat_url = "http://127.0.0.1:8080/v1"
+  chat_model = "Qwen3-8B-4bit"
+  embedding_url = "http://127.0.0.1:8080/v1"
+  embedding_model = "nomic-embed-text"
+  ```
+
   The `ollama` backend chats on Ollama's native API with a 300 s request
   timeout; `vllm` uses 120 s. A `chat_url` with or without `/v1` works for
   Ollama: its version endpoint is asked at the root, and chat requests drop
@@ -62,7 +82,8 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 - The [command-line reference](cli.md#first-run) has every prompt and
   reason.
 
-For embeddings, a cloud API or another backend, use the wizard.
+For an embedding model, see [Set up an embedding model](embedding.md). For a
+cloud API or another backend, use the wizard.
 
 ## Set up with the wizard
 
@@ -78,8 +99,16 @@ file, and then opens the interactive UI or, with `--serve`, starts the
 gateway. Press Ctrl+C to stop the gateway.
 
 - Each question offers the config file's current value in brackets: press
-  Enter to keep it. The embedding question offers `None` when no embedding
-  backend is set.
+  Enter to keep it. The embedding question offers the saved backend; with
+  none saved, the first candidate the chat server lists, else `None`.
+- When no embedding is saved, the wizard lists the chat server's models
+  once (only for a local chat backend) and appends each embedding model it
+  finds as options `6`, `7`, … after the fixed five. The first candidate is
+  the default; choosing one saves the chat backend's URL and model and asks
+  no endpoint question. The fixed `1`–`4` options still ask for another
+  server's URL and model, and `5` is `None`. A server whose list cannot be
+  read falls back to those five silently; the end-of-wizard check reports a
+  dead server.
 - When the chat server's check fails, the wizard prints `Probe failed: …`
   and asks `[r]etry, [s]ave anyway, [N]o [N]:`. `r` asks for the URL and
   model again, with what you typed as the defaults; `s` saves anyway;
@@ -88,7 +117,8 @@ gateway. Press Ctrl+C to stop the gateway.
   API key to local servers. In oMLX, turn on
   **Allow inference without API key**.
 - When the embedding server's check fails, the wizard saves with embedding
-  off (`embedding_backend = "none"`, no long-term memory) and says so.
+  off (`embedding_backend = "none"`, no long-term memory) and says so. A
+  detected model that fails its probe is not left in the config's table.
 - `melo --serve` runs the wizard by itself when there is no config file.
 - Without a terminal the wizard reads its answers from stdin. With no
   config file and no terminal, `melo --serve` exits with code 1 and one
@@ -137,6 +167,19 @@ tables of the chosen backends.
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
 | `host` | `[gateway]` | `"127.0.0.1"` | The address the gateway listens on: keep `127.0.0.1`, or use `localhost` or `::1`. On a host that is not `localhost` or a loopback IP address, such as `0.0.0.0`, the gateway does not check the `Host` and `Origin` of requests; see [Keep the gateway private](gateway.md#keep-the-gateway-private). |
 | `port` | `[gateway]` | `8401` | The port the gateway listens on. |
+| `policy` | `[scheduler]` | `"off"` | How the web workspace's calls reach the model server: `off` records only, `fcfs` admits first come and `class` admits P1 before P2 (and so on); see [Scheduler](scheduler.md#the-gate-on-chats-s2). |
+| `n_srv` | `[scheduler]` | `8` | The model server's slots. |
+| `r_f` | `[scheduler]` | `1` | Slots kept for the CLI and direct runs; forced to 0 when `n_srv <= 2`. |
+| `n_fg` | `[scheduler]` | `1` | Background calls allowed in flight while a chat is focused. |
+| `call_log` | `[scheduler]` | `true` | Write one JSONL call log per gateway run. |
+| `call_log_dir` | `[scheduler]` | `""` | The log's parent directory; the default is `~/.cache/localmelo/scheduler`. |
+| `gpu_lock_file` | `[scheduler]` | `""` | The shared GPU lock to read; empty means no lock reader. The battery reader is always on in the gateway. |
+| `lock_self` | `[scheduler]` | `""` | This bench's own holder: the exact `holder:` value, or `holder:run` when the lock carries a `run:` line. Matching is exact and case-sensitive. |
+| `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](scheduler.md#the-gpu-lock-and-the-battery-s2b). |
+
+A `[scheduler]` table that is all defaults is not written, and unknown
+scheduler keys are dropped, so a config file without such a table keeps its
+exact bytes; the wizard keeps a non-default policy.
 
 Top-level keys must come before the first `[table]` line. How URLs are used:
 
@@ -230,9 +273,11 @@ enable_thinking = false
 
 - `chat_model` is the model's id in oMLX's `GET /v1/models`: its folder
   name, or the alias set for it in oMLX.
-- [First run](#first-run) writes the `chat_backend`, `embedding_backend`,
-  `chat_url` and `chat_model` lines: run `melo` in a terminal with no
-  config file, while oMLX runs. Add the other lines by hand.
+- [First run](#first-run) writes the `chat_backend`, `chat_url` and
+  `chat_model` lines: run `melo` in a terminal with no config file, while
+  oMLX runs. When it offers an embedding model it also writes
+  `embedding_backend = "vllm"` with that table's `embedding_url` and
+  `embedding_model`. Add the other lines by hand.
 - `request_timeout_s = 600` gives oMLX time to load the model when a
   request finds it unloaded; see [Chat request timeout](#chat-request-timeout).
 - The `extra_body` table turns off a Qwen3 model's thinking, which makes
@@ -241,9 +286,10 @@ enable_thinking = false
 - For long-term memory, oMLX can also serve an embedding model from the
   same directory: set `embedding_backend = "vllm"` and add
   `embedding_url = "http://127.0.0.1:8000/v1"` and
-  `embedding_model = "<its folder name>"` to `[vllm]`. Keep `embedding` in
-  the folder name of a Qwen3-Embedding model, as in its repository name:
-  oMLX tells it from a chat model by that name.
+  `embedding_model = "<its id>"` to `[vllm]`. oMLX's `GET /v1/models`
+  gives ids but no type, so it cannot tell an embedding model from a chat
+  model: the id and one `POST /v1/embeddings` are the check. See
+  [Set up an embedding model](embedding.md#omlx).
 
 ### Ollama with embeddings
 
@@ -255,11 +301,12 @@ embedding_backend = "ollama"
 chat_url = "http://127.0.0.1:11434"
 chat_model = "qwen3:8b"
 embedding_url = "http://127.0.0.1:11434"
-embedding_model = "nomic-embed-text"
+embedding_model = "qwen3-embedding:0.6b"
 ```
 
 Pull both models first: `ollama pull qwen3:8b` and
-`ollama pull nomic-embed-text`.
+`ollama pull qwen3-embedding:0.6b`. `nomic-embed-text` is a smaller
+English-only alternative.
 
 ### MLC LLM, vLLM or SGLang
 
@@ -318,12 +365,13 @@ chat_model = "gpt-4o"
 
 [ollama]
 embedding_url = "http://127.0.0.1:11434"
-embedding_model = "nomic-embed-text"
+embedding_model = "qwen3-embedding:0.6b"
 ```
 
 ## Embedding and long-term memory
 
-Long-term memory needs an embedding backend. With
+Long-term memory needs an embedding backend; see
+[Set up an embedding model](embedding.md). With
 `embedding_backend = "none"`:
 
 - nothing is recalled from long-term memory, and nothing is written to it;
@@ -379,6 +427,12 @@ enable_thinking = false
   `extra_body = { think = false }` turns that off.
 - `--base-url` does not read the config file, so `extra_body` does not apply
   there.
+
+## MCP servers
+
+`mcp_config = "~/mcp.json"` at the top of `config.toml` names the MCP servers JSON file the
+interactive UI loads (the gateway will read the same key); `--mcp-config FILE` overrides it for
+one run. Direct mode never reads it.
 
 ## Chat request timeout
 

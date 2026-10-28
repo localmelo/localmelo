@@ -9,16 +9,24 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.contracts.approvals import (
+    AllowAllPolicy,
+    ApprovalDecision,
+    ApprovalRequest,
+    DenyAllPolicy,
+)
 from localmelo.melo.schema import ToolTier
+from localmelo.support.cli import edits
 from localmelo.support.cli.approvals import (
     APPROVAL_KEY_GUARD_S,
     Approvals,
+    EditSnapshots,
     TerminalApprover,
     panel_text,
     session_warning,
 )
 from localmelo.support.cli.render import LiveState
+from localmelo.support.sessions.approvals import RememberingPolicy
 from localmelo.tests.cli.ui_helpers import (
     BACKSPACE,
     CTRL_C,
@@ -53,19 +61,17 @@ def _request(
 
 def test_a_shell_command_shows_whole_and_wrapped() -> None:
     command = "echo 'a    b' " + "x" * 50
-    text = panel_text(_request(command=command), exists=None, width=30)
+    text = panel_text(_request(command=command), width=30)
     assert text.title == "Run a shell command?"
     assert text.header == f"shell_exec · in {WORKSPACE}"
-    assert "".join(text.body) == command  # nothing collapsed or dropped
-    assert [len(row) for row in text.body] == [30, 30, 4]
+    assert "".join(line for _, line in text.body) == command  # nothing dropped
+    assert [len(line) for _, line in text.body] == [30, 30, 4]
     assert not text.escaped
 
 
 def test_python_code_is_numbered() -> None:
-    text = panel_text(
-        _request("python_exec", code="import sys\nprint(1)\n"), exists=None, width=60
-    )
-    assert (text.title, text.body) == (
+    text = panel_text(_request("python_exec", code="import sys\nprint(1)\n"), width=60)
+    assert (text.title, [line for _, line in text.body]) == (
         "Run Python code?",
         ["   1 import sys", "   2 print(1)"],
     )
@@ -74,32 +80,41 @@ def test_python_code_is_numbered() -> None:
 def test_a_new_file_and_an_existing_one() -> None:
     path = f"{WORKSPACE}/todo.md"
     new = panel_text(
-        _request("file_write", path=path, content="a\nb\n"), exists=False, width=60
+        _request("file_write", path=path, content="a\nb\n"),
+        target=edits.Target(path=path, exists=False),
+        width=60,
     )
     assert new.title == "Write a new file?"
     assert new.header == "file_write  todo.md · new file, 2 lines"
-    assert new.body == ["   1 a", "   2 b"]
+    assert [line for _, line in new.body] == ["   1 a", "   2 b"]
     old = panel_text(
-        _request("file_write", path=path, content="a"), exists=True, width=60
+        _request("file_write", path=path, content="b\n"),
+        target=edits.Target(path=path, exists=True, size_bytes=2, text="a\n"),
+        width=60,
     )
     assert old.title == "Change a file?"
-    assert old.header == "file_write  todo.md · overwrites the file; no diff shown"
+    assert old.header == "file_write  todo.md · +1 −1 lines"
+    assert [(style, line) for style, line in old.body] == [
+        ("error", "   1 − a"),
+        ("ok", "   1 + b"),
+    ]
 
 
 def test_another_tool_shows_its_arguments_as_json() -> None:
-    text = panel_text(
-        _request("mcp__web__fetch", url="http://x", n=2), exists=None, width=60
-    )
+    text = panel_text(_request("mcp__web__fetch", url="http://x", n=2), width=60)
     assert text.title == "Call mcp__web__fetch?"
-    assert text.body == ["{", '  "url": "http://x",', '  "n": 2', "}"]
+    assert [line for _, line in text.body] == [
+        "{",
+        '  "url": "http://x",',
+        '  "n": 2',
+        "}",
+    ]
 
 
 def test_the_header_names_the_tier() -> None:
-    shell = panel_text(_request(tier="exec"), exists=None, width=60)
+    shell = panel_text(_request(tier="exec"), width=60)
     assert shell.header == f"shell_exec · exec · in {WORKSPACE}"
-    python = panel_text(
-        _request("python_exec", tier="exec", code="print(1)"), exists=None, width=60
-    )
+    python = panel_text(_request("python_exec", tier="exec", code="print(1)"), width=60)
     assert python.header == f"python_exec · exec · in {WORKSPACE}"
 
 
@@ -107,40 +122,34 @@ def test_a_file_write_header_names_the_tier_after_the_path() -> None:
     path = f"{WORKSPACE}/todo.md"
     new = panel_text(
         _request("file_write", tier="write", path=path, content="a\nb\n"),
-        exists=False,
+        target=edits.Target(path=path, exists=False),
         width=60,
     )
     assert new.header == "file_write  todo.md · write · new file, 2 lines"
     old = panel_text(
-        _request("file_write", tier="write", path=path, content="a"),
-        exists=True,
+        _request("file_write", tier="write", path=path, content="b\n"),
+        target=edits.Target(path=path, exists=True, text="a\n"),
         width=60,
     )
-    assert old.header == (
-        "file_write  todo.md · write · overwrites the file; no diff shown"
-    )
+    assert old.header == "file_write  todo.md · write · +1 −1 lines"
 
 
 def test_an_mcp_header_names_the_tier() -> None:
-    network = panel_text(
-        _request("mcp__cua__click", tier="network", x=1), exists=None, width=60
-    )
+    network = panel_text(_request("mcp__cua__click", tier="network", x=1), width=60)
     assert network.header == "mcp__cua__click · network"
     # A read-only tool only reaches the panel when it is forced to ask.
     forced_read = panel_text(
-        _request("mcp__notes__search", tier="read", q="x"), exists=None, width=60
+        _request("mcp__notes__search", tier="read", q="x"), width=60
     )
     assert forced_read.header == "mcp__notes__search · read"
 
 
 def test_a_request_without_a_tier_keeps_the_old_header() -> None:
     # A caller that builds its own ApprovalRequest leaves tier out.
-    assert panel_text(_request(), exists=None, width=60).header == (
-        f"shell_exec · in {WORKSPACE}"
+    assert panel_text(_request(), width=60).header == (f"shell_exec · in {WORKSPACE}")
+    assert panel_text(_request("mcp__cua__click", x=1), width=60).header == (
+        "mcp__cua__click"
     )
-    assert panel_text(
-        _request("mcp__cua__click", x=1), exists=None, width=60
-    ).header == ("mcp__cua__click")
 
 
 @pytest.mark.parametrize(
@@ -155,8 +164,8 @@ def test_a_request_without_a_tier_keeps_the_old_header() -> None:
 def test_control_characters_show_escaped_and_nothing_is_dropped(
     command: str, shown: str
 ) -> None:
-    text = panel_text(_request(command=command), exists=None, width=200)
-    assert shown in text.body[0]
+    text = panel_text(_request(command=command), width=200)
+    assert shown in text.body[0][1]
     assert text.escaped
 
 
@@ -243,7 +252,10 @@ async def test_a_file_write_target_is_checked_without_following_it(
         approver.ask(_request("file_write", path=str(link), content="x"))
     )
     await asyncio.sleep(0.05)
-    assert approver.pending is not None and approver.pending.exists is True
+    assert approver.pending is not None
+    target = approver.pending.target
+    assert target is not None and target.exists and not target.diffable
+    assert target.problem == "is not a regular file"
     approver.answer("once")
     await asking
 
@@ -495,10 +507,9 @@ async def test_the_warning_under_option_two_wraps_rather_than_hides_the_folder(
 def test_long_code_lines_wrap_under_their_number() -> None:
     text = panel_text(
         _request("python_exec", code="x = 1 + 2 + 3 + 4\nprint(x)"),
-        exists=None,
         width=12,
     )
-    assert text.body == [
+    assert [line for _, line in text.body] == [
         "   1 x = 1 +",
         "      2 + 3 ",
         "     + 4",
@@ -594,3 +605,167 @@ async def test_the_panel_shows_no_cursor_but_the_reason_field_does(
         assert not app.cursor_hidden()
         app.type(ENTER)
         await asyncio.wait_for(asking, 3)
+
+
+# ── Snapshots, modes and grants ──
+
+
+async def test_a_file_write_is_snapshotted_before_it_is_answered(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "todo.md"
+    path.write_text("a\n", encoding="utf-8")
+    snapshots = EditSnapshots(AllowAllPolicy())
+    request = _request("file_write", path=str(path), content="b\n")
+    decision = await snapshots.decide(request)
+    assert decision.allow and decision.origin == "policy"
+    snapshot = snapshots.take(request.request_id)
+    assert snapshot is not None
+    assert (snapshot.target.text, snapshot.new) == ("a\n", "b\n")
+    assert (snapshot.added, snapshot.removed) == (1, 1)
+    assert snapshots.take(request.request_id) is None
+
+
+async def test_another_tool_is_not_snapshotted() -> None:
+    snapshots = EditSnapshots(AllowAllPolicy())
+    request = _request()
+    await snapshots.decide(request)
+    assert snapshots.take(request.request_id) is None
+
+
+def test_the_modes_wrap_the_policy() -> None:
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        return ApprovalDecision(True)
+
+    approvals = Approvals(ask, "ask")
+    assert approvals.policy() is approvals.snapshots
+    assert isinstance(approvals.snapshots.inner, RememberingPolicy)
+    approvals.set_mode("auto")
+    assert approvals.policy() is approvals.snapshots
+    assert isinstance(approvals.snapshots.inner, AllowAllPolicy)
+    approvals.set_mode("deny")
+    policy = approvals.policy()
+    assert isinstance(policy, DenyAllPolicy)
+    assert policy.reason == "approvals are set to deny"
+    assert Approvals(ask, "yolo").policy() is None
+
+
+async def test_grants_survive_auto_and_ask_until_forgotten() -> None:
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        return ApprovalDecision(True, remember=True)
+
+    approvals = Approvals(ask, "ask")
+    policy = approvals.policy()
+    assert policy is not None
+    await policy.decide(_request("shell_exec"))
+    await policy.decide(_request("python_exec", code="1"))
+    assert approvals.allowed_tools == {"shell_exec", "python_exec"}
+    approvals.set_mode("auto")
+    approvals.set_mode("ask")
+    assert approvals.allowed_tools == {"shell_exec", "python_exec"}
+    approvals.forget("shell_exec")
+    assert approvals.allowed_tools == {"python_exec"}
+    approvals.forget()
+    assert approvals.allowed_tools == set()
+    approvals.reset()
+    assert approvals.allowed_tools == set()
+
+
+def test_a_file_that_cannot_be_diffed_says_why() -> None:
+    path = f"{WORKSPACE}/big.txt"
+    target = edits.Target(
+        path=path,
+        exists=True,
+        size_bytes=1_200_000,
+        problem="overwrites a 1.2 MB file",
+    )
+    text = panel_text(
+        _request("file_write", path=path, content="a\n"), target=target, width=60
+    )
+    assert text.title == "Change a file?"
+    assert (
+        text.header == "file_write  big.txt · overwrites a 1.2 MB file; no diff shown"
+    )
+    assert [line for _, line in text.body] == ["   1 a"]
+
+
+def test_the_diff_uses_the_uis_minus() -> None:
+    path = f"{WORKSPACE}/todo.md"
+    text = panel_text(
+        _request("file_write", path=path, content="b\n"),
+        target=edits.Target(path=path, exists=True, text="a\n"),
+        width=60,
+        minus="-",
+    )
+    assert text.header.endswith("+1 -1 lines")
+    assert [line for _, line in text.body] == ["   1 - a", "   1 + b"]
+
+
+async def test_the_diff_panel_renders(tmp_path: Path) -> None:
+    path = tmp_path / "notes.txt"
+    path.write_text("buy milk\n", encoding="utf-8")
+    approver = TerminalApprover()
+    request = _request("file_write", path=str(path), content="remember the milk\n")
+    async with running_app(approver=approver, columns=80, clock=lambda: 100.0) as app:
+        asking = asyncio.ensure_future(approver.ask(request))
+        await app.wait(lambda: "Change a file?" in app.text(), timeout_s=15)
+        # It rendered: before the style fix this raised and no frame came.
+        assert "file_write" in app.text() and "1. Yes" in app.text()
+        approver.answer("once")
+        await asking
+
+
+def test_the_diff_context_is_dim() -> None:
+    path = f"{WORKSPACE}/todo.md"
+    text = panel_text(
+        _request("file_write", path=path, content="a\nB\nc\n"),
+        target=edits.Target(path=path, exists=True, text="a\nb\nc\n"),
+        width=60,
+    )
+    context = [style for style, line in text.body if line.strip().endswith(" c")]
+    assert context and all(style == "muted" for style in context)
+
+
+async def test_a_file_changed_while_the_panel_waits_is_denied(tmp_path: Path) -> None:
+    path = tmp_path / "notes.txt"
+    path.write_text("old\n", encoding="utf-8")
+
+    async def ask_and_rewrite(request: ApprovalRequest) -> ApprovalDecision:
+        path.write_text("someone else's newer line\n", encoding="utf-8")
+        return ApprovalDecision(True)
+
+    snapshots = EditSnapshots(RememberingPolicy(ask_and_rewrite))
+    decision = await snapshots.decide(
+        _request("file_write", path=str(path), content="mine\n")
+    )
+    assert not decision.allow and decision.origin == "policy"
+    assert "changed while this was waiting" in decision.reason
+
+
+async def test_a_file_created_while_the_panel_waits_is_denied(tmp_path: Path) -> None:
+    path = tmp_path / "new.txt"
+
+    async def ask_and_create(request: ApprovalRequest) -> ApprovalDecision:
+        path.write_text("someone else's file\n", encoding="utf-8")
+        return ApprovalDecision(True)
+
+    snapshots = EditSnapshots(RememberingPolicy(ask_and_create))
+    decision = await snapshots.decide(
+        _request("file_write", path=str(path), content="mine\n")
+    )
+    assert not decision.allow and decision.origin == "policy"
+
+
+async def test_a_new_file_left_alone_while_the_panel_waits_is_allowed(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "new.txt"
+
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        return ApprovalDecision(True)
+
+    snapshots = EditSnapshots(RememberingPolicy(ask))
+    decision = await snapshots.decide(
+        _request("file_write", path=str(path), content="mine\n")
+    )
+    assert decision.allow

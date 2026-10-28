@@ -10,6 +10,7 @@ import ast
 import asyncio
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -28,7 +29,12 @@ from localmelo.support.cli.session import STOP_REASON, CliSession
 from localmelo.support.cli.theme import UNICODE
 from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import SessionBusyError, SessionStore
-from localmelo.tests.sessions.helpers import ScriptedLLM, answer, started_agent
+from localmelo.tests.sessions.helpers import (
+    ScriptedLLM,
+    answer,
+    started_agent,
+    tool_call,
+)
 
 URL = "http://127.0.0.1:9/v1"
 
@@ -46,11 +52,13 @@ def _server_is_not_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
 class FakeFactory(AgentFactory):
     """Builds Agents on scripted models; lists and saves without a server."""
 
-    def __init__(self, root: Path, scripts: dict[str, list[Message]]) -> None:
+    def __init__(
+        self, root: Path, scripts: dict[str, list[Message]], *, memory: bool = True
+    ) -> None:
         super().__init__(
             backend=url_backend(URL, "m1", source="saved"),
             cfg=None,
-            options=AgentOptions(),
+            options=AgentOptions(memory=memory),
             workspace=str(root),
         )
         self.root = root
@@ -145,13 +153,19 @@ async def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     await store.open()
     agent = await factory.build()
     out = RecordingOut(80)
-    renderer = TurnRenderer(out, symbols=UNICODE, backend=lambda: factory.backend)
+    approver = TerminalApprover()
+    renderer = TurnRenderer(
+        out,
+        symbols=UNICODE,
+        backend=lambda: factory.backend,
+        snapshots=approver.snapshots,
+    )
     session = CliSession(
         store=store,
         factory=factory,
         agent=agent,
         renderer=renderer,
-        approver=TerminalApprover(),
+        approver=approver,
         mode="ask",
         out=out,
     )
@@ -560,6 +574,47 @@ async def test_a_late_check_of_the_old_server_does_not_replace_the_new_list(
     assert session.models == ["new-a"]
 
 
+async def test_check_server_suggests_a_listed_embedding_model(setup: Setup) -> None:
+    setup.factory.backend = replace(setup.factory.backend, key="vllm", label="vLLM")
+    setup.factory.listed = ["m1", "Qwen3-Embedding-0.6B"]
+    await setup.session.check_server()
+    out = " ".join(setup.out.text().split())
+    assert (
+        "This server lists Qwen3-Embedding-0.6B; melo --reconfigure adds it "
+        "for long-term memory."
+    ) in out
+
+
+async def test_check_server_does_not_suggest_without_a_listed_candidate(
+    setup: Setup,
+) -> None:
+    setup.factory.backend = replace(setup.factory.backend, key="vllm", label="vLLM")
+    setup.factory.listed = ["m1", "m2"]
+    await setup.session.check_server()
+    assert "This server lists" not in setup.out.text()
+
+
+@pytest.mark.parametrize(
+    ("embedding", "memory", "key"),
+    [
+        ("vllm · E", True, "vllm"),
+        ("", False, "vllm"),
+        ("", True, "openai-compatible"),
+    ],
+    ids=["already-configured", "memory-off", "base-url"],
+)
+async def test_check_server_does_not_suggest_an_embedding_where_it_cannot_act(
+    setup: Setup, embedding: str, memory: bool, key: str
+) -> None:
+    setup.factory.backend = replace(
+        setup.factory.backend, key=key, label=key, embedding=embedding
+    )
+    setup.factory._options = replace(setup.factory._options, memory=memory)
+    setup.factory.listed = ["m1", "Qwen3-Embedding-0.6B"]
+    await setup.session.check_server()
+    assert "melo --reconfigure adds it" not in setup.out.text()
+
+
 async def test_esc_after_the_run_ended_does_not_stop_the_turn(
     setup: Setup, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -763,7 +818,7 @@ async def test_a_new_server_keeps_the_configs_embedding_and_timeout(
     assert saved.embedding_backend == "sglang" and saved.request_timeout_s == 2
     assert cfg.chat_backend == "sglang"  # the startup config is not changed
     assert factory.backend.base_url == new_url and factory.backend.model == "m2"
-    assert factory.backend.embedding == "sglang"
+    assert factory.backend.embedding == "SGLang · embed-x"
     # A later /model on the new server saves its model only.
     built.clear()
     await factory.build("m3")
@@ -947,3 +1002,331 @@ async def test_a_refused_command_and_exit_are_not_echoed(setup: Setup) -> None:
     await _until(lambda: setup.app.exited)
     text = setup.out.text()
     assert "› /nope" not in text and "› /new" not in text and "› /exit" not in text
+
+
+# ── U2a.2's commands ──
+
+
+async def _tool_turn(setup: Setup, *, lines: int = 10) -> None:
+    """Run one turn that reads a file of *lines* lines, so /expand has a call."""
+    setup.factory.scripts["m1"] = [
+        tool_call("file_read", {"path": "notes.txt"}),
+        answer("done"),
+    ]
+    setup.session.agent = await setup.factory.build()
+    root = Path(setup.session.agent.workspace_root or "")
+    (root / "notes.txt").write_text(
+        "\n".join(f"line {number}" for number in range(1, lines + 1)) + "\n",
+        encoding="utf-8",
+    )
+    setup.session.enter("read the notes")
+    await setup.idle()
+
+
+async def test_verbose_and_thinking_toggle(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    session.enter("/verbose")
+    await _until(lambda: "Verbose rendering on." in out.text())
+    assert session.renderer.verbose
+    session.enter("/verbose")
+    await _until(lambda: "Verbose rendering off." in out.text())
+    assert not session.renderer.verbose
+    session.enter("/verbose maybe")
+    await _until(lambda: "✗ Use /verbose on or /verbose off." in out.text())
+    assert not session.renderer.verbose
+    session.enter("/thinking off")
+    await _until(lambda: "Thinking excerpts off." in out.text())
+    assert not session.renderer.thinking
+    session.enter("/thinking on")
+    await _until(lambda: "Thinking excerpts on." in out.text())
+    assert session.renderer.thinking
+    session.enter("/thinking yes")
+    await _until(lambda: "✗ Use /thinking on or /thinking off." in out.text())
+    assert session.renderer.thinking
+
+
+async def test_expand_prints_a_call_in_full(setup: Setup) -> None:
+    await _tool_turn(setup)
+    out = setup.out
+    assert "line 4" not in out.text()  # the block shows three lines
+    setup.session.enter("/expand")
+    await _until(lambda: "line 10" in out.text())
+    assert "line 4" in out.text()
+    setup.session.enter("/expand 1.1")
+    await _until(lambda: out.text().count("line 10") >= 2)
+    # A call of a resumed turn is not in this process's list.
+    setup.session.enter("/expand 1.2")
+    await _until(lambda: "✗ Turn 1 has 1 tool call." in out.text())
+    setup.session.enter("/expand 2")
+    await _until(lambda: out.text().count("✗ Turn 1 has 1 tool call.") == 2)
+    setup.session.enter("/expand 9.1")
+    await _until(lambda: "✗ No tool calls yet." in out.text())
+    setup.session.enter("/expand nope")
+    await _until(lambda: "✗ Use /expand [turn.call]." in out.text())
+
+
+async def test_the_new_commands_follow_the_ascii_symbols(setup: Setup) -> None:
+    from localmelo.support.cli.theme import ASCII
+
+    session, out = setup.session, setup.out
+    session.renderer.symbols = ASCII
+    session.enter("/verbose maybe")
+    await _until(lambda: "x Use /verbose on or /verbose off." in out.text())
+    session.renderer.progress = {
+        "level": 1,
+        "state": "running",
+        "step": 1,
+        "attempt": 1,
+        "limits": {},
+        "phase": None,
+        "cycle": 0,
+        "tests": None,
+        "items": [{"label": "Edit b", "state": "current", "repeat": 2}],
+        "fraction": None,
+        "expected_steps": None,
+        "past": None,
+        "off_reason": None,
+        "basis": {
+            "routine_id": "r",
+            "template_id": "t",
+            "version": 1,
+            "match": "routine",
+            "model": "m",
+            "title": None,
+        },
+    }
+    session.enter("/progress")
+    await _until(lambda: "Edit b (x2) - current" in out.text())
+    assert "basis r - v1 - match routine - model m" in out.text()
+
+
+async def test_expand_with_no_call_yet_says_so(setup: Setup) -> None:
+    setup.session.enter("/expand")
+    await _until(lambda: "✗ No tool calls yet." in setup.out.text())
+
+
+async def test_expand_stops_at_two_hundred_lines(setup: Setup) -> None:
+    await _tool_turn(setup, lines=300)
+    setup.session.enter("/expand")
+    await _until(lambda: "lines not shown" in setup.out.text())
+    text = setup.out.text()
+    assert "line 200" in text and "line 201" not in text
+    assert "… +100 lines not shown (" in text and " chars in all)" in text
+
+
+async def test_progress_prints_the_latest_facts(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    session.enter("/progress")
+    await _until(lambda: "No progress facts for this turn yet." in out.text())
+    session.enter("hello")
+    await setup.idle()
+    assert session.renderer.progress is not None  # the turn asked for them
+    session.renderer.progress = {
+        "level": 1,
+        "state": "running",
+        "step": 4,
+        "attempt": 2,
+        "limits": {},
+        "phase": "Verify",
+        "cycle": 1,
+        "tests": {"passed": 7, "failed": 1, "total": 8},
+        "items": [
+            {"label": "Read a", "state": "done", "repeat": None},
+            {"label": "Edit b", "state": "current", "repeat": 2},
+        ],
+        "fraction": None,
+        "expected_steps": None,
+        "past": {
+            "runs": 2,
+            "steps_lo": 6,
+            "steps_hi": 8,
+            "last_steps": 8,
+            "wall_lo_s": 120.0,
+            "wall_hi_s": 180.0,
+            "last_wall_s": 170.0,
+        },
+        "off_reason": None,
+        "basis": {
+            "routine_id": "routine-1",
+            "template_id": "routine-1:t",
+            "version": 3,
+            "match": "routine",
+            "model": "stub-model",
+            "title": None,
+        },
+    }
+    session.enter("/progress")
+    await _until(lambda: "level 1 · step 4 · attempt 2" in out.text())
+    text = out.text()
+    assert "phase Verify (cycle 1) · tests 7/8" in text
+    assert "past 2 runs · 6-8 steps · 2-3 min · last 8 steps, 2m50s" in text
+    assert "items\n  Read a · done\n  Edit b (×2) · current" in text
+    assert "basis routine-1 · v3 · match routine · model stub-model" in text
+
+
+async def test_new_forgets_this_process_calls_and_progress(setup: Setup) -> None:
+    await _tool_turn(setup)
+    session = setup.session
+    assert session.renderer.tool_outputs
+    assert session.renderer.progress is not None
+    session.renderer.verbose = True
+    session.renderer.thinking = False
+    session.enter("/new")
+    await _until(lambda: session.runner is None)
+    assert session.renderer.tool_outputs == []
+    assert session.renderer.progress is None
+    assert not session.renderer.verbose and session.renderer.thinking
+    session.enter("/expand")
+    await _until(lambda: "✗ No tool calls yet." in setup.out.text())
+    session.enter("/progress")
+    await _until(lambda: "No progress facts for this turn yet." in setup.out.text())
+
+
+# ── U2a.3's /approvals ──
+
+
+async def test_approvals_shows_and_switches_the_mode(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    session.enter("/approvals")
+    await _until(lambda: "Approvals: ask · grants: none" in out.text())
+    session.enter("/approvals auto")
+    await _until(lambda: "Approvals: auto" in out.text())
+    assert session.approvals.mode == "auto"
+    assert session.status_bar().mode == "auto"
+    session.enter("/approvals deny")
+    await _until(lambda: "Approvals: deny" in out.text())
+    assert session.approvals.mode == "deny"
+    session.enter("/approvals ask")
+    await _until(lambda: out.text().count("Approvals: ask") >= 2)
+    session.enter("/approvals nope")
+    await _until(
+        lambda: "✗ Use /approvals ask, auto, deny, or forget [tool]." in out.text()
+    )
+    assert session.approvals.mode == "ask"
+
+
+async def test_approvals_under_yolo_says_how_to_turn_prompts_on(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    session.approvals.mode = "yolo"
+    session.enter("/approvals")
+    await _until(lambda: "Approvals: YOLO (--yolo); no grants." in out.text())
+    session.enter("/approvals ask")
+    await _until(lambda: "✗ YOLO is on; /approvals ask turns prompts on." in out.text())
+    assert session.approvals.mode == "yolo"
+
+
+# ── U2a.3's /status, /retry and /mcp ──
+
+
+async def test_status_shows_the_facts(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def list_models(key: str, url: str, **kwargs: object) -> list[str]:
+        return ["m1"]
+
+    monkeypatch.setattr("localmelo.support.backends.discovery.list_models", list_models)
+    session, out = setup.session, setup.out
+    session.enter("hello")
+    await setup.idle()
+    session.enter("/status")
+    await _until(lambda: "version    melo " in out.text())
+    text = out.text()
+    assert "model      m1 · " in text and " · reachable" in text
+    assert "workspace  " in text and "fence      file tools stay here" in text
+    assert "session    'hello' · " in text and " · 1 turn" in text
+    assert "approvals  ask · allowed in this session: none" in text
+    assert "tools      4 built-in (3 ask first)" in text
+    assert "memory     2 of 20 messages · " in text
+    assert "limits     30 steps a turn, 10 an attempt, 5 attempts" in text
+    assert "files      " in text and "sessions.db" in text
+    assert "version    melo " in text
+
+
+async def test_retry_runs_the_last_turn_again(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    setup.factory.scripts["m1"] = [answer("Paris."), answer("Paris.")]
+    session.agent = await setup.factory.build()
+    session.enter("What is the capital of France?")
+    await setup.idle()
+    session.enter("/retry")
+    await _until(
+        lambda: "↻ Retrying turn 1: What is the capital of France?" in out.text()
+    )
+    await _until(lambda: session.state == "idle" and out.text().count("● Paris.") == 2)
+    turns = await setup.rows()
+    assert [(turn.turn, turn.status, turn.undone) for turn in turns] == [
+        (1, "completed", True),
+        (2, "completed", False),
+    ]
+
+
+async def test_retry_with_nothing_to_retry_says_so(setup: Setup) -> None:
+    setup.session.enter("/retry")
+    await _until(lambda: "✗ Nothing to retry." in setup.out.text())
+
+
+async def test_mcp_without_a_config_explains_how_to_add_one(setup: Setup) -> None:
+    setup.session.enter("/mcp")
+    await _until(lambda: "No MCP servers." in setup.out.text())
+
+
+async def test_mcp_lists_the_servers_and_a_start_failure(setup: Setup) -> None:
+    from localmelo.support.mcp import McpServerConfig
+
+    session, out = setup.session, setup.out
+    factory = session.factory
+    factory.mcp_config = "~/mcp.json"
+    factory.mcp_source = "mcp_config"
+    factory.mcp_servers = [
+        McpServerConfig(name="notes", command="notes-mcp", args=["--stdio"])
+    ]
+    session.enter("/mcp")
+    await _until(lambda: "notes: running, 0 tools · notes-mcp --stdio" in out.text())
+    assert "MCP servers from ~/mcp.json (mcp_config)" in out.text()
+    factory.mcp_error = "the server exited"
+    session.enter("/mcp")
+    await _until(
+        lambda: "MCP is off for this session: the server exited." in out.text()
+    )
+    assert "Fix the config, then restart melo." in " ".join(out.text().split())
+
+
+async def test_deny_mode_refuses_a_file_write(setup: Setup) -> None:
+    from localmelo.tests.sessions.helpers import tool_call
+
+    session, out = setup.session, setup.out
+    setup.factory.scripts["m1"] = [
+        tool_call("file_write", {"path": "blocked.txt", "content": "x\n"}),
+        answer("I did not write it."),
+    ]
+    session.agent = await setup.factory.build()
+    session.approvals.set_mode("deny")
+    session.enter("write it")
+    await setup.idle()
+    assert "denied by policy: approvals are set to de" in out.text()
+    root = Path(session.agent.workspace_root or "")
+    assert not (root / "blocked.txt").exists()
+
+
+async def test_auto_mode_writes_and_shows_the_change(setup: Setup) -> None:
+    from localmelo.tests.sessions.helpers import tool_call
+
+    session, out = setup.session, setup.out
+    setup.factory.scripts["m1"] = [
+        tool_call("file_write", {"path": "notes.txt", "content": "new note\n"}),
+        answer("Written."),
+    ]
+    session.agent = await setup.factory.build()
+    session.approvals.set_mode("auto")
+    session.enter("write the notes")
+    await setup.idle()
+    assert "auto-allowed" in out.text() or "allowed" in out.text()
+    assert "└ +1 −1 lines" in out.text()
+
+
+async def test_approvals_forget_takes_back_a_grant(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    session.approvals._policy._granted.add("file_write")
+    session.enter("/approvals forget file_write")
+    await _until(lambda: "Approvals: ask · grants: none" in out.text())
+    assert session.approvals.allowed_tools == frozenset()

@@ -112,17 +112,18 @@ pip install -e ".[gateway]"</code></pre>
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 Model server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
+No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo --reconfigure.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
 │ model      qwen3:8b · Ollama · http://127.0.0.1:11434/v1                 │
 │            saved as the default                                          │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory (no embedding backend)                    │
+│ memory     no long-term memory · melo --reconfigure adds one             │
 │ session    new                                                           │
 ╰──────────────────────────────────────────────────────────────────────────╯
   / commands · esc stop · ctrl+d quit</code></pre>
-        <p>输入一条消息后按回车，或用 <code>/exit</code> 退出。以后运行 <code>melo</code> 会直接进入，<code>melo "&lt;task&gt;"</code> 也会使用保存的服务器。这里用的是 Ollama，所以它被保存为 <code>ollama</code> 后端；其他兼容 OpenAI 接口的服务器保存为 <code>vllm</code>，不带嵌入；详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#first-run">首次运行（英文）</a>。</p>
+        <p>输入一条消息后按回车，或用 <code>/exit</code> 退出。以后运行 <code>melo</code> 会直接进入，<code>melo "&lt;task&gt;"</code> 也会使用保存的服务器。这里用的是 Ollama，所以它被保存为 <code>ollama</code> 后端；其他兼容 OpenAI 接口的服务器保存为 <code>vllm</code>。如果服务器还列出了嵌入模型，首次运行会多问一句 <code>Use &lt;model&gt; for long-term memory? [Y/n]:</code>。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#first-run">首次运行（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">设置嵌入模型（英文）</a>。</p>
         <h3 id="with-the-setup-wizard">使用配置向导</h3>
         <p>配置向导还可以设置嵌入服务器或云端 API，并在完成后启动网关。使用云端 API 时，请先在这个终端中运行 <code>export OPENAI_API_KEY="&lt;your key&gt;"</code>（或你所用服务商对应的变量）：向导的测试请求会用到这个密钥。</p>
         <pre><code>melo --serve --reconfigure</code></pre>
@@ -137,14 +138,33 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
               <tr><td><code>Base URL</code></td><td>服务器地址。按回车接受方括号中显示的默认值：已保存的地址，没有时是该后端的常用地址。</td></tr>
               <tr><td><code>Chat model name</code></td><td>模型名，例如 <code>qwen3:8b</code>。</td></tr>
               <tr><td><code>Start?</code></td><td>按回车（表示“是”）继续。</td></tr>
-              <tr><td><code>Embedding backend</code></td><td>如果没有嵌入服务器，输入 <code>5</code>，即 <code>None (no long-term memory)</code>；没有保存过嵌入后端时，这就是默认值。</td></tr>
-              <tr><td><code>Embedding endpoint URL</code>、<code>Embedding model name</code></td><td>只有选择了嵌入后端时才会询问。</td></tr>
+              <tr><td><code>Embedding backend</code></td><td><code>5</code> 表示 <code>None (no long-term memory)</code>。没有保存过嵌入后端时，对话服务器自己列出的嵌入模型会作为 <code>6</code>、<code>7</code>…… 追加，第一个是默认值；选中一个即可。</td></tr>
+              <tr><td><code>Embedding endpoint URL</code>、<code>Embedding model name</code></td><td>只有选择了固定的嵌入后端 <code>1</code>–<code>4</code> 时才会询问；选择检测到的模型时不会询问。</td></tr>
             </tbody>
           </table>
         </div>
         <p>使用云端 API 时，请选择对应的服务商。向导接着会询问 <code>API key env var</code>（即你导出的那个变量的名字）和 <code>Chat model</code>，而不是 <code>Base URL</code> 和 <code>Chat model name</code>。</p>
         <p>Ollama 的默认地址 <code>http://localhost:11434</code> 没有 <code>/v1</code>，这是正确的：<code>ollama</code> 后端使用 Ollama 自己的 API，而不是兼容 OpenAI 的 API。</p>
         <p>接着，向导会向每个服务器发送一个简短的测试请求（<code>Probing backends ...</code>）。如果对话服务器没有响应，它会输出 <code>Probe failed: …</code> 并询问 <code>[r]etry, [s]ave anyway, [N]o [N]:</code>；输入 <code>r</code> 会重新询问地址和模型，直接按回车则什么也不保存。如果只有嵌入服务器失败，向导会关闭嵌入后保存，并给出提示。成功时，它会输出 <code>Config saved to …</code>（后面是 <code>~/.cache/localmelo/config.toml</code> 的路径），然后<strong>启动网关</strong>，地址为 <code>http://127.0.0.1:8401</code>。网关会一直在这个终端中运行。不加 <code>--serve</code> 时，<code>melo --reconfigure</code> 改为打开交互式界面。</p>
+      </section>
+
+      <section class="section" id="set-up-an-embedding-model">
+        <h2>设置嵌入模型</h2>
+        <p>长期记忆需要一个嵌入模型。localmelo 从不下载或启动模型：请让它使用你的服务器已经提供的模型。<a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">指南（英文）</a>覆盖 Ollama、oMLX、vLLM、SGLang 和 MLC。</p>
+        <p>使用 Ollama 时：</p>
+        <pre><code>ollama pull qwen3-embedding:0.6b
+curl -sS http://127.0.0.1:11434/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "qwen3-embedding:0.6b", "input": "ping"}'
+melo --reconfigure    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b</code></pre>
+        <p>回复中必须包含非空的 <code>data[0].embedding</code>。<code>nomic-embed-text</code> 是更小的纯英文替代品。</p>
+        <p>使用 oMLX 时，对话服务器也提供嵌入模型：</p>
+        <pre><code>curl -sS http://127.0.0.1:8000/v1/models
+curl -sS http://127.0.0.1:8000/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'</code></pre>
+        <p><code>GET /v1/models</code> 只给出 id，不给出类型，所以要用上面的嵌入请求来确认。保留原来的对话服务器，并设置 <code>embedding_backend = "vllm"</code> 以及该表的 <code>embedding_url</code> 和 <code>embedding_model</code>；见<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#omlx">oMLX（英文）</a>。</p>
+        <p>更换模型会改变向量空间：维度不同的旧向量会被跳过，旧条目不再参与排序。要回收空间，请先停止 localmelo，再删除 <code>~/.cache/localmelo/memory/long_term.db*</code>。</p>
       </section>
 
       <section class="section" id="start-the-gateway">
@@ -165,14 +185,14 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 
       <section class="section" id="interactive-conversations">
         <h2>交互式对话</h2>
-        <p>不带任务运行 <code>melo</code>，即可在终端里对话。每个工具调用完成时都会显示出来，模型工作时有一个旋转指示显示当前步数和用时，答案按 Markdown 输出：</p>
+        <p>不带任务运行 <code>melo</code>，即可在终端里对话。回合运行时会实时显示它的工作：模型的思考、每个工具调用完成时的命令或文件、重试、通知和反思，实时区域显示步数、阶段、正在运行的工具和本回合的进度事实。答案按 Markdown 输出：</p>
         <pre><code>melo
 # Or talk to an OpenAI-compatible server that is not saved, with its first
 # model or the one you name:
 melo --base-url http://127.0.0.1:8000/v1
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
         <ul>
-          <li>输入 <code>/</code> 查看命令：<code>/model</code> 列出服务器上的模型并切换到其中一个，<code>/backend</code> 切换到另一个服务器（两者都会保存为默认值），<code>/new</code> 重新开始，<code>/exit</code> 或 Ctrl+D 退出。</li>
+          <li>输入 <code>/</code> 查看命令：<code>/model</code> 列出服务器上的模型并切换到其中一个，<code>/backend</code> 切换到另一个服务器（两者都会保存为默认值），<code>/verbose</code> 和 <code>/thinking</code> 增减细节，<code>/expand</code> 打印某个工具调用的完整输出，<code>/progress</code> 显示实时区域依据的进度事实，<code>/approvals</code> 显示审批模式和授权，<code>/status</code> 显示会话的各项事实，<code>/mcp</code> 显示 MCP 服务器，<code>/retry</code> 重新运行最近的一轮，<code>/new</code> 重新开始，<code>/exit</code> 或 Ctrl+D 退出。</li>
           <li>melo 在运行 shell 命令、Python 代码或写文件之前会先询问：按 <code>1</code> 允许这一次，按 <code>2</code> 在本次会话中允许这个工具，按 <code>3</code> 拒绝并告诉 melo 原因。按 Esc 停止当前回合。</li>
           <li>melo 在当前文件夹中工作（<code>--workspace DIR</code> 可以换一个）：文件工具只能在其中操作；命令和 Python 可以访问其他文件，所以 melo 会先询问。</li>
         </ul>

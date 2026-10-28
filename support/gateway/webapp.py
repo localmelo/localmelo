@@ -11,15 +11,40 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from localmelo.melo.contracts.providers import ProviderError
-from localmelo.support.gateway.playground import SmokePlayground
+from localmelo.support.config import Config, SchedulerConfig
+from localmelo.support.gateway.chat_gate import DEFAULT_CALL_LOG_DIR
+from localmelo.support.gateway.machine_monitor import read_pmset
+from localmelo.support.gateway.playground import LockHeldError, SmokePlayground
 
 _STATIC = Path(__file__).with_name("static")
+
+
+def _call_log_dir(scheduler: SchedulerConfig) -> Path | None:
+    """The configured call-log directory, or None when the file is off."""
+    if not scheduler.call_log:
+        return None
+    if scheduler.call_log_dir:
+        return Path(scheduler.call_log_dir).expanduser()
+    return DEFAULT_CALL_LOG_DIR
 
 
 def _manager(app: FastAPI) -> SmokePlayground:
     manager = getattr(app.state, "smoke_playground", None)
     if manager is None:
-        manager = SmokePlayground()
+        cfg = getattr(app.state, "config", None)
+        scheduler = cfg.scheduler if isinstance(cfg, Config) else SchedulerConfig()
+        manager = SmokePlayground(
+            policy=scheduler.policy,
+            n_srv=scheduler.n_srv,
+            r_f=scheduler.r_f,
+            n_fg=scheduler.n_fg,
+            call_log_dir=_call_log_dir(scheduler),
+            lock_path=scheduler.gpu_lock_file or None,
+            lock_self=scheduler.lock_self,
+            lock_gate=scheduler.lock_gate,
+            # The gateway always reads the battery; the lock is optional.
+            battery_runner=read_pmset,
+        )
         app.state.smoke_playground = manager
     return manager
 
@@ -31,16 +56,21 @@ def _body_text(body: dict[str, Any], key: str, default: str = "") -> str:
     return value
 
 
-def mount(app: FastAPI) -> None:
+def mount(app: FastAPI, cfg: Config | None = None) -> None:
     """Register the smoke playground routes on the app."""
     if getattr(app.state, "_localmelo_webapp_mounted", False):
         return
     app.state._localmelo_webapp_mounted = True
+    app.state.config = cfg
 
     from localmelo.support.gateway.playground import SessionBusyError
 
     _manager(app)
     app.mount("/assets", StaticFiles(directory=_STATIC), name="workspace-assets")
+
+    @app.on_event("startup")
+    async def _start_smoke_playground() -> None:
+        await _manager(app).start()
 
     @app.on_event("shutdown")
     async def _close_smoke_playground() -> None:
@@ -49,6 +79,34 @@ def mount(app: FastAPI) -> None:
     @app.get("/", response_class=HTMLResponse)
     async def chat_ui() -> str:
         return (_STATIC / "index.html").read_text(encoding="utf-8")
+
+    @app.post("/v1/playground/presence")
+    async def playground_presence(body: dict[str, Any]) -> JSONResponse:
+        session_id = body.get("session_id")
+        if not isinstance(session_id, str):
+            return JSONResponse(
+                status_code=400, content={"error": "session_id must be a string"}
+            )
+        try:
+            _manager(app).presence(session_id)
+            return JSONResponse(content={"ok": True})
+        except KeyError:
+            return JSONResponse(status_code=404, content={"error": "session not found"})
+
+    @app.post("/v1/playground/session/{session_id}/level")
+    async def playground_level(session_id: str, body: dict[str, Any]) -> JSONResponse:
+        level = body.get("level")
+        if isinstance(level, bool) or not isinstance(level, int) or not 1 <= level <= 4:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "level must be an integer from 1 to 4"},
+            )
+        try:
+            return JSONResponse(content=_manager(app).set_level(session_id, level))
+        except KeyError:
+            return JSONResponse(status_code=404, content={"error": "session not found"})
+        except ValueError as e:
+            return JSONResponse(status_code=400, content={"error": str(e)})
 
     @app.get("/v1/playground/scenarios")
     async def playground_scenarios() -> JSONResponse:
@@ -82,6 +140,8 @@ def mount(app: FastAPI) -> None:
                 scenario_id=_body_text(body, "scenario_id", ""),
             )
             return JSONResponse(content=payload)
+        except LockHeldError as e:
+            return JSONResponse(status_code=409, content={"error": str(e)})
         except SessionBusyError as e:
             return JSONResponse(status_code=409, content={"error": str(e)})
         except ValueError as e:
@@ -113,7 +173,13 @@ def mount(app: FastAPI) -> None:
 
     @app.get("/v1/playground/sessions")
     async def playground_sessions() -> JSONResponse:
-        return JSONResponse(content={"sessions": _manager(app).list_sessions()})
+        manager = _manager(app)
+        return JSONResponse(
+            content={
+                "sessions": manager.list_sessions(),
+                "machine": manager.machine_payload(),
+            }
+        )
 
     @app.get("/v1/playground/session/{session_id}")
     async def playground_get(session_id: str) -> JSONResponse:

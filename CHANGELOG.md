@@ -22,6 +22,53 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   JSON line reports the mode, `usage.reasoning_chars`, and the
   `memory_stats` replay counters outside `legacy`. The interactive UI
   refuses `--reasoning-field` until R2b wires it ([#NN]).
+- Diffs in the approval panel: a `file_write` over an existing file shows
+  the change (`+a -b lines`, removed lines in red and added in green),
+  a new file its line count, and a file too large or not text says why.
+  `/approvals` shows the mode and this session's grants and switches
+  between `ask`, `auto` and `deny` (or forgets one tool's grant). The
+  terminal UI accepts `--mcp-config`, and the config file's top-level
+  `mcp_config` key names an MCP servers file the UI loads (direct mode
+  never reads it); `/mcp` lists the servers and their tools and says why
+  MCP is off after a failure, `/status` shows the model and server, the
+  session, the tools, memory, limits and files, and `/retry` runs the
+  newest turn again. The hints name them where they apply ([#75]).
+- Setup can add the embedding model that long-term memory needs. The first
+  run offers an embedding model the chat server already lists, the wizard
+  appends such models as options `6+`, the banner names the configured
+  backend and model (or the flag that adds one), and a stored vector from
+  another model is skipped instead of failing recall. A new
+  [guide](docs/embedding.md) covers Ollama, oMLX, vLLM, SGLang and MLC
+  ([#74]).
+- The terminal and the web console share one set of words for a session.
+  `support/sessions/display.py` re-exports `split_thinking` and adds the
+  status table `STATUS_TEXT`, keyed by status and by `(status, cause)` and
+  read through `status_text` (each with its word, severity and title), and
+  `approval_tag`, which gives the short tag and long text of how a call's
+  approval ended. `build_session_agent` takes optional `wrap_llm` and
+  `wrap_embedding` callables, called with the providers it builds before
+  the Agent's `Chat` is made, so a surface can put its scheduler gate in
+  front of every model call; with neither, the builder is unchanged. The
+  terminal reads its status severities from `STATUS_TEXT`, and its rendered
+  lines and goldens are unchanged ([#72]).
+- The web workspace's chats go through the scheduler: each chat call is
+  admitted at once or held according to `[scheduler] policy` (`off`
+  by default, which only records), each embedding call is recorded and counts
+  in flight but is never held, a chat's level chip (P1-P4), the focused
+  chat's lane, the server's `n_srv` slots and the `r_f`/`n_fg` reserves. A
+  held chat shows `Waiting: <reason>` in the page, and every call leaves one
+  schema-1 line in `~/.cache/localmelo/scheduler/runs/<UTC>/calls.jsonl`.
+  Direct runs, the CLI and `/v1/agent/run` are unchanged and gated nowhere
+  ([#69]).
+- The gateway reads the shared GPU lock and `pmset -g batt`, records both in
+  `machine.jsonl` beside the call log, and shows the holder and the battery
+  in the workspace header. `[scheduler] lock_gate` defaults to `record`,
+  which changes no request; `wait` holds every workspace call, embeddings
+  included, while a foreign lock is present, and shows
+  `Waiting: Reservation`. `lock_self` is an exact holder (or `holder:run`);
+  unreadable and stale locks are foreign, and localmelo never writes,
+  renames or removes a lock. Direct runs, the CLI and `/v1/agent/run` are
+  unchanged and read neither source ([#76]).
 - Tools have a permission tier, and an approval policy asks by tier rather
   than by a fixed list of names. The built-ins keep their tiers (`file_read`
   read, `file_write` write, `shell_exec` and `python_exec` exec), and a
@@ -68,6 +115,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (↑↓, Ctrl+R) and makes a new line with Alt+Enter or Ctrl+J; Esc stops a
   turn. Sessions are kept in `~/.cache/localmelo/cli/sessions.db`;
   resuming them comes later ([#53]).
+- A turn's work in the interactive UI, as it happens: the model's
+  thinking (`✻ Thought for 1.2s` and 3 rows; 40 with `/verbose`, none with
+  `/thinking off`), intermediate text and one held message printed only
+  when it differs from the answer, `↻` retries, `·` empty replies, `⚠`
+  stuck and budget notices, and reflections (including the unreadable
+  ones). Tool blocks take the call's arguments and 20 output lines under
+  `/verbose` and print images as `▪ image/png · 312 KB · not shown`. The
+  live area now draws the run's `run.progress` facts, the running tool's
+  clock and limit, and on a session's first turn a dim row of the past
+  runs (the direct-mode line's wording). `/expand [turn.call]` prints a
+  call's whole output, `/progress` the latest facts with the memory they
+  rest on ([#68]).
 - A first run in a terminal: `melo` with no config file looks for a model
   server on this computer, asks for its URL and for a model from the
   server's list, saves them and opens the chat. It looks with
@@ -264,6 +323,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A held chat's header still said `● Working` while the sidebar, status
+  label and message area said it was waiting, and a chat that had just sent
+  kept `Working on your request…` in the message area for the whole hold
+  (the poll skipped the detail refresh while the send was pending). The
+  header's status pill now says `Waiting: <reason>`, and while the send is
+  pending the message area follows the polled hold as it changes; both
+  return to Working when the hold ends ([#71]).
 - The scheduler simulator's importer reads a chat call's kind from the
   `X-Localmelo-Call-Kind` header that localmelo sends, in the headers side
   file a proxy record names with `bodies.headers`. Retrieval and
@@ -392,4 +458,11 @@ earlier milestones.
 [#63]: https://github.com/localmelo/localmelo/pull/63
 [#64]: https://github.com/localmelo/localmelo/pull/64
 [#66]: https://github.com/localmelo/localmelo/pull/66
-[#67]: https://github.com/localmelo/localmelo/pull/NN
+[#67]: https://github.com/localmelo/localmelo/pull/67
+[#68]: https://github.com/localmelo/localmelo/pull/68
+[#69]: https://github.com/localmelo/localmelo/pull/69
+[#71]: https://github.com/localmelo/localmelo/pull/71
+[#72]: https://github.com/localmelo/localmelo/pull/72
+[#74]: https://github.com/localmelo/localmelo/pull/74
+[#75]: https://github.com/localmelo/localmelo/pull/75
+[#76]: https://github.com/localmelo/localmelo/pull/76

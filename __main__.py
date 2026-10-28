@@ -697,11 +697,6 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             "--host and --port are for --serve and --daemon; "
             "bare melo opens the interactive UI"
         )
-    if interactive and (args.mcp_config is not None or args.mcp_only):
-        parser.error(
-            "--mcp-config and --mcp-only are not in the interactive UI yet; "
-            'give them with a task (melo -- "<task>")'
-        )
     if interactive and args.reasoning_field is not None:
         parser.error(
             "--reasoning-field is not in the interactive UI yet; "

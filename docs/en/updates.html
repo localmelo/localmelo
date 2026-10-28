@@ -70,7 +70,7 @@
         </div>
         <p>Planned:</p>
         <ul>
-          <li>the interactive CLI's next parts: the model's thinking and retries as a turn runs, diffs in approvals, sessions you can resume (<code>melo -c</code>, <code>melo -r</code>), attached files and shell commands;</li>
+          <li>the interactive CLI's next parts: diffs in approvals, sessions you can resume (<code>melo -c</code>, <code>melo -r</code>), attached files and shell commands;</li>
           <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
           <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
@@ -88,6 +88,109 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-2026-10-27-gpu-lock">
+          <h3>The gateway reads the GPU lock and the battery</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/76">#76</a>
+          </p>
+          <ul>
+            <li>The web workspace's header shows a foreign GPU lock (holder and purpose, with <code>(recorded)</code> or <code>(chats wait)</code>), your own lock, an unreadable lock, <code>· ETA passed</code>, and the battery percent and state on battery power. The same change is logged to <code>machine.jsonl</code> beside <code>calls.jsonl</code>.</li>
+            <li><code>[scheduler] lock_gate</code> defaults to <code>record</code>: the lock and battery are shown and logged and no request changes. <code>wait</code> holds every workspace call, embeddings included, while a foreign lock is present; the chat says <code>Waiting: Reservation</code>.</li>
+            <li><code>lock_self</code> matches the holder exactly (or <code>holder:run</code>). An unreadable or stale lock is foreign and never auto-cleared, and localmelo never writes, renames or removes a lock. Direct runs, the CLI and <code>/v1/agent/run</code> are unchanged.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-approval-diffs">
+          <h3>Diffs in approvals, and the recovery commands</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/75">#75</a>
+          </p>
+          <ul>
+            <li>A <code>file_write</code> over an existing text file now shows what changes before you approve it: a unified diff with <code>+a -b lines</code> in the header, removed lines in red and added lines in green; a new file shows its content and line count, and a file too large, not text or not a regular file says why.</li>
+            <li>The terminal UI gains <code>/approvals</code> (the mode and the session's grants, and switching <code>ask</code>, <code>auto</code> or <code>deny</code>), <code>/status</code> (the model and server, the session, the tools, memory, limits and files), <code>/retry</code> (runs the newest turn again) and <code>/mcp</code> (the servers, their tools and why MCP is off). The hints name them where they apply.</li>
+            <li>It loads an MCP servers file from <code>--mcp-config</code>, or the config file's new top-level <code>mcp_config</code> key; a server that fails to start turns MCP off for that session instead of ending the UI. Direct mode never reads the key.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-embedding-setup">
+          <h3>Setting up an embedding model for long-term memory</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/74">#74</a>
+          </p>
+          <ul>
+            <li>The first run offers an embedding model the chat server already lists (<code>Use nomic-embed-text for long-term memory? [Y/n]:</code>), and the setup wizard appends the server's embedding models as options after the backends, defaulting to the recommended one.</li>
+            <li>The banner names the configured embedding backend and model (<code>long-term memory · vLLM · Qwen3-Embedding-0.6B</code>), or says <code>melo --reconfigure adds one</code> when there is none; a stored vector from another model is skipped instead of failing the recall.</li>
+            <li>A new <a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">guide</a> covers Ollama, oMLX, vLLM, SGLang and MLC.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-held-labels">
+          <h3>A held chat reads Waiting everywhere</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/71">#71</a>
+          </p>
+          <ul>
+            <li>While a chat's model call waits for the scheduler, the header's status pill says <code>Waiting: Resources</code> too (or the policy's other reason), next to the sidebar, the composer and the message area; all of them return to Working when the hold ends.</li>
+            <li>A chat that has just sent no longer keeps <code>Working on your request…</code> for the whole hold: while the send is pending, the message area follows the hold the page polls.</li>
+            <li>The web workspace only; direct runs, the CLI and the requests localmelo sends are unchanged.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-scheduler-gate">
+          <h3>The web workspace's chats go through the scheduler</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/69">#69</a>
+          </p>
+          <ul>
+            <li>Every planning, reflection and embedding call a chat in the web workspace makes now passes through the scheduler's policy: a chat call is sent at once or waits for a slot, embeddings are never held but count in flight, and the page says <code>Waiting: Resources</code> (or the policy's other reason) while a call waits.</li>
+            <li>A level chip (P1 to P4, P2 by default) sets how the chat ranks against other chats; the chat you are typing in is the lane and is admitted first, up to the server's slots.</li>
+            <li><code>[scheduler] policy</code> is <code>off</code> by default: it records each call under <code>~/.cache/localmelo/scheduler/</code> and holds nothing. <code>fcfs</code> and <code>class</code> enforce. Direct runs, the CLI and <code>/v1/agent/run</code> are unchanged.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-turn-work">
+          <h3>A turn's work, as it happens</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time>
+          </p>
+          <ul>
+            <li>The interactive UI now draws every event of a turn: the model's thinking as <code>Thought for 1.2s</code> and an excerpt, intermediate text, the last message when it differs from the answer, retries that count down, empty-reply, stuck and budget notices, and reflections, including the ones melo could not read.</li>
+            <li>The live area shows the run's progress facts (step, attempt, phase and cycle, tests, time), the running tool's clock and limit, and on a session's first turn a dim row of what the past runs did, worded exactly as the direct-mode progress line.</li>
+            <li>New commands: <code>/verbose</code> for longer excerpts, the tool arguments and 20 output lines; <code>/thinking</code> to turn the excerpt off; <code>/expand</code> for one tool call's whole output; <code>/progress</code> for the facts the live area rests on.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-short-readme">
+          <h3>A short README and a developer guide</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/67">#67</a>
+          </p>
+          <ul>
+            <li>The README is a short front door now: two badge rows (one to the website's pages, one of facts), what localmelo is, install, a few commands, a Learn more list and the security warning. The Chinese README mirrors it, and <code>CONTRIBUTING.md</code> is the short version.</li>
+            <li>A new <a href="./developers.html">developer guide</a>, in English and Chinese, is linked from every page's navigation: the repository layout, setup, the tests and checks, adding a backend, a built-in tool or a check, commits and pull requests, and the docs and website layout.</li>
+            <li>The reference documentation stays in <code>docs/</code> and is linked from the README's Learn more list.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-permission-tiers">
+          <h3>Approvals ask by permission tier</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/66">#66</a>
+          </p>
+          <ul>
+            <li>Every tool now has a permission tier: <code>read</code>, <code>write</code>, <code>exec</code> or <code>network</code>. The built-ins keep theirs (<code>file_read</code> read, <code>file_write</code> write, <code>shell_exec</code> and <code>python_exec</code> exec); an MCP tool's tier comes from its annotations, cautiously: <code>openWorldHint</code> gives network, <code>readOnlyHint</code> read unless <code>destructiveHint</code> contradicts it, and anything else write.</li>
+            <li>A run with an approval policy asks before every call whose tier is not <code>read</code>, so an unannotated MCP tool asks now; <code>require_approval</code> only adds a mark, which can make a read tool ask too. The terminal's approval panel names the tier, and <code>ToolInfo.tier</code> and <code>ApprovalRequest.tier</code> report it.</li>
+            <li>Direct mode, the plain conversation loop and the gateway pass no policy and are unchanged; <code>--yolo</code> still means no policy, not read-only.</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-27-forget">
           <h3>Forget a task's memory</h3>
@@ -274,7 +377,7 @@
           <ul>
             <li>A scheduler will share one local model server between your conversation, background tasks and chats. Its policy decides which model call goes next and why a task waits, and keeps your conversation answering first.</li>
             <li>A simulator replays workloads through the policy, so its variants can be compared offline, on synthetic workloads or on traces from the benchmark.</li>
-            <li>Nothing uses the scheduler yet: runs and the gateway work as before. The next step puts it in front of the model server.</li>
+            <li>Only the web workspace's chats use the gate so far; direct runs and the CLI work as before. The next step puts it in front of their calls too.</li>
           </ul>
         </article>
 
