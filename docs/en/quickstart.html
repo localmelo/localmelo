@@ -362,15 +362,18 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
           <code>melo --serve</code>.
         </p>
         <p>
-          The web workspace at <code>http://127.0.0.1:8401/</code> supports
-          model discovery, separate chat drafts, code formatting, cancellation,
-          and responsive navigation. It does not read the configuration file:
-          enter your server's URL as the Chat API URL, such as
-          <code>http://127.0.0.1:11434/v1</code> for Ollama, then select
-          Discover models and pick a chat model. Other browser tabs on the
-          same gateway see the same chats, and reloading the page brings them
-          back. Chats last only while the gateway runs, and the terminal's
-          conversations are separate from the web chats.
+          The web workspace at <code>http://127.0.0.1:8401/</code> is the
+          console's live page and talks only to <code>/api</code>: it uses the
+          gateway's configured model, so <code>melo --reconfigure</code> changes
+          it. It lists your chats newest first, with search and a draft for
+          each, and draws a turn as the terminal does: your message, a work
+          card for each tool call, folded reasoning and reflections, notices,
+          the live progress row and the answer with its facts and
+          <code>Copy response</code>. Stop cancels the turn, a waiting approval
+          shows as <code>Needs approval</code>, and the chats are saved in the
+          gateway's <code>sessions.db</code>, so a restart keeps them. Other
+          browser tabs on the same gateway see the same chats. The approval
+          cards and the settings dialog arrive in a later update.
         </p>
       </section>
 
@@ -457,9 +460,8 @@ brew install jundot/omlx/omlx</code></pre>
           serves an embedding model.
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#omlx">Configuration</a>
           shows the file they save and the table to add to turn off a Qwen3
-          model's thinking. In the web workspace, enter
-          <code>http://127.0.0.1:8000/v1</code> as the Chat API URL, select
-          Discover models and pick the model.
+          model's thinking. The web workspace then uses that model; it reads
+          the configuration file.
         </p>
       </section>
 
