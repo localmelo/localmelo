@@ -143,9 +143,11 @@ Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`
 
 如果配置是用 `melo` 保存的，就用 `melo --serve` 启动网关；上面的向导会自行启动它。在第二个终端中，检查网关并通过它运行任务：
 
+示例把网关的 bearer token 从其私有文件通过管道传给 curl，使它不出现在命令行参数和 shell 历史中。不要开启 curl 的详细输出，也不要记录这个请求头；同一用户的其他进程仍能读取 token 文件。
+
 ```bash
-curl http://127.0.0.1:8401/v1/health
-curl -X POST http://127.0.0.1:8401/v1/agent/run \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
   -d '{"query": "What is 6*7?"}'
 ```
@@ -157,7 +159,7 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 {"result":"42","session_id":"a7e8f646ca2e"}
 ```
 
-健康检查不会联系模型服务器；任务会。在浏览器中打开 `http://127.0.0.1:8401/` 可进入网页工作区（见[交互式对话](#interactive-conversations)）。
+健康检查不会联系模型服务器；任务会。要使用网页工作区，在终端中运行 `melo --gateway-login`，并在 60 秒内打开它打印的一次性链接。不要分享这个链接。见[交互式对话](#interactive-conversations)。
 
 在第一个终端中按 Ctrl+C 停止网关。任务使用已保存的配置：
 
