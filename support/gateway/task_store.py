@@ -1,6 +1,6 @@
 """The scheduler's task store: component version 2 of the gateway's file.
 
-The seven tables of design 4.2 arrive as the ``scheduler`` component of the
+The eight tables of design 4.2 arrive as the ``scheduler`` component of the
 gateway's ``sessions.db``, never of the CLI's file. :meth:`TaskStore.open`
 reads ``schema_components`` and, when the component is absent, creates the
 tables and the version row in one ``BEGIN IMMEDIATE`` transaction on the
@@ -98,7 +98,9 @@ _SCHEMA: Final = (
 _SNAPSHOT_SCHEMA: Final = """CREATE TABLE park_priority (
   task_id TEXT PRIMARY KEY REFERENCES tasks(task_id) ON DELETE CASCADE,
   level INTEGER NOT NULL, source TEXT NOT NULL, reason TEXT NOT NULL,
-  user_rank REAL, pause_pending INTEGER NOT NULL DEFAULT 0)"""
+  user_rank REAL, pause_pending INTEGER NOT NULL DEFAULT 0,
+  generation INTEGER NOT NULL DEFAULT 0, operation_id TEXT,
+  snapshot_active INTEGER NOT NULL DEFAULT 1)"""
 
 _TASK_COLUMNS: Final = (
     "task_id",
@@ -206,6 +208,74 @@ def _json_columns(values: Mapping[str, Any]) -> dict[str, Any]:
         "pgids": tuple(json.loads(values["pgids"])),
         "level_pinned": bool(values["level_pinned"]),
     }
+
+
+async def compare_park_identity(
+    conn: Any,
+    task_id: str,
+    *,
+    expected_generation: int | None,
+    expected_operation_id: str | None,
+    operation_id: str | None,
+    create: bool = False,
+) -> int | None:
+    """CAS the retained identity inside the caller's event transaction."""
+    row = await _first(
+        conn,
+        "SELECT generation, operation_id FROM park_priority WHERE task_id = ?",
+        (task_id,),
+    )
+    if row is None:
+        if expected_generation is not None or expected_operation_id is not None:
+            raise TaskConflictError("stale task identity")
+        if not create:
+            return None
+        cursor = await conn.execute(
+            "INSERT INTO park_priority (task_id, level, source, reason, user_rank, snapshot_active, generation, operation_id) "
+            "SELECT task_id, level, level_source, reason, user_rank, 0, 1, ? FROM tasks WHERE task_id = ?",
+            (operation_id, task_id),
+        )
+        if cursor.rowcount != 1:
+            raise TaskNotFoundError(f"No task has id {task_id}")
+        return 1
+    if (row[0], row[1]) != (expected_generation, expected_operation_id):
+        raise TaskConflictError("stale task identity")
+    cursor = await conn.execute(
+        "UPDATE park_priority SET generation = generation + 1, operation_id = ? "
+        "WHERE task_id = ? AND generation = ? AND operation_id IS ?",
+        (operation_id, task_id, expected_generation, expected_operation_id),
+    )
+    if cursor.rowcount != 1:
+        raise TaskConflictError("stale task identity")
+    return int(row[0]) + 1
+
+
+async def read_operation_receipt(
+    conn: Any, task_id: str, operation_id: str
+) -> tuple[dict[str, Any], bool] | None:
+    """Read a receipt; absence is unknown, never evidence of rollback."""
+    row = await _first(
+        conn,
+        "SELECT event FROM events WHERE session_id = ? AND type LIKE 'sched.%' AND json_extract(event, '$.data.operation_id') = ?",
+        (task_id, operation_id),
+    )
+    if row is None:
+        return None
+    data = json.loads(row[0])["data"]
+    task = await _first(conn, "SELECT state FROM tasks WHERE task_id = ?", (task_id,))
+    identity = await _first(
+        conn,
+        "SELECT generation, operation_id FROM park_priority WHERE task_id = ?",
+        (task_id,),
+    )
+    current = (
+        (tuple(identity) if identity else (None, None))
+        == (data.get("generation"), data.get("pending_operation_id"))
+        and bool(task)
+        and task[0] == data.get("state")
+        and task[0] not in _TERMINAL_STATES
+    )
+    return data, current
 
 
 class TaskStore:
@@ -316,20 +386,107 @@ class TaskStore:
         rank: float | None,
     ) -> None:
         await conn.execute(
-            "INSERT OR REPLACE INTO park_priority (task_id, level, source, reason, user_rank) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO park_priority (task_id, level, source, reason, user_rank) VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(task_id) DO UPDATE SET level = excluded.level, source = excluded.source, "
+            "reason = excluded.reason, user_rank = excluded.user_rank, snapshot_active = 1",
             (task_id, level, source, reason, rank),
         )
 
     async def _has_snapshot(self, conn: Any, task_id: str) -> bool:
         return (
             await _first(
-                conn, "SELECT 1 FROM park_priority WHERE task_id = ?", (task_id,)
+                conn,
+                "SELECT 1 FROM park_priority WHERE task_id = ? AND snapshot_active = 1",
+                (task_id,),
             )
             is not None
         )
 
     async def _clear_snapshot(self, conn: Any, task_id: str) -> None:
-        await conn.execute("DELETE FROM park_priority WHERE task_id = ?", (task_id,))
+        await conn.execute(
+            "UPDATE park_priority SET snapshot_active = 0, pause_pending = 0 WHERE task_id = ?",
+            (task_id,),
+        )
+
+    async def park_identity(self, task_id: str) -> tuple[int | None, str | None]:
+        """Read the current CAS tuple; reading it does not reserve a transition."""
+        async with self._store.component_transaction("task_park_identity") as conn:
+            if await self._get(conn, task_id) is None:
+                raise TaskNotFoundError(f"No task has id {task_id}")
+            row = await _first(
+                conn,
+                "SELECT generation, operation_id FROM park_priority WHERE task_id = ?",
+                (task_id,),
+            )
+            return (int(row[0]), row[1]) if row else (None, None)
+
+    async def _identity_transition(
+        self,
+        conn: Any,
+        events: Any,
+        task_id: str,
+        kind: str,
+        *,
+        expected_generation: int | None = None,
+        expected_operation_id: str | None = None,
+        operation_id: str | None = None,
+        bump: bool = False,
+        explicit: bool = False,
+        create: bool = False,
+        pending: bool = False,
+        request: Mapping[str, Any] | None = None,
+        state: str = "",
+    ) -> None:
+        if not explicit:
+            row = await _first(
+                conn,
+                "SELECT generation, operation_id FROM park_priority WHERE task_id = ?",
+                (task_id,),
+            )
+            expected_generation, expected_operation_id = row if row else (None, None)
+        op = operation_id or uuid.uuid4().hex
+        generation = await compare_park_identity(
+            conn,
+            task_id,
+            expected_generation=expected_generation,
+            expected_operation_id=expected_operation_id,
+            operation_id=op if pending else None,
+            create=create,
+        )
+        await self._store.append_component_event(
+            conn,
+            events,
+            task_id,
+            kind,
+            {
+                "generation": generation,
+                "operation_id": op,
+                "pending_operation_id": op if pending else None,
+                "pause_pending": pending,
+                "task_request": request,
+                "state": state,
+            },
+        )
+
+    async def reconcile_pause_operation(
+        self, task_id: str, operation_id: str
+    ) -> tuple[dict[str, Any], bool] | None:
+        """Read a receipt after the writer settles; None means unknown, not rollback."""
+        async with self._store.component_transaction("task_pause_reconcile") as conn:
+            if await self._get(conn, task_id) is None:
+                raise TaskNotFoundError(f"No task has id {task_id}")
+            return await read_operation_receipt(conn, task_id, operation_id)
+
+    async def _is_retry(
+        self, conn: Any, current: TaskRecord, op: str, request: Mapping[str, Any]
+    ) -> bool:
+        result = await read_operation_receipt(conn, current.task_id, op)
+        if result is None:
+            return False
+        receipt, is_current = result
+        if receipt.get("task_request") != dict(request) or not is_current:
+            raise TaskConflictError("operation ID reused or superseded")
+        return True
 
     # ── Creation ──
 
@@ -525,7 +682,10 @@ class TaskStore:
         if level == 0 and source != "user":
             raise ValueError("P0 is the user's setting; level 0 needs source 'user'")
         now = self._clock()
-        async with self._store.component_transaction("task_set_level") as conn:
+        async with self._store.component_event_transaction("task_set_level") as (
+            conn,
+            events,
+        ):
             current = await self._get(conn, task_id)
             if current is None:
                 raise TaskNotFoundError(f"No task has id {task_id}")
@@ -535,6 +695,18 @@ class TaskStore:
                 raise TaskStoreError(
                     f"Task {task_id}'s level is set by the user; use force to "
                     "hand it back to the scheduler"
+                )
+            if await _first(
+                conn, "SELECT 1 FROM park_priority WHERE task_id = ?", (task_id,)
+            ):
+                if await _first(
+                    conn,
+                    "SELECT 1 FROM park_priority WHERE task_id = ? AND pause_pending = 1",
+                    (task_id,),
+                ):
+                    raise TaskConflictError("task has a pending pause")
+                await self._identity_transition(
+                    conn, events, task_id, "sched.priority_changed"
                 )
             if level == 0 and source == "user":
                 await self._demote_other_p0(conn, task_id, actor, now)
@@ -657,6 +829,9 @@ class TaskStore:
         state: str | None = None,
         actor: str = "user",
         failure_reason: str | None = None,
+        expected_generation: int | None = None,
+        expected_operation_id: str | None = None,
+        operation_id: str | None = None,
     ) -> TaskRecord:
         """Commit priority and state together, including P0 demotions and audit rows.
 
@@ -697,13 +872,73 @@ class TaskStore:
             raise ValueError(
                 "failure_reason requires a failed state and must be a string"
             )
+        if operation_id is not None:
+            if (
+                state not in _TERMINAL_STATES
+                or not isinstance(operation_id, str)
+                or not operation_id.strip()
+            ):
+                raise ValueError(
+                    "operation_id requires a terminal state and must be non-empty"
+                )
+        elif expected_generation is not None or expected_operation_id is not None:
+            raise ValueError("an expected identity requires an operation_id")
         now = self._clock()
-        async with self._store.component_transaction("task_change") as conn:
+        async with self._store.component_event_transaction("task_change") as (
+            conn,
+            events,
+        ):
             current = await self._get(conn, task_id)
             if current is None:
                 raise TaskNotFoundError(f"No task has id {task_id}")
+            if operation_id and await read_operation_receipt(
+                conn, task_id, operation_id
+            ):
+                raise TaskConflictError(
+                    "operation ID already recorded; reconcile its receipt"
+                )
             if current.state in _TERMINAL_STATES:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
+            if state in _TERMINAL_STATES:
+                await self._identity_transition(
+                    conn,
+                    events,
+                    task_id,
+                    "sched.stopped" if state == "cancelled" else "sched.finished",
+                    bump=True,
+                    state=state or "",
+                    explicit=operation_id is not None,
+                    expected_generation=expected_generation,
+                    expected_operation_id=expected_operation_id,
+                    operation_id=operation_id,
+                    request=(
+                        {
+                            "kind": "stop",
+                            "state": state,
+                            "priority": choice,
+                            "actor": actor,
+                            "failure_reason": failure_reason,
+                            "generation": expected_generation,
+                            "previous": expected_operation_id,
+                        }
+                        if operation_id
+                        else None
+                    ),
+                )
+            elif (
+                choice is not None or (state is not None and state != "parked")
+            ) and await _first(
+                conn, "SELECT 1 FROM park_priority WHERE task_id = ?", (task_id,)
+            ):
+                if await _first(
+                    conn,
+                    "SELECT 1 FROM park_priority WHERE task_id = ? AND pause_pending = 1",
+                    (task_id,),
+                ):
+                    raise TaskConflictError("task has a pending pause")
+                await self._identity_transition(
+                    conn, events, task_id, "sched.priority_changed"
+                )
             if choice is not None:
                 if choice == "first":
                     await conn.execute(
@@ -783,17 +1018,97 @@ class TaskStore:
         assert result is not None
         return result
 
-    async def pause(self, task_id: str, *, actor: str = "user") -> TaskRecord:
+    async def request_pending_pause(
+        self,
+        task_id: str,
+        *,
+        expected_generation: int | None,
+        expected_operation_id: str | None,
+        operation_id: str,
+        actor: str = "user",
+    ) -> TaskRecord:
+        return await self.pause(
+            task_id,
+            actor=actor,
+            _guard=(expected_generation, expected_operation_id, operation_id),
+        )
+
+    async def cancel_pending_pause(
+        self,
+        task_id: str,
+        *,
+        expected_generation: int | None,
+        expected_operation_id: str | None,
+        operation_id: str,
+        actor: str = "user",
+    ) -> TaskRecord:
+        return await self.resume(
+            task_id,
+            actor=actor,
+            _guard=(expected_generation, expected_operation_id, operation_id),
+        )
+
+    async def pause(
+        self,
+        task_id: str,
+        *,
+        actor: str = "user",
+        _guard: tuple[int | None, str | None, str] | None = None,
+    ) -> TaskRecord:
         """Park at P5, saving the previous priority independently of audit retention."""
         now = self._clock()
-        async with self._store.component_transaction("task_pause") as conn:
+        async with self._store.component_event_transaction("task_pause") as (
+            conn,
+            events,
+        ):
             current = await self._get(conn, task_id)
             if current is None:
                 raise TaskNotFoundError(f"No task has id {task_id}")
             if current.state in _TERMINAL_STATES:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
-            if current.state == "parked" and current.level == 5:
+            request = (
+                {
+                    "kind": "pause",
+                    "generation": _guard[0],
+                    "previous": _guard[1],
+                    "actor": actor,
+                }
+                if _guard
+                else None
+            )
+            if _guard and (not isinstance(_guard[2], str) or not _guard[2].strip()):
+                raise ValueError("operation_id must be a non-empty string")
+            if _guard and await self._is_retry(conn, current, _guard[2], request or {}):
                 return current
+            if current.state == "parked" and current.level == 5 and not _guard:
+                return current
+            if _guard and current.state not in ("queued", "running", "held"):
+                raise TaskStoreError("task cannot accept a pending pause")
+            if await _first(
+                conn,
+                "SELECT 1 FROM park_priority WHERE task_id = ? AND pause_pending = 1",
+                (task_id,),
+            ):
+                raise TaskConflictError("task already has a pending pause")
+            await self._identity_transition(
+                conn,
+                events,
+                task_id,
+                "sched.pause_requested",
+                create=True,
+                explicit=bool(_guard),
+                expected_generation=_guard[0] if _guard else None,
+                expected_operation_id=_guard[1] if _guard else None,
+                operation_id=_guard[2] if _guard else None,
+                pending=bool(_guard),
+                request=request,
+                state=current.state if _guard else "parked",
+            )
+            if _guard:
+                await conn.execute(
+                    "UPDATE park_priority SET pause_pending = 1 WHERE task_id = ?",
+                    (task_id,),
+                )
             await self._save_snapshot(
                 conn,
                 task_id,
@@ -814,13 +1129,14 @@ class TaskStore:
                 pinned=True,
                 ts=now,
             )
-            await conn.execute(
-                "UPDATE tasks SET state = 'parked', "
-                "wait_reason = CASE WHEN state = 'held' THEN wait_reason ELSE '' END, "
-                "hold_site = CASE WHEN state = 'held' THEN hold_site ELSE '' END "
-                "WHERE task_id = ?",
-                (task_id,),
-            )
+            if not _guard:
+                await conn.execute(
+                    "UPDATE tasks SET state = 'parked', "
+                    "wait_reason = CASE WHEN state = 'held' THEN wait_reason ELSE '' END, "
+                    "hold_site = CASE WHEN state = 'held' THEN hold_site ELSE '' END "
+                    "WHERE task_id = ?",
+                    (task_id,),
+                )
             await self._log(
                 conn,
                 "task.pause",
@@ -837,23 +1153,76 @@ class TaskStore:
         assert result is not None
         return result
 
-    async def resume(self, task_id: str, *, actor: str = "user") -> TaskRecord:
+    async def resume(
+        self,
+        task_id: str,
+        *,
+        actor: str = "user",
+        _guard: tuple[int | None, str | None, str] | None = None,
+    ) -> TaskRecord:
         """Restore a pause priority; a parked P5 without a pause falls back to P2."""
         now = self._clock()
-        async with self._store.component_transaction("task_resume") as conn:
+        async with self._store.component_event_transaction("task_resume") as (
+            conn,
+            events,
+        ):
             current = await self._get(conn, task_id)
             if current is None:
                 raise TaskNotFoundError(f"No task has id {task_id}")
             if current.state in _TERMINAL_STATES:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
-            if current.state != "parked" or current.level != 5:
+            request = (
+                {
+                    "kind": "cancel",
+                    "generation": _guard[0],
+                    "previous": _guard[1],
+                    "actor": actor,
+                }
+                if _guard
+                else None
+            )
+            if _guard and (not isinstance(_guard[2], str) or not _guard[2].strip()):
+                raise ValueError("operation_id must be a non-empty string")
+            if _guard and await self._is_retry(conn, current, _guard[2], request or {}):
+                return current
+            pending = await _first(
+                conn,
+                "SELECT 1 FROM park_priority WHERE task_id = ? AND snapshot_active = 1 AND pause_pending = 1",
+                (task_id,),
+            )
+            if (
+                current.level != 5
+                or (
+                    _guard
+                    and (
+                        current.state not in ("queued", "running", "held")
+                        or not pending
+                    )
+                )
+                or (not _guard and current.state != "parked")
+            ):
                 raise TaskNotPausedError(f"Task {task_id} is not paused")
             saved = await _first(
                 conn,
-                "SELECT level, source, reason, user_rank FROM park_priority WHERE task_id = ?",
+                "SELECT level, source, reason, user_rank FROM park_priority WHERE task_id = ? AND snapshot_active = 1",
                 (task_id,),
             )
             level, source, reason, rank = saved if saved else (2, "computed", "", None)
+            await self._identity_transition(
+                conn,
+                events,
+                task_id,
+                "sched.resumed",
+                bump=True,
+                explicit=bool(_guard),
+                expected_generation=_guard[0] if _guard else None,
+                expected_operation_id=_guard[1] if _guard else None,
+                operation_id=_guard[2] if _guard else None,
+                request=request,
+                state=(
+                    current.state if _guard else ("parked" if level == 5 else "queued")
+                ),
+            )
             await self._clear_snapshot(conn, task_id)
             if level == 0 and source == "user":
                 await self._demote_other_p0(conn, task_id, actor, now)
@@ -870,10 +1239,11 @@ class TaskStore:
                     pinned=_pinned(source),
                     ts=now,
                 )
-            await conn.execute(
-                "UPDATE tasks SET state = ?, wait_reason = '', hold_site = '' WHERE task_id = ?",
-                ("parked" if level == 5 else "queued", task_id),
-            )
+            if not _guard:
+                await conn.execute(
+                    "UPDATE tasks SET state = ?, wait_reason = '', hold_site = '' WHERE task_id = ?",
+                    ("parked" if level == 5 else "queued", task_id),
+                )
             await self._log(
                 conn, "task.resume", task_id, {"level": level, "source": source}, ts=now
             )
@@ -885,13 +1255,20 @@ class TaskStore:
         """Fail unrecovered tasks together when a new gateway starts."""
         now = self._clock()
         reason = "gateway restarted; recovery arrives in S3b"
-        async with self._store.component_transaction("task_restart") as conn:
+        async with self._store.component_event_transaction("task_restart") as (
+            conn,
+            events,
+        ):
             rows = await _rows(
                 conn,
                 "SELECT task_id, state FROM tasks WHERE state NOT IN (?, ?, ?, ?)",
                 tuple(sorted(_TERMINAL_STATES)),
             )
             for task_id, state in rows:
+                await self._identity_transition(
+                    conn, events, task_id, "sched.finished", bump=True, state="failed"
+                )
+                await self._clear_snapshot(conn, task_id)
                 await conn.execute(
                     "UPDATE tasks SET state = 'failed', wait_reason = ?, hold_site = '', "
                     "finished_at = ?, updated_at = ? WHERE task_id = ?",
@@ -1005,7 +1382,10 @@ class TaskStore:
         # Seconds, so an earlier "first" is a smaller value and sorts first
         # within its class (levels.py sorts ascending; None is +inf).
         rank = now
-        async with self._store.component_transaction("task_set_first") as conn:
+        async with self._store.component_event_transaction("task_set_first") as (
+            conn,
+            events,
+        ):
             current = await self._get(conn, task_id)
             if current is None:
                 raise TaskNotFoundError(f"No task has id {task_id}")
@@ -1020,6 +1400,9 @@ class TaskStore:
                 and current.level == 5
                 and await self._has_snapshot(conn, task_id)
             ):
+                await self._identity_transition(
+                    conn, events, task_id, "sched.priority_changed"
+                )
                 await self._save_snapshot(
                     conn,
                     task_id,

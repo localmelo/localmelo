@@ -122,7 +122,7 @@ async def recent_log(tasks: TaskStore, task_id: str) -> list[Any]:
     )
 
 
-async def test_open_creates_seven_tables_and_leaves_user_version_alone(
+async def test_open_creates_eight_tables_and_leaves_user_version_alone(
     store: SessionStore, clock: Clock
 ) -> None:
     assert await component_version(store, COMPONENT) is None
@@ -233,6 +233,9 @@ async def test_open_creates_seven_tables_and_leaves_user_version_alone(
             "reason",
             "user_rank",
             "pause_pending",
+            "generation",
+            "operation_id",
+            "snapshot_active",
         },
         "idle_windows": {
             "start",
@@ -358,6 +361,16 @@ async def test_v1_migration_preserves_rows_and_pause_before_retention(
         "SELECT pause_pending FROM park_priority WHERE task_id = ?",
         (record.task_id,),
     ) == (0,)
+    snapshot = await one(
+        store, "SELECT * FROM park_priority WHERE task_id = ?", (record.task_id,)
+    )
+    assert await TaskStore(store, clock=clock).open() == 2
+    assert (
+        await one(
+            store, "SELECT * FROM park_priority WHERE task_id = ?", (record.task_id,)
+        )
+        == snapshot
+    )
     assert await priority_events(migrated, record.task_id) == before_events
     assert before_log and await recent_log(migrated, record.task_id) == []
     resumed = await migrated.resume(record.task_id)
@@ -368,6 +381,178 @@ async def test_v1_migration_preserves_rows_and_pause_before_retention(
         rank,
     )
     assert await one(store, "PRAGMA user_version") == (1,)
+
+
+async def test_identity_retention(
+    store: SessionStore, tasks: TaskStore, clock: Clock
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.pause(record.task_id)
+    reopened = TaskStore(store, clock=clock)
+    await reopened.open()
+    assert await reopened.park_identity(record.task_id) == (1, None)
+    assert (await reopened.resume(record.task_id)).level == 1
+    identity = await reopened.park_identity(record.task_id)
+    clock.advance(31 * 86_400)
+    await reopened.apply_retention()
+    assert await reopened.park_identity(record.task_id) == identity
+    assert await one(
+        store,
+        "SELECT snapshot_active FROM park_priority WHERE task_id = ?",
+        (record.task_id,),
+    ) == (0,)
+
+
+async def test_pending_pause_and_cancel_rollback(
+    store: SessionStore, tasks: TaskStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    before = await tasks.get_task(record.task_id)
+
+    def fail(label: str) -> None:
+        if label in {"task_pause", "task_resume"}:
+            raise RuntimeError("rollback")
+
+    monkeypatch.setattr(store, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="rollback"):
+        await tasks.request_pending_pause(
+            record.task_id,
+            expected_generation=None,
+            expected_operation_id=None,
+            operation_id="p",
+        )
+    assert await tasks.get_task(record.task_id) == before
+    assert await tasks.park_identity(record.task_id) == (None, None)
+    monkeypatch.undo()
+    await tasks.request_pending_pause(
+        record.task_id,
+        expected_generation=None,
+        expected_operation_id=None,
+        operation_id="p",
+    )
+    monkeypatch.setattr(store, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="rollback"):
+        await tasks.cancel_pending_pause(
+            record.task_id,
+            expected_generation=1,
+            expected_operation_id="p",
+            operation_id="r",
+        )
+    assert await tasks.park_identity(record.task_id) == (1, "p")
+    assert (await tasks.get_task(record.task_id)).level == 5
+
+
+async def test_pending_receipt_retry_and_supersession(tasks: TaskStore) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    args: dict[str, Any] = dict(
+        expected_generation=None, expected_operation_id=None, operation_id="pause-id"
+    )
+    first = await tasks.request_pending_pause(record.task_id, **args)
+    assert await tasks.request_pending_pause(record.task_id, **args) == first
+    receipt = await tasks.reconcile_pause_operation(record.task_id, "pause-id")
+    assert receipt is not None and receipt[1]
+    assert await tasks.reconcile_pause_operation(record.task_id, "unknown") is None
+    with pytest.raises(TaskConflictError):
+        await tasks.request_pending_pause(record.task_id, **{**args, "actor": "other"})
+    with pytest.raises(TaskConflictError):
+        await tasks.pause(record.task_id)
+    with pytest.raises(TaskConflictError):
+        await tasks.change(record.task_id, priority=2)
+    cancelled = await tasks.cancel_pending_pause(
+        record.task_id,
+        expected_generation=1,
+        expected_operation_id="pause-id",
+        operation_id="cancel-id",
+    )
+    assert (cancelled.state, cancelled.level) == ("running", 1)
+    assert (
+        await tasks.cancel_pending_pause(
+            record.task_id,
+            expected_generation=1,
+            expected_operation_id="pause-id",
+            operation_id="cancel-id",
+        )
+        == cancelled
+    )
+    receipt = await tasks.reconcile_pause_operation(record.task_id, "pause-id")
+    assert receipt is not None and not receipt[1]
+    with pytest.raises(TaskConflictError):
+        await tasks.request_pending_pause(record.task_id, **args)
+
+
+async def test_stale_guarded_terminal_write_cannot_stop_resumed_task(
+    store: SessionStore, tasks: TaskStore
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    await tasks.request_pending_pause(
+        record.task_id,
+        expected_generation=None,
+        expected_operation_id=None,
+        operation_id="p",
+    )
+    await tasks.cancel_pending_pause(
+        record.task_id,
+        expected_generation=1,
+        expected_operation_id="p",
+        operation_id="r",
+    )
+    before = await tasks.get_task(record.task_id)
+    events_before = await rows(
+        store, "SELECT type FROM events WHERE session_id = ?", (record.task_id,)
+    )
+    with pytest.raises(TaskConflictError):
+        await tasks.change(
+            record.task_id,
+            state="cancelled",
+            expected_generation=1,
+            expected_operation_id="p",
+            operation_id="stale-stop",
+        )
+    assert await tasks.get_task(record.task_id) == before
+    assert (
+        await rows(
+            store, "SELECT type FROM events WHERE session_id = ?", (record.task_id,)
+        )
+        == events_before
+    )
+    assert await tasks.reconcile_pause_operation(record.task_id, "stale-stop") is None
+    finished = await tasks.change(
+        record.task_id,
+        state="done",
+        expected_generation=2,
+        expected_operation_id=None,
+        operation_id="done-id",
+    )
+    assert finished.state == "done"
+    assert await one(
+        store,
+        "SELECT type FROM events WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+        (record.task_id,),
+    ) == ("sched.finished",)
+
+
+async def test_snapshot_identity_fenced_on_patch_and_restart(tasks: TaskStore) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.pause(record.task_id)
+    assert await tasks.park_identity(record.task_id) == (1, None)
+    await tasks.change(record.task_id, priority="first")
+    assert await tasks.park_identity(record.task_id) == (2, None)
+    assert await tasks.fail_nonterminal_on_restart() == 1
+    assert await tasks.park_identity(record.task_id) == (3, None)
+    assert (await tasks.get_task(record.task_id)).state == "failed"
 
 
 async def test_v1_migration_preserves_later_override_and_missing_log_fallback(
