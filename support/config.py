@@ -108,6 +108,7 @@ class AgentConfig:
     reasoning: str = "legacy"  # legacy | drop | replay | compress | compress+replay
     replay_turns: int | None = None  # None: every turn in scope
     note_writer: str = "auto"  # auto | heuristic (compress modes)
+    tool_env: list[str] = field(default_factory=list)  # extra inherited variable names
 
 
 @dataclass
@@ -340,7 +341,24 @@ class Config:
             isinstance(turns, bool) or not isinstance(turns, int) or turns < 1
         ):
             errors.append(f"[agent] replay_turns must be an int >= 1, got {turns!r}")
+        names: object = self.agent.tool_env
+        if not isinstance(names, list) or any(
+            not isinstance(name, str)
+            or re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None
+            for name in names
+        ):
+            errors.append(
+                "[agent] tool_env must be a list of valid environment variable names"
+            )
         return errors
+
+    def tool_environment(self) -> dict[str, str]:
+        """Present variables explicitly named by the config; never persist their values."""
+        if errors := self._validate_agent():
+            raise ConfigError("; ".join(errors))
+        return {
+            name: os.environ[name] for name in self.agent.tool_env if name in os.environ
+        }
 
     def _validate_retrieval(self) -> list[str]:
         """``[retrieval]`` holds known values inside their documented ranges."""
@@ -763,6 +781,7 @@ def save(cfg: Config) -> None:
         cfg.agent.reasoning != "legacy"
         or cfg.agent.replay_turns is not None
         or cfg.agent.note_writer != "auto"
+        or cfg.agent.tool_env
     ):
         lines.append("[agent]")
         lines.append(f"reasoning = {_toml_string(cfg.agent.reasoning)}")
@@ -770,6 +789,8 @@ def save(cfg: Config) -> None:
             lines.append(f"replay_turns = {cfg.agent.replay_turns}")
         if cfg.agent.note_writer != "auto":
             lines.append(f"note_writer = {_toml_string(cfg.agent.note_writer)}")
+        if cfg.agent.tool_env:
+            lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
         lines.append("")
 
     if cfg.memory != MemoryConfig():

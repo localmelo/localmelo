@@ -228,6 +228,7 @@ async def test_a_session_agent_works_in_its_workspace_with_session_limits(
             record_answers=True,
             tool_exposure="all",
             tool_timeout_s=SESSION_TOOL_TIMEOUT_S,
+            replay_scope="window",
         )
         assert agent.workspace_root == os.path.realpath(tmp_path)
         assert agent._llm.model == "qwen3-8b"
