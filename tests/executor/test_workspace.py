@@ -695,6 +695,16 @@ async def test_without_a_root_a_python_error_reads_as_the_rooted_one() -> None:
     assert tail.endswith("ValueError: boom")
 
 
+async def test_without_a_root_a_keyboard_interrupt_keeps_its_exit_status() -> None:
+    executor = _executor(None)
+
+    outcome = await _run(executor, "python_exec", code="raise KeyboardInterrupt")
+
+    # As python -c's own status, which the rooted child kept before this path.
+    assert outcome.error.startswith("Python exited with code 130:\n")
+    assert outcome.error.endswith("KeyboardInterrupt")
+
+
 @pytest.mark.skipif(os.name != "posix", reason="POSIX resource limits")
 async def test_a_python_child_gets_the_posix_resource_limits() -> None:
     executor = _executor(None)

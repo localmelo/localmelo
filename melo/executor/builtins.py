@@ -272,7 +272,8 @@ def _python_program(code: str) -> str:
     with ``__name__`` set to ``"__main__"``, so the names the limits use
     stay out of its reach. A failure's traceback is printed from the code's
     own frame: the frame of this program that runs it is dropped, and the
-    exit status is 1, as an uncaught exception's is. ``SystemExit``
+    exit status is 1, as an uncaught exception's is, or 130 for
+    ``KeyboardInterrupt``, as Python's is. ``SystemExit``
     propagates, so ``sys.exit()`` keeps its status.
     """
     limits = _posix_rlimits() if os.name == "posix" else ""
@@ -295,7 +296,8 @@ def _python_program(code: str) -> str:
         "    _localmelo_traceback.print_exception(\n"
         "        _localmelo_type, _localmelo_value,\n"
         "        None if _localmelo_tb is None else _localmelo_tb.tb_next)\n"
-        "    raise SystemExit(1)\n"
+        "    raise SystemExit(\n"
+        "        130 if isinstance(_localmelo_value, KeyboardInterrupt) else 1)\n"
     )
     return limits + run
 
