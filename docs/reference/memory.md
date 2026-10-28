@@ -58,8 +58,14 @@ and the rest of the same task's results. Only the task's last 200 records are
 kept, and another task's records are never used. A record matches when it
 shares a strong key or at least two distinctive non-stopwords of four or more
 characters. The uniquely best score wins; equal top scores cite nothing.
-Each matching typed key adds to the score, and conflicting dates, years when
-both are present, currencies or phone numbers reject a record. Amounts retain
+Each matching typed key adds to the score; conflicting dates, years when
+both are present, currencies, phone numbers or event times reject a record.
+For JSON records, time comparison uses body, text, notes, start and end, not
+message timestamps. A polarity mismatch rejects a record in either direction;
+the detector is heuristic and may also reject records with unrelated negative
+clauses. A negative item must appear in full in the record (apart
+from final punctuation), or it is left unsourced; paraphrases can be missed.
+Other matching remains heuristic and is not verified evidence. Amounts retain
 their unit or currency. A strong key is a date, a time with a colon or am/pm,
 an amount with a currency or unit (or an amount field), a phone number, an
 identifier of three or more characters containing a digit, a number of three
@@ -174,8 +180,9 @@ pool has no absolute floor. A doc is `long:<entry id>`, not a hash of its text.
   persistence on, the first run that ends creates it, and every run adds
   its record at its end, `--memory off` included. With persistence off,
   procedural memory stays in RAM, and nothing is written.
-- The gateway's web workspace keeps its own files in
-  `~/.cache/localmelo/playground/`. Its `history.db` keeps the model's
+- The legacy playground is disabled by default; `melo --serve
+  --enable-playground` enables it and creates `~/.cache/localmelo/playground/`.
+  Its `history.db` keeps the model's
   reasoning for the same number of days, and clears older reasoning when a
   new chat first uses it: each chat opens its own connection to the shared
   file. Its chats share a `procedures.db` there too.
@@ -196,8 +203,8 @@ Every run saves one row in the `tasks` table of history:
   `Cancelled by SIGTERM` or `Cancelled by SIGHUP`.
 - An interactive run that is cancelled is saved as `cancelled`, with the
   reason as its result: a run started in the Python API with `on_event` or
-  `approval`, or a web workspace chat stopped with Stop or by its 600-second
-  limit (its history is in `~/.cache/localmelo/playground/`). Its
+  `approval`, or a legacy playground chat stopped with Stop or by its 600-second
+  limit (when enabled, its history is in `~/.cache/localmelo/playground/`). Its
   interrupted step gets one row per tool call in `steps` (see
   [Stop a run](../guides/python.md#stop-a-run)). Other cancelled runs are saved as
   `crashed`.
@@ -315,8 +322,8 @@ planning and reflection requests alike. The history in RAM keeps none.
 
 The session store ([Sessions](sessions.md)) keeps conversations in its own
 files, apart from `history.db`. Bare `melo` opens
-`~/.cache/localmelo/cli/sessions.db` at its first message; the gateway does
-not use a store yet.
+`~/.cache/localmelo/cli/sessions.db` at its first message; the gateway's
+console uses its own store.
 
 ```text
 ~/.cache/localmelo/gateway/sessions.db   the gateway's sessions

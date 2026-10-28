@@ -11,7 +11,15 @@
     <script type="module" src="/assets/workspace.js"></script>
   </head>
   <body>
-    <div class="app" id="app">
+    <main class="lock-screen" id="lock-screen" aria-labelledby="lock-title">
+      <div class="lock-card">
+        <div class="lock-brand"><img src="/assets/icon_small.png" width="32" height="32" alt="" /> <strong>localmelo</strong></div>
+        <h1 id="lock-title" tabindex="-1">Locked</h1>
+        <p>Run <code>melo --gateway-login</code> in a terminal to get a sign-in link.</p>
+        <p id="lock-status" role="status" aria-live="polite"></p>
+      </div>
+    </main>
+    <div class="app" id="app" hidden inert>
       <aside class="sidebar" id="sidebar" aria-label="Chat navigation">
         <div class="brand">
           <img

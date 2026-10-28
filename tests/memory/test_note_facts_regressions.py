@@ -23,11 +23,9 @@ from localmelo.melo.memory.notes import (
         "I could check the offsite on 4/16.",
         "Is yoga at 9:00?",
         "Not on 4/9.",
-        "The plumber is not coming on 4/9.",
         "Option A: meet on 4/9 at 9:00.",
         "Should we book the room for 4/16 at 9:00?",
         "Maybe the meeting is at 9:00.",
-        "The meeting was cancelled on 4/9.",
         "We can meet at 9:00.",
     ],
 )

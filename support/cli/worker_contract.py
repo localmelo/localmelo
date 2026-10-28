@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
 import queue
@@ -21,7 +20,7 @@ from localmelo.support.sessions.worker import redact_worker, sensitive_read
 MAX_BRIEF_BYTES = 1024 * 1024
 MAX_EVENT_BYTES = 1024 * 1024
 _SECRET_ASSIGNMENT = re.compile(
-    r"(?im)^([ \t]*(?:export[ \t]+)?(?=[A-Za-z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|PASSWD|CREDENTIAL))[A-Za-z_][A-Za-z0-9_]*[ \t]*[:=][ \t]*)[^\r\n]*"
+    r"(?i)\b((?=[A-Za-z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|PASSWD|CREDENTIAL))[A-Za-z_][A-Za-z0-9_]*[ \t]*[:=][ \t]*)[^\r\n]*"
 )
 
 
@@ -47,7 +46,7 @@ def read_brief(path: str | Path) -> str:
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
-                raise ValueError("brief is not a regular file")
+                raise ValueError(f"{path}: brief is not a regular file")
             with os.fdopen(fd, "rb", closefd=False) as source:
                 raw = source.read(MAX_BRIEF_BYTES + 1)
         finally:
@@ -88,27 +87,6 @@ def workspace_head(workspace: str) -> tuple[str | None, bool | None]:
     except (OSError, subprocess.SubprocessError):
         dirty = None
     return head, dirty
-
-
-def failure_record(status: str, workspace: str, error: str) -> dict[str, Any]:
-    """Build a redacted report when there is no completed run result."""
-    head, dirty = workspace_head(workspace)
-    return cast(
-        dict[str, Any],
-        redact_output(
-            {
-                "v": 1,
-                "status": status,
-                "run_id": None,
-                "exit_code": 1,
-                "head_sha": head,
-                "git_dirty": dirty,
-                "tests": {"state": "not_recorded", "items": []},
-                "run": None,
-                "error": error,
-            }
-        ),
-    )
 
 
 class WorkerObserver:
@@ -235,21 +213,6 @@ class WorkerObserver:
                 }
             ],
         }
-
-    def transport_result(self, record: dict[str, Any]) -> None:
-        """Try to append a failure record after an event sink failure."""
-        if self.thread is None or not self.thread.is_alive():
-            return
-        line = (
-            json.dumps(
-                {"v": 1, "type": "result", "result": record},
-                ensure_ascii=True,
-                allow_nan=False,
-            )
-            + "\n"
-        )
-        with contextlib.suppress(queue.Full):
-            self.lines.put(line, timeout=1)
 
     def close(self) -> None:
         if self.thread is None:

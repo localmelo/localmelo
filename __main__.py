@@ -64,6 +64,7 @@ STATUS_LINE_ERROR_CHARS = 500
 # interactive UI also takes --workspace.
 _DIRECT_FLAGS = {
     "workspace": "--workspace",
+    "fixed_prefix": "--fixed-prefix",
     "context_window": "--context-window",
     "output_reserve": "--output-reserve",
     "safety_margin": "--safety-margin",
@@ -461,11 +462,7 @@ async def _run_worker_brief(
     routine: str | None,
 ) -> int:
     """Run one opt-in worker and write its versioned report."""
-    from localmelo.support.cli.worker_contract import (
-        WorkerObserver,
-        failure_record,
-        result_record,
-    )
+    from localmelo.support.cli.worker_contract import WorkerObserver, result_record
 
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
@@ -491,17 +488,6 @@ async def _run_worker_brief(
                 observe=observer,
                 routine=routine,
             )
-        if observer.error is not None:
-            record = await asyncio.to_thread(
-                failure_record,
-                "transport_error",
-                workspace,
-                "Worker event output failed",
-            )
-            await asyncio.to_thread(observer.transport_result, record)
-            await asyncio.to_thread(observer.close)
-            print("melo: worker event output failed", file=sys.stderr)
-            return EXIT_CRASHED
         code = _exit_code(outcome.status)
         record = await asyncio.to_thread(
             result_record, outcome, observer, workspace, code
@@ -525,10 +511,6 @@ async def _run_worker_brief(
     except asyncio.CancelledError:
         if observer.error is None:
             raise
-        record = await asyncio.to_thread(
-            failure_record, "transport_error", workspace, "Worker event output failed"
-        )
-        await asyncio.to_thread(observer.transport_result, record)
         print(
             f"melo: worker output failed: {_one_line(str(observer.error))}",
             file=sys.stderr,
@@ -1063,6 +1045,10 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             "--reconfigure sets up the config file, which --base-url does not use; "
             "give one of them"
         )
+    if getattr(args, "enable_playground", False) and (
+        not args.serve or args.daemon or args.query
+    ):
+        parser.error("--enable-playground is only for --serve")
     if getattr(args, "allow_unconfigured", False):
         if not args.serve:
             parser.error("--allow-unconfigured is only for --serve")
@@ -1085,7 +1071,14 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         and getattr(args, "resume", None) is not None
     ):
         parser.error("-c and -r cannot be combined")
-    if interactive and (args.host is not None or args.port is not None):
+    auth_command = getattr(args, "gateway_login", False) or getattr(
+        args, "gateway_rotate_token", False
+    )
+    if (
+        interactive
+        and not auth_command
+        and (args.host is not None or args.port is not None)
+    ):
         parser.error(
             "--host and --port are for --serve and --daemon; "
             "bare melo opens the interactive UI"
@@ -1146,6 +1139,8 @@ def _direct_options(
         fields["memory_dir"] = args.memory_dir
     if args.timeout is not None:
         fields["timeout_s"] = args.timeout
+    if getattr(args, "fixed_prefix", None) is not None:
+        fields["fixed_prefix"] = args.fixed_prefix == "on"
     reasoning = getattr(args, "reasoning", None)
     if reasoning is not None:
         fields["reasoning"] = reasoning
@@ -1225,6 +1220,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--parent-run",
             "--import-session",
             "--title",
+            "--fixed-prefix",
             "--context-window",
             "--output-reserve",
             "--safety-margin",
@@ -1314,6 +1310,11 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         "score to reach 0.1 (utility, the behavior before this option)",
     )
     direct.add_argument(
+        "--fixed-prefix",
+        choices=["on", "off"],
+        help="Use a versioned run-frozen system prefix and local date (default off)",
+    )
+    direct.add_argument(
         "--tool-exposure",
         choices=["retrieve", "all"],
         help="Offer every built-in plus the extra tools retrieved for each step "
@@ -1359,8 +1360,7 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     )
     direct.add_argument(
         "--output-format",
-        choices=["text", "json"],
-        metavar="{text,json,stream-json}",
+        choices=["text", "json", "stream-json"],
         help="text (default), one JSON line, or stream-json with --brief",
     )
     direct.add_argument(
@@ -1510,6 +1510,25 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
             help="Resume a session, or open the session picker without a value",
         )
 
+    if not direct_only:
+        parser.add_argument(
+            "--gateway-login",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Print a one-use console sign-in link to the terminal",
+        )
+        parser.add_argument(
+            "--gateway-rotate-token",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Rotate the local gateway access token",
+        )
+        parser.add_argument(
+            "--enable-playground",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Enable authenticated development playground routes",
+        )
     # gateway mode
     parser.add_argument("--serve", action="store_true", help="Run as gateway server")
     parser.add_argument("--host", default=None, help="Gateway listen host")
@@ -1577,6 +1596,49 @@ def main() -> None:
         parser.error("--output-format stream-json requires --brief")
     _check_args(parser, args)
 
+    if getattr(args, "gateway_login", False) or getattr(
+        args, "gateway_rotate_token", False
+    ):
+        if (
+            args.query
+            or args.serve
+            or args.daemon
+            or (
+                getattr(args, "gateway_login", False)
+                and getattr(args, "gateway_rotate_token", False)
+            )
+        ):
+            parser.error(
+                "gateway authentication commands cannot be combined with a task or --serve"
+            )
+        from localmelo.support import config
+        from localmelo.support.gateway.auth import GatewayAuth
+
+        cfg = config.load()
+        auth_port = args.port or cfg.gateway.port
+        host = args.host or cfg.gateway.host
+        if host in ("::1", "[::1]"):
+            host = "[::1]"
+        elif host.lower() in ("localhost", "localhost."):
+            host = "localhost"
+        elif host != "127.0.0.1":
+            parser.error("gateway authentication requires a supported loopback host")
+        if getattr(args, "gateway_login", False) and not sys.stdout.isatty():
+            parser.exit(2, "melo: sign-in links are printed only to a terminal.\n")
+        auth = GatewayAuth(allow_corrupt=getattr(args, "gateway_rotate_token", False))
+        try:
+            if getattr(args, "gateway_login", False):
+                login_code = auth.issue_login(auth_port)
+                print(
+                    f"Open http://{host}:{auth_port}/#login={login_code} within 60 seconds. Do not share this link."
+                )
+            else:
+                auth.rotate()
+                print("Gateway token rotated; browser sessions were signed out.")
+        finally:
+            auth.close()
+        return
+
     if args.import_session is not None:
         from localmelo.support.sessions.dsh_import import import_dsh
 
@@ -1626,46 +1688,18 @@ def main() -> None:
     # direct mode (no gateway): exit code 0 completed, 1 crashed, 2 otherwise
     if args.query and not args.serve:
         query = " ".join(args.query)
-        try:
-            options = _direct_options(parser, args)
-            # The surface is known here: direct mode has no approver, so its
-            # default set leaves shell_exec out (--builtins all names it).
-            options = dataclasses.replace(options, mode="direct")
-            if not query:
-                # The loop keeps its answers, so each turn sees the earlier ones; a
-                # single task's options stay as they were.
-                options = dataclasses.replace(options, record_answers=True)
-            tool_providers = _direct_tool_providers(parser, args)
-            agent = _build_direct_mode_agent(
-                args, options=options, tool_providers=tool_providers
-            )
-        except (Exception, SystemExit) as exc:
-            if args.brief is None or (isinstance(exc, SystemExit) and exc.code != 1):
-                raise
-            from localmelo.support.cli.worker_contract import failure_record
-
-            error = (
-                "Worker startup failed"
-                if isinstance(exc, SystemExit)
-                else _one_line(str(exc))
-            )
-            workspace = os.path.realpath(
-                os.path.expanduser(args.workspace or os.getcwd())
-            )
-            record = failure_record("startup_error", workspace, error)
-            if not isinstance(exc, SystemExit):
-                print(
-                    f"melo: worker startup failed: {record['error']}", file=sys.stderr
-                )
-            if args.output_format == "stream-json":
-                record = {"v": 1, "type": "result", "result": record}
-            try:
-                print(
-                    json.dumps(record, ensure_ascii=True, allow_nan=False), flush=True
-                )
-            except BrokenPipeError:
-                print("melo: worker output failed: broken pipe", file=sys.stderr)
-            raise SystemExit(EXIT_CRASHED) from None
+        options = _direct_options(parser, args)
+        # The surface is known here: direct mode has no approver, so its
+        # default set leaves shell_exec out (--builtins all names it).
+        options = dataclasses.replace(options, mode="direct")
+        if not query:
+            # The loop keeps its answers, so each turn sees the earlier ones; a
+            # single task's options stay as they were.
+            options = dataclasses.replace(options, record_answers=True)
+        tool_providers = _direct_tool_providers(parser, args)
+        agent = _build_direct_mode_agent(
+            args, options=options, tool_providers=tool_providers
+        )
         worker_args: dict[str, Any] = (
             {"worker_brief": True} if args.brief is not None else {}
         )
@@ -1750,6 +1784,8 @@ def main() -> None:
             raise SystemExit(1) from e
 
     # start gateway
+    if getattr(args, "enable_playground", False):
+        cfg._enable_playground = True
     _start_gateway(cfg)
 
 
@@ -1886,6 +1922,10 @@ def _build_direct_mode_agent(
         )
     except ValueError as exc:
         parser.error(str(exc))
+    if not isinstance(budget_cfg.agent.fixed_prefix, bool):
+        parser.error("[agent] fixed_prefix must be a boolean")
+    if getattr(args, "fixed_prefix", None) is None and budget_cfg.agent.fixed_prefix:
+        options = dataclasses.replace(options, fixed_prefix=True)
 
     if base_url:
         # Generic OpenAI-compatible endpoint

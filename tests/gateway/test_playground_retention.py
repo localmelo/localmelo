@@ -6,6 +6,7 @@ Requires fastapi (gateway extra). Each playground keeps its memory under
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import sqlite3
 import time
@@ -98,3 +99,36 @@ async def test_a_new_chat_clears_old_reasoning(
         "SELECT kind, outcome, content, thinking FROM llm_calls "
         "WHERE task_id != 'old'",
     ) == [("plan", "answer", "Hello", "Say hello.")]
+
+
+async def test_eviction_rechecks_after_another_close(
+    make_manager: Callable[[], SmokePlayground], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager = make_manager()
+    first = await manager.create_session(
+        chat_url="http://localhost:8000/v1", chat_model="x"
+    )
+    second = await manager.create_session(
+        chat_url="http://localhost:8000/v1", chat_model="x"
+    )
+    one = manager._sessions[str(first["session_id"])]
+    two = manager._sessions[str(second["session_id"])]
+    one.last_active = two.last_active = 0
+    entered, release = asyncio.Event(), asyncio.Event()
+    original_close = one.agent.close
+
+    async def blocked_close() -> None:
+        entered.set()
+        await release.wait()
+        await original_close()
+
+    monkeypatch.setattr(one.agent, "close", blocked_close)
+    eviction = asyncio.create_task(manager._evict_idle())
+    await entered.wait()
+    await two.lock.acquire()
+    try:
+        release.set()
+        await eviction
+        assert manager._sessions[two.session_id] is two
+    finally:
+        two.lock.release()

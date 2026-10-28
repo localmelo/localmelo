@@ -7,10 +7,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
-### Fixed
+### Security
 
-- Direct workers report agent construction failures as `startup_error` and
-  attempt a `transport_error` result on event-output failure. ([#NN])
+- Gateway authentication is in progress: loopback-only binding, a private bearer
+  token for API clients, and a one-use terminal sign-in link for browser sessions.
+  Existing unauthenticated API clients must migrate; see the gateway guide.
+  Same-user processes and localhost services on other ports remain outside the
+  isolation guarantee. ([#136])
+
+- Gateway security-1b is in progress: disable the legacy playground by default;
+  `melo --serve --enable-playground` opts in behind authentication and uses
+  saved local backend/model settings. Authenticated settings and model probes
+  accept typed HTTP/HTTPS endpoints without following redirects. Explicit
+  close/delete refuses running or queued starts with 409 rather than cancelling
+  them ([#141]).
+
+### Fixed
 
 - Correct the API v2 response formats and tools example, and update the bilingual
   quickstart to reflect the shipped console settings and approvals ([#122], [#124]).
@@ -25,7 +37,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Added
 
 - Direct workers can read a brief file and emit a versioned JSON result or an
-  NDJSON event stream; inbox steering remains future work. ([#NN])
+  NDJSON event stream; inbox steering remains future work. ([#143])
+
+- Opt-in fixed system prefix with a local-date snapshot and schema-change telemetry;
+  dynamic recall and reflection remain labelled data ([#142]).
+- Heuristic notes retain a bounded set of explicit English negative and Chinese
+  residence/cancellation assertions, and item attribution rejects conflicting
+  event times, rejects opposing detected polarity and requires the full negative
+  assertion ([#137]). Similar opposing assertions are retained as conflicts;
+  structured polarity-aware supersession is not yet implemented.
+
 - Worker park integration fences held provider and approval delivery, persists
   pause intent and evidence-based cards, releases cleanly parked worker slots,
   and re-asks withdrawn approvals on resume. Failed park writes retry and can
@@ -951,3 +972,8 @@ earlier milestones.
 [#132]: https://github.com/localmelo/localmelo/pull/132
 [#133]: https://github.com/localmelo/localmelo/pull/133
 [#135]: https://github.com/localmelo/localmelo/pull/135
+[#136]: https://github.com/localmelo/localmelo/pull/136
+[#137]: https://github.com/localmelo/localmelo/pull/137
+[#141]: https://github.com/localmelo/localmelo/pull/141
+[#142]: https://github.com/localmelo/localmelo/pull/142
+[#143]: https://github.com/localmelo/localmelo/pull/143
