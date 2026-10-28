@@ -72,7 +72,7 @@
         <ul>
           <li>the interactive CLI's next parts: sessions you can resume (<code>melo -c</code>, <code>melo -r</code>), attached files and shell commands;</li>
           <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
-          <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
+          <li>switchable retrieval over the reasoning notes, so a later run can recall them (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
           <li>a percent bar on the progress line for tasks you run again and again, off until their repeated runs pass the replay.</li>
         </ul>
@@ -88,6 +88,56 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-2026-10-28-reasoning-notes">
+          <h3>Reasoning modes that keep notes instead of thinking</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/85">#85</a>
+          </p>
+          <ul>
+            <li><code>--reasoning compress</code> and <code>compress+replay</code>, <code>--note-writer auto|heuristic</code> and the <code>[agent]</code> <code>note_writer</code> key: <code>compress</code> sends no reasoning and keeps a short note of each reply instead (its plan, what it found and decided, what it left open, and what its tools returned) with its code drafts, in a RAM-only note store beside the working window. <code>compress+replay</code> also sends thinking as <code>replay</code> does; a backend that requires replay runs <code>compress</code> as <code>compress+replay</code>, and the JSON line reports the effective mode.</li>
+            <li>A pending draft aimed at a file is pinned once after its turn's tool results, and a later write of at least 60% of its lines marks it written. Notes are rehearsed when a later note restates them, a successful call acts on a path or command they name, or a reflection cites them; each attempt gets a digest of its rehearsed notes.</li>
+            <li>Every note, draft and digest passes the new <code>check_memory_candidate</code> boundary (redact, sanitize, cap) before it reaches the window or the store. Nothing is recalled from the notes yet, <code>history.db</code> gains no notes table, and the explicit modes stop writing raw step summaries and promoting reflections to long-term memory; a session turn's <code>note</code> column gets the final digest. <code>legacy</code> is byte-identical. See the <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">guide</a>.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-api-v2">
+          <h3>The web console's API v2 serves reads</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/84">#84</a>
+          </p>
+          <ul>
+            <li>The gateway opens its console session store and serves <code>GET /api/health</code>, the sessions list and one session, a session's turns with their events, a Server-Sent Events stream (with <code>Last-Event-ID</code> and one-shot catch-up), image blobs and submission lookups by <code>client_request_id</code>. The console opens a session's agent on demand and resumes its conversation when an idle sweep or the open cap closed it.</li>
+            <li>When the store cannot open, health still answers and the reads answer 503 <code>store_unavailable</code> while the gateway retries every 5 seconds.</li>
+            <li><code>/api</code> is served only on a loopback address, carries one error envelope and <code>Cache-Control: no-store</code>, and only grows; <code>/</code> and every <code>/v1</code> route are unchanged, and a turn cannot be started, stopped or retried through it yet. See the <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2 reference</a>.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-redacted-writes">
+          <h3>Secrets no longer stay in stored memory</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/83">#83</a>
+          </p>
+          <ul>
+            <li>A task's <code>query</code> and <code>result</code>, each step's <code>thought</code>, a tool call's arguments, a tool result's output and error, and the text long-term memory keeps (step summaries and promoted reflections) are written with the same redaction model calls and events already use: <code>sk-</code> keys, GitHub tokens, AWS access key ids, the token after <code>Bearer</code>, and a one-time code next to its keyword.</li>
+            <li>The run and the model keep the text: working memory, the requests, events and the run's <code>result</code> are unchanged, and stored images stay references. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#privacy">Privacy</a>.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-tool-env">
+          <h3>Tools run with a minimal environment</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/81">#81</a>
+          </p>
+          <ul>
+            <li><code>shell_exec</code> and <code>python_exec</code> start their child with <code>PATH</code>, <code>HOME</code>, <code>USER</code>, <code>LOGNAME</code>, <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, every <code>LC_*</code> variable and <code>TMPDIR</code>, plus the new <code>AgentOptions(tool_env={...})</code>, and nothing else. An API key in melo's environment reaches no tool; <code>VIRTUAL_ENV</code>, <code>PYTHONPATH</code>, <code>SSH_AUTH_SOCK</code> and the proxy variables pass only through <code>tool_env</code>.</li>
+            <li>MCP servers get the same base environment, which now includes every <code>LC_*</code> variable, plus the <code>env</code> their entry names. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#built-in-tools">Tools</a>.</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-tool-hints">
           <h3>Tool hints come from the model's own calls</h3>

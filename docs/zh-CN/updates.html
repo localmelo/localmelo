@@ -66,7 +66,7 @@
         <ul>
           <li>交互式命令行的后续部分：可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
           <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
-          <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
+          <li>让后续运行可以检索推理笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
           <li>进度行上的百分比进度条，用于反复运行的任务；在重放证明它可靠之前保持关闭。</li>
         </ul>
@@ -76,6 +76,56 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-28-reasoning-notes">
+          <h3>保留笔记而不是思考的推理模式</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/85">#85</a>
+          </p>
+          <ul>
+            <li><code>--reasoning compress</code> 和 <code>compress+replay</code>、<code>--note-writer auto|heuristic</code>，以及 <code>[agent]</code> 的 <code>note_writer</code> 键：<code>compress</code> 不发送推理，改为在对话窗口旁的内存笔记库中，为每条回复保留一条简短的笔记（计划、发现和决定、尚未确定的事项，以及工具返回的内容）和它的代码草稿。<code>compress+replay</code> 还会像 <code>replay</code> 一样发送思考；要求重放的后端会把 <code>compress</code> 当作 <code>compress+replay</code> 运行，JSON 行会报告实际生效的模式。</li>
+            <li>指向某个文件的待定草稿会在本回合工具结果之后固定一次；之后写入至少 60% 的行就算已写入。后来的笔记重述、成功的调用用到笔记中的路径或命令、或反思引用这些笔记时，笔记会被排练（rehearsed）；每次尝试会得到一份由已排练笔记组成的摘要（digest）。</li>
+            <li>每条笔记、草稿和摘要进入窗口或笔记库之前，都要经过新的 <code>check_memory_candidate</code> 边界（脱敏、清理、限长）。笔记目前还不能被召回，<code>history.db</code> 不增加笔记表；在显式模式下，不再把原始步骤摘要写入长期记忆，也不再提升反思；会话回合的 <code>note</code> 列会得到最终的摘要。<code>legacy</code> 逐字节不变。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">指南（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-api-v2">
+          <h3>网页控制台的 API v2 提供读取接口</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/84">#84</a>
+          </p>
+          <ul>
+            <li>网关会打开自己的控制台会话库，并提供 <code>GET /api/health</code>、会话列表和单个会话、会话的回合及其事件、Server-Sent Events 流（支持 <code>Last-Event-ID</code> 和一次性补齐）、图片 blob，以及按 <code>client_request_id</code> 查询提交。控制台按需打开会话的智能体，并在空闲清扫或打开数量上限关闭它之后恢复对话。</li>
+            <li>会话库打不开时，health 仍然回答，读取接口回答 503 <code>store_unavailable</code>，网关每 5 秒重试一次。</li>
+            <li><code>/api</code> 只在回环地址上提供，所有响应带统一的错误格式和 <code>Cache-Control: no-store</code>，并且只增不改；<code>/</code> 和所有 <code>/v1</code> 路由不变，目前还不能通过它开始、停止或重试回合。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2 参考（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-redacted-writes">
+          <h3>保存的记忆里不再留有密钥</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/83">#83</a>
+          </p>
+          <ul>
+            <li>任务的 <code>query</code> 和 <code>result</code>、每一步的 <code>thought</code>、工具调用的参数、工具结果的输出和错误，以及长期记忆保存的文字（步骤摘要和提升的反思），现在都用与模型调用和事件相同的脱敏规则写入：<code>sk-</code> 密钥、GitHub 令牌、AWS access key id、<code>Bearer</code> 后面的令牌，以及关键词旁边的一次性验证码。</li>
+            <li>运行和模型仍然看到原文：工作记忆、请求、事件和运行的 <code>result</code> 都不变，保存的图片仍然只是引用。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#privacy">隐私（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-tool-env">
+          <h3>工具在最小环境中运行</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/81">#81</a>
+          </p>
+          <ul>
+            <li><code>shell_exec</code> 和 <code>python_exec</code> 启动子进程时只带 <code>PATH</code>、<code>HOME</code>、<code>USER</code>、<code>LOGNAME</code>、<code>SHELL</code>、<code>TERM</code>、<code>LANG</code>、所有 <code>LC_*</code> 变量和 <code>TMPDIR</code>，再加上新增的 <code>AgentOptions(tool_env={...})</code>，别的都不带。melo 环境里的 API 密钥不会到达任何工具；<code>VIRTUAL_ENV</code>、<code>PYTHONPATH</code>、<code>SSH_AUTH_SOCK</code> 和代理变量只能通过 <code>tool_env</code> 传入。</li>
+            <li>MCP 服务器也拿到同样的基础环境（现在包括所有 <code>LC_*</code> 变量），再加上它自己条目里的 <code>env</code>。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#built-in-tools">工具（英文）</a>。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-tool-hints">
           <h3>工具提示只来自模型自己的调用</h3>
