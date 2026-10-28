@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import queue
@@ -89,6 +90,27 @@ def workspace_head(workspace: str) -> tuple[str | None, bool | None]:
     return head, dirty
 
 
+def failure_record(status: str, workspace: str, error: str) -> dict[str, Any]:
+    """Build a redacted report when there is no completed run result."""
+    head, dirty = workspace_head(workspace)
+    return cast(
+        dict[str, Any],
+        redact_output(
+            {
+                "v": 1,
+                "status": status,
+                "run_id": None,
+                "exit_code": 1,
+                "head_sha": head,
+                "git_dirty": dirty,
+                "tests": {"state": "not_recorded", "items": []},
+                "run": None,
+                "error": error,
+            }
+        ),
+    )
+
+
 class WorkerObserver:
     """Collect check evidence and, optionally, write bounded redacted NDJSON."""
 
@@ -122,7 +144,9 @@ class WorkerObserver:
             if line is None:
                 return
             try:
-                self.out.write(line)
+                written = self.out.write(line)
+                if written != len(line):
+                    raise OSError("short worker output write")
                 self.out.flush()
             except Exception as exc:
                 self._fail(exc)
@@ -213,6 +237,21 @@ class WorkerObserver:
                 }
             ],
         }
+
+    def transport_result(self, record: dict[str, Any]) -> None:
+        """Try to append a failure record after an event sink failure."""
+        if self.thread is None or not self.thread.is_alive():
+            return
+        line = (
+            json.dumps(
+                {"v": 1, "type": "result", "result": record},
+                ensure_ascii=True,
+                allow_nan=False,
+            )
+            + "\n"
+        )
+        with contextlib.suppress(queue.Full):
+            self.lines.put(line, timeout=1)
 
     def close(self) -> None:
         if self.thread is None:
