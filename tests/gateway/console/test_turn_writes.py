@@ -1276,7 +1276,7 @@ async def test_a_shutdown_during_an_approval_wait_withdraws_the_card(
         assert late.json()["error"]["code"] == "already_answered"
 
 
-async def test_a_delete_during_an_approval_wait_ends_the_turn(
+async def test_a_delete_during_an_approval_wait_preserves_the_turn(
     tmp_path: Path,
 ) -> None:
     _target, card, said = _write_card(tmp_path)
@@ -1287,15 +1287,15 @@ async def test_a_delete_during_an_approval_wait_ends_the_turn(
 
         deleted = await client.delete(f"/api/sessions/{session_id}")
 
-        assert deleted.status_code == 204
-        assert await console.store.get_session(session_id) is None
-        assert console.sessions.get(session_id) is None
-        late = await client.post(
+        assert deleted.status_code == 409
+        assert deleted.json()["error"]["code"] == "session_busy"
+        assert await console.store.get_session(session_id) is not None
+        assert console.sessions.get(session_id) is not None
+        answer = await client.post(
             f"/api/approvals/{pending['request_id']}", json={"choice": "once"}
         )
-        # The card was withdrawn by the close; it cannot be answered.
-        assert late.status_code == 409
-        assert late.json()["error"]["code"] == "already_answered"
+        assert answer.status_code == 200
+        await _wait_turn(client, session_id)
 
 
 # ── Locks, retries and deletes ──

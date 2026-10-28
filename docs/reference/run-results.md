@@ -12,6 +12,7 @@ retried.
 | `failed` | 2 | A check refused the run, or the model gave two empty replies in a row. |
 | `gate_stopped` | 2 | After an attempt, the reflection decided not to continue. |
 | `budget_exhausted` | 2 | The run used all its steps or attempts without a final answer. |
+| `context_budget_exceeded` | 2 | The pinned request cannot fit the configured input budget, or a smaller retry still overflowed. |
 | `stuck` | 2 | The same tool calls, or the same errors, repeated three steps in a row. |
 | `provider_error` | 2 | A request to the model server failed. |
 | `setup_error` | 2 | The tool providers, such as MCP servers, could not be set up. |
@@ -126,6 +127,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `usage` | Token counts of all responses, summed by name, such as `prompt_tokens`, `completion_tokens` and `total_tokens`. Outside `legacy`, it also has `reasoning_chars` (the reasoning received, after an inline `<think>` block is split out) and `cached_tokens` or `reasoning_tokens` when the server reported them. |
 | `duration_s` | Wall-clock time of the run, in seconds. |
 | `config` | The options the run used (below). |
+| `prefix_cache` | With fixed prefix enabled: version, observed planning schema changes, and optional server-reported cached tokens summed across planning and reflection responses; schema changes are expected invalidations, not measured cache misses. |
 | `context_budget` | When configured, a list of per-attempt planning/reflection accounting records; absent when disabled. See [context accounting](configuration.md#context-accounting). |
 | `memory_stats` | Outside `legacy`, the replay counters and the note counters; absent from a `legacy` line. |
 

@@ -15,6 +15,7 @@
 import { renderMarkdown } from "./markdown.mjs";
 import { setupSettings } from "./settings.mjs";
 import { setupDrawer } from "./drawer.mjs";
+import { workerHistory } from "./worker-history.mjs";
 import {
   activity,
   applyEvent,
@@ -46,6 +47,7 @@ const LIST_POLL_MS = 4000;
 
 const S = {
   health: null,
+  authenticated: false,
   machine: null,
   sessions: [],
   activeId: null,
@@ -143,12 +145,35 @@ function notify(message, { sticky = false, kind = "" } = {}) {
   }
 }
 
+function lock(message = "") {
+  if (S.authenticated) saveDraft();
+  S.authenticated = false;
+  closeStream();
+  $("settings-dialog")?.close?.();
+  $("app").inert = true;
+  $("app").hidden = true;
+  $("lock-screen").hidden = false;
+  $("lock-status").textContent = message;
+  $("lock-title").focus();
+}
+
 /** One `/api` call; an API v2 error keeps its code, message and details. */
-async function api(path, { body, method } = {}) {
+async function api(path, { body, method, allowLocked = false } = {}) {
+  if (!S.authenticated && !allowLocked) {
+    const error = new Error("Workspace is locked");
+    error.status = 401;
+    throw error;
+  }
   const response = await fetch("/api" + path, {
     method: method ?? (body ? "POST" : "GET"),
     ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
   });
+  if (response.status === 401) {
+    lock();
+    const error = new Error("Workspace is locked");
+    error.status = 401;
+    throw error;
+  }
   const payload = response.status === 204 ? {} : await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(
@@ -352,6 +377,12 @@ function syncUI() {
   $("details-trigger").disabled = !session;
   if (!session && S.levelsOpen) showLevelMenu(false);
   $("new-btn").disabled = false;
+  if (workerMode) {
+    const heading = workers.state.mode === "detail" ? workers.state.session?.title || "Worker run" : "Workers";
+    $("header-title").textContent = heading;
+    $("header-model").textContent = "Read-only history";
+    document.title = `localmelo · ${heading}`;
+  }
   const welcome = $("welcome-description");
   if (welcome) {
     welcome.textContent = session
@@ -368,6 +399,7 @@ function renderSessions() {
   const snapshot = JSON.stringify([
     query,
     active,
+    workerMode,
     S.sessions.map((session) => [
       session.id,
       session.title,
@@ -415,7 +447,7 @@ function renderSessions() {
     close.type = "button";
     close.setAttribute("aria-label", `Close chat: ${title(session)}`);
     close.title = "Close chat";
-    close.disabled = !!session.busy || (session.pending_approvals || 0) > 0;
+    close.disabled = workerMode || !!session.busy || (session.pending_approvals || 0) > 0;
     close.addEventListener("click", () => {
       deleteSession(session.id);
     });
@@ -576,7 +608,7 @@ function eventsUrl(id) {
 function startStream(id) {
   // A chat opened and then left before its load finished keeps no stream:
   // one bound to this id would ignore every frame of the chat now open.
-  if (S.activeId !== id) return;
+  if (!S.authenticated || S.activeId !== id || workerMode) return;
   closeStream();
   if (typeof EventSource !== "function") return;
   S.stream.sessionId = id;
@@ -606,14 +638,13 @@ function startStream(id) {
     syncUI();
   };
   source.onerror = () => {
-    if (S.activeId !== id || S.view === null) return;
-    // A stream the browser will retry by itself is left alone; one it gave
-    // up on is reopened here, after the same backoff, from our own cursor.
-    if (source.readyState === 2) {
-      S.stream.status = "paused";
-      scheduleReconnect();
-      refreshStreamNotice();
-    }
+    if (!S.authenticated || S.stream.source !== source || S.activeId !== id || S.view === null) return;
+    // EventSource cannot expose a 401. Stop its automatic retry and check
+    // authentication before opening another stream.
+    source.close();
+    S.stream.status = "paused";
+    scheduleReconnect();
+    refreshStreamNotice();
   };
 }
 
@@ -652,7 +683,7 @@ function closeStream() {
 
 function scheduleReconnect() {
   const id = S.activeId;
-  if (!id || S.stream.timer !== null) return;
+  if (!S.authenticated || !id || S.stream.timer !== null) return;
   const delay = STREAM_DELAYS_S[Math.min(S.stream.attempt, STREAM_DELAYS_S.length - 1)];
   S.stream.attempt += 1;
   S.stream.retryAt = nowSeconds() + delay;
@@ -673,7 +704,7 @@ function scheduleReconnect() {
         return;
       }
     }
-    if (S.activeId !== id) return;
+    if (!S.authenticated || S.activeId !== id) return;
     startStream(id);
   }, delay * 1000);
 }
@@ -1000,6 +1031,7 @@ function statusNode(turn) {
 }
 
 async function retryTurn(turn) {
+  if (workerMode) return;
   const id = S.activeId;
   if (!id || retrying || runningTurn() !== null || pendingOutbox() || !canRetry(turn, S.view?.turns[S.view.turns.length - 1] === turn)) return;
   retrying = true;
@@ -1038,10 +1070,10 @@ function heldOf(turn) {
   return S.view?.session?.held || "";
 }
 
-function itemNode(item, turn) {
+function itemNode(item, turn, context = {}) {
   switch (item.kind) {
     case "tool":
-      return toolCard(item, turn);
+      return toolCard(item, turn, context);
     case "thinking": {
       const card = el("details", "thinking");
       card.open = item.expanded === true;
@@ -1216,6 +1248,7 @@ function approvalCard(request) {
 }
 
 async function answerApproval(request, state, choice) {
+  if (workerMode) return;
   const id = String(request.request_id);
   if (state.submitting || approvalNow() - state.mountedAt < 500 || !S.view?.pending.has(id)) return;
   if (choice !== "deny" && (request.arguments_complete !== true || (request.tool_name === "file_write" && !request.target))) return;
@@ -1267,9 +1300,9 @@ function goToApproval() {
   }
 }
 
-function toolCard(item, turn) {
+function toolCard(item, turn, context = {}) {
   // A call of a held chat says why the model server is not being asked yet.
-  const state = toolState(item, { held: heldOf(turn), now: nowSeconds() });
+  const state = toolState(item, { held: context.readOnly ? "" : heldOf(turn), now: nowSeconds() });
   const card = el("details", "tool-card");
   card.dataset.state = state.state;
   card.open = item.expanded === true;
@@ -1279,18 +1312,18 @@ function toolCard(item, turn) {
   if (item.preview) summary.append(el("span", "tool-preview", printable(item.preview)));
   const meta = state.text ? el("span", "tool-meta", state.text) : null;
   if (meta) summary.append(meta);
-  if (meta && state.state === "running") {
+  if (meta && state.state === "running" && !context.readOnly) {
     runningCards.set(item, {item, turn, node: meta, card});
   }
   card.append(summary);
-  card.append(toolBody(item));
+  card.append(toolBody(item, context));
   card.addEventListener("toggle", () => {
     item.expanded = card.open;
   });
   return card;
 }
 
-function toolBody(item) {
+function toolBody(item, context = {}) {
   const body = el("div", "tool-body");
   const entries = Object.entries(item.arguments ?? {});
   if (entries.length > 0) {
@@ -1306,20 +1339,20 @@ function toolBody(item) {
   const tag = approvalTag(item.status, item.errorCategory, item.approval);
   if (tag) body.append(el("p", "tool-approval", tag.long));
   if (item.error) body.append(el("p", "tool-error", cleanOutput(item.error)));
-  if (item.output) body.append(outputBlock(item));
+  if (item.output) body.append(outputBlock(item, context));
   for (const image of item.images ?? []) {
     const node = document.createElement("img");
     node.className = "tool-image";
     node.loading = "lazy";
     node.alt = `Image from ${item.name}`;
-    node.src = `/api/sessions/${encodeURIComponent(S.activeId ?? "")}/blobs/${encodeURIComponent(image.sha256)}`;
+    node.src = `/api/sessions/${encodeURIComponent(context.sessionId ?? S.activeId ?? "")}/blobs/${encodeURIComponent(image.sha256)}`;
     node.title = `${image.mime_type} · ${formatBytes(image.size_bytes)}`;
     body.append(node);
   }
   return body;
 }
 
-function outputBlock(item) {
+function outputBlock(item, context = {}) {
   const section = el("div", "tool-section");
   section.append(el("h4", "", "Output"));
   const text = cleanOutput(item.output);
@@ -1335,7 +1368,8 @@ function outputBlock(item) {
     section.append(
       button("link-button", `Show all ${hidden} characters`, () => {
         item.showAll = true;
-        renderMessages(false);
+        if (context.readOnly) context.render();
+        else renderMessages(false);
       }),
     );
   }
@@ -1430,10 +1464,12 @@ function outboxNode(entry, slot) {
 // ── Sending, stopping, deleting ──
 
 async function send() {
+  if (workerMode) return;
   return queueMessage(input.value.trim(), {clearInput: true});
 }
 
 async function queueMessage(text, {clearInput = false} = {}) {
+  if (workerMode) return;
   const slot = S.activeId ?? "new";
   const previous = S.outbox[slot];
   if (!text || runningTurn() !== null) return;
@@ -1528,6 +1564,7 @@ async function submit(slot, key, text) {
 }
 
 async function checkSubmission(slot, key) {
+  if (workerMode) return;
   const entry = S.outbox[slot];
   if (!entry) return;
   entry.state = "checking";
@@ -1538,7 +1575,7 @@ async function checkSubmission(slot, key) {
     const body = sessionId
       ? await api(`/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(key)}`)
       : await api(`/submissions/${encodeURIComponent(key)}`);
-    if (S.outbox[slot] !== entry || entry.clientRequestId !== key) return;
+    if (workerMode || S.outbox[slot] !== entry || entry.clientRequestId !== key) return;
     const submission = body.submission ?? {};
     if (submission.state === "accepted") {
       forgetDraft(slot, entry.text);
@@ -1566,7 +1603,7 @@ async function checkSubmission(slot, key) {
     // Keep the text editable; the persisted key prevents a duplicate retry.
     keepDraft(slot, entry.text);
   } catch (error) {
-    if (S.outbox[slot] !== entry || entry.clientRequestId !== key) return;
+    if (workerMode || S.outbox[slot] !== entry || entry.clientRequestId !== key) return;
     entry.state = "failed";
     entry.error = error.message;
     entry.unknown = true;
@@ -1577,6 +1614,7 @@ async function checkSubmission(slot, key) {
 }
 
 async function cancelSend(slot, entry) {
+  if (workerMode) return;
   const sessionId = slot === "new" ? null : slot;
   const path = sessionId
     ? `/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(entry.clientRequestId)}/cancel`
@@ -1606,6 +1644,7 @@ async function cancelSend(slot, entry) {
 }
 
 async function stop() {
+  if (workerMode) return;
   const turn = runningTurn();
   if (!turn || !turn.id || S.cancelling.has(turn.id)) return;
   S.cancelling.add(turn.id);
@@ -1623,6 +1662,7 @@ async function stop() {
 }
 
 async function deleteSession(id) {
+  if (workerMode) return;
   const session = S.sessions.find((item) => item.id === id);
   if (!session || session.busy || (session.pending_approvals || 0) > 0) return;
   try {
@@ -1670,6 +1710,7 @@ function showLevelMenu(open) {
 }
 
 async function setLevel(level) {
+  if (workerMode) return;
   const id = S.activeId;
   showLevelMenu(false);
   if (!id) return;
@@ -1696,8 +1737,9 @@ async function setLevel(level) {
 }
 
 function presence(force = false) {
+  if (workerMode) return;
   const id = S.activeId;
-  if (!id) return;
+  if (!S.authenticated || !id) return;
   const now = Date.now();
   if (!force && now - S.lastPresenceAt < PRESENCE_MS) return;
   S.lastPresenceAt = now;
@@ -1708,13 +1750,154 @@ function presence(force = false) {
       body: JSON.stringify({ session_id: id }),
       keepalive: true,
     });
-    request?.catch?.(() => {});
+    request?.then?.((response) => { if (response.status === 401) lock(); }).catch(() => {});
   } catch {
     /* A browser may refuse fetch, or a test may not allow it. */
   }
 }
 
 // ── Routing and the sidebar ──
+
+let workerMode = false;
+const workers = workerHistory(api, () => { if (workerMode) renderWorkers(); });
+
+function workerRoute() {
+  const match = /^#\/workers(?:\/(.+))?$/.exec(globalThis.location?.hash || "");
+  if (!match) return null;
+  try { return match[1] ? decodeURIComponent(match[1]) : ""; }
+  catch { return ""; }
+}
+
+function showWorkers(id) {
+  const previousWorker = workers.state.selectedId;
+  if (!workerMode) {
+    saveDraft();
+    closeStream();
+    drawer.close();
+    showLevelMenu(false);
+  }
+  workerMode = true;
+  $("worker-panel").hidden = false;
+  $("scroll").hidden = true;
+  document.querySelector(".composer-area").hidden = true;
+  $("details-trigger").hidden = true;
+  $("level-btn").hidden = true;
+  $("connection-btn").hidden = true;
+  $("chats-link").href = S.activeId ? `#/s/${S.activeId}` : "#/new";
+  renderSessions();
+  $("workers-link").setAttribute("aria-current", "page");
+  $("chats-link").removeAttribute("aria-current");
+  sidebar(false);
+  if (id) workers.detail(id);
+  else if (workers.state.loaded && !workers.state.error) { workers.state.epoch++; workers.state.mode = "list"; workers.state.session = null; workers.state.view = null; workers.state.loading = false; renderWorkers(); }
+  else workers.list();
+  const previousRow = !id && previousWorker && Array.from($("worker-panel").children).find((node) => node.dataset?.workerId === previousWorker);
+  (previousRow || $("worker-panel").querySelector("h1"))?.focus();
+}
+
+function leaveWorkers() {
+  if (!workerMode) return;
+  workers.leave();
+  workerMode = false;
+  $("worker-panel").hidden = true;
+  $("scroll").hidden = false;
+  document.querySelector(".composer-area").hidden = false;
+  $("details-trigger").hidden = false;
+  $("level-btn").hidden = false;
+  $("connection-btn").hidden = false;
+  renderSessions();
+  $("workers-link").removeAttribute("aria-current");
+  $("chats-link").setAttribute("aria-current", "page");
+  for (const [slot, entry] of Object.entries(S.outbox)) {
+    if (entry.state === "checking") checkSubmission(slot, entry.clientRequestId);
+  }
+}
+
+function renderWorkers() {
+  const state = workers.state;
+  const root = $("worker-panel");
+  const restoreHeading = document.activeElement?.parentElement === root && document.activeElement?.tagName === "H1";
+  const title = el("h1", "", state.mode === "list" ? "Workers" : state.session?.title || "Worker run");
+  title.tabIndex = -1;
+  const nodes = [title, el("p", "muted", state.mode === "list" ? "Read-only history" : "Read-only worker run")];
+  if (state.mode === "detail") {
+    const back = document.createElement("a"); back.href = "#/workers"; back.textContent = "Back to workers"; nodes.push(back);
+  }
+  if (state.mode === "list") {
+    const filters = el("form", "worker-filters");
+    const select = (label, name, choices, selected) => {
+      const wrapper = el("label", "", label);
+      const control = document.createElement("select"); control.name = name;
+      for (const [value, text] of choices) {
+        const option = document.createElement("option"); option.value = value; option.textContent = text;
+        control.append(option);
+      }
+      control.value = selected; wrapper.append(control); filters.append(wrapper);
+      return control;
+    };
+    const statuses = [...new Set(["running", "completed", "crashed", "budget_exhausted", "stuck", "cancelled", ...state.rows.map((row) => row.status).filter(Boolean), state.filters.status].filter(Boolean))];
+    const status = select("Status", "status", [["", "All statuses"], ...statuses.map((s) => [s, s])], state.filters.status);
+    const source = select("Source", "source", [["", "All sources"], ["localmelo", "localmelo"], ["dsh", "dsh"]], state.filters.source);
+    const label = el("label", "", "Parent run");
+    const parent = document.createElement("input"); parent.value = state.filters.parent; label.append(parent); filters.append(label);
+    const apply = document.createElement("button"); apply.type = "submit"; apply.className = "primary-button"; apply.textContent = "Apply"; filters.append(apply);
+    filters.append(button("secondary-button", "Clear filters", () => { state.filters = {status: "", source: "", parent: ""}; workers.list(); }));
+    filters.addEventListener("submit", (event) => { event.preventDefault(); state.filters = {status: status.value, source: source.value, parent: parent.value.trim()}; workers.list(); });
+    nodes.push(filters);
+    for (const row of state.rows) {
+      const link = document.createElement("a");
+      link.className = "worker-row"; link.dataset.workerId = row.id; link.href = `#/workers/${encodeURIComponent(row.id)}`;
+      link.append(el("strong", "", row.title || "Not recorded"), el("span", "muted", [row.source, row.model, row.status].map((v) => v == null || v === "" ? "Not recorded" : String(v)).join(" · ")));
+      const started = row.started_at == null ? "Not recorded" : new Date(row.started_at * 1000).toLocaleString();
+      const duration = row.duration_s == null ? "Not recorded" : `${row.duration_s} s`;
+      link.append(el("span", "muted", `Started: ${started} · Duration: ${duration}${row.parent_run ? ` · Parent: ${row.parent_run}` : ""}`));
+      nodes.push(link);
+    }
+    if (!state.loading && !state.error && !state.rows.length) nodes.push(el("p", "", Object.values(state.filters).some(Boolean) ? "No runs match these filters." : "No worker runs yet."));
+    if (state.nextCursor) nodes.push(button("secondary-button", "Load more", () => workers.list({more: true})));
+  }
+  const announcement = el("p", "worker-announcement", state.loading ? (state.mode === "list" ? "Loading workers…" : "Loading worker run…") : state.error);
+  announcement.setAttribute("role", "status"); announcement.setAttribute("aria-live", "polite");
+  nodes.push(announcement);
+  if (state.error) {
+    nodes.push(button("secondary-button", "Retry", () => state.mode === "list" ? workers.list() : workers.detail(state.selectedId)));
+  }
+  if (state.mode === "detail" && state.session && state.view) {
+    const session = state.session;
+    const meta = el("dl", "worker-meta");
+    const firstTurn = state.view.turns[0];
+    const started = session.started_at == null ? null : new Date(session.started_at * 1000).toLocaleString();
+    const duration = session.duration_s ?? firstTurn?.result?.duration_s ?? (firstTurn?.finishedAt && firstTurn?.startedAt ? firstTurn.finishedAt - firstTurn.startedAt : null);
+    for (const [label, value] of [["Source", session.source], ["Model", session.model], ["Workspace", session.workspace], ["Git branch", session.git_branch], ["Git head", session.git_head], ["Started", started], ["Duration", duration == null ? null : `${duration} s`], ["Steps", session.steps], ["Tokens", session.tokens], ["Status", session.status], ["Exit code", session.exit_code], ["Parent run", session.parent_run]]) {
+      meta.append(el("dt", "", label), el("dd", "", value == null || value === "" ? "Not recorded" : String(value)));
+    }
+    nodes.push(meta);
+    if (state.unsupported) nodes.push(el("p", "muted", "Some recorded event types cannot be shown."));
+    if (state.view.turns.length > 1) nodes.push(el("p", "", "This run has multiple recorded turns."));
+    if (!state.view.turns.length) nodes.push(el("p", "", "No recorded turn."));
+    if (session.status === "running") nodes.push(el("p", "", "Run not finished. This view does not update live."));
+    nodes.push(button("secondary-button", "Refresh", () => workers.detail(state.selectedId)));
+    for (const turn of state.view.turns) {
+      nodes.push(el("h2", "", "Brief"), el("p", "worker-brief", turn.userText || "No brief recorded."), el("h2", "", "Work"));
+      if (!state.eventCounts[turn.turn]) nodes.push(el("p", "muted", "No recorded events."));
+      else {
+        const group = el("details", "work-group"); group.open = true;
+        group.append(el("summary", "work-summary", workSummary(turn, {})));
+        for (const item of turn.items) group.append(itemNode(item, turn, {readOnly: true, sessionId: session.id, render: renderWorkers}));
+        nodes.push(group);
+      }
+      if (turn.answer) nodes.push(answerNode(turn.answer));
+      if (turn.status) {
+        nodes.push(el("p", "turn-status", statusText(turn.status, turn.cause).title));
+        const error = turn.status !== "completed" ? cleanOutput(String(turn.result?.error || turn.error || "")).split("\n")[0] : "";
+        if (error) nodes.push(el("p", "failure-error", error));
+      }
+    }
+  }
+  root.replaceChildren(...nodes);
+  if (restoreHeading) title.focus({preventScroll: true});
+  syncUI();
+}
 
 function setRoute(id) {
   const next = id ? `#/s/${id}` : "#/new";
@@ -1791,6 +1974,41 @@ function tick() {
 // ── Starting up ──
 
 async function init() {
+  const fragment = globalThis.location?.hash || "";
+  if (fragment.startsWith("#login=")) {
+    // Remove the entire fragment before any request, including a failed exchange.
+    try {
+      globalThis.history.replaceState(null, "", globalThis.location.pathname + globalThis.location.search);
+    } catch {
+      lock("Could not clear the sign-in link. Close this tab and try again.");
+      return;
+    }
+    try {
+      const code = new URLSearchParams(fragment.slice(1)).get("login") || "";
+      const response = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({code}),
+      });
+      if (response.status !== 204) {
+        lock("This sign-in link is invalid or expired. Get a new link and try again.");
+        return;
+      }
+    } catch {
+      lock("Could not sign in. Get a new link and try again.");
+      return;
+    }
+  }
+  try {
+    S.health = await api("/health", {allowLocked: true});
+  } catch (error) {
+    lock(error.status === 401 ? "" : "Could not reach the gateway. Open a new sign-in link to try again.");
+    return;
+  }
+  S.authenticated = true;
+  $("lock-screen").hidden = true;
+  $("app").hidden = false;
+  $("app").inert = false;
   S.drafts = stored(KEY + "-drafts", {}, "sessionStorage");
   const savedOutbox = stored(KEY + "-outbox", {}, "sessionStorage");
   S.outbox = {};
@@ -1802,18 +2020,14 @@ async function init() {
   input.value = S.drafts.new || "";
   resizeInput();
   sidebar(false);
-  const health = api("/health")
-    .then((body) => {
-      S.health = body;
-      return body;
-    })
-    .catch(() => null);
-  await Promise.allSettled([health, refreshList()]);
+  await refreshList();
+  if (!S.authenticated) return;
   syncUI();
   // The hash wins: `#/s/<id>` opens that chat, `#/new` a new one. Without
   // one, the last chat this tab opened, else the newest. The hash id is
   // authoritative even when it is outside the list's first page: its 404
   // sends the page back to a new chat, as a gone chat does.
+  const fromWorker = workerRoute();
   const fromHash = hashId();
   const wantsNew = (globalThis.location?.hash || "") === "#/new";
   let wanted = "";
@@ -1825,7 +2039,9 @@ async function init() {
       ? saved
       : (S.sessions[0]?.id ?? "");
   }
-  if (wanted) {
+  if (fromWorker !== null) {
+    showWorkers(fromWorker);
+  } else if (wanted) {
     await openSession(wanted);
   } else {
     setRoute(null);
@@ -1833,12 +2049,14 @@ async function init() {
     renderMessages(true);
     syncUI();
   }
+  if (!S.authenticated) return;
   for (const [slot, entry] of Object.entries(S.outbox)) {
     if (entry.state === "checking") await checkSubmission(slot, entry.clientRequestId);
+    if (!S.authenticated) return;
   }
   setInterval(tick, 1000);
   setInterval(() => {
-    if (!document.hidden) {
+    if (S.authenticated && !document.hidden) {
       refreshList();
       api("/health").then((body) => { S.health = body; syncUI(); }).catch(() => {});
     }
@@ -1876,6 +2094,7 @@ for (const id of ["close-settings", "cancel-settings"]) $(id).addEventListener("
   if (dialog?.close) dialog.close();
 });
 $("details-trigger").addEventListener("click", () => {
+  if (workerMode) return;
   if (!drawer.close()) drawer.open();
 });
 $("stop-btn").addEventListener("click", stop);
@@ -1912,12 +2131,17 @@ $("sidebar-backdrop").addEventListener("click", () => sidebar(false));
 matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(false));
 // Back and Forward move the hash; the chat follows it, as a reload would.
 globalThis.addEventListener?.("hashchange", async () => {
+  if (!S.authenticated) return;
+  const worker = workerRoute();
+  if (worker !== null) { showWorkers(worker); return; }
+  const wasWorker = workerMode;
+  leaveWorkers();
   const id = hashId();
   if (id) {
-    if (S.activeId !== id) await openSession(id);
+    if (wasWorker || S.activeId !== id) await openSession(id);
     return;
   }
-  if ((globalThis.location?.hash || "") === "#/new" && S.activeId !== null) newChat();
+  if ((globalThis.location?.hash || "") === "#/new" && (wasWorker || S.activeId !== null)) newChat();
 });
 document.querySelectorAll("[data-prompt]").forEach((node) =>
   node.addEventListener("click", () => {
@@ -1929,6 +2153,7 @@ document.querySelectorAll("[data-prompt]").forEach((node) =>
   }),
 );
 document.addEventListener("keydown", (event) => {
+  if (!S.authenticated || workerMode) return;
   if (event.isComposing || event.keyCode === 229) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
@@ -1962,7 +2187,7 @@ document.addEventListener("keydown", (event) => {
   if (runningTurn() !== null) stop();
 });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) refreshList();
+  if (S.authenticated && !document.hidden) refreshList();
 });
 
 init();

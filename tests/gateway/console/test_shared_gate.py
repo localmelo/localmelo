@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from localmelo.melo.contracts.providers import BaseLLMProvider
@@ -77,8 +78,10 @@ def _cfg(*, host: str = "127.0.0.1", policy: str = "off", n_srv: int = 8) -> Con
 
 
 def test_the_console_uses_the_workspace_pages_gate(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg._enable_playground = True
     server = GatewayServer(
-        _cfg(),
+        cfg,
         console_options=ConsoleOptions(
             store_path=str(tmp_path / "sessions.db"), probe=QuietProbe()
         ),
@@ -107,9 +110,9 @@ def test_a_test_supplied_gate_is_kept(tmp_path: Path) -> None:
     assert server.console.gate is gate
 
 
-def test_a_non_loopback_gateway_has_no_console_to_share_with() -> None:
-    server = GatewayServer(_cfg(host="0.0.0.0"))
-    assert server.console is None
+def test_a_non_loopback_gateway_is_refused() -> None:
+    with pytest.raises(ValueError, match="loopback"):
+        GatewayServer(_cfg(host="0.0.0.0"))
 
 
 async def test_two_surfaces_share_one_slot_budget() -> None:
@@ -139,7 +142,11 @@ def test_the_console_still_serves_with_the_shared_gate(tmp_path: Path) -> None:
             store_path=str(tmp_path / "sessions.db"), probe=QuietProbe()
         ),
     )
-    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    client = TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    )
     assert client.get("/api/health").status_code == 200
 
 
@@ -251,8 +258,10 @@ async def test_a_turn_waiting_for_a_slot_ends_cancelled_at_shutdown(
             Path(workspace), GatedLLM(inner, holder["gate"].client(session_id))
         )
 
+    cfg = _cfg(policy="fcfs", n_srv=1)
+    cfg._enable_playground = True
     server = GatewayServer(
-        _cfg(policy="fcfs", n_srv=1),
+        cfg,
         console_options=ConsoleOptions(
             store_path=str(tmp_path / "sessions.db"),
             builder=build,

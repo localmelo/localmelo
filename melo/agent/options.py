@@ -164,6 +164,9 @@ class AgentOptions:
       ``replay`` does. A provider that requires replay runs ``compress``
       as ``compress+replay``, and the effective mode is what the run
       reports. Neither mode recalls anything yet (R5).
+    - ``captured_history``: opt in to a bounded, pattern-redacted history copy
+      of tool results, separate from the checked model preview. The option is
+      off by default; :meth:`Agent.run_tool` does not write history.
     - ``note_writer``: who writes a reply's note in the compress modes:
       ``"auto"`` (default) parses the model's ``<note>`` block and falls
       back to the heuristic, ``"heuristic"`` always writes it from the
@@ -207,8 +210,12 @@ class AgentOptions:
     keep_decision_text: bool = False
     # The surface the run belongs to; it decides the default built-ins.
     mode: ToolMode = "python"
+    fixed_prefix: bool = False
+    captured_history: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.fixed_prefix, bool):
+            raise ValueError("fixed_prefix must be a bool")
         budget = (self.context_window, self.output_reserve, self.safety_margin)
         if any(value is not None for value in budget):
             if not all(_is_positive_int(value) for value in budget):
@@ -277,7 +284,7 @@ class AgentOptions:
         if not isinstance(self.memory, bool):
             raise ValueError(f"memory must be a bool, got {self.memory!r}")
 
-        for name in ("admit_on_outcome", "keep_decision_text"):
+        for name in ("admit_on_outcome", "keep_decision_text", "captured_history"):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a bool, got {getattr(self, name)!r}")
 

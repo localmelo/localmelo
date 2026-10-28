@@ -7,6 +7,7 @@ retry it or report it without knowing about httpx.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -47,6 +48,26 @@ def attempt_headers() -> dict[str, str]:
 
 def _body_preview(response: httpx.Response) -> str:
     return response.text[:BODY_PREVIEW_CHARS] or "(empty body)"
+
+
+def _context_overflow(response: httpx.Response) -> bool:
+    """Classify only explicit context-length errors, never generic HTTP failures."""
+    if response.status_code != 400:
+        return False
+    try:
+        data = response.json()
+    except ValueError:
+        return False
+    error = data.get("error") if isinstance(data, dict) else None
+    if isinstance(error, dict):
+        if error.get("code") in ("context_length_exceeded", "context_window_exceeded"):
+            return True
+        message = error.get("message")
+    else:
+        message = error
+    return isinstance(message, str) and bool(
+        re.search(r"maximum context length is \d+ tokens", message, re.IGNORECASE)
+    )
 
 
 def _exception_text(exc: Exception) -> str:
@@ -93,6 +114,7 @@ async def post_json(
             f"POST {path} failed with HTTP {status}: {_body_preview(exc.response)}",
             status_code=status,
             retryable=status in RETRYABLE_STATUS_CODES,
+            context_overflow=_context_overflow(exc.response),
         ) from exc
     except httpx.TransportError as exc:  # timeouts included
         raise ProviderError(

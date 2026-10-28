@@ -209,6 +209,7 @@ class OllamaNativeChat(BaseLLMProvider):
             base_url=base_url.rstrip("/"),
             timeout=timeout,
             transport=transport,
+            follow_redirects=False,
         )
 
     async def chat(

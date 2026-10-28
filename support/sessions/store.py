@@ -132,6 +132,7 @@ RUN_STATUSES: Final = frozenset(
         "failed",
         "gate_stopped",
         "budget_exhausted",
+        "context_budget_exceeded",
         "stuck",
         "provider_error",
         "setup_error",

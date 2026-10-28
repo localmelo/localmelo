@@ -78,7 +78,7 @@ async def test_opt_in_calibration_kind_model_and_reset() -> None:
             None,
         ]
     )
-    chat = Chat(llm, context_budget=ContextBudget(100, 10, 10))
+    chat = Chat(llm, context_budget=ContextBudget(100000, 10, 10))
 
     async def plan() -> None:
         await chat.plan_step(
@@ -102,9 +102,9 @@ async def test_opt_in_calibration_kind_model_and_reset() -> None:
     ]
     assert records[0]["measured_prompt_tokens"] == 9000
     assert records[1]["measured_prompt_tokens"] is None
-    assert records[0]["over_limit"]
-    assert records[0]["input_limit"] == 80
-    assert len(llm.sent) == 5  # over-limit requests are still sent
+    assert not records[0]["over_limit"]
+    assert records[0]["input_limit"] == 99980
+    assert len(llm.sent) == 5
     chat.reset_stats()
     await plan()
     assert chat.stats.context_budget is not None
@@ -152,7 +152,7 @@ async def test_agent_reports_budget_in_result_and_event() -> None:
     agent = Agent(
         llm=FakeLLM([{"prompt_tokens": 9999}]),
         options=AgentOptions(
-            context_window=100,
+            context_window=10000,
             output_reserve=10,
             safety_margin=10,
             memory=False,
@@ -165,7 +165,7 @@ async def test_agent_reports_budget_in_result_and_event() -> None:
     finally:
         await agent.close()
     records = result.to_dict()["context_budget"]
-    assert len(records) == 1 and records[0]["over_limit"]
+    assert len(records) == 1 and not records[0]["over_limit"]
     assert records[0]["measured_prompt_tokens"] == 9999
     assert [dict(e.data) for e in events if e.type == "context_budget"] == records
     assert events[-1].to_dict()["data"]["result"]["context_budget"] == records

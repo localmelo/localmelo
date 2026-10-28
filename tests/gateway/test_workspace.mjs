@@ -10,6 +10,7 @@ import vm from 'node:vm';
 
 import * as turns from '../../support/gateway/static/turns.mjs';
 import {renderMarkdown} from '../../support/gateway/static/markdown.mjs';
+import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -362,6 +363,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ renderMarkdown \} from "\.\/markdown\.mjs";\n/m, '')
   .replace(/^import \{ setupSettings \} from "\.\/settings\.mjs";\n/m, '')
   .replace(/^import \{ setupDrawer \} from "\.\/drawer\.mjs";\n/m, '')
+  .replace(/^import \{ workerHistory \} from "\.\/worker-history\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -396,6 +398,7 @@ function makeElement(tag, id = '') {
     },
     setAttribute(name, value) { element.attributes[name] = String(value); },
     getAttribute(name) { return element.attributes[name] ?? null; },
+    removeAttribute(name) { delete element.attributes[name]; },
     append(...items) { for (const item of items) { item.parentElement = element; element.children.push(item); } },
     prepend(...items) { for (const item of items) item.parentElement = element; element.children.unshift(...items); },
     replaceChildren(...items) { element.children = []; element.append(...items); },
@@ -417,6 +420,7 @@ function makeElement(tag, id = '') {
     close() { element.open = false; },
     showModal() { element.open = true; },
     querySelector(selector) {
+      if (selector === 'h1') return findNode(element, (node) => node.tag === 'h1');
       if (selector === '[data-approval-once]') return findNode(element, (node) => 'approvalOnce' in node.dataset);
       if (selector === '[data-approval-deny]') return findNode(element, (node) => 'approvalDeny' in node.dataset);
       const focus = selector.match(/^\[data-approval-focus="(\w+)"\]$/);
@@ -505,8 +509,8 @@ function harness(routes, {mobile = false} = {}) {
       (documentListeners[type] ||= []).push(handler);
     },
     querySelector: (selector) => {
-      assert.equal(selector, '.chat', 'The DOM double only supports the selectors the page uses');
-      return element('chat');
+      assert.ok(['.chat', '.composer-area'].includes(selector), 'The DOM double only supports the selectors the page uses');
+      return element(selector === '.chat' ? 'chat' : 'composer-area');
     },
     querySelectorAll: () => [],
     createElement: (tag) => makeElement(tag),
@@ -534,10 +538,13 @@ function harness(routes, {mobile = false} = {}) {
   const context = vm.createContext({
     ...turns,
     renderMarkdown,
+    workerHistory,
     setupSettings: () => async () => {},
     setupDrawer: () => drawer,
     document,
-    location: {hash: ''},
+    location: {hash: '', pathname: '/', search: ''},
+    history: {replaceState(_state, _title, url) { context.location.hash = ''; context.replacedUrl = url; }},
+    URLSearchParams,
     localStorage: storage(),
     sessionStorage: storage(),
     navigator: {clipboard: {writeText: async (text) => { context.copied = text; }}},
@@ -615,6 +622,104 @@ function baseRoutes(extra = {}) {
     ...extra,
   };
 }
+
+test('locked startup does not load protected workspace data', async () => {
+  const h = harness(baseRoutes({'GET /health': {status: 401}}));
+  await h.run('init()');
+  assert.deepEqual(h.net.calls.map((call) => call.path), ['/health']);
+  assert.equal(h.element('app').hidden, true);
+  assert.equal(h.element('app').inert, true);
+  assert.equal(h.element('lock-screen').hidden, false);
+  await h.run('api("/sessions").catch(() => {})');
+  h.documentListeners.visibilitychange[0]();
+  assert.equal(h.net.calls.length, 1);
+});
+
+test('login removes the fragment before exchange and health precedes workspace initialization', async () => {
+  let h;
+  h = harness(baseRoutes({'POST /auth/login': (body) => {
+    assert.equal(h.context.location.hash, '');
+    assert.equal(h.context.replacedUrl, '/?view=one');
+    assert.equal(body.code, 'single-use-code');
+    return {status: 204};
+  }}));
+  h.context.location.search = '?view=one';
+  h.context.location.hash = '#login=single-use-code';
+  await h.run('init()');
+  assert.deepEqual(h.net.calls.slice(0, 3).map((call) => call.path), ['/auth/login', '/health', '/sessions']);
+  assert.equal(h.element('app').hidden, false);
+  assert.equal(h.element('lock-screen').hidden, true);
+  assert.equal(h.local.getItem('single-use-code'), null);
+  assert.equal(h.session.getItem('single-use-code'), null);
+});
+
+test('invalid login never proceeds to health or displays the code', async () => {
+  const h = harness(baseRoutes({'POST /auth/login': {status: 401}}));
+  h.context.location.hash = '#login=secret-code';
+  await h.run('init()');
+  assert.deepEqual(h.net.calls.map((call) => call.path), ['/auth/login']);
+  assert.equal(h.context.location.hash, '');
+  assert.equal(h.element('app').hidden, true);
+  assert.doesNotMatch(h.text('lock-status'), /secret-code/);
+});
+
+test('failed fragment removal and a rejected health check both fail closed', async () => {
+  const failedRemoval = harness(baseRoutes());
+  failedRemoval.context.location.hash = '#login=secret';
+  failedRemoval.context.history.replaceState = () => { throw new Error('denied'); };
+  await failedRemoval.run('init()');
+  assert.equal(failedRemoval.net.calls.length, 0);
+  assert.equal(failedRemoval.element('app').hidden, true);
+  const rejected = harness(baseRoutes({'POST /auth/login': {status: 204}, 'GET /health': {status: 401}}));
+  rejected.context.location.hash = '#login=secret';
+  await rejected.run('init()');
+  assert.deepEqual(rejected.net.calls.map((call) => call.path), ['/auth/login', '/health']);
+  assert.equal(rejected.element('app').hidden, true);
+});
+
+test('a presence 401 locks and closes the stream', async () => {
+  let expired = false;
+  const h = harness(baseRoutes({'POST /presence': () => expired ? {status: 401} : {ok: true}}));
+  await h.run('init()');
+  const source = h.stream();
+  expired = true;
+  h.run('presence(true)');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(source.closed, true);
+  assert.equal(h.element('app').hidden, true);
+});
+
+test('a 401 locks, preserves the draft, closes the stream and suppresses retries', async () => {
+  const h = harness(baseRoutes({'GET /settings': {status: 401}}));
+  await h.run('init()');
+  const source = h.stream();
+  h.element('input').value = 'unfinished draft';
+  await h.run('api("/settings").catch(() => {})');
+  assert.equal(source.closed, true);
+  assert.equal(h.element('app').hidden, true);
+  assert.equal(JSON.parse(h.session.getItem('localmelo-console-drafts')).a, 'unfinished draft');
+  const count = h.net.calls.length;
+  for (const timer of h.timers.filter((item) => item.interval)) await timer.handler();
+  source.fail();
+  assert.equal(h.net.calls.length, count);
+  assert.equal(h.state().stream.timer, null);
+});
+
+test('a stream failure closes browser retries and a 401 on reconnect locks', async () => {
+  let fail = false;
+  const h = harness(baseRoutes({'GET /sessions/a': () => fail ? {status: 401} : {
+    session: session('a'), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0,
+  }}));
+  await h.run('init()');
+  const source = h.stream();
+  fail = true;
+  source.fail();
+  assert.equal(source.closed, true);
+  const timer = h.timers.find((item) => !item.interval && item.ms === 1000 && !item.cleared);
+  await timer.handler();
+  assert.equal(h.element('app').hidden, true);
+  assert.equal(FakeEventSource.instances.length, 1);
+});
 
 test('approval guard, denial keyboard and focus never allow by accident', async () => {
   const h = harness(baseRoutes({'POST /approvals/req1': {outcome: 'denied'}}));
@@ -1377,6 +1482,8 @@ test('a chat left before its load finishes keeps no stream', async () => {
     'GET /sessions/b': {session: session('b'), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0},
     'GET /sessions/b/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0},
   }));
+  h.context.location.hash = '#/new';
+  await h.run('init()');
   const first = h.run('openSession("a")');
   await h.run('openSession("b")');
   release(detail);
@@ -1810,4 +1917,177 @@ test('a stream paused on a deleted chat starts a new one instead of reopening', 
   assert.equal(h.state().activeId, null);
   assert.match(h.element('notice').textContent, /This chat expired or the gateway restarted/);
   assert.equal(h.element('welcome').hidden, false);
+});
+
+test('worker detail is read-only and isolates the chat draft and stream', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions/w': {session: session('w', {kind: 'worker', title: 'Worker', source: 'dsh', status: 'running', steps: 0, tokens: null})},
+    'GET /sessions/w/turns?limit=50&events=true': {turns: [turnRow({user_text: 'Worker brief', answer: 'Worker answer', events: [
+      {id: 1, turn: 1, type: 'approval.requested', data: {request_id: 'old', call_id: 'call', tool_name: 'file_write'}},
+    ]})], has_earlier: false},
+  }));
+  await h.run('init()');
+  const stream = h.stream();
+  h.element('input').value = 'Chat draft';
+  h.run('showWorkers("w")');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(stream.closed, true);
+  assert.equal(h.state().activeId, 'a');
+  assert.equal(h.state().drafts.a, 'Chat draft');
+  assert.equal(h.element('composer-area').hidden, true);
+  assert.equal(h.element('details-trigger').hidden, true);
+  assert.match(h.text('worker-panel'), /Worker brief/);
+  assert.match(h.text('worker-panel'), /Not recorded/);
+  assert.match(h.text('worker-panel'), /does not update live/);
+  assert.equal(findNode(h.element('worker-panel'), (node) => node.classList.contains('approval-card')), null);
+  assert.equal(findNode(h.element('worker-panel'), (node) => node.classList.contains('live-row')), null);
+  await h.run('send()');
+  await h.run('stop()');
+  h.run('presence(true)');
+  h.element('details-trigger').click();
+  await h.run('setLevel(3)');
+  await h.run('deleteSession("a")');
+  assert.equal(h.element('connection-btn').hidden, true);
+  const closeChat = findNode(h.element('session-list'), (node) => node.classList.contains('session-close'));
+  assert.ok(closeChat.disabled || closeChat.hidden);
+  assert.equal(h.drawer.calls.length, 0);
+  assert.equal(h.net.calls.filter((call) => call.method !== 'GET' && call.path !== '/presence').length, 0);
+  assert.equal(FakeEventSource.instances.length, 1);
+});
+
+test('worker images use the worker session id through detail rendering', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions/worker-1': {session: session('worker-1', {kind:'worker'})},
+    'GET /sessions/worker-1/turns?limit=50&events=true': {turns:[turnRow({events:[
+      {id:1, turn:1, type:'tool.started', data:{call_id:'c', name:'image', arguments:{}}},
+      {id:2, turn:1, type:'tool.finished', data:{call_id:'c', name:'image', status:'success', images:[{sha256:'abc', mime_type:'image/png', size_bytes:1}]}},
+    ]})]},
+  }));
+  await h.run('init()'); h.run('showWorkers("worker-1")');
+  await new Promise((resolve) => setImmediate(resolve));
+  const image = findNode(h.element('worker-panel'), (node) => node.tag === 'img');
+  assert.equal(image.src, '/api/sessions/worker-1/blobs/abc');
+});
+
+test('worker list uses server filters without opening worker streams', async () => {
+  const h = harness(baseRoutes({'GET /sessions?kind=worker&limit=50': {sessions: [session('w', {kind: 'worker', source: 'dsh', status: 'completed'})], next_cursor: null}}));
+  await h.run('init()');
+  h.run('showWorkers("")');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(h.text('worker-panel'), /Workers/);
+  assert.match(h.text('worker-panel'), /dsh/);
+  const apply = findNode(h.element('worker-panel'), (node) => node.textContent === 'Apply');
+  assert.equal(apply.classList.contains('primary-button'), true);
+  const css = readFileSync(new URL('../../support/gateway/static/workspace.css', import.meta.url), 'utf8');
+  assert.match(css, /\.worker-filters button,[\s\S]*?height: 40px/);
+  assert.match(css, /\.worker-panel a:not\(\.worker-row\):visited\s*\{\s*color: var\(--accent\)/);
+  assert.match(css, /\.worker-panel\s*\{[^}]*overflow: auto;[^}]*overflow-wrap: anywhere;/);
+  assert.match(css, /@media \(max-width: 700px\)\s*\{\s*\.worker-panel\s*\{/);
+  assert.equal(h.net.callsTo('/sessions?kind=worker&limit=50').length, 1);
+  assert.equal(FakeEventSource.instances.length, 1);
+});
+
+test('worker back returns to the list header and Chats resumes the open chat', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions?kind=worker&limit=50': {sessions: [session('w', {kind: 'worker'})], next_cursor: null},
+    'GET /sessions/w': {session: session('w', {kind: 'worker', title: 'Worker title'})},
+    'GET /sessions/w/turns?limit=50&events=true': {turns: [], has_earlier: false},
+  }));
+  await h.run('init()');
+  h.run('showWorkers("")');
+  await new Promise((resolve) => setImmediate(resolve));
+  h.run('showWorkers("w")');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(h.element('header-title').textContent, 'Worker title');
+  h.run('showWorkers("")');
+  assert.equal(h.element('header-title').textContent, 'Workers');
+  assert.equal(h.element('chats-link').href, '#/s/a');
+  h.context.location.hash = h.element('chats-link').href;
+  await h.windowListeners.hashchange[0]();
+  assert.equal(h.state().activeId, 'a');
+  assert.equal(h.element('connection-btn').hidden, false);
+  assert.equal(h.stream().closed, false);
+});
+
+test('failed worker filters remain an error when navigating away and back', async () => {
+  const routes = baseRoutes({'GET /sessions?kind=worker&limit=50': {sessions: [], next_cursor: null},
+    'GET /sessions?kind=worker&limit=50&source=dsh': {status: 503, body: {error: {message: 'unavailable'}}}});
+  const h = harness(routes);
+  await h.run('init()'); h.run('showWorkers("")');
+  await new Promise((resolve) => setImmediate(resolve));
+  await h.run('workers.state.filters.source = "dsh"; workers.list()');
+  assert.match(h.text('worker-panel'), /Worker history is unavailable/);
+  h.run('leaveWorkers()'); h.run('showWorkers("")');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(h.text('worker-panel'), /Worker history is unavailable/);
+  assert.doesNotMatch(h.text('worker-panel'), /No runs match these filters/);
+});
+
+test('worker metadata and errors preserve missing, zero and recorded values', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions?kind=worker&limit=50': {sessions: [session('w', {kind:'worker', source:'dsh', model:'', status:'crashed'})], next_cursor:null},
+    'GET /sessions/w': {session: session('w', {kind:'worker', status:'crashed', steps:0, tokens:0, duration_s:0})},
+    'GET /sessions/w/turns?limit=50&events=true': {turns:[turnRow({status:'crashed', result:{error:'Recorded error\nextra', duration_s:99}, events:[]})]},
+  }));
+  await h.run('init()'); h.run('showWorkers("")');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(h.text('worker-panel'), /dsh · Not recorded · crashed/);
+  h.run('showWorkers("w")'); await new Promise((resolve) => setImmediate(resolve));
+  assert.match(h.text('worker-panel'), /Steps 0 Tokens 0/);
+  assert.match(h.text('worker-panel'), /Duration 0 s/);
+  assert.match(h.text('worker-panel'), /Recorded error/);
+});
+
+test('worker filter and paging controls cover more than 200 records', async () => {
+  const routes = baseRoutes();
+  for (let page = 0; page < 5; page++) {
+    const path = `/sessions?kind=worker&limit=50${page ? `&cursor=c${page}` : ''}`;
+    routes[`GET ${path}`] = {sessions: Array.from({length:50}, (_, i) => session(`w${page*50+i}`, {kind:'worker'})), next_cursor: page < 4 ? `c${page+1}` : null};
+  }
+  routes['GET /sessions?kind=worker&limit=50&source=dsh&parent_run=parent'] = {sessions: [session('filtered', {kind:'worker', source:'dsh'})], next_cursor:null};
+  const h = harness(routes); await h.run('init()'); h.run('showWorkers("")');
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  await settle();
+  for (let page = 0; page < 4; page++) {
+    const more = findNode(h.element('worker-panel'), (node) => node.textContent === 'Load more');
+    assert.ok(more); more.click(); await settle();
+  }
+  assert.equal(h.run('workers.state.rows.length'), 250);
+  let form = findNode(h.element('worker-panel'), (node) => node.tag === 'form');
+  findNode(form, (node) => node.tag === 'select' && node.name === 'source').value = 'dsh';
+  findNode(form, (node) => node.tag === 'input').value = 'parent';
+  form.listeners.submit[0]({preventDefault() {}}); await settle();
+  assert.equal(h.net.callsTo('/sessions?kind=worker&limit=50&source=dsh&parent_run=parent').length, 1);
+  assert.equal(h.run('workers.state.rows.length'), 1);
+  findNode(h.element('worker-panel'), (node) => node.textContent === 'Clear filters').click(); await settle();
+  assert.equal(h.run('workers.state.rows.length'), 50);
+});
+
+test('worker routes and shortcuts cannot dispatch chat writes', async () => {
+  const h = harness(baseRoutes({'GET /sessions?kind=worker&limit=50': {sessions:[], next_cursor:null}}));
+  await h.run('init()');
+  const stream = h.stream(); h.context.location.hash = '#/workers';
+  await h.windowListeners.hashchange[0](); await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(stream.closed, true);
+  const count = h.net.calls.length;
+  h.element('input').listeners.keydown[0]({key:'Enter', shiftKey:false, isComposing:false, keyCode:13, preventDefault() {}});
+  for (const key of ['Enter', 'Escape', 'k']) {
+    h.documentListeners.keydown[0]({key, metaKey:key === 'k', ctrlKey:false, preventDefault() {}});
+  }
+  assert.equal(h.net.calls.slice(count).filter((call) => call.method !== 'GET').length, 0);
+  h.context.location.hash = '#/s/a'; await h.windowListeners.hashchange[0]();
+  assert.equal(h.state().activeId, 'a'); assert.equal(h.stream().closed, false);
+});
+
+test('worker title and answer use safe rendering', async () => {
+  const hostile = '<img src=x onerror=alert(1)>';
+  const h = harness(baseRoutes({
+    'GET /sessions/w': {session: session('w', {kind:'worker', title:hostile})},
+    'GET /sessions/w/turns?limit=50&events=true': {turns:[turnRow({answer:hostile, events:[]})]},
+  }));
+  await h.run('init()'); h.run('showWorkers("w")');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(findNode(h.element('worker-panel'), (node) => node.tag === 'h1').textContent, hostile);
+  assert.equal(findNode(h.element('worker-panel'), (node) => node.tag === 'img'), null);
+  assert.doesNotMatch(findNode(h.element('worker-panel'), (node) => node.classList.contains('answer')).innerHTML, /<img/i);
 });
