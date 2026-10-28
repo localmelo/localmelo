@@ -56,6 +56,10 @@ async def test_resume_keeps_workspace_and_uses_stored_typed_text(setup: Setup) -
         'typed question\n\n<attachment name="notes.txt" chars="4">\nbody\n</attachment>'
     )
     sid = await seed(setup, text, typed="typed question", workspace="/other")
+    async with setup.store.component_transaction("legacy_fixture") as conn:
+        await conn.execute(
+            "UPDATE turns SET attachments = NULL WHERE session_id = ?", (sid,)
+        )
     setup.session.approvals._policy._granted.add("file_write")
     setup.session.enter(f"/resume {sid}")
     await setup.idle()
@@ -78,6 +82,15 @@ async def test_resume_keeps_workspace_and_uses_stored_typed_text(setup: Setup) -
     assert rows[0].undone
     assert rows[-1].user_text == text
     assert rows[-1].typed_text == "typed question"
+    setup.out.console.export_text()
+    session.enter("/new")
+    await setup.idle()
+    session.enter(f"/resume {sid}")
+    await setup.idle()
+    assert (
+        "typed question" in setup.out.text()
+        and "<attachment name=" not in setup.out.text()
+    )
     assert "changed in another window" not in setup.out.text()
 
 
