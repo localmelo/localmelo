@@ -333,7 +333,6 @@ async def test_flush_does_not_admit_an_earlier_run_s_candidate() -> None:
     [
         "I could check the offsite on 4/16.",
         "Is yoga at 9:00?",
-        "The plumber is not coming on 4/9.",
         "Option A: meet on 4/9 at 9:00.",
         "Maybe the meeting is at 9:00.",
     ],
@@ -347,6 +346,18 @@ async def test_heuristic_nonfacts_are_not_admitted_with_user_signal(text: str) -
     hippo.propose(_candidate(text, remember=note.remember, items=candidate_items(note)))
     assert await hippo.flush(run_request=True, digest=None, final_reflection=None) == []
     assert await store.count_entries() == 0
+
+
+async def test_explicit_negative_fact_is_admitted_without_losing_negation() -> None:
+    from localmelo.melo.memory.notes import note_from_reply
+
+    text = "The plumber is not coming on 4/9."
+    note, _ = note_from_reply(text, writer="heuristic")
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    hippo.propose(_candidate(text, remember=note.remember, items=candidate_items(note)))
+    await hippo.flush(run_request=True, digest=None, final_reflection=None)
+    assert [entry.text for entry in await store.active_entries()] == [text]
 
 
 async def test_mixed_bullet_admits_the_fact_not_the_question() -> None:

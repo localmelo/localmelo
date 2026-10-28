@@ -430,7 +430,8 @@ def _without_fences(text: str) -> str:
 # "e.g." or "i.e.". Their word boundary is an ASCII one, so "例如e.g. "
 # holds the abbreviation too.
 _SENTENCE_END_RE = re.compile(
-    r"[。！？]|[!?](?=\s)|(?a:(?<!\be\.g)(?<!\bi\.e))\.(?=\s)", re.IGNORECASE
+    r"[。！？]|[!?](?=\s|[一-鿿])|(?a:(?<!\be\.g)(?<!\bi\.e))\.(?=\s|[一-鿿])",
+    re.IGNORECASE,
 )
 _LIST_MARKER_RE = re.compile(r"(?:[-*•]|\d+[.)])(?:\s+|$)")
 
@@ -662,6 +663,18 @@ _NEGATION_MARKERS = _english(
     r"cancel+ed",
     r"cancel+ing",
 )
+_CJK_ASSERTION = re.compile(
+    r"^[一-鿿]{2,12}(?:已取消|取消了|不再住在[一-鿿]{2,12}|住在[一-鿿]{2,12})[。.!]?$"
+)
+_EN_NEGATIVE_ASSERTION = re.compile(
+    r"^[A-Za-z][^?！!]*\b(?:is not|are not|was not|were not|does not|did not|"
+    r"no longer|was cancelled|was canceled|is cancelled|is canceled)\b[^?！!]*$",
+    re.IGNORECASE,
+)
+_UNCERTAIN_ASSERTION = re.compile(
+    r"\b(?:if|unless|whether|may|might|could|not only)\b|如果|假如|是否|不但|不仅|可能|也许",
+    re.IGNORECASE,
+)
 
 
 def _is_plan(sentence: str) -> bool:
@@ -669,9 +682,21 @@ def _is_plan(sentence: str) -> bool:
 
 
 def _eligible_fact(sentence: str) -> bool:
-    return not (
-        _is_open(sentence) or _is_plan(sentence) or _NEGATION_MARKERS.search(sentence)
-    )
+    if (
+        _is_open(sentence)
+        or _is_plan(sentence)
+        or _UNCERTAIN_ASSERTION.search(sentence)
+    ):
+        return False
+    if _NEGATION_MARKERS.search(sentence):
+        return (
+            len(sentence) <= NOTE_ITEM_CHARS
+            and not any(char in sentence for char in '"“”')
+            and bool(_EN_NEGATIVE_ASSERTION.fullmatch(sentence))
+        )
+    if any(marker in sentence for marker in ("不再", "取消", "没有", "不是")):
+        return bool(_CJK_ASSERTION.fullmatch(sentence))
+    return True
 
 
 # ── Calls and results ──
@@ -1163,8 +1188,9 @@ def _factual_lines(text: str) -> list[str]:
                 for part in parts
             ]
         for part in parts:
-            if _eligible_fact(part) and any(
-                not _ITEM_CJK_RE.fullmatch(key) for key in _strong_keys(part)
+            if _eligible_fact(part) and (
+                _CJK_ASSERTION.fullmatch(part)
+                or any(not _ITEM_CJK_RE.fullmatch(key) for key in _strong_keys(part))
             ):
                 items.append(part)
     return items
@@ -2303,6 +2329,21 @@ def _item_score(keys: _ItemKeys, text: str) -> int:
     ):
         return 0
     typed = _typed_keys(text)
+    item_times = {key for key in keys.strong if key.startswith("time:")}
+    # A mail's sent timestamp is not the time of its subject event.
+    try:
+        record = json.loads(text)
+    except (ValueError, RecursionError):
+        record = None
+    time_text = text
+    if isinstance(record, dict):
+        time_text = " ".join(
+            str(record.get(field) or "")
+            for field in ("body", "text", "notes", "start", "end")
+        )
+    record_times = _time_keys(time_text)
+    if item_times and record_times and item_times.isdisjoint(record_times):
+        return 0
     item_phones = {key for key in keys.strong if key.startswith("phone:")}
     record_phones = {key for key in typed if key.startswith("phone:")}
     if item_phones and record_phones and item_phones.isdisjoint(record_phones):
@@ -2353,7 +2394,15 @@ def _item_source_ids(item: str, records: Sequence[tuple[str, str]]) -> list[str]
     best_id = ""
     best_score = 0
     tied = False
+    # Shared dates or names alone cannot establish a denial.
+    negative = bool(_NEGATION_MARKERS.search(item)) or any(
+        marker in item for marker in ("取消", "不再", "没有", "不是")
+    )
+    assertion = _collapse(item).lower().rstrip(".。!！ ")
     for record_id, text in records:
+        # Abstain unless the complete negative assertion is present.
+        if negative and assertion not in _collapse(text).lower():
+            continue
         score = _item_score(keys, text)
         if score > best_score:
             best_id, best_score, tied = record_id, score, False
