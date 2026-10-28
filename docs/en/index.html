@@ -110,7 +110,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">
             <strong>Tools and MCP</strong>
-            <span>Use four built-in tools and the tools of local MCP servers; each step runs only the tools it offered.</span>
+            <span>Use four built-in tools and the tools of local MCP servers; each step offers the built-in tools, the ones the model has already called and the closest matches for the task, and runs only those; and a Python call runs in a child process that its time limit can stop.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#backends">
             <strong>Model servers</strong>
@@ -138,7 +138,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#use-melo-in-scripts">
             <strong>Scripts and benchmarks</strong>
-            <span>Read one JSON line per run and a fixed exit code, so scripts can rely on the outcome.</span>
+            <span>Read one JSON line per run and a fixed exit code, so scripts can rely on the outcome, and choose how a reply's reasoning is sent back on later turns (<code>--reasoning legacy</code>, <code>drop</code> or <code>replay</code>).</span>
           </a>
         </div>
       </section>

@@ -327,10 +327,11 @@ uv run mypy .</code></pre>
           <li>
             Add the <code>ToolDef</code> and the function in
             <code>melo/executor/builtins.py</code>, decorated with
-            <code>@_builtin(...)</code>. The semantic tags are the words a task
-            may use to name the tool. Every registered built-in is offered in
-            every step; the task's hints and the BM25 search rank the other,
-            provided tools.
+            <code>@_builtin(...)</code>. The semantic tags are terms the BM25
+            search matches a task against. Every registered built-in is offered
+            in every step; among the other, provided tools, retrieve mode offers
+            the ones the model has already called and the three best matches for
+            the task.
           </li>
           <li>
             Give it a permission tier: add its name to
