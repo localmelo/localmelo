@@ -161,7 +161,7 @@ MCP 服务器的 `require_approval` 是级别之上的额外标记：`true` 或�
 
 ### 设置审批策略时
 
-通过 Python 使用 `approval=policy` 启动的运行，在每次调用级别不是 `read` 的内置工具或提供的工具前都会询问策略（见[权限级别](#permission-tiers)）：包括运行提供的内置工具（默认 `python` 模式下的 `python_exec` 和 `file_write`；调用方指定时也包括 `shell_exec`），以及级别为 `write`、`exec` 或 `network` 的提供的工具或 MCP 工具，包括没有注解因而为 `write` 的 MCP 工具。交互式界面始终有这样的策略，除非使用 `--yolo`；直接模式以及网关的 `/v1` 和工作区会话没有。因此网关会话完全不提供 `shell_exec`：没有人可以询问。控制台有策略，但其审批通过同一个未经身份验证的本机回环 API 传递，因此也属于网关模式。工具被明确标记时也会请求审批：例如 `requires_approval=True` 的提供的工具、在 `register` 调用中设置该标记的自定义工具，或设置了 `require_approval` 的 MCP 服务器的工具（见[审批工具调用](python.md#approve-tool-calls)）。自定义工具的级别只是标签：只有其 `register` 调用设置了标记才会询问。
+通过 Python 使用 `approval=policy` 启动的运行，在每次调用级别不是 `read` 的内置工具或提供的工具前都会询问策略（见[权限级别](#permission-tiers)）：包括运行提供的内置工具（默认 `python` 模式下的 `python_exec` 和 `file_write`；调用方指定时也包括 `shell_exec`），以及级别为 `write`、`exec` 或 `network` 的提供的工具或 MCP 工具，包括没有注解因而为 `write` 的 MCP 工具。交互式界面始终有这样的策略，除非使用 `--yolo`；直接模式以及网关的 `/v1` 和工作区会话没有。因此网关会话完全不提供 `shell_exec`：没有人可以询问。控制台有策略，但持有凭据的人或同一用户的进程都能回答审批，因此也属于网关模式。工具被明确标记时也会请求审批：例如 `requires_approval=True` 的提供的工具、在 `register` 调用中设置该标记的自定义工具，或设置了 `require_approval` 的 MCP 服务器的工具（见[审批工具调用](python.md#approve-tool-calls)）。自定义工具的级别只是标签：只有其 `register` 调用设置了标记才会询问。
 
 - **在其他检查之后。** 策略只会收到上述所有检查均通过的调用，因此能看到将要运行的确切内容，包括解析后的文件路径。参数不符合工具参数定义的调用会以 `Arguments for <tool> do not match its parameters: <message>` 拒绝，不会请求策略决策。
 - **不计入工具时限。** 工具时限从策略允许调用后开始计算。
