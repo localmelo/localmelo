@@ -422,6 +422,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- Secrets no longer stay in stored memory. `tasks.query` and `tasks.result`,
+  `steps.thought`, a tool call's arguments and a tool result's output and
+  error, and the text long-term memory keeps (each step's summary and the
+  promoted reflections) are written with the same redaction `llm_calls` and
+  events already use: `sk-` keys, GitHub tokens, AWS access key ids, the
+  token after `Bearer` and a one-time code next to its keyword. The run and
+  the model keep the text: working memory, the requests a run sends, its
+  events and its `result` are unchanged, and the stored images stay
+  references ([#NN]).
 - On `localhost` or a loopback IP address, the gateway refuses requests that
   are not addressed to it, before any route runs. A `Host` other than
   `127.0.0.1`, `localhost` or `[::1]` with the gateway's port gets HTTP 421

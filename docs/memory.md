@@ -158,7 +158,7 @@ Every run saves one row in the `tasks` table of history:
 | Column | Value |
 |---|---|
 | `task_id` | The run's `task_id`: 32 hex characters. |
-| `query` | The task as given. |
+| `query` | The task as given, with the secrets of [Redaction](#model-calls) replaced. |
 | `status` | `running` during the run, then how it ended; see [Run results](run-results.md#statuses). `cancelled` appears only for interactive runs: in the Python API, and in the web workspace's history. |
 | `result` | The run's result, or its error when the result is empty. |
 
@@ -181,7 +181,10 @@ Every run saves one row in the `tasks` table of history:
 
 The `steps` table holds one row per tool call: `step_id`, `task_id`,
 `thought` (the model's text), `tool_call_json`, `tool_result_json`,
-`timestamp` and `seq` (the order within the task).
+`timestamp` and `seq` (the order within the task). The `thought`, every
+string in the call's arguments and the result's output and error are stored
+with the secrets of [Redaction](#model-calls) replaced; the run itself and
+the model keep the text.
 
 ## Model calls
 
@@ -230,17 +233,22 @@ planning and reflection requests alike. The history in RAM keeps none.
   unlinked; each belongs to the task's latest `plan` row before its
   `timestamp`. A cancelled interactive run in the Python API links the rows
   that its clean-up writes.
-- **Redaction.** `content` and `thinking` pass a minimal redaction of
-  secrets, the same as the Python API's events: well-known key shapes
+- **Redaction.** Every text that memory stores passes a minimal redaction
+  of secrets, the same as the Python API's events: well-known key shapes
   (`sk-` keys, GitHub tokens, AWS access key ids), the token after `Bearer`,
   and a code of 4 to 8 digits within 20 characters of `verification code`,
   `passcode`, `OTP` or `验证码`, on the same line, each become `[redacted]`.
-  It is minimal: tool-call arguments are not redacted, in
-  `tool_calls_json` or in `steps`, and a key glued to the text before it
-  stays: an `sk-` key right after a letter, a digit, `_` or `-`, a GitHub
-  token right after a letter, a digit or `_`, and an AWS access key id
-  right after a letter or a digit. `tasks` and `steps` keep every text as
-  it was.
+  It covers `tasks.query`, `tasks.result`, `steps.thought`, every string
+  in `steps.tool_call_json`'s arguments, `steps.tool_result_json`'s output
+  and error, `llm_calls.content` and `llm_calls.thinking`, and the text
+  long-term memory keeps (each step's summary and the promoted
+  reflections). What the model reads is not redacted: working memory, the
+  requests a run sends, `assistant.message` events and a run's `result`
+  keep the original text, so only the stored copies change.
+  It is minimal: other secret shapes stay, and so does a key glued to the
+  text before it: an `sk-` key right after a letter, a digit, `_` or `-`, a
+  GitHub token right after a letter, a digit or `_`, and an AWS access key
+  id right after a letter or a digit.
 - **Retention.** Reasoning older than 30 days, or than
   `LOCALMELO_THINKING_RETENTION_DAYS`, is cleared: `thinking` becomes `""`,
   and the reasoning that `content` holds goes too, by the row's
@@ -426,11 +434,12 @@ that directory instead.
 ## Privacy
 
 - The files are not encrypted. `history.db` holds your tasks, the model's
-  text, every tool call with its arguments, and every tool result. It also
+  text, every tool call with its arguments, and every tool result, each
+  after the redaction of [Model calls](#model-calls). It also
   holds the model's reasoning for every call, redacted and kept 30 days by
   default; see [Model calls](#model-calls).
-  `long_term.db` holds step summaries and reflections, with their embedding
-  vectors. `procedures.db` holds each task's query, normalized, the folder
+  `long_term.db` holds step summaries and reflections, redacted, with their
+  embedding vectors. `procedures.db` holds each task's query, normalized, the folder
   it ran in, and its tool calls' labels: file names and program names,
   never their content or output. The query and the labels pass a minimal
   redaction: the key shapes, bearer tokens and one-time codes of
