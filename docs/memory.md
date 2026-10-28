@@ -148,7 +148,10 @@ tool output and recalled memory are data, not instructions.
   even one item cannot fit, nothing is added.
 - **Thought chunks.** `--recall-kinds thought` turns a reply's reasoning
   without code into at most 1,500-character chunks, at most 6 per task.
-  They never leave the task and never enter long-term memory.
+  They never leave the task and never enter long-term memory. A chunk
+  counts as shown while its step's turn is in the window: its alias stays
+  with that turn and leaves with it, so `step` recall and the `recall` tool
+  can return the chunk only after the turn was evicted.
 - **The counters.** `recall_empty` counts a triggered recall that had no candidate or no hit, so a pass that added no block is visible next to `recall_skipped` and `recall_refused`.
 - **The record.** Every block that is first sent is recorded in
   `llm_calls.recall_json`: the trigger, the query, the hit ids and aliases,
