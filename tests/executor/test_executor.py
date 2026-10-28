@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
-import sys
 import tempfile
 import unittest
 
@@ -57,28 +56,40 @@ class TestBuiltinExecution(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.error, "")
         self.assertGreater(outcome.duration_ms, 0)
 
-    async def test_python_exec_sys_exit_fails_the_call(self) -> None:
-        # SystemExit would end the agent's own process: the call fails
-        # instead, like code that raises any other exception.
+    async def test_python_exec_sys_exit_stays_in_the_child(self) -> None:
+        # sys.exit() and exit() end only the child process, never melo.
         cases = [
-            ("import sys\nprint('hi')\nsys.exit(0)", "0"),
-            ("import sys\nsys.exit(3)", "3"),
-            ("exit()", "None"),
-            ("raise SystemExit('bye')", "'bye'"),
+            (
+                "import sys\nprint('hi')\nsys.exit(0)",
+                ExecutionStatus.SUCCESS,
+                "hi",
+                "",
+            ),
+            (
+                "import sys\nsys.exit(3)",
+                ExecutionStatus.ERROR,
+                "",
+                "Python exited with code 3",
+            ),
+            ("exit()", ExecutionStatus.SUCCESS, "", ""),
+            (
+                "raise SystemExit('bye')",
+                ExecutionStatus.ERROR,
+                "",
+                "Python exited with code 1:\nbye",
+            ),
         ]
-        stdout = sys.stdout
-        for code, shown in cases:
+        for code, status, output, error in cases:
             with self.subTest(code=code):
                 outcome = await self.executor.execute_structured(
                     ExecutionRequest(tool_name="python_exec", arguments={"code": code})
                 )
-                self.assertEqual(outcome.status, ExecutionStatus.ERROR)
-                self.assertEqual(outcome.error_category, ErrorCategory.RUNTIME_ERROR)
-                self.assertEqual(
-                    outcome.error,
-                    f"Code called sys.exit({shown}), which python_exec does not allow",
-                )
-                self.assertIs(sys.stdout, stdout)  # the redirection was undone
+                self.assertEqual((outcome.status, outcome.output), (status, output))
+                self.assertEqual(outcome.error, error)
+                if status == ExecutionStatus.ERROR:
+                    self.assertEqual(
+                        outcome.error_category, ErrorCategory.RUNTIME_ERROR
+                    )
 
     async def test_shell_exec(self) -> None:
         outcome = await self.executor.execute_structured(

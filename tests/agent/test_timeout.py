@@ -221,10 +221,14 @@ async def test_a_timeout_kills_the_shell_command_it_interrupts(pid_file: Path) -
 
 
 @pytest.mark.asyncio
-async def test_a_timeout_cannot_interrupt_python_exec() -> None:
-    # A documented limit: python_exec runs its code on the event loop, so
-    # the deadline takes effect only once the code returns.
-    code = "import time\ntime.sleep(0.3)"
+async def test_a_timeout_kills_the_python_child_it_interrupts(pid_file: Path) -> None:
+    # python_exec runs its code in a child process now, so a run's deadline
+    # kills it, as it kills a shell command.
+    code = (
+        "import os, time\n"
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid()) + '\\n')\n"
+        "time.sleep(60)\n"
+    )
     call = Message(
         role="assistant",
         tool_call=ToolCall(tool_name="python_exec", arguments={"code": code}),
@@ -232,9 +236,12 @@ async def test_a_timeout_cannot_interrupt_python_exec() -> None:
     agent = Agent(
         llm=ScriptedLLM([call]),
         options=AgentOptions(
-            builtins=frozenset({"python_exec"}), tool_exposure="all", timeout_s=0.05
+            builtins=frozenset({"python_exec"}), tool_exposure="all", timeout_s=1.0
         ),
     )
     result = await agent.run_task("run python")
     assert (result.status, result.n_tool) == ("timeout", 1)
-    assert result.duration_s >= 0.3
+    # The deadline had to wait for the child to start and write its PID,
+    # not for the 60 s sleep.
+    assert result.duration_s < 10
+    assert await _gone(int(pid_file.read_text()))

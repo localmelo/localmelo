@@ -44,7 +44,9 @@ def register_builtins(
     :meth:`Executor.execute_structured` is given, if any, before it runs.
 
     Without *workspace_root*, the functions of :data:`BUILTINS` themselves
-    are registered, and a *tool_timeout_s* raises ``ValueError``. With a
+    are registered, and a *tool_timeout_s* raises ``ValueError``. Its
+    ``python_exec`` is a child process too, in this process's directory,
+    within the executor's default timeout. With a
     root, the tools that :func:`rooted_builtins` gives for it take their
     place, with the timeouts it gives them: ``file_read`` and ``file_write``
     refuse a symlink that takes the checked file's place and anything but a

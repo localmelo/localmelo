@@ -81,11 +81,8 @@ class AgentOptions:
       ``LOCALMELO_MEMORY_DIR`` environment variables decide.
     - ``timeout_s``: wall-clock bound for one run, in seconds; ``None``
       means no bound. A run still going when it expires is cancelled and
-      ends with status ``timeout``, except while ``python_exec`` code
-      runs without a ``workspace_root``: that code runs on the agent's
-      event loop and cannot be interrupted, so the run ends only once the
-      code returns. With a root it runs in a child process, which the
-      expiry kills.
+      ends with status ``timeout``; a ``python_exec`` child process running
+      then is killed with every process it started.
     - ``workspace_root``: the directory the built-in tools work in, or
       ``None`` (the default) for none. The agent resolves it to its real
       path (``~`` expanded) and raises ``ValueError`` when that is not a
@@ -97,7 +94,9 @@ class AgentOptions:
       starts in the root, but can still reach any path, so approval is
       their control; a non-zero exit of ``shell_exec`` starts its text
       with ``[exit code <n>]``. The planning prompt then names the root.
-      Without a root, the built-ins behave as before this option.
+      Without a root, the built-ins behave as before this option, except
+      that ``python_exec`` also runs in a child process, in this process's
+      directory.
     - ``record_answers``: ``True`` ends every run by appending its answer
       to working memory as an assistant message, so the next run on the
       agent sees it: the result without a ``<think>`` block (see

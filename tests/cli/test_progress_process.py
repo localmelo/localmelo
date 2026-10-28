@@ -268,10 +268,10 @@ def test_nothing_drawn_without_a_terminal(
     assert (done.returncode, done.stdout, done.stderr) == (0, b"done\n", "")
 
 
-def test_the_timer_runs_while_python_exec_holds_the_event_loop(
+def test_the_timer_runs_while_python_exec_sleeps_in_its_child(
     chat_server: FakeChatServer, tmp_path: Path
 ) -> None:
-    """Without a workspace root, python_exec code runs on the event loop."""
+    """Without a workspace root, python_exec code runs in a child process."""
     code = "import time\ntime.sleep(2)\nprint('slept')"
     _queue(chat_server, [_tool_call("python_exec", {"code": code})])
     done = _run(chat_server, tmp_path, ["sleep a while"])

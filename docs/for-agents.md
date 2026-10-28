@@ -156,7 +156,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 ## Tools and MCP
 
 - `shell_exec(command)`: stdin `/dev/null`; process group killed after 30 s; refuses `rm -rf /...`, `mkfs`, `dd if=`, fork bombs, `shutdown`, `reboot`.
-- `python_exec(code)`: `exec` in the agent's process, on its event loop, so it cannot be interrupted (a child process with a workspace root).
+- `python_exec(code)`: a child Python (`sys.executable -c`), stdin `/dev/null`, in the current directory (or the workspace root); its process group is killed at the tool's limit (60 s by default) or on cancellation; `sys.exit()` ends only the child; a non-zero exit fails with `Python exited with code <n>`, then the last 4,000 characters of its output.
 - `file_read(path)`: any file the user can read. `file_write(path, content)`: creates or replaces any file the user can write; in the interactive UI, only inside the workspace.
 - A Python run with an approval policy, and the interactive UI (bare `melo`, unless `--yolo`), gate `shell_exec`, `python_exec` and `file_write`; direct mode, `melo ""` and the gateway have none. Output is cut at 50,000 characters.
 - `retrieve` offers the built-ins every step, plus extra (MCP or provided) tools the conversation already named and the BM25 top 3 for the task; `all` offers every tool every step. Unoffered calls are refused (`Tool 'NAME' was not offered in this step.`).
@@ -176,12 +176,12 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 ## Gotchas
 
 - Exit 1 and exit 2 can come with no JSON line (setup or usage error, message on stderr). Check that stdout is non-empty before parsing, then read `status`.
-- Always set `--timeout` (or `timeout_s`): the request timeout counts per read, so a server that keeps sending bytes never trips it, and a silent server costs about 3 x the request timeout + 5 s per request (two retries). It cannot interrupt `python_exec` without a workspace root (direct mode has none).
+- Always set `--timeout` (or `timeout_s`): the request timeout counts per read, so a server that keeps sending bytes never trips it, and a silent server costs about 3 x the request timeout + 5 s per request (two retries).
 - `--serve` silently ignores a positional task; direct mode silently ignores `--host`, `--port`, `--reconfigure`.
 - A non-string `session_id` gets a plain-text HTTP 500; omit it or send `null` for a new session.
 - One `Agent` per concurrent task: `run_task` has no overlap guard (runs share working memory and counters).
 - `ollama` backend: `result` can start with a `<think>...</think>` block.
-- Gateway: `python_exec` runs inside the gateway process and blocks every request until it returns. `DELETE` on a session running a task: 409 `{"error", "session_id"}`, and the run goes on; `/v1/agent` has no cancel route (the web workspace's cancel is for its own chats). At shutdown every session is closed, a busy one included, and a task still running then ends as `crashed`.
+- Gateway: `python_exec` runs in a child process, so the gateway keeps answering while the code runs, and Stop kills it. `DELETE` on a session running a task: 409 `{"error", "session_id"}`, and the run goes on; `/v1/agent` has no cancel route (the web workspace's cancel is for its own chats). At shutdown every session is closed, a busy one included, and a task still running then ends as `crashed`.
 - Stopping: `&` jobs from a non-interactive shell ignore SIGINT; send SIGTERM. Direct mode exits 143 within 8 s; the gateway exits 143 only after its runs in flight finish (no time limit): SIGKILL it after your own deadline.
 - Under `uv run`, `$!` is uv: SIGTERM reaches melo, SIGKILL does not (the gateway keeps listening). In scripts start `.venv/bin/melo`, or SIGKILL the child (`pkill -KILL -f 'melo --serve --port PORT'`).
 - `--daemon install` takes `--port` but not `--host`, gets no shell env vars (no cloud keys), and its KeepAlive restarts a killed gateway: use `--daemon uninstall`.

@@ -4,7 +4,7 @@
 
 - Install from a clone named `localmelo` with Python 3.11+: `uv sync --extra gateway`, then run `uv run melo` in the clone (`melo` is not on PATH). MIT license. localmelo never downloads, starts or serves models.
 - One task: `melo --base-url http://127.0.0.1:8000/v1 --chat-model MODEL --output-format json --timeout 300 "TASK"`; exit 0 completed, 1 crashed or a configuration error, 2 any other status or a usage error. Bare `melo` in a terminal opens the interactive UI (a first run asks for a model server and model and saves them, as `ollama` when the server answers `GET /api/version` like Ollama, else as `vllm`; tool calls shown live, approvals, `/model`, `/backend`); without a TTY it exits 2. `melo --serve` starts the gateway. Agents: do not run bare `melo` in a pty under the user's HOME, and use direct mode in scripts.
-- Tools run with the user's permissions and no sandbox. The gateway has no authentication and must stay on 127.0.0.1.
+- Tools run with the user's permissions and no sandbox; `python_exec` code runs in a child process, killed at its time limit. The gateway has no authentication and must stay on 127.0.0.1.
 
 ## Docs
 

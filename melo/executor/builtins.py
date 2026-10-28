@@ -34,9 +34,8 @@ APPROVAL_BUILTINS: frozenset[str] = frozenset(
 # each call. A tool that runs a child process may append the child's
 # returncode (negative when a signal ended it) once the child has exited by
 # itself; a tool that kills its child appends nothing. Without a list
-# (None, the default), there is nothing to record. The shell_exec and
-# python_exec of a workspace root record their child's status; the Phase 1a
-# functions record nothing.
+# (None, the default), there is nothing to record. shell_exec and
+# python_exec record their child's status, with or without a workspace root.
 TOOL_EXIT_CODE: contextvars.ContextVar[list[int] | None] = contextvars.ContextVar(
     "TOOL_EXIT_CODE", default=None
 )
@@ -50,8 +49,21 @@ SHELL_TIMEOUT_S = 30.0
 # (_REAP_TIMEOUT_S), so the shell's own limit fires first and names itself.
 _SHELL_TIMEOUT_MARGIN_S = 30.0
 
-# Characters of output that the error of a failed rooted python_exec keeps.
+# Characters of output that the error of a failed python_exec keeps.
 _PYTHON_ERROR_TAIL = 4_000
+
+# Resource limits of a python_exec child: seconds of CPU time and open file
+# descriptors, as RLIMIT_CPU and RLIMIT_NOFILE. Both are a backstop, not the
+# call's limit: the executor's timeout (60 s by default) is a wall clock and
+# fires first, killing the child's process group. The CPU limit only ends a
+# child that outlives melo, as one orphaned by SIGKILL, and lies well above
+# the longest wall limit (600 s in the interactive UI); the descriptor limit
+# keeps a broken loop from exhausting the machine's table. RLIMIT_AS is not
+# set: macOS refuses a finite address-space limit with ValueError ("current
+# limit exceeds maximum limit"), so setting it would end every call before
+# the code runs.
+PYTHON_CPU_LIMIT_S = 3_600
+PYTHON_NOFILE_LIMIT = 1_024
 
 # Seconds to wait for a killed shell_exec command to be reaped.
 _REAP_TIMEOUT_S = 5.0
@@ -216,26 +228,119 @@ async def _file_write(path: str, content: str) -> str:
     )
 )
 async def _python_exec(code: str) -> str:
-    import contextlib
-    import io
+    # A child process, as the rooted python_exec is: code that loops, sleeps
+    # or calls os._exit() must not hold or end the agent's own process, and
+    # the executor's timeout and the run's timeout_s must be able to stop it.
+    # Its directory is this process's, and its standard input is /dev/null,
+    # so it never reads the terminal melo runs in (see _shell_exec).
+    return await _run_python(code)
 
-    buf = io.StringIO()
-    ns: dict[str, Any] = {}
-    # exec() runs on the event loop's thread and holds it until the code
-    # returns, so neither the executor's timeout nor the run's timeout_s
-    # can interrupt it (a documented limit).
-    with contextlib.redirect_stdout(buf):
-        try:
-            exec(code, ns)
-        except SystemExit as exc:
-            # sys.exit() and exit() raise SystemExit, which would end melo
-            # itself, before the run is reported. The call fails instead,
-            # as for any other exception, and the run goes on.
-            raise RuntimeError(
-                f"Code called sys.exit({exc.code!r}), which python_exec "
-                "does not allow"
-            ) from None
-    return buf.getvalue().strip()
+
+# ── The child Python ──
+
+
+def _posix_rlimits() -> str:
+    """The program that gives a python_exec child its POSIX limits.
+
+    The limits above are lowered to the parent's hard limit when that is
+    smaller. It is a Python program because asyncio's subprocess calls
+    cannot set a resource limit in the child; ``preexec_fn`` would run
+    Python in a forked child of this threaded process, which can deadlock.
+    The names the limits use are deleted, so the code sees no new names.
+    """
+    return (
+        "import resource as _localmelo_resource\n"
+        "def _localmelo_cap(_which, _want):\n"
+        "    _soft, _hard = _localmelo_resource.getrlimit(_which)\n"
+        "    if _hard != _localmelo_resource.RLIM_INFINITY and _hard < _want:\n"
+        "        _want = _hard\n"
+        "    _localmelo_resource.setrlimit(_which, (_want, _want))\n"
+        f"_localmelo_cap(_localmelo_resource.RLIMIT_CPU, {PYTHON_CPU_LIMIT_S})\n"
+        f"_localmelo_cap(_localmelo_resource.RLIMIT_NOFILE, {PYTHON_NOFILE_LIMIT})\n"
+        "del _localmelo_cap, _localmelo_resource\n"
+    )
+
+
+def _python_program(code: str) -> str:
+    """The program a python_exec child runs: its limits, then *code*.
+
+    The code is compiled under the name ``<python_exec>`` and its lines go
+    into :mod:`linecache` under that name, so a traceback names the code's
+    own lines and shows them. (Compiling it as ``<string>``, the name the
+    ``-c`` program itself gets, would show the limits' lines instead.) It
+    runs in a fresh globals dict, as Phase 1a's ``exec(code, {})`` did,
+    with ``__name__`` set to ``"__main__"``, so the names the limits use
+    stay out of its reach. A failure's traceback is printed from the code's
+    own frame: the frame of this program that runs it is dropped, and the
+    exit status is 1, as an uncaught exception's is. ``SystemExit``
+    propagates, so ``sys.exit()`` keeps its status.
+    """
+    limits = _posix_rlimits() if os.name == "posix" else ""
+    run = (
+        "import linecache as _localmelo_linecache\n"
+        f"_localmelo_code = {code!r}\n"
+        "_localmelo_linecache.cache['<python_exec>'] = (\n"
+        "    len(_localmelo_code), None,\n"
+        "    _localmelo_code.splitlines(True), '<python_exec>')\n"
+        "import sys as _localmelo_sys\n"
+        "import traceback as _localmelo_traceback\n"
+        "try:\n"
+        "    exec(compile(_localmelo_code, '<python_exec>', 'exec'),\n"
+        "         {'__name__': '__main__', '__builtins__': __builtins__})\n"
+        "except SystemExit:\n"
+        "    raise\n"
+        "except BaseException:\n"
+        "    _localmelo_type, _localmelo_value, _localmelo_tb = "
+        "_localmelo_sys.exc_info()\n"
+        "    _localmelo_traceback.print_exception(\n"
+        "        _localmelo_type, _localmelo_value,\n"
+        "        None if _localmelo_tb is None else _localmelo_tb.tb_next)\n"
+        "    raise SystemExit(1)\n"
+    )
+    return limits + run
+
+
+async def _run_python(code: str, *, cwd: str | None = None) -> str:
+    """Run *code* in a child Python, in *cwd* (``None``: this directory).
+
+    The child runs ``sys.executable -c`` with ``/dev/null`` as its standard
+    input, so ``input()`` gets EOF and it never reads the terminal melo runs
+    in, and it starts a new session, so it and everything it starts are one
+    process group. The POSIX limits of :func:`_posix_rlimits` apply to it.
+
+    A timeout or a cancellation kills that group, as for shell_exec. Once
+    the child has exited by itself, its status goes to
+    :data:`TOOL_EXIT_CODE`. A non-zero exit raises ``RuntimeError("Python
+    exited with code <n>")``, followed by a colon, a line break and the
+    last :data:`_PYTHON_ERROR_TAIL` characters of its output when there is
+    any; zero returns the output, stdout then stderr.
+    """
+    if not sys.executable:
+        raise RuntimeError("No Python interpreter is available for python_exec")
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        _python_program(code),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        cwd=cwd,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = await proc.communicate()
+    except BaseException:
+        await _kill_process_group(proc)
+        raise
+    assert proc.returncode is not None  # communicate() waits for the exit
+    _record_exit_code(proc.returncode)
+    text = _output_text(stdout, stderr)
+    if proc.returncode:
+        message = f"Python exited with code {proc.returncode}"
+        if text:
+            message = f"{message}:\n{text[-_PYTHON_ERROR_TAIL:]}"
+        raise RuntimeError(message)
+    return text
 
 
 # ── Built-ins with a workspace root ──
@@ -272,12 +377,14 @@ def rooted_builtins(
       ended), and the call still succeeds: every later cut keeps a text's
       start.
     - ``python_exec`` runs the code in a child Python, ``sys.executable
-      -``, in *root*, with the code on its standard input, so ``input()``
-      gets EOF and ``sys.exit()`` or ``os.chdir()`` stays in the child. The
-      executor's limit, *tool_timeout_s* when it is set, else its default,
-      stops it. A non-zero exit raises ``RuntimeError("Python exited with
-      code <n>")``, followed by a colon, a line break and the last 4,000
-      characters of the output when there is any.
+      -c``, in *root*, with ``/dev/null`` as its standard input, so
+      ``input()`` gets EOF, and ``sys.exit()`` or ``os.chdir()`` stays in
+      the child. The executor's limit, *tool_timeout_s* when it is set, else
+      its default, stops it. A non-zero exit raises ``RuntimeError("Python
+      exited with code <n>")``, followed by a colon, a line break and the
+      last 4,000 characters of the output when there is any. Without a
+      root, ``python_exec`` runs the same child, in this process's
+      directory.
 
     Both run in a process group of their own, which a timeout or a
     cancellation kills as a whole. Once their child has exited by itself,
@@ -314,32 +421,7 @@ def _rooted_shell_exec(root: str, tool_timeout_s: float | None) -> ToolFunction:
 
 def _rooted_python_exec(root: str) -> ToolFunction:
     async def python_exec(code: str) -> str:
-        if not sys.executable:
-            raise RuntimeError("No Python interpreter is available for python_exec")
-        source = code.encode("utf-8")
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-",
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            cwd=root,
-            start_new_session=True,
-        )
-        try:
-            stdout, stderr = await proc.communicate(source)
-        except BaseException:
-            await _kill_process_group(proc)
-            raise
-        assert proc.returncode is not None  # communicate() waits for the exit
-        _record_exit_code(proc.returncode)
-        text = _output_text(stdout, stderr)
-        if proc.returncode:
-            message = f"Python exited with code {proc.returncode}"
-            if text:
-                message = f"{message}:\n{text[-_PYTHON_ERROR_TAIL:]}"
-            raise RuntimeError(message)
-        return text
+        return await _run_python(code, cwd=root)
 
     return python_exec
 
