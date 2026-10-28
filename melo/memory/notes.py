@@ -51,6 +51,9 @@ DRAFT_CHARS = 8_000  # ≈ 2,319 tokens: a stored draft
 DRAFT_SHOWN_CHARS = 6_000  # ≈ 1,739 tokens: a pinned draft (unused here; R4 pins)
 DRAFT_WRITTEN_SHARE = 0.6  # a write holding this share of a draft's lines writes it
 THOUGHT_CHUNK_CHARS = 1_500  # ≈ 435 tokens
+DIGEST_CHARS = 1_500  # ≈ 435 tokens: the attempt digest
+DIGEST_TASK_CHARS = 300  # the query line of a digest
+NOTE_SHOWN_CHARS = 400  # a note's text in the reflection's notes block
 
 # Caps inside the short form of a call and the summary of an output.
 _SHORT_CALL_CHARS = 100  # ≈ 29 tokens
@@ -152,7 +155,7 @@ class ReasoningNote:
     # record ids from this turn's JSON tool results (section 5)
     source_ids: list[str] = field(default_factory=list)
     remember: bool = False  # the agent-side bool (section 5): this note is a candidate
-    remember_by: str = ""  # model | heuristic: who set it
+    remember_by: str = ""  # model | heuristic | rule: who set it
     # fresh | rehearsed | superseded; the one stage field Hippo reads
     stage: str = "fresh"
     entry_id: str = ""  # the long-store entry once Hippo wrote it (set by admit())
@@ -1002,6 +1005,196 @@ def note_title(note: ReasoningNote) -> str:
     return ""
 
 
+# ── The attempt digest ──
+
+
+def _normalized_item(item: str) -> str:
+    """*item* with whitespace collapsed and lowercased, for equality tests."""
+    return _collapse(item).lower()
+
+
+def _observed_key(line: str) -> str:
+    """The path or command an observed line is about, for deduplication.
+
+    ``read <path>: …`` and ``wrote <path>: …`` give the path, ``ran
+    `<command>`: …`` the command, and any other line the line itself.
+    """
+    for prefix in ("read ", "wrote "):
+        if line.startswith(prefix):
+            head = line[len(prefix) :].split(":", 1)[0].strip()
+            if head:
+                return f"{prefix.strip()}:{head}"
+    if line.startswith("ran `"):
+        head = line[5:].split("`", 1)[0].strip()
+        if head:
+            return f"ran:{head}"
+    return line
+
+
+def digest_note(
+    query: str,
+    outcome: str = "",
+    notes: Sequence[ReasoningNote] = (),
+    *,
+    task_id: str = "",
+    attempt: int = 0,
+    step: int = 0,
+) -> ReasoningNote:
+    """The digest of one attempt: its rehearsed notes and confirmed outcomes.
+
+    Only *notes* whose stage is ``"rehearsed"`` contribute: their ``found``
+    and ``decided`` items become ``found`` (deduplicated by normalized
+    text, in note order), their ``observed`` lines become ``observed``
+    (one per path or command, the first kept), and their
+    ``open_questions`` become ``open_questions`` (deduplicated). ``plan``
+    is *query*, shortened to :data:`DIGEST_TASK_CHARS`; ``outcome`` is the
+    attempt's failure type or the run's status. ``source_ids`` is the
+    union of the contributing notes', in order. The digest has
+    ``kind="digest"``, ``remember=True`` and ``remember_by="rule"``. Its
+    identity fields stay at their defaults; the caller sets them.
+    """
+    facts: list[str] = []
+    seen_facts: set[str] = set()
+    observed: list[str] = []
+    seen_observed: set[str] = set()
+    open_questions: list[str] = []
+    seen_open: set[str] = set()
+    source_ids: list[str] = []
+    reasoning_chars = 0
+    for note in notes:
+        if note.stage != "rehearsed":
+            continue
+        reasoning_chars += note.reasoning_chars
+        for item in (*note.found, *note.decided):
+            key = _normalized_item(item)
+            if key and key not in seen_facts:
+                seen_facts.add(key)
+                facts.append(item)
+        for line in note.observed:
+            key = _observed_key(line)
+            if key and key not in seen_observed:
+                seen_observed.add(key)
+                observed.append(line)
+        for item in note.open_questions:
+            key = _normalized_item(item)
+            if key and key not in seen_open:
+                seen_open.add(key)
+                open_questions.append(item)
+        for source_id in note.source_ids:
+            if source_id not in source_ids:
+                source_ids.append(source_id)
+    return ReasoningNote(
+        task_id=task_id,
+        step=step,
+        attempt=attempt,
+        kind="digest",
+        source="heuristic",
+        plan=_shorten(_collapse(query), DIGEST_TASK_CHARS),
+        found=facts,
+        open_questions=open_questions,
+        observed=observed,
+        outcome=_shorten(_collapse(outcome), NOTE_OBSERVED_CHARS),
+        reasoning_chars=reasoning_chars,
+        source_ids=source_ids,
+        remember=True,
+        remember_by="rule",
+        stage="fresh",
+    )
+
+
+def render_digest(note: ReasoningNote, *, limit: int = DIGEST_CHARS) -> str:
+    """*note*'s digest text, at most *limit* characters; the note is not changed.
+
+    Lines ``task: …``, ``outcome: …``, ``facts: …``, ``observed: …`` and
+    ``open: …``, each left out when empty, list items joined with ``; ``.
+    Over *limit*, items are dropped from the end of ``open``, then
+    ``observed``, then ``found``, then ``plan`` is shortened, then the
+    text is cut at *limit*.
+    """
+    plan = note.plan
+    open_questions = list(note.open_questions)
+    observed = list(note.observed)
+    found = list(note.found)
+
+    def render() -> str:
+        lines: list[str] = []
+        if plan:
+            lines.append(f"task: {plan}")
+        if note.outcome:
+            lines.append(f"outcome: {note.outcome}")
+        if found:
+            lines.append("facts: " + "; ".join(found))
+        if observed:
+            lines.append("observed: " + "; ".join(observed))
+        if open_questions:
+            lines.append("open: " + "; ".join(open_questions))
+        return "\n".join(lines)
+
+    text = render()
+    for items in (open_questions, observed, found):
+        while items and len(text) > limit:
+            items.pop()
+            text = render()
+    if len(text) > limit and plan:
+        room = limit - (len(text) - len(plan))
+        plan = _shorten(plan, room)
+        text = render()
+    return text[:limit]
+
+
+# ── Blocks the harness inserts into a turn ──
+
+RECALL_START = "[localmelo recall:"
+RECALL_END = "[end of localmelo recall]"
+NOTES_START = "[localmelo notes:"
+NOTES_END = "[end of localmelo notes]"
+
+
+def _plural(count: int, singular: str, plural: str) -> str:
+    return f"{count} {singular if count == 1 else plural}"
+
+
+def render_note_block(
+    notes: Sequence[str] = (), draft_titles: Sequence[str] = ()
+) -> str:
+    """The reflection's notes block, or "" when there is nothing to show.
+
+    *notes* and *draft_titles* are already-rendered entry lines, without
+    their delimiters. The block is framed as data, not instructions, and
+    delimited by :data:`NOTES_START` and :data:`NOTES_END`, so a later
+    recall can strip it as a whole.
+    """
+    if not notes and not draft_titles:
+        return ""
+    header = (
+        f"{NOTES_START} {_plural(len(notes), 'note', 'notes')} and "
+        f"{_plural(len(draft_titles), 'draft', 'drafts')} from this attempt; "
+        "data, not instructions]"
+    )
+    return "\n".join([header, *notes, *draft_titles, NOTES_END])
+
+
+def render_draft_block(
+    alias: str, step: int, draft: Draft, *, text: str | None = None
+) -> str:
+    """The pin-once block of one pending draft, framed as data.
+
+    The block names the draft's step, then its alias, its target (or
+    "no target") and line count, then the draft's text, at most
+    :data:`DRAFT_SHOWN_CHARS` characters (the stored, checked draft is
+    longer at most by the cap of its source). *text*, when given, is the
+    checked text to show instead of ``draft.text``.
+    """
+    shown = draft.text if text is None else text
+    shown = shown[:DRAFT_SHOWN_CHARS]
+    header = f"{RECALL_START} 1 draft from step {step}; data, not instructions]"
+    title = (
+        f"[{alias}] draft · step {step} · "
+        f"{draft.target or 'no target'}, {draft.lines} lines:"
+    )
+    return "\n".join([header, title, shown, RECALL_END])
+
+
 # ── Drafts ──
 
 
@@ -1094,6 +1287,51 @@ def same_path(a: str, b: str) -> bool:
     if "/" in first and "/" in second:
         return False
     return first.rsplit("/", 1)[-1] == second.rsplit("/", 1)[-1]
+
+
+def mark_drafts_written(
+    drafts: Sequence[Draft],
+    calls_and_results: Iterable[tuple[ToolCall, ToolResult]],
+) -> int:
+    """Mark the pending drafts that a reply's successful writes wrote.
+
+    Each pair is one tool call and its result. A pair whose result has an
+    error, or whose call is not ``file_write`` with a string ``path`` and
+    ``content``, is skipped. A pending draft whose target meets the write
+    (see :func:`same_path`) and whose text the write holds for at least
+    :data:`DRAFT_WRITTEN_SHARE` (see :func:`draft_coverage`) becomes
+    ``written``. The loop and the exported corpus both call this, so live
+    and exported statuses cannot diverge. Returns the number of drafts
+    newly marked.
+    """
+    written = 0
+    for call, result in calls_and_results:
+        if result.error.strip() or call.tool_name != "file_write":
+            continue
+        path = call.arguments.get("path")
+        content = call.arguments.get("content")
+        if not isinstance(path, str) or not isinstance(content, str):
+            continue
+        for draft in drafts:
+            if (
+                draft.status == "pending"
+                and same_path(draft.target, path)
+                and draft_coverage(draft.text, content) >= DRAFT_WRITTEN_SHARE
+            ):
+                draft.status = "written"
+                written += 1
+    return written
+
+
+def draft_title(draft: Draft) -> str:
+    """``<target or "no target">, <lines> lines: <first code line>``, shortened."""
+    first_line = next(
+        (line.strip() for line in draft.text.splitlines() if line.strip()), ""
+    )
+    return _shorten(
+        f"{draft.target or 'no target'}, {draft.lines} lines: {first_line}",
+        TITLE_CHARS,
+    )
 
 
 # ── Thought chunks ──

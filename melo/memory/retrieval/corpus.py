@@ -35,16 +35,15 @@ from typing import Any, TypeGuard
 from localmelo.melo.checker.sanitize import sanitize_assistant_text
 from localmelo.melo.contracts.providers import LLM_REQUEST_KINDS
 from localmelo.melo.memory.notes import (
-    DRAFT_WRITTEN_SHARE,
     NOTE_ITEM_CHARS,
     NOTE_PLAN_CHARS,
-    TITLE_CHARS,
     Draft,
     ReasoningNote,
     _collapse,
     _shorten,
-    draft_coverage,
+    draft_title,
     extract_draft,
+    mark_drafts_written,
     note_from_reply,
     note_title,
     render_note,
@@ -436,13 +435,7 @@ def _doc(
 
 def _draft_title(draft: Draft) -> str:
     """``<target or "no target">, <lines> lines: <first code line>``, shortened."""
-    first_line = next(
-        (line.strip() for line in draft.text.splitlines() if line.strip()), ""
-    )
-    return _shorten(
-        f"{draft.target or 'no target'}, {draft.lines} lines: {first_line}",
-        TITLE_CHARS,
-    )
+    return draft_title(draft)
 
 
 def _executed(call: RawCall) -> Iterator[tuple[ToolCall, ToolResult]]:
@@ -453,21 +446,13 @@ def _executed(call: RawCall) -> Iterator[tuple[ToolCall, ToolResult]]:
 
 
 def _mark_written(call: RawCall, drafts: Sequence[Draft]) -> None:
-    """Mark the pending drafts that a ``file_write`` of *call* wrote."""
-    for tool_call, _result in _executed(call):
-        if tool_call.tool_name != "file_write":
-            continue
-        path = tool_call.arguments.get("path")
-        content = tool_call.arguments.get("content")
-        if not isinstance(path, str) or not isinstance(content, str):
-            continue
-        for draft in drafts:
-            if (
-                draft.status == "pending"
-                and same_path(draft.target, path)
-                and draft_coverage(draft.text, content) >= DRAFT_WRITTEN_SHARE
-            ):
-                draft.status = "written"
+    """Mark the pending drafts that a ``file_write`` of *call* wrote.
+
+    The rule is :func:`~localmelo.melo.memory.notes.mark_drafts_written`,
+    which the agent loop also calls, so a live run and an exported corpus
+    agree on a draft's status.
+    """
+    mark_drafts_written(drafts, _executed(call))
 
 
 def _recent_path(call: RawCall, recent_path: str) -> str:

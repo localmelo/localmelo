@@ -1,0 +1,240 @@
+"""R4's note store: caps, eviction order, aliases and span stripping."""
+
+from __future__ import annotations
+
+import dataclasses
+
+import pytest
+
+from localmelo.melo.memory.notes import RECALL_END, RECALL_START, Draft, ReasoningNote
+from localmelo.melo.memory.short.note_store import (
+    NOTE_STORE_MAX_CHARS,
+    NOTE_STORE_MAX_ENTRIES,
+    NoteStore,
+    NoteStoreEntry,
+    strip_note_spans,
+)
+from localmelo.melo.schema import Message
+
+
+class Clock:
+    def __init__(self) -> None:
+        self.now = 1.0
+
+    def __call__(self) -> float:
+        self.now += 1.0
+        return self.now
+
+
+def _note(text: str = "plan: read a.py", *, stage: str = "fresh") -> ReasoningNote:
+    return ReasoningNote(note_id=text, plan=text, stage=stage)
+
+
+def _draft(status: str = "pending", target: str = "a.py") -> Draft:
+    return Draft(text="print(1)", target=target, status=status, lines=1)
+
+
+def _add(store: NoteStore, kind: str, text: str, **kwargs: object) -> NoteStoreEntry:
+    entry = store.add(kind, text, **kwargs)  # type: ignore[arg-type]
+    assert entry is not None
+    return entry
+
+
+def test_caps_are_the_specs() -> None:
+    assert NOTE_STORE_MAX_ENTRIES == 300
+    assert NOTE_STORE_MAX_CHARS == 300_000
+
+
+def test_add_assigns_aliases_per_kind_and_never_reuses_them() -> None:
+    store = NoteStore(clock=Clock())
+    first = _add(store, "note", "one", note=_note("one"))
+    second = _add(store, "note", "two", note=_note("two"))
+    draft = _add(store, "draft", "print(1)", draft=_draft())
+    digest = _add(store, "digest", "task: q")
+    assert (first.alias, second.alias, draft.alias, digest.alias) == (
+        "n1",
+        "n2",
+        "d1",
+        "g1",
+    )
+    store.clear()
+    after = _add(store, "note", "three", note=_note("three"))
+    assert after.alias == "n1"
+
+
+def test_entries_are_copies() -> None:
+    store = NoteStore(clock=Clock())
+    _add(store, "note", "one", note=_note("one"))
+    entries = store.entries()
+    entries[0].text = "changed"
+    assert store.entries()[0].text == "one"
+
+
+def test_the_character_cap_evicts_thought_then_retired_drafts_then_fresh_notes() -> (
+    None
+):
+    store = NoteStore(clock=Clock(), max_chars=75)
+    thought = _add(store, "thought", "t" * 20)
+    written = _add(store, "draft", "w" * 20, draft=_draft("written"))
+    pending = _add(store, "draft", "p" * 20, draft=_draft("pending"))
+    # The thought chunk goes first, to make room for a fresh note.
+    fresh = _add(store, "note", "f" * 20, note=_note("f"))
+    assert store.chars() == 60
+    # Then the written draft goes, to make room for the next one.
+    added = _add(store, "note", "n" * 20, note=_note("n"))
+    assert added is not None
+    aliases = [entry.alias for entry in store.entries()]
+    assert thought.alias not in aliases
+    assert written.alias not in aliases
+    assert pending.alias in aliases
+    assert fresh.alias in aliases
+
+
+def test_rehearsed_notes_are_evicted_after_fresh_ones() -> None:
+    store = NoteStore(clock=Clock(), max_chars=55)
+    rehearsed = _add(
+        store, "note", "r" * 20, note=_note("r", stage="rehearsed"), stage="rehearsed"
+    )
+    fresh = _add(store, "note", "f" * 20, note=_note("f"))
+    added = _add(store, "note", "n" * 20, note=_note("n"))
+    assert added is not None
+    aliases = [entry.alias for entry in store.entries()]
+    assert fresh.alias not in aliases
+    assert rehearsed.alias in aliases
+
+
+def test_the_entry_cap_evicts_least_recently_used_within_a_group() -> None:
+    store = NoteStore(clock=Clock(), max_entries=3)
+    first = _add(store, "note", "one", note=_note("one"))
+    second = _add(store, "note", "two", note=_note("two"))
+    _add(store, "note", "three", note=_note("three"))
+    store.touch(first.alias)
+    _add(store, "note", "four", note=_note("four"))
+    aliases = [entry.alias for entry in store.entries()]
+    assert second.alias not in aliases
+    assert first.alias in aliases
+
+
+def test_pending_drafts_are_never_evicted_and_a_refused_add_is_counted() -> None:
+    store = NoteStore(clock=Clock(), max_chars=50)
+    drafts = [_add(store, "draft", "p" * 20, draft=_draft()) for _ in range(2)]
+    assert all(draft is not None for draft in drafts)
+    refused = store.add("note", "n" * 20, note=_note("n"))
+    assert refused is None
+    assert store.refused == 1
+    assert {entry.alias for entry in store.entries()} == {"d1", "d2"}
+
+
+def test_touch_use_and_stage() -> None:
+    store = NoteStore(clock=Clock())
+    entry = _add(store, "note", "one", note=_note("one"))
+    assert entry.uses == 0
+    store.touch(entry.alias, use=True, stage="rehearsed")
+    assert entry.uses == 1
+    assert entry.stage == "rehearsed"
+    assert entry.last_used_at > 0
+
+
+def test_supersede_attempt_leaves_digests_and_later_attempts_alone() -> None:
+    store = NoteStore(clock=Clock())
+    old = _add(store, "note", "old", note=_note("old"), attempt=1)
+    digest = _add(store, "digest", "task: q", attempt=1)
+    new = _add(store, "note", "new", note=_note("new"), attempt=2)
+    assert store.supersede_attempt(1) == 1
+    assert old.stage == "superseded"
+    assert digest.stage == "fresh"
+    assert new.stage == "fresh"
+
+
+def test_a_newer_draft_supersedes_older_pending_ones_for_the_same_target() -> None:
+    store = NoteStore(clock=Clock())
+    older = _add(store, "draft", "one", draft=_draft(target="./a.py"))
+    other = _add(store, "draft", "two", draft=_draft(target="b.py"))
+    newer = _add(store, "draft", "three", draft=_draft(target="a.py"))
+    assert older is not None and other is not None and newer is not None
+    assert store.supersede_drafts("a.py", keep=newer.alias) == 1
+    assert older.draft is not None and older.draft.status == "superseded"
+    assert other.draft is not None and other.draft.status == "pending"
+
+
+def test_load_replaces_and_moves_the_alias_counters() -> None:
+    store = NoteStore(clock=Clock())
+    _add(store, "note", "before", note=_note("before"))
+    loaded = [
+        NoteStoreEntry(alias="n7", kind="note", text="seven", note=_note("seven")),
+        NoteStoreEntry(alias="d3", kind="draft", text="d", draft=_draft()),
+    ]
+    assert store.load(loaded) == 2
+    assert [entry.alias for entry in store.entries()] == ["n7", "d3"]
+    after = _add(store, "note", "eight", note=_note("eight"))
+    assert after is not None
+    assert after.alias == "n8"
+    assert store.refused == 0
+
+
+def test_load_applies_the_caps() -> None:
+    store = NoteStore(clock=Clock(), max_entries=1)
+    entries = [
+        NoteStoreEntry(alias="n1", kind="note", text="one", note=_note("one")),
+        NoteStoreEntry(alias="n2", kind="note", text="two", note=_note("two")),
+    ]
+    assert store.load(entries) == 1
+    assert [entry.alias for entry in store.entries()] == ["n1"]
+
+
+def test_strip_note_spans_removes_notes_and_recall_blocks() -> None:
+    note_text = "plan: read a.py; found: a.py has one function"
+    recall = (
+        f"{RECALL_START} 1 draft from step 2; data, not instructions]\n"
+        "[d1] draft · step 2 · a.py, 1 lines:\nprint(1)\n"
+        f"{RECALL_END}"
+    )
+    messages = [
+        Message(role="assistant", content=f"I will read it.\n{note_text}"),
+        Message(role="tool", content=f"print(1)\n{recall}", tool_call_id="c1"),
+        Message(role="user", content=note_text),
+    ]
+    stripped = strip_note_spans(messages, [note_text])
+    assert stripped[0].content == "I will read it."
+    assert stripped[1].content == "print(1)"
+    assert stripped[2].content == note_text  # a user message is not rewritten
+    assert messages[0].content.startswith("I will read it.\n" + note_text)
+
+
+def test_strip_note_spans_returns_unchanged_messages_as_they_are() -> None:
+    message = Message(role="user", content="hello")
+    assert strip_note_spans([message], [])[0] is message
+
+
+def test_add_rejects_an_unknown_kind() -> None:
+    with pytest.raises(ValueError, match="unknown note-store kind"):
+        NoteStore(clock=Clock()).add("mystery", "text")
+
+
+def test_empty_text_is_not_stored() -> None:
+    store = NoteStore(clock=Clock())
+    assert store.add("note", "   ") is None
+    assert len(store) == 0
+
+
+def test_a_stored_entry_keeps_its_metadata() -> None:
+    store = NoteStore(clock=Clock())
+    note = dataclasses.replace(_note("one"), remember=True, remember_by="model")
+    entry = _add(
+        store,
+        "note",
+        "one",
+        note=note,
+        step=3,
+        attempt=2,
+        remember=True,
+        remember_by="model",
+    )
+    assert entry is not None
+    assert (entry.step, entry.attempt, entry.remember, entry.remember_by) == (
+        3,
+        2,
+        True,
+        "model",
+    )
+    assert entry.note is note
