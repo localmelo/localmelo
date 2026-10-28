@@ -211,3 +211,36 @@ async def test_the_in_memory_long_term_searches_text() -> None:
     assert [text for text, _score, _meta in rows] == [
         "the deployment checklist is owned by Alice"
     ]
+
+
+@pytest.mark.asyncio
+async def test_an_embedding_agent_still_recalls_text_only_entries() -> None:
+    from localmelo.melo.memory.coordinator import Hippo
+
+    class FakeEmbedding:
+        async def embed(self, texts: list[str]) -> list[list[float]]:
+            return [[1.0, 0.0] for _text in texts]
+
+    store = LongTerm()
+    await store.apply(
+        text="the deployment checklist is owned by Alice",
+        kind="semantic",
+        source="user",
+        admitted_by="user_statement",
+        provenance={"source_ids": []},
+        task_id="t-a",
+        session_id="",
+        created_at=1.0,
+        embedding=None,
+        action="NEW",
+        target_id=None,
+        reason="new",
+        source_ids=[],
+        keep_text=False,
+        candidate_id="c1",
+    )
+    hippo = Hippo(embedding=FakeEmbedding(), long=store)  # type: ignore[arg-type]
+    rows = await hippo.recall_long("deployment checklist")
+    assert [text for text, _score, _meta in rows] == [
+        "the deployment checklist is owned by Alice"
+    ]

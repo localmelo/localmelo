@@ -222,3 +222,40 @@ def test_a_note_with_no_matching_record_keeps_all_its_ids() -> None:
     )
     items = candidate_items(note)
     assert items[0].source_ids == ("r1", "r2")
+
+
+async def test_flush_does_not_admit_an_earlier_run_s_candidate() -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    old = _candidate("I live in Berlin near the river and work at Acme", task_id="t1")
+    hippo.propose(old)
+    assert (
+        await hippo.flush(
+            run_request=True, digest=None, final_reflection=None, task_id="t2"
+        )
+        == []
+    )
+    assert await store.count_entries() == 0
+    decisions = await hippo.flush(
+        run_request=True, digest=None, final_reflection=None, task_id="t1"
+    )
+    assert [decision.action for decision in decisions] == ["NEW"]
+
+
+async def test_each_item_keeps_its_own_source_ids_in_the_entry() -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    candidate = _candidate(
+        "two facts",
+        items=(
+            CandidateItem("the amount is 42 thousand for the migration", ("r1",)),
+            CandidateItem("the office is on Main Street in Springfield", ("r2",)),
+        ),
+    )
+    hippo.propose(candidate)
+    await hippo.admit("n1", "rehearsal")
+    entries = await store.active_entries()
+    assert [entry.provenance["source_ids"] for entry in entries] == [
+        ["r1"],
+        ["r2"],
+    ]

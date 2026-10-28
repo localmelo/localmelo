@@ -197,3 +197,47 @@ def test_a_candidate_carries_its_items_and_remember_bool() -> None:
     )
     assert candidate.items == ()
     assert candidate.remember
+
+
+def test_the_target_tie_break_prefers_the_higher_id() -> None:
+    active = [
+        _entry(1, "I live in Berlin near the river and work at Acme", created_at=1.0),
+        _entry(2, "I live in Berlin near the river and work at Acme", created_at=1.0),
+    ]
+    decision = _decision(
+        "I live in Berlin near the river and work at Acme",
+        kind="profile",
+        source="user",
+        active=active,
+    )
+    assert decision.action == "IGNORE"
+    assert decision.target_id == 2
+
+
+def _boundary_texts(shared: int, total: int = 100) -> tuple[str, str]:
+    left = [f"a{index}" for index in range(total)]
+    right = [f"a{index}" for index in range(shared)] + [
+        f"b{index}" for index in range(total - shared)
+    ]
+    return " ".join(left), " ".join(right)
+
+
+def test_the_action_boundary_is_0_90_for_ignore() -> None:
+    active_text, below_text = _boundary_texts(89)
+    _active_text, at_text = _boundary_texts(90)
+    below = _decision(below_text, kind="semantic", active=[_entry(1, active_text)])
+    at = _decision(at_text, kind="semantic", active=[_entry(1, active_text)])
+    assert below.overlap == 0.89
+    assert below.action != "IGNORE"
+    assert at.overlap == 0.9
+    assert at.action == "IGNORE"
+
+
+def test_the_action_boundary_is_0_35_for_related() -> None:
+    active_text, below_text = _boundary_texts(34)
+    _active_text, at_text = _boundary_texts(35)
+    below = _decision(below_text, kind="semantic", active=[_entry(1, active_text)])
+    at = _decision(at_text, kind="semantic", active=[_entry(1, active_text)])
+    assert below.action == "NEW"
+    assert at.overlap == 0.35
+    assert at.action == "RELATED"

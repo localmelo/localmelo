@@ -131,6 +131,7 @@ async def test_a_stated_fact_is_admitted_at_the_start_without_a_model_call(
     ]
     assert entries[0]["kind"] == "profile"
     assert entries[0]["admitted_by"] == "user_statement"
+    assert entries[0]["provenance"]["source_ids"] == []
     assert result.memory_stats is not None
     assert result.memory_stats["admitted"]["user_statement"] == 1
 
@@ -163,7 +164,7 @@ async def test_admit_on_outcome_writes_the_digest_with_its_terminal_status(
 
 @pytest.mark.asyncio
 async def test_the_memory_event_has_its_five_fields(tmp_path: Path) -> None:
-    events: list[tuple[str, dict[str, Any]]] = []
+    events: list[tuple[str, Any]] = []
 
     def on_event(event: AgentEvent) -> None:
         if event.type == "memory":
@@ -203,6 +204,7 @@ async def test_a_tool_result_never_becomes_a_user_fact(tmp_path: Path) -> None:
         json.dumps({"record_id": "r1", "note": "my birthday is 12 May 1990"}) + "\n"
     )
     server = FakeLLM(
+        _note_reply("profile.json says my birthday is 12 May 1990 and I like tea"),
         _call("file_read", {"path": "profile.json"}),
         _answer("done"),
     )
@@ -213,13 +215,65 @@ async def test_a_tool_result_never_becomes_a_user_fact(tmp_path: Path) -> None:
             memory_dir=str(tmp_path / "memory"),
             workspace_root=str(tmp_path),
             builtins=frozenset({"file_read"}),
-            max_steps=2,
+            max_steps=3,
         ),
     )
     await agent.run_task("read the profile file")
     await agent.close()
     entries = await _entries(tmp_path)
+    assert entries
     assert all(entry["kind"] != "profile" for entry in entries)
+
+
+@pytest.mark.asyncio
+async def test_an_aider_shaped_query_makes_no_profile_entry(tmp_path: Path) -> None:
+    server = FakeLLM(_answer("done"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            max_steps=1,
+        ),
+    )
+    await agent.run_task(
+        "Fix the failing test in list_ops.py and run pytest until it passes"
+    )
+    await agent.close()
+    assert not (tmp_path / "memory" / "long_term.db").exists() or all(
+        entry["kind"] != "profile" for entry in await _entries(tmp_path)
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_secret_in_a_note_item_is_checked_before_it_is_staged(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "notes.py").write_text("def append(a, b):\n    return a + b\n")
+    key = "sk-" + "a" * 24
+    server = FakeLLM(
+        _note_reply(f"notes.py holds the key {key} in its append helper"),
+        _call("file_read", {"path": "notes.py"}),
+        _answer("done"),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_read"}),
+            max_steps=3,
+        ),
+    )
+    await agent.run_task("q")
+    staged = agent.hippo.staged.all()
+    await agent.close()
+    assert staged
+    for candidate in staged:
+        assert key not in candidate.text
+        for item in candidate.items:
+            assert key not in item.text
 
 
 @pytest.mark.asyncio

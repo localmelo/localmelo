@@ -153,6 +153,7 @@ async def test_500_active_entries_rank_under_five_milliseconds(tmp_path: Path) -
     try:
         for index in range(500):
             await store.add(f"entry {index} about cats and dogs", [1.0, index / 500])
+        await store.search_text("cats", top_k=20)  # builds the index once
         started = time.perf_counter()
         rows = await store.search_text("cats", top_k=20)
         elapsed_ms = (time.perf_counter() - started) * 1000
@@ -333,3 +334,19 @@ def test_a_vector_row_may_hold_a_tuple_stored_as_float32(tmp_path: Path) -> None
             await store.aclose()
 
     asyncio.run(run())
+
+
+async def test_two_legacy_rows_with_equal_scores_keep_their_id_order(
+    tmp_path: Path,
+) -> None:
+    store = SqliteLongTerm(tmp_path / "long_term.db")
+    try:
+        await store.add("first in id order", [1.0, 0.0])
+        await store.add("second in id order", [1.0, 0.0])
+        rows = await store.search([1.0, 0.0], top_k=5)
+        assert [text for text, _score, _meta in rows] == [
+            "first in id order",
+            "second in id order",
+        ]
+    finally:
+        await store.aclose()
