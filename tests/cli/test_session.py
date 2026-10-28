@@ -579,6 +579,15 @@ async def test_check_server_suggests_a_listed_embedding_model(setup: Setup) -> N
     ) in out
 
 
+async def test_check_server_does_not_suggest_without_a_listed_candidate(
+    setup: Setup,
+) -> None:
+    setup.factory.backend = replace(setup.factory.backend, key="vllm", label="vLLM")
+    setup.factory.listed = ["m1", "m2"]
+    await setup.session.check_server()
+    assert "This server lists" not in setup.out.text()
+
+
 @pytest.mark.parametrize(
     ("embedding", "memory", "key"),
     [
