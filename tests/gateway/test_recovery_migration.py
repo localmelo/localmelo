@@ -28,6 +28,7 @@ async def test_v2_recovery_migration_rolls_back_and_preserves_pause(
         identity = await tasks.park_identity(task.task_id)
         async with store.component_transaction("make_v2") as conn:
             for table in (
+                "recovery_capture",
                 "recovery_processes",
                 "recovery_crashes",
                 "recovery_operations",
