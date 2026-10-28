@@ -91,8 +91,9 @@ def test_refuses_symlink_and_nonregular_file(tmp_path: Path) -> None:
             Inbox(path).poll()
 
 
+@pytest.mark.parametrize("fixed_prefix", [False, True])
 async def test_agent_accepts_at_boundaries_without_adjacent_users(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fixed_prefix: bool
 ) -> None:
     import json
 
@@ -125,7 +126,9 @@ async def test_agent_accepts_at_boundaries_without_adjacent_users(
             model="stub",
             transport=httpx.MockTransport(reply),
         ),
-        options=AgentOptions(memory=False, max_steps=2, attempt_policy="none"),
+        options=AgentOptions(
+            memory=False, max_steps=2, attempt_policy="none", fixed_prefix=fixed_prefix
+        ),
     )
     try:
         result = await agent.run_task(
@@ -229,6 +232,40 @@ async def test_inbox_batch_that_cannot_fit_is_not_acknowledged(
             base_url="http://llm.test/v1", model="stub", transport=transport
         ),
         options=AgentOptions(memory=False),
+    )
+    source = Inbox(path)
+    try:
+        result = await agent.run_task("task", observe=events.append, inbox=source)
+    finally:
+        await agent.close()
+    assert result.status != "completed"
+    assert source.offset == 0
+    assert not [event for event in events if event.type == "inbox.accepted"]
+
+
+async def test_inbox_is_not_acknowledged_if_context_budget_rejects_request(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import httpx
+
+    from localmelo.melo.agent import Agent, AgentOptions
+    from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = tmp_path / "inbox"
+    path.write_text("x" * 1000 + "\n", encoding="utf-8")
+    events: list[AgentEvent] = []
+    agent = Agent(
+        llm=OpenAICompatLLM(
+            base_url="http://llm.test/v1",
+            model="stub",
+            transport=httpx.MockTransport(
+                lambda request: pytest.fail("model must not run")
+            ),
+        ),
+        options=AgentOptions(
+            memory=False, context_window=100, output_reserve=10, safety_margin=10
+        ),
     )
     source = Inbox(path)
     try:

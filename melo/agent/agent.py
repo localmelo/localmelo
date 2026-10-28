@@ -3386,6 +3386,7 @@ class Agent:
         *,
         task_query: Message | None = None,
         run: _RunState | None = None,
+        on_ready: Callable[[list[Message]], None] | None = None,
     ) -> tuple[Message, str | None]:
         """Stage 3: LLM planning step with post-plan check.
 
@@ -3418,6 +3419,11 @@ class Agent:
             recall_records = run.pending_recall_records
             run.pending_recalls = []
             run.pending_recall_records = []
+        plan_args: dict[str, Any] = {}
+        if run is not None and run.inbox is not None:
+            plan_args["coalesce_users"] = True
+        if on_ready is not None:
+            plan_args["on_ready"] = on_ready
         response = await self.chat.plan_step(
             context=long_context,
             short=sent,
@@ -3426,7 +3432,7 @@ class Agent:
             reflections=reflections,
             query_block=query_block,
             recalls=recalls,
-            **({"coalesce_users": True} if run is not None and run.inbox else {}),
+            **plan_args,
         )
         if run is not None and recall_records:
             self._commit_recalls(recall_records, run)
@@ -4412,14 +4418,30 @@ class Agent:
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""
+            on_ready = None
             if inserted is not None:
                 if not any(message is inserted for message in short_window):
                     run.end("failed", error="inbox instructions do not fit the prompt")
                     return step + 1, ""
-                assert run.inbox is not None
-                for offset, text in pending:
-                    run.inbox.accept(offset)
-                    run.events.inbox_accepted(offset, text, run.steps + 1, run.attempts)
+
+                def on_ready(
+                    messages: list[Message],
+                    *,
+                    inserted: Message = inserted,
+                    pending: list[tuple[int, str]] = pending,
+                ) -> None:
+                    assert run.inbox is not None
+                    if (
+                        not messages
+                        or messages[-1].role != "user"
+                        or not messages[-1].content.endswith(inserted.content)
+                    ):
+                        raise ContextFitError(
+                            "Inbox instructions do not fit the request"
+                        )
+                    for offset, text in pending:
+                        run.inbox.accept(offset)
+                        run.events.inbox_accepted(offset, text, run.steps, run.attempts)
 
             # LLM planning step (with reflection context). The step counts
             # once the planning call is made, even if it then raises.
@@ -4434,6 +4456,7 @@ class Agent:
                 reflections=reflections,
                 task_query=run.task_query_msg,
                 run=run,
+                **({"on_ready": on_ready} if on_ready is not None else {}),
             )
             # Also a reply the post-plan check refuses.
             run.events.assistant_message(response)
