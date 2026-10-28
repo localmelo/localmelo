@@ -218,7 +218,7 @@ and polls for changes from other browser clients every 2.5 seconds while visible
 A chat's header has a level chip (P1 to P4, P2 by default) that sets how the
 scheduler orders the chat's calls in front of other chats; it is kept in
 memory and is not saved. While a call waits (for a slot or for the
-background cap), the status label says
+background cap), the header's status pill and the status label say
 `Waiting: <reason>`, the sidebar says `● Waiting` and the chat's bubble says
 the same; the reason is the scheduler's own code (`Resources`, `Priority`, …).
 
