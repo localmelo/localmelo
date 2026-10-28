@@ -76,6 +76,30 @@
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
 
+        <article class="update-entry" id="u-2026-10-28-tool-modes">
+          <h3>网关和控制台会话不再提供 <code>shell_exec</code></h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/104">#104</a>
+          </p>
+          <ul>
+            <li>网关和控制台会话现在运行在新的 <code>gateway</code> 工具模式中，只注册 <code>file_read</code>、<code>file_write</code> 和 <code>python_exec</code>：<code>shell_exec</code> 完全不注册，模型根本看不到它。这两种界面都没有审批策略：控制台的审批会通过同一个未认证的回环 API 到达，所以任何本地进程都能批准自己的请求；Python 代码仍然可以启动进程。网关或控制台会话不能通过默认组合拿到 <code>shell_exec</code>，显式写出它的 <code>AgentOptions(builtins=…)</code> 会被检查器在 <code>gateway</code> 模式下拒绝，并在原因里写明模式和 <code>--builtins all</code>。</li>
+            <li><code>AgentOptions</code> 新增 <code>mode</code>：<code>direct</code>、<code>interactive</code>、<code>gateway</code> 或 <code>python</code>（Python API 的默认值），命令行会设置各自界面的模式。交互式界面仍把 <code>shell_exec</code> 放在审批面板之后（<code>--yolo</code> 不询问），直接模式不变。针对六种破坏性命令模式的黑名单仍适用于 <code>direct</code> 和 <code>python</code> 模式，所以不传审批策略的 Python 调用者不会比以前更弱：<code>rm -rf /</code>、<code>mkfs</code>、<code>dd if=</code>、fork 炸弹、<code>shutdown</code> 和 <code>reboot</code> 都会被拒绝，而交互式界面改为询问审批面板。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#permission-tiers">权限级别（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md#agentoptions">Python API（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-note-sources">
+          <h3>笔记中的事实会引用确立它的结果</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/103">#103</a>
+          </p>
+          <ul>
+            <li>笔记的条目现在会从确立它们的观察中取得 <code>source_ids</code>，即使这个观察来自同一任务更早的回复：先找这次回复自己的工具结果，再找仍在窗口里的结果，然后是任务其余的记录（最新的在前，最多保留最后 200 条）。只有共享一个强键（数字、日期或时间、含数字的标识符，或不在句首的大写名称）或两个有区分度的非填充词时才算匹配；有记录但都不匹配的笔记不会给条目任何来源，所以只写着“Done.”的笔记不会再引用一条无关的“no harm done”记录。这会为从更早的工具结果复制的事实以及由它们构成的摘要补全 <code>provenance.source_ids</code>，并且永远不会使用其他任务的记录。</li>
+            <li>模型看到的召回标题不再带检索耗时：现在是 <code>(retriever bm25)</code>，而不是 <code>(retriever bm25, 12 ms)</code>。相同的运行现在会产生相同的提示词字节，所以保留在窗口里的块不会破坏前缀缓存；耗时仍保留在 <code>llm_calls.recall_json</code>、<code>recall</code> 事件和 <code>memory_stats</code> 中。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#recall-in-the-loop">循环中的召回（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#long-term-memory">长期记忆（英文）</a>。</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-28-session-commands">
           <h3>命名、撤销、查看和复制终端对话</h3>
           <p class="update-date">
