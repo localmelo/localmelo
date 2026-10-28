@@ -496,7 +496,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   punctuation) no longer enter a digest or make one a rehearsal candidate.
   Over the limit, open questions drop first, then observed lines, decisions,
   facts and files, then the task shortens; the outcome and the verification
-  stay. `legacy` and direct mode without memory are unchanged ([#NN]).
+  stay. `legacy` and direct mode without memory are unchanged ([#116]).
 - Direct mode and the Python API's default `python` mode no longer offer
   `shell_exec`: their default built-ins are `file_read`, `file_write` and
   `python_exec`, and an `exec` call that was registered anyway is refused
@@ -854,3 +854,4 @@ earlier milestones.
 [#113]: https://github.com/localmelo/localmelo/pull/113
 [#114]: https://github.com/localmelo/localmelo/pull/114
 [#115]: https://github.com/localmelo/localmelo/pull/115
+[#116]: https://github.com/localmelo/localmelo/pull/116
