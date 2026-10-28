@@ -740,3 +740,32 @@ async def test_a_file_changed_while_the_panel_waits_is_denied(tmp_path: Path) ->
     )
     assert not decision.allow and decision.origin == "policy"
     assert "changed while this was waiting" in decision.reason
+
+
+async def test_a_file_created_while_the_panel_waits_is_denied(tmp_path: Path) -> None:
+    path = tmp_path / "new.txt"
+
+    async def ask_and_create(request: ApprovalRequest) -> ApprovalDecision:
+        path.write_text("someone else's file\n", encoding="utf-8")
+        return ApprovalDecision(True)
+
+    snapshots = EditSnapshots(RememberingPolicy(ask_and_create))
+    decision = await snapshots.decide(
+        _request("file_write", path=str(path), content="mine\n")
+    )
+    assert not decision.allow and decision.origin == "policy"
+
+
+async def test_a_new_file_left_alone_while_the_panel_waits_is_allowed(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "new.txt"
+
+    async def ask(request: ApprovalRequest) -> ApprovalDecision:
+        return ApprovalDecision(True)
+
+    snapshots = EditSnapshots(RememberingPolicy(ask))
+    decision = await snapshots.decide(
+        _request("file_write", path=str(path), content="mine\n")
+    )
+    assert decision.allow

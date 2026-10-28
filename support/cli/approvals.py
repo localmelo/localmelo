@@ -339,11 +339,8 @@ class EditSnapshots:
         )
         # Q1 a: the person approved what they saw. If the file changed while
         # the panel was open, deny rather than write over the newer file.
-        if (
-            decision.allow
-            and stat is not None
-            and await asyncio.to_thread(_stat_key, path) != stat
-        ):
+        # A file that did not exist then (stat None) and exists now counts too.
+        if decision.allow and path and await asyncio.to_thread(_stat_key, path) != stat:
             return ApprovalDecision(
                 False,
                 "The file changed while this was waiting; look again.",
