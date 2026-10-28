@@ -100,3 +100,12 @@ def test_a_slash_date_matches_an_iso_record_and_not_a_bare_number() -> None:
         source_records=[plumber],
     )
     assert [candidate.source_ids for candidate in candidate_items(only_plumber)] == [()]
+
+
+def test_a_fenced_code_block_is_not_a_fact() -> None:
+    content = (
+        "```python\nmeeting = '2026-04-09 9:00'\n```\n"
+        "The meeting is at 9:00 on 2026-04-09."
+    )
+    note, _rest = note_from_reply(content)
+    assert note.found == ["The meeting is at 9:00 on 2026-04-09."]

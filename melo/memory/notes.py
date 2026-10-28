@@ -994,7 +994,9 @@ def note_from_reply(
                 visible = _NOTE_TAG_RE.sub("", content)
             text = _without_fences(thinking + "\n\n" + visible)
             note = _heuristic_note(
-                text, tool_calls, factual_text=visible if block is None else ""
+                text,
+                tool_calls,
+                factual_text=_without_fences(visible) if block is None else "",
             )
         minimal = _without_fences(fallback or visible).strip()
 
