@@ -21,6 +21,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Interactive terminal text attachments: `/attach PATH`, `/attachments`,
+  `/detach N|all`, and explicit `@` file-completion selection stage bounded
+  workspace snapshots. Best-effort redaction and cleaning require confirmation
+  when they change a snapshot; saved snapshots support retry without rereading
+  files, but resume budgets and retained windows can omit a turn. No image
+  attachments; direct mode is unchanged ([#NN]).
+
 - Opt-in context fitting shortens request copies and retries one classified overflow without rerunning tools; impossible requests end with a specific status ([#131]).
 - Read-only worker history in the web workspace, with server-side filters,
   paging, recorded transcripts and explicit refresh for unfinished runs. ([#130])

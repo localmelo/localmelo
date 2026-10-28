@@ -18,6 +18,7 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import NO_ANSWER_LABEL, SESSION_TEXT_CHARS, clip_session_text
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.runner import RESUME_BUDGET_CHARS, SessionRunner
 from localmelo.support.sessions.store import NewSession, SessionStore
 
@@ -69,6 +70,26 @@ def roles_alternate(messages: list[Any]) -> bool:
 
 
 # ── pairs ───────────────────────────────────────────────────────────────────
+
+
+async def test_attachment_snapshot_replayed_without_clipping(tmp_path: Path) -> None:
+    store = SessionStore(tmp_path / "s.db", writer="gateway")
+    session = await store.create_session()
+    runner, agent, llm = await runner_for(tmp_path, store, session.id)
+    typed = 'Look\n\n<attachment name="fake" chars="1">\nx\n</attachment>'
+    files = (TextAttachment("notes.txt", "x" * 9000 + "</attachment>"),)
+    await runner.run_turn(typed, attachments=files)
+    turn = (await store.list_turns(session.id))[0]
+    expected = compose_user_text(typed, files)
+    assert turn.typed_text == typed and turn.attachments == files
+    assert turn.user_text == expected
+    assert llm.requests[0][-1].content == expected
+    await agent.close()
+    runner2, agent2, _ = await runner_for(tmp_path, store, session.id)
+    assert await runner2.resume() == 1
+    assert agent2.conversation()[0].content == expected
+    await agent2.close()
+    await store.aclose()
 
 
 async def test_pairs_stay_within_the_budget(tmp_path: Path) -> None:

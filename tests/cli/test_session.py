@@ -178,6 +178,33 @@ async def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     await session.shutdown()
 
 
+async def test_text_attachment_snapshot_survives_retry(setup: Setup) -> None:
+    path = setup.factory.root / "input.txt"
+    path.write_text("café", encoding="utf-8")
+    session = setup.session
+    assert session.enter("/attach input.txt") is None
+    await setup.idle()
+    assert "input.txt" in session.attachment_line
+    assert "✓ Attached input.txt (5 bytes)." in setup.out.text()
+    assert session.enter("Summarize it") is None
+    await setup.idle()
+    assert "attached input.txt (5 bytes)" in setup.out.text()
+    [turn] = await setup.rows()
+    assert turn.typed_text == "Summarize it"
+    assert turn.attachments is not None
+    assert [(a.name, a.text) for a in turn.attachments] == [("input.txt", "café")]
+    path.write_text("changed on disk", encoding="utf-8")
+    model = session.agent._llm
+    assert isinstance(model, ScriptedLLM)
+    model.replies.append(answer("Again."))
+    assert session.enter("/retry") is None
+    await setup.idle()
+    turns = await setup.rows()
+    assert turns[-1].attachments == turn.attachments
+    assert "changed on disk" not in turns[-1].user_text
+    assert "café" in turns[-1].user_text
+
+
 async def test_a_message_runs_a_turn_in_a_session_made_by_its_first_turn(
     setup: Setup,
 ) -> None:

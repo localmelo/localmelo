@@ -277,6 +277,18 @@ These options apply to `melo` without a task.
   `window` can replay the checkpoint's retained, redacted thinking. The
   current process's mode wins over the mode recorded on old turns. Neither
   path reconstructs the RAM-only note store. See [Resume](../guides/sessions.md#resume).
+- Text attachments in the interactive UI: `/attach PATH` stages one file
+  (quote paths with spaces), `/attachments` lists staged files, and `/detach N`
+  or `/detach all` removes them. Explicit selection from `@` file completion
+  stages a file; typed `@file` prose alone does not. Workspace-only regular
+  UTF-8 text, no symlinks, traversal, URLs, recognized secret files, binary or
+  images; up to 8 files, 256 KiB each and 512 KiB total in original bytes,
+  subject also to the composed prompt limit. Redaction is best effort; if
+  cleaning or redaction changes a snapshot or path, review and confirm it.
+  Snapshots persist unencrypted with the session and `/retry` uses the saved
+  snapshot, not the live file. Pairs resume has a 32,000-character user/answer
+  budget and may omit a turn; window resume can omit it too. See
+  [Attach text files](../guides/terminal.md#attach-text-files).
 - `--workspace` is expanded and resolved here too, and a path that is not a
   folder gives the same one-line usage error as with a task; see
   [Usage errors](#usage-errors).

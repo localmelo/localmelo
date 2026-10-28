@@ -56,6 +56,10 @@ async def test_resume_keeps_workspace_and_uses_stored_typed_text(setup: Setup) -
         'typed question\n\n<attachment name="notes.txt" chars="4">\nbody\n</attachment>'
     )
     sid = await seed(setup, text, typed="typed question", workspace="/other")
+    async with setup.store.component_transaction("legacy_fixture") as conn:
+        await conn.execute(
+            "UPDATE turns SET attachments = NULL WHERE session_id = ?", (sid,)
+        )
     setup.session.approvals._policy._granted.add("file_write")
     setup.session.enter(f"/resume {sid}")
     await setup.idle()
