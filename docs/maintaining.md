@@ -68,6 +68,14 @@ not migrated yet. Missing Chinese pages are not generated. Do not commit the
 preview. See the [English style guide](STYLE.md) and
 [Chinese style guide](zh-CN/STYLE.md).
 
+In `docs/manifest.json`, a page's `fragments` maps each old source path to
+its migration rule. `"same"` sends every fragment to that language's output
+page with the same ID; a single output path instead sends every fragment to
+that page with the same ID. Neither rule needs an edit for a new heading.
+A split page uses an explicit old-ID-to-`page.html#ID` map: adding a heading
+requires choosing its destination and adding it to that map. The docs tests
+report the source and missing anchors; keep known retired IDs in the map too.
+
 ## Add or change a page
 
 - Add a new Markdown page to the index in `README.md` in this folder. Add it
