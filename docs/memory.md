@@ -17,7 +17,7 @@ page.
 | Turn long-term memory off for one run | `melo --memory off "<task>"` |
 | Keep the model's reasoning N days | `export LOCALMELO_THINKING_RETENTION_DAYS=N` (default 30) |
 | See past runs | `sqlite3` queries; see [Inspect memory](#inspect-memory) |
-| Delete memory | Stop localmelo, then remove the files; see [Reset memory](#reset-memory) |
+| Delete memory | In Python, `await hippo.forget_all()` (one task: `forget(task_id)`); no command yet. See [Reset memory](#reset-memory) |
 
 ## What localmelo remembers
 
@@ -319,7 +319,60 @@ not use a store yet.
 
 ## Reset memory
 
-localmelo has no reset command. To delete memory:
+The Python API can forget memory. There is no command yet; a
+`melo --forget task|all` command comes with the UI work.
+
+```python
+import asyncio
+from pathlib import Path
+
+from localmelo.melo.memory.coordinator import Hippo
+from localmelo.melo.memory.history.sqlite import SqliteHistory
+from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+
+
+async def main() -> None:
+    memory = Path.home() / ".cache" / "localmelo" / "memory"
+    hippo = Hippo(
+        history=SqliteHistory(memory / "history.db"),
+        long=SqliteLongTerm(memory / "long_term.db"),
+    )
+    try:
+        await hippo.forget_all()      # one task: await hippo.forget(task_id)
+    finally:
+        await hippo.aclose()
+
+
+asyncio.run(main())
+```
+
+`agent.hippo` is the same facade over the stores an agent has opened, so a
+running script can call `forget` there too; the script above opens both
+files even when the agent has no embedding provider. `SqliteHistory` and
+`SqliteLongTerm` have `forget(task_id)` and `forget_all()` themselves, as
+do the in-memory `History` and `LongTerm`.
+
+- **What `forget(task_id)` removes.** The task's rows from history's
+  `tasks`, `steps` and `llm_calls` tables. In long-term memory, the entries
+  whose metadata names the task: a reflection's metadata has `"task_id"`,
+  a step summary's has only `"step_id"`, so a per-task forget removes the
+  task's reflections from long-term memory and leaves its step summaries.
+  `forget_all()` removes every long-term entry and every row of the three
+  history tables.
+- **What it does not touch.** Working memory (the current conversation),
+  procedural memory (`melo-procedures forget` clears that), and the session
+  store (`sessions.db`; the web workspace's chats are in
+  `~/.cache/localmelo/playground/`).
+- **How.** One `BEGIN IMMEDIATE` transaction under the store's write lock.
+  The deletes overwrite what they free (`PRAGMA secure_delete=ON`), and a
+  checkpoint then truncates the WAL, so the forgotten text is not left in
+  the database file or its `-wal` file. If another connection keeps the WAL
+  from being truncated, the checkpoint is skipped with a WARNING in the log
+  and a later checkpoint clears it. A forget is safe while localmelo runs;
+  removing the files is not.
+
+To delete everything, including what the API does not touch, stop every
+localmelo process and remove the files:
 
 1. Stop every localmelo process: direct runs, `melo --serve`, and the
    background service. Stop the service with `melo --daemon uninstall`; a
@@ -392,7 +445,9 @@ that directory instead.
   encrypted); `~/.cache/localmelo/logs/cli.log` records request URLs and
   errors.
 - The files are as private as your home directory. To remove them, see
-  [Reset memory](#reset-memory).
+  [Reset memory](#reset-memory). The Python API's `forget` overwrites the
+  cells it deletes and truncates the WAL, so the text does not stay in the
+  database file's free pages or in `history.db-wal`/`long_term.db-wal`.
 - The gateway's web workspace always saves the history and procedural
   memory of its chats, and their long-term memory when an embedding model
   is selected, in `~/.cache/localmelo/playground/`.

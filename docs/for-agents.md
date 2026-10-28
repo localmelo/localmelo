@@ -173,7 +173,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 - Long-term memory needs an embedding backend; without one it is inert although `config.memory` is `true`. A new `Agent` or `melo` process recalls earlier runs only through it; history is written but never read back into a run.
 - Multi-turn chat: one `Agent` with `record_answers=True` (without it, later runs see earlier queries but not answers), or one gateway `session_id`.
 - Sessions: used by the interactive UI (`~/.cache/localmelo/cli/sessions.db`, every turn with its tool calls and output; your messages also in `cli_history`); Python API experimental (`~/.cache/localmelo/gateway/` by default otherwise). Plain text, files `0600`.
-- No reset command: stop localmelo, delete the files (the web workspace's: `~/.cache/localmelo/playground/`). Not encrypted. One gateway's sessions share one set of files.
+- Delete memory with the Python API: `await agent.hippo.forget(task_id)` removes the task's `tasks`, `steps` and `llm_calls` rows and its long-term reflections (entries whose metadata `task_id` names it); `forget_all()` removes both stores, step summaries included. No command yet. Sessions, procedures and the web workspace's files (`~/.cache/localmelo/playground/`) go only by deleting them with localmelo stopped. Not encrypted. One gateway's sessions share one set of files.
 
 ## Gotchas
 
