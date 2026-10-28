@@ -390,14 +390,22 @@ async def test_interleaved_tools_and_repeated_identifiers() -> None:
     raw = (
         chunk(
             [
-                {"index": 0, "id": "a", "function": {"name": "read", "arguments": '{"x":'}},
+                {
+                    "index": 0,
+                    "id": "a",
+                    "function": {"name": "read", "arguments": '{"x":'},
+                },
                 {"index": 1, "id": "b", "function": {"name": "noop"}},
             ]
         )
         + chunk(
             [
                 {"index": 1, "id": "b", "function": {"name": "noop", "arguments": " "}},
-                {"index": 0, "id": "a", "function": {"name": "read", "arguments": "3}"}},
+                {
+                    "index": 0,
+                    "id": "a",
+                    "function": {"name": "read", "arguments": "3}"},
+                },
             ],
             "tool_calls",
         )
@@ -406,13 +414,17 @@ async def test_interleaved_tools_and_repeated_identifiers() -> None:
     provider = OpenAICompatLLM(
         "http://example.test/v1",
         "test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, stream=Bytes([raw]))),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, stream=Bytes([raw]))
+        ),
     )
     try:
         events = [event async for event in provider.stream_chat([])]
         reply = events[-1].reply
         assert reply is not None
-        assert [(call.id, call.tool_name, call.arguments) for call in reply.tool_calls] == [
+        assert [
+            (call.id, call.tool_name, call.arguments) for call in reply.tool_calls
+        ] == [
             ("a", "read", {"x": 3}),
             ("b", "noop", {}),
         ]
@@ -434,7 +446,9 @@ async def test_error_frames_and_incomplete_calls(raw: bytes) -> None:
     provider = OpenAICompatLLM(
         "http://example.test/v1",
         "test",
-        transport=httpx.MockTransport(lambda _: httpx.Response(200, stream=Bytes([raw]))),
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(200, stream=Bytes([raw]))
+        ),
     )
     try:
         with pytest.raises(ProviderError):
