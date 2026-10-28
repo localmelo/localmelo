@@ -268,11 +268,16 @@ memory off. Tools run with the user's permissions, not in a sandbox.
   returns 409 `not_paused`. Stop cancels a running worker or cancels a queued
   task. Finished tasks cannot be changed (409 `invalid_transition`).
 
-Pause takes effect at the next model call: an already-running tool finishes,
-and an answered pending approval waits until resume before proceeding. If a
-task is paused before it starts, no worker starts until it resumes. S3b.1a
-does not change that worker pause behavior from #119 or ship a new API; its
-internal hold/park foundations are not integrated with workers. S3b.1b follows.
+Pause closes the worker fence and records pending pause while an already-running
+provider or tool finishes. At a held plan, reflection or undelivered approval,
+the worker parks, closes its resources and saves a card from persisted evidence.
+An undelivered approval is withdrawn; resume starts from the card and asks again.
+A task paused before it starts does not start a worker until resumed. If a park
+cannot be saved, the worker retries with its fence closed; after three failed
+attempts it saves an interrupted task and card. If the store cannot persist that
+outcome, resume and stop return 503 `store_unavailable` until finalization succeeds.
+A failed resource close quarantines the worker and keeps its slot counted; after
+retries, the interrupted task reports `cleanup failed; slot held until restart`.
 
 Task objects include the task id, normalized `spec`, `state`, priority and
 source, `wait_reason`, timestamps, workspace and `priority_events`, along
@@ -284,7 +289,7 @@ Invalid workspace requests return 400 `invalid_workspace`; a workspace that
 becomes invalid before a run or resume fails the task with
 `wait_reason="invalid_workspace"` instead of running it.
 
-At most four workers are resident at once, including paused running workers.
+At most four workers are resident at once, including quarantined workers.
 Task rows persist across gateway restarts. At startup, surviving nonterminal
 tasks are marked failed with `gateway restarted; recovery arrives in S3b`;
 full recovery is deferred to S3b. Retrying the same `request_key` returns the
