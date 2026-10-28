@@ -136,6 +136,7 @@ def test_historical_dispatch(
             **P5_DEFAULTS,
             **R6_DEFAULTS,
             **U3_PR4_DEFAULTS,
+            **WORKER_DEFAULTS,
             "continue_session": False,
             "resume": None,
             **case["namespace"],
