@@ -24,6 +24,16 @@ from localmelo.support.sessions.agents import build_session_agent
 URL_LABEL: Final = "OpenAI-compatible"
 
 
+def _embedding_name(cfg: config.Config) -> str:
+    """How the banner names the configured embedding: backend and model."""
+    if not cfg.has_embedding:
+        return ""
+    key = cfg.embedding_backend
+    section = getattr(cfg, key, None)
+    model = getattr(section, "embedding_model", "")
+    return f"{key} · {model}" if model else key
+
+
 def config_backend(cfg: config.Config, model: str | None) -> BackendInfo:
     """The configured chat backend, with *model* when one is given."""
     from localmelo.support.backends.registry import get_backend
@@ -39,7 +49,7 @@ def config_backend(cfg: config.Config, model: str | None) -> BackendInfo:
         label=label,
         model=model or getattr(section, "chat_model", "") or "default",
         base_url=getattr(section, "chat_url", "") or getattr(section, "base_url", ""),
-        embedding="" if not cfg.has_embedding else cfg.embedding_backend,
+        embedding=_embedding_name(cfg),
         key_env=getattr(section, "api_key_env", ""),
     )
 

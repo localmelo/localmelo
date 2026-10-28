@@ -74,7 +74,9 @@ def memory_text(backend: BackendInfo, *, memory: bool) -> str:
     if not memory:
         return "long-term memory off (--memory off)"
     if not backend.embedding:
-        return "no long-term memory (no embedding backend)"
+        if backend.key == "openai-compatible":
+            return "no long-term memory · --embedding-base-url adds one"
+        return "no long-term memory · melo --reconfigure adds one"
     return f"long-term memory · {backend.embedding}"
 
 

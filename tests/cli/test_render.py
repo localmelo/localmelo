@@ -612,10 +612,39 @@ def test_the_banner_box() -> None:
     assert lines[1].startswith("│ model      stub-model · OpenAI-compatible · " + URL)
     assert lines[1].endswith(" │")
     assert "│ tools      4 built-in (3 ask first)" in lines[3]
-    assert "│ memory     no long-term memory (no embedding backend)" in lines[4]
+    assert (
+        "│ memory     no long-term memory · --embedding-base-url adds one" in lines[4]
+    )
     assert "│ session    new" in lines[5]
     assert all(cells(line) == 80 for line in lines[:7])
     assert lines[7] == "  / commands · esc stop · ctrl+d quit"
+
+
+def test_the_banner_names_the_configured_embedding_model() -> None:
+    text = _banner(key="vllm", label="vLLM", embedding="vllm · Qwen3-Embedding-0.6B")
+    assert "│ memory     long-term memory · vllm · Qwen3-Embedding-0.6B" in text
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [
+        {},
+        {"key": "vllm", "label": "vLLM", "embedding": "vllm · Qwen3-Embedding-0.6B"},
+    ],
+    ids=["no-embedding", "configured"],
+)
+def test_a_narrow_banner_keeps_the_memory_text_in_full(
+    backend: dict[str, str],
+) -> None:
+    text = _banner(width=45, **backend)
+    assert "╭" not in text
+    if backend:
+        assert "long-term memory" in text
+        assert "Qwen3-Embedding-0.6B" in text
+    else:
+        assert "no long-term memory" in text
+        assert "--embedding-base-url adds one" in text
+    assert all(cells(line) <= 45 for line in text.split("\n"))
 
 
 def test_the_banner_names_where_the_model_came_from() -> None:
