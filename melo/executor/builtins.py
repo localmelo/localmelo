@@ -231,8 +231,9 @@ async def _python_exec(code: str) -> str:
     # A child process, as the rooted python_exec is: code that loops, sleeps
     # or calls os._exit() must not hold or end the agent's own process, and
     # the executor's timeout and the run's timeout_s must be able to stop it.
-    # Its directory is this process's, and its standard input is /dev/null,
-    # so it never reads the terminal melo runs in (see _shell_exec).
+    # Its directory is this process's, and the code arrives on its standard
+    # input, a pipe, which the wrapper turns into /dev/null before the code
+    # runs, so it never reads the terminal melo runs in (see _shell_exec).
     return await _run_python(code)
 
 
@@ -261,8 +262,21 @@ def _posix_rlimits() -> str:
     )
 
 
-def _python_program(code: str) -> str:
-    """The program a python_exec child runs: its limits, then *code*.
+def _python_wrapper() -> str:
+    """The fixed program a python_exec child runs: its limits, then the code.
+
+    The code is never in the program or in argv: it arrives on the child's
+    standard input, a pipe, and this program reads it to end of file. argv
+    would show the code to every user of the machine (``ps``) and would
+    fail with ``E2BIG`` for code near the system's ``ARG_MAX``; a pipe has
+    no such limit. ``-c`` keeps ``sys.argv == ["-c"]``, as it was before,
+    and the pipe carries only the user's code (``python -`` would read the
+    wrapper from the same stream, so it would need a delimiter).
+
+    Having read the code, the program points fd 0 at ``/dev/null``
+    (``os.dup2``), so ``input()`` and ``sys.stdin.read()`` in the code get
+    end of file even though standard input was a pipe while the wrapper
+    read it; the code never reads the terminal melo runs in.
 
     The code is compiled under the name ``<python_exec>`` and its lines go
     into :mod:`linecache` under that name, so a traceback names the code's
@@ -277,13 +291,22 @@ def _python_program(code: str) -> str:
     propagates, so ``sys.exit()`` keeps its status.
     """
     limits = _posix_rlimits() if os.name == "posix" else ""
+    read = (
+        "import os as _localmelo_os\n"
+        "import sys as _localmelo_sys\n"
+        "_localmelo_code = _localmelo_sys.stdin.buffer.read().decode(\n"
+        "    'utf-8', 'surrogatepass')\n"
+        "_localmelo_devnull = _localmelo_os.open(\n"
+        "    _localmelo_os.devnull, _localmelo_os.O_RDONLY)\n"
+        "_localmelo_os.dup2(_localmelo_devnull, 0)\n"
+        "_localmelo_os.close(_localmelo_devnull)\n"
+        "del _localmelo_devnull\n"
+    )
     run = (
         "import linecache as _localmelo_linecache\n"
-        f"_localmelo_code = {code!r}\n"
         "_localmelo_linecache.cache['<python_exec>'] = (\n"
         "    len(_localmelo_code), None,\n"
         "    _localmelo_code.splitlines(True), '<python_exec>')\n"
-        "import sys as _localmelo_sys\n"
         "import traceback as _localmelo_traceback\n"
         "try:\n"
         "    exec(compile(_localmelo_code, '<python_exec>', 'exec'),\n"
@@ -299,16 +322,20 @@ def _python_program(code: str) -> str:
         "    raise SystemExit(\n"
         "        130 if isinstance(_localmelo_value, KeyboardInterrupt) else 1)\n"
     )
-    return limits + run
+    return limits + read + run
 
 
 async def _run_python(code: str, *, cwd: str | None = None) -> str:
     """Run *code* in a child Python, in *cwd* (``None``: this directory).
 
-    The child runs ``sys.executable -c`` with ``/dev/null`` as its standard
-    input, so ``input()`` gets EOF and it never reads the terminal melo runs
-    in, and it starts a new session, so it and everything it starts are one
-    process group. The POSIX limits of :func:`_posix_rlimits` apply to it.
+    The child runs ``sys.executable -c`` with the fixed wrapper of
+    :func:`_python_wrapper`; *code* goes to its standard input, a pipe,
+    never into argv, so it is not in the process list and has no
+    ``ARG_MAX`` limit, and the wrapper points fd 0 at ``/dev/null`` before
+    running it, so ``input()`` gets EOF and it never reads the terminal
+    melo runs in. The child starts a new session, so it and everything it
+    starts are one process group, and the POSIX limits of
+    :func:`_posix_rlimits` apply to it.
 
     A timeout or a cancellation kills that group, as for shell_exec. Once
     the child has exited by itself, its status goes to
@@ -322,15 +349,15 @@ async def _run_python(code: str, *, cwd: str | None = None) -> str:
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
         "-c",
-        _python_program(code),
-        stdin=subprocess.DEVNULL,
+        _python_wrapper(),
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=cwd,
         start_new_session=True,
     )
     try:
-        stdout, stderr = await proc.communicate()
+        stdout, stderr = await proc.communicate(code.encode("utf-8", "surrogatepass"))
     except BaseException:
         await _kill_process_group(proc)
         raise
@@ -379,14 +406,15 @@ def rooted_builtins(
       ended), and the call still succeeds: every later cut keeps a text's
       start.
     - ``python_exec`` runs the code in a child Python, ``sys.executable
-      -c``, in *root*, with ``/dev/null`` as its standard input, so
-      ``input()`` gets EOF, and ``sys.exit()`` or ``os.chdir()`` stays in
-      the child. The executor's limit, *tool_timeout_s* when it is set, else
-      its default, stops it. A non-zero exit raises ``RuntimeError("Python
-      exited with code <n>")``, followed by a colon, a line break and the
-      last 4,000 characters of the output when there is any. Without a
-      root, ``python_exec`` runs the same child, in this process's
-      directory.
+      -c`` with a fixed wrapper, in *root*. The code arrives on the child's
+      standard input, a pipe, and the wrapper points fd 0 at ``/dev/null``
+      before running it, so ``input()`` gets EOF, and ``sys.exit()`` or
+      ``os.chdir()`` stays in the child. The executor's limit,
+      *tool_timeout_s* when it is set, else its default, stops it. A
+      non-zero exit raises ``RuntimeError("Python exited with code
+      <n>")``, followed by a colon, a line break and the last 4,000
+      characters of the output when there is any. Without a root,
+      ``python_exec`` runs the same child, in this process's directory.
 
     Both run in a process group of their own, which a timeout or a
     cancellation kills as a whole. Once their child has exited by itself,

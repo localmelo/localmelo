@@ -16,13 +16,15 @@ A `file_read` or `file_write` call may take up to 60 seconds, and an MCP tool
 call up to its server's `timeout`. Output longer than 50,000 characters is
 cut.
 
-The `python_exec` child has `/dev/null` as standard input, so `input()` gets
-EOF, and at most 1,024 open files and one hour of CPU time (the POSIX
-`RLIMIT_NOFILE` and `RLIMIT_CPU` limits). The call's time limit normally
-ends it first; the CPU limit only stops code that outlives melo or that
-spends an hour of CPU. An address-space limit is not set: macOS refuses a
-finite one. The code reaches the child as its `-c` argument, so it shares
-the system's limit on an argument's size (about 1 MiB on macOS).
+The `python_exec` code reaches the child on its standard input, a pipe,
+never in its `-c` argument: `ps` does not show the code, and a call has no
+`ARG_MAX` limit (about 1 MiB of argv and environment on macOS). The child
+runs a fixed wrapper; once that has read the code it points fd 0 at
+`/dev/null`, so `input()` gets EOF. The child may have at most 1,024 open
+files and one hour of CPU time (the POSIX `RLIMIT_NOFILE` and `RLIMIT_CPU`
+limits). The call's time limit normally ends it first; the CPU limit only
+stops code that outlives melo or that spends an hour of CPU. An
+address-space limit is not set: macOS refuses a finite one.
 
 This is how the built-in tools work in direct mode and the gateway. In the
 Python API, an agent with a workspace root keeps the file tools inside a

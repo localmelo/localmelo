@@ -156,7 +156,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 ## Tools and MCP
 
 - `shell_exec(command)`: stdin `/dev/null`; process group killed after 30 s; refuses `rm -rf /...`, `mkfs`, `dd if=`, fork bombs, `shutdown`, `reboot`.
-- `python_exec(code)`: a child Python (`sys.executable -c`), stdin `/dev/null`, in the current directory (or the workspace root); its process group is killed at the tool's limit (60 s by default) or on cancellation; `sys.exit()` ends only the child; a non-zero exit fails with `Python exited with code <n>`, then the last 4,000 characters of its output.
+- `python_exec(code)`: a child Python (`sys.executable -c`, a fixed wrapper), the code on stdin (a pipe; fd 0 is then `/dev/null`, so `input()` gets EOF, and the code is not in argv), in the current directory (or the workspace root); its process group is killed at the tool's limit (60 s by default) or on cancellation; `sys.exit()` ends only the child; a non-zero exit fails with `Python exited with code <n>`, then the last 4,000 characters of its output.
 - `file_read(path)`: any file the user can read. `file_write(path, content)`: creates or replaces any file the user can write; in the interactive UI, only inside the workspace.
 - A Python run with an approval policy, and the interactive UI (bare `melo`, unless `--yolo`), gate `shell_exec`, `python_exec` and `file_write`; direct mode, `melo ""` and the gateway have none. Output is cut at 50,000 characters.
 - `retrieve` offers the built-ins every step, plus extra (MCP or provided) tools the conversation already named and the BM25 top 3 for the task; `all` offers every tool every step. Unoffered calls are refused (`Tool 'NAME' was not offered in this step.`).

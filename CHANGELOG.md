@@ -175,9 +175,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a workspace root. Code that loops, sleeps or calls `os._exit()` no longer
   holds or ends `melo`: the tool's time limit (60 seconds by default, 10
   minutes in the interactive UI) and a run's `timeout_s` kill it with every
-  process it started. The child gets `/dev/null` as its standard input, so
-  `input()` gets EOF, a POSIX CPU-time limit of one hour and an open-file
-  limit of 1,024. Success output is unchanged. A failure now reads
+  process it started. The code reaches the child on its standard input, a
+  pipe, never in its `-c` argument, so `ps` does not show it and a call has
+  no `ARG_MAX` limit; once the fixed wrapper has read the code it points
+  fd 0 at `/dev/null`, so `input()` gets EOF. The child gets a POSIX
+  CPU-time limit of one hour and an open-file limit of 1,024. Success
+  output is unchanged. A failure now reads
   `Python exited with code <n>:` and the end of the child's output instead
   of the exception's text, and `sys.exit(0)` is a success. The code runs as
   `__main__` with `sys.argv == ["-c"]`, in a fresh module namespace: module

@@ -635,6 +635,55 @@ async def test_without_a_root_python_exec_never_reads_this_process_stdin() -> No
     assert outcome.output == "''"
 
 
+async def test_without_a_root_a_python_input_gets_eof() -> None:
+    executor = _executor(None)
+
+    outcome = await asyncio.wait_for(
+        _run(executor, "python_exec", code="input()"), 10.0
+    )
+
+    assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
+    assert "EOFError" in outcome.error
+
+
+@pytest.mark.parametrize("rooted", [False, True], ids=["no_root", "root"])
+async def test_the_code_goes_to_the_child_on_a_pipe_not_in_argv(
+    root: Path, monkeypatch: pytest.MonkeyPatch, rooted: bool
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+    real = asyncio.create_subprocess_exec
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        calls.append(args)
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    executor = _executor(root if rooted else None)
+    marker = "LOCALMELO_CODE_MARKER_7f3a"
+
+    outcome = await _run(executor, "python_exec", code=f"print({marker!r})")
+
+    assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, marker)
+    (argv,) = calls
+    # The executable, ``-c`` and the fixed wrapper: never the code.
+    assert len(argv) == 3
+    assert argv[1] == "-c"
+    assert argv[2] == builtin_tools._python_wrapper()
+    assert marker not in "".join(argv)
+
+
+@pytest.mark.parametrize("rooted", [False, True], ids=["no_root", "root"])
+async def test_a_two_megabyte_python_code_runs(root: Path, rooted: bool) -> None:
+    # Past this Mac's ARG_MAX (1,048,576 bytes of argv and environment); in
+    # argv this would fail with E2BIG before the code ran.
+    code = "print('ok')\n#" + "y" * 2_000_000 + "\n"
+    executor = _executor(root if rooted else None)
+
+    outcome = await asyncio.wait_for(_run(executor, "python_exec", code=code), 60.0)
+
+    assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, "ok")
+
+
 async def test_without_a_root_a_hang_ends_at_the_executors_limit(
     pid_file: Path,
 ) -> None:

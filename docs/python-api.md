@@ -390,13 +390,15 @@ Both lines print the real path of `~/melo-work`, such as
   resolved path.
 - **`shell_exec` and `python_exec`** always run in a child process with a
   process group of its own, which a timeout or a cancellation kills as a
-  whole; the root is the directory they start in. Both have `/dev/null` as
-  standard input. Python code runs in a child Python, so a time limit can
-  stop it, and `sys.exit()` or `os.chdir()` stays in the child. The child
-  also gets a CPU-time limit of one hour and an open-file limit of 1,024
-  (`RLIMIT_CPU` and `RLIMIT_NOFILE` on POSIX), which only stop code that
-  outlives the call; no address-space limit is set, because macOS refuses
-  one.
+  whole; the root is the directory they start in. A shell command's standard
+  input is `/dev/null`; `python_exec` receives its code on a pipe (never in
+  argv) and then points fd 0 at `/dev/null`, so `input()` gets EOF and
+  neither reads the terminal. Python code runs in a child Python, so a time
+  limit can stop it, and `sys.exit()` or `os.chdir()` stays in the child.
+  The child also gets a CPU-time limit of one hour and an open-file limit of
+  1,024 (`RLIMIT_CPU` and `RLIMIT_NOFILE` on POSIX), which only stop code
+  that outlives the call; no address-space limit is set, because macOS
+  refuses one.
 - **They can still reach any path.** Only the file tools are limited to the
   root. Use an [approval policy](#approve-tool-calls) to control
   `shell_exec` and `python_exec`.
