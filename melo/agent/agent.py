@@ -1721,8 +1721,8 @@ class Agent:
         """Stage 1+2: retrieve context, resolve tools, run boundary checks.
 
         With ``tool_exposure="retrieve"`` the tools are every registered
-        built-in, sorted by name, then the other tools that hint
-        extraction and BM25 resolve among themselves, also sorted by name;
+        built-in, sorted by name, then the other tools that the model's
+        tool calls and BM25 resolve among themselves, also sorted by name;
         with ``"all"`` they are every registered tool, sorted by name.
 
         In ``drop`` and ``replay`` no long-term recall is read, so the
@@ -1759,7 +1759,8 @@ class Agent:
             # sorted by name too: the list stays byte-identical for as long
             # as the chosen set does not change, whatever the hint order.
             builtins = builtin_names()
-            # Include reflection context in tool hint extraction
+            # Hints are the model's tool calls, which live in the window; the
+            # long-term and reflection messages carry none.
             hint_sources = long_context + short_window + reflection_msgs
             tool_hints = [
                 name

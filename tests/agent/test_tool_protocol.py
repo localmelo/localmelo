@@ -875,7 +875,7 @@ class TestToolResultImages:
             ]
         )
         agent = _image_agent(llm, shot=ToolOutput(text=output, images=[SHOT]))
-        assert await agent.run("take a large screenshot") == "done"
+        assert await agent.run("take a large screenshot with shot") == "done"
         window = agent.hippo.working.get_window()
         [result] = [m for m in window if m.role == "tool"]
         assert result.content == f"{output}\n{MARKER}"
@@ -893,7 +893,7 @@ class TestToolResultImages:
             ]
         )
         agent = _image_agent(llm, shot=ToolOutput(text="x" * 60_000, images=[SHOT]))
-        await agent.run("take a large screenshot")
+        await agent.run("take a large screenshot with shot")
         window = agent.hippo.working.get_window()
         [result] = [m for m in window if m.role == "tool"]
         text, marker = result.content.rsplit("\n", 1)
@@ -976,7 +976,7 @@ class TestToolResultImages:
         agent = _image_agent(llm)
         history = SqliteHistory(tmp_path / "history.db")
         agent.hippo.history = history
-        assert await agent.run("take a screenshot") == "done"
+        assert await agent.run("take a screenshot with shot") == "done"
 
         conn = await history._ensure_ready()
         async with conn.execute("SELECT task_id FROM tasks") as cur:
@@ -1036,7 +1036,7 @@ class TestToolResultImages:
             page=ToolOutput(text="p" * 20_000, images=[SHOT]),
             shot=ToolOutput(text="x" * 30_000, images=[SHOT]),
         )
-        assert await agent.run("save the page and a screenshot") == "done"
+        assert await agent.run("save the page and a screenshot with shot") == "done"
 
         second = _planning_calls(llm)[1]["messages"]
         assert_protocol_valid(second)
