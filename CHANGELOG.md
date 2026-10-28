@@ -299,7 +299,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `procedures.db`, with its `-wal` and `-shm`; it got the default mode
   before, usually 0644, so other users of the computer could read the step
   summaries and reflections it holds. An existing file keeps its mode
-  ([#NN]).
+  ([#62]).
 
 Changes before these are not listed here. See the
 [updates page](https://localmelo.github.io/localmelo/en/updates.html) for
@@ -335,3 +335,4 @@ earlier milestones.
 [#59]: https://github.com/localmelo/localmelo/pull/59
 [#60]: https://github.com/localmelo/localmelo/pull/60
 [#61]: https://github.com/localmelo/localmelo/pull/61
+[#62]: https://github.com/localmelo/localmelo/pull/62
