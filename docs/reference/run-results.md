@@ -15,7 +15,7 @@ retried.
 | `context_budget_exceeded` | 2 | The pinned request cannot fit the configured input budget, or a smaller retry still overflowed. |
 | `stuck` | 2 | The same tool calls, or the same errors, repeated three steps in a row. |
 | `provider_error` | 2 | A request to the model server failed. |
-| `setup_error` | 2 | The tool providers, such as MCP servers, could not be set up. |
+| `setup_error` | 2 | The tool providers, such as MCP servers, could not be set up, or a worker inbox could not be read safely. |
 | `timeout` | 2 | The run was still going when its time limit (`--timeout`) expired. |
 | `crashed` | 1 | An unexpected error, Ctrl+C, SIGTERM or SIGHUP ended the run. |
 | `cancelled` | none | An interactive run was stopped: a run in the Python API with `on_event` or `approval`, or a web workspace chat stopped with Stop or by its 600-second limit. Direct mode, the `melo ""` loop and `POST /v1/agent/run` never report it. |
@@ -62,8 +62,11 @@ Details:
   new results, such as polling a job, are not stuck.
 - **`provider_error`.** See [Provider errors and retries](#provider-errors-and-retries).
 - **`setup_error`.** The error names the problem, for example
-  `MCP server 'notes' exited (code 1)`. An agent does not retry setup: its
-  later runs end as `setup_error` too.
+  `MCP server 'notes' exited (code 1)`. An agent does not retry an MCP or tool
+  provider setup failure: its later runs end as `setup_error` too. A worker
+  inbox that is inside the workspace, not a regular file, oversized, replaced,
+  truncated or invalid also ends `setup_error` with the plain message; that
+  failure is about the file, so a later run with a readable inbox proceeds.
 - **`timeout`.** The error is `Timed out after <n> s`. A model request in
   flight is abandoned, and a `shell_exec` command or `python_exec` child is
   killed with every process it started.

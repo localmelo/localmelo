@@ -75,7 +75,7 @@
           <li>macOS app-1: desktop app (A1) — the native shell, bundled runtime and sign-in are at the screenshot stage; review fixes in progress;</li>
           <li>Task scheduler-3: pause, park and restart recovery (S3b) — <a href="https://github.com/localmelo/localmelo/pull/125">#125</a>, <a href="https://github.com/localmelo/localmelo/pull/135">#135</a>, <a href="https://github.com/localmelo/localmelo/pull/147">#147</a> and <a href="https://github.com/localmelo/localmelo/pull/152">#152</a> landed; process capture and controlled Resume in review;</li>
           <li>Task scheduler-4: <code>melo-task</code> command (S3c) — S3c.1 in review;</li>
-          <li>Headless worker support-4: worker contract (#107 W2) — <a href="https://github.com/localmelo/localmelo/pull/143">#143</a> landed; startup results in review, inbox next;</li>
+          <li>Headless worker support-4: worker contract (#107 W2) — <a href="https://github.com/localmelo/localmelo/pull/143">#143</a> landed; startup results in review, the inbox in review;</li>
           <li>Terminal UI-2: attachments, shell commands, streaming (U2c, U4) — <code>/attach</code> (<a href="https://github.com/localmelo/localmelo/pull/155">#155</a>) and streaming (<a href="https://github.com/localmelo/localmelo/pull/145">#145</a>, <a href="https://github.com/localmelo/localmelo/pull/153">#153</a>) landed; shell commands next;</li>
           <li>Memory facts-2: Chinese and negative facts — slice 1 (<a href="https://github.com/localmelo/localmelo/pull/137">#137</a>) landed; slice 2 (updates and supersession) in review;</li>
           <li>Memory recall-2: same-task recall gating (<a href="https://github.com/localmelo/localmelo/issues/148">#148</a>) — in progress, opt-in; digest labels (<a href="https://github.com/localmelo/localmelo/pull/149">#149</a>) landed;</li>
@@ -109,7 +109,7 @@
         <article class="update-entry" id="u-worker-brief">
           <h3>Worker briefs and event streams</h3>
           <p class="update-date">Unreleased</p>
-          <p>Direct workers read a brief and return a versioned JSON result or stream events. Agent construction errors produce a startup result; output failure may prevent a final record. Inbox steering follows separately.</p>
+          <p>Direct workers read a brief and an explicit inbox, returning a versioned JSON result or event stream. Agent construction errors produce a startup result; output failure may prevent a final record.</p>
         </article>
 
         <article class="update-entry" id="u-attach">

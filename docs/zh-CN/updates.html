@@ -69,7 +69,7 @@
           <li>macOS 应用-1：桌面应用（A1）——原生外壳、内置运行时和登录已到截图阶段；审查修复进行中；</li>
           <li>任务调度器-3：暂停、停放和重启恢复（S3b）——<a href="https://github.com/localmelo/localmelo/pull/125">#125</a>、<a href="https://github.com/localmelo/localmelo/pull/135">#135</a>、<a href="https://github.com/localmelo/localmelo/pull/147">#147</a> 和 <a href="https://github.com/localmelo/localmelo/pull/152">#152</a> 已落地；进程捕获和受控 Resume 在审查中；</li>
           <li>任务调度器-4：<code>melo-task</code> 命令（S3c）——S3c.1 在审查中；</li>
-          <li>无头工作进程支持-4：worker 契约（#107 W2）——<a href="https://github.com/localmelo/localmelo/pull/143">#143</a> 已落地；启动结果在审查中，收件箱随后；</li>
+          <li>无头工作进程支持-4：worker 契约（#107 W2）——<a href="https://github.com/localmelo/localmelo/pull/143">#143</a> 已落地；启动结果在审查中，收件箱在审查中；</li>
           <li>终端界面-2：附件、shell 命令和流式输出（U2c、U4）——<code>/attach</code>（<a href="https://github.com/localmelo/localmelo/pull/155">#155</a>）和流式输出（<a href="https://github.com/localmelo/localmelo/pull/145">#145</a>、<a href="https://github.com/localmelo/localmelo/pull/153">#153</a>）已落地；shell 命令随后；</li>
           <li>记忆事实-2：中文和否定事实——第一切片（<a href="https://github.com/localmelo/localmelo/pull/137">#137</a>）已落地；第二切片（更新和取代）在审查中；</li>
           <li>记忆召回-2：同任务召回门控（<a href="https://github.com/localmelo/localmelo/issues/148">#148</a>）——进行中，可选；摘要标签（<a href="https://github.com/localmelo/localmelo/pull/149">#149</a>）已落地；</li>
@@ -97,7 +97,7 @@
         <article class="update-entry" id="u-worker-brief">
           <h3>Worker 任务说明与事件流</h3>
           <p class="update-date">尚未发布</p>
-          <p>直接运行的 worker 可读取任务说明，返回版本化 JSON 结果或事件流。智能体构建失败会产生启动错误结果；输出故障可能阻止最终记录送达。收件箱引导将在后续实现。</p>
+          <p>直接运行的 worker 可读取任务说明和显式收件箱，返回版本化 JSON 结果或事件流。智能体构建失败会产生启动错误结果；输出故障可能阻止最终记录送达。</p>
         </article>
 
         <article class="update-entry" id="u-attach">

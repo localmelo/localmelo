@@ -24,7 +24,8 @@ the notice, so ``_run`` has a new hash again. Worker history adds opt-in
 Context accounting resolves its opt-in budget before Agent construction, so
 ``_build_direct_mode_agent`` has a new hash. The opt-in worker brief routes
 through ``_run_direct`` and ``_run``; review fixes handle broken worker pipes
-in ``_run_direct``. The ordinary direct path remains unchanged. Fixed prefix
+in ``_run_direct``. Inbox routing changes both hashes again without changing
+the ordinary direct path. Fixed prefix
 adds an opt-in flag and config fallback to ``_direct_options`` and
 ``_build_direct_mode_agent``; the default output and provider wire remain
 covered by the legacy golden. Captured history also adds an opt-in flag and
@@ -46,8 +47,8 @@ import pytest
 MAIN = Path(__file__).resolve().parents[2] / "__main__.py"
 
 PINNED = {
-    "_run_direct": "fd5741d695df24913667c1cbb76c3764b562cf19b34e9c13ec2090bdd3a7eec2",
-    "_run": "634122524cec011fa1fbfbe42306c07aee69e63ded84d8bcecb71916b8a5f455",
+    "_run_direct": "98eeb31649dc6f2d84ed21187d680a08e7ceb96929e386e34aaae67b64659eaa",
+    "_run": "8a99388d143f68b8db3d16c3b4f5c50b6bde05c0519a3f9e2768ab136b376725",
     "_run_one": "0c323f5d879739c205efe3ac0c71d651be2496721b68437ac30c93c6b6f70f31",
     "_report": "5ce2d43919e8bea8c5cfdb9689acd104e4bf65d2a8c377d9913f25b2cd909ecf",
     "_status_line": "51cf6b34fa09e121214b0a06e29e74d3d7d38d68b8e19ba5c68b0809abc1821b",

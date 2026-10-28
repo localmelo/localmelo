@@ -15,6 +15,7 @@ from localmelo.melo.checker.redaction import redact_secrets
 if TYPE_CHECKING:
     from localmelo.melo.agent import Agent
     from localmelo.melo.contracts.events import EventSink
+    from localmelo.melo.contracts.inbox import InboxSource
     from localmelo.melo.schema import RunResult
 
 
@@ -177,6 +178,7 @@ async def run_worker(
     parent_run: str | None,
     observe: EventSink | None = None,
     routine: str | None = None,
+    inbox: InboxSource | None = None,
 ) -> RunResult:
     """Record a direct run in the CLI store without changing its options."""
     from localmelo.support.sessions.runner import SessionRunner
@@ -213,6 +215,7 @@ async def run_worker(
         ),
         progress=observe is not None,
         observe=observe,
+        inbox=inbox,
     )
     try:
         outcome = await runner.run_turn(

@@ -48,6 +48,7 @@ class TestCatalogue:
         assert frozenset(EVENT_FIELDS) == EVENT_TYPES
         assert {
             "run.started",
+            "inbox.accepted",
             "step.started",
             "assistant.message",
             "note",
