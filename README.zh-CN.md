@@ -40,7 +40,7 @@ source .venv/bin/activate
 melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 ```
 
-在终端里运行 `melo` 可以对话，第一次运行时会保存配置；`melo --serve` 启动网关，在 `http://127.0.0.1:8401/` 上提供 HTTP API 和网页工作区。
+在终端里运行 `melo` 可以对话，第一次运行时会保存配置；`melo --serve` 启动网关；在终端运行 `melo --gateway-login`，并在 60 秒内打开一次性链接。网关在 `http://127.0.0.1:8401/` 上提供 HTTP API 和网页工作区。
 
 ## 了解更多
 
@@ -55,7 +55,7 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 ## 安全
 
 > [!WARNING]
-> 工具以你的账户权限运行，并且没有沙箱：模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 `127.0.0.1`（默认值）。详见 [SECURITY.md（英文）](SECURITY.md)和[检查能做什么（英文）](docs/guides/tools-mcp.md#what-the-checks-do)。
+> 工具以你的账户权限运行，并且没有沙箱：模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关要求身份验证并拒绝非回环监听，但令牌无法防御同一操作系统用户下的恶意进程。详见 [SECURITY.md（英文）](SECURITY.md)和[检查能做什么（英文）](docs/guides/tools-mcp.md#what-the-checks-do)。
 
 ## 参与贡献
 

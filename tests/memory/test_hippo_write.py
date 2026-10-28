@@ -333,7 +333,6 @@ async def test_flush_does_not_admit_an_earlier_run_s_candidate() -> None:
     [
         "I could check the offsite on 4/16.",
         "Is yoga at 9:00?",
-        "The plumber is not coming on 4/9.",
         "Option A: meet on 4/9 at 9:00.",
         "Maybe the meeting is at 9:00.",
     ],
@@ -347,6 +346,48 @@ async def test_heuristic_nonfacts_are_not_admitted_with_user_signal(text: str) -
     hippo.propose(_candidate(text, remember=note.remember, items=candidate_items(note)))
     assert await hippo.flush(run_request=True, digest=None, final_reflection=None) == []
     assert await store.count_entries() == 0
+
+
+@pytest.mark.parametrize(
+    "positive,negative",
+    [
+        ("The meeting is at 20:00.", "The meeting is not at 20:00."),
+        ("The meeting can start at 20:00.", "The meeting can't start at 20:00."),
+        ("The train will stop at 20:00.", "The train won't stop at 20:00."),
+        ("The train does stop at 20:00.", "The train doesn't stop at 20:00."),
+        ("The meeting is at 20:00.", "The meeting isn't at 20:00."),
+        ("The train stops at 20:00.", "The train no longer stops at 20:00."),
+        (
+            "会议在20:00举行，请大家注意时间安排。",
+            "会议不在20:00举行，请大家注意时间安排。",
+        ),
+    ],
+)
+@pytest.mark.parametrize("reverse", [False, True])
+async def test_opposite_polarities_are_never_duplicates(
+    positive: str, negative: str, reverse: bool
+) -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    first, second = (negative, positive) if reverse else (positive, negative)
+    hippo.propose(_candidate(first, candidate_id="a"))
+    await hippo.admit("a", "rehearsal")
+    hippo.propose(_candidate(second, candidate_id="b"))
+    decisions = await hippo.admit("b", "rehearsal")
+    assert decisions[0].action != "IGNORE"
+    assert {entry.text for entry in await store.active_entries()} == {first, second}
+
+
+async def test_explicit_negative_fact_is_admitted_without_losing_negation() -> None:
+    from localmelo.melo.memory.notes import note_from_reply
+
+    text = "The plumber is not coming on 4/9."
+    note, _ = note_from_reply(text, writer="heuristic")
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    hippo.propose(_candidate(text, remember=note.remember, items=candidate_items(note)))
+    await hippo.flush(run_request=True, digest=None, final_reflection=None)
+    assert [entry.text for entry in await store.active_entries()] == [text]
 
 
 async def test_mixed_bullet_admits_the_fact_not_the_question() -> None:

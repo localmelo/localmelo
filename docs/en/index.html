@@ -130,7 +130,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">
             <strong>Memory</strong>
-            <span>Keep working memory, a history of tasks and steps, and long-term memory with an embedding server, saved to SQLite when you turn persistence on; the saved text is redacted, long-term entries are typed and admitted only by a rehearsal, a user statement or the opt-in outcome digest, the compress reasoning modes keep a short note of each reply in RAM and recall it at start, attempt and step, the heuristic note writer keeps real facts only and cites the record that established each, and you can forget a task's memory or all of it from Python.</span>
+            <span>Keep working memory, a history of tasks and steps, and long-term memory, saved to SQLite when you turn persistence on; compress reasoning modes keep short notes and recall them at start, attempt and step. Heuristic notes can retain some negative and Chinese statements, but extraction and source attribution can be wrong or incomplete. You can forget a task's memory or all of it from Python.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">
             <strong>Embedding setup</strong>
@@ -174,10 +174,7 @@ source .venv/bin/activate</code></pre>
             <strong>Tools run with your account's permissions, and there is no
             sandbox.</strong> The model can run shell commands and Python code,
             and read or write any file you can. New memory files are created
-            readable only by you (mode 0600). The gateway has no
-            authentication, so keep it on <code>127.0.0.1</code> (the default):
-            there it refuses requests to its API that web pages at other
-            sites send through your browser.
+            readable only by you (mode 0600). The gateway requires a bearer token or browser session and refuses non-loopback binds. Run <code>melo --gateway-login</code> in a terminal for a one-use link. A token holder can act as you; same-user processes are not isolated, and browser cookies are not isolated by localhost port.
           </p>
         </div>
         <p>
