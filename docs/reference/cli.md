@@ -140,8 +140,8 @@ accepts the options named in [Interactive UI](#interactive-ui).
   A path that is not a folder is a usage error (exit 2, one line); see
   [Usage errors](#usage-errors). `melo ""` and `--serve` refuse the flag.
 - The three context flags override the matching `[agent]` keys independently, in direct mode and the
-  interactive UI. They measure, but do not truncate or reject, planning and reflection requests; the
-  output reserve is not a generation cap. See [context accounting](configuration.md#context-accounting).
+  interactive UI. Over-budget requests are fitted on a copy, or the run ends `context_budget_exceeded`;
+  the output reserve is not a generation cap. See [context accounting](configuration.md#context-accounting).
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
   [How localmelo works](../concepts/how-it-works.md#the-run-loop).
