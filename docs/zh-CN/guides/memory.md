@@ -23,6 +23,12 @@ melo "What is 6*7?"
 - 历史记录将模型的推理保留 30 天；参见[模型调用](../../reference/memory.md#model-calls)（英文）。`LOCALMELO_THINKING_RETENTION_DAYS` 可为 `history.db` 和会话存储的 `sessions.db` 设置其他保留天数，例如 `7` 或 `0.5`（参见[会话](../../reference/memory.md#sessions)（英文））。如果值不是大于 0 的数字，`melo` 会在运行任何操作之前停止；参见[用法错误](../../reference/cli.md#usage-errors)（英文）。
 - 在后续进程中召回长期记忆需要启用持久化、开启记忆，并且已有存储的条目。在 `legacy` 中，持久化长期存储还需要嵌入后端。显式推理模式无需嵌入后端即可持久化纯文本条目，并通过 BM25 找到它们。在显式模式下，必须启用召回并包含 `long` 类型；`drop` 和 `replay` 默认关闭 `auto` 召回。
 
+<a id="experimental-typed-facts"></a>
+
+## 实验性的类型化事实
+
+Python 调用方可以在显式推理模式中启用 `AgentOptions(typed_assertions=True)`。这个功能默认关闭，开启后会保留受支持的简短事实；当一个经过验证、有先后顺序的变更取代旧断言时，旧断言可以作为带标签的历史保留下来。有歧义或未关联的事实不会被悄悄关联。解析器和来源检查都是保守且不完整的；召回受相关性限制。参见[类型化断言参考](../../reference/memory.md#experimental-typed-assertions)（英文）。
+
 <a id="turn-long-term-memory-off"></a>
 
 ## 关闭长期记忆
