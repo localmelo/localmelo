@@ -104,47 +104,47 @@ source .venv/bin/activate</code></pre>
         <h2>What you can do</h2>
         <p>Each card opens the matching reference page on GitHub.</p>
         <div class="link-grid">
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">
             <strong>Run tasks</strong>
             <span>Run one task per command, within a step budget, with reflection between attempts and an optional time limit, or chat in the terminal with <code>melo</code>: it shows the model's thinking, each tool call and the run's progress as they happen, shows the diff a file write will make before you approve it, asks before it runs a command or writes a file, and resumes a saved chat in the folder with <code>melo -c</code> or <code>melo -r</code>; <code>/title</code>, <code>/undo</code>, <code>/usage</code>, <code>/memory</code> and <code>/copy</code> name, undo, inspect and copy the conversation, and a whole chat can run in a reasoning and recall mode (<code>--reasoning</code>, <code>--retriever</code> and the recall options).</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">
             <strong>Tools and MCP</strong>
             <span>Use four built-in tools and the tools of local MCP servers: a gateway or console chat gets three, without <code>shell_exec</code>; each step offers the built-in tools, the ones the model has already called and the closest matches for the task, and runs only those; their children get a minimal environment plus <code>tool_env</code>, and a Python call runs in a child process that its time limit can stop.</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#backends">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#backends">
             <strong>Model servers</strong>
             <span>Connect to Ollama, oMLX, MLC LLM, vLLM or SGLang servers that you run, or to the OpenAI, Anthropic, Google Gemini or NVIDIA API.</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">
             <strong>Gateway and web workspace</strong>
             <span>Serve the agent over HTTP, with sessions that survive a restart, and use the web console's live page at <code>http://127.0.0.1:8401/</code>: the session list, a chat's turns with a work card for each tool call, the progress row, Stop and a level chip; the page talks only to <code>/api</code>.</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#worker-histories">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">
             <strong>Worker history</strong>
             <span>Optionally save direct runs or import dsh logs, then read and filter their history through the local gateway API.</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">
             <strong>API v2</strong>
             <span>Read the web console's sessions, turns, stored events (a Server-Sent Events stream too), image blobs, submission lookups, tools, grants, memory and runs over <code>/api</code>, and create a session or start, retry, stop and approve its turns there; it is loopback-only and only grows.</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">
             <strong>Memory</strong>
             <span>Keep working memory, a history of tasks and steps, and long-term memory with an embedding server, saved to SQLite when you turn persistence on; the saved text is redacted, long-term entries are typed and admitted only by a rehearsal, a user statement or the opt-in outcome digest, the compress reasoning modes keep a short note of each reply in RAM and recall it at start, attempt and step, the heuristic note writer keeps real facts only and cites the record that established each, and you can forget a task's memory or all of it from Python.</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">
             <strong>Embedding setup</strong>
             <span>Add the embedding model long-term memory needs: the first run or the setup wizard offers one the chat server already lists, with steps for Ollama, oMLX, vLLM, SGLang and MLC.</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md">
             <strong>Python API <span class="tag experimental">Experimental</span></strong>
             <span>Run tasks from Python code: follow each step as an event, stop a run, approve tool calls, and keep the file tools inside one directory.</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/retrieval.md">
             <strong>Memory retrieval</strong>
             <span>Compare the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers on labelled queries with <code>melo-retrieve</code>; the compress reasoning modes use the same retrievers in the loop, and <code>auto</code> picks one.</span>
           </a>
-          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#use-melo-in-scripts">
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#use-melo-in-scripts">
             <strong>Scripts and benchmarks</strong>
             <span>Read one JSON line per run and a fixed exit code, so scripts can rely on the outcome, and choose how a reply's reasoning is sent back or kept on later turns (<code>--reasoning legacy</code>, <code>drop</code>, <code>replay</code>, <code>compress</code> or <code>compress+replay</code>).</span>
           </a>
@@ -155,6 +155,7 @@ source .venv/bin/activate</code></pre>
         <h2>Roadmap</h2>
         <p>The v0.1.0 milestone is due 2026-12-20.</p>
         <p>On 2026-10-28 the queue landed Tool safety-1: no shell in direct runs (P13b, <a href="https://github.com/localmelo/localmelo/pull/110">#110</a>), Web console-1: live chat page (U3 PR 5a, <a href="https://github.com/localmelo/localmelo/pull/111">#111</a>), Terminal UI-1: show the model's reasoning (R2b, <a href="https://github.com/localmelo/localmelo/pull/115">#115</a>), Memory facts-1: reliable fact notes (T68, <a href="https://github.com/localmelo/localmelo/pull/114">#114</a>), Task scheduler-1: task store and priorities (S3a.1, <a href="https://github.com/localmelo/localmelo/pull/113">#113</a>), Memory facts-1b: digests say what the attempt did (<a href="https://github.com/localmelo/localmelo/pull/116">#116</a>), website sync (<a href="https://github.com/localmelo/localmelo/pull/118">#118</a>) and Task scheduler-2: task API and workers (S3a.2, <a href="https://github.com/localmelo/localmelo/pull/119">#119</a>).</p>
+        <p>Context accounting is available as an opt-in measurement; fitting requests to the budget is a later stage.</p>
         <p>In flight, landing in this order:</p>
         <ul>
           <li>Web console-3: settings and details drawer (U3 PR 6); approvals, errors, history and settings landed in <a href="https://github.com/localmelo/localmelo/pull/122">#122</a>; worker session recording and import landed in <a href="https://github.com/localmelo/localmelo/pull/123">#123</a>.</li>
@@ -182,7 +183,7 @@ source .venv/bin/activate</code></pre>
         </div>
         <p>
           Read the <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">security policy</a>
-          and <a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#what-the-checks-do">what the checks do</a>.
+          and <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">what the checks do</a>.
         </p>
       </section>
     </article>

@@ -48,7 +48,7 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 Run `melo` in a terminal to chat and save a configuration on the first run;
 `melo --serve` starts the gateway, with the HTTP API and the web workspace at
 `http://127.0.0.1:8401/`.
-The interactive UI accepts the same [reasoning and recall options](docs/cli.md#interactive-ui)
+The interactive UI accepts the same [reasoning and recall options](docs/reference/cli.md#interactive-ui)
 as a task, with saved `[agent]` and `[retrieval]` defaults; console sessions
 also honor the saved reasoning mode (default `legacy`).
 
@@ -76,7 +76,7 @@ also honor the saved reasoning mode (default `legacy`).
 > model can run shell commands and Python code, and read or write any file you
 > can. The gateway has no authentication, so keep it on `127.0.0.1` (the
 > default). See [SECURITY.md](SECURITY.md) and
-> [what the checks do](docs/tools.md#what-the-checks-do).
+> [what the checks do](docs/guides/tools-mcp.md#what-the-checks-do).
 
 ## Contributing
 

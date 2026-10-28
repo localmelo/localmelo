@@ -102,6 +102,12 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-28-context-accounting">
+          <h3>Opt-in context accounting</h3>
+          <p class="update-date"><time datetime="2026-10-28">2026-10-28</time></p>
+          <p>Planning and reflection attempts can report an estimated input size and measured prompt tokens. This is not a context bound: request fitting and output-cap enforcement are not implemented. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/configuration.md#context-accounting">configuration</a>.</p>
+        </article>
+
         <article class="update-entry" id="u-console-drawer">
           <h3>Session details and appearance</h3>
           <p class="update-date">Unreleased</p>
@@ -117,7 +123,7 @@
         <article class="update-entry" id="u-2026-10-28-console-controls">
           <h3>Workspace controls and recovery</h3>
           <p class="update-date"><time datetime="2026-10-28">2026-10-28</time> · <a href="https://github.com/localmelo/localmelo/pull/122">#122</a></p>
-          <p>The workspace adds connection settings, earlier-turn paging, failure and stopped controls, and per-tab outbox recovery. Approval cards render pending requests with a 500 ms guard; console sessions ask before <code>file_write</code> and <code>python_exec</code>, while legacy <code>/v1</code> has no approval policy. See the <a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#web-workspace">web workspace guide</a>.</p>
+          <p>The workspace adds connection settings, earlier-turn paging, failure and stopped controls, and per-tab outbox recovery. Approval cards render pending requests with a 500 ms guard; console sessions ask before <code>file_write</code> and <code>python_exec</code>, while legacy <code>/v1</code> has no approval policy. See the <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#web-workspace">web workspace guide</a>.</p>
         </article>
 
         <article class="update-entry" id="u-2026-10-28-attempt-digest">
@@ -128,7 +134,7 @@
           </p>
           <ul>
             <li>In the compress modes, an attempt's digest now names the paths its successful <code>file_write</code> calls wrote (at most six, workspace-relative, then <code>+N</code>), the last <code>shell_exec</code> or <code>python_exec</code> check and its result (test counts, exit code or last output line), up to three decisions, and the task's first sentence or heading instead of a fixed 300-character cut.</li>
-            <li>An observed line that is empty or only a boolean, <code>None</code>, an exit code or punctuation no longer enters a digest or makes one a rehearsal candidate. Over the limit, open questions drop first, then observed lines, decisions, facts and files, then the task shortens; the outcome and the verification stay. <code>legacy</code> and direct mode without memory are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">reasoning notes</a>.</li>
+            <li>An observed line that is empty or only a boolean, <code>None</code>, an exit code or punctuation no longer enters a digest or makes one a rehearsal candidate. Over the limit, open questions drop first, then observed lines, decisions, facts and files, then the task shortens; the outcome and the verification stay. <code>legacy</code> and direct mode without memory are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">reasoning notes</a>.</li>
           </ul>
         </article>
 
@@ -141,7 +147,7 @@
           <ul>
             <li>The interactive UI now takes the reasoning and recall options for every turn of the session: <code>--reasoning</code>, <code>--reasoning-field</code>, <code>--replay-turns</code>, <code>--note-writer</code>, <code>--retriever</code>, <code>--recall-*</code> and <code>--retrieval-extra-body</code>, from flags or the saved <code>[agent]</code> and <code>[retrieval]</code> tables. Explicit flags win, retrieval flags stay inert in <code>legacy</code>, and there is no <code>/reasoning</code> command; <code>/model</code> and <code>/backend</code> keep the mode across a switch.</li>
             <li>Console sessions run the configured reasoning mode (default <code>legacy</code>) and the saved recall settings without changing legacy <code>/v1</code>. A resumed chat uses the retained window under the current process's mode: pairs resume without old thinking, while a checkpoint resume can send retained, redacted thinking, and a rejected mode switch keeps the old agent and closes the new providers.</li>
-            <li><code>[agent] tool_env</code> names extra environment variables that <code>shell_exec</code> and <code>python_exec</code> inherit in config-backed direct runs, the UI and console sessions. Names are validated and missing variables skipped, only names are saved, and <code>--base-url</code> runs and sessions expose nothing new; SSH-agent and proxy access are explicit capability grants. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#the-interactive-ui">the interactive UI</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#tool-environment">tool environment</a>.</li>
+            <li><code>[agent] tool_env</code> names extra environment variables that <code>shell_exec</code> and <code>python_exec</code> inherit in config-backed direct runs, the UI and console sessions. Names are validated and missing variables skipped, only names are saved, and <code>--base-url</code> runs and sessions expose nothing new; SSH-agent and proxy access are explicit capability grants. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-interactive-ui">the interactive UI</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/configuration.md#tool-environment">tool environment</a>.</li>
           </ul>
         </article>
 
@@ -153,7 +159,7 @@
           </p>
           <ul>
             <li>Replies without a note block can yield up to 12 keyed facts, and an explicit note can also hold 12. Questions, options, plans and negated or cancelled statements are not promoted as positive facts, and a claim about the agent's own work is filtered unless a keyed content clause follows it; <code>task:</code>/code markers and completed outcome digests stay exempt.</li>
-            <li>Source matching scores typed keys independently, keeps date years, currencies and whole phone numbers, rejects conflicts, and leaves ties and unmatched items unsourced even after admission. Bare slash dates use US order when ambiguous; quantity/count contexts, mixed numbers and <code>24/7</code> are excluded, and digit runs over 20 characters are ignored. Extraction is still heuristic and CJK-only keys are not extracted. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">reasoning notes</a>.</li>
+            <li>Source matching scores typed keys independently, keeps date years, currencies and whole phone numbers, rejects conflicts, and leaves ties and unmatched items unsourced even after admission. Bare slash dates use US order when ambiguous; quantity/count contexts, mixed numbers and <code>24/7</code> are excluded, and digit runs over 20 characters are ignored. Extraction is still heuristic and CJK-only keys are not extracted. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">reasoning notes</a>.</li>
           </ul>
         </article>
 
@@ -166,7 +172,7 @@
           <ul>
             <li><code>sessions.db</code> gains the scheduler's component version 1: <code>tasks</code>, <code>task_deps</code>, <code>priority_events</code>, <code>questions</code>, <code>sched_rules</code>, <code>sched_log</code> and <code>idle_windows</code>, created in one transaction in that file only. <code>PRAGMA user_version</code> stays the session schema's, a newer component is refused, and a second gateway on the same file is refused by its owner lock.</li>
             <li>A task's id is its <code>kind="task"</code> session's id, and the task is created with that session, its first priority event and a log row in one transaction. <code>UNIQUE(origin, request_key)</code> makes a repeated create idempotent while a reused key with a different payload is a conflict, and an actual level change writes a priority event and the log. <code>TaskSpec</code> normalizes an untrusted request, pins a user-selected P0-P5 only through the trusted adapter, and resolves a worker's folder under the user's home or <code>[gateway] workspace</code>; the user's P0 is single. Only <code>user</code> and <code>user_rule</code> origins get remembered approvals, unmarked MCP tools and session grants, and 30-day retention clears the log and idle windows.</li>
-            <li><code>ChatGate.register_task()</code> gives a worker its task lifecycle: its calls are logged as <code>session_kind="task"</code>, never take the lane, and only the runner ends it. No <code>/api/tasks</code> route or worker run is on main yet; the console wiring is next. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/scheduler.md#tasks-workers-and-the-scheduler-store-s3a1">the scheduler</a>.</li>
+            <li><code>ChatGate.register_task()</code> gives a worker its task lifecycle: its calls are logged as <code>session_kind="task"</code>, never take the lane, and only the runner ends it. No <code>/api/tasks</code> route or worker run is on main yet; the console wiring is next. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/scheduler.md#tasks-workers-and-the-scheduler-store-s3a">the scheduler</a>.</li>
           </ul>
         </article>
 
@@ -179,7 +185,7 @@
           <ul>
             <li>The page at <code>/</code> now talks only to <code>/api</code>: the session list with its machine snapshot, one chat's turns, its event stream (SSE, reopened from the last applied event id), keyed sends that the store is asked about before <code>Retry</code> is offered, stop, close, the level chip and the typing heartbeat. A refused or unknown send goes back to the chat's draft, so a reload keeps it, and <code>#/s/&lt;id&gt;</code> opens a chat even when the list's first page does not hold it.</li>
             <li>A turn reads as the terminal's: the user's message, a work group with one card per tool call (<code>Running</code>, <code>Waiting: &lt;held&gt;</code>, <code>Needs approval</code>, <code>[ok]</code> with a non-zero <code>exit</code>, <code>blocked</code>, <code>not run</code>, <code>Interrupted</code>), folded reasoning and reflections, notices, the live row (<code>step 4 · attempt 2 · Verify (cycle 1) · tests 3/8</code>) and the answer with its duration, steps, tokens and <code>Copy response</code>. The page is plain ES modules with no build step.</li>
-            <li>The console's sessions persist in <code>~/.cache/localmelo/gateway/sessions.db</code> and reopen from their transcript, and the page uses the gateway's configured model. Connection settings, approval cards and the failure block's <code>Continue</code>/<code>Try again</code> follow in a later update; until then a waiting approval shows as <code>Needs approval</code>. <code>/</code> and every <code>/v1/*</code> route keep their behaviour. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#web-workspace">the web workspace</a>.</li>
+            <li>The console's sessions persist in <code>~/.cache/localmelo/gateway/sessions.db</code> and reopen from their transcript, and the page uses the gateway's configured model. Connection settings, approval cards and the failure block's <code>Continue</code>/<code>Try again</code> follow in a later update; until then a waiting approval shows as <code>Needs approval</code>. <code>/</code> and every <code>/v1/*</code> route keep their behaviour. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/web-console.md#web-workspace">the web workspace</a>.</li>
           </ul>
         </article>
 
@@ -191,7 +197,7 @@
           </p>
           <ul>
             <li>Direct mode and the Python API's default <code>python</code> mode now register only <code>file_read</code>, <code>file_write</code> and <code>python_exec</code>. <code>--builtins all</code> (or naming <code>shell_exec</code>) restores the old set, and a named shell then runs; <code>--builtins</code> is still a usage error with <code>--serve</code> and <code>--daemon</code>. A call to a built-in the run does not offer returns <code>shell_exec is not available in this run. Available tools: …</code>, naming the run's tools.</li>
-            <li>The six-pattern command blocklist is gone: the tool's tier and the run's mode decide, not the command's spelling. The JSON line's <code>config</code> gains <code>mode</code>, and <code>config.builtins</code> and <code>config.tools</code> lose <code>shell_exec</code> in a direct run. The <code>melo ""</code> loop says once at start that <code>shell_exec</code> is off and that <code>melo "" --builtins all</code> turns it on. The benchmark measured 12 of 12 tasks with the default set and 11 of 12 with the shell on. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#direct-mode">the command line</a>.</li>
+            <li>The six-pattern command blocklist is gone: the tool's tier and the run's mode decide, not the command's spelling. The JSON line's <code>config</code> gains <code>mode</code>, and <code>config.builtins</code> and <code>config.tools</code> lose <code>shell_exec</code> in a direct run. The <code>melo ""</code> loop says once at start that <code>shell_exec</code> is off and that <code>melo "" --builtins all</code> turns it on. The benchmark measured 12 of 12 tasks with the default set and 11 of 12 with the shell on. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#direct-mode">the command line</a>.</li>
           </ul>
         </article>
 
@@ -203,7 +209,7 @@
           </p>
           <ul>
             <li>Gateway and console sessions now run in a new <code>gateway</code> tool mode and register only <code>file_read</code>, <code>file_write</code> and <code>python_exec</code>: <code>shell_exec</code> is not registered at all, so the model never sees it. Legacy <code>/v1</code> has no approval policy; console sessions ask before <code>file_write</code> and <code>python_exec</code>. The console's approvals arrive over the same unauthenticated loopback API, so any local process could approve its own request; Python code can still start a process. A gateway or console session cannot be given <code>shell_exec</code> by its default set, and an explicit <code>AgentOptions(builtins=…)</code> that names it is refused by the checker in <code>gateway</code> mode, with the mode and <code>--builtins all</code> in the reason.</li>
-            <li><code>AgentOptions</code> gains <code>mode</code>: <code>direct</code>, <code>interactive</code>, <code>gateway</code> or <code>python</code>, the Python API's default, and the command line sets its surface's mode. The interactive UI keeps <code>shell_exec</code> behind its approval panel (<code>--yolo</code> asks nothing). Direct mode and the Python API's default follow in the tool-defaults update above. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#permission-tiers">permission tiers</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md#agentoptions">the Python API</a>.</li>
+            <li><code>AgentOptions</code> gains <code>mode</code>: <code>direct</code>, <code>interactive</code>, <code>gateway</code> or <code>python</code>, the Python API's default, and the command line sets its surface's mode. The interactive UI keeps <code>shell_exec</code> behind its approval panel (<code>--yolo</code> asks nothing). Direct mode and the Python API's default follow in the tool-defaults update above. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#permission-tiers">permission tiers</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md#agentoptions">the Python API</a>.</li>
           </ul>
         </article>
 
@@ -215,7 +221,7 @@
           </p>
           <ul>
             <li>A note's items now take their <code>source_ids</code> from the observation that established them, even when it came in an earlier reply of the same task: the reply's own tool results first, then the results still in the window, then the rest of the task's records, newest first, up to the last 200. A record matches only on a strong key (a number, a date or time, an identifier containing a digit, or a capitalised name that does not start its sentence) or two distinctive non-filler words; a note with records but no match gets no item source, so “Done.” no longer cites an unrelated “no harm done” record. This fills <code>provenance.source_ids</code> for facts copied from an earlier tool result and for the digest built from them, and another task's records are never used.</li>
-            <li>The recall header the model sees no longer carries the retrieval latency: it is <code>(retriever bm25)</code>, not <code>(retriever bm25, 12 ms)</code>. Identical runs now produce identical prompt bytes, so a block kept in the window does not break the prefix cache; the time stays in <code>llm_calls.recall_json</code>, in the <code>recall</code> event and in <code>memory_stats</code>. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#recall-in-the-loop">recall in the loop</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#long-term-memory">long-term memory</a>.</li>
+            <li>The recall header the model sees no longer carries the retrieval latency: it is <code>(retriever bm25)</code>, not <code>(retriever bm25, 12 ms)</code>. Identical runs now produce identical prompt bytes, so a block kept in the window does not break the prefix cache; the time stays in <code>llm_calls.recall_json</code>, in the <code>recall</code> event and in <code>memory_stats</code>. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#recall-in-the-loop">recall in the loop</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md#long-term-memory">long-term memory</a>.</li>
           </ul>
         </article>
 
@@ -229,7 +235,7 @@
             <li><code>/title [text]</code> shows or sets a 1–200-character title, including before the first message: it is kept until the session is created, and <code>/new</code> or a successful resume clears an unsaved one.</li>
             <li><code>/undo</code> forgets the newest finished turn and keeps its typed message in the ↑ history; files and commands it ran stay changed. A committed undo reports success even after Esc, and <code>/retry</code> re-runs that undone turn without removing the previous live one.</li>
             <li><code>/usage</code> shows the recorded steps, tool calls, tokens and time of each turn, undone work included, with <code>?</code> for a missing counter, <code>+?</code> on a partial total and labeled rows below 72 columns; <code>/memory</code> inspects a copy of the working window, its counts, the long-term backend and the restore mode actually used, without a model call or a memory write.</li>
-            <li><code>/copy [turn]</code> copies a stored, redacted answer's Markdown instead of the wrapped display, keeping indentation and trailing newlines; an explicit turn number may pick an undone answer. On macOS it uses <code>pbcopy</code>, and under SSH, elsewhere or when that fails it sends an OSC 52 request and says so; nothing touches the clipboard without the command. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#inspect-undo-or-copy-a-conversation">Inspect, undo or copy a conversation</a>.</li>
+            <li><code>/copy [turn]</code> copies a stored, redacted answer's Markdown instead of the wrapped display, keeping indentation and trailing newlines; an explicit turn number may pick an undone answer. On macOS it uses <code>pbcopy</code>, and under SSH, elsewhere or when that fails it sends an OSC 52 request and says so; nothing touches the clipboard without the command. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#inspect-undo-or-copy-a-conversation">Inspect, undo or copy a conversation</a>.</li>
           </ul>
         </article>
 
@@ -242,7 +248,7 @@
           <ul>
             <li>A request such as <code>Remember that …</code> or <code>记住…</code> now also stores the fact it carries after the marker, admitted by <code>user_request</code> beside the run's episodic digest, instead of storing only the digest. The fact is <code>semantic</code> unless it is first-person (<code>profile</code>), the redaction, meta-noun and question rules apply to it, and a to-do such as <code>remember to buy milk</code> still stores no fact.</li>
             <li>A thought chunk is now superseded at its attempt's boundary together with that attempt's notes, so a later recall renders it with the <code>(superseded)</code> marker and names its attempt instead of passing for the current attempt's thinking.</li>
-            <li><code>melo-retrieve --export-store DIR</code> and <code>--export-decisions DIR</code> print zero entries and exit 0 when the directory has no <code>long_term.db</code> yet, instead of failing with “No such file”; a path that is not a directory keeps the missing-file usage error. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#long-term-memory">long-term memory</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">offline retrieval</a>.</li>
+            <li><code>melo-retrieve --export-store DIR</code> and <code>--export-decisions DIR</code> print zero entries and exit 0 when the directory has no <code>long_term.db</code> yet, instead of failing with “No such file”; a path that is not a directory keeps the missing-file usage error. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md#long-term-memory">long-term memory</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/retrieval.md">offline retrieval</a>.</li>
           </ul>
         </article>
 
@@ -254,7 +260,7 @@
           </p>
           <ul>
             <li><code>--workspace DIR</code> now works with a task, not only in the interactive UI: the run sets the same <code>workspace_root</code> the Python API takes, so <code>file_read</code> and <code>file_write</code> stay inside the folder and <code>shell_exec</code> and <code>python_exec</code> start there. Without the flag a run keeps the current folder, exactly as before; <code>~</code> is expanded and the path resolved like the UI's.</li>
-            <li>A path that is not a folder exits 2 with one line, <code>melo: --workspace: not a directory: DIR</code>, and <code>melo ""</code> and <code>--serve</code> refuse the flag like every other direct-mode option. Direct mode still has no approvals; the folder limits only the file tools. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#direct-mode">the command line</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#with-a-workspace-root">with a workspace root</a>.</li>
+            <li>A path that is not a folder exits 2 with one line, <code>melo: --workspace: not a directory: DIR</code>, and <code>melo ""</code> and <code>--serve</code> refuse the flag like every other direct-mode option. Direct mode still has no approvals; the folder limits only the file tools. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#direct-mode">the command line</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#with-a-workspace-root">with a workspace root</a>.</li>
           </ul>
         </article>
 
@@ -267,7 +273,7 @@
           <ul>
             <li><code>long_term.db</code> is now a typed store: each entry has a kind (<code>semantic</code>, <code>episodic</code>, <code>profile</code> or <code>reflection</code>), a source, a status, the signal that admitted it and its provenance (task and session ids, step and attempt, the paths and commands it touches) beside the text and the vector, plus a <code>decisions</code> table. An existing file migrates in place to <code>user_version</code> 1, its rows and the search order intact.</li>
             <li>A candidate is admitted only by a rehearsal (a later note restating it, a successful call acting on it, a reflection citing it), a user request or statement, or <code>--admit-on-outcome on</code> for the final attempt digest; the policy picks <code>NEW</code>, <code>UPDATE</code>, <code>RELATED</code>, <code>CONFLICT</code> or <code>IGNORE</code>, and every stored text, provenance included, passes the candidate boundary and redaction. <code>--keep-decision-text</code> keeps a decision's text beside its hash, and the <code>[memory]</code> table saves the outcome default.</li>
-            <li>The start recall reads active entries of other tasks of every kind, by cosine or BM25; <code>memory_stats</code> gains <code>admitted</code>, <code>written</code> and <code>ignored</code>, a <code>memory</code> event reports each decision, and <code>melo-retrieve</code> gains <code>--export-store</code>, <code>--export-decisions</code> and <code>--route</code>. Legacy requests, the JSON line, the window and the search order are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#long-term-memory">long-term memory</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md">configuration</a>.</li>
+            <li>The start recall reads active entries of other tasks of every kind, by cosine or BM25; <code>memory_stats</code> gains <code>admitted</code>, <code>written</code> and <code>ignored</code>, a <code>memory</code> event reports each decision, and <code>melo-retrieve</code> gains <code>--export-store</code>, <code>--export-decisions</code> and <code>--route</code>. Legacy requests, the JSON line, the window and the search order are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md#long-term-memory">long-term memory</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/configuration.md">configuration</a>.</li>
           </ul>
         </article>
 
@@ -280,7 +286,7 @@
           <ul>
             <li><code>melo -c</code> resumes the newest chat with a finished turn in the current folder, and <code>melo -r [ID|TITLE]</code> resumes a named one or opens the session picker; <code>/sessions [filter]</code> and <code>/resume [id|title]</code> use the same picker and resolution. The picker filters this folder or all folders before the banner, which names the chosen chat as resumed.</li>
             <li>A resume keeps the current model and workspace, clears approval grants and keeps <code>/verbose</code> and <code>/thinking</code> preferences; a recap explains what reached the model's memory (<code>[sessions] resume_mode = "pairs"</code>, the default, or <code>"window"</code>), and a chat from another folder says so. Changes another terminal made are reloaded before sending, a busy or deleted session keeps the draft, <code>/retry</code> keeps the stored typed text, and <code>/expand</code> reads tool output across the stored event pages. Quitting a saved chat prints its <code>melo -r ID</code> command.</li>
-            <li><code>-c</code> and <code>-r</code> cannot be combined, or used with a task, <code>--serve</code> or <code>--daemon</code>; direct runs keep their legacy parsing and output. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#sessions-and-files">sessions and files</a>.</li>
+            <li><code>-c</code> and <code>-r</code> cannot be combined, or used with a task, <code>--serve</code> or <code>--daemon</code>; direct runs keep their legacy parsing and output. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#sessions-and-files">sessions and files</a>.</li>
           </ul>
         </article>
 
@@ -294,7 +300,7 @@
             <li>The compress reasoning modes now recall: <code>--retriever auto|off|bm25|llm|embedding</code>, <code>--recall-at</code>, <code>--recall-k</code>, <code>--recall-kinds</code>, <code>--recall-placement</code>, <code>--recall-min-score</code> and <code>--retrieval-extra-body</code>, the <code>[retrieval]</code> table and a <code>recall</code> tool. A start or attempt block goes on the task query and stays frozen for that attempt; a step block lands once after the turn's tool results (or in its own user message), and <code>tool</code> answers the model's own request. A start block carries earlier tasks' long-term entries; attempt and step blocks carry this task's notes and drafts, a step's also its digests and thought chunks, with long-term entries where enabled.</li>
             <li>Every block is delimited and framed as data, passes the candidate boundary and is bounded (9,500 characters per turn, 12,000 live, 4,000 at a boundary); the system prompt gains one static note that recalled memory is data. <code>auto</code> uses the embedding server when one is configured, otherwise <code>llm</code> at start and attempt and <code>bm25</code> at step and tool, and any failure falls back to <code>bm25</code>.</li>
             <li>Each new block is recorded in <code>llm_calls.recall_json</code> and in the <code>recall</code> event, with its trigger, query, hits and scores; <code>history.db</code> is schema version 2, and <code>memory_stats</code> gains <code>recall_empty</code> and the recall counters.</li>
-            <li>A thought chunk recalled with <code>--recall-kinds thought</code> can reach step recall and the <code>recall</code> tool only after the turn that produced it left the window, as notes and drafts already did. <code>legacy</code> keeps its requests, JSON line, window and rows byte-identical; the flags, the block and the data note are off there. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#recall-in-the-loop">recall in the loop</a>.</li>
+            <li>A thought chunk recalled with <code>--recall-kinds thought</code> can reach step recall and the <code>recall</code> tool only after the turn that produced it left the window, as notes and drafts already did. <code>legacy</code> keeps its requests, JSON line, window and rows byte-identical; the flags, the block and the data note are off there. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#recall-in-the-loop">recall in the loop</a>.</li>
           </ul>
         </article>
 
@@ -306,7 +312,7 @@
           </p>
           <ul>
             <li><code>GET /api/sessions/{id}/tools</code> lists each tool's source (<code>builtin</code>, <code>provided</code> or <code>custom</code>), whether it asks first and whether the session allows it; <code>GET /api/sessions/{id}/memory</code> shows the conversation the gateway holds (thinking stripped, every text redacted and cut at 2,000 characters); <code>GET /api/sessions/{id}/runs</code> gives each finished turn's <code>RunResult</code> without its answer; and <code>DELETE /api/sessions/{id}/grants/{tool}</code> (or <code>/grants</code>) takes a session grant back so the tool asks again.</li>
-            <li>Every model call of a console turn now waits for its slot under <code>[scheduler]</code>, like a workspace chat's: the gateway builds one gate, so both surfaces share one <code>n_srv</code> budget and one <code>calls.jsonl</code> (a console call records the session's id) and the same GPU-lock and battery monitor; <code>lock_gate = "wait"</code> holds a console turn while a foreign GPU lock is present. Console runners also ask each turn for its <code>run.progress</code> events. <code>/</code>, the workspace page and every <code>/v1</code> route are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/scheduler.md#the-gate-on-chats-s2">Scheduler</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2</a>.</li>
+            <li>Every model call of a console turn now waits for its slot under <code>[scheduler]</code>, like a workspace chat's: the gateway builds one gate, so both surfaces share one <code>n_srv</code> budget and one <code>calls.jsonl</code> (a console call records the session's id) and the same GPU-lock and battery monitor; <code>lock_gate = "wait"</code> holds a console turn while a foreign GPU lock is present. Console runners also ask each turn for its <code>run.progress</code> events. <code>/</code>, the workspace page and every <code>/v1</code> route are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/scheduler.md#the-gate-on-chats-s2">Scheduler</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2</a>.</li>
           </ul>
         </article>
 
@@ -319,7 +325,7 @@
           <ul>
             <li><code>POST /api/sessions</code> creates a session, with or without a first turn; <code>POST /api/sessions/{id}/turns</code>, <code>/retry</code> and <code>/turns/{id}/cancel</code> start, retry and stop turns, the cancel-by-key routes stop a message, <code>POST /api/approvals/{request_id}</code> answers an approval, and a session can be renamed, moved or deleted with <code>PATCH</code> and <code>DELETE</code>.</li>
             <li>A turn starts in the background and its events arrive on the session's stream: <code>approval.requested</code> waits for an answer given through the API, and the turn ends with <code>turn.finished</code> and the result read from its row. A <code>client_request_id</code> makes a create or a turn safe to repeat, one turn runs per session (409 <code>session_busy</code>), and a stop during an approval wait withdraws the card.</li>
-            <li>Every request string must be valid UTF-8 (a lone surrogate is 400 <code>invalid_request</code>). The reference gained the routes and a tested Python script that creates a session, follows its stream, answers an approval and reads the answer back. <code>/</code>, the workspace page and every <code>/v1</code> route are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2</a>.</li>
+            <li>Every request string must be valid UTF-8 (a lone surrogate is 400 <code>invalid_request</code>). The reference gained the routes and a tested Python script that creates a session, follows its stream, answers an approval and reads the answer back. <code>/</code>, the workspace page and every <code>/v1</code> route are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2</a>.</li>
           </ul>
         </article>
 
@@ -331,7 +337,7 @@
           </p>
           <ul>
             <li>A <code>session_id</code> that is not a string (a number, a list) now gets the route's own 400 <code>{"error": "Invalid session_id format: …"}</code>, like any other invalid id, instead of FastAPI's plain-text 500.</li>
-            <li>The 100,000-character limit counts the query after leading and trailing whitespace is removed — the text the agent runs — so a whitespace-padded query whose trimmed text fits is accepted; an empty query is still 400. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#post-v1agentrun">Gateway and HTTP API</a>.</li>
+            <li>The 100,000-character limit counts the query after leading and trailing whitespace is removed — the text the agent runs — so a whitespace-padded query whose trimmed text fits is accepted; an empty query is still 400. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/http-v1.md#post-v1agentrun">Gateway and HTTP API</a>.</li>
           </ul>
         </article>
 
@@ -344,7 +350,7 @@
           <ul>
             <li><code>--reasoning compress</code> and <code>compress+replay</code>, <code>--note-writer auto|heuristic</code> and the <code>[agent]</code> <code>note_writer</code> key: <code>compress</code> sends no reasoning and keeps a short note of each reply instead (its plan, what it found and decided, what it left open, and what its tools returned) with its code drafts, in a RAM-only note store beside the working window. <code>compress+replay</code> also sends thinking as <code>replay</code> does; a backend that requires replay runs <code>compress</code> as <code>compress+replay</code>, and the JSON line reports the effective mode.</li>
             <li>A pending draft aimed at a file is pinned once after its turn's tool results, and a later write of at least 60% of its lines marks it written. Notes are rehearsed when a later note restates them, a successful call acts on a path or command they name, or a reflection cites them; each attempt gets a digest of its rehearsed notes.</li>
-            <li>Every note, draft and digest passes the new <code>check_memory_candidate</code> boundary (redact, sanitize, cap) before it reaches the window or the store. Nothing is recalled from the notes yet, <code>history.db</code> gains no notes table, and the explicit modes stop writing raw step summaries and promoting reflections to long-term memory; a session turn's <code>note</code> column gets the final digest. <code>legacy</code> is byte-identical. See the <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">guide</a>.</li>
+            <li>Every note, draft and digest passes the new <code>check_memory_candidate</code> boundary (redact, sanitize, cap) before it reaches the window or the store. Nothing is recalled from the notes yet, <code>history.db</code> gains no notes table, and the explicit modes stop writing raw step summaries and promoting reflections to long-term memory; a session turn's <code>note</code> column gets the final digest. <code>legacy</code> is byte-identical. See the <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">guide</a>.</li>
           </ul>
         </article>
 
@@ -357,7 +363,7 @@
           <ul>
             <li>The gateway opens its console session store and serves <code>GET /api/health</code>, the sessions list and one session, a session's turns with their events, a Server-Sent Events stream (with <code>Last-Event-ID</code> and one-shot catch-up), image blobs and submission lookups by <code>client_request_id</code>. The console opens a session's agent on demand and resumes its conversation when an idle sweep or the open cap closed it.</li>
             <li>When the store cannot open, health still answers and the reads answer 503 <code>store_unavailable</code> while the gateway retries every 5 seconds.</li>
-            <li><code>/api</code> is served only on a loopback address, carries one error envelope and <code>Cache-Control: no-store</code>, and only grows; <code>/</code> and every <code>/v1</code> route are unchanged, and a turn cannot be started, stopped or retried through it yet. See the <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2 reference</a>.</li>
+            <li><code>/api</code> is served only on a loopback address, carries one error envelope and <code>Cache-Control: no-store</code>, and only grows; <code>/</code> and every <code>/v1</code> route are unchanged, and a turn cannot be started, stopped or retried through it yet. See the <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2 reference</a>.</li>
           </ul>
         </article>
 
@@ -369,7 +375,7 @@
           </p>
           <ul>
             <li>A task's <code>query</code> and <code>result</code>, each step's <code>thought</code>, a tool call's arguments, a tool result's output and error, and the text long-term memory keeps (step summaries and promoted reflections) are written with the same redaction model calls and events already use: <code>sk-</code> keys, GitHub tokens, AWS access key ids, the token after <code>Bearer</code>, and a one-time code next to its keyword.</li>
-            <li>The run and the model keep the text: working memory, the requests, events and the run's <code>result</code> are unchanged, and stored images stay references. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#privacy">Privacy</a>.</li>
+            <li>The run and the model keep the text: working memory, the requests, events and the run's <code>result</code> are unchanged, and stored images stay references. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/memory.md#privacy">Privacy</a>.</li>
           </ul>
         </article>
 
@@ -381,7 +387,7 @@
           </p>
           <ul>
             <li><code>shell_exec</code> and <code>python_exec</code> start their child with <code>PATH</code>, <code>HOME</code>, <code>USER</code>, <code>LOGNAME</code>, <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, every <code>LC_*</code> variable and <code>TMPDIR</code>, plus the new <code>AgentOptions(tool_env={...})</code>, and nothing else. An API key in melo's environment reaches no tool unless <code>tool_env</code> names it; <code>VIRTUAL_ENV</code>, <code>PYTHONPATH</code>, <code>SSH_AUTH_SOCK</code> and the proxy variables pass only through <code>tool_env</code>.</li>
-            <li>MCP servers get the same base environment, which now includes every <code>LC_*</code> variable, plus the <code>env</code> their entry names. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#built-in-tools">Tools</a>.</li>
+            <li>MCP servers get the same base environment, which now includes every <code>LC_*</code> variable, plus the <code>env</code> their entry names. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md#built-in-tools">Tools</a>.</li>
           </ul>
         </article>
 
@@ -458,7 +464,7 @@
           <ul>
             <li>The first run offers an embedding model the chat server already lists (<code>Use nomic-embed-text for long-term memory? [Y/n]:</code>), and the setup wizard appends the server's embedding models as options after the backends, defaulting to the recommended one.</li>
             <li>The banner names the configured embedding backend and model (<code>long-term memory · vLLM · Qwen3-Embedding-0.6B</code>), or says <code>melo --reconfigure adds one</code> when there is none; a stored vector from another model is skipped instead of failing the recall.</li>
-            <li>A new <a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">guide</a> covers Ollama, oMLX, vLLM, SGLang and MLC.</li>
+            <li>A new <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">guide</a> covers Ollama, oMLX, vLLM, SGLang and MLC.</li>
           </ul>
         </article>
 
@@ -534,7 +540,7 @@
           </p>
           <ul>
             <li>Python code can forget one task's memory or all of it: <code>await hippo.forget(task_id)</code> removes the task's rows from <code>tasks</code>, <code>steps</code> and <code>llm_calls</code>, and the long-term entries whose metadata names it (its reflections); <code>await hippo.forget_all()</code> empties history and long-term memory, step summaries included. Working memory, procedural memory and sessions are left alone.</li>
-            <li>A forget overwrites what it deletes and truncates the WAL, so the text does not stay in the database or its <code>-wal</code> file. There is no command or page for it yet. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reset-memory">Reset memory</a>.</li>
+            <li>A forget overwrites what it deletes and truncates the WAL, so the text does not stay in the database or its <code>-wal</code> file. There is no command or page for it yet. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/memory.md#reset-memory">Reset memory</a>.</li>
           </ul>
         </article>
 
@@ -619,7 +625,7 @@
             <li>Type <code>/</code> to see the commands and what they do. <code>/model</code> and <code>/backend</code> switch the model and the server, and save them as the default (a session opened with <code>--base-url</code> saves nothing); <code>/new</code> starts a new conversation.</li>
             <li>Commands, Python and file writes ask first: allow once, allow the tool for the session, or say no with a reason. <code>--yolo</code> skips the questions, and <code>--workspace DIR</code> sets the folder the file tools stay in.</li>
             <li>Chinese and other wide characters type, delete and wrap whole. Esc stops a turn, the Up arrow recalls earlier messages, and Alt+Enter or Ctrl+J starts a new line.</li>
-            <li>Without a terminal, <code>melo</code> now says what to run instead and exits with code 2; <code>melo --serve</code> starts the gateway. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#the-interactive-ui">The interactive UI</a>.</li>
+            <li>Without a terminal, <code>melo</code> now says what to run instead and exits with code 2; <code>melo --serve</code> starts the gateway. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-interactive-ui">The interactive UI</a>.</li>
           </ul>
         </article>
 
@@ -646,7 +652,7 @@
           <ul>
             <li>While <code>melo &quot;&lt;task&gt;&quot;</code> runs on a terminal, one dimmed line on stderr shows the step, the phase, the running tool and the time. It is erased before the answer.</li>
             <li>When the task has run before with memory kept (<code>--memory-dir</code>), the line adds what the last run took and its steps; a similar task's runs are marked as such. <code>--routine NAME</code> groups differently worded runs of one task.</li>
-            <li>The line never wraps, draws nothing in the background, and never holds up the run, even when the terminal's output is paused. <code>--progress off</code> turns it off. Pipes, files, <code>--output-format json</code> and the exit codes are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#progress-line">Progress line</a>.</li>
+            <li>The line never wraps, draws nothing in the background, and never holds up the run, even when the terminal's output is paused. <code>--progress off</code> turns it off. Pipes, files, <code>--output-format json</code> and the exit codes are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#progress-line">Progress line</a>.</li>
           </ul>
         </article>
 
@@ -779,7 +785,7 @@
             <li>Before, a reflection could end a run whose task was unsolved although attempts and steps were left: its own utility score had to reach a threshold, and a reflection that could not be read, or was too long, ended the run.</li>
             <li>Now the next attempt starts when the reflection chooses <code>continue</code> and its three checks hold. An unreadable reflection no longer ends a run that has attempts and steps left, and a long one is trimmed. <code>--reflection-gate utility</code> keeps the earlier behavior.</li>
             <li>On 12 coding exercises run 5 times each with one local model, the new default passed 59/60 runs and the earlier behavior 50/60. Runs without reflection (<code>--attempt-policy none</code>) passed 59/60 too: the new default matches them and does not beat them.</li>
-            <li>Conditions and limits: <a href="https://github.com/localmelo/localmelo/blob/main/docs/evaluations.md#reflection-gate">Evaluations</a>.</li>
+            <li>Conditions and limits: <a href="https://github.com/localmelo/localmelo/blob/main/docs/project/evaluations.md#reflection-gate">Evaluations</a>.</li>
           </ul>
         </article>
 
