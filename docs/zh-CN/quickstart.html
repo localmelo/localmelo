@@ -197,7 +197,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
           <li>melo 在当前文件夹中工作（<code>--workspace DIR</code> 可以换一个）：文件工具只能在其中操作；命令和 Python 可以访问其他文件，所以 melo 会先询问。</li>
         </ul>
         <p>按键和其余细节见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#the-interactive-ui">交互式界面（英文）</a>。<code>melo ""</code> 打开的是早先版本的简单对话循环。没有终端时，单独的 <code>melo</code> 会以退出码 2 结束；请用 <code>melo --serve</code> 启动网关。</p>
-        <p><code>http://127.0.0.1:8401/</code> 上的网页工作区支持模型发现、独立的对话草稿、代码格式化、取消运行和响应式导航。它不读取配置文件：在 Chat API URL 中输入你的服务器地址（例如 Ollama 的 <code>http://127.0.0.1:11434/v1</code>），然后点 Discover models，再选择一个对话模型。同一网关上的其他浏览器标签页会看到相同的对话，刷新页面也能恢复对话。对话只在网关运行期间保留，终端里的对话与网页对话相互独立。</p>
+        <p><code>http://127.0.0.1:8401/</code> 上的网页工作区就是控制台的实时页面，只访问 <code>/api</code>：它使用网关配置的模型，所以用 <code>melo --reconfigure</code> 修改。它按最新在前列出你的对话，支持搜索和每个对话各自的草稿，并像终端一样显示一个回合：你的消息、每个工具调用一张工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 <code>Copy response</code> 的答案。Stop 会取消回合，等待中的审批显示为 <code>Needs approval</code>，对话保存在网关的 <code>sessions.db</code> 中，所以重启后仍然保留。同一网关上的其他浏览器标签页会看到相同的对话。审批卡片和设置对话框会在之后的更新中出现。</p>
       </section>
 
       <section class="section" id="serve-a-model-with-omlx">
@@ -230,7 +230,7 @@ brew install jundot/omlx/omlx</code></pre>
             <p>oMLX 在第一次请求时才加载模型，大模型可能要一分钟左右。如果这次请求超时，加上 <code>--request-timeout 600</code>。不带任务运行 <code>melo --base-url http://127.0.0.1:8000/v1</code>，会用 oMLX 列出的第一个模型打开交互式界面。</p>
           </li>
         </ol>
-        <p>要把 oMLX 设为默认：在还没有任何配置时，在终端里运行 <code>melo</code>，它会在 8000 端口找到 oMLX，列出模型并保存你选的那个。已经有配置时，先完成第 5 步，让模型加载好，再运行向导（<code>melo --reconfigure</code>）：对话后端选 vLLM（<code>3</code>），输入 <code>http://127.0.0.1:8000/v1</code> 和模型 ID；除非 oMLX 也提供嵌入模型，嵌入后端选 <code>5</code>（None）。保存的文件，以及关闭 Qwen3 模型思考要加的配置，见<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#omlx">配置（英文）</a>。在网页工作区里，把 <code>http://127.0.0.1:8000/v1</code> 填为 Chat API URL，点 Discover models，再选择这个模型。</p>
+        <p>要把 oMLX 设为默认：在还没有任何配置时，在终端里运行 <code>melo</code>，它会在 8000 端口找到 oMLX，列出模型并保存你选的那个。已经有配置时，先完成第 5 步，让模型加载好，再运行向导（<code>melo --reconfigure</code>）：对话后端选 vLLM（<code>3</code>），输入 <code>http://127.0.0.1:8000/v1</code> 和模型 ID；除非 oMLX 也提供嵌入模型，嵌入后端选 <code>5</code>（None）。保存的文件，以及关闭 Qwen3 模型思考要加的配置，见<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#omlx">配置（英文）</a>。网页工作区随后会使用这个模型；它读取配置文件。</p>
       </section>
 
       <section class="section" id="next-steps">

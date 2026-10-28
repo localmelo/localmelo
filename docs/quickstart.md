@@ -228,19 +228,27 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 - melo works in the current folder (`--workspace DIR` picks another): file
   tools stay in it; commands and Python can reach other files, so melo asks
   first.
+- A chat can run in a reasoning and recall mode: `--reasoning`,
+  `--reasoning-field`, `--replay-turns`, `--note-writer`, `--retriever`,
+  `--recall-*` and `--retrieval-extra-body`, or the saved `[agent]` and
+  `[retrieval]` tables. Explicit flags win, and retrieval flags stay inert
+  in `legacy`.
 
 [The interactive UI](cli.md#the-interactive-ui) has the keys and the rest.
 `melo ""` opens the plain conversation loop of earlier releases. Without a
 terminal, `melo` alone exits with code 2; start the gateway with
 `melo --serve`.
 
-The web workspace at `http://127.0.0.1:8401/` supports model discovery, separate
-chat drafts, code formatting, cancellation, and responsive navigation. It does
-not read the configuration file: enter your server's URL as the Chat API URL,
-such as `http://127.0.0.1:11434/v1` for Ollama, then select Discover models and
-pick a chat model. Other browser tabs on the same gateway see the same chats,
-and reloading the page brings them back. Chats last only while the gateway
-runs, and the terminal's conversations are separate from the web chats.
+The web workspace at `http://127.0.0.1:8401/` is the console's live page and
+talks only to `/api`: it uses the gateway's configured model, so
+`melo --reconfigure` changes it. It lists your chats newest first, with
+search and a draft for each, and draws a turn as the terminal does: your
+message, a work card for each tool call, folded reasoning and reflections,
+notices, the live progress row and the answer with its facts and
+`Copy response`. Stop cancels the turn, a waiting approval shows as
+`Needs approval`, and the chats are saved in the gateway's `sessions.db`, so
+a restart keeps them. Other browser tabs on the same gateway see the same
+chats. The approval cards and the settings dialog arrive in a later update.
 
 ## Serve a model with oMLX
 
@@ -313,9 +321,8 @@ model is loaded, then the wizard (`melo --reconfigure`): choose vLLM (`3`)
 as the chat backend, enter `http://127.0.0.1:8000/v1` and the model id, and
 choose `5` (None) as the embedding backend unless oMLX also serves an
 embedding model. [Configuration](configuration.md#omlx) shows the file they
-save and the table to add to turn off a Qwen3 model's thinking. In the web
-workspace, enter `http://127.0.0.1:8000/v1` as the Chat API URL, select
-Discover models and pick the model.
+save and the table to add to turn off a Qwen3 model's thinking. The web
+workspace then uses that model; it reads the configuration file.
 
 ## Next steps
 
