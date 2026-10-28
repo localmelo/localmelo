@@ -45,6 +45,10 @@ class Command:
 COMMANDS: Final[tuple[Command, ...]] = (
     Command("help", (), "[command]", "Show commands and keys", True),
     Command("new", ("clear",), "", "Start a new session", False),
+    Command("verbose", (), "[on|off]", "Toggle verbose rendering", True),
+    Command("thinking", (), "[on|off]", "Toggle thinking excerpts", True),
+    Command("expand", (), "[turn.call]", "Show a tool call's full output", True),
+    Command("progress", (), "", "Show this turn's progress facts", True),
     Command("model", (), "[name]", "Show, list or switch the model (saved)", False),
     Command("backend", (), "[url]", "Switch to another model server (saved)", False),
     Command("exit", ("quit",), "", "Quit", True, keys="ctrl+d"),

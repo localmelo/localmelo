@@ -133,7 +133,9 @@ def test_a_tool_block_shows_three_lines_then_the_rest_count() -> None:
         .text()
     )
     assert "✓ shell_exec  ls -1 · 0.1s · allowed for the session\n" in text
-    assert "  └ app.py\n    notes.txt\n    tests\n    … +2 lines\n" in text
+    assert (
+        "  └ app.py\n    notes.txt\n    tests\n    … +2 lines (/expand 1.1)\n" in text
+    )
 
 
 def test_a_single_line_left_prints_instead_of_the_marker() -> None:

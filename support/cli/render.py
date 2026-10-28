@@ -444,7 +444,8 @@ class TurnRenderer:
                 body.append("\n")
             body.append("  " + row)
         if len(rows) > len(shown):
-            body.append(f"\n  {self.symbols.ellipsis} +{len(rows) - len(shown)} lines")
+            marker = f"\n  {self.symbols.ellipsis} +{len(rows) - len(shown)} lines"
+            body.append(marker + ("" if self.verbose else " (/verbose)"))
         self.out.print(Padding(body, (0, 0, 0, 0), style="muted"))
 
     def _print_held(self) -> None:
@@ -759,6 +760,14 @@ class TurnRenderer:
         call_id = data.get("call_id")
         return self._arguments.get(call_id) if isinstance(call_id, str) else None
 
+    def tool_output(self, ref: str | None) -> ToolOutput | None:
+        """The finished call *ref* names, or the latest when *ref* is None."""
+        if not self.tool_outputs:
+            return None
+        if ref is None:
+            return self.tool_outputs[-1]
+        return next((call for call in self.tool_outputs if call.ref == ref), None)
+
     def _preview_of(self, data: Mapping[str, Any]) -> str:
         call_id = data.get("call_id")
         if not isinstance(call_id, str):
@@ -784,10 +793,10 @@ class TurnRenderer:
             body.append(prefix, style="muted")
             body.append(cut_cells(line, width, self.symbols.ellipsis))
         if len(shown) < len(lines):
-            body.append(
-                f"\n    {self.symbols.ellipsis} +{len(lines) - len(shown)} lines",
-                style="muted",
-            )
+            marker = f"\n    {self.symbols.ellipsis} +{len(lines) - len(shown)} lines"
+            if ref:
+                marker += f" (/expand {ref})"
+            body.append(marker, style="muted")
         return body
 
     def _print_result(self, result: RunResult, *, footer: bool) -> None:
