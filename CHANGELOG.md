@@ -260,7 +260,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   in melo's environment reaches no tool; `VIRTUAL_ENV`, `PYTHONPATH`,
   `SSH_AUTH_SOCK` and the proxy variables pass only through `tool_env`. MCP
   servers keep their minimal environment, which now takes every `LC_*`
-  variable too, from the same list ([#NN]).
+  variable too, from the same list ([#81]).
 - Tool hints come from the model's tool calls only. A tool named in the
   task, in a tool result, in recalled memory or in a reflection no longer
   offers that tool, so text in a run cannot put a tool the model never
@@ -499,3 +499,4 @@ earlier milestones.
 [#78]: https://github.com/localmelo/localmelo/pull/78
 [#79]: https://github.com/localmelo/localmelo/pull/79
 [#80]: https://github.com/localmelo/localmelo/pull/80
+[#81]: https://github.com/localmelo/localmelo/pull/81
