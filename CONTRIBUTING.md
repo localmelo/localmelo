@@ -26,23 +26,23 @@ uv sync --extra dev --extra gateway
   later.
 - Optionally, run `uv run pre-commit install`. The hooks then run
   `ruff --fix`, `black`, `mypy` and the whole `pytest` suite on every commit.
-  That suite includes `tests/smoke/test_backend_smoke.py`, which sends a real
-  chat request when a model server answers on `127.0.0.1:11434` or
-  `127.0.0.1:8400`.
+  The suite includes `tests/smoke/test_backend_smoke.py`, whose real-backend
+  tests are skipped unless `LOCALMELO_SMOKE=1` is set, so a plain run opens
+  no socket and sends no chat request.
 
 ## Run the checks
 
 Run these before you send a pull request:
 
 ```bash
-uv run pytest -q --ignore=tests/smoke/test_backend_smoke.py
+uv run pytest -q
 uv run ruff check .
 uv run black --check .
 uv run mypy .
 ```
 
-The first command runs the offline test suite, which needs no model server.
-While you work, run the part you change:
+The first command runs the offline test suite, which needs no model server and
+sends no chat request. While you work, run the part you change:
 
 ```bash
 uv run pytest tests/agent -q
@@ -61,7 +61,7 @@ uv run pytest tests/agent -q
 | `tests/scheduler` | The scheduling policy, the simulator and the trace importer | `dev` |
 | `tests/gateway` | Sessions, the HTTP API, the `Host` and `Origin` checks and the web workspace; the `.mjs` files test the workspace's JavaScript | `dev` and `gateway`; Node for the `.mjs` files |
 | `tests/integration` | Several parts together | `dev` and `gateway` |
-| `tests/smoke` | Offline tests of the smoke tools (parsing, metrics, logging), plus `test_backend_smoke.py`, which talks to a real model server | `dev` (and a model server for that file) |
+| `tests/smoke` | Offline tests of the smoke tools (parsing, metrics, logging), plus the opt-in `test_backend_smoke.py`, which talks to a real model server | `dev` (and a model server for that file) |
 
 The web workspace's JavaScript has its own tests. They need Node (the version
 in `.nvmrc`), and pytest does not run them:
@@ -72,18 +72,18 @@ node --test tests/gateway/test_markdown.mjs tests/gateway/test_workspace.mjs
 
 ### Real-backend smoke tests
 
-Run these only with your own model server running:
+Run these only with your own model server running and the opt-in switch:
 
 ```bash
-uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q
+LOCALMELO_SMOKE=1 uv run pytest -m smoke_backend tests/smoke/test_backend_smoke.py -q
 ```
 
 They send a chat request to Ollama on `127.0.0.1:11434` and to MLC LLM on
 `127.0.0.1:8400`, and skip the server that does not answer.
 `tests/smoke/core_loop_test.py` runs longer memory scenarios against real
-servers; see [tests/smoke/README.md](tests/smoke/README.md). That README's
-default `pytest` command also collects `test_backend_smoke.py`; for an
-offline run, use the `--ignore` command above. Results worth keeping go to
+servers; see [tests/smoke/README.md](tests/smoke/README.md).
+`--ignore=tests/smoke/test_backend_smoke.py` still works for a bench harness,
+but a plain run no longer needs it. Results worth keeping go to
 [tests_result/](tests_result/README.md).
 
 ## Project layout
