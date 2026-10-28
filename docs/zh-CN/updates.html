@@ -62,12 +62,28 @@
             </tbody>
           </table>
         </div>
-        <p>计划中：</p>
+        <p>进行中，按顺序落地：</p>
         <ul>
-          <li>交互式命令行剩下的部分：附加文件和 shell 命令；</li>
-          <li>一个实时显示智能体工作的控制台页面，以及网关重启后仍然保留的网页工作区对话（控制台的会话已经可以持久保存并在重启后恢复）；</li>
-          <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
-          <li>进度行上的百分比进度条，用于反复运行的任务；在重放证明它可靠之前保持关闭。</li>
+          <li>网页控制台-2：审批、错误、历史和设置（U3 PR 5b）。</li>
+        </ul>
+        <p>接下来，按顺序：</p>
+        <ul>
+          <li>无头工作进程支持-1：把 worker 运行保存为会话（<a href="https://github.com/localmelo/localmelo/issues/108">#108</a>）；</li>
+          <li>无头工作进程支持-2：内部试用（dogfood，#107 W1）；</li>
+          <li>网页控制台-3：设置面板和详情抽屉（U3 PR 6）；</li>
+          <li>无头工作进程支持-3：网页上的 worker 历史（<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>）；</li>
+          <li>任务调度器-2：任务 API 和 workers（S3a.2）；</li>
+          <li>网页控制台-4：API 和控制台文档（U3 PR 7）；</li>
+          <li>macOS 应用-1：桌面应用（A1）；</li>
+          <li>任务调度器-3：暂停、停放和重启恢复（S3b）；</li>
+          <li>任务调度器-4：<code>melo-task</code> 命令（S3c）；</li>
+          <li>无头工作进程支持-4：worker 契约（#107 W2）；</li>
+          <li>网关安全-1：访问令牌（<a href="https://github.com/localmelo/localmelo/issues/29">#29</a> P11-P12）；</li>
+          <li>终端界面-2：附件、shell 命令和流式输出（U2c、U4）；</li>
+          <li>记忆事实-2：中文和否定事实；</li>
+          <li>无头工作进程支持-5：任务 API 的 workers 和 Claude Code（#107 W3-W4）；</li>
+          <li>文档-1：在网站上提供有条理、可读、双语的文档（<a href="https://github.com/localmelo/localmelo/issues/117">#117</a>）；</li>
+          <li>之后：更多调度器阶段、睡眠流水线（<a href="https://github.com/localmelo/localmelo/issues/14">#14</a>）和 Track 6 的其余部分（<a href="https://github.com/localmelo/localmelo/issues/29">#29</a>）。</li>
         </ul>
         <p>维护者撰写的记忆设计见<a href="./memory-design.html">记忆设计</a>页，其中部分内容尚未实现。</p>
       </section>
@@ -76,10 +92,79 @@
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
 
+        <article class="update-entry" id="u-2026-10-28-attempt-digest">
+          <h3>一次尝试的摘要说明这次尝试做了什么</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/116">#116</a>
+          </p>
+          <ul>
+            <li>在 compress 模式下，一次尝试的摘要现在会写明它成功的 <code>file_write</code> 调用写入的路径（最多六条，相对于工作区，之后是 <code>+N</code>）、最后一次 <code>shell_exec</code> 或 <code>python_exec</code> 检查及其结果（测试计数、退出码或最后一行输出）、最多三个决定，以及任务的第一句或标题，而不是固定的 300 字符截断。</li>
+            <li>空白的观察行，或者只有布尔值、<code>None</code>、退出码或标点的观察行，不再进入摘要，也不会让摘要成为排练候选。超过长度限制时，先丢掉未决问题，然后是观察行、决定、事实和文件，最后缩短任务；结果和验证会保留。<code>legacy</code> 和没有记忆的直接模式不变。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">推理笔记（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-chat-reasoning">
+          <h3>整段终端对话运行在推理和召回模式下</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/115">#115</a>
+          </p>
+          <ul>
+            <li>交互式界面现在为会话的每个回合接受和任务一样的推理与召回选项：<code>--reasoning</code>、<code>--reasoning-field</code>、<code>--replay-turns</code>、<code>--note-writer</code>、<code>--retriever</code>、<code>--recall-*</code> 和 <code>--retrieval-extra-body</code>，可以来自旗标，也可以来自已保存的 <code>[agent]</code> 和 <code>[retrieval]</code> 表。显式旗标优先，召回旗标在 <code>legacy</code> 下不生效，也没有 <code>/reasoning</code> 命令；<code>/model</code> 和 <code>/backend</code> 切换后仍保留该模式。</li>
+            <li>控制台会话会使用配置的推理模式（默认 <code>legacy</code>）和已保存的召回设置，同时不改变旧的 <code>/v1</code>。恢复的对话按当前进程的模式使用保留的窗口：pairs 恢复不带旧思考，检查点恢复可以发送保留且已脱敏的思考；被拒绝的模式切换会保留旧的智能体并关闭新的提供方。</li>
+            <li><code>[agent] tool_env</code> 指定 <code>shell_exec</code> 和 <code>python_exec</code> 在配置文件支持的直接运行、界面和控制台会话中额外继承的环境变量。名称会被校验，缺失的变量会被跳过，只保存名称；<code>--base-url</code> 运行和会话不会多暴露任何变量；SSH agent 和代理访问都是显式的授权。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#the-interactive-ui">交互式界面（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#tool-environment">工具环境（英文）</a>。</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-28-heuristic-facts">
-          <h3>启发式笔记提取带强键的事实</h3>
-          <p class="update-date"><time datetime="2026-10-28">2026-10-28</time> · 尚未发布</p>
-          <p>没有笔记块的回复可以产生最多 12 条带强键的事实。问题、计划和否定句不会作为肯定事实；来源冲突或得分相同时不引用记录。这是启发式提取，仅含中日韩文字键的行不会被提取。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">推理笔记（英文）</a>。</p>
+          <h3>启发式笔记只保留真实事实并引用正确的记录</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/114">#114</a>
+          </p>
+          <ul>
+            <li>没有笔记块的回复可以产生最多 12 条带强键的事实，显式笔记也可以有 12 条。问题、选项、计划和否定或取消的陈述不会作为肯定事实；关于智能体自己工作的说法，只有在后面跟着带强键的内容从句时才保留；<code>task:</code>/代码标记和已完成的结果摘要不受影响。</li>
+            <li>来源匹配会独立地给带强键的字段打分，保留日期中的年份、货币和完整电话号码，拒绝冲突，并让得分相同或没有匹配的条目即使写入后也没有来源。有歧义的斜杠日期按美式顺序解释；数量/计数语境、混合数字和 <code>24/7</code> 会被排除，超过 20 个字符的连续数字会被忽略。提取仍然是启发式的，仅含中日韩文字键的行不会被提取。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">推理笔记（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-task-store">
+          <h3>网关的会话文件可以保存调度器的任务</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/113">#113</a>
+          </p>
+          <ul>
+            <li><code>sessions.db</code> 增加了调度器的组件版本 1：<code>tasks</code>、<code>task_deps</code>、<code>priority_events</code>、<code>questions</code>、<code>sched_rules</code>、<code>sched_log</code> 和 <code>idle_windows</code>，只在该文件中用一个事务创建。<code>PRAGMA user_version</code> 仍然是会话架构的版本，更新的组件会被拒绝，同一文件上的第二个网关会被它的所有者锁拒绝。</li>
+            <li>任务的 ID 就是它 <code>kind="task"</code> 会话的 ID，任务与这个会话、它的第一个优先级事件和一条日志记录在同一个事务中创建。<code>UNIQUE(origin, request_key)</code> 让重复创建幂等，复用 key 但内容不同则冲突，实际的等级变化会写入优先级事件和日志。<code>TaskSpec</code> 会规范化不可信的请求，只通过受信任的适配器固定用户选择的 P0-P5，并把 worker 的文件夹解析到用户主目录或 <code>[gateway] workspace</code> 下；用户的 P0 只有一个。只有 <code>user</code> 和 <code>user_rule</code> 来源会得到记住的审批、未标记的 MCP 工具和会话授权，30 天保留期会清理日志和空闲窗口。</li>
+            <li><code>ChatGate.register_task()</code> 给 worker 一个任务生命周期：它的调用记录为 <code>session_kind="task"</code>，永远不占快车道，只有 runner 能结束它。main 上还没有 <code>/api/tasks</code> 路由或 worker 运行；下一步是控制台接线。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/scheduler.md#tasks-workers-and-the-scheduler-store-s3a1">调度器（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-console-page">
+          <h3>网页控制台的页面实时显示对话</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/111">#111</a>
+          </p>
+          <ul>
+            <li><code>/</code> 页面现在只访问 <code>/api</code>：带机器快照的会话列表、单个对话的回合、它的事件流（SSE，从最后应用的事件 ID 重开）、由会话库确认后才提供 <code>Retry</code> 的带 key 发送、Stop、关闭、优先级标签和输入心跳。被拒绝或未知的发送会退回该对话的草稿，所以刷新后仍在；即使列表第一页没有某个对话，<code>#/s/&lt;id&gt;</code> 也能打开它。</li>
+            <li>一个回合的读法和终端一致：用户的消息、每个工具调用一张工作卡片（<code>Running</code>、<code>Waiting: &lt;held&gt;</code>、<code>Needs approval</code>、带非零 <code>exit</code> 的 <code>[ok]</code>、<code>blocked</code>、<code>not run</code>、<code>Interrupted</code>）、折叠的推理和反思、通知、实时行（<code>step 4 · attempt 2 · Verify (cycle 1) · tests 3/8</code>），以及带用时、步数、令牌和 <code>Copy response</code> 的答案。页面是没有构建步骤的普通 ES 模块。</li>
+            <li>控制台的会话保存在 <code>~/.cache/localmelo/gateway/sessions.db</code>，并从记录中重新打开；页面使用网关配置的模型。连接设置、审批卡片和失败块里的 <code>Continue</code>/<code>Try again</code> 会在之后的更新中出现；在那之前，等待中的审批显示为 <code>Needs approval</code>。<code>/</code> 和所有 <code>/v1/*</code> 路由保持原有行为。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#web-workspace">网页工作区（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-tool-defaults">
+          <h3>直接运行和 Python 运行默认不再提供 <code>shell_exec</code></h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/110">#110</a>
+          </p>
+          <ul>
+            <li>直接模式和 Python API 默认的 <code>python</code> 模式现在只注册 <code>file_read</code>、<code>file_write</code> 和 <code>python_exec</code>。<code>--builtins all</code>（或点名 <code>shell_exec</code>）会恢复原来的组合，被点名的 shell 随后会运行；<code>--builtins</code> 在 <code>--serve</code> 和 <code>--daemon</code> 下仍然是用法错误。调用本次运行没有提供的内置工具会返回 <code>shell_exec is not available in this run. Available tools: …</code>，并列出这次运行的工具。</li>
+            <li>六种破坏性命令模式的黑名单被移除了：由工具的权限级别和运行的模式决定，而不是命令的写法。JSON 行的 <code>config</code> 增加 <code>mode</code>，直接运行的 <code>config.builtins</code> 和 <code>config.tools</code> 不再包含 <code>shell_exec</code>。<code>melo ""</code> 循环会在开始时说明一次 <code>shell_exec</code> 已关闭，以及 <code>melo "" --builtins all</code> 可以打开它。基准测试在默认组合下 12 个任务全部通过，打开 shell 时是 12 个中的 11 个。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#direct-mode">命令行（英文）</a>。</li>
+          </ul>
         </article>
 
         <article class="update-entry" id="u-2026-10-28-tool-modes">
@@ -89,8 +174,8 @@
             <a href="https://github.com/localmelo/localmelo/pull/104">#104</a>
           </p>
           <ul>
-            <li>网关和控制台会话现在运行在新的 <code>gateway</code> 工具模式中，只注册 <code>file_read</code>、<code>file_write</code> 和 <code>python_exec</code>：<code>shell_exec</code> 完全不注册，模型根本看不到它。这两种界面都没有审批策略：控制台的审批会通过同一个未认证的回环 API 到达，所以任何本地进程都能批准自己的请求；Python 代码仍然可以启动进程。网关或控制台会话不能通过默认组合拿到 <code>shell_exec</code>，显式写出它的 <code>AgentOptions(builtins=…)</code> 会被检查器在 <code>gateway</code> 模式下拒绝，并在原因里写明模式和 <code>--builtins all</code>。</li>
-            <li><code>AgentOptions</code> 新增 <code>mode</code>：<code>direct</code>、<code>interactive</code>、<code>gateway</code> 或 <code>python</code>（Python API 的默认值），命令行会设置各自界面的模式。交互式界面仍把 <code>shell_exec</code> 放在审批面板之后（<code>--yolo</code> 不询问），直接模式不变。针对六种破坏性命令模式的黑名单仍适用于 <code>direct</code> 和 <code>python</code> 模式，所以不传审批策略的 Python 调用者不会比以前更弱：<code>rm -rf /</code>、<code>mkfs</code>、<code>dd if=</code>、fork 炸弹、<code>shutdown</code> 和 <code>reboot</code> 都会被拒绝，而交互式界面改为询问审批面板。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#permission-tiers">权限级别（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md#agentoptions">Python API（英文）</a>。</li>
+            <li>网关和控制台会话现在运行在新的 <code>gateway</code> 工具模式中，只注册 <code>file_read</code>、<code>file_write</code> 和 <code>python_exec</code>：<code>shell_exec</code> 完全不注册，模型根本看不到它。控制台会询问，通过同一个未认证的回环 API（所以本地进程可以回答自己的请求）；<code>/v1</code> 不询问。Python 代码仍然可以启动进程。网关或控制台会话不能通过默认组合拿到 <code>shell_exec</code>，显式写出它的 <code>AgentOptions(builtins=…)</code> 会被检查器在 <code>gateway</code> 模式下拒绝，并在原因里写明模式和 <code>--builtins all</code>。</li>
+            <li><code>AgentOptions</code> 新增 <code>mode</code>：<code>direct</code>、<code>interactive</code>、<code>gateway</code> 或 <code>python</code>（Python API 的默认值），命令行会设置各自界面的模式。交互式界面仍把 <code>shell_exec</code> 放在审批面板之后（<code>--yolo</code> 不询问）。直接模式和 Python API 的默认行为见上面的工具默认值更新。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#permission-tiers">权限级别（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md#agentoptions">Python API（英文）</a>。</li>
           </ul>
         </article>
 
@@ -267,7 +352,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/81">#81</a>
           </p>
           <ul>
-            <li><code>shell_exec</code> 和 <code>python_exec</code> 启动子进程时只带 <code>PATH</code>、<code>HOME</code>、<code>USER</code>、<code>LOGNAME</code>、<code>SHELL</code>、<code>TERM</code>、<code>LANG</code>、所有 <code>LC_*</code> 变量和 <code>TMPDIR</code>，再加上新增的 <code>AgentOptions(tool_env={...})</code>，别的都不带。melo 环境里的 API 密钥不会到达任何工具；<code>VIRTUAL_ENV</code>、<code>PYTHONPATH</code>、<code>SSH_AUTH_SOCK</code> 和代理变量只能通过 <code>tool_env</code> 传入。</li>
+            <li><code>shell_exec</code> 和 <code>python_exec</code> 启动子进程时只带 <code>PATH</code>、<code>HOME</code>、<code>USER</code>、<code>LOGNAME</code>、<code>SHELL</code>、<code>TERM</code>、<code>LANG</code>、所有 <code>LC_*</code> 变量和 <code>TMPDIR</code>，再加上新增的 <code>AgentOptions(tool_env={...})</code>，别的都不带。除 <code>tool_env</code> 点名之外，melo 环境里的 API 密钥不会到达任何工具；<code>VIRTUAL_ENV</code>、<code>PYTHONPATH</code>、<code>SSH_AUTH_SOCK</code> 和代理变量只能通过 <code>tool_env</code> 传入。</li>
             <li>MCP 服务器也拿到同样的基础环境（现在包括所有 <code>LC_*</code> 变量），再加上它自己条目里的 <code>env</code>。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#built-in-tools">工具（英文）</a>。</li>
           </ul>
         </article>
@@ -306,7 +391,7 @@
           <ul>
             <li>直接运行可以用 <code>--reasoning legacy|drop|replay</code>（默认 <code>legacy</code>）、<code>--reasoning-field</code>（<code>auto</code>、<code>reasoning_content</code> 或 <code>reasoning</code>）和 <code>--replay-turns N</code>，或在 <code>config.toml</code> 里使用 <code>[agent]</code> 的 <code>reasoning</code> 和 <code>replay_turns</code>。<code>legacy</code> 保持请求不变，<code>drop</code> 从不发送推理，<code>replay</code> 在范围内的助手回合上发送推理，默认只限当前任务的回合。</li>
             <li><code>replay</code> 每个回合最多保留 40,000 个字符的推理（更长的推理会被跳过并计数）；<code>requires_reasoning_replay = true</code> 的后端会收到窗口内所有助手回合的推理，开启 <code>record_answers</code> 时会保留最终回答的思考，并且拒绝 <code>drop</code>。</li>
-            <li>在 <code>legacy</code> 之外，JSON 行会加上 <code>config.reasoning</code>、<code>config.replay_turns</code>、<code>usage.reasoning_chars</code> 和 <code>memory_stats</code> 里的重放计数；<code>legacy</code> 的记录与之前逐字节相同。交互式界面目前还不接受 <code>--reasoning-field</code>。</li>
+            <li>在 <code>legacy</code> 之外，JSON 行会加上 <code>config.reasoning</code>、<code>config.replay_turns</code>、<code>usage.reasoning_chars</code> 和 <code>memory_stats</code> 里的重放计数；<code>legacy</code> 的记录与之前逐字节相同。交互式界面在 <a href="https://github.com/localmelo/localmelo/pull/115">#115</a> 中才支持 <code>--reasoning-field</code>。</li>
           </ul>
         </article>
 

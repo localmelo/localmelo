@@ -20,6 +20,10 @@ MD = MarkdownIt("commonmark", {"html": True}).enable("table")
 # A specific broken link may be recorded here as (source, literal URL, reason).
 # Entries must disappear when the underlying issue is fixed.
 LINK_DEBT: dict[tuple[str, str], str] = {}
+# Headings removed upstream may already have inbound links; keep their stubs.
+RETIRED_FRAGMENTS = {
+    "docs/scheduler.md": {"tasks-workers-and-the-scheduler-store-s3a1"},
+}
 
 
 class HTMLInventory(HTMLParser):
@@ -170,7 +174,9 @@ def test_manifest_schema_and_inventory() -> None:
             assert safe_path(alias) and alias in tracked_docs()
             aliases.append(alias)
             expected, _ = inventory((ROOT / alias).read_text(), Path(alias).suffix)
-            assert set(page["fragments"][alias]) == set(expected), alias
+            assert set(page["fragments"][alias]) == set(
+                expected
+            ) | RETIRED_FRAGMENTS.get(alias, set()), alias
             for fragment, destination in page["fragments"][alias].items():
                 target, sep, anchor = destination.partition("#")
                 assert sep and fragment and anchor == fragment, (
