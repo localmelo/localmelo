@@ -125,7 +125,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `usage` | Token counts of all responses, summed by name, such as `prompt_tokens`, `completion_tokens` and `total_tokens`. Outside `legacy`, it also has `reasoning_chars` (the reasoning received, after an inline `<think>` block is split out) and `cached_tokens` or `reasoning_tokens` when the server reported them. |
 | `duration_s` | Wall-clock time of the run, in seconds. |
 | `config` | The options the run used (below). |
-| `memory_stats` | Outside `legacy`, the replay counters `replayed_chars`, `replay_skipped` and `replay_stripped`; absent from a `legacy` line. |
+| `memory_stats` | Outside `legacy`, the replay counters and the note counters; absent from a `legacy` line. |
 
 `config` holds:
 
@@ -135,7 +135,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `builtins` | The registered built-in tools, sorted by name. |
 | `memory_dir` | The directory of the SQLite files, or `null` when memory stays in RAM. |
 | `tools` | Every registered tool, built-in and MCP, sorted by name. |
-| `reasoning`, `replay_turns` | Outside `legacy`, the reasoning mode and its turn cap (`null` for every turn in scope). They are absent from a `legacy` line. |
+| `reasoning`, `replay_turns`, `note_writer` | Outside `legacy`, the effective reasoning mode, its turn cap (`null` for every turn in scope) and who writes a reply's note in the compress modes. They are absent from a `legacy` line. |
 
 `memory_stats` holds, in order:
 
@@ -144,11 +144,22 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `replayed_chars` | Characters of reasoning the planning and reflection requests carried. |
 | `replay_skipped` | Assistant turns whose reasoning was over the 40,000-character per-turn cap and was left out, summed over the requests sent. |
 | `replay_stripped` | Assistant turns whose reasoning the fit-to-cap eviction cleared, summed over the requests sent. |
+| `notes`, `notes_model`, `notes_heuristic` | Notes stored in the compress modes, and how many the model and the heuristic wrote. `notes` counts reflections too. |
+| `note_chars` | Characters of the checked note texts stored. |
+| `drafts`, `drafts_written` | Drafts stored, and how many a write covered. |
+| `candidates` | Documents offered to the candidate boundary. |
+| `remember_model`, `remember_heuristic` | Notes whose `remember` flag the model or the heuristic set. |
+| `candidates_refused` | Documents the boundary or the note store refused. |
+| `redactions` | Secret spans the boundary replaced. |
+| `rehearsed` | `{"restated": n, "acted": n, "cited": n}`: how often each rehearsal signal fired. |
+| `digests` | Attempt digests stored. |
 
-All three are `0` in `drop`. A `legacy` line has no `memory_stats`, no
-`reasoning_chars` and no `cached_tokens`/`reasoning_tokens` in `usage`, and
-no `reasoning`/`replay_turns` in `config`, so it is byte-identical to the
-line before these fields.
+The replay counters are `0` in `drop`; the note counters are `0` in every
+mode that does not use them, so the shape is the same across the explicit
+arms. A `legacy` line has no `memory_stats`, no `reasoning_chars` and no
+`cached_tokens`/`reasoning_tokens` in `usage`, and no
+`reasoning`/`replay_turns`/`note_writer` in `config`, so it is
+byte-identical to the line before these fields.
 
 The chat request timeout is a setting of the model connection, not of the
 run, so it is not part of `config`.

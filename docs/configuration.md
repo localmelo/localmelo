@@ -131,8 +131,9 @@ tables of the chosen backends.
 | `extra_body` | local or cloud backend | not set | Extra fields for every chat request; see [Extra request fields](#extra-request-fields-extra_body). |
 | `reasoning_field` | local or cloud backend | not set | The request key reasoning is sent back under: `auto`, `reasoning_content` or `reasoning`; `[ollama]` also takes `thinking`. See [Reasoning](#reasoning). |
 | `requires_reasoning_replay` | local or cloud backend | `false` | `true` when the server rejects a request that omits a reply's reasoning. See [Reasoning](#reasoning). |
-| `reasoning` | `[agent]` | `"legacy"` | `legacy`, `drop` or `replay`; the default is direct mode's `--reasoning`. See [Reasoning](#reasoning). |
-| `replay_turns` | `[agent]` | not set | With `replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
+| `reasoning` | `[agent]` | `"legacy"` | `legacy`, `drop`, `replay`, `compress` or `compress+replay`; the default is direct mode's `--reasoning`. See [Reasoning](#reasoning). |
+| `replay_turns` | `[agent]` | not set | With `replay` or `compress+replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
+| `note_writer` | `[agent]` | `"auto"` | In the compress modes, `auto` (the model's `<note>`, else the heuristic) or `heuristic`. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. |
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
 | `host` | `[gateway]` | `"127.0.0.1"` | The address the gateway listens on: keep `127.0.0.1`, or use `localhost` or `::1`. On a host that is not `localhost` or a loopback IP address, such as `0.0.0.0`, the gateway does not check the `Host` and `Origin` of requests; see [Keep the gateway private](gateway.md#keep-the-gateway-private). |
@@ -152,13 +153,19 @@ Top-level keys must come before the first `[table]` line. How URLs are used:
 and Ollama native sends its own `thinking` field and inline copy as before.
 `drop` never sends reasoning; `replay` sends it on the assistant turns in
 scope, under one key, at most 40,000 characters per turn (a longer turn's
-reasoning is skipped and counted). Both explicit modes also stop reading
-`[RECALL]` and remove an inline `<think>` block from the answer.
+reasoning is skipped and counted). `compress` sends none and keeps each
+reply's note and drafts in working memory; `compress+replay` does both. A
+backend with `requires_reasoning_replay = true` runs `compress` as
+`compress+replay`. Every explicit mode also stops reading `[RECALL]` and
+removes an inline `<think>` block from the answer, and stops writing the
+raw step summary to long-term memory. The compress modes recall nothing
+yet; see [Reasoning notes](memory.md#reasoning-notes).
 
 ```toml
 [agent]
-reasoning = "replay"      # legacy, drop, replay
+reasoning = "replay"      # legacy, drop, replay, compress, compress+replay
 replay_turns = 3          # optional; omit for every turn
+note_writer = "auto"      # optional: auto or heuristic
 ```
 
 A direct-mode flag wins over `[agent]`, and a `--base-url` run uses only the
@@ -179,8 +186,8 @@ requires_reasoning_replay = false     # true for a server that rejects a
 
 `auto` follows the key the last reply's reasoning came from, so a backend
 that emits either `reasoning_content` or `reasoning` works as it is; it
-sends no key before the first reply. The field is used only by `replay`:
-`legacy` and `drop` ignore it, also when the gateway, a configured
+sends no key before the first reply. The field is used only by `replay`
+and `compress+replay`: `legacy`, `drop` and `compress` ignore it, also when the gateway, a configured
 interactive session or a Python caller builds its provider from this file
 (direct mode with `--base-url` does not read the file). `replay` uses the
 current task's assistant turns by default; earlier turns of a `melo ""`
