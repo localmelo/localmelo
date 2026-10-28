@@ -379,6 +379,7 @@ def docs_from_entries(
     *,
     exclude_task_ids: Iterable[str] = (),
     min_score: float = 0.0,
+    include_history: bool = False,
 ) -> list[Doc]:
     """Docs for typed long-term rows ``(text, score, metadata)``, aliased m1, m2, ….
 
@@ -396,7 +397,9 @@ def docs_from_entries(
     for text, score, meta in rows:
         if not isinstance(text, str) or not text.strip():
             continue
-        if meta.get("status") not in (None, "active"):
+        if meta.get("status") not in (
+            (None, "active", "superseded") if include_history else (None, "active")
+        ):
             continue
         task_id = meta.get("task_id")
         if isinstance(task_id, str) and task_id in excluded:
@@ -420,12 +423,39 @@ def docs_from_entries(
         origin = _origin_task_ids(meta)
         created = _number(meta.get("created_at"))
         entry_id = int(meta.get("id") or 0)
+        title = _long_title(created)
+        order_time = created
+        if include_history:
+            provenance = meta.get("provenance")
+            assertion = (
+                provenance.get("assertion") if isinstance(provenance, dict) else None
+            )
+            labels = []
+            if meta.get("status") == "superseded":
+                labels.append("superseded")
+            if isinstance(assertion, dict):
+                observed = _number(assertion.get("observed_at"))
+                if observed > 0:
+                    order_time = observed
+                    source_date = assertion.get("observed_date")
+                    if isinstance(source_date, str) and source_date:
+                        title = source_date
+                    elif meta.get("source") != "user":
+                        title = _long_title(observed)
+                if not assertion.get("subject_key"):
+                    labels.append("unlinked assertion")
+                effective = assertion.get("effective_date")
+                if isinstance(effective, str) and effective:
+                    labels.append(f"effective {effective}")
+            else:
+                labels.append("polarity unknown")
+            title = " · ".join(part for part in (title, *labels) if part)
         docs.append(
             Doc(
                 doc_id=f"long:{entry_id}",
                 kind="long",
                 text=text,
-                title=_long_title(created),
+                title=title,
                 meta={
                     **meta,
                     "alias": _long_alias(index),
@@ -434,6 +464,7 @@ def docs_from_entries(
                     "entry_id": entry_id,
                     "origin_task_ids": origin,
                     "created_at": created,
+                    **({"assertion_order_time": order_time} if include_history else {}),
                     "origin": _long_origin(meta),
                 },
             )

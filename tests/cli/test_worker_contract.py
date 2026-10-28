@@ -213,14 +213,18 @@ def test_brief_main_with_fake_provider(
         args += ["--save-session"]
     monkeypatch.setattr(sys, "argv", args)
     cli.main()
-    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    out = capsys.readouterr().out
+    records = [json.loads(line) for line in out.splitlines()]
     result = records[-1]["result"] if fmt == "stream-json" else records[-1]
     assert result["v"] == 1 and result["status"] == "completed"
     assert result["run"]["result"] == "Done"
     assert result["tests"]["state"] == "not_recorded"
     if fmt == "stream-json":
+        assert sum(record["type"] == "result" for record in records) == 1
         assert records[-1]["type"] == "result"
         assert records[-2]["event"]["type"] == "run.finished"
+    else:
+        assert len(records) == 1 and out.count("\n") == 1
 
 
 @pytest.mark.parametrize(

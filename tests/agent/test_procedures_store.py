@@ -110,6 +110,12 @@ async def test_hippo_close_drops_the_store_s_connection(tmp_path: Path) -> None:
     # connection reference dropped.
     store = SqliteProcedures(tmp_path / "procedures.db")
     await store.export_rows()  # opens the connection
-    assert store._conn is not None
-    Hippo(procedures=store).close()  # should not raise
-    assert store._conn is None
+    connection = store._conn
+    assert connection is not None
+    try:
+        Hippo(procedures=store).close()  # should not raise
+        assert store._conn is None
+    finally:
+        # The shim only drops its reference; close what this test opened
+        # before its event loop exits.
+        await connection.close()

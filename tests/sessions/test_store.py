@@ -23,6 +23,7 @@ import pytest
 import localmelo.melo.memory._sqlite as core_sqlite
 import localmelo.support.sessions.store as store_mod
 from localmelo.melo.schema import ImagePart, Message, answer_text, split_thinking
+from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.store import (
     LEASE_S,
     RESERVED_EVENT_PREFIXES,
@@ -37,7 +38,10 @@ from localmelo.support.sessions.store import (
     default_path,
     title_from_text,
 )
-from localmelo.support.sessions.submissions import SubmissionRepeated
+from localmelo.support.sessions.submissions import (
+    SubmissionConflict,
+    SubmissionRepeated,
+)
 from localmelo.support.sessions.window import decode_window
 
 from .helpers import (
@@ -97,13 +101,61 @@ def file_bytes(path: Path) -> bytes:
 # ── Schema ──────────────────────────────────────────────────────────────────
 
 
-async def test_a_new_file_gets_schema_version_1(tmp_path: Path) -> None:
+async def test_attachment_migration_and_atomic_validation(tmp_path: Path) -> None:
+    path = tmp_path / "old.db"
+    with sqlite3.connect(path) as conn:
+        for statement in store_mod._SCHEMA:
+            conn.execute(statement.replace("    attachments TEXT,\n", ""))
+        conn.execute("INSERT INTO store_info VALUES ('writer', 'gateway')")
+        conn.execute("PRAGMA user_version = 1")
+        conn.execute(
+            "INSERT INTO sessions (id, created_at, updated_at) VALUES ('old', 1, 1)"
+        )
+        conn.execute(
+            "INSERT INTO turns (session_id, turn, id, user_text, holder, started_at, status) VALUES ('old', 1, 'oldturn', 'legacy', 'h', 1, 'completed')"
+        )
+    store = gateway(path)
+    old = (await store.list_turns("old"))[0]
+    assert old.attachments is None
+    files = (TextAttachment('a".txt', "hello </attachment>"),)
+    text = compose_user_text("typed", files)
+    with pytest.raises(ValueError, match="must match"):
+        await store.begin_turn(
+            "old", "wrong", holder=HOLDER, attachments=files, typed_text="typed"
+        )
+    assert len(await store.list_turns("old")) == 1
+    turn = await store.begin_turn(
+        "old",
+        text,
+        holder=HOLDER,
+        attachments=files,
+        typed_text="typed",
+        client_request_id="key",
+    )
+    with pytest.raises(SubmissionRepeated):
+        await store.begin_turn(
+            "old",
+            text,
+            holder=HOLDER,
+            attachments=files,
+            typed_text="typed",
+            client_request_id="key",
+        )
+    with pytest.raises(SubmissionConflict):
+        await store.begin_turn("old", text, holder=HOLDER, client_request_id="key")
+    assert turn.attachments == files and turn.typed_text == "typed"
+    assert (await store.list_turns("old"))[-1].user_text == text
+    await store.aclose()
+    assert rows(path, "PRAGMA user_version") == [(2,)]
+
+
+async def test_a_new_file_gets_schema_version_2(tmp_path: Path) -> None:
     path = tmp_path / "s" / "sessions.db"
     store = gateway(path)
     await store.open()
     await store.aclose()
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert rows(path, "PRAGMA user_version") == [(1,)]
+    assert rows(path, "PRAGMA user_version") == [(2,)]
     assert rows(path, "SELECT value FROM store_info WHERE key = 'writer'") == [
         ("gateway",)
     ]
@@ -145,7 +197,7 @@ async def test_a_new_file_gets_schema_version_1(tmp_path: Path) -> None:
     assert window_columns["thinking_since"][3] == 0  # nullable
 
 
-def _sessions_file(path: Path, writer: str = "gateway", version: int = 1) -> None:
+def _sessions_file(path: Path, writer: str = "gateway", version: int = 2) -> None:
     """A sessions file made by hand, with a chosen marker and version."""
     conn = sqlite3.connect(path)
     for statement in store_mod._SCHEMA:
@@ -160,7 +212,7 @@ def _sessions_file(path: Path, writer: str = "gateway", version: int = 1) -> Non
 @pytest.mark.parametrize(
     ("case", "message"),
     [
-        ("newer", "has schema version 2; this localmelo reads version 1"),
+        ("newer", "has schema version 3; this localmelo reads version 2"),
         ("no_marker", "has no valid writer marker"),
         ("other_marker", "has no valid writer marker"),
         ("history_db", "is not a localmelo sessions file"),
@@ -171,7 +223,7 @@ async def test_a_refused_file_stays_unchanged(
 ) -> None:
     path = tmp_path / "sessions.db"
     if case == "newer":
-        _sessions_file(path, version=2)
+        _sessions_file(path, version=3)
     elif case == "no_marker":
         _sessions_file(path, writer="")
     elif case == "other_marker":

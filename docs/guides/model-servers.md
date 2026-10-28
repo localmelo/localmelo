@@ -70,7 +70,7 @@ pick. With a configuration saved already, run step 5 first, so that the
 model is loaded, then the wizard (`melo --reconfigure`): choose vLLM (`3`)
 as the chat backend, enter `http://127.0.0.1:8000/v1` and the model id, and
 choose `5` (None) as the embedding backend unless oMLX also serves an
-embedding model. [Configuration](model-servers.md#omlx) shows the file they
+embedding model. [oMLX configuration](model-servers.md#omlx) shows the file they
 save and the table to add to turn off a Qwen3 model's thinking. The web
 workspace then uses that model; it reads the configuration file.
 

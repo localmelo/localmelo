@@ -186,19 +186,19 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
 
       <section class="section" id="interactive-conversations">
         <h2>交互式对话</h2>
-        <p>不带任务运行 <code>melo</code>，即可在终端里对话。回合运行时会实时显示它的工作：模型的思考、每个工具调用完成时的命令或文件、重试、通知和反思，实时区域显示步数、阶段、正在运行的工具和本回合的进度事实。答案按 Markdown 输出：</p>
+        <p>不带任务运行 <code>melo</code>，即可在终端里对话。轮次运行时会实时显示它的工作：模型的思考、每个工具调用完成时的命令或文件、重试、通知和反思，实时区域显示步数、阶段、正在运行的工具和本次运行的进度事实。答案按 Markdown 输出：</p>
         <pre><code>melo
 # Or talk to an OpenAI-compatible server that is not saved, with its first
 # model or the one you name:
 melo --base-url http://127.0.0.1:8000/v1
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
         <ul>
-          <li>输入 <code>/</code> 查看命令：<code>/model</code> 列出服务器上的模型并切换到其中一个，<code>/backend</code> 切换到另一个服务器（两者都会保存为默认值），<code>/verbose</code> 和 <code>/thinking</code> 增减细节，<code>/expand</code> 打印某个工具调用的完整输出，<code>/progress</code> 显示实时区域依据的进度事实，<code>/approvals</code> 显示审批模式和授权，<code>/status</code> 显示会话的各项事实，<code>/mcp</code> 显示 MCP 服务器，<code>/retry</code> 重新运行最近的一轮，<code>/new</code> 重新开始，<code>/exit</code> 或 Ctrl+D 退出。</li>
-          <li>melo 在运行 shell 命令、Python 代码或写文件之前会先询问：按 <code>1</code> 允许这一次，按 <code>2</code> 在本次会话中允许这个工具，按 <code>3</code> 拒绝并告诉 melo 原因。按 Esc 停止当前回合。</li>
+          <li>输入 <code>/</code> 查看命令：<code>/model</code> 列出服务器上的模型并切换到其中一个，<code>/backend</code> 切换到另一个服务器（两者都会保存为默认值），<code>/verbose</code> 和 <code>/thinking</code> 增减细节，<code>/expand</code> 打印某个工具调用的完整输出，<code>/progress</code> 显示实时区域依据的进度事实，<code>/approvals</code> 显示审批模式和授权，<code>/status</code> 显示会话的各项事实，<code>/mcp</code> 显示 MCP 服务器，<code>/retry</code> 重新运行最近的一轮，<code>/attach PATH</code> 把一个工作区文本文件（最大 256 KiB）暂存到下一条消息，<code>/attachments</code> 和 <code>/detach N|all</code> 列出和移除已暂存的文件，<code>/new</code> 重新开始，<code>/exit</code> 或 Ctrl+D 退出。</li>
+          <li>melo 在运行 shell 命令、Python 代码或写文件之前会先询问：按 <code>1</code> 允许这一次，按 <code>2</code> 在本次会话中允许这个工具，按 <code>3</code> 拒绝并告诉 melo 原因。按 Esc 停止当前轮次。</li>
           <li>melo 在当前文件夹中工作（<code>--workspace DIR</code> 可以换一个）：文件工具只能在其中操作；命令和 Python 可以访问其他文件，所以 melo 会先询问。</li>
         </ul>
         <p>按键和其余细节见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-interactive-ui">交互式界面（英文）</a>。<code>melo ""</code> 打开的是早先版本的简单对话循环。没有终端时，单独的 <code>melo</code> 会以退出码 2 结束；请用 <code>melo --serve</code> 启动网关。</p>
-        <p><code>http://127.0.0.1:8401/</code> 上的网页工作区就是控制台的实时页面，只访问 <code>/api</code>：它使用网关配置的模型，可以在连接设置中或用 <code>melo --reconfigure</code> 修改。它按最新在前列出你的对话，支持搜索和每个对话各自的草稿，并像终端一样显示一个回合：你的消息、每个工具调用一张工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 <code>Copy response</code> 的答案。Stop 会取消回合，等待中的审批显示为 <code>Needs approval</code>，对话保存在网关的 <code>sessions.db</code> 中，所以重启后仍然保留。同一网关上的其他浏览器标签页会看到相同的对话。审批卡片让你允许或拒绝工具调用，设置对话框用于配置连接；Workers 区域以只读方式显示保存的 worker 运行记录。网关没有登录验证，审批也不能防止其他本机进程访问。</p>
+        <p><code>http://127.0.0.1:8401/</code> 上的网页工作区就是控制台的实时页面，只访问 <code>/api</code>：它使用网关配置的模型，可以在连接设置中或用 <code>melo --reconfigure</code> 修改。它按最新在前列出你的对话，支持搜索和每个对话各自的草稿，并像终端一样显示一轮：你的消息、每个工具调用一张工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 <code>Copy response</code> 的答案。Stop 会取消轮次，等待中的审批显示为 <code>Needs approval</code>，对话保存在网关的 <code>sessions.db</code> 中，所以重启后仍然保留。同一网关上的其他浏览器标签页会看到相同的对话。审批卡片让你允许或拒绝工具调用，设置对话框用于配置连接；Workers 区域以只读方式显示保存的 worker 运行记录。网关要求认证，可用 <code>melo --gateway-login</code> 登录；审批不能防止同一用户的进程或其他本机服务访问。</p>
       </section>
 
       <section class="section" id="serve-a-model-with-omlx">

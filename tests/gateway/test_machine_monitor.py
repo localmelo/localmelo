@@ -549,8 +549,9 @@ def test_no_code_writes_the_lock(tmp_path: Path) -> None:
 
     # A grep-style check over both modules: the lock reader opens read-only;
     # nothing creates, writes, renames or removes a lock.
+    gateway_dir = Path(__file__).resolve().parents[2] / "support" / "gateway"
     for name in ("machine_monitor.py", "chat_gate.py"):
-        source = (Path("support/gateway") / name).read_text(encoding="utf-8")
+        source = (gateway_dir / name).read_text(encoding="utf-8")
         for pattern in (
             'open(path, "w"',
             'open(target, "w"',

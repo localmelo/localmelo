@@ -103,7 +103,12 @@ _THINK_OPENING = re.compile(r"\s*<think>", re.IGNORECASE)
 _THINK_CLOSING = re.compile(r"</think>", re.IGNORECASE)
 
 
-def split_thinking(text: str, *, strip_answer: bool = True) -> tuple[str, str]:
+ReasoningTags = Literal["explicit", "closing_only", "none"]
+
+
+def split_thinking(
+    text: str, *, strip_answer: bool = True, reasoning_tags: ReasoningTags | None = None
+) -> tuple[str, str]:
     """Split the reasoning in a ``<think>`` block off *text*: ``(thinking, text)``.
 
     - The first ``<think>...</think>`` block, in any letter case and
@@ -122,7 +127,28 @@ def split_thinking(text: str, *, strip_answer: bool = True) -> tuple[str, str]:
     The thinking is returned stripped too. Ollama's provider, and an
     OpenAI-compatible server without a reasoning parser, put the reasoning
     at the start of a reply's content as such a block.
+    A declared ``reasoning_tags`` selects the same trusted framing used by
+    streaming: ``explicit`` recognizes a leading opening tag, ``closing_only``
+    treats text before the first closing tag as thinking, and ``none`` keeps
+    tags literal. With no declaration, the original rules above are unchanged.
     """
+    if reasoning_tags is not None:
+        if reasoning_tags == "none":
+            return "", text.strip() if strip_answer else text
+        if reasoning_tags == "explicit":
+            leading = len(text) - len(text.lstrip())
+            if not text[leading:].lower().startswith("<think>"):
+                return "", text.strip() if strip_answer else text
+            text = text[leading + len("<think>") :]
+        elif reasoning_tags != "closing_only":
+            raise ValueError("unknown reasoning_tags")
+        closing = _THINK_CLOSING.search(text)
+        if closing is None:
+            return text.strip(), ""
+        answer = text[closing.end() :]
+        return text[: closing.start()].strip(), (
+            answer.strip() if strip_answer else answer
+        )
     block = _THINK_BLOCK.search(text)
     if block is not None:
         rest = text[: block.start()] + text[block.end() :]
@@ -551,6 +577,7 @@ class CandidateItem:
 
     text: str
     source_ids: tuple[str, ...] | None = None
+    evidence: str | None = None
 
 
 @dataclass

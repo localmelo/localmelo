@@ -50,7 +50,8 @@ without dropping the negation; other forms may be missed. The rules are
 heuristic, not a semantic verifier. The admission policy flags similar
 assertions with opposite detected polarity as conflicts, rather than ignoring
 one as a duplicate. It can still ignore short facts; structured, polarity-aware
-supersession is not yet implemented. The
+supersession is off by default; Python callers can opt into the experimental
+[typed assertion path](../reference/memory.md#experimental-typed-assertions). The
 rendered note keeps its 1,200-character budget, so it may show fewer than it
 stores; the 12 items are what long-term memory offers. An explicit `<note>`
 may also list up to 12 `found` items. A reply that only reports the agent's
@@ -84,13 +85,20 @@ transpose in transpose.py … outcome: completed") is kept.
   reflection cites them in `used_notes`. A rehearsed note feeds the
   attempt's **digest**: the first meaningful task sentence (skipping headings
   and bare labels), the outcome, the files the attempt's successful
-  `file_write` calls wrote (at most six, workspace-relative, then `+N`),
-  the last passing check, the facts, up to three decisions, observed lines
+  `file_write` calls wrote (at most six, workspace-relative, then `+N`;
+  hidden paths and agent scratch notes are omitted), the last passing check,
+  the facts, up to three decisions, observed lines
   and open questions, at most 1,500 characters. A check is a `shell_exec` or
   `python_exec` that runs a test runner, references a file written earlier
   in this attempt, or imports its Python module. Failed checks and trivial imports are not verification;
-  a later failing check clears the earlier verification. Test runners need a
-  positive test summary or a zero exit marker. An observed
+  a later failing check clears the earlier verification. Python check labels
+  name a recognizable runner and, when safe to show, a target's basename;
+  otherwise they use a neutral label rather than the first line of code.
+  Python tool writes are not inferred as `files` from code or workspace changes.
+  The result shows test counts or an exit code when available, and otherwise
+  `completed` rather than arbitrary tool output. A digest may have neither
+  `files` nor `verified` when it has no observable write or eligible check.
+  Test runners need a positive test summary or a zero exit marker. An observed
   line whose result is empty or only a boolean, `None`, an exit code or
   punctuation is left out, so it cannot enter a digest or make one a
   rehearsal candidate. An unrehearsed note stays out of it. Over the limit,

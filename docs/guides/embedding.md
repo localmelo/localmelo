@@ -155,7 +155,7 @@ curl -sS http://127.0.0.1:8080/v1/embeddings \
 melo --reconfigure    # Embedding backend: 1 (MLC); URL http://localhost:8080/v1; model <the served id>
 ```
 
-Neither command is run on this Mac. The archived backend smoke used a
+The SGLang and MLC commands above are not run on this Mac. The archived backend smoke used a
 compiled `Qwen3-Embedding-0.6B-q0f16-MLC` artifact on MLC and
 `qwen3-embedding` as the served id.
 
