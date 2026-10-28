@@ -26,7 +26,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   the answer; every request string must be valid UTF-8 (a lone surrogate
   is 400 `invalid_request`), a session's workspace is stored as its real
   path, and `/`, the workspace page and every `/v1/*` route are unchanged
-  ([#NN]).
+  ([#91]).
 - Reasoning notes for the compress modes: `--reasoning compress` and
   `compress+replay`, `--note-writer auto|heuristic`, and the `[agent]`
   `note_writer` key. `compress` sends no reasoning; instead each reply is
@@ -577,6 +577,6 @@ earlier milestones.
 [#83]: https://github.com/localmelo/localmelo/pull/83
 [#84]: https://github.com/localmelo/localmelo/pull/84
 [#85]: https://github.com/localmelo/localmelo/pull/85
-[#NN]: https://github.com/localmelo/localmelo/pull/NN
+[#91]: https://github.com/localmelo/localmelo/pull/91
 [#89]: https://github.com/localmelo/localmelo/pull/89
 [#90]: https://github.com/localmelo/localmelo/pull/90
