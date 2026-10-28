@@ -16,13 +16,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   one-shot catch-up; image blobs with their own CSP; and submission lookups
   by `client_request_id`. The console holds each session's Agent, keeps its
   conversation when an idle MCP session or the open cap closes it, and
-  resumes it on reopen. When the store
-  cannot open, health still serves and the reads answer 503
-  `store_unavailable` while the gateway retries the open every 5 s. `/api`
-  is loopback-only, carries the one error envelope and
-  `Cache-Control: no-store`, and is additive-only and documented in
+  resumes it on reopen. When the store cannot open, health still serves and
+  the reads answer 503 `store_unavailable` while the gateway retries the
+  open every 5 s. `/api` is loopback-only, carries the one error envelope
+  and `Cache-Control: no-store`, and is additive-only and documented in
   [docs/api.md](docs/api.md); `/` and every `/v1/*` route are unchanged, and
   no turn starts yet ([#NN]).
+- Setup can add the embedding model that long-term memory needs. The first
+  run offers an embedding model the chat server already lists, the wizard
+  appends such models as options `6+`, the banner names the configured
+  backend and model (or the flag that adds one), and a stored vector from
+  another model is skipped instead of failing recall. A new
+  [guide](docs/embedding.md) covers Ollama, oMLX, vLLM, SGLang and MLC
+  ([#74]).
 - The terminal and the web console share one set of words for a session.
   `support/sessions/display.py` re-exports `split_thinking` and adds the
   status table `STATUS_TEXT`, keyed by status and by `(status, cause)` and
@@ -437,3 +443,4 @@ earlier milestones.
 [#69]: https://github.com/localmelo/localmelo/pull/69
 [#71]: https://github.com/localmelo/localmelo/pull/71
 [#72]: https://github.com/localmelo/localmelo/pull/72
+[#74]: https://github.com/localmelo/localmelo/pull/74
