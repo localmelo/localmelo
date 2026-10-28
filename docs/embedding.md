@@ -178,7 +178,7 @@ See [Mix backends](configuration.md#mix-backends).
 ## What changes
 
 - The interactive banner's memory row names the backend and model, for
-  example `long-term memory · vllm · Qwen3-Embedding-0.6B`; without one it
+  example `long-term memory · vLLM · Qwen3-Embedding-0.6B`; without one it
   says `no long-term memory · melo --reconfigure adds one` (or
   `--embedding-base-url adds one` in a `--base-url` session).
 - Long-term memory starts empty. It fills as runs end and steps complete;
