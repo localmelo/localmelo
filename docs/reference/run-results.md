@@ -164,7 +164,8 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `recalls` | Recall blocks first sent in this run. |
 | `recalls_by_trigger` | The same count by `start`, `attempt`, `step` and `tool`. |
 | `recall_hits` | Hits those blocks carried. |
-| `recall_same_task`, `recall_cross_task` | Delivered hits that were task-local or a same-task digest, and delivered cross-task digests; unscoped long entries count in neither. |
+| `recall_same_task`, `recall_cross_task` | Delivered long-store digests from this task and from other tasks; unscoped long entries count in neither. |
+| `recall_task_notes` | Delivered task-local note-store hits (notes, drafts, thoughts and in-task digests). |
 | `recall_chars` | Characters of the checked blocks. |
 | `recall_ms` | Wall time of the recalls, summed. |
 | `recall_fallbacks` | Recalls a retriever fallback answered, and `retrieve_errors` the retrieval failures behind them. |
@@ -173,7 +174,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `recall_empty` | Triggered recalls that had no candidate or no hit, so no block was built. |
 | `aux_retrieve_calls` | Context-free retrieval requests sent (the `llm` retriever), already counted in `n_aux`; `retrieve_prompt_tokens` and `retrieve_completion_tokens` are their tokens. |
 | `thought_chunks` | Thought chunks stored (at most 6 per task). |
-| `recall_log` | One compact record per block first sent, without item text: trigger, placement, retriever, query, k, candidates, hits (ids, aliases, kinds, scores, origin task ids, chars, omitted), same/cross counts, chars, ms, fallback. |
+| `recall_log` | One compact record per block first sent, without item text: trigger, placement, retriever, query, k, candidates, hits (ids, aliases, kinds, scores, origin task ids, chars, omitted), same/cross/task-note counts, chars, ms, fallback. |
 | `admitted` | `{"rehearsal": n, "user_request": n, "user_statement": n, "outcome": n, "sleep": n}`: decisions written per signal. |
 | `written` | `{"semantic": n, "episodic": n, "profile": n, "reflection": n}`: entries written per kind (`IGNORE` writes no entry). |
 | `ignored` | Decisions that wrote no entry because the policy chose `IGNORE`. A boundary refusal counts in `candidates_refused`, not here. |

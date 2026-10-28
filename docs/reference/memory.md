@@ -25,11 +25,14 @@ page.
 
 A digest is eligible for long-term admission only when its checked text has a
 nonempty `files:` or `verified:` line. An admitted digest stores a hash of its
-run's normalized, redacted task line in its provenance, so a sanitized or
-truncated rendered line cannot change the key; a hash is not a privacy guarantee
-against guessing. Digests with no key, including old entries, are cross-task.
-The first meaningful sentence is bounded, so distinct tasks with the same task
-line can share a key.
+run's normalized, redacted task line and of its workspace's realpath in its
+provenance, so a sanitized or truncated rendered line cannot change the key and
+the same task text in another folder is a different task; a hash is not a
+privacy guarantee against guessing. Digests with no key, including old entries,
+are cross-task. The first meaningful sentence is bounded, so distinct tasks with
+the same task line in the same workspace can share a key. If the run's last
+attempt has no evidence but an earlier attempt does, the last evidence-bearing
+attempt digest is the one admitted, so checked work is not lost.
 
 Within the long-term candidate pool, same-task episodic digests rank first. The
 store also searches for the best matching same-task digests beyond that pool.
@@ -43,10 +46,12 @@ Non-digest memories, including user facts and notes, bypass this gate.
 
 The config keys are under `[retrieval]`: ratio 1–10 (default 1.1), cap 0–2
 (default 1), and cold 0–1 (default 0). They are inert in `legacy`. A delivered
-recall record includes `same_task` and `cross_task` counts: task-local hits
-count as same, scoped long digests count by key, and unscoped long hits count
-neither. `memory_stats.recall_same_task` and `memory_stats.recall_cross_task`
-sum delivered records; a block that is not sent does not count.
+recall record includes `same_task` and `cross_task` counts for long-store
+digests only, plus `task_notes` for delivered task-local note-store hits
+(notes, drafts, thoughts and in-task digests); unscoped long hits count in none
+of the three. `memory_stats.recall_same_task`, `recall_cross_task` and
+`recall_task_notes` sum delivered records; a block that is not sent does not
+count.
 
 ## Long-term memory
 

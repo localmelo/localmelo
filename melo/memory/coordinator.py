@@ -667,7 +667,7 @@ class Hippo:
                     top_k=pool,
                     kinds=kinds,
                     exclude_task_ids=exclude_task_ids,
-                    **({"include_history": True} if self.typed_assertions else {}),
+                    include_history=self.typed_assertions,
                 )
                 seen = {row[2].get("id") for row in raw_rows}
                 rows.extend(
@@ -684,7 +684,7 @@ class Hippo:
                         top_k=pool,
                         kinds=kinds,
                         exclude_task_ids=exclude_task_ids,
-                        **({"include_history": True} if self.typed_assertions else {}),
+                        include_history=self.typed_assertions,
                     )
                 ]
             same_rows: list[tuple[str, float, dict[str, Any]]] = []

@@ -25,8 +25,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Fixed
 
 - Prefer same-task episodic digests during recall; gate and cap cross-task
-  digests, with an optional cold-start allowance. General memories are not
-  gated. Do not admit digests lacking file or verification evidence ([#NN]).
+  digests, with an optional cold-start allowance. A digest key includes the
+  run's workspace realpath, and a final evidence-less attempt keeps the last
+  evidence-bearing attempt's digest. General memories are not gated. Do not
+  admit digests lacking file or verification evidence ([#NN]).
 
 - Label Python checks in attempt digests with a recognizable runner and safe
   target basename when available, rather than the first line of code. Unknown

@@ -158,6 +158,7 @@ from localmelo.melo.memory.recall import (
     recall_span_chars,
     recall_spans,
     record_to_dict,
+    relation_counts,
     resolve_plan,
 )
 from localmelo.melo.memory.recall_gate import (
@@ -1102,6 +1103,7 @@ class _RunState:
     recall_hits: int = 0
     recall_same_task: int = 0
     recall_cross_task: int = 0
+    recall_task_notes: int = 0
     recall_chars: int = 0
     recall_ms: int = 0
     recall_fallbacks: int = 0
@@ -1862,7 +1864,7 @@ class Agent:
                 query,
                 exclude_task_ids={run.task_id},
                 pool=LONG_POOL,
-                task_key=digest_task_key(run.task_text),
+                task_key=digest_task_key(run.task_text, run.place or ""),
                 min_score=self.options.recall_min_score,
             )
         except ProviderError as exc:
@@ -1881,7 +1883,7 @@ class Agent:
             min_score=self.options.recall_min_score,
             include_history=self.options.typed_assertions,
         )
-        key = digest_task_key(run.task_text)
+        key = digest_task_key(run.task_text, run.place or "")
         docs = gate_long_docs(
             docs,
             key,
@@ -2173,12 +2175,10 @@ class Agent:
                 run.recalls_by_trigger.get(record.trigger, 0) + 1
             )
             run.recall_hits += len(record.hits)
-            run.recall_same_task += sum(
-                hit.task_relation == "same" for hit in record.hits
-            )
-            run.recall_cross_task += sum(
-                hit.task_relation == "cross" for hit in record.hits
-            )
+            counts = relation_counts(record.hits)
+            run.recall_same_task += counts["same_task"]
+            run.recall_cross_task += counts["cross_task"]
+            run.recall_task_notes += counts["task_notes"]
             run.recall_chars += record.chars
             run.recall_ms += record.ms
             run.recall_log.append(compact_record(record))
@@ -2778,7 +2778,7 @@ class Agent:
         # Key the digest by the run's task, the same input recall hashes: the
         # checked text may have escaped a role token or cut a long plan, and a
         # key read from it would no longer match this run's task.
-        provenance["task_key"] = digest_task_key(query)
+        provenance["task_key"] = digest_task_key(query, run.place or "")
         candidate = MemoryCandidate(
             candidate_id=note.note_id,
             source="digest",
@@ -2790,9 +2790,11 @@ class Agent:
             created_at=note.created_at,
             remember=True,
         )
-        has_evidence = digest_has_evidence(checked)
-        run.final_digest = candidate if has_evidence else None
-        if has_evidence:
+        if digest_has_evidence(checked):
+            # Keep the run's last evidence-bearing attempt. A final attempt
+            # without evidence must not drop an episode whose earlier attempt
+            # wrote a file or passed a check.
+            run.final_digest = candidate
             self.hippo.propose(candidate)
         return checked
 
@@ -5652,6 +5654,7 @@ class Agent:
                 "recall_hits": run.recall_hits,
                 "recall_same_task": run.recall_same_task,
                 "recall_cross_task": run.recall_cross_task,
+                "recall_task_notes": run.recall_task_notes,
                 "recall_chars": run.recall_chars,
                 "recall_ms": run.recall_ms,
                 "recall_fallbacks": run.recall_fallbacks,

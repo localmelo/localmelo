@@ -627,7 +627,9 @@ async def test_a_run_without_a_check_has_no_verified_line(tmp_path: Path) -> Non
     digests = [entry for entry in entries if entry["source"] == "digest"]
     assert len(digests) == 1
     assert "files: a.py" in digests[0]["text"]
-    assert digests[0]["provenance"]["task_key"] == digest_task_key("Write a.py.")
+    assert digests[0]["provenance"]["task_key"] == digest_task_key(
+        "Write a.py.", str(tmp_path)
+    )
     assert "verified:" not in digests[0]["text"]
 
 
@@ -657,7 +659,7 @@ async def test_a_digest_key_matches_a_sanitized_task_line(tmp_path: Path) -> Non
     digests = [entry for entry in entries if entry["source"] == "digest"]
     assert len(digests) == 1
     assert "&lt;|user|&gt;" in digests[0]["text"]
-    assert digests[0]["provenance"]["task_key"] == digest_task_key(task)
+    assert digests[0]["provenance"]["task_key"] == digest_task_key(task, str(tmp_path))
 
 
 @pytest.mark.asyncio

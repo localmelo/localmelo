@@ -35,9 +35,11 @@ melo "What is 6*7?"
   leave `auto` recall off by default.
 - Attempt digests are admitted to long-term memory only when they contain a
   confirmed file write or an eligible passing check. Recall prefers digests
-  from the same task; older keyless digests count as cross-task. By default,
-  a new task receives no cross-task digests until a same-task digest matches.
-  General facts and other non-digest memories are not gated. See
+  from the same task and workspace; older keyless digests count as cross-task.
+  By default, a new task receives no cross-task digests until a same-task
+  digest matches. When the final attempt has no evidence, the last
+  evidence-bearing attempt's digest is kept. General facts and other
+  non-digest memories are not gated. See
   [digest recall](../reference/memory.md#digest-recall).
 
 ## Experimental typed facts

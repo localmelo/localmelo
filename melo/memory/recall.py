@@ -890,6 +890,24 @@ def recall_span_chars(messages: Sequence[Message]) -> int:
     return total
 
 
+def relation_counts(hits: Sequence[RecallHit]) -> dict[str, int]:
+    """Delivered long-digest same/cross counts plus task-local note hits.
+
+    Only ``kind == "long"`` hits feed the D11 signal: the note store's
+    notes, drafts, thoughts and in-task digests are not cross-task
+    evidence, so they are counted apart.
+    """
+    return {
+        "same_task": sum(
+            hit.kind == "long" and hit.task_relation == "same" for hit in hits
+        ),
+        "cross_task": sum(
+            hit.kind == "long" and hit.task_relation == "cross" for hit in hits
+        ),
+        "task_notes": sum(hit.kind != "long" for hit in hits),
+    }
+
+
 def compact_record(record: RecallRecord) -> dict[str, Any]:
     """The compact record of the JSON line and the event: no item text."""
     return {
@@ -913,8 +931,7 @@ def compact_record(record: RecallRecord) -> dict[str, Any]:
             }
             for hit in record.hits
         ],
-        "same_task": sum(hit.task_relation == "same" for hit in record.hits),
-        "cross_task": sum(hit.task_relation == "cross" for hit in record.hits),
+        **relation_counts(record.hits),
         "chars": record.chars,
         "ms": record.ms,
         "fallback": record.fallback,
@@ -949,8 +966,7 @@ def record_to_dict(record: RecallRecord) -> dict[str, Any]:
             }
             for hit in record.hits
         ],
-        "same_task": sum(hit.task_relation == "same" for hit in record.hits),
-        "cross_task": sum(hit.task_relation == "cross" for hit in record.hits),
+        **relation_counts(record.hits),
         "chars": record.chars,
         "ms": record.ms,
         "fallback": record.fallback,

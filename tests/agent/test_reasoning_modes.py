@@ -266,6 +266,7 @@ async def test_drop_equals_legacy_on_the_wire() -> None:
         "recall_hits": 0,
         "recall_same_task": 0,
         "recall_cross_task": 0,
+        "recall_task_notes": 0,
         "recall_chars": 0,
         "recall_ms": 0,
         "recall_fallbacks": 0,

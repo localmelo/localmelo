@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 from collections.abc import Sequence
 
 from localmelo.melo.checker.redaction import redact_secrets
@@ -11,11 +12,20 @@ from localmelo.melo.memory.notes import _task_line
 from localmelo.melo.memory.retrieval.base import Doc
 
 
-def digest_task_key(query: str) -> str:
-    """Hash the normalized, redacted task line shared with digest rendering."""
+def digest_task_key(query: str, workspace: str = "") -> str:
+    """Hash the normalized, redacted task line and the workspace's realpath.
+
+    A digest and the recall that looks for it must hash the same workspace:
+    two tasks with the same text in different folders are different tasks.
+    An empty *workspace* keeps a text-only key for callers without one.
+    """
     line = _task_line(redact_secrets(query)[0])
     normalized = " ".join(line.casefold().split())
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest() if normalized else ""
+    if not normalized:
+        return ""
+    place = os.path.realpath(workspace) if workspace else ""
+    identity = f"{place}\0{normalized}" if place else normalized
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
 def digest_has_evidence(text: str) -> bool:
@@ -67,11 +77,12 @@ def gate_long_docs(
         for doc in cross:
             backend = str(doc.meta.get("retrieval") or "")
             score = float(doc.meta.get("score") or 0.0)
-            if (
-                backend in best
-                and math.isfinite(score)
-                and score >= ratio * best[backend]
-            ):
+            if backend not in best or not math.isfinite(score):
+                continue
+            threshold = ratio * best[backend]
+            # A float product can miss an exact boundary (1.1 * 0.8 is
+            # 0.8800000000000001); compare with a relative tolerance.
+            if score >= threshold or math.isclose(score, threshold, rel_tol=1e-9):
                 eligible.append(doc)
         eligible = eligible[:cap]
     remaining = [doc for doc in ranked if doc in general or doc in eligible]

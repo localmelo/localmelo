@@ -448,6 +448,7 @@ def test_the_json_line_reports_the_mode_and_counters(
         "recall_hits": 0,
         "recall_same_task": 0,
         "recall_cross_task": 0,
+        "recall_task_notes": 0,
         "recall_chars": 0,
         "recall_ms": 0,
         "recall_fallbacks": 0,

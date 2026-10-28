@@ -9,9 +9,17 @@ import pytest
 
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.memory.long import LongTerm
+from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.recall_gate import digest_task_key
 
-from .test_compress import FakeLLM, _agent, _answer, _options
+from .test_compress import (
+    FakeLLM,
+    _agent,
+    _answer,
+    _options,
+    _reflection,
+    _write_reply,
+)
 
 
 async def _seed(agent: Any, rows: list[tuple[str, str, str, str]]) -> None:
@@ -112,6 +120,7 @@ async def test_same_task_survives_top_twenty_and_is_counted(tmp_path: Path) -> N
         _options(
             reasoning="compress",
             memory_dir=str(tmp_path / "memory"),
+            workspace_root=str(tmp_path),
             retriever="bm25",
             max_steps=1,
         ),
@@ -134,7 +143,7 @@ async def test_same_task_survives_top_twenty_and_is_counted(tmp_path: Path) -> N
         kind="episodic",
         source="digest",
         admitted_by="outcome",
-        provenance={"task_key": digest_task_key(query)},
+        provenance={"task_key": digest_task_key(query, str(tmp_path))},
         task_id="previous-run",
         session_id="",
         created_at=1.0,
@@ -169,6 +178,7 @@ async def test_a_stronger_cross_task_digest_passes_the_ratio(tmp_path: Path) -> 
         _options(
             reasoning="compress",
             memory_dir=str(tmp_path / "memory"),
+            workspace_root=str(tmp_path),
             retriever="embedding",
             max_steps=1,
         ),
@@ -176,7 +186,13 @@ async def test_a_stronger_cross_task_digest_passes_the_ratio(tmp_path: Path) -> 
     )
     query = "transpose matrix"
     for name, text, vector, key, task_id in (
-        ("same", "same task marker", [0.8, 0.6], digest_task_key(query), "earlier"),
+        (
+            "same",
+            "same task marker",
+            [0.8, 0.6],
+            digest_task_key(query, str(tmp_path)),
+            "earlier",
+        ),
         ("cross", "cross task marker", [1.0, 0.0], "", "other"),
     ):
         await agent.hippo.long.apply(
@@ -202,8 +218,45 @@ async def test_a_stronger_cross_task_digest_passes_the_ratio(tmp_path: Path) -> 
     assert "same task marker" in prompt
     assert "cross task marker" in prompt  # 1.0 >= 1.1 * 0.8
     assert result.memory_stats is not None
-    assert result.memory_stats["recall_same_task"] >= 1
-    assert result.memory_stats["recall_cross_task"] >= 1
+    assert result.memory_stats["recall_same_task"] == 1
+    assert result.memory_stats["recall_cross_task"] == 1
+
+
+@pytest.mark.asyncio
+async def test_the_last_evidence_bearing_attempt_digest_is_admitted(
+    tmp_path: Path,
+) -> None:
+    server = FakeLLM(
+        _write_reply("helper.py", "x = 1"),
+        _reflection("continue", used_notes=[]),
+        _answer("done"),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_write"}),
+            attempt_policy="reflect",
+            steps_per_attempt=1,
+            max_attempts=2,
+            admit_on_outcome=True,
+        ),
+    )
+    result = await agent.run_task("write helper")
+    await agent.close()
+    assert result.memory_stats is not None
+    # Attempt 1 wrote a file; attempt 2 answered without evidence. The
+    # episode keeps attempt 1's digest.
+    assert result.memory_stats["digests"] == 2
+    store = SqliteLongTerm(tmp_path / "memory" / "long_term.db")
+    try:
+        entries = await store.active_entries()
+    finally:
+        await store.aclose()
+    assert [entry.kind for entry in entries] == ["episodic"]
+    assert "files: helper.py" in entries[0].text
 
 
 @pytest.mark.asyncio
@@ -508,3 +561,74 @@ async def test_a_legacy_run_continues_without_a_newer_long_store(
     ]
     assert len(warnings) == 1
     assert "schema version 2" in warnings[0].getMessage()
+
+
+@pytest.mark.asyncio
+async def test_typed_assertion_order_keeps_a_same_task_digest_first(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.melo.agent import agent as agent_module
+    from localmelo.melo.agent.agent import _RunState
+
+    monkeypatch.setattr(agent_module, "RECALL_LONG_K", 3)
+
+    server = FakeLLM(_answer("done"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            workspace_root=str(tmp_path),
+            retriever="bm25",
+            recall_kinds=frozenset({"long"}),
+            max_steps=1,
+            typed_assertions=True,
+        ),
+    )
+    key = digest_task_key("door", str(tmp_path))
+    rows: tuple[tuple[str, str, str, dict[str, Any], float], ...] = (
+        ("door time same task", "episodic", "digest", {"task_key": key}, 3.0),
+        (
+            "door door door early",
+            "semantic",
+            "user",
+            {"assertion": {"observed_at": 10.0}},
+            1.0,
+        ),
+        (
+            "door late",
+            "semantic",
+            "user",
+            {"assertion": {"observed_at": 20.0}},
+            2.0,
+        ),
+    )
+    for index, (text, kind, source, provenance, created) in enumerate(rows, 1):
+        await agent.hippo.long.apply(
+            text=text,
+            kind=kind,
+            source=source,
+            admitted_by="outcome",
+            provenance=provenance,
+            task_id=f"t-{index}",
+            session_id="",
+            created_at=created,
+            embedding=None,
+            action="NEW",
+            target_id=None,
+            reason="seed",
+            source_ids=[],
+            keep_text=False,
+            candidate_id=f"seed-{index}",
+        )
+    run = _RunState(task_id="reader", task_text="door", place=str(tmp_path))
+    docs = await agent._long_docs("door", run)
+    await agent.close()
+    # Same-task gating wins over #162's assertion order, which still orders
+    # the general facts after it (the newer fact first).
+    assert [doc.text for doc in docs] == [
+        "door time same task",
+        "door late",
+        "door door door early",
+    ]
+    assert [doc.meta["alias"] for doc in docs] == ["m1", "m2", "m3"]

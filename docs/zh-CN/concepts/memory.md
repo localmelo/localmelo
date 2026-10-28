@@ -47,7 +47,7 @@ remember: yes if a fact or decision here should be kept after this task, else no
 
 ## 循环中的召回
 
-情景性尝试摘要优先召回同一任务的内容；默认情况下，冷启动任务不会获得跨任务摘要。普通记忆不受此限制。只有包含文件或检查证据的摘要才会进入长期记忆。设置与限制见[摘要召回](../../reference/memory.md#digest-recall)（英文）。
+情景性尝试摘要优先召回同一任务、同一工作区的内容；默认情况下，冷启动任务不会获得跨任务摘要。普通记忆不受此限制。只有包含文件或检查证据的摘要才会进入长期记忆；最后一次尝试没有证据时，保留最后一次有证据的尝试摘要。任务键包含任务行和工作区真实路径的哈希。设置与限制见[摘要召回](../../reference/memory.md#digest-recall)（英文）。
 
 压缩模式会重新读取笔记存储。`--reasoning compress` 使用默认 `--retriever auto` 时在三个时点召回；显式指定的 `--recall-at` 会替换它们，`tool` 只有在指定时才会开启：
 
