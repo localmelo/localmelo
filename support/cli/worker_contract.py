@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import stat
 import subprocess
 import threading
@@ -12,12 +13,30 @@ from pathlib import Path
 from typing import Any, TextIO, cast
 
 from localmelo.melo.contracts.events import AgentEvent
-from localmelo.melo.memory.notes import _digest_verified, _is_check
+from localmelo.melo.memory.notes import _call_text, _digest_verified, _is_check
 from localmelo.melo.schema import ToolCall, ToolResult
 from localmelo.support.sessions.worker import redact_worker, sensitive_read
 
 MAX_BRIEF_BYTES = 1024 * 1024
 MAX_EVENT_BYTES = 1024 * 1024
+_SECRET_ASSIGNMENT = re.compile(
+    r"(?im)^([ \t]*(?:export[ \t]+)?(?=[A-Za-z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD|PASSWD|CREDENTIAL))[A-Za-z_][A-Za-z0-9_]*[ \t]*[:=][ \t]*)[^\r\n]*"
+)
+
+
+def redact_output(value: Any) -> Any:
+    """Mask common secret assignments in addition to worker redaction."""
+
+    def mask(item: Any) -> Any:
+        if isinstance(item, str):
+            return _SECRET_ASSIGNMENT.sub(r"\1[redacted]", item)
+        if isinstance(item, dict):
+            return {mask(key): mask(child) for key, child in item.items()}
+        if isinstance(item, list):
+            return [mask(child) for child in item]
+        return item
+
+    return mask(redact_worker(value))
 
 
 def read_brief(path: str | Path) -> str:
@@ -25,10 +44,13 @@ def read_brief(path: str | Path) -> str:
     path = Path(path)
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
-        with os.fdopen(fd, "rb") as source:
-            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise ValueError("brief is not a regular file")
-            raw = source.read(MAX_BRIEF_BYTES + 1)
+            with os.fdopen(fd, "rb", closefd=False) as source:
+                raw = source.read(MAX_BRIEF_BYTES + 1)
+        finally:
+            os.close(fd)
         if len(raw) > MAX_BRIEF_BYTES:
             raise ValueError("brief exceeds 1 MiB")
         text = raw.decode("utf-8")
@@ -57,11 +79,14 @@ def workspace_head(workspace: str) -> tuple[str | None, bool | None]:
         ).stdout.strip()
 
     try:
-        head = git("rev-parse", "--verify", "HEAD")
-        dirty = bool(git("status", "--porcelain"))
-        return head or None, dirty
+        head = git("rev-parse", "--verify", "HEAD") or None
     except (OSError, subprocess.SubprocessError):
-        return None, None
+        head = None
+    try:
+        dirty: bool | None = bool(git("status", "--porcelain"))
+    except (OSError, subprocess.SubprocessError):
+        dirty = None
+    return head, dirty
 
 
 class WorkerObserver:
@@ -106,7 +131,7 @@ class WorkerObserver:
     def _enqueue(self, value: dict[str, Any]) -> None:
         if self.error is not None:
             return
-        line = json.dumps(value, ensure_ascii=False, allow_nan=False) + "\n"
+        line = json.dumps(value, ensure_ascii=True, allow_nan=False) + "\n"
         if len(line.encode("utf-8")) > MAX_EVENT_BYTES:
             self._fail(ValueError("worker event exceeds 1 MiB"))
             return
@@ -157,7 +182,7 @@ class WorkerObserver:
                     self.check_exit = exit_code if type(exit_code) is int else None
         if not self.stream:
             return
-        payload = redact_worker(event.to_dict())
+        payload = redact_output(event.to_dict())
         if event.type == "run.finished" and isinstance(
             payload.get("data", {}).get("result"), dict
         ):
@@ -176,13 +201,13 @@ class WorkerObserver:
         evidence = _digest_verified(self.checks, self.workspace)
         if not evidence:
             return {"state": "not_recorded", "items": []}
-        command, _, outcome = evidence.partition(" -> ")
+        command = redact_output(_call_text(self.checks[-1][0]))
         return {
             "state": "recorded",
             "items": [
                 {
-                    "command": command,
-                    "result": outcome,
+                    "command": command[:2000],
+                    "command_truncated": len(command) > 2000,
                     "exit_code": self.check_exit,
                     "source": "tool_event",
                 }
@@ -209,7 +234,7 @@ def result_record(
     run.pop("config", None)
     return cast(
         dict[str, Any],
-        redact_worker(
+        redact_output(
             {
                 "v": 1,
                 "status": outcome.status,

@@ -227,6 +227,8 @@ def test_brief_main_with_fake_provider(
     "args",
     [
         ["--brief", "missing.md"],
+        ["--brief", "."],
+        ["--brief", "fifo"],
         ["--brief", "brief.md", "task"],
         ["--brief", "brief.md", "--serve"],
         ["--brief", "brief.md", "--output-format", "text"],
@@ -237,11 +239,13 @@ def test_brief_main_with_fake_provider(
 def test_invalid_modes_fail_before_agent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, args: list[str]
 ) -> None:
+    import os
     import sys
 
     import localmelo.__main__ as cli
 
     monkeypatch.chdir(tmp_path)
+    os.mkfifo(tmp_path / "fifo")
     (tmp_path / "brief.md").write_text("Task", encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["melo", *args])
     monkeypatch.setattr(

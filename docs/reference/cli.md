@@ -100,7 +100,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 
 | Option | Default | Description |
 |---|---|---|
-| `--brief FILE` | not set | Read a direct task from a nonempty UTF-8 file, at most 1 MiB, relative to the invocation directory. Requires no positional task and defaults to worker JSON output. |
+| `--brief FILE` | not set | Read a direct task from a nonempty UTF-8 file, at most 1 MiB, relative to the invocation directory. Requires no positional task, defaults to worker JSON output and rejects text output. |
 | `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](../guides/tools-mcp.md#with-a-workspace-root). |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |
@@ -409,17 +409,21 @@ These are usage errors:
 state come from the workspace, and are null when unavailable. `run` is the
 run record without `config`; `tests` is `recorded` only for the last passing
 recognized test check of the final attempt, otherwise `not_recorded`. A
-recorded item contains command, result, nullable exit code and `tool_event`
-source. It is evidence from tool output, not a guarantee that a task is correct.
+recorded item contains the raw command or Python code, redacted and capped at
+2,000 characters with `command_truncated`, its nullable exit code and
+`tool_event` source. It is evidence from tool output, not a guarantee that a task is correct.
 
 With `--brief --output-format stream-json`, stdout is NDJSON: each agent event
 is wrapped as `{ "v": 1, "type": "event", "event": ... }`, followed by a
 `{ "v": 1, "type": "result", "result": ... }` worker result when the run
 finishes normally. A broken or undrained output pipe is a failure; signals,
 process death or a broken pipe can leave no result. Drain stdout and check
-both the final record and the exit code. Worker output uses pattern-based
-redaction and omits recognizable sensitive-file reads; arbitrary printed or
-model-echoed secrets may remain. Review before sharing. `--inbox` is not yet
+both the final record and the exit code. Startup and transport errors may
+exit without a worker result; explicit error records are deferred. Worker
+output uses pattern-based
+redaction and omits some recognizable sensitive-file reads, including simple
+shell and Python reads. Arbitrary commands, code and model output can still
+expose secrets: the stream is not a secret boundary. Review before sharing. `--inbox` is not yet
 available. `--save-session` can record the same run.
 
 **In both formats:**

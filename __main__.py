@@ -495,7 +495,7 @@ async def _run_worker_brief(
             observer._enqueue({"v": 1, "type": "result", "result": record})
         else:
             print(
-                json.dumps(record, ensure_ascii=False, allow_nan=False),
+                json.dumps(record, ensure_ascii=True, allow_nan=False),
                 file=out,
                 flush=True,
             )
@@ -690,6 +690,7 @@ def _run_direct(
     exit_signals = _ExitSignals(
         agent, tool_providers, before_exit=None if line is None else line.close
     )
+    reported = False
     try:
         output = (
             _stdout_for_the_report() if query else contextlib.nullcontext(sys.stdout)
@@ -710,9 +711,18 @@ def _run_direct(
                     **({"worker_brief": True} if worker_brief else {}),
                 )
             )
+            reported = code == EXIT_CRASHED
     except BaseException as exc:
         if line is not None:
             line.close()  # before a traceback or the line below
+        if (
+            isinstance(exc, BrokenPipeError)
+            and worker_brief
+            and exit_signals.received is None
+        ):
+            if not reported:
+                print("melo: worker output failed: broken pipe", file=sys.stderr)
+            return EXIT_CRASHED
         if exit_signals.received is None:
             if not query and isinstance(exc, KeyboardInterrupt):
                 _exit_by_signal(signal.SIGINT)
@@ -1331,6 +1341,7 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     direct.add_argument(
         "--output-format",
         choices=["text", "json"],
+        metavar="{text,json,stream-json}",
         help="text (default), one JSON line, or stream-json with --brief",
     )
     direct.add_argument(
