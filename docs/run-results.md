@@ -139,6 +139,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `reasoning`, `replay_turns`, `note_writer` | Outside `legacy`, the effective reasoning mode, its turn cap (`null` for every turn in scope) and who writes a reply's note in the compress modes. They are absent from a `legacy` line. |
 | `retriever`, `retriever_effective`, `recall_at` | Outside `legacy`, the requested retriever (`auto` when the default), the enabled-trigger map (`{"start": "llm", "attempt": "llm", "step": "bm25"}`, sorted) and the sorted effective trigger list. |
 | `recall_k`, `recall_kinds`, `recall_placement`, `recall_min_score` | Outside `legacy`, the task-local hit cap, the sorted enabled kinds, the step placement and the embedding/long score floor. |
+| `admit_on_outcome`, `keep_decision_text` | Outside `legacy`, the two R6-lite switches: admit only the final digest with its terminal status at the run's end, and keep a decision's text beside its hash. Both are `false` by default and absent from a `legacy` line. |
 
 `memory_stats` holds, in order:
 
@@ -150,9 +151,9 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `notes`, `notes_model`, `notes_heuristic` | Notes stored in the compress modes, and how many the model and the heuristic wrote. `notes` counts reflections too. |
 | `note_chars` | Characters of the checked note texts this run stored (a restatement that grows an earlier note is not counted again). |
 | `drafts`, `drafts_written` | Drafts stored, and how many a write covered. |
-| `candidates` | Documents offered to the candidate boundary. |
+| `candidates` | Texts offered to the candidate boundary: each document (a note, a draft, a digest, a reflection, a user text, a recall block) and each candidate item that passes it again. |
 | `remember_model`, `remember_heuristic` | Notes whose `remember` flag the model or the heuristic set. |
-| `candidates_refused` | Documents the boundary or the note store refused. |
+| `candidates_refused` | Texts the boundary or the note store refused, counted like `candidates`. |
 | `redactions` | Secret spans the boundary replaced. |
 | `rehearsed` | `{"restated": n, "acted": n, "cited": n}`: how often each rehearsal signal fired. |
 | `digests` | Attempt digests stored. |
@@ -168,10 +169,13 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `aux_retrieve_calls` | Context-free retrieval requests sent (the `llm` retriever), already counted in `n_aux`; `retrieve_prompt_tokens` and `retrieve_completion_tokens` are their tokens. |
 | `thought_chunks` | Thought chunks stored (at most 6 per task). |
 | `recall_log` | One compact record per block first sent, without item text: trigger, placement, retriever, query, k, candidates, hits (ids, aliases, kinds, scores, origin task ids, chars, omitted), chars, ms, fallback. |
+| `admitted` | `{"rehearsal": n, "user_request": n, "user_statement": n, "outcome": n, "sleep": n}`: decisions written per signal. |
+| `written` | `{"semantic": n, "episodic": n, "profile": n, "reflection": n}`: entries written per kind (`IGNORE` writes no entry). |
+| `ignored` | Decisions that wrote no entry because the policy chose `IGNORE`. A boundary refusal counts in `candidates_refused`, not here. |
 
-The replay counters are `0` in `drop`; the note and recall counters are `0`
-in every mode that does not use them, so the shape is the same across the
-explicit arms. A `legacy` line has no `memory_stats`, no `reasoning_chars`
+The replay counters are `0` in `drop`; the note, recall and admission
+counters are `0` in every mode that does not use them, so the shape is the
+same across the explicit arms. A `legacy` line has no `memory_stats`, no `reasoning_chars`
 and no `cached_tokens`/`reasoning_tokens` in `usage`, and no
 `reasoning`/`replay_turns`/`note_writer` or `retriever`/`recall_*` in
 `config`, so it is byte-identical to the line before these fields.

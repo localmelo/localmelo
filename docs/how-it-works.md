@@ -103,6 +103,18 @@ recorded in [procedural memory](procedures.md), which no prompt includes.
 See [How memory works](memory.md#how-memory-works) for the limits and the
 exact behavior.
 
+In the explicit modes, a reply's note, the attempt digest and the reflection
+are also **candidates** for long-term memory. A candidate is written only
+when a signal admits it: a rehearsal (a restatement, a successful call that
+acted on it, a reflection's `used_notes`), a user statement, a user request
+covering the run, or `--admit-on-outcome` for the final digest. The checked
+write classifies the fact, compares it with the active entries of its kind
+and records one action (`NEW`, `UPDATE`, `RELATED`, `CONFLICT` or `IGNORE`)
+in the store's decision log. The text passes the candidate boundary with
+target `long`, so every stored text is redacted first. `legacy` keeps its
+old path: a step summary and the reflection promotion, unchanged. See
+[Long-term memory](memory.md#long-term-memory).
+
 ## Timeouts
 
 Three limits apply at different levels:

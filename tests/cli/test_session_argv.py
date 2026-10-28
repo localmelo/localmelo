@@ -54,6 +54,8 @@ R5_DEFAULTS = dict.fromkeys(
         "retrieval_extra_body",
     )
 )
+# R6-lite added two direct-mode options.
+R6_DEFAULTS = {"admit_on_outcome": None, "keep_decision_text": False}
 
 
 @pytest.fixture
@@ -118,6 +120,7 @@ def test_historical_dispatch(
         **R2A_DEFAULTS,
         **R4_DEFAULTS,
         **R5_DEFAULTS,
+        **R6_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:

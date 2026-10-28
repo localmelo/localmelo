@@ -26,7 +26,7 @@ page.
 |---|---|---|
 | Working memory | The conversation of a run, of the `melo ""` loop, of a gateway session or of a web workspace chat: the last 20 messages. | RAM only. |
 | History | Every task with its status and result, and every step with its tool call and result. In `history.db`, also every reply of the model with its reasoning; the history in RAM keeps no model calls. | RAM, or `history.db`. |
-| Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an [embedding backend](embedding.md). | RAM, or `long_term.db`. |
+| Long-term memory | In `legacy`, short summaries of steps and the reflections of past runs; each step recalls the 5 entries closest to the task, and it needs an [embedding backend](embedding.md). Outside `legacy`, typed entries (semantic, episodic, profile, reflection) admitted by a signal, recalled at `start` even without an embedding. | RAM, or `long_term.db` (in `legacy` only with an embedding backend). |
 | Procedural memory | What the runs of each recurring task did: the classes and short labels of their tool calls, their step counts and times. Written at the end of every run; never put in a prompt. See [Procedural memory](procedures.md). | RAM, or `procedures.db`. |
 | Reasoning notes | In the compress modes only, what each reply planned, found, decided and left open, its code drafts, and one digest per attempt. Recall reads them back at `start`, `attempt` and `step`. See [Reasoning notes](#reasoning-notes). | RAM only. |
 
@@ -102,7 +102,7 @@ default `--retriever auto` recalls at three points; an explicit
 
 | Trigger | When | What it ranks |
 |---|---|---|
-| `start` | Before the task's first planning call. | Earlier tasks' long-term entries only: each must score at least `--recall-min-score` (0.35). The current task's own entries are never returned. |
+| `start` | Before the task's first planning call. | Earlier tasks' long-term entries only. A cosine hit must reach `--recall-min-score` (0.35); a BM25 hit has no absolute floor. The current task's own entries are never returned. |
 | `attempt` | After a reflection, before the attempt's digest is built. | The failed attempt's notes and drafts, the reflection's note, and long-term entries, minus what the window shows. |
 | `step` | After each tool turn's results, for the next planning call. | This task's notes (a later attempt's superseded ones included), drafts, digests and thought chunks the window does not show, and long-term entries when `long` is in `--recall-kinds`. The query is the latest note's plan, what it found, its open questions and outcome, plus the paths and commands of the latest calls, at most 600 characters. |
 | `tool` | When the model calls the `recall` tool. | Every candidate above, superseded notes included; the query is the model's argument. |
@@ -172,6 +172,93 @@ tool output and recalled memory are data, not instructions.
   byte-identical, and `llm_calls.recall_json` is `NULL`. `drop` and `replay`
   recall nothing by default and only turn recall on when the user names a
   retriever there.
+
+## Long-term memory
+
+With `--reasoning compress` (or `compress+replay`) and memory on,
+`long_term.db` is a **typed** store: every entry has a kind, a source, a
+status, the signal that admitted it and its provenance, beside the text and
+the vector the earlier store already had. With persistence on, the file
+exists in those modes even without an embedding provider; a text-only entry
+stores an empty vector and is found by the in-process BM25 index. In
+`legacy` the file still exists only with an embedding provider.
+
+| Kind | What it holds | Source |
+|---|---|---|
+| `semantic` | A fact about a named third party (person, place, organization, event), usually an attribute such as an address or a date. | `user`, `reasoning_note` |
+| `episodic` | What happened in this task: a note's ordinary item, every digest. | `reasoning_note`, `digest` |
+| `profile` | A fact the user states about themselves (first person: I/my/we/our; 我/我的/我们; `call me`/`叫我`). Only a user message gives it. | `user` |
+| `reflection` | A reflection: the attempt summary, what failed, the evidence, what to avoid, the next directions and the open questions. | `reflection` |
+
+`source` is one of `reasoning_note`, `digest`, `reflection`, `user`, `sleep`
+or `step_summary` (a legacy row). `status` is `active`, `superseded` or
+`conflicted`; v1 writes `active` for every new entry and marks the replaced
+entry `superseded`; `conflicted` is reserved for the sleep pipeline.
+`admitted_by` is the signal that wrote the entry, or empty for a legacy row.
+`provenance` carries the task and session, the step and attempt, the run's
+text, the paths and commands the turn touched, the record ids the item came
+from (`source_ids`), and the candidate id and item index. Every one of those
+texts is redacted and bounded before the write. The session id is `""` in direct mode, which does
+not thread one; the gateway does not thread its own id into the run yet. A
+search returns the legacy metadata merged with these columns, so an older
+reader still sees the same text and metadata.
+
+Nothing is written without a signal:
+
+| Signal | When | What it admits |
+|---|---|---|
+| `rehearsal` | A restatement, a successful call that acted on the note's path or command, or a reflection's `used_notes`. | That candidate, at once. A second admission of the unchanged candidate writes nothing. |
+| `user_request` | The user's message asks to remember, and states no fact. | This run's `remember` notes and its final digest at the run's end; never the final reflection. |
+| `user_statement` | A declarative sentence of the user's message states a stable fact, or corrects one and carries the corrected value. A question (`?`/`？`) never counts, and `my … is`/`我的…是` refuses a meta noun (task, question, request, goal, plan, problem, issue, job, point; 任务, 问题, 请求, 目标, 计划). | That sentence, at once. |
+| `outcome` | The end of the run, only with `--admit-on-outcome on`. | The final attempt digest, with the terminal status in its provenance; never the final reflection. |
+| `sleep` | Reserved for the sleep pipeline's probe gate. | Nothing in v1. |
+
+Only the user's own text gives a user signal: a tool result, a note, a recall
+block or an assistant message never does, and a note's first-person item is
+never a profile entry. The candidate boundary runs again with target `long`
+before the write: a refused item writes no entry and no decision. Every text
+written, including the provenance's task text, paths and commands, is redacted
+by `redact_secrets` and bounded first.
+
+The policy compares the item with the active entries of its kind and picks
+one action:
+
+| Action | Rule | Write |
+|---|---|---|
+| `IGNORE` | A short fact (under 20 normalised characters), a fact that names only this task's files, or a duplicate (normalised equality, text overlap >= 0.9, or cosine >= 0.95). | No entry; a duplicate target's `uses` grows. |
+
+An episodic item's subject is its candidate plus its item index, so two
+different items of one note are two entries; a restatement re-proposes the
+same candidate and item order, so it stays an `UPDATE`.
+| `UPDATE` | Same subject and a compatible value, or a change marker (`moved`, `now`, `搬到` and so on). | A new entry that supersedes the old one; the old one becomes `superseded`. |
+| `CONFLICT` | Same subject, values that contradict, and no change marker. | A new active entry linked to the old one; both stay recallable. |
+| `RELATED` | A different subject with text overlap >= 0.35 or cosine >= 0.75. | A new active entry linked to the old one. |
+| `NEW` | Anything else. | A new active entry. |
+
+**The decision log.** `long_term.db` also has a `decisions` table: one row per
+action, with the candidate id, the action, the kind, the signal, the entry and
+target ids, a one-line reason, the item's `source_ids`, the SHA-256 of the
+checked text and the task id. The text itself is stored only with
+`--keep-decision-text` (an evaluation switch, refused in the interactive UI);
+the hash lets a later join without keeping the text. `forget(task_id)` removes
+a task's entries and decisions; `forget_all()` clears both tables. Reset the
+file by deleting `long_term.db` with localmelo stopped. There is no
+age-based retention in this version; the sleep pipeline's policy comes later.
+
+**The migration.** A `long_term.db` from the earlier store is migrated in place
+when it is opened: `user_version` becomes 1, the typed columns and the
+`decisions` table are added with `ALTER TABLE` (no table rebuild), a legacy
+reflection becomes `kind='reflection'`/`source='reflection'`, every other row
+`episodic`/`step_summary`, and its text, vector and metadata bytes stay as they
+were. An older localmelo can still open and search the file. A file from a
+newer localmelo raises one WARNING and the run continues without long-term
+memory. The read-only exports never migrate a file; see
+[Offline retrieval](retrieval.md#the-typed-long-term-store).
+
+At `start`, the long leg reads the active entries of other tasks of every kind:
+`--recall-min-score` applies to a cosine score, while the BM25 first-stage
+pool has no absolute floor. A doc is `long:<entry id>`, not a hash of its text.
+`memory=False` removes the store, the writes and the leg.
 
 ## Keep memory between runs
 

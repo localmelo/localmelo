@@ -9,6 +9,30 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- R6-lite's typed long-term store: `long_term.db` migrates in place to
+  `user_version` 1 with `kind`, `source`, `status`, `admitted_by`,
+  provenance, task/session ids, links and uses beside the text and vector,
+  plus a `decisions` table. A candidate is admitted only by a rehearsal
+  (restatement, a successful call it acted on, a cited note), a user
+  request or statement, or `--admit-on-outcome on` for the final digest;
+  the policy picks `NEW`, `UPDATE`, `RELATED`, `CONFLICT` or `IGNORE`, and
+  every stored text, provenance included, passes the candidate boundary and
+  `redact_secrets` (with its task text, paths and commands bounded). A long
+  entry's llm catalog line carries a bounded text snippet, a BM25 row is
+  exempt from the cosine floor, two items of one note stay two entries, a
+  restatement merges the new note's records and supersedes its candidate, a
+  newer file keeps a legacy run alive with one WARNING, a user signal needs
+  a declarative, non-meta sentence, `call me` is a profile, and the three
+  store modes accept and ignore model flags.
+  `--keep-decision-text` keeps a decision's text beside its hash, and the
+  `[memory]` table saves the outcome default. The `start` recall reads
+  active entries of other tasks of every kind, by cosine or BM25, with
+  `long:<entry id>` doc ids; `memory_stats` gains `admitted`, `written` and
+  `ignored`, and a `memory` event reports each decision. `melo-retrieve`
+  gains `--export-store`, `--export-decisions` and `--route` for the
+  bench. Legacy requests, JSON line, window, `tasks`/`steps` and search
+  order are unchanged; an existing `long_term.db` migrates with its rows
+  intact. ([#97])
 - Resume saved terminal chats with `melo -c`, `melo -r [ID|TITLE]`,
   `/sessions [filter]` or `/resume [ID|TITLE]`. The inline picker filters
   eligible chats by folder or across folders before the startup banner,
@@ -647,3 +671,4 @@ earlier milestones.
 [#95]: https://github.com/localmelo/localmelo/pull/95
 [#96]: https://github.com/localmelo/localmelo/pull/96
 [#90]: https://github.com/localmelo/localmelo/pull/90
+[#97]: https://github.com/localmelo/localmelo/pull/97

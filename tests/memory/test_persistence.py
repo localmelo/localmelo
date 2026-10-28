@@ -422,7 +422,9 @@ class TestSqliteLongTerm:
         results = await lt2.search([1.0, 0.0, 0.0], top_k=1)
         assert len(results) == 1
         assert results[0][0] == "alpha"
-        assert results[0][2] == {"src": "test"}
+        # R6-lite's search merges the typed columns into the legacy metadata.
+        assert results[0][2]["src"] == "test"
+        assert results[0][2]["kind"] == "episodic"
         await lt2.aclose()
 
     @pytest.mark.asyncio
@@ -449,7 +451,8 @@ class TestSqliteLongTerm:
         lt = SqliteLongTerm(db)
         await lt.add("x", [1.0, 0.0], metadata={"step_id": "abc", "num": 42})
         results = await lt.search([1.0, 0.0], top_k=1)
-        assert results[0][2] == {"step_id": "abc", "num": 42}
+        assert results[0][2]["step_id"] == "abc"
+        assert results[0][2]["num"] == 42
         await lt.aclose()
 
     @pytest.mark.asyncio
@@ -459,10 +462,10 @@ class TestSqliteLongTerm:
         lt = SqliteLongTerm(db)
         await lt.add("old model", [1.0, 0.0, 0.0])
         await lt.add("new model", [1.0, 0.0, 0.0, 0.0])
-        assert await lt.search([1.0, 0.0, 0.0, 0.0], top_k=5) == [
-            ("new model", 1.0, {})
-        ]
-        assert await lt.search([1.0, 0.0, 0.0], top_k=5) == [("old model", 1.0, {})]
+        new = await lt.search([1.0, 0.0, 0.0, 0.0], top_k=5)
+        old = await lt.search([1.0, 0.0, 0.0], top_k=5)
+        assert [(text, score) for text, score, _meta in new] == [("new model", 1.0)]
+        assert [(text, score) for text, score, _meta in old] == [("old model", 1.0)]
         await lt.aclose()
 
 
@@ -472,7 +475,7 @@ class TestLongTermDimensions:
         lt = LongTerm()
         await lt.add("old model", [1.0, 0.0, 0.0])
         await lt.add("new model", [1.0, 0.0, 0.0, 0.0])
-        assert await lt.search([1.0, 0.0, 0.0, 0.0], top_k=5) == [
-            ("new model", 1.0, {})
-        ]
-        assert await lt.search([1.0, 0.0, 0.0], top_k=5) == [("old model", 1.0, {})]
+        new = await lt.search([1.0, 0.0, 0.0, 0.0], top_k=5)
+        old = await lt.search([1.0, 0.0, 0.0], top_k=5)
+        assert [(text, score) for text, score, _meta in new] == [("new model", 1.0)]
+        assert [(text, score) for text, score, _meta in old] == [("old model", 1.0)]

@@ -181,8 +181,22 @@ async def test_replay_usage_adds_reasoning_and_reported_details() -> None:
         "retrieve_completion_tokens": 0,
         "thought_chunks": 0,
         "recall_log": [],
+        "admitted": {
+            "rehearsal": 0,
+            "user_request": 0,
+            "user_statement": 0,
+            "outcome": 0,
+            "sleep": 0,
+        },
+        "written": {
+            "semantic": 0,
+            "episodic": 0,
+            "profile": 0,
+            "reflection": 0,
+        },
+        "ignored": 0,
     }
-    assert list(result.config)[-10:] == [
+    assert list(result.config)[-12:] == [
         "reasoning",
         "replay_turns",
         "note_writer",
@@ -193,6 +207,8 @@ async def test_replay_usage_adds_reasoning_and_reported_details() -> None:
         "recall_kinds",
         "recall_placement",
         "recall_min_score",
+        "admit_on_outcome",
+        "keep_decision_text",
     ]
     assert (result.config["reasoning"], result.config["replay_turns"]) == (
         "replay",

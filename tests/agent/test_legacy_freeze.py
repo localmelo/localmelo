@@ -95,6 +95,8 @@ LATER_OPTIONS = [
     "--recall-placement",
     "--recall-min-score",
     "--retrieval-extra-body",
+    "--admit-on-outcome",
+    "--keep-decision-text",
 ]
 
 
