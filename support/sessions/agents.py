@@ -11,6 +11,7 @@ was made with.
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import dataclasses
 import os
@@ -183,9 +184,14 @@ async def build_session_agent(
                 )
             if section is not None:
                 section.reasoning_field = reasoning_field
-        if wrap_llm is None and wrap_embedding is None and retrieval_extra_body is None:
-            # No hook: the Agent builds the config's providers itself, as it
-            # did before the hook existed.
+        if (
+            wrap_llm is None
+            and wrap_embedding is None
+            and retrieval_extra_body is None
+            and agent_options.reasoning == "legacy"
+        ):
+            # Keep the original legacy path. Other modes may be refused by
+            # Agent.__init__, so own their providers to close them on refusal.
             from_config = True
         else:
             # The providers must exist before the Agent's Chat is made, so
@@ -193,34 +199,42 @@ async def build_session_agent(
             from localmelo.melo.agent.agent import _providers_from_config
 
             llm, embedding = _providers_from_config(cfg)
-    if not from_config:
-        assert llm is not None
-        replay = agent_options.reasoning in ("replay", "compress+replay") or (
-            agent_options.reasoning == "compress" and llm.requires_reasoning_replay
-        )
-        if cfg is not None and cfg.chat_backend != "ollama" and not replay:
-            llm.reasoning_field = None
-        if retrieval_extra_body is not None:
-            from localmelo.support.providers.llm._protocol import prepare_extra_body
+    try:
+        if not from_config:
+            assert llm is not None
+            replay = agent_options.reasoning in ("replay", "compress+replay") or (
+                agent_options.reasoning == "compress" and llm.requires_reasoning_replay
+            )
+            if cfg is not None and cfg.chat_backend != "ollama" and not replay:
+                llm.reasoning_field = None
+            if retrieval_extra_body is not None:
+                from localmelo.support.providers.llm._protocol import prepare_extra_body
 
-            llm.extra_body_by_kind = {
-                "retrieve": prepare_extra_body(
-                    copy.deepcopy(dict(retrieval_extra_body))
-                )
-            }
-        if wrap_llm is not None:
-            llm = wrap_llm(llm)
-        if wrap_embedding is not None and embedding is not None:
-            embedding = wrap_embedding(embedding)
-        agent = Agent(
-            llm=llm,
-            embedding=embedding,
-            options=agent_options,
-            tool_providers=providers,
-        )
-    else:
-        assert cfg is not None
-        agent = Agent(config=cfg, options=agent_options, tool_providers=providers)
+                llm.extra_body_by_kind = {
+                    "retrieve": prepare_extra_body(
+                        copy.deepcopy(dict(retrieval_extra_body))
+                    )
+                }
+            if wrap_llm is not None:
+                llm = wrap_llm(llm)
+            if wrap_embedding is not None and embedding is not None:
+                embedding = wrap_embedding(embedding)
+            agent = Agent(
+                llm=llm,
+                embedding=embedding,
+                options=agent_options,
+                tool_providers=providers,
+            )
+        else:
+            assert cfg is not None
+            agent = Agent(config=cfg, options=agent_options, tool_providers=providers)
+    except BaseException:
+        # No Agent exists to own these if a wrapper or constructor refused.
+        for provider in (llm, embedding, *providers):
+            if provider is not None:
+                with contextlib.suppress(Exception):
+                    await provider.close()
+        raise
     try:
         await agent.start()
     except BaseException:

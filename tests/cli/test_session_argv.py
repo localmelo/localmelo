@@ -5,6 +5,8 @@ The golden corpus was generated from AST-extracted parser/check functions in
 Only shared namespace defaults are factored out; every case's result is recorded.
 The three explicit R4 overrides were captured from upstream cb250c6 before U2b,
 not from the new parser: compress became valid, and two replay errors name it.
+R2b intentionally retires the no-query reasoning-field refusal: that one case
+now checks UI dispatch and its complete namespace; the original golden remains.
 Dispatch is mocked: no model, MCP process, session store or gateway is started.
 """
 
@@ -27,10 +29,19 @@ GOLDEN = json.loads(
     (Path(__file__).parent / "golden" / "direct_argv.json").read_text(encoding="utf-8")
 )
 SOURCES = GOLDEN["sources"]
+R2B_OVERRIDES = {
+    GOLDEN["reasoning_baseline"]: {
+        "r2a-16": {"result": "ui", "namespace": {"reasoning_field": "auto"}}
+    }
+}
 CASES = [
     pytest.param(
         source,
-        {**case, **GOLDEN["upstream_overrides"].get(source, {}).get(case["id"], {})},
+        {
+            **case,
+            **GOLDEN["upstream_overrides"].get(source, {}).get(case["id"], {}),
+            **R2B_OVERRIDES.get(source, {}).get(case["id"], {}),
+        },
         id=f"{source[:7]}-{case['id']}",
     )
     for source, record in SOURCES.items()
@@ -110,6 +121,25 @@ def test_historical_dispatch(
         return
 
     cli.main()
+    if case["result"] == "ui":
+        dispatch.ui.assert_called_once()
+        assert vars(dispatch.ui.call_args.args[0]) == {
+            **SOURCES[source]["namespace_defaults"],
+            **R2A_DEFAULTS,
+            **R4_DEFAULTS,
+            **R5_DEFAULTS,
+            **P5_DEFAULTS,
+            **R6_DEFAULTS,
+            "continue_session": False,
+            "resume": None,
+            **case["namespace"],
+        }
+        dispatch.build.assert_not_called()
+        dispatch.providers.assert_not_called()
+        dispatch.run.assert_not_called()
+        dispatch.gateway.assert_not_called()
+        assert capsys.readouterr() == ("", "")
+        return
     if case["result"] != "direct":
         dispatch.build.assert_not_called()
         dispatch.run.assert_not_called()

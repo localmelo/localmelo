@@ -23,7 +23,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Final, Literal
 
-from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent import Agent
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.schema import Message
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
@@ -123,7 +123,6 @@ async def default_builder(
         base_url=None,
         model=None,
         workspace=workspace,
-        options=AgentOptions(),
         wrap_llm=None if llm is None else (lambda inner: GatedLLM(inner, llm)),
         wrap_embedding=(
             None if llm is None else (lambda inner: GatedEmbedding(inner, llm))

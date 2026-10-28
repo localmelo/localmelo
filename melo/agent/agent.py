@@ -388,6 +388,12 @@ def _replay_plan(
     """
     if options.reasoning == "legacy":
         return window, []
+    # A resumed window or /model switch can carry legacy's inline copy.
+    # Normalize only the request copy before applying the current mode.
+    window = [
+        _split_inline_reasoning(msg) if msg.role == "assistant" else msg
+        for msg in window
+    ]
     start = 0
     if (
         not requires_replay
