@@ -132,7 +132,7 @@
 
         <h3 id="c-gateway">网关</h3>
         <p><code>melo --serve</code> 启动的 HTTP 服务器。它提供 HTTP API（<code>/v1/health</code>、<code>/v1/agent/run</code>、<code>/v1/sessions</code>），最多保留 50 个会话，每个会话都有一个根据配置文件创建的智能体。会话的智能体会保留自己的回答，所以每个请求都能看到之前的回答。每个请求在运行前都要通过检查：任务的长度和会话 ID。</p>
-        <p>在 <code>/api/</code> 上，它提供 API v2，也就是网页控制台的只读 API：health、会话列表和单个会话、会话的回合及其事件、Server-Sent Events 流、图片 blob 和提交查询。控制台按需打开会话的智能体，并在空闲清扫或打开数量上限关闭它之后恢复对话。API v2 只在回环地址上提供，所有响应带统一的错误格式和 <code>Cache-Control: no-store</code>，并且只增不改；目前还不能通过它开始、停止或重试回合。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2（英文）</a>。</p>
+        <p>在 <code>/api/</code> 上，它提供 API v2，也就是网页控制台的 API：health、会话列表和单个会话、会话的回合及其事件、Server-Sent Events 流、图片 blob、提交查询，以及会话的工具、授权、记忆和运行记录；还有运行会话的写入接口——创建会话（可带或不带第一个回合）、开始、重试和停止回合、按 key 取消消息、回答审批、重命名或移动会话，以及删除会话。控制台回合在网关进程中运行，每个会话同一时间只运行一个；它的模型调用和工作区聊天一样经过同一个调度器门。控制台按需打开会话的智能体，并在空闲清扫、打开数量上限或网关重启关闭它之后恢复对话。API v2 只在回环地址上提供，所有响应带统一的错误格式和 <code>Cache-Control: no-store</code>，并且只增不改。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2（英文）</a>。</p>
         <p>在 <code>/</code> 上，它提供网页工作区。网页工作区不读取配置文件：它列出你输入地址的服务器上的模型，最多保留 12 个自己的对话，支持搜索、每个对话各自的草稿，以及 Stop 按钮（停止运行，运行以 <code>cancelled</code> 结束）。每个对话都有自己的智能体，带四个内置工具和自己的工作记忆。所有对话把历史记录写入同一个库，选择了嵌入模型时也把长期记忆写入同一个库，都在 <code>~/.cache/localmelo/playground/</code> 中。对话在网关运行期间保留，但创建对话时会关闭空闲超过 2 小时的对话；已有 12 个对话时，会替换最久没有活动的空闲对话。聊天的模型调用会经过调度器的策略，标题栏会显示网关读取到的 GPU 锁和电池。</p>
         <p>网关没有身份验证。监听 <code>localhost</code> 或回环地址（例如默认的 <code>127.0.0.1:8401</code>）时，它会拒绝 <code>Host</code> 不是 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>[::1]</code> 加网关端口的请求（HTTP 421），以及其他来源的网页通过浏览器向它的 API 发来的请求（HTTP 403）。任何网页都不能在 frame 里显示网关的页面。监听其他地址（例如 <code>0.0.0.0</code>）时，它不做这些检查，并在启动时记录一条警告。</p>
         <p>关键文件：<code>support/gateway/__init__.py</code>、<code>session.py</code>、<code>guard.py</code>（<code>Host</code> 和 <code>Origin</code> 检查）、<code>webapp.py</code> 和 <code>playground.py</code>（网页工作区的路由和对话）、<code>console/</code>（控制台的会话库和 API v2 路由）、<code>static/</code>（网页工作区的页面），以及用于 macOS 后台服务的 <code>daemon.py</code>。</p>
@@ -169,7 +169,7 @@
         <p>工作记忆保存一次运行或一个网关会话中的对话：最近 20 条消息，只在内存中。历史记录保存每个任务和每一步；开启持久化后，还保存每次模型调用及其推理。长期记忆需要嵌入后端：它把步骤摘要和反思连同嵌入向量一起保存，并在每一步召回最接近的 5 条。程序记忆保存每次运行的步骤，并学习你反复运行的任务的步骤。历史记录、长期记忆和程序记忆默认留在内存中；开启持久化后，分别写入 <code>history.db</code>、<code>long_term.db</code> 和 <code>procedures.db</code>。新建的文件只有你能读取（权限 0600）。写入历史记录和长期记忆的文字会先脱敏：<code>sk-</code> 密钥、GitHub 令牌、AWS access key id、<code>Bearer</code> 后面的令牌，以及关键词旁边的一次性验证码，与事件和模型调用已有的规则相同；运行、它的请求和模型仍然看到原文。Python API 可以用 <code>Hippo.forget(task_id)</code> 忘掉一个任务的历史记录行和指明该任务的长期记忆反思，用 <code>forget_all()</code> 清空历史记录和长期记忆（包括步骤摘要）。工具注册表保存所有已注册的工具，以及检索模式使用的 BM25 索引。</p>
         <p>在 <code>compress</code> 和 <code>compress+replay</code> 推理模式下，每条回复都会变成一条简短的笔记（计划、发现、决定和尚未确定的事项，以及工具返回的内容）和它的代码草稿，保存在对话窗口旁的内存笔记库中；后来的笔记、调用和反思用到它时，笔记会被排练并汇总成该次尝试的摘要。每条笔记、草稿和摘要进入窗口或笔记库之前，都要经过 <code>check_memory_candidate</code> 边界（脱敏、清理、限长）。笔记目前还不能被召回，历史记录也不增加笔记表。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">推理笔记（英文）</a>。</p>
         <p><code>melo/memory/retrieval/</code> 中有三种可切换的检索器：<code>bm25</code>、<code>llm</code> 和 <code>embedding</code>。它们检索由一次运行的模型调用构建的文档：<code>melo/memory/notes.py</code> 从模型回复中提取的推理笔记、代码草稿和思考片段，以及反思。运行目前还不使用它们：<code>melo-retrieve</code> 命令（<code>support/retrieve.py</code>）在带标注的查询上离线比较这些检索器，并能把以 raw-call JSONL 记录的模型调用导出为语料。开启持久化后，<code>melo</code> 写入的 <code>history.db</code> 也记录每次模型调用，<code>melo-retrieve</code> 同样能导出它。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">离线检索（英文）</a>。</p>
-        <p>会话（实验性）把整段对话保存在 <code>sessions.db</code> 中：每一轮都是一行记录，只结束一次，带有状态和原因；会话的事件也一起保存；窗口检查点（window checkpoint）让新的智能体从上一个智能体停下的地方继续。用 <code>progress=True</code> 创建的 <code>SessionRunner</code> 会让每一轮运行报告 <code>run.progress</code> 事件，并把这些事件和该轮一起保存。网关的文件和终端的文件是分开的。交互式界面在会话上运行每一轮，但目前还不能恢复会话；网关会为自己的网页控制台和 API v2 打开会话库，而它的 <code>/v1</code> 会话仍留在内存中（代码在 <code>support/sessions/</code> 和 <code>support/gateway/console/</code>）。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/sessions.md">会话（英文）</a>。</p>
+        <p>会话（实验性）把整段对话保存在 <code>sessions.db</code> 中：每一轮都是一行记录，只结束一次，带有状态和原因；会话的事件也一起保存；窗口检查点（window checkpoint）让新的智能体从上一个智能体停下的地方继续。用 <code>progress=True</code> 创建的 <code>SessionRunner</code> 会让每一轮运行报告 <code>run.progress</code> 事件，并把这些事件和该轮一起保存。网关的文件和终端的文件是分开的。交互式界面在会话上运行每一轮，但目前还不能恢复会话；网页控制台在网关自己的会话库中运行并读取它的会话，而网关的 <code>/v1</code> 会话仍留在内存中（代码在 <code>support/sessions/</code> 和 <code>support/gateway/console/</code>）。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/sessions.md">会话（英文）</a>。</p>
         <p>关键文件：<code>melo/memory/coordinator.py</code>、<code>short/</code>（工作记忆）、<code>history/</code>、<code>long/</code>、<code>tools/</code>（工具注册表）、<code>bm25.py</code>。</p>
         <p>记忆设计（计划中）：<a href="./memory-design.html">记忆设计</a>页保留了维护者为记忆撰写的设计，其中部分内容尚未实现。</p>
 
@@ -185,7 +185,7 @@
         <p>每个后端键对应一个适配器：<code>mlc</code>、<code>ollama</code>、<code>vllm</code> 和 <code>sglang</code> 用于你自己运行的服务器，<code>openai</code>、<code>anthropic</code>、<code>gemini</code> 和 <code>nvidia</code> 用于云端 API。每个适配器检查配置文件中属于自己的表，并创建提供方。后端只负责连接：模型服务器由你自己启动和停止。</p>
         <p>关键文件：<code>support/backends/registry.py</code>、<code>base.py</code>、<code>local/</code>、<code>cloud/</code>。</p>
 
-        <p><code>melo/sleep/</code>、<code>melo/memory/personalized/</code> 和 <code>support/melo_serving/</code> 中的代码，智能体目前还没有使用。<code>melo/memory/retrieval/</code> 和 <code>melo/memory/notes.py</code> 目前只供 <code>melo-retrieve</code> 使用；<code>support/scheduler/</code> 是调度策略核心及其模拟器，网关的聊天门会使用它，<code>support/gateway/machine_monitor.py</code> 为工作区读取 GPU 锁和电池。</p>
+        <p><code>melo/sleep/</code>、<code>melo/memory/personalized/</code> 和 <code>support/melo_serving/</code> 中的代码，智能体目前还没有使用。<code>melo/memory/retrieval/</code> 和 <code>melo/memory/notes.py</code> 目前只供 <code>melo-retrieve</code> 使用；<code>support/scheduler/</code> 是调度策略核心及其模拟器，网关的门用它来调度网页工作区的聊天和控制台的回合，<code>support/gateway/machine_monitor.py</code> 为工作区读取 GPU 锁和电池。</p>
       </section>
 
       <section class="section" id="boundaries">
@@ -230,14 +230,14 @@
           <li>工具子进程和 MCP 服务器只拿到最小环境（<code>PATH</code>、<code>HOME</code>、<code>USER</code>、<code>LOGNAME</code>、<code>SHELL</code>、<code>TERM</code>、<code>LANG</code>、<code>LC_*</code>、<code>TMPDIR</code>），再加上 <code>AgentOptions(tool_env)</code> 或服务器条目里的 <code>env</code>；其他变量都不继承。</li>
           <li>每一步提供内置工具、模型在这次对话中已经调用过的工具，以及与任务最接近的三个匹配（默认的 <code>retrieve</code> 模式）；<code>all</code> 在每一步提供所有工具。</li>
           <li>Python API（实验性）：运行事件、停止运行、工具调用的审批策略、限制文件工具的工作区根目录，以及可以在多次运行之间延续的对话。</li>
-          <li>会话（实验性）：保存在 SQLite 中的对话，每一轮只结束一次，重启后仍在，并能在新的智能体上恢复（<code>support/sessions/</code>）；runner 可以让每一轮报告进度事件。交互式界面把它的每一轮保存在会话中，网关会为网页控制台和 API v2 打开自己的会话库；<code>/v1</code> HTTP API 目前还不使用会话。</li>
-          <li>网关：HTTP API、<code>/api</code> 下控制台的只读 API v2（health、会话、回合、事件流、blob 和提交查询）、只在空闲时响应关闭请求的会话、网页工作区（其中的聊天经过调度器的策略，默认 <code>off</code>；标题栏显示 GPU 锁和电池）、监听回环地址时拒绝其他网站请求的检查，以及 macOS 后台服务。</li>
+          <li>会话（实验性）：保存在 SQLite 中的对话，每一轮只结束一次，重启后仍在，并能在新的智能体上恢复（<code>support/sessions/</code>）；runner 可以让每一轮报告进度事件。交互式界面把它的每一轮保存在会话中，网页控制台在网关自己的会话库中运行并读取会话；<code>/v1</code> HTTP API 目前还不使用会话。</li>
+          <li>网关：HTTP API、<code>/api</code> 下控制台的 API v2（health、会话、回合、事件流、blob、提交查询、工具、授权、记忆和运行记录，以及创建会话并开始、重试、停止和审批其回合的写入接口）、只在空闲时响应关闭请求的会话、网页工作区（其中的聊天和控制台回合经过调度器的策略，默认 <code>off</code>；标题栏显示 GPU 锁和电池）、监听回环地址时拒绝其他网站请求的检查，以及 macOS 后台服务。</li>
           <li>支持 Ollama、MLC LLM、vLLM、SGLang 和四个云端 API 的后端。</li>
           <li>工作记忆、历史记录和长期记忆；开启持久化后会保存到 SQLite，保存的文字会先脱敏，保存的历史记录还包括每次模型调用及其推理，默认保留 30 天；Python API 还可以忘掉一个任务或全部记忆。</li>
           <li>推理笔记：<code>compress</code> 和 <code>compress+replay</code> 模式会在对话窗口旁的内存笔记库中，为每条回复及其代码草稿保留一条简短的笔记，并把它们排练成该次尝试的摘要；笔记目前还不能被召回。</li>
           <li><code>melo-retrieve</code>：离线比较 <code>bm25</code>、<code>llm</code> 和 <code>embedding</code> 三种记忆检索器。运行目前还不使用这些检索器。</li>
           <li>程序记忆：每次运行都会记录自己的步骤，完成的运行还会更新所属任务的步骤模板；开启持久化后写入 <code>procedures.db</code>。Python 调用方传入 <code>progress=True</code> 就能收到 <code>run.progress</code> 事件，目前不带百分比进度条。在终端里，<code>melo &quot;&lt;task&gt;&quot;</code> 会把它们画成 stderr 上的一行进度（<code>support/progress_line.py</code>）。<code>melo-procedures</code> 可以离线重放进度规则。</li>
-          <li>调度器的策略核心，以及离线测试它的模拟器（<code>support/scheduler/</code>），以及网关的聊天门（chat gate）、GPU 锁读取器和电池读取器（<code>support/gateway/chat_gate.py</code>、<code>machine_monitor.py</code>）。直接运行、<code>melo ""</code> 和 HTTP API 都不经过它。</li>
+          <li>调度器的策略核心，以及离线测试它的模拟器（<code>support/scheduler/</code>），以及网关共用的门（gate）、GPU 锁读取器和电池读取器（<code>support/gateway/chat_gate.py</code>、<code>machine_monitor.py</code>）。网页工作区的聊天和控制台会话的回合都经过它；直接运行、<code>melo ""</code> 和 <code>/v1</code> HTTP API 不经过。</li>
         </ul>
         <p>接下来的计划见<a href="./updates.html#roadmap">路线图</a>。</p>
       </section>

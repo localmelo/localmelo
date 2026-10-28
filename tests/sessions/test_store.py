@@ -881,6 +881,21 @@ async def test_turn_counts_leave_out_running_and_undone_turns(tmp_path: Path) ->
     await store.aclose()
 
 
+async def test_min_turns_counts_a_running_turn(tmp_path: Path) -> None:
+    store = cli(tmp_path / "s.db")
+    empty = await store.create_session()
+    turn = await store.begin_turn(
+        None, "hello", holder=HOLDER, new_session=NewSession()
+    )
+
+    listed = await store.list_sessions(min_turns=1)
+
+    # A running turn counts: the list shows a session while it works.
+    assert [info.id for info in listed] == [turn.session_id]
+    assert empty.id not in {info.id for info in listed}
+    await store.aclose()
+
+
 async def test_update_session_changes_only_the_given_fields(tmp_path: Path) -> None:
     clock = Clock()
     store = cli(tmp_path / "s.db", clock)
@@ -1053,6 +1068,10 @@ async def test_begin_turn_checks_its_arguments(tmp_path: Path) -> None:
         await store.begin_turn(info.id, "x", holder=HOLDER, new_session=NewSession())
     with pytest.raises(ValueError, match="text must be at most 100000 characters"):
         await store.begin_turn(info.id, "x" * 100_001, holder=HOLDER)
+    with pytest.raises(ValueError, match="text must be valid UTF-8"):
+        await store.begin_turn(info.id, "x\ud800", holder=HOLDER)
+    with pytest.raises(ValueError, match="title must be valid UTF-8"):
+        await store.begin_turn(info.id, "x", holder=HOLDER, title="y\ud800")
     with pytest.raises(ValueError, match="client_request_id must be 1 to 128"):
         await store.begin_turn(info.id, "x", holder=HOLDER, client_request_id="-x")
     with pytest.raises(SessionStoreError, match="Unknown session: nope"):

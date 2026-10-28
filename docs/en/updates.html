@@ -71,7 +71,7 @@
         <p>Planned:</p>
         <ul>
           <li>the interactive CLI's next parts: sessions you can resume (<code>melo -c</code>, <code>melo -r</code>), attached files and shell commands;</li>
-          <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
+          <li>a console page that shows the agent's work live, and web-workspace chats that survive a gateway restart (the console's sessions already persist and reopen after one);</li>
           <li>switchable retrieval over the reasoning notes, so a later run can recall them (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
           <li>a percent bar on the progress line for tasks you run again and again, off until their repeated runs pass the replay.</li>
@@ -88,6 +88,43 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-2026-10-28-console-details">
+          <h3>A console session's tools, grants, memory and runs, and the scheduler gate</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/92">#92</a>
+          </p>
+          <ul>
+            <li><code>GET /api/sessions/{id}/tools</code> lists each tool's source (<code>builtin</code>, <code>provided</code> or <code>custom</code>), whether it asks first and whether the session allows it; <code>GET /api/sessions/{id}/memory</code> shows the conversation the gateway holds (thinking stripped, every text redacted and cut at 2,000 characters); <code>GET /api/sessions/{id}/runs</code> gives each finished turn's <code>RunResult</code> without its answer; and <code>DELETE /api/sessions/{id}/grants/{tool}</code> (or <code>/grants</code>) takes a session grant back so the tool asks again.</li>
+            <li>Every model call of a console turn now waits for its slot under <code>[scheduler]</code>, like a workspace chat's: the gateway builds one gate, so both surfaces share one <code>n_srv</code> budget and one <code>calls.jsonl</code> (a console call records the session's id) and the same GPU-lock and battery monitor; <code>lock_gate = "wait"</code> holds a console turn while a foreign GPU lock is present. Console runners also ask each turn for its <code>run.progress</code> events. <code>/</code>, the workspace page and every <code>/v1</code> route are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/scheduler.md#the-gate-on-chats-s2">Scheduler</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2</a>.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-api-v2-turns">
+          <h3>Turns and approvals over API v2</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/91">#91</a>
+          </p>
+          <ul>
+            <li><code>POST /api/sessions</code> creates a session, with or without a first turn; <code>POST /api/sessions/{id}/turns</code>, <code>/retry</code> and <code>/turns/{id}/cancel</code> start, retry and stop turns, the cancel-by-key routes stop a message, <code>POST /api/approvals/{request_id}</code> answers an approval, and a session can be renamed, moved or deleted with <code>PATCH</code> and <code>DELETE</code>.</li>
+            <li>A turn starts in the background and its events arrive on the session's stream: <code>approval.requested</code> waits for an answer given through the API, and the turn ends with <code>turn.finished</code> and the result read from its row. A <code>client_request_id</code> makes a create or a turn safe to repeat, one turn runs per session (409 <code>session_busy</code>), and a stop during an approval wait withdraws the card.</li>
+            <li>Every request string must be valid UTF-8 (a lone surrogate is 400 <code>invalid_request</code>). The reference gained the routes and a tested Python script that creates a session, follows its stream, answers an approval and reads the answer back. <code>/</code>, the workspace page and every <code>/v1</code> route are unchanged. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2</a>.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-v1-run-input">
+          <h3>Cleaner 400s for a bad <code>/v1/agent/run</code> request</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/89">#89</a>
+          </p>
+          <ul>
+            <li>A <code>session_id</code> that is not a string (a number, a list) now gets the route's own 400 <code>{"error": "Invalid session_id format: …"}</code>, like any other invalid id, instead of FastAPI's plain-text 500.</li>
+            <li>The 100,000-character limit counts the query after leading and trailing whitespace is removed — the text the agent runs — so a whitespace-padded query whose trimmed text fits is accepted; an empty query is still 400. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#post-v1agentrun">Gateway and HTTP API</a>.</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-reasoning-notes">
           <h3>Reasoning modes that keep notes instead of thinking</h3>
