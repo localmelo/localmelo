@@ -14,7 +14,7 @@
 - [Run results](https://localmelo.github.io/localmelo/run-results.md): run statuses, the fields of the JSON line and `RunResult`, and retries.
 - [Python API](https://localmelo.github.io/localmelo/python-api.md): `Agent`, `AgentOptions`, `RunResult`, stopping a run, approval policies and the workspace root.
 - [Events](https://localmelo.github.io/localmelo/events.md): the events a Python run reports, their order, fields and rules.
-- [Sessions](https://localmelo.github.io/localmelo/sessions.md): conversations kept in SQLite (experimental Python API): turns, statuses, message ids, resume, approvals for a person and the event stream.
+- [Sessions](https://localmelo.github.io/localmelo/sessions.md): conversations kept in SQLite (experimental Python API): turns, statuses, message ids, resume, approvals for a person and the event stream; `SessionRunner(..., progress=True)` stores a turn's `run.progress`, and `run_turn`/`start_turn` take `routine=`.
 - [Gateway and HTTP API](https://localmelo.github.io/localmelo/gateway.md): HTTP routes, sessions, the loopback guard, the web workspace and the macOS background service.
 - [Tools and MCP](https://localmelo.github.io/localmelo/tools.md): the built-in tools, the MCP config file, which tools each step offers, and what the checks do.
 - [Memory](https://localmelo.github.io/localmelo/memory.md): working memory, history, long-term and procedural memory, and how to keep, inspect and reset them.
@@ -26,7 +26,7 @@
 - [How localmelo works](https://localmelo.github.io/localmelo/how-it-works.md): the run loop, reflection, memory and timeouts.
 - [Evaluations](https://localmelo.github.io/localmelo/evaluations.md): the controlled comparisons behind the defaults, such as the reflection gate (one model, 12 coding exercises).
 - [Offline retrieval](https://localmelo.github.io/localmelo/retrieval.md): `melo-retrieve`, which compares memory retrievers offline; runs do not use it.
-- [Procedural memory](https://localmelo.github.io/localmelo/procedures.md): the steps of recurring tasks, which every run records at its end (`procedures.db` with persistence on) and which `run.progress` events report to a Python caller and `melo` draws as a progress line on a terminal; `melo-procedures` replays the progress rules offline.
+- [Procedural memory](https://localmelo.github.io/localmelo/procedures.md): the steps of recurring tasks, which every run records at its end (`procedures.db` with persistence on) and which `run.progress` events report to a Python caller and `melo` draws as a progress line on a terminal; `localmelo.support.progress_line.format_past` gives that line's past facts and items alone; `melo-procedures` replays the progress rules offline.
 - [Scheduler](https://localmelo.github.io/localmelo/scheduler.md): the scheduling policy core and its simulator, for maintainers; runs do not use it yet.
 - [Changelog](https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md): notable changes; there is no release yet, so all are under Unreleased.
 - [Repository](https://github.com/localmelo/localmelo): source code, issues and the contributing guide.
