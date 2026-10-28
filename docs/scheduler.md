@@ -129,8 +129,10 @@ The gateway reads two machine sources and records them; it never writes to
 either. One task watches the shared GPU lock, one polls the battery, and both
 are read-only. The lock is the four-line file the benchmark writers create
 (`~/Developer/mlsys/experiments/.gpu-lock` on this Mac); the battery comes
-from `pmset -g batt`. Direct runs, the interactive CLI and `/v1/agent/run`
-do not read either, import no monitor and print nothing new.
+from `pmset -g batt`. Direct runs and the interactive CLI do not read
+either. The gateway app imports the monitor and starts it with the gateway
+(`/v1/agent/run`'s requests and answers are unchanged), and `melo --serve`
+logs one INFO line at startup and per change.
 
 ```toml
 [scheduler]
@@ -168,8 +170,8 @@ the whole `holder:` value, or `holder:run` when the file carries a `run:`
 line. There is no prefix or substring matching, so
 `lock_self = "local_ai-benchmark session"` does not match
 `local_ai-benchmark session (copy)`; a typo makes every lock foreign and the
-page names the holder. `mem_gib:` is recorded only; nothing is reserved for
-it yet.
+page names the holder. `mem_gib:` is parsed into the snapshot only (not
+into `machine.jsonl`); nothing is reserved for it yet.
 
 `lock_gate = "record"` (the default) is observation only: the page and the
 machine log see the lock, holder and battery band, but the policy keeps its
@@ -194,7 +196,7 @@ and the table below is what S7 would enforce, not what S2b blocks.
 
 The band is S1's `battery_band()` with its hysteresis: it falls to 2 at 50%
 and 1 at 20%, and releases to 4 at 80% (or on AC). A `pmset` failure keeps the
-last good reading and logs `battery_unknown` once; before the first good
+last good reading and logs `battery unknown: <reason>` once; before the first good
 reading the state is AC with no percentage, so a battery read never blocks a
 chat. Chats have `Task.size = ""`, so the size arms of the battery rule cannot
 fire for an S2 chat.
@@ -203,7 +205,8 @@ The lock watcher uses `kqueue` on macOS (a directory watch plus a file watch)
 and a 2-second safety poll; where `kqueue` is unavailable it polls every
 second. After a wake it waits 200 ms, re-reads and re-arms, so an O_EXCL
 create and an atomic `mv -f` replacement are one state each, not an
-absent-then-present pair. A re-read of the same bytes emits nothing. The
+absent-then-present pair. A re-read with no changed field emits nothing
+(the ETA's `stale` flip is a change). The
 battery poll is every 30 seconds in a thread with a 2-second `pmset` timeout.
 
 Every changed snapshot is one line in `machine.jsonl`, beside `calls.jsonl` in

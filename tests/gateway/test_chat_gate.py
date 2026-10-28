@@ -1272,3 +1272,17 @@ def test_enforces_holds_is_true_for_fcfs_or_wait_and_false_for_off_record() -> N
     assert ChatGate(policy="fcfs", lock_gate="record").enforces_holds is True
     assert ChatGate(policy="off", lock_gate="wait").enforces_holds is True
     assert ChatGate(policy="off", lock_gate="record").enforces_holds is False
+
+
+async def test_a_level_change_while_parked_applies_when_released() -> None:
+    gate = ChatGate(policy="fcfs", n_srv=8, lock_gate="wait")
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("a", kind="plan")
+    assert gate.held("a") == "Reservation"
+    gate.set_level("a", 1)
+    gate.set_machine(Machine(lock="none"))
+    assert admitted(call)
+    task = next(t for t in gate._state.tasks if t.task_id == "a")
+    assert (task.level, task.level_source) == (1, "user")
+    finish(gate, call)
+    await gate.close()

@@ -728,7 +728,7 @@ class ChatGate:
                                 task_id=meta.session_id,
                                 kind="chat",
                                 origin="user",
-                                level=meta.level,
+                                level=self.level(meta.session_id),
                                 level_source=cast(
                                     LevelSource, self.level_source(meta.session_id)
                                 ),

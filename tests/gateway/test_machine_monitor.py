@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import stat
 import time
@@ -357,7 +358,12 @@ async def test_the_lock_watcher_survives_an_atomic_replace(tmp_path: Path) -> No
     path.write_text("holder: a\n", encoding="utf-8")
     seen: list[LockSnapshot] = []
     watcher = LockWatcher(
-        path, seen.append, poll_s=0.01, settle_s=0.01, use_kqueue=False
+        path,
+        seen.append,
+        poll_s=0.01,
+        settle_s=0.01,
+        use_kqueue=True,
+        guard_poll_s=5.0,
     )
     await watcher.start()
     try:
@@ -402,18 +408,23 @@ async def test_a_kqueue_watcher_sees_a_create_and_a_delete(tmp_path: Path) -> No
     watcher = LockWatcher(
         path,
         seen.append,
-        poll_s=0.2,
+        poll_s=5.0,
         settle_s=0.01,
-        guard_poll_s=0.2,
+        guard_poll_s=5.0,
         use_kqueue=True,
     )
     await watcher.start()
     try:
+        # The kqueue path is the one used: a 5 s poll could not see either
+        # change within the bound, and the fallback would take 1 s.
+        assert watcher._use_kqueue and watcher._kq is not None
         await wait_until(lambda: len(seen) == 1)
         path.write_text("holder: a\n", encoding="utf-8")
         await wait_until(lambda: bool(seen) and seen[-1].holder == "a", timeout=0.5)
+        assert watcher._use_kqueue and watcher._kq is not None
         path.unlink()
         await wait_until(lambda: bool(seen) and not seen[-1].present, timeout=0.5)
+        assert watcher._use_kqueue and watcher._kq is not None
     finally:
         await watcher.stop()
 
@@ -551,3 +562,145 @@ def test_no_code_writes_the_lock(tmp_path: Path) -> None:
             "os.replace",
         ):
             assert pattern not in source, f"{name} uses {pattern}"
+
+
+class _FakeKqueue:
+    """A kqueue whose control never reports an event, or always raises."""
+
+    def __init__(self, *, raises: bool = False) -> None:
+        self._read, self._write = os.pipe()
+        self.raises = raises
+
+    def fileno(self) -> int:
+        return self._read
+
+    def control(self, changelist: object, max_events: int, timeout: float) -> list:
+        if changelist:
+            return []
+        if self.raises:
+            raise OSError(35, "Resource temporarily unavailable")
+        return []
+
+    def close(self) -> None:
+        with contextlib.suppress(OSError):
+            os.close(self._read)
+        with contextlib.suppress(OSError):
+            os.close(self._write)
+
+
+async def test_the_safety_poll_sees_a_change_when_kqueue_reports_nothing(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "gpu.lock"
+    seen: list[LockSnapshot] = []
+    watcher = LockWatcher(
+        path,
+        seen.append,
+        poll_s=5.0,
+        settle_s=0.0,
+        guard_poll_s=0.15,
+        use_kqueue=True,
+        kqueue_factory=_FakeKqueue,
+    )
+    await watcher.start()
+    try:
+        assert watcher._use_kqueue
+        await wait_until(lambda: len(seen) == 1)
+        path.write_text("holder: a\n", encoding="utf-8")
+        await wait_until(lambda: bool(seen) and seen[-1].holder == "a", timeout=0.5)
+    finally:
+        await watcher.stop()
+
+
+async def test_a_kqueue_that_keeps_failing_falls_back_to_polling(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "gpu.lock"
+    seen: list[LockSnapshot] = []
+    watcher = LockWatcher(
+        path,
+        seen.append,
+        poll_s=0.05,
+        settle_s=0.0,
+        guard_poll_s=0.01,
+        use_kqueue=True,
+        kqueue_factory=lambda: _FakeKqueue(raises=True),
+    )
+    await watcher.start()
+    try:
+        await wait_until(lambda: watcher._kq is not None)
+        path.write_text("holder: a\n", encoding="utf-8")
+        await wait_until(
+            lambda: bool(seen) and seen[-1].holder == "a" and not watcher._use_kqueue,
+            timeout=15.0,
+        )
+    finally:
+        await watcher.stop()
+
+
+async def test_a_watcher_stops_and_starts_again_on_the_same_file(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "gpu.lock"
+    path.write_text("holder: a\n", encoding="utf-8")
+    seen: list[LockSnapshot] = []
+    watcher = LockWatcher(
+        path, seen.append, poll_s=5.0, settle_s=0.0, guard_poll_s=5.0, use_kqueue=True
+    )
+    await watcher.start()
+    await wait_until(lambda: len(seen) == 1)
+    started = time.monotonic()
+    await watcher.stop()
+    # No worker may still hold the fd: stop returns at once.
+    assert time.monotonic() - started < 0.5
+    assert watcher._kq is None
+    await watcher.start()
+    try:
+        path.write_text("holder: b\n", encoding="utf-8")
+        await wait_until(lambda: bool(seen) and seen[-1].holder == "b", timeout=2.0)
+    finally:
+        await watcher.stop()
+
+
+async def test_a_fifo_lock_file_is_unreadable_without_blocking(tmp_path: Path) -> None:
+    path = tmp_path / "gpu.lock"
+    os.mkfifo(path)
+    started = time.monotonic()
+    snapshot = read_lock_file(path, now_wall=time.time())
+    assert time.monotonic() - started < 0.5
+    assert snapshot.present and not snapshot.readable
+    assert snapshot.error == "not a regular file"
+
+
+def test_an_infinite_mem_gib_is_not_accepted() -> None:
+    snapshot = parse_lock(
+        "holder: a\neta: 2026-10-27T10:00:00Z\nmem_gib: inf\n",
+        now_wall=datetime(
+            2026, 10, 27, 9, 0, tzinfo=datetime.now().astimezone().tzinfo
+        ).timestamp(),
+    )
+    assert snapshot.mem_gib == 0.0
+
+
+async def test_one_battery_outage_warns_once(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    def runner() -> str:
+        raise OSError("no pmset")
+
+    monitor = MachineMonitor(
+        lock_path=None,
+        battery_runner=runner,
+        battery_poll_s=0.01,
+        use_kqueue=False,
+    )
+    with caplog.at_level("WARNING"):
+        await monitor.start()
+        await asyncio.sleep(0.05)
+        await monitor.stop()
+    messages = [
+        record.message
+        for record in caplog.records
+        if "battery_unknown" in record.message or "battery unknown" in record.message
+    ]
+    assert len(messages) == 1, messages

@@ -19,9 +19,11 @@ import asyncio
 import contextlib
 import json
 import logging
+import math
 import os
 import re
 import select
+import stat
 import subprocess
 import time
 from collections.abc import Callable
@@ -206,7 +208,7 @@ def parse_lock(
             parsed = float(raw_mem)
         except ValueError:
             parsed = -1.0
-        if parsed >= 0.0:
+        if math.isfinite(parsed) and parsed >= 0.0:
             mem_gib = parsed
     return LockSnapshot(
         present=True,
@@ -263,6 +265,14 @@ def read_lock_file(
     unreadable, which the gate treats as foreign.
     """
     target = Path(path).expanduser()
+    try:
+        info = target.stat(follow_symlinks=False)
+    except FileNotFoundError:
+        return LockSnapshot.absent()
+    except OSError as exc:
+        return LockSnapshot.unreadable(f"{type(exc).__name__}: {exc.strerror or exc}")
+    if not stat.S_ISREG(info.st_mode):
+        return LockSnapshot.unreadable("not a regular file")
     try:
         with target.open("rb") as handle:
             raw = handle.read(MAX_LOCK_BYTES + 1)
@@ -378,13 +388,16 @@ class BatteryReader:
         *,
         poll_s: float = BATTERY_POLL_S,
         initial: BatterySnapshot | None = None,
+        initial_failed: bool = False,
     ) -> None:
         self._runner = runner
         self._on_change = on_change
         self._poll_s = max(0.001, poll_s)
         self._good = initial
         self._last = initial if initial is not None else BatterySnapshot()
-        self._warned = False
+        # The monitor already logged the initial failure (F5): one warning
+        # for one outage.
+        self._warned = initial_failed
         self._task: asyncio.Task[None] | None = None
 
     @property
@@ -480,6 +493,8 @@ class LockWatcher:
         self._kq: Any | None = None
         self._dir_fd: int | None = None
         self._file_fd: int | None = None
+        # A wake that completed without error resets the failure count (F4).
+        self._healthy = False
 
     @property
     def snapshot(self) -> LockSnapshot | None:
@@ -538,7 +553,8 @@ class LockWatcher:
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:
-                        failures += 1
+                        failures = 1 if self._healthy else failures + 1
+                        self._healthy = False
                         logger.warning(
                             "lock monitor task failed (%s); falling back to polling",
                             type(exc).__name__,
@@ -554,7 +570,8 @@ class LockWatcher:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                failures += 1
+                failures = 1 if self._healthy else failures + 1
+                self._healthy = False
                 logger.warning("lock monitor task failed (%s)", type(exc).__name__)
                 if failures > 5:
                     self._use_kqueue = False
@@ -574,7 +591,7 @@ class LockWatcher:
     def _open_file_fd(self) -> None:
         self._close_file_fd()
         try:
-            fd = os.open(self._path, os.O_RDONLY)
+            fd = os.open(self._path, os.O_RDONLY | os.O_NONBLOCK)
         except OSError:
             return
         self._file_fd = fd
@@ -616,16 +633,36 @@ class LockWatcher:
             self._prepare_kqueue()
         kq = self._kq
         assert kq is not None
-        while True:
-            events = await asyncio.to_thread(kq.control, None, 1, self._guard_poll_s)
-            if events and self._settle_s:
-                await asyncio.sleep(self._settle_s)
-            # Re-read and re-arm after every wake, a timeout included, so a
-            # replaced inode cannot leave the watcher on a dead fd.
-            self._check()
-            if self._dir_fd is None:
-                raise RuntimeError("lock directory fd closed")
-            self._open_file_fd()
+        loop = asyncio.get_running_loop()
+        wake = asyncio.Event()
+
+        def ready() -> None:
+            wake.set()
+
+        # The fd is read on the loop, never in a worker: stop() may close it
+        # as soon as this task is cancelled (F1). The guard sleep is the
+        # safety poll when the fs gives no vnode notes.
+        loop.add_reader(kq.fileno(), ready)
+        try:
+            while True:
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(wake.wait(), timeout=self._guard_poll_s)
+                wake.clear()
+                # Drain every pending event without blocking.
+                while kq.control([], 1, 0):
+                    pass
+                if self._settle_s:
+                    await asyncio.sleep(self._settle_s)
+                # Re-read and re-arm after every wake, a timeout included,
+                # so a replaced inode cannot leave the watcher on a dead fd.
+                self._check()
+                if self._dir_fd is None:
+                    raise RuntimeError("lock directory fd closed")
+                self._open_file_fd()
+                self._healthy = True
+        finally:
+            with contextlib.suppress(Exception):
+                loop.remove_reader(kq.fileno())
 
     def _close_file_fd(self) -> None:
         if self._file_fd is not None:
@@ -779,6 +816,7 @@ class MachineMonitor:
         self._watcher: LockWatcher | None = None
         self._reader: BatteryReader | None = None
         self._started = False
+        self._battery_failed = False
 
     @property
     def snapshot(self) -> MachineSnapshot | None:
@@ -819,6 +857,7 @@ class MachineMonitor:
                 self._on_battery,
                 poll_s=self._battery_poll_s,
                 initial=self._battery,
+                initial_failed=self._battery_failed,
             )
             await self._reader.start()
 
@@ -865,6 +904,7 @@ class MachineMonitor:
             raise
         except Exception:
             self._alarm("battery_unknown")
+            self._battery_failed = True
             return BatterySnapshot()
 
     def _on_lock(self, snapshot: LockSnapshot) -> None:
