@@ -9,6 +9,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- S3a.2 adds `/api/tasks` creation, inspection and control and in-process
+  workers sharing the console's scheduler gate. Creation is idempotent with
+  `request_key`; workers disable memory, omit `shell_exec`, and have at most
+  four resident at once. On startup, surviving nonterminal rows fail with
+  `gateway restarted; recovery arrives in S3b`; full recovery and accounting
+  are deferred, deadlines are rejected, and an invalid workspace fails at run
+  or resume. Pause takes effect at the next model call; running tools finish
+  and answered pending approvals wait until resume; a task paused before
+  start starts no worker until resumed. Resume restores the pre-pause priority,
+  or computed P2 if the pause log is missing (including a task created or set
+  at P5) or pruned by retention; an unpaused task returns 409 `not_paused`.
+  Retention discards old terminal gate identities while keeping their rows.
+  PATCH rejects `first` until S6b
+  ([#119]).
+
 - Reasoning and recall options now work in the interactive UI, including
   `--reasoning-field` and `--retrieval-extra-body`; explicit flags override
   `[agent]`/`[retrieval]` defaults. Console sessions honor the configured
@@ -42,8 +57,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `user_rule` origins get remembered approvals, unmarked MCP tools and session
   grants. `ChatGate` can register a worker task, so its calls are logged as
   `session_kind="task"`, its P0 is the user's single task P0, and only the
-  runner ends it. No `/api/tasks` route or worker runs yet; the console
-  wiring is S3a.2 ([#113]).
+  runner ends it. S3a.1 supplied the store and task policy boundary ([#113]).
+
 - The workspace page on API v2. `http://127.0.0.1:8401/` now talks only to
   `/api`: the session list with its machine snapshot, one chat's turns, its
   event stream (SSE, reopened from the last applied event id), keyed sends
@@ -68,6 +83,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `Continue`/`Try again`/`Copy error` and the settings dialog follow in a
   later update; a waiting approval shows as `Needs approval` until then.
   `/` and every `/v1/*` route keep their behaviour ([#111]).
+
 - API v2 settings, model listing, guard body limits and unconfigured gateway
   startup: `GET /api/settings`, `PUT /api/settings`,
   `POST /api/settings/test`, `GET /api/settings/key-status` and
@@ -855,3 +871,4 @@ earlier milestones.
 [#114]: https://github.com/localmelo/localmelo/pull/114
 [#115]: https://github.com/localmelo/localmelo/pull/115
 [#116]: https://github.com/localmelo/localmelo/pull/116
+[#119]: https://github.com/localmelo/localmelo/pull/119
