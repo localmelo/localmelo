@@ -33,7 +33,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Direct workers report agent construction failures, including refused
   config-file values and invalid TOML, as `startup_error` with a redacted
   cause (`$HOME` shown as `~`), and attempt a `transport_error` result on
-  event-output failure; a broken output pipe exits 1. ([#NN])
+  event-output failure; a broken output pipe exits 1. ([#157])
 
 - Correct the API v2 response formats and tools example, and update the bilingual
   quickstart to reflect the shipped console settings and approvals ([#122], [#124]).
@@ -1016,3 +1016,4 @@ earlier milestones.
 [#152]: https://github.com/localmelo/localmelo/pull/152
 [#153]: https://github.com/localmelo/localmelo/pull/153
 [#155]: https://github.com/localmelo/localmelo/pull/155
+[#157]: https://github.com/localmelo/localmelo/pull/157
