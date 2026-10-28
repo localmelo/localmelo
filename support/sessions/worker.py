@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import os
+import shlex
 import subprocess
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
@@ -31,26 +33,50 @@ def redact_worker(value: Any) -> Any:
 def sensitive_read(
     tool: str, arguments: Any, workspace: str | None = None
 ) -> str | None:
-    """Identify direct reads of common secret files, including symlink targets."""
+    """Identify simple reads of common secret files, including symlink targets.
+
+    This is best-effort detection, not a boundary against arbitrary commands.
+    """
     name = tool.lower()
     if name.startswith("mcp__") and "__" in name[5:]:
         name = name.rsplit("__", 1)[-1]
-    if name not in {
-        "file_read",
-        "read",
-        "read_file",
-        "read_text_file",
-    } or not isinstance(arguments, dict):
+    if not isinstance(arguments, dict):
         return None
-    path = next(
-        (
-            arguments.get(k)
-            for k in ("path", "file_path", "filename")
-            if isinstance(arguments.get(k), str)
-        ),
-        None,
-    )
-    if not path:
+    paths: list[str] = []
+    if name in {"file_read", "read", "read_file", "read_text_file"}:
+        path = next(
+            (
+                arguments.get(k)
+                for k in ("path", "file_path", "filename")
+                if isinstance(arguments.get(k), str)
+            ),
+            None,
+        )
+        if path:
+            paths.append(path)
+    elif name == "shell_exec" and isinstance(arguments.get("command"), str):
+        paths = _shell_read_paths(arguments["command"])
+    elif name == "python_exec" and isinstance(arguments.get("code"), str):
+        try:
+            tree = ast.parse(arguments["code"])
+        except (SyntaxError, ValueError, RecursionError):
+            return None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id != "open":
+                    continue
+                path_node = (
+                    node.args[0]
+                    if node.args
+                    else next(
+                        (kw.value for kw in node.keywords if kw.arg == "file"), None
+                    )
+                )
+                if isinstance(path_node, ast.Constant) and isinstance(
+                    path_node.value, str
+                ):
+                    paths.append(path_node.value)
+    else:
         return None
 
     def matches(candidate: str) -> bool:
@@ -67,8 +93,64 @@ def sensitive_read(
             or name.endswith((".pem", ".key", ".p12", ".pfx"))
         )
 
-    resolved = os.path.realpath(os.path.join(workspace or os.getcwd(), path))
-    return redact_worker(path) if matches(path) or matches(resolved) else None
+    for path in paths:
+        if not path or "\x00" in path:
+            continue
+        resolved = os.path.realpath(os.path.join(workspace or os.getcwd(), path))
+        if matches(path) or matches(resolved):
+            return redact_secrets(path)[0]
+    return None
+
+
+def _shell_read_paths(command: str) -> list[str]:
+    """Extract operands from a small subset of shell reads, without executing it."""
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+        lexer.whitespace_split = True
+        tokens = list(lexer)
+    except ValueError:
+        return []
+    if not tokens or tokens[0] not in {
+        "cat",
+        "head",
+        "tail",
+        "less",
+        "more",
+        "sed",
+        "grep",
+    }:
+        return []
+    # Shell syntax and expansion require an actual shell parser; don't guess.
+    if any(any(c in token for c in "|&;<>$`\n") for token in tokens):
+        return []
+    tool, args = tokens[0], tokens[1:]
+    if tool == "sed" and "-n" not in args:
+        return []
+    operands: list[str] = []
+    pattern_supplied = False
+    options = True
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if options and arg == "--":
+            options = False
+        elif options and arg.startswith("-") and arg != "-":
+            if arg in {"-e", "-f"} and tool in {"grep", "sed"}:
+                pattern_supplied = True
+                i += 1
+            elif (
+                arg in {"-n", "-c"}
+                and tool in {"head", "tail"}
+                or arg in {"-m", "-A", "-B", "-C"}
+                and tool == "grep"
+            ):
+                i += 1
+        else:
+            operands.append(arg)
+        i += 1
+    if tool in {"grep", "sed"} and not pattern_supplied:
+        operands = operands[1:]
+    return operands
 
 
 def _git_metadata(workspace: str) -> dict[str, str]:

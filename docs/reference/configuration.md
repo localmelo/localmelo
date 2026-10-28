@@ -51,7 +51,7 @@ tables of the chosen backends.
 | `admit_on_outcome` | `[memory]` | `false` | R6-lite: admit only the final attempt digest at the run's end, with the terminal status in its provenance. The `--admit-on-outcome` flag wins for one run; direct mode applies the table, the interactive UI and the gateway do not read it, and it is accepted and inert in `legacy`. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. |
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
-| `host` | `[gateway]` | `"127.0.0.1"` | The address the gateway listens on: keep `127.0.0.1`, or use `localhost` or `::1`. On a host that is not `localhost` or a loopback IP address, such as `0.0.0.0`, the gateway does not check the `Host` and `Origin` of requests; see [Keep the gateway private](../guides/gateway.md#keep-the-gateway-private). |
+| `host` | `[gateway]` | `"127.0.0.1"` | Loopback listen address; non-loopback binds are refused. |
 | `port` | `[gateway]` | `8401` | The port the gateway listens on. |
 | `workspace` | `[gateway]` | `""` | The default workspace folder for web console sessions (`~/localmelo-workspace` when empty); written only when set. |
 | `resume_mode` | `[sessions]` | `"pairs"` | Terminal conversation restoration: `pairs` loads recent user/answer pairs; `window` loads the saved working window plus later pairs, falling back when no checkpoint is usable. Invalid values warn/fall back only in the UI; direct runs do not consume this setting. |
@@ -193,14 +193,47 @@ Set `[agent] context_window`, `output_reserve` and `safety_margin` to positive i
 must be greater than their sum. Direct and interactive flags override individual values; API v2
 console sessions use the config. Legacy `/v1` is unchanged. When unset, no accounting is recorded.
 
-For each planning or reflection attempt, `utf8-bytes-v1` estimates the assembled message and tool
-schema representation at UTF-8 bytes divided by three, rounded up, plus 16,384 tokens for each
-attached image. The last positive prompt-token count for the same model and request kind calibrates
-the proxy upward; missing or zero usage resets that calibration. This is an estimate, not an exact
-provider wire count or a bound: templates and vision models differ. Events and JSON results record
-the estimate, source, measured count, input limit and over-limit flag without storing prompt text.
-This release neither prunes nor refuses over-limit requests and does not enforce the output reserve
-as a provider generation cap. The existing independent character guard still applies.
+For each planning or reflection attempt, `utf8-bytes-v2` estimates the assembled message and tool
+schema representation at UTF-8 bytes divided by three, rounded up. Each image adds
+`ceil(width / 28) * ceil(height / 28)` tokens when dimensions are known, capped at 16,384;
+unknown dimensions use the cap. The last positive prompt-token count for the same model and request
+kind calibrates the proxy upward; missing or zero usage resets that calibration. The proxy is an
+estimate, not a bound: templates and vision models differ.
+
+When the estimate exceeds the input limit, the agent fits a request copy: it previews eligible old
+tool outputs, removes optional old thinking and then evicts old complete units, while keeping the
+task, tool schemas, matching call/result pairs, images and failing evidence. It leaves history and
+the retained conversation unchanged. If the pinned context cannot fit, the run ends with
+`context_budget_exceeded` and a remediation message. A classified context-overflow response gets at
+most one smaller request retry without re-running tools; other provider errors keep their existing
+retry policy. Events and JSON results report the estimate, actual prompt count if available, and
+pruning counts without storing prompt text. The output reserve is not a provider generation cap;
+the independent character guard still applies.
+
+`[agent] fixed_prefix = true` opts direct, interactive and API v2 console runs into
+`fixed-prefix-v1`; `--fixed-prefix on|off` overrides it for a direct or interactive
+run. It snapshots the local date and UTC offset at each run's start, including across
+midnight, and places changing recall and reflections in labelled user-side data.
+An explicit end delimiter leaves the task and reflection request outside that data;
+data lines starting with that delimiter are deterministically quoted.
+`all` freezes sorted tool definitions for that run; `retrieve` keeps selecting tools
+as before. The JSON result's `prefix_cache.schema_changes` counts changes to the
+offered planning schemas within the run, not actual cache misses; an optional
+`reported_cached_tokens` is the server-reported total for planning and reflection responses only. Providers
+may not report caching, and byte-stable prefixes do not guarantee a cache hit.
+The legacy `/v1` API and the default-off request bytes remain unchanged.
+
+Opt in to separate captured tool history with `[agent] captured_history = true` or
+`--captured-history on`; `off` overrides the setting. The checked preview uses a 50,000-character
+ceiling including truncation and image notices. History stores a distinct, pattern-redacted copy of
+up to 200,000 characters per result (errors first), with exact omitted counts relative to the
+redacted capture. Counts live in `capture_metadata`, not in-band markers in stored text.
+`acquisition_omitted_chars` is null because the tool may already have limited its
+output. Capture is not a complete file or unlimited stdout; redaction is pattern-based and can miss
+secrets. The model's checked preview can still contain raw text; the `Message.tool_result`,
+`tool.finished` event and trace use redacted copies. Existing history retention and permissions
+apply. `Agent.run_tool()` does not write captured history and retains its existing result check.
+The option is off by default.
 
 ## Embedding and long-term memory
 
@@ -320,7 +353,7 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | `~/.cache/localmelo/config.toml` | The configuration. | By the setup wizard. |
 | `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` with an embedding backend. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
-| `~/.cache/localmelo/playground/` | The web workspace's memory. | When the gateway starts. |
+| `~/.cache/localmelo/playground/` | Legacy playground memory. | When the opt-in playground starts (security-1b in progress). |
 | `~/.localmelo/logs/` | The background service's logs. | By `melo --daemon install`. |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | The background service's definition. | By `melo --daemon install`. |
 

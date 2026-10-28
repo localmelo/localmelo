@@ -170,7 +170,7 @@ asyncio.run(main())
 | `reflection.started` | Before the reflection that follows an attempt. | `attempt`, `failure_type` |
 | `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `usage`, `duration_s` |
 | `run.progress` | Only with `progress=True`: right after `run.started`; after each `step.started`, `tool.finished`, `reflection.started` and `stuck` notice; and right before `run.finished`. | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
-| `context_budget` | With context accounting enabled, once per planning or reflection attempt, including failures. | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance` |
+| `context_budget` | With context accounting enabled, once per planning or reflection attempt, including failures. | `kind`, `model`, `attempt`, `proxy_version`, `source`, `estimate`, `measured_prompt_tokens`, `input_limit`, `over_limit`, `image_allowance`, `pruned` |
 | `run.finished` | Last. | `result` |
 
 ### run.started

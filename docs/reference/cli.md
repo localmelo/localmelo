@@ -14,6 +14,7 @@ melo --base-url URL [--chat-model NAME]      # the interactive UI on this server
 melo [--base-url URL] [--chat-model NAME] "" # the plain conversation loop
 melo --reconfigure                           # run setup, then the interactive UI
 melo --serve [--host HOST] [--port PORT]     # start the gateway
+melo --serve --enable-playground             # opt in to legacy playground (in progress)
 melo --serve --reconfigure                   # run setup, then start the gateway
 melo --import-session dsh-jsonl FILE [--title TITLE] # import worker history
 melo --daemon install|uninstall|status       # macOS background service
@@ -31,7 +32,7 @@ lines, abbreviations and the `melo ""` loop keep their previous parsing.
 | `melo` (no task) | Opens the [interactive UI](../guides/terminal.md#the-interactive-ui) in a terminal, on the saved backend. With no saved backend it first asks for a model server and a model, and saves them; see [First run](../guides/terminal.md#first-run). Without a terminal it exits with code 2 and says what to run instead. |
 | `melo --base-url URL` (no task) | Opens the interactive UI on that server, with `--chat-model` or the first chat model the server lists. |
 | `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI. Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
-| `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). |
+| `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). In the in-progress security-1b changes, `--enable-playground` opts into authenticated legacy playground routes and is only valid with `--serve`. |
 | `melo ""` (empty task) | Opens the plain conversation loop: each line you type is a task for the same agent, and only the answer prints. `/help` lists its commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
 | `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](../guides/gateway.md#run-the-gateway-at-login-macos). |
 
@@ -100,9 +101,11 @@ accepts the options named in [Interactive UI](#interactive-ui).
 
 | Option | Default | Description |
 |---|---|---|
-| `--brief FILE` | not set | Read a direct task from a nonempty UTF-8 file, at most 1 MiB, relative to the invocation directory. Requires no positional task and defaults to worker JSON output. |
+| `--brief FILE` | not set | Read a direct task from a nonempty UTF-8 file, at most 1 MiB, relative to the invocation directory. Requires no positional task, defaults to worker JSON output and rejects text output. |
 | `--inbox FILE` | not set | With `--brief`, accept complete appended instruction lines at planning boundaries. The path is explicit and relative to the invocation directory. |
 | `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](../guides/tools-mcp.md#with-a-workspace-root). |
+| `--fixed-prefix on\|off` | `off` | Opt in to a versioned fixed system prefix with the local date frozen at run start; overrides `[agent] fixed_prefix`. |
+| `--captured-history on\|off` | `off` | Store a bounded, pattern-redacted captured result separately from the model preview; see [configuration](configuration.md#context-accounting). |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
@@ -142,8 +145,8 @@ accepts the options named in [Interactive UI](#interactive-ui).
   A path that is not a folder is a usage error (exit 2, one line); see
   [Usage errors](#usage-errors). `melo ""` and `--serve` refuse the flag.
 - The three context flags override the matching `[agent]` keys independently, in direct mode and the
-  interactive UI. They measure, but do not truncate or reject, planning and reflection requests; the
-  output reserve is not a generation cap. See [context accounting](configuration.md#context-accounting).
+  interactive UI. Over-budget requests are fitted on a copy, or the run ends `context_budget_exceeded`;
+  the output reserve is not a generation cap. See [context accounting](configuration.md#context-accounting).
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
   [How localmelo works](../concepts/how-it-works.md#the-run-loop).
@@ -297,8 +300,8 @@ These options apply to `melo` without a task.
 - The defaults of `--host` and `--port` come from the `[gateway]` table of
   the config file. The options change them for this run only.
 - `--host`, `--port` and `--reconfigure` are ignored when you give a task.
-- Without a task, `--host` and `--port` are usage errors; give `--serve`
-  to start the gateway.
+- Without a task, `--host` and `--port` require `--serve`, `--daemon`,
+  `--gateway-login` or `--gateway-rotate-token`.
 - Without a terminal and with no config file, `melo --serve` prints one
   line on stderr and exits with code 1, as under launchd:
   `melo: no backend is configured; run melo --reconfigure in a terminal`.
@@ -309,7 +312,9 @@ These options apply to `melo` without a task.
   cannot be combined with `--reconfigure` or used without `--serve`.
 - Ctrl-D at a wizard question prints `Setup cancelled.` and exits with
   code 0; Ctrl+C prints the same and exits with 130.
-- The gateway has no authentication. Keep it on `127.0.0.1`; see
+- `melo --gateway-login [--port PORT]` prints a one-use sign-in link to a terminal;
+  `melo --gateway-rotate-token` rotates the shared local gateway token.
+  The gateway refuses non-loopback binds and requires authentication; see
   [Keep the gateway private](../guides/gateway.md#keep-the-gateway-private).
 
 ## Usage errors
@@ -345,8 +350,8 @@ These are usage errors:
   `only for the interactive UI (melo without a query, --serve or --daemon): --yolo`;
 - `--base-url` or `--chat-model` with `--serve` or `--daemon`, reported as
   `--base-url and --chat-model are for a task or the interactive UI; --serve uses the config file (melo --reconfigure)`;
-- `--host` or `--port` without a task and without `--serve` or `--daemon`,
-  reported as
+- `--host` or `--port` without a task, `--serve`, `--daemon`, or a gateway
+  authentication command, reported as
   `--host and --port are for --serve and --daemon; bare melo opens the interactive UI`;
 - `--reconfigure` with `--base-url` and no task, reported as
   `--reconfigure sets up the config file, which --base-url does not use; give one of them`;
@@ -408,20 +413,27 @@ These are usage errors:
 **With `--brief`:** JSON is a versioned worker result: `v`, `status`, `run_id`,
 `exit_code`, `head_sha`, `git_dirty`, `tests`, `run` and `error`. HEAD and dirty
 state come from the workspace, and are null when unavailable. `run` is the
-run record without `config`; `tests` is `recorded` only for the last passing
+run record without `config`, or null for startup or transport errors; `tests` is
+`recorded` only for the last passing
 recognized test check of the final attempt, otherwise `not_recorded`. A
-recorded item contains command, result, nullable exit code and `tool_event`
-source. It is evidence from tool output, not a guarantee that a task is correct.
+recorded item contains the raw command or Python code, redacted and capped at
+2,000 characters with `command_truncated`, its nullable exit code and
+`tool_event` source. It is evidence from tool output, not a guarantee that a task is correct.
 
 With `--brief --output-format stream-json`, stdout is NDJSON: each agent event
 is wrapped as `{ "v": 1, "type": "event", "event": ... }`, followed by a
 `{ "v": 1, "type": "result", "result": ... }` worker result when the run
 finishes normally. A broken or undrained output pipe is a failure; signals,
 process death or a broken pipe can leave no result. Drain stdout and check
-both the final record and the exit code. Worker output uses pattern-based
-redaction and omits recognizable sensitive-file reads; arbitrary printed or
-model-echoed secrets may remain. Review before sharing. `--save-session` can
-record the same run.
+both the final record and the exit code. Agent construction failures after a
+valid brief produce `startup_error` with `run: null` and exit 1. For event
+output failures the worker attempts a `transport_error` result with `run: null`
+and exits 1; a failed or blocked output may prevent that record from arriving.
+Usage errors remain resultless. Worker output uses pattern-based
+redaction and omits some recognizable sensitive-file reads, including simple
+shell and Python reads. Arbitrary commands, code and model output can still
+expose secrets: the stream is not a secret boundary. Review before sharing.
+`--save-session` can record the same run.
 
 With an explicit `--inbox FILE`, a worker reads complete LF-terminated,
 nonempty UTF-8 lines at the start of each planning step. An incomplete last
