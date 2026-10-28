@@ -284,7 +284,7 @@ class RecoveryStore:
                     create=True,
                 )
                 await conn.execute(
-                    "UPDATE recovery_capture SET active = 0 WHERE task_id = ?",
+                    "UPDATE recovery_capture SET active = 0, complete = 0 WHERE task_id = ?",
                     (task_id,),
                 )
                 if _capture:
@@ -631,7 +631,7 @@ class RecoveryStore:
         async with self.store.component_transaction("capture_get") as conn:
             row = await _one(
                 conn,
-                "SELECT complete AND trusted FROM recovery_capture WHERE task_id = ? AND execution_id = ?",
+                "SELECT complete AND trusted FROM recovery_capture WHERE task_id = ? AND execution_id = ? AND active = 1",
                 (task_id, execution_id),
             )
             return bool(row and row[0])
