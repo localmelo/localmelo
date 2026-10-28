@@ -48,10 +48,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Added
 
 - Experimental Python opt-in typed memory assertions: conservative evidence
-  checks (timezone-aware `timestamp` or `date` records), ordered same-task
-  updates (record time or per-task user sentence order), cancellation markers,
-  exact-duplicate-only retention, wall-clock historical recall with source-dated
-  titles ([#NN]).
+  checks (timezone-aware `timestamp`/`date` records), ordered same-task updates
+  (record time or per-task user order), cancellation markers, exact-duplicate-only
+  retention and wall-clock labelled recall with source-dated titles ([#NN]).
 - Scheduler component v4 adds dormant process capture state, identity checks
   and a gated subprocess primitive; worker behavior and Resume are unchanged. [#158]
 

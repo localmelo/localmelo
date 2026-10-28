@@ -169,40 +169,31 @@ async def test_concurrent_sqlite_writers_compare_inside_transaction(
 
 
 @pytest.mark.parametrize("sqlite", [False, True])
-async def test_one_active_negation_conflicts_and_keeps_both(
+async def test_store_keeps_negations_and_shared_dates_unlinked(
     tmp_path: Path, sqlite: bool
 ) -> None:
-    store: LongTerm = SqliteLongTerm(tmp_path / "long.db") if sqlite else LongTerm()
-    try:
-        first, action = await apply(store, "Mina lives in Paris.", 10, "a")
-        assert first is not None and action == "NEW"
-        second, action = await apply(store, "Mina does not live in Paris.", 20, "b")
-        assert second is not None and action == "CONFLICT"
-        active = await store.active_entries()
-        assert [entry.id for entry in active] == [first, second]
-        assert [entry.status for entry in active] == ["active", "active"]
-    finally:
-        if isinstance(store, SqliteLongTerm):
-            await store.aclose()
+    def store_at(name: str) -> LongTerm:
+        return SqliteLongTerm(tmp_path / name) if sqlite else LongTerm()
 
-
-@pytest.mark.parametrize("sqlite", [False, True])
-async def test_shared_date_different_subjects_stay_unlinked(
-    tmp_path: Path, sqlite: bool
-) -> None:
-    store: LongTerm = SqliteLongTerm(tmp_path / "long.db") if sqlite else LongTerm()
-    texts = (
-        "Riverside concert at the Old Mill on 2026-05-02 doors at 18:00.",
-        "Harbor concert at the Old Mill on 2026-05-02 doors at 21:00.",
-    )
+    mina, concerts = store_at("mina.db"), store_at("concerts.db")
     try:
-        for name, text in zip(("a", "b"), texts, strict=True):
-            entry_id, action = await apply(store, text, 10, name)
-            assert entry_id is not None and action == "NEW"
-        active = await store.active_entries()
-        assert [entry.text for entry in active] == list(texts)
-        subjects = {entry.provenance["assertion"]["subject_key"] for entry in active}
-        assert len(subjects) == 2
+        assert (await apply(mina, "Mina lives in Paris.", 10, "a"))[1] == "NEW"
+        assert (await apply(mina, "Mina does not live in Paris.", 20, "b"))[1] == (
+            "CONFLICT"
+        )
+        assert [entry.text for entry in await mina.active_entries()] == [
+            "Mina lives in Paris.",
+            "Mina does not live in Paris.",
+        ]
+        first = "Riverside concert at the Old Mill on 2026-05-02 doors at 18:00."
+        second = "Harbor concert at the Old Mill on 2026-05-02 doors at 21:00."
+        for name, text in zip(("a", "b"), (first, second), strict=True):
+            assert (await apply(concerts, text, 10, name))[1] == "NEW"
+        active = await concerts.active_entries()
+        assert [entry.text for entry in active] == [first, second]
+        unique = {entry.provenance["assertion"]["subject_key"] for entry in active}
+        assert len(unique) == 2
     finally:
-        if isinstance(store, SqliteLongTerm):
-            await store.aclose()
+        for store in (mina, concerts):
+            if isinstance(store, SqliteLongTerm):
+                await store.aclose()

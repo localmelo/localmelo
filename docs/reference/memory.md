@@ -104,9 +104,8 @@ Within the same task, an explicitly marked change to a verified typed key can
 supersede one older active assertion when its verified source time (`timestamp`
 or `date`) is later; a user statement is ordered by message and sentence
 position within its task. A user counter and a source timestamp are different
-clocks and never order against each other, and a restarted task starts its user
-order over: it does not link to earlier user statements, which stay conflicts.
-Missing or naive source times do not order; markers include Chinese meeting
+clocks, and a restarted task does not link to earlier user statements (they stay
+conflicts). Missing or naive source times do not order; markers include Chinese
 `取消` and trailing `now`/`instead`. Multiple active candidates, missing ordering
 or a different value without a change marker retain conflicts. This does not
 link entities across tasks or sessions. An unlinked assertion is kept

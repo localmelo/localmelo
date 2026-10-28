@@ -158,19 +158,11 @@ def decide_assertion(
 
 
 def _decision_order(assertion: dict[str, Any]) -> tuple[str, float] | None:
-    """The order two assertions can share: per-task user counter or source epoch.
-
-    A user statement's counter and a source record's timestamp are different
-    clocks, so an assertion from one is never ordered against the other.
-    """
-    for kind, name in (("user", "user_order"), ("source", "observed_at")):
-        value = assertion.get(name)
-        if (
-            isinstance(value, (int, float))
-            and not isinstance(value, bool)
-            and value > 0
-        ):
-            return kind, float(value)
+    """A per-task user counter or a source epoch; the two never compare."""
+    for kind, key in (("user", "user_order"), ("source", "observed_at")):
+        value = assertion.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return (kind, float(value)) if value > 0 else None
     return None
 
 

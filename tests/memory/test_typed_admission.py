@@ -12,6 +12,7 @@ from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.memory.hippo.signals import user_candidates
 from localmelo.melo.memory.long import LongTerm
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+from localmelo.melo.memory.recall import docs_from_entries
 from localmelo.melo.schema import CandidateItem, MemoryCandidate, TaskRecord
 
 
@@ -98,18 +99,26 @@ async def test_agent_user_correction_supersedes_in_message_order() -> None:
 
 
 @pytest.mark.parametrize("sqlite", [False, True])
-async def test_gate_keeps_an_exact_duplicate_ignored(
+async def test_the_gate_drops_only_an_exact_duplicate(
     tmp_path: Path, sqlite: bool
 ) -> None:
     store: LongTerm = SqliteLongTerm(tmp_path / "long.db") if sqlite else LongTerm()
     hippo = Hippo(long=store, typed_assertions=True)
-    text = "Quarterly planning review is scheduled for 2026-05-04."
+    exact = "Quarterly planning review is scheduled for 2026-05-04."
+    shared = [f"token{index}" for index in range(9)]
     try:
         for name in ("a", "b"):
-            hippo.propose(MemoryCandidate(name, "digest", text, "rule", "task"))
+            hippo.propose(MemoryCandidate(name, "digest", exact, "rule", "task"))
             decision = (await hippo.admit(name, "rehearsal"))[0]
         assert decision.action == "IGNORE"
         assert len(await store.active_entries()) == 1
+        actions = []
+        near = (" ".join([*shared, "alpha"]), " ".join([*shared, "beta"]))
+        for name, text in zip(("c", "d"), near, strict=True):
+            hippo.propose(MemoryCandidate(name, "digest", text, "rule", "task"))
+            actions.append((await hippo.admit(name, "rehearsal"))[0].action)
+        assert actions == ["NEW", "NEW"]
+        assert len(await store.active_entries()) == 3
     finally:
         if isinstance(store, SqliteLongTerm):
             await store.aclose()
@@ -237,68 +246,38 @@ async def test_t4_reader_sees_newer_unlinked_doors_first(tmp_path: Path) -> None
         await agent.close()
 
 
-@pytest.mark.parametrize("sqlite", [False, True])
-async def test_gate_keeps_near_duplicate_different_content_unlinked(
-    tmp_path: Path, sqlite: bool
-) -> None:
-    store: LongTerm = SqliteLongTerm(tmp_path / "long.db") if sqlite else LongTerm()
-    hippo = Hippo(long=store, typed_assertions=True)
-    shared = [f"token{index}" for index in range(9)]
-    texts = (" ".join([*shared, "alpha"]), " ".join([*shared, "beta"]))
-    try:
-        actions = []
-        for name, text in zip(("a", "b"), texts, strict=True):
-            hippo.propose(MemoryCandidate(name, "digest", text, "rule", "task"))
-            actions.append((await hippo.admit(name, "rehearsal"))[0].action)
-        assert actions == ["NEW", "NEW"]
-        assert {entry.text for entry in await store.active_entries()} == set(texts)
-    finally:
-        if isinstance(store, SqliteLongTerm):
-            await store.aclose()
-
-
 async def test_user_and_source_entries_keep_wall_time_for_recall_order() -> None:
-    from localmelo.melo.agent.agent import _RunState
-    from localmelo.tests.agent.test_recall_loop import FakeLLM, _agent, _options
-
-    agent = _agent(
-        FakeLLM(),
-        _options(reasoning="compress", retriever="bm25", typed_assertions=True),
+    store = LongTerm()
+    hippo = Hippo(long=store, typed_assertions=True)
+    await hippo.save_task(TaskRecord(query="Mina lives in Paris.", task_id="facts"))
+    user_text = "Mina lives in Paris."
+    hippo.propose(
+        MemoryCandidate(
+            "u",
+            "user",
+            user_text,
+            "rule",
+            "facts",
+            created_at=1_790_000_000.0,
+            remember=True,
+        )
     )
-    try:
-        await agent.hippo.save_task(
-            TaskRecord(query="Mina lives in Paris.", task_id="facts")
+    assert (await hippo.admit("u", "user_statement"))[0].action == "NEW"
+    source_text = "Mina moved to Rome."
+    hippo.propose(
+        candidate(
+            "f1",
+            source_text,
+            record("f1", source_text, "2026-05-02T19:10:00-04:00", "date"),
+            1_790_000_100.0,
+            "facts",
         )
-        user_text = "Mina lives in Paris."
-        agent.hippo.propose(
-            MemoryCandidate(
-                "u",
-                "user",
-                user_text,
-                "rule",
-                "facts",
-                created_at=1_790_000_000.0,
-                remember=True,
-            )
-        )
-        assert (await agent.hippo.admit("u", "user_statement"))[0].action == "NEW"
-        source_text = "Mina moved to Rome."
-        agent.hippo.propose(
-            candidate(
-                "f1",
-                source_text,
-                record("f1", source_text, "2026-05-02T19:10:00-04:00", "date"),
-                1_790_000_100.0,
-                "facts",
-            )
-        )
-        assert (await agent.hippo.admit("f1", "rehearsal"))[0].action == "CONFLICT"
-        _, block, _ = await agent._run_recall(
-            "start", "Where does Mina live?", _RunState(task_id="reader")
-        )
-        assert block.index(user_text) < block.index(source_text)
-    finally:
-        await agent.close()
+    )
+    assert (await hippo.admit("f1", "rehearsal"))[0].action == "CONFLICT"
+    rows = await store.search_text("Mina", top_k=10, include_history=True)
+    docs = docs_from_entries(rows, include_history=True)
+    times = {doc.text: doc.meta["assertion_order_time"] for doc in docs}
+    assert times[user_text] > times[source_text]
 
 
 @pytest.mark.parametrize("field", ["timestamp", "date"])
