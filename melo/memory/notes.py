@@ -1468,14 +1468,22 @@ def _workspace_relative(path: str, root: str) -> str:
     return path.replace(os.sep, "/")
 
 
+def _digest_internal_path(path: str) -> bool:
+    """Hide dot paths and the agent's own scratch note from file lists."""
+    parts = path.replace("\\", "/").split("/")
+    if any(part.startswith(".") and part not in (".", "..") for part in parts):
+        return True
+    return parts[-1].casefold() in {"memory_note.md", "memory_notes.md"}
+
+
 def _digest_files(calls: Sequence[tuple[ToolCall, ToolResult]], root: str) -> list[str]:
-    """The paths this attempt's successful ``file_write`` calls wrote."""
+    """The visible paths this attempt's successful ``file_write`` calls wrote."""
     files: list[str] = []
     for call, result in calls:
         if call.tool_name != "file_write" or result.error.strip():
             continue
         path = _workspace_relative(_string_argument(call, "path"), root)
-        if path and path not in files:
+        if path and not _digest_internal_path(path) and path not in files:
             files.append(_shorten(path, DIGEST_PATH_CHARS))
     if len(files) > DIGEST_FILES:
         more = len(files) - DIGEST_FILES
@@ -1560,17 +1568,77 @@ def _is_check(call: ToolCall, written: Sequence[str], root: str) -> bool:
     return False
 
 
+def _safe_check_target(target: str) -> bool:
+    """Avoid placing absolute, hidden or credential-like paths in a digest."""
+    if not re.fullmatch(r"[A-Za-z0-9_./-]+(?:::[A-Za-z0-9_]+)*", target):
+        return False
+    path = target.split("::", 1)[0]
+    if path.startswith(("/", "-")) or any(
+        part.startswith(".") for part in path.split("/")
+    ):
+        return False
+    return not re.search(r"secret|token|credential|password|api[_-]?key", target, re.I)
+
+
+def _python_check_command(code: str) -> str:
+    """Name a recognizable check without presenting arbitrary code as its label."""
+    if len(code) > 32_000:
+        return "python check"
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError):
+        return "python check"
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        owner = node.func.value
+        if not isinstance(owner, ast.Name):
+            continue
+        if owner.id == "unittest" and node.func.attr in ("main", "TextTestRunner"):
+            return "python unittest"
+        if owner.id == "pytest" and node.func.attr == "main":
+            args = node.args[0] if node.args else next(
+                (kw.value for kw in node.keywords if kw.arg == "args"), None
+            )
+            if isinstance(args, (ast.List, ast.Tuple)):
+                for arg in args.elts:
+                    if (
+                        not isinstance(arg, ast.Constant)
+                        or not isinstance(arg.value, str)
+                    ):
+                        break
+                    target = arg.value
+                    if target in ("-q", "-v", "-s", "-x"):
+                        continue
+                    if _safe_check_target(target):
+                        path, *node_ids = target.split("::")
+                        shown = "::".join([os.path.basename(path), *node_ids])
+                        return f"python pytest {shown}"
+                    break
+            return "python pytest"
+        if owner.id == "runpy" and node.func.attr == "run_path" and node.args:
+            path = node.args[0]
+            if (
+                isinstance(path, ast.Constant)
+                and isinstance(path.value, str)
+                and path.value.endswith(".py")
+                and _safe_check_target(path.value)
+            ):
+                return f"python runpy {os.path.basename(path.value)}"
+    return "python check"
+
+
 def _check_command(call: ToolCall) -> str:
-    """A one-line form of a check call's command or first line of code."""
+    """A short, recognizable label for a check call."""
     text = _call_text(call)
     if call.tool_name == "python_exec":
-        line = _first_nonblank_line(text)
-        text = _joined("python", line)
+        text = _python_check_command(text)
     return _shorten(_collapse(text), DIGEST_COMMAND_CHARS)
 
 
 def _check_result(result: ToolResult) -> str:
-    """The result of a check in one phrase: test counts, exit code or last line."""
+    """Summarize a check by test counts, exit code or neutral completion."""
     if result.error.strip():
         return _shorten("Error: " + _error(result), DIGEST_RESULT_CHARS)
     output = result.output
@@ -1591,10 +1659,7 @@ def _check_result(result: ToolResult) -> str:
     match = _EXIT_CODE_RE.fullmatch(first)
     if match is not None:
         return f"exit {int(match.group(1))}"
-    last = next(
-        (line.strip() for line in reversed(output.splitlines()) if line.strip()), ""
-    )
-    return _shorten(last, DIGEST_RESULT_CHARS) if last else "no output"
+    return "completed"
 
 
 def _digest_verified(calls: Sequence[tuple[ToolCall, ToolResult]], root: str) -> str:

@@ -55,7 +55,7 @@ echo $?   # 0 completed; 1 crashed (JSON line) or no/invalid config (no JSON lin
 
 Other modes:
 
-- Attempt digests skip headings in the task line; `verified` requires a passing test runner or a check referencing a previously written file. A failed last check removes verification.
+- Attempt digests skip headings in the task line; `verified` requires a passing test runner or a check referencing a previously written file. A failed last check removes verification. Python check labels name a recognized runner and, when safe, a target basename; otherwise they use `python check`. Python tool writes are not inferred as `files`; hidden paths and agent scratch notes are omitted. Check results show counts, exit code or `completed`, not arbitrary output.
 
 - Compress-mode heuristic notes extract up to 12 facts from visible replies without a note block, including a bounded set of English negative/cancelled and Chinese residence/cancellation forms, verbatim. Questions and plans are excluded. Negative source attribution requires the full assertion in the record; time conflicts reject matches. This is heuristic and can abstain or miss facts; similar opposing detected polarities are conflicts, not duplicates, but structured polarity-aware supersession is not implemented. Self-work frames are filtered unless they carry a keyed content clause; completed outcome-admitted digests are exempt. See [memory](concepts/memory.md#reasoning-notes).
 - `melo ""`: the plain conversation loop on stdin (`/help`, `/exit` or `/quit`, Ctrl-D). Takes `--base-url`, `--chat-model` and `--builtins`; exits 0 even if every turn failed. Do not parse its output.

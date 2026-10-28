@@ -84,12 +84,18 @@ transpose in transpose.py … outcome: completed") is kept.
   reflection cites them in `used_notes`. A rehearsed note feeds the
   attempt's **digest**: the first meaningful task sentence (skipping headings
   and bare labels), the outcome, the files the attempt's successful
-  `file_write` calls wrote (at most six, workspace-relative, then `+N`),
-  the last passing check, the facts, up to three decisions, observed lines
+  `file_write` calls wrote (at most six, workspace-relative, then `+N`;
+  hidden paths and agent scratch notes are omitted), the last passing check,
+  the facts, up to three decisions, observed lines
   and open questions, at most 1,500 characters. A check is a `shell_exec` or
   `python_exec` that runs a test runner, references a file written earlier
   in this attempt, or imports its Python module. Failed checks and trivial imports are not verification;
-  a later failing check clears the earlier verification. Test runners need a
+  a later failing check clears the earlier verification. Python check labels
+  name a recognizable runner and, when safe to show, a target's basename;
+  otherwise they use a neutral label rather than the first line of code.
+  Python tool writes are not inferred as `files` from code or workspace changes.
+  The result shows test counts or an exit code when available, and otherwise
+  `completed` rather than arbitrary tool output. Test runners need a
   positive test summary or a zero exit marker. An observed
   line whose result is empty or only a boolean, `None`, an exit code or
   punctuation is left out, so it cannot enter a digest or make one a
