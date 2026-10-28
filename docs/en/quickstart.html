@@ -121,7 +121,7 @@ pip install -e ".[gateway]"</code></pre>
             or write any file you can: there is no sandbox.</strong> To run a
             task without tools, add <code>--builtins none</code>. See the
             <a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">security policy</a>
-            and <a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#what-the-checks-do">what the checks do</a>.
+            and <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">what the checks do</a>.
           </p>
         </div>
         <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"</code></pre>
@@ -134,7 +134,7 @@ pip install -e ".[gateway]"</code></pre>
         </p>
         <p>
           For every option, see the
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">command-line reference</a>.
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">command-line reference</a>.
         </p>
       </section>
 
@@ -155,7 +155,7 @@ pip install -e ".[gateway]"</code></pre>
           <code>provider_error</code>. The counters say how many steps, model
           requests and tool calls the run took, and <code>config</code>
           records the options it ran with. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/run-results.md">Run results</a>
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/run-results.md">Run results</a>
           for every status and field.
         </p>
       </section>
@@ -199,9 +199,9 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
           <code>vllm</code>, the key for those. When the server lists an
           embedding model, the first run asks one more question,
           <code>Use &lt;model&gt; for long-term memory? [Y/n]:</code>. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#first-run">First run</a>
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/configure.md#first-run">First run</a>
           and
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">Set up an embedding model</a>.
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">Set up an embedding model</a>.
         </p>
         <h3 id="with-the-setup-wizard">With the setup wizard</h3>
         <p>
@@ -260,7 +260,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
         <p>
           Long-term memory needs an embedding model. localmelo never downloads
           or starts one: point it at a model your server already serves. The
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">guide</a>
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">guide</a>
           covers Ollama, oMLX, vLLM, SGLang and MLC.
         </p>
         <p>With Ollama:</p>
@@ -283,7 +283,7 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
           request is the check. Keep the chat server and set
           <code>embedding_backend = "vllm"</code> with that table's
           <code>embedding_url</code> and <code>embedding_model</code>; see
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#omlx">oMLX</a>.
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">oMLX</a>.
         </p>
         <p>
           Changing the model changes the vector space: stored vectors of
@@ -355,7 +355,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
             reach other files, so melo asks first.</li>
         </ul>
         <p>
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#the-interactive-ui">The interactive UI</a>
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#the-interactive-ui">The interactive UI</a>
           has the keys and the rest. <code>melo ""</code> opens the plain
           conversation loop of earlier releases. Without a terminal,
           <code>melo</code> alone exits with code 2; start the gateway with
@@ -458,7 +458,7 @@ brew install jundot/omlx/omlx</code></pre>
           <code>http://127.0.0.1:8000/v1</code> and the model id, and choose
           <code>5</code> (None) as the embedding backend unless oMLX also
           serves an embedding model.
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#omlx">Configuration</a>
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/model-servers.md#omlx">Configuration</a>
           shows the file they save and the table to add to turn off a Qwen3
           model's thinking. The web workspace then uses that model; it reads
           the configuration file.
@@ -468,13 +468,13 @@ brew install jundot/omlx/omlx</code></pre>
       <section class="section" id="next-steps">
         <h2>Next steps</h2>
         <ul>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md">Configuration</a>: backends, cloud API keys, timeouts.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">Tools and MCP</a>: choose built-in tools and add MCP servers.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md">Gateway and HTTP API</a>: sessions, the web workspace, running at login.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md">Python API</a>: run tasks from Python, follow their events, approve tool calls.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">Memory</a>: keep memory between runs, inspect and reset it.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">Command-line reference</a>: every option, exit codes, scripting.</li>
-          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/troubleshooting.md">Troubleshooting</a>: error messages and fixes.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/configuration.md">Configuration</a>: backends, cloud API keys, timeouts.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/tools.md">Tools and MCP</a>: choose built-in tools and add MCP servers.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">Gateway and HTTP API</a>: sessions, the web workspace, running at login.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/python-api.md">Python API</a>: run tasks from Python, follow their events, approve tool calls.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">Memory</a>: keep memory between runs, inspect and reset it.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md">Command-line reference</a>: every option, exit codes, scripting.</li>
+          <li><a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/troubleshooting.md">Troubleshooting</a>: error messages and fixes.</li>
         </ul>
       </section>
     </article>

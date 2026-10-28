@@ -208,7 +208,7 @@
           the gateway restarted. API v2 is served only on a loopback
           address, carries one error envelope and <code>Cache-Control:
           no-store</code>, and only grows. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2</a>.
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2</a>.
         </p>
         <p>
           At <code>/</code> the web workspace uses the console's API v2 and
@@ -409,7 +409,7 @@
         </p>
 
         <h3 id="c-memory">Memory</h3>
-        <p>In compress modes, heuristic notes can extract up to 12 keyed facts from a visible reply without a note block, and an explicit note can also hold 12. Questions, options, plans and negated or cancelled statements are not positive facts; a claim about the agent's own work is filtered unless a keyed content clause follows it; source matching scores typed keys, rejects conflicts and leaves ties and unmatched items unsourced; CJK-only keys are not extracted. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">reasoning notes</a>.</p>
+        <p>In compress modes, heuristic notes can extract up to 12 keyed facts from a visible reply without a note block, and an explicit note can also hold 12. Questions, options, plans and negated or cancelled statements are not positive facts; a claim about the agent's own work is filtered unless a keyed content clause follows it; source matching scores typed keys, rejects conflicts and leaves ties and unmatched items unsourced; CJK-only keys are not extracted. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">reasoning notes</a>.</p>
         <p>
           Working memory holds the conversation of a run or a gateway session:
           the last 20 messages, in RAM. History records every task and step
@@ -464,9 +464,9 @@
           window. <code>history.db</code> version 2 records each new block in
           <code>recall_json</code>, and the <code>recall</code> event carries
           its hits. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">Reasoning notes</a>
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">Reasoning notes</a>
           and
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#recall-in-the-loop">Recall in the loop</a>.
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#recall-in-the-loop">Recall in the loop</a>.
         </p>
         <p>
           <code>melo/memory/retrieval/</code> holds three switchable
@@ -481,7 +481,7 @@
           recorded as raw-call JSONL into a corpus. With persistence on, the
           <code>history.db</code> that <code>melo</code> writes records model
           calls too, and <code>melo-retrieve</code> exports it as well. See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">Offline retrieval</a>.
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/retrieval.md">Offline retrieval</a>.
         </p>
         <p>
           Sessions (experimental) keep whole conversations in
@@ -497,7 +497,7 @@
           gateway's own file, while its <code>/v1</code> sessions stay in RAM
           (code: <code>support/sessions/</code>,
           <code>support/gateway/console/</code>). See
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/sessions.md">Sessions</a>.
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/sessions.md">Sessions</a>.
         </p>
         <p>
           Key files: <code>melo/memory/coordinator.py</code>,
@@ -520,7 +520,7 @@
           them, as the <code>ollama</code> backend for an Ollama server and as
           <code>vllm</code> for any other OpenAI-compatible server. When the
           server lists an embedding model, it offers one for long-term
-          memory; the <a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">embedding guide</a>
+          memory; the <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/embedding.md">embedding guide</a>
           covers Ollama, oMLX, vLLM, SGLang and MLC. The setup
           wizard (<code>melo --reconfigure</code>) asks for
           every backend, sends a test request to each server, saves the file,
