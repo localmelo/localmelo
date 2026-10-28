@@ -24,6 +24,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Direct workers report agent construction failures as `startup_error` and
+  attempt a `transport_error` result on event-output failure. ([#NN])
+
 - Correct the API v2 response formats and tools example, and update the bilingual
   quickstart to reflect the shipped console settings and approvals ([#122], [#124]).
   Clarify task validation and read-only worker details ([#119], [#123], [#130], [#133]).

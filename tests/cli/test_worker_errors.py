@@ -82,6 +82,41 @@ def test_legacy_startup_exception_is_unchanged(monkeypatch: pytest.MonkeyPatch) 
         cli.main()
 
 
+@pytest.mark.parametrize("fmt", ["json", "stream-json"])
+def test_brief_main_reports_executed_test_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fmt: str,
+) -> None:
+    from localmelo.tests.agent.procedural_helpers import (
+        ScriptedLLM,
+        answer,
+        make_agent,
+        passing_tools,
+        shell,
+    )
+
+    brief = tmp_path / "brief"
+    brief.write_text("Run pytest in the project", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["melo", "--brief", str(brief), "--output-format", fmt])
+    monkeypatch.setattr(
+        cli,
+        "_build_direct_mode_agent",
+        lambda *a, **kw: make_agent(
+            ScriptedLLM([shell("pytest -q"), answer("Done")]), tools=passing_tools()
+        ),
+    )
+    cli.main()
+    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    result = records[-1]["result"] if fmt == "stream-json" else records[-1]
+    assert result["tests"]["state"] == "recorded"
+    assert result["tests"]["items"][0]["command"] == "pytest -q"
+    assert result["tests"]["items"][0]["source"] == "tool_event"
+
+
 async def test_oversized_event_reports_transport_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
