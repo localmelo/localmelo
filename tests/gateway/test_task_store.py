@@ -122,7 +122,7 @@ async def recent_log(tasks: TaskStore, task_id: str) -> list[Any]:
     )
 
 
-async def test_open_creates_seven_tables_and_leaves_user_version_alone(
+async def test_open_creates_eight_tables_and_leaves_user_version_alone(
     store: SessionStore, clock: Clock
 ) -> None:
     assert await component_version(store, COMPONENT) is None
@@ -150,6 +150,7 @@ async def test_open_creates_seven_tables_and_leaves_user_version_alone(
         "sched_rules",
         "sched_log",
         "idle_windows",
+        "park_priority",
     } <= objects
     indexes = {
         row[0]
@@ -225,6 +226,17 @@ async def test_open_creates_seven_tables_and_leaves_user_version_alone(
         },
         "sched_rules": {"id", "text", "match", "level", "enabled", "created_at"},
         "sched_log": {"id", "ts", "kind", "task_id", "data"},
+        "park_priority": {
+            "task_id",
+            "level",
+            "source",
+            "reason",
+            "user_rank",
+            "pause_pending",
+            "generation",
+            "operation_id",
+            "snapshot_active",
+        },
         "idle_windows": {
             "start",
             "end",
@@ -246,9 +258,9 @@ async def test_a_newer_scheduler_component_is_refused(
     async with store.component_transaction("newer") as conn:
         await conn.execute(
             "INSERT INTO schema_components (name, version) VALUES (?, ?)",
-            (COMPONENT, 2),
+            (COMPONENT, 3),
         )
-    with pytest.raises(SessionStoreError, match="scheduler schema version 2"):
+    with pytest.raises(SessionStoreError, match="scheduler schema version 3"):
         await TaskStore(store, clock=clock).open()
     assert await one(store, "SELECT name FROM sqlite_master WHERE name='tasks'") is None
 
@@ -307,6 +319,506 @@ async def test_a_closed_and_reopened_file_keeps_the_component_and_tasks(
         assert repeated is True and again.task_id == record.task_id
     finally:
         await second.aclose()
+
+
+async def test_v1_migration_preserves_rows_and_pause_before_retention(
+    store: SessionStore, tasks: TaskStore, clock: Clock, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user", reason="urgent"), origin="user"
+    )
+    await tasks.set_priority(record.task_id, "first")
+    rank = (await tasks.get_task(record.task_id)).user_rank
+    paused = await tasks.pause(record.task_id)
+    before_events = await priority_events(tasks, record.task_id)
+    before_log = await recent_log(tasks, record.task_id)
+    async with store.component_transaction("make_v1") as conn:
+        await conn.execute("DROP TABLE park_priority")
+        await conn.execute(
+            "UPDATE schema_components SET version = 1 WHERE name = ?", (COMPONENT,)
+        )
+
+    def fail(label: str) -> None:
+        if label == "component_scheduler":
+            raise RuntimeError("migration rollback")
+
+    monkeypatch.setattr(store, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="migration rollback"):
+        await TaskStore(store, clock=clock).open()
+    assert await component_version(store, COMPONENT) == 1
+    assert (
+        await one(store, "SELECT name FROM sqlite_master WHERE name='park_priority'")
+        is None
+    )
+    assert await tasks.get_task(record.task_id) == paused
+    monkeypatch.undo()
+    clock.advance(31 * 86_400)
+    migrated = TaskStore(store, clock=clock)
+    assert await migrated.open() == 2
+    assert await migrated.get_task(record.task_id) == paused
+    assert await one(
+        store,
+        "SELECT pause_pending FROM park_priority WHERE task_id = ?",
+        (record.task_id,),
+    ) == (0,)
+    snapshot = await one(
+        store, "SELECT * FROM park_priority WHERE task_id = ?", (record.task_id,)
+    )
+    assert await TaskStore(store, clock=clock).open() == 2
+    assert (
+        await one(
+            store, "SELECT * FROM park_priority WHERE task_id = ?", (record.task_id,)
+        )
+        == snapshot
+    )
+    assert await priority_events(migrated, record.task_id) == before_events
+    assert before_log and await recent_log(migrated, record.task_id) == []
+    resumed = await migrated.resume(record.task_id)
+    assert (resumed.level, resumed.level_source, resumed.reason, resumed.user_rank) == (
+        1,
+        "user",
+        "urgent",
+        rank,
+    )
+    assert await one(store, "PRAGMA user_version") == (1,)
+
+
+async def test_identity_retention(
+    store: SessionStore, tasks: TaskStore, clock: Clock
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.pause(record.task_id)
+    reopened = TaskStore(store, clock=clock)
+    await reopened.open()
+    assert await reopened.park_identity(record.task_id) == (1, None)
+    assert (await reopened.resume(record.task_id)).level == 1
+    identity = await reopened.park_identity(record.task_id)
+    clock.advance(31 * 86_400)
+    await reopened.apply_retention()
+    assert await reopened.park_identity(record.task_id) == identity
+    assert await one(
+        store,
+        "SELECT snapshot_active FROM park_priority WHERE task_id = ?",
+        (record.task_id,),
+    ) == (0,)
+
+
+async def test_pending_pause_and_cancel_rollback(
+    store: SessionStore, tasks: TaskStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    before = await tasks.get_task(record.task_id)
+
+    def fail(label: str) -> None:
+        if label in {"task_pause", "task_resume"}:
+            raise RuntimeError("rollback")
+
+    monkeypatch.setattr(store, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="rollback"):
+        await tasks.request_pending_pause(
+            record.task_id,
+            expected_generation=None,
+            expected_operation_id=None,
+            operation_id="p",
+        )
+    assert await tasks.get_task(record.task_id) == before
+    assert await tasks.park_identity(record.task_id) == (None, None)
+    monkeypatch.undo()
+    await tasks.request_pending_pause(
+        record.task_id,
+        expected_generation=None,
+        expected_operation_id=None,
+        operation_id="p",
+    )
+    monkeypatch.setattr(store, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="rollback"):
+        await tasks.cancel_pending_pause(
+            record.task_id,
+            expected_generation=1,
+            expected_operation_id="p",
+            operation_id="r",
+        )
+    assert await tasks.park_identity(record.task_id) == (1, "p")
+    assert (await tasks.get_task(record.task_id)).level == 5
+
+
+async def test_pending_receipt_retry_and_supersession(tasks: TaskStore) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    args: dict[str, Any] = dict(
+        expected_generation=None, expected_operation_id=None, operation_id="pause-id"
+    )
+    first = await tasks.request_pending_pause(record.task_id, **args)
+    assert await tasks.request_pending_pause(record.task_id, **args) == first
+    receipt = await tasks.reconcile_pause_operation(record.task_id, "pause-id")
+    assert receipt is not None and receipt[1]
+    assert await tasks.reconcile_pause_operation(record.task_id, "unknown") is None
+    with pytest.raises(TaskConflictError):
+        await tasks.request_pending_pause(record.task_id, **{**args, "actor": "other"})
+    with pytest.raises(TaskConflictError):
+        await tasks.pause(record.task_id)
+    with pytest.raises(TaskConflictError):
+        await tasks.change(record.task_id, priority=2)
+    cancelled = await tasks.cancel_pending_pause(
+        record.task_id,
+        expected_generation=1,
+        expected_operation_id="pause-id",
+        operation_id="cancel-id",
+    )
+    assert (cancelled.state, cancelled.level) == ("running", 1)
+    assert (
+        await tasks.cancel_pending_pause(
+            record.task_id,
+            expected_generation=1,
+            expected_operation_id="pause-id",
+            operation_id="cancel-id",
+        )
+        == cancelled
+    )
+    receipt = await tasks.reconcile_pause_operation(record.task_id, "pause-id")
+    assert receipt is not None and not receipt[1]
+    with pytest.raises(TaskConflictError):
+        await tasks.request_pending_pause(record.task_id, **args)
+
+
+async def test_stale_guarded_terminal_write_cannot_stop_resumed_task(
+    store: SessionStore, tasks: TaskStore
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    await tasks.request_pending_pause(
+        record.task_id,
+        expected_generation=None,
+        expected_operation_id=None,
+        operation_id="p",
+    )
+    await tasks.cancel_pending_pause(
+        record.task_id,
+        expected_generation=1,
+        expected_operation_id="p",
+        operation_id="r",
+    )
+    before = await tasks.get_task(record.task_id)
+    events_before = await rows(
+        store, "SELECT type FROM events WHERE session_id = ?", (record.task_id,)
+    )
+    with pytest.raises(TaskConflictError):
+        await tasks.change(
+            record.task_id,
+            state="cancelled",
+            expected_generation=1,
+            expected_operation_id="p",
+            operation_id="stale-stop",
+        )
+    assert await tasks.get_task(record.task_id) == before
+    assert (
+        await rows(
+            store, "SELECT type FROM events WHERE session_id = ?", (record.task_id,)
+        )
+        == events_before
+    )
+    assert await tasks.reconcile_pause_operation(record.task_id, "stale-stop") is None
+    finished = await tasks.change(
+        record.task_id,
+        state="done",
+        expected_generation=2,
+        expected_operation_id=None,
+        operation_id="done-id",
+    )
+    assert finished.state == "done"
+    assert await one(
+        store,
+        "SELECT type FROM events WHERE session_id = ? ORDER BY id DESC LIMIT 1",
+        (record.task_id,),
+    ) == ("sched.finished",)
+
+
+async def test_snapshot_identity_fenced_on_patch_and_restart(tasks: TaskStore) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.pause(record.task_id)
+    assert await tasks.park_identity(record.task_id) == (1, None)
+    await tasks.change(record.task_id, priority="first")
+    assert await tasks.park_identity(record.task_id) == (2, None)
+    assert await tasks.fail_nonterminal_on_restart() == 1
+    assert await tasks.park_identity(record.task_id) == (3, None)
+    assert (await tasks.get_task(record.task_id)).state == "failed"
+
+
+@pytest.mark.parametrize("operation", ["pause", "cancel", "stop"])
+async def test_t82r2_committed_then_cancelled_retry(
+    store: SessionStore,
+    tasks: TaskStore,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    if operation != "pause":
+        await tasks.request_pending_pause(
+            record.task_id,
+            expected_generation=None,
+            expected_operation_id=None,
+            operation_id="pause",
+        )
+    original = store._commit
+    label = {"pause": "task_pause", "cancel": "task_resume", "stop": "task_change"}[
+        operation
+    ]
+
+    async def committed_then_cancelled(conn: Any, stored: Any, actual: str) -> None:
+        await original(conn, stored, actual)
+        if actual == label:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(store, "_commit", committed_then_cancelled)
+
+    async def execute() -> TaskRecord:
+        if operation == "pause":
+            return await tasks.request_pending_pause(
+                record.task_id,
+                expected_generation=None,
+                expected_operation_id=None,
+                operation_id="pause",
+            )
+        if operation == "cancel":
+            return await tasks.cancel_pending_pause(
+                record.task_id,
+                expected_generation=1,
+                expected_operation_id="pause",
+                operation_id="cancel",
+            )
+        return await tasks.change(
+            record.task_id,
+            state="cancelled",
+            expected_generation=1,
+            expected_operation_id="pause",
+            operation_id="stop",
+        )
+
+    with pytest.raises(asyncio.CancelledError):
+        await execute()
+    monkeypatch.undo()
+    committed = await tasks.get_task(record.task_id)
+    receipt = await tasks.reconcile_pause_operation(record.task_id, operation)
+    assert receipt is not None
+    assert receipt[1] is (operation != "stop")
+    assert await execute() == committed
+    if operation == "stop":
+        with pytest.raises(TaskConflictError):
+            await tasks.change(
+                record.task_id,
+                state="cancelled",
+                expected_generation=1,
+                expected_operation_id="pause",
+                operation_id="stop",
+                actor="other",
+            )
+        with pytest.raises(TaskConflictError):
+            await tasks.change(
+                record.task_id,
+                state="cancelled",
+                expected_generation=2,
+                expected_operation_id="pause",
+                operation_id="stop",
+            )
+    event_count = await one(
+        store,
+        "SELECT COUNT(*) FROM events WHERE session_id = ? AND json_extract(event, '$.data.operation_id') = ?",
+        (record.task_id, operation),
+    )
+    assert event_count == (1,)
+
+
+@pytest.mark.parametrize("changed", ["identity", "state"])
+async def test_t82r2_terminal_retry_rejects_superseded_result(
+    store: SessionStore, tasks: TaskStore, changed: str
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.pause(record.task_id)
+    args: dict[str, Any] = {
+        "state": "cancelled",
+        "expected_generation": 1,
+        "expected_operation_id": None,
+        "operation_id": "stop",
+    }
+    await tasks.change(record.task_id, **args)
+    async with store.component_transaction("supersede_receipt") as conn:
+        if changed == "identity":
+            await conn.execute(
+                "UPDATE park_priority SET generation = generation + 1 WHERE task_id = ?",
+                (record.task_id,),
+            )
+        else:
+            await conn.execute(
+                "UPDATE tasks SET state = 'done' WHERE task_id = ?", (record.task_id,)
+            )
+    with pytest.raises(TaskConflictError):
+        await tasks.change(record.task_id, **args)
+    assert await one(
+        store,
+        "SELECT COUNT(*) FROM events WHERE session_id = ? AND json_extract(event, '$.data.operation_id') = ?",
+        (record.task_id, "stop"),
+    ) == (1,)
+
+
+async def test_t82r2_parked_and_set_level_reject_pending(
+    store: SessionStore, tasks: TaskStore
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    pending = await tasks.request_pending_pause(
+        record.task_id,
+        expected_generation=None,
+        expected_operation_id=None,
+        operation_id="p",
+    )
+    snapshot = await one(
+        store, "SELECT * FROM park_priority WHERE task_id = ?", (record.task_id,)
+    )
+    events = await rows(
+        store,
+        "SELECT id, type, event FROM events WHERE session_id = ? ORDER BY id",
+        (record.task_id,),
+    )
+    for action in (
+        lambda: tasks.change(record.task_id, state="parked"),
+        lambda: tasks.set_level(record.task_id, 2),
+    ):
+        with pytest.raises(TaskConflictError):
+            await action()
+        assert await tasks.get_task(record.task_id) == pending
+        assert (
+            await one(
+                store,
+                "SELECT * FROM park_priority WHERE task_id = ?",
+                (record.task_id,),
+            )
+            == snapshot
+        )
+        assert (
+            await rows(
+                store,
+                "SELECT id, type, event FROM events WHERE session_id = ? ORDER BY id",
+                (record.task_id,),
+            )
+            == events
+        )
+
+
+async def test_t82r2_receipt_current_checks_state_and_terminal(
+    store: SessionStore, tasks: TaskStore
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    await tasks.request_pending_pause(
+        record.task_id,
+        expected_generation=None,
+        expected_operation_id=None,
+        operation_id="p",
+    )
+    receipt = await tasks.reconcile_pause_operation(record.task_id, "p")
+    assert receipt is not None and receipt[1] is True
+    async with store.component_transaction("test_state_without_bump") as conn:
+        await conn.execute(
+            "UPDATE tasks SET state = 'held' WHERE task_id = ?", (record.task_id,)
+        )
+    assert await tasks.park_identity(record.task_id) == (1, "p")
+    receipt = await tasks.reconcile_pause_operation(record.task_id, "p")
+    assert receipt is not None and receipt[1] is False
+    await tasks.change(
+        record.task_id,
+        state="cancelled",
+        expected_generation=1,
+        expected_operation_id="p",
+        operation_id="stop",
+    )
+    receipt = await tasks.reconcile_pause_operation(record.task_id, "stop")
+    assert (
+        receipt is not None
+        and receipt[0]["state"] == "cancelled"
+        and receipt[1] is False
+    )
+
+
+async def test_v1_migration_preserves_later_override_and_missing_log_fallback(
+    store: SessionStore, tasks: TaskStore, clock: Clock
+) -> None:
+    overridden, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    missing, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.pause(overridden.task_id)
+    changed = await tasks.set_priority(overridden.task_id, "first")
+    await tasks.pause(missing.task_id)
+    async with store.component_transaction("make_v1") as conn:
+        await conn.execute("DROP TABLE park_priority")
+        await conn.execute(
+            "UPDATE schema_components SET version = 1 WHERE name = ?", (COMPONENT,)
+        )
+        await conn.execute(
+            "DELETE FROM sched_log WHERE task_id = ?", (missing.task_id,)
+        )
+    migrated = TaskStore(store, clock=clock)
+    await migrated.open()
+    resumed = await migrated.resume(overridden.task_id)
+    assert (resumed.state, resumed.level, resumed.reason, resumed.user_rank) == (
+        "parked",
+        5,
+        changed.reason,
+        changed.user_rank,
+    )
+    resumed = await migrated.resume(missing.task_id)
+    assert (resumed.state, resumed.level, resumed.level_source) == (
+        "queued",
+        2,
+        "computed",
+    )
+
+
+async def test_snapshot_writes_roll_back_with_pause_and_resume(
+    store: SessionStore, tasks: TaskStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+
+    def fail(label: str) -> None:
+        if label in {"task_pause", "task_resume"}:
+            raise RuntimeError("rollback")
+
+    monkeypatch.setattr(store, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="rollback"):
+        await tasks.pause(record.task_id)
+    assert await tasks.get_task(record.task_id) == record
+    assert await one(store, "SELECT * FROM park_priority") is None
+    monkeypatch.undo()
+    paused = await tasks.pause(record.task_id)
+    monkeypatch.setattr(store, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="rollback"):
+        await tasks.resume(record.task_id)
+    assert await tasks.get_task(record.task_id) == paused
+    assert await one(store, "SELECT level FROM park_priority") == (1,)
 
 
 async def test_the_cli_file_never_gets_the_component(tmp_path: Path) -> None:
@@ -663,6 +1175,60 @@ async def test_resume_after_pause_log_retention_uses_computed_default(
         "queued",
         2,
         "computed",
+    )
+
+
+async def test_resume_after_pause_log_retention_uses_durable_snapshot(
+    tasks: TaskStore, clock: Clock
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user", reason="urgent"), origin="user"
+    )
+    await tasks.set_priority(record.task_id, "first")
+    rank = (await tasks.get_task(record.task_id)).user_rank
+    await tasks.pause(record.task_id)
+    clock.advance(31 * 86_400)
+    await tasks.apply_retention()
+    assert await recent_log(tasks, record.task_id) == []
+    resumed = await tasks.resume(record.task_id)
+    assert (
+        resumed.state,
+        resumed.level,
+        resumed.level_source,
+        resumed.reason,
+        resumed.user_rank,
+    ) == ("queued", 1, "user", "urgent", rank)
+
+
+@pytest.mark.parametrize("operation", ["change_first", "set_first", "set_p5"])
+async def test_later_priority_override_survives_retention(
+    tasks: TaskStore, clock: Clock, operation: str
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.pause(record.task_id)
+    if operation == "change_first":
+        changed = await tasks.change(record.task_id, priority="first")
+    elif operation == "set_first":
+        changed = await tasks.set_priority(record.task_id, "first")
+    else:
+        changed = await tasks.set_level(record.task_id, 5, reason="later")
+    clock.advance(31 * 86_400)
+    await tasks.apply_retention()
+    resumed = await tasks.resume(record.task_id)
+    assert (
+        resumed.state,
+        resumed.level,
+        resumed.level_source,
+        resumed.reason,
+        resumed.user_rank,
+    ) == (
+        "parked",
+        changed.level,
+        changed.level_source,
+        changed.reason,
+        changed.user_rank,
     )
 
 

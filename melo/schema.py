@@ -473,6 +473,7 @@ class RunResult:
     duration_s: float = 0.0
     config: dict[str, Any] = field(default_factory=dict)
     memory_stats: dict[str, Any] | None = None
+    context_budget: list[dict[str, Any]] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """A deep copy as a plain dict, with keys in field order.
@@ -483,6 +484,8 @@ class RunResult:
         data = asdict(self)
         if data.get("memory_stats") is None:
             del data["memory_stats"]
+        if data.get("context_budget") is None:
+            del data["context_budget"]
         return data
 
 

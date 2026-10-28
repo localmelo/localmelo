@@ -31,7 +31,10 @@ from localmelo.support import config, onboard
 from localmelo.support.backends import discovery
 from localmelo.support.backends.openai_compat import normalize_url
 from localmelo.support.cli.views import BackendInfo
-from localmelo.support.sessions.agents import configured_session_options
+from localmelo.support.sessions.agents import (
+    configured_context_options,
+    configured_session_options,
+)
 
 LOG_DIR: Final = "~/.cache/localmelo/logs"
 LOG_FILE: Final = "cli.log"
@@ -74,7 +77,23 @@ def ui_terminal() -> bool:
     return ttys and os.environ.get("TERM") != "dumb"
 
 
-def _configured(cfg: config.Config, model: str | None) -> Choice | int:
+def _configured(
+    cfg: config.Config, model: str | None, args: argparse.Namespace | None = None
+) -> Choice | int:
+    if args is not None:
+        for name in ("context_window", "output_reserve", "safety_margin"):
+            value = getattr(args, name, None)
+            if value is not None:
+                setattr(cfg.agent, name, value)
+        if any(
+            getattr(args, name, None) is not None
+            for name in ("context_window", "output_reserve", "safety_margin")
+        ):
+            try:
+                configured_context_options(cfg, AgentOptions(), {})
+            except ValueError as exc:
+                print(f"melo: error: {exc}", file=sys.stderr)
+                return 2
     try:
         cfg.validate_or_raise()
     except config.ConfigError as exc:
@@ -138,17 +157,17 @@ def choose_backend(args: argparse.Namespace) -> Choice | int:
         cfg = onboard.run_backend_setup()
         if cfg is None:
             return 0
-        return _configured(cfg, args.chat_model)
+        return _configured(cfg, args.chat_model, args)
     if args.base_url:
         return _with_url(args)
     cfg = config.load()
     if cfg.is_configured:
-        return _configured(cfg, args.chat_model)
+        return _configured(cfg, args.chat_model, args)
     setup = onboard.run_first_setup()
     if setup is None:
         return 0
     if setup.saved:
-        chosen = _configured(config.load(), args.chat_model)
+        chosen = _configured(config.load(), args.chat_model, args)
         if isinstance(chosen, Choice):
             return replace(
                 chosen, backend=replace(chosen.backend, source="saved"), checked=True
@@ -270,7 +289,24 @@ def run_interactive(
         if getattr(args, name, None) is not None
     }
     try:
-        options = configured_session_options(choice.cfg, options, explicit=explicit)
+        if choice.cfg is None:
+            options = configured_context_options(
+                config.load(),
+                options,
+                {
+                    name: getattr(args, name, None)
+                    for name in ("context_window", "output_reserve", "safety_margin")
+                },
+            )
+        options = configured_session_options(
+            choice.cfg,
+            options,
+            explicit=explicit,
+            budget_overrides={
+                name: getattr(args, name, None)
+                for name in ("context_window", "output_reserve", "safety_margin")
+            },
+        )
     except (ValueError, config.ConfigError) as exc:
         parser.error(str(exc))
     if (

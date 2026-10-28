@@ -1406,6 +1406,78 @@ async def test_out_of_turn_events_on_the_gateway_store(tmp_path: Path) -> None:
     await terminal.aclose()
 
 
+async def test_component_event_and_row_commit_together(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = gateway(tmp_path / "s.db")
+    session = await store.create_session()
+    heard: list[StoredEvent] = []
+    store.add_listener(heard.append)
+    async with store.component_event_transaction("scheduler_test") as (conn, stored):
+        await conn.execute(
+            "UPDATE sessions SET title = ? WHERE id = ?", ("new", session.id)
+        )
+        await store.append_component_event(
+            conn, stored, session.id, "sched.held", {"site": "plan"}
+        )
+        assert not heard
+    assert len(heard) == 1 and heard[0] in await store.list_events(session.id)
+    info = await store.get_session(session.id)
+    assert info is not None and info.title == "new"
+
+    def fail(label: str) -> None:
+        if label == "scheduler_test":
+            raise RuntimeError("commit refused")
+
+    monkeypatch.setattr(store, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="commit refused"):
+        async with store.component_event_transaction("scheduler_test") as (
+            conn,
+            stored,
+        ):
+            await conn.execute(
+                "UPDATE sessions SET title = ? WHERE id = ?", ("lost", session.id)
+            )
+            await store.append_component_event(
+                conn, stored, session.id, "sched.resumed", {}
+            )
+    assert len(heard) == 1
+    info = await store.get_session(session.id)
+    assert info is not None and info.title == "new"
+    await store.aclose()
+
+
+async def test_component_event_committed_before_cancel_is_observable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = gateway(tmp_path / "s.db")
+    session = await store.create_session()
+    heard: list[StoredEvent] = []
+    store.add_listener(heard.append)
+    original = store._commit
+
+    async def uncertain(conn: Any, events: list[StoredEvent], label: str) -> None:
+        await original(conn, events, label)
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(store, "_commit", uncertain)
+    with pytest.raises(asyncio.CancelledError):
+        async with store.component_event_transaction("scheduler_test") as (
+            conn,
+            stored,
+        ):
+            await conn.execute(
+                "UPDATE sessions SET title = ? WHERE id = ?", ("saved", session.id)
+            )
+            await store.append_component_event(
+                conn, stored, session.id, "sched.held", {"site": "plan"}
+            )
+    info = await store.get_session(session.id)
+    assert info is not None and info.title == "saved"
+    assert len(heard) == 1 and heard == await store.list_events(session.id)
+    await store.aclose()
+
+
 # ── Leases (CLI file) ───────────────────────────────────────────────────────
 
 

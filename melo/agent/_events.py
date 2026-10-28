@@ -162,6 +162,10 @@ class _Emitter:
             ),
         )
 
+    def context_budget(self, record: dict[str, Any]) -> None:
+        if self._sink is not None:
+            self._emit("context_budget", lambda: json_safe_payload(record))
+
     def step_started(self, step: int, attempt: int) -> None:
         if self._sink is None:
             return

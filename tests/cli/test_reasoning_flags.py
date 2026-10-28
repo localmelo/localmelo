@@ -175,7 +175,7 @@ def test_the_agent_table_applies_only_when_the_flag_is_absent(
     assert (built.reasoning, built.replay_turns) == ("drop", 5)
 
 
-def test_base_url_does_not_read_the_agent_table(
+def test_base_url_ignores_config_reasoning_but_reads_budget(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "config.toml"
@@ -188,10 +188,10 @@ def test_base_url_does_not_read_the_agent_table(
             "localmelo.support.providers.llm.openai_compat.OpenAICompatLLM"
         ) as provider,
         mock.patch.object(cli, "Agent") as agent_cls,
-        mock.patch.object(config, "load") as load,
+        mock.patch.object(config, "load", wraps=config.load) as load,
     ):
         cli._build_direct_mode_agent(args, options=options)
-    load.assert_not_called()
+    load.assert_called_once()
     assert agent_cls.call_args.kwargs["options"].reasoning == "legacy"
 
     parser, args = _parse(
