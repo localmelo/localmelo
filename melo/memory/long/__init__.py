@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import copy
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 
+from localmelo.melo.memory.assertions import decide_assertion
 from localmelo.melo.memory.bm25 import BM25Index
 
 # The typed store's closed sets (R6-lite).
@@ -76,7 +78,7 @@ class _Entry:
 
 def _meta(entry: _Entry) -> dict[str, Any]:
     """The legacy metadata merged with the typed columns, as search returns it."""
-    provenance = dict(entry.provenance)
+    provenance = copy.deepcopy(entry.provenance)
     origin = provenance.get("origin_task_ids")
     if isinstance(origin, list | tuple) and all(isinstance(i, str) for i in origin):
         origin_task_ids = list(origin)
@@ -116,7 +118,7 @@ def _stored(entry: _Entry) -> StoredEntry:
         source=entry.source,
         status=entry.status,
         admitted_by=entry.admitted_by,
-        provenance=dict(entry.provenance),
+        provenance=copy.deepcopy(entry.provenance),
         task_id=entry.task_id,
         session_id=entry.session_id,
         uses=entry.uses,
@@ -188,6 +190,8 @@ class LongTerm:
         source_ids: Any,
         keep_text: bool,
         candidate_id: str,
+        typed_assertion: bool = False,
+        decision_details: dict[str, Any] | None = None,
     ) -> tuple[int | None, str]:
         """Write one decision in one step; returns ``(entry_id, action)``."""
         for name, value, allowed in (
@@ -198,6 +202,17 @@ class LongTerm:
         ):
             if value not in allowed:
                 raise ValueError(f"Unknown long-term {name}: {value!r}")
+        assertion = provenance.get("assertion")
+        if typed_assertion and isinstance(assertion, dict) and task_id:
+            rows = [
+                (entry.id, entry.provenance["assertion"], entry.created_at)
+                for entry in self._entries
+                if entry.status == "active"
+                and entry.kind == kind
+                and entry.task_id == task_id
+                and isinstance(entry.provenance.get("assertion"), dict)
+            ]
+            action, target_id, reason = decide_assertion(assertion, rows, created_at)
         target = self._find(target_id) if target_id is not None else None
         if action == "UPDATE" and (target is None or target.status != "active"):
             # The SQLite twin clears the target on this downgrade; the two
@@ -226,6 +241,8 @@ class LongTerm:
                 )
             )
             self._index = None
+            if decision_details is not None:
+                decision_details.update(target_id=target_id, reason=reason)
             return None, action
         now = created_at or time.time()
         vector = (
@@ -261,7 +278,7 @@ class LongTerm:
             admitted_by=admitted_by,
             supersedes=supersedes,
             links=links,
-            provenance=dict(provenance),
+            provenance=copy.deepcopy(provenance),
             task_id=task_id,
             session_id=session_id,
             created_at=now,
@@ -286,6 +303,8 @@ class LongTerm:
             )
         )
         self._index = None
+        if decision_details is not None:
+            decision_details.update(target_id=target_id, reason=reason)
         return entry.id, action
 
     @staticmethod
@@ -379,8 +398,19 @@ class LongTerm:
         *,
         kinds: Any = None,
         exclude_task_ids: Any = (),
+        include_history: bool = False,
     ) -> list[tuple[str, float, dict[str, Any]]]:
-        rows = self._active(kinds, exclude_task_ids)
+        if include_history:
+            excluded = set(exclude_task_ids)
+            rows = [
+                entry
+                for entry in self._entries
+                if entry.status in ("active", "superseded")
+                and (not kinds or entry.kind in kinds)
+                and entry.task_id not in excluded
+            ]
+        else:
+            rows = self._active(kinds, exclude_task_ids)
         if not rows or not query.strip():
             return []
         index = BM25Index()
@@ -403,6 +433,14 @@ class LongTerm:
             if entry.status == "active" and (kind is None or entry.kind == kind)
         ]
         rows.sort(key=lambda entry: (entry.created_at, entry.id))
+        return [_stored(entry) for entry in rows]
+
+    async def history_entries(self, task_id: str) -> list[StoredEntry]:
+        """Return a task's entries, including superseded rows, newest first."""
+        if not task_id:
+            return []
+        rows = [entry for entry in self._entries if entry.task_id == task_id]
+        rows.sort(key=lambda entry: (entry.created_at, entry.id), reverse=True)
         return [_stored(entry) for entry in rows]
 
     async def decisions(self) -> list[dict[str, Any]]:

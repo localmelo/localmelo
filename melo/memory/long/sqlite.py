@@ -19,6 +19,7 @@ from localmelo.melo.memory._sqlite import (
     prepare_connection,
     secure_deletes,
 )
+from localmelo.melo.memory.assertions import decide_assertion
 from localmelo.melo.memory.bm25 import BM25Index
 from localmelo.melo.memory.long import (
     ACTIONS,
@@ -323,6 +324,8 @@ class SqliteLongTerm(LongTerm):
         source_ids: Any,
         keep_text: bool,
         candidate_id: str,
+        typed_assertion: bool = False,
+        decision_details: dict[str, Any] | None = None,
     ) -> tuple[int | None, str]:
         """Write one decision, its entry and its decision row, in one transaction."""
         for name, value, allowed in (
@@ -344,6 +347,27 @@ class SqliteLongTerm(LongTerm):
             await conn.execute("BEGIN IMMEDIATE")
             try:
                 actual = action
+                assertion = provenance.get("assertion")
+                if typed_assertion and isinstance(assertion, dict) and task_id:
+                    async with conn.execute(
+                        "SELECT id, provenance_json, created_at FROM long_term "
+                        "WHERE status = 'active' AND kind = ? AND task_id = ?",
+                        (kind, task_id),
+                    ) as cur:
+                        existing = await cur.fetchall()
+                    typed_rows = []
+                    for entry_id, raw, observed_at in existing:
+                        try:
+                            other = json.loads(raw).get("assertion")
+                        except (ValueError, AttributeError, TypeError):
+                            continue
+                        if isinstance(other, dict):
+                            typed_rows.append(
+                                (int(entry_id), other, float(observed_at))
+                            )
+                    actual, target_id, reason = decide_assertion(
+                        assertion, typed_rows, created_at
+                    )
                 target_status = ""
                 if target_id is not None:
                     async with conn.execute(
@@ -439,6 +463,8 @@ class SqliteLongTerm(LongTerm):
                     await conn.rollback()
                 raise
         self._index = None
+        if decision_details is not None:
+            decision_details.update(target_id=target_id, reason=reason)
         return entry_id, actual
 
     async def search(
@@ -485,18 +511,23 @@ class SqliteLongTerm(LongTerm):
         *,
         kinds: Any = None,
         exclude_task_ids: Any = (),
+        include_history: bool = False,
     ) -> list[tuple[str, float, dict[str, Any]]]:
         conn = await self._ensure_ready()
         filtered = bool(kinds) or bool(tuple(exclude_task_ids))
-        if self._db_path == ":memory:":
+        if include_history or self._db_path == ":memory:":
+            statuses = "('active', 'superseded')" if include_history else "('active')"
             async with conn.execute(
                 f"SELECT {_SELECT_COLUMNS} FROM long_term "
-                "WHERE status = 'active' ORDER BY created_at, id"
+                f"WHERE status IN {statuses} ORDER BY created_at, id"
             ) as cur:
                 rows = [tuple(row) for row in await cur.fetchall()]
             metas, texts = _index_rows(
                 rows, tuple(kinds or ()), tuple(exclude_task_ids)
             )
+            index = BM25Index()
+            for doc_id, text in texts.items():
+                index.add(doc_id, text)
             filtered = True
         elif filtered:
             metas, texts = await asyncio.to_thread(
@@ -542,6 +573,19 @@ class SqliteLongTerm(LongTerm):
             params.append(kind)
         sql += " ORDER BY created_at, id"
         async with conn.execute(sql, params) as cur:
+            rows = [tuple(row) for row in await cur.fetchall()]
+        return [_stored(row) for row in rows]
+
+    async def history_entries(self, task_id: str) -> list[StoredEntry]:
+        """Return a task's entries, including superseded rows, newest first."""
+        if not task_id:
+            return []
+        conn = await self._ensure_ready()
+        async with conn.execute(
+            f"SELECT {_SELECT_COLUMNS} FROM long_term WHERE task_id = ? "
+            "ORDER BY created_at DESC, id DESC",
+            (task_id,),
+        ) as cur:
             rows = [tuple(row) for row in await cur.fetchall()]
         return [_stored(row) for row in rows]
 

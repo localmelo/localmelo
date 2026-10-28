@@ -283,9 +283,21 @@ def user_candidates(
     task_id: str,
     session_id: str = "",
     provenance: dict[str, Any] | None = None,
+    typed_assertions: bool = False,
 ) -> list[MemoryCandidate]:
     """One whole candidate per stated fact, in message order."""
     signals = classify_user_text(text)
+    facts = list(signals.facts)
+    if typed_assertions:
+        from localmelo.melo.memory.assertions import parse_assertion
+
+        facts = []
+        for _, sentence in split_sentences(text):
+            fact = sentence.strip()
+            if fact in facts:
+                continue
+            if fact in signals.facts or (len(fact) <= 300 and parse_assertion(fact)):
+                facts.append(fact)
     return [
         _user_candidate(
             fact,
@@ -293,7 +305,7 @@ def user_candidates(
             session_id=session_id,
             provenance=provenance,
         )
-        for fact in signals.facts
+        for fact in facts
     ]
 
 
