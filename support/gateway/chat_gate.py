@@ -203,9 +203,15 @@ class CallLog:
             with contextlib.suppress(OSError):
                 os.chmod(path, 0o600)
             self._path = path
-            # The machine log sits beside the calls it affected, so one
-            # retention sweep covers both (decision D8). Its schema is its
-            # own; a failure disables only this file.
+        except OSError as exc:
+            logger.warning("Call log disabled: cannot create %s: %s", directory, exc)
+            self._close_fd()
+            self._path = None
+            return
+        # The machine log sits beside the calls it affected, so one retention
+        # sweep covers both (decision D8). Its schema is its own; a failure
+        # here disables only this file, never calls.jsonl (R14).
+        try:
             machine = run / "machine.jsonl"
             self._machine_fd = os.open(
                 machine, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600
@@ -214,9 +220,7 @@ class CallLog:
                 os.chmod(machine, 0o600)
             self._machine_path = machine
         except OSError as exc:
-            logger.warning("Call log disabled: cannot create %s: %s", directory, exc)
-            self._close_fd()
-            self._path = None
+            logger.warning("Machine log disabled: cannot create %s: %s", directory, exc)
             self._close_machine_fd()
             self._machine_path = None
 
@@ -368,6 +372,7 @@ class CallMeta:
     # embedding while that call is not a lane call (decision 1b).
     lane: bool = False
     admitted_mono_us: int | None = None
+    prompt_tokens: int | None = None
 
 
 @dataclass
@@ -670,6 +675,7 @@ class ChatGate:
             inflight_at_submit=self._inflight(),
             prev_end_mono_us=self._last_end.get(session_id),
             lane=lane,
+            prompt_tokens=prompt_tokens,
         )
         call = GateCall(meta)
         self._calls[meta.call_id] = call
@@ -699,33 +705,45 @@ class ChatGate:
         meta: CallMeta,
         now: Clock,
         prompt_tokens: int | None = None,
+        opened: set[str] | None = None,
     ) -> list[Event]:
-        """The events a submit would build: task open, then the call."""
+        """The events a submit would build: task open, then the call.
+
+        *opened* names the sessions a release batch already gave a task event
+        to; each session gets at most one in a batch, or the duplicate
+        ``TaskAdded`` would make ``advance`` reject the whole release.
+        """
         events: list[Event] = []
         planning = meta.kind in _CHAT_KINDS
         if planning:
             # Only a chat call opens (or reopens) the chat's task; an
             # embedding or a retrieval is taskless in S1 (section 4.2).
+            already = opened is not None and meta.session_id in opened
             current = self._task(meta.session_id)
             if current is None:
-                events.append(
-                    TaskAdded(
-                        Task(
-                            task_id=meta.session_id,
-                            kind="chat",
-                            origin="user",
-                            level=meta.level,
-                            level_source=cast(
-                                LevelSource, self.level_source(meta.session_id)
-                            ),
-                            phase="running",
-                            created_mono_us=now.mono_us,
-                            created_wall_us=now.wall_us,
+                if not already:
+                    events.append(
+                        TaskAdded(
+                            Task(
+                                task_id=meta.session_id,
+                                kind="chat",
+                                origin="user",
+                                level=meta.level,
+                                level_source=cast(
+                                    LevelSource, self.level_source(meta.session_id)
+                                ),
+                                phase="running",
+                                created_mono_us=now.mono_us,
+                                created_wall_us=now.wall_us,
+                            )
                         )
                     )
-                )
-            elif is_terminal(current.phase):
+                    if opened is not None:
+                        opened.add(meta.session_id)
+            elif is_terminal(current.phase) and not already:
                 events.append(TaskUpdated(meta.session_id, (("phase", "running"),)))
+                if opened is not None:
+                    opened.add(meta.session_id)
         events.append(
             CallSubmitted(
                 Call(
@@ -808,6 +826,14 @@ class ChatGate:
             )
         except Exception:  # the log may never fail a chat (R19)
             logger.warning("Call log line could not be written", exc_info=True)
+        if (
+            self.lock_gate == "wait"
+            and self.machine.lock != "foreign"
+            and not self._closed
+        ):
+            # A finished planning call may let the next parked call of the
+            # same chat enter the policy.
+            self._release_lock_waiters(now)
         if lock_waiting or (self.lock_gate == "wait" and self.policy == "off"):
             # The policy never saw this call, so no transition booked its
             # hold end; do it here in every mode (R10).
@@ -934,6 +960,8 @@ class ChatGate:
             call.done = True
             if call.future is not None and not call.future.done():
                 call.future.cancel()
+        # Book every hold that was still open before the bookkeeping goes.
+        self._update_holds(None, now)
         self._calls.clear()
         self._hold_start.clear()
         self._held_reason.clear()
@@ -1018,9 +1046,18 @@ class ChatGate:
         self._update_holds(decided, now)
 
     def _held_for(
-        self, session_id: str, waiting: list[CallMeta], decided: Decision | None
+        self,
+        session_id: str,
+        waiting: list[CallMeta],
+        decided: Decision | None,
+        *,
+        parked: bool = False,
     ) -> str:
         """The reason code of the chat's pending call (R16)."""
+        if parked:
+            # A call parked by the lock gate, still waiting for its turn
+            # after the lock cleared, reads as the same Reservation hold.
+            return "Reservation"
         if self.lock_gate == "wait" and self.machine.lock == "foreign":
             return "Reservation"
         if any(meta.lane for meta in waiting):
@@ -1037,39 +1074,65 @@ class ChatGate:
         )
         if not waiting:
             return
-        for call in waiting:
-            call.lock_waiting = False
         if self.policy == "off" or self._closed or self._params is None:
             for call in waiting:
+                call.lock_waiting = False
                 if call.meta.admitted_mono_us is None:
                     call.meta.admitted_mono_us = now.mono_us
                 if call.future is not None and not call.future.done():
                     call.future.set_result(None)
             self._update_holds(None, now)
             return
-        events: list[Event] = []
+        # S1 keeps at most one holdable planning call per task. A chat makes
+        # its plan and reflect calls one after the other, so a release batch
+        # submits the first planning call of each chat and leaves the next
+        # one parked until that call finishes (otherwise advance() would
+        # raise on a duplicate TaskAdded, or the policy would alarm on an
+        # extra pending call and never admit it).
+        planning_sessions = {
+            c.meta.session_id
+            for c in self._calls.values()
+            if not c.done and not c.lock_waiting and c.meta.kind in _CHAT_KINDS
+        }
+        ready: list[GateCall] = []
         for call in waiting:
-            events.extend(self._submitted_events(call.meta, now))
+            if call.meta.kind in _CHAT_KINDS:
+                if call.meta.session_id in planning_sessions:
+                    continue
+                planning_sessions.add(call.meta.session_id)
+            call.lock_waiting = False
+            ready.append(call)
+        if not ready:
+            self._update_holds(None, now)
+            return
+        events: list[Event] = []
+        opened: set[str] = set()
+        for call in ready:
+            events.extend(
+                self._submitted_events(call.meta, now, call.meta.prompt_tokens, opened)
+            )
         self._transition(events)
 
     def _update_holds(self, decided: Decision | None, now: Clock) -> None:
         """Book hold starts and ends; set ``wait_event`` on each change."""
-        by_session: dict[str, list[CallMeta]] = {}
+        by_session: dict[str, list[GateCall]] = {}
         for call in self._calls.values():
             if not call.done:
-                by_session.setdefault(call.meta.session_id, []).append(call.meta)
+                by_session.setdefault(call.meta.session_id, []).append(call)
         for session_id in set(by_session) | set(self._hold_start):
-            waiting = [
-                meta
-                for meta in by_session.get(session_id, [])
-                if meta.admitted_mono_us is None
+            waiting_calls = [
+                call
+                for call in by_session.get(session_id, [])
+                if call.meta.admitted_mono_us is None
             ]
+            waiting = [call.meta for call in waiting_calls]
+            parked = any(call.lock_waiting for call in waiting_calls)
             if waiting:
                 if session_id not in self._hold_start:
                     self._hold_start[session_id] = now.mono_us
                     self._wait_event.set()
                 self._held_reason[session_id] = self._held_for(
-                    session_id, waiting, decided
+                    session_id, waiting, decided, parked=parked
                 )
             elif session_id in self._hold_start:
                 self._held_total_us[session_id] = self._held_total_us.get(

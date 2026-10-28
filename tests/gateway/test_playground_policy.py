@@ -625,7 +625,11 @@ async def test_a_lock_hold_does_not_trip_the_run_timeout(
         )
 
         async def remove_later() -> None:
-            await asyncio.sleep(0.4)
+            # Wait for the run's own call to be parked, so the hold really is
+            # exercised for the 0.2 s timeout.
+            await wait_until(lambda: manager._gate.held_since(session_id) is not None)
+            assert provider.requests == 0
+            await asyncio.sleep(0.3)
             lock.unlink()
 
         remover = asyncio.create_task(remove_later())
@@ -635,7 +639,7 @@ async def test_a_lock_hold_does_not_trip_the_run_timeout(
             await remover
         assert response["answer"] == "Hello"
         assert provider.requests >= 1
-        assert manager._gate.held_seconds(session_id) >= 0.3
+        assert manager._gate.held_seconds(session_id) >= 0.25
     finally:
         await manager.close_all()
 
@@ -842,8 +846,6 @@ async def test_a_create_that_would_seed_under_a_foreign_lock_returns_409_and_sen
                 embedding_model="embed",
                 scenario_id="personal_preference",
             )
-        assert provider.calls == 0
-        assert manager.list_sessions() == []
         app = make_app(manager)
         async with client_for(app) as client:
             response = await client.post(
@@ -857,6 +859,8 @@ async def test_a_create_that_would_seed_under_a_foreign_lock_returns_409_and_sen
             )
         assert response.status_code == 409
         assert "agent-benchmark session" in response.json()["error"]
+        assert provider.calls == 0
+        assert manager.list_sessions() == []
     finally:
         await manager.close_all()
 

@@ -20,6 +20,7 @@ from localmelo.support.gateway.machine_monitor import (
     LockSnapshot,
     LockWatcher,
     MachineMonitor,
+    classify,
     classify_lock,
     parse_battery,
     parse_lock,
@@ -169,6 +170,33 @@ def test_eta_forms_and_staleness() -> None:
     assert snapshot.eta == "not a date"
 
 
+def test_a_huge_relative_eta_is_not_an_error(tmp_path: Path) -> None:
+    text = (
+        "holder: evil\n"
+        "start: 2026-01-01T00:00:00\n"
+        "eta: 99999999999999999999999999 min\n"
+    )
+    snapshot = parse(text, at("2026-01-01T00:00:00"))
+    assert snapshot.readable and snapshot.stale is False
+    assert snapshot.eta == "99999999999999999999999999 min"
+    path = tmp_path / "gpu.lock"
+    path.write_text(text, encoding="utf-8")
+
+    async def start_stop() -> None:
+        monitor = MachineMonitor(
+            lock_path=path, use_kqueue=False, lock_poll_s=0.01, settle_s=0.01
+        )
+        await monitor.start()
+        try:
+            payload = monitor.payload()
+            assert payload is not None
+            assert payload["lock"] == "foreign" and payload["readable"] is True
+        finally:
+            await monitor.stop()
+
+    asyncio.run(start_stop())
+
+
 def test_lock_self_exact_and_holder_run_forms() -> None:
     snapshot = parse("holder: local_ai-benchmark session\nrun: r1\n", 0.0)
     assert classify_lock(snapshot, "local_ai-benchmark session") == "self"
@@ -181,6 +209,10 @@ def test_lock_self_exact_and_holder_run_forms() -> None:
     assert classify_lock(near, "local_ai-benchmark session") == "foreign"
     colon_holder = parse("holder: bench:run\nrun: task\n", 0.0)
     assert classify_lock(colon_holder, "bench:run:task") == "self"
+    carried = parse_lock(
+        "holder: bench\nrun: r1\n", now_wall=0.0, self_holder="bench:r1"
+    )
+    assert classify(carried) == "self"
 
 
 def test_classify_lock_is_foreign_for_unreadable_and_self_for_self() -> None:
@@ -268,6 +300,30 @@ async def test_the_battery_reader_keeps_the_last_good_state_on_a_failure(
     assert [snapshot.pct for snapshot in seen] == [55.0, 100.0]
 
 
+async def test_the_battery_reader_rejects_garbage_and_keeps_the_last_good(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    readings = [
+        "Now drawing from 'Battery Power'\n"
+        " -InternalBattery-0 (id=1)\t55%; discharging; 3:00 remaining\n",
+        "something else\n",
+        "Now drawing from 'AC Power'\n"
+        " -InternalBattery-0 (id=1)\t100%; charged; 0:00 remaining\n",
+    ]
+
+    def runner() -> str:
+        return readings.pop(0)
+
+    reader = BatteryReader(runner, lambda snapshot: None, poll_s=0.01)
+    first = await reader.poll_once()
+    with caplog.at_level("WARNING"):
+        second = await reader.poll_once()
+    assert second == first
+    assert sum("battery unknown" in record.message for record in caplog.records) == 1
+    third = await reader.poll_once()
+    assert (third.on_ac, third.pct) == (True, 100.0)
+
+
 # ── The lock watcher (section 4) ──
 
 
@@ -310,6 +366,7 @@ async def test_the_lock_watcher_survives_an_atomic_replace(tmp_path: Path) -> No
         replacement.write_text("holder: b\n", encoding="utf-8")
         os.replace(replacement, path)
         await wait_until(lambda: len(seen) >= 2 and seen[-1].holder == "b")
+        assert [snapshot.holder for snapshot in seen] == ["a", "b"]
         assert all(snapshot.present for snapshot in seen)
     finally:
         await watcher.stop()
@@ -457,6 +514,20 @@ def test_a_machine_log_write_failure_warns_once_and_does_not_raise(
     assert gate.call_log_path is not None
 
 
+def test_read_machine_rejects_a_wrong_schema_or_version(tmp_path: Path) -> None:
+    import json
+
+    path = tmp_path / "machine.jsonl"
+    for line in (
+        {"schema": "localmelo.sched.trace", "version": 1, "event": "start"},
+        {"schema": MACHINE_SCHEMA, "version": 2, "event": "start"},
+        {"schema": MACHINE_SCHEMA, "version": True, "event": "start"},
+    ):
+        path.write_text(json.dumps(line) + "\n", encoding="utf-8")
+        with pytest.raises(ValueError):
+            read_machine(path)
+
+
 def test_no_code_writes_the_lock(tmp_path: Path) -> None:
     path = tmp_path / "gpu.lock"
     original = "holder: local_ai-benchmark session\nrun: r1\n"
@@ -465,10 +536,18 @@ def test_no_code_writes_the_lock(tmp_path: Path) -> None:
     assert snapshot.holder == "local_ai-benchmark session"
     assert path.read_text(encoding="utf-8") == original
 
-    source = Path("support/gateway/machine_monitor.py").read_text(encoding="utf-8")
-    # A grep-style check: the lock reader opens read-only; nothing creates,
-    # writes, renames or removes a lock.
-    assert 'open("w"' not in source
-    assert "write_text" not in source
-    assert "unlink(" not in source
-    assert "os.replace" not in source
+    # A grep-style check over both modules: the lock reader opens read-only;
+    # nothing creates, writes, renames or removes a lock.
+    for name in ("machine_monitor.py", "chat_gate.py"):
+        source = (Path("support/gateway") / name).read_text(encoding="utf-8")
+        for pattern in (
+            'open(path, "w"',
+            'open(target, "w"',
+            "write_text",
+            "write_bytes",
+            "unlink(",
+            "os.remove",
+            "os.rename",
+            "os.replace",
+        ):
+            assert pattern not in source, f"{name} uses {pattern}"

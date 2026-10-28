@@ -1092,7 +1092,18 @@ async def test_wait_holds_plan_reflect_and_embed_before_the_policy(
         assert gate.held_since("a") is not None
     assert gate._state.calls == ()  # the policy never saw them
     gate.set_machine(Machine(lock="none"))
-    assert all(admitted(call) for call in calls)
+    if policy == "off":
+        assert all(admitted(call) for call in calls)
+    else:
+        # S1 keeps one holdable planning call per chat: the plan is in the
+        # policy, the reflect stays parked until the plan finishes, and the
+        # embed is taskless and admitted with it.
+        assert admitted(calls[0])
+        assert not admitted(calls[1])
+        assert admitted(calls[2])
+        finish(gate, calls[0])
+        assert admitted(calls[1])
+    assert not gate.alarms
     assert gate.held("a") == ""
     for call in calls:
         finish(gate, call)
@@ -1109,10 +1120,16 @@ async def test_a_lock_wait_is_one_hold_and_one_log_line(tmp_path: Path) -> None:
     assert gate._state.calls == ()
     path = gate.call_log_path
     assert path is not None
+    # The gate stays usable for the same chat.
+    gate.set_machine(Machine(lock="none"))
+    later = gate.submit("a", kind="plan")
+    assert admitted(later)
+    finish(gate, later)
     await gate.close()
     traces = read_trace(path)
     assert traces[0].calls[0].status == "refused"
     assert traces[0].calls[0].admit_s is None
+    assert traces[0].calls[1].status == "ok"
 
 
 @pytest.mark.parametrize("policy", ["off", "fcfs"])
@@ -1198,7 +1215,14 @@ async def test_stop_during_a_lock_wait_cancels_the_future_and_keeps_the_gate_usa
     gate.set_machine(Machine(lock="foreign"))
     call = gate.submit("a", kind="plan")
     assert call.future is not None and not call.future.done()
-    call.future.cancel()
+    # The production stop path: the run awaiting acquire() is cancelled;
+    # GatedLLM's handler then finishes the call as refused.
+    waiter = asyncio.create_task(gate.acquire(call))
+    await asyncio.sleep(0)
+    waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await waiter
+    assert call.future.cancelled()
     finish(gate, call, "refused")
     assert gate.held("a") == ""
     gate.set_machine(Machine(lock="none"))
@@ -1220,6 +1244,28 @@ async def test_close_cancels_lock_waiters_and_logs_them_refused(
     assert call.future is not None and call.future.cancelled()
     traces = read_trace(path)
     assert traces[0].calls[0].status == "refused"
+
+
+async def test_a_self_lock_never_waits() -> None:
+    gate = ChatGate(policy="off", lock_gate="wait")
+    gate.set_machine(Machine(lock="self"))
+    call = gate.submit("a", kind="plan")
+    assert call.future is None
+    assert call.meta.admitted_mono_us is not None
+    assert gate.held("a") == ""
+    finish(gate, call)
+    await gate.close()
+
+
+async def test_close_books_an_open_lock_hold() -> None:
+    clock = ClockBox()
+    gate = ChatGate(policy="off", clock=clock, lock_gate="wait")
+    gate.turn_start("a")
+    gate.set_machine(Machine(lock="foreign"))
+    gate.submit("a", kind="plan")
+    clock.advance(1.0)
+    await gate.close()
+    assert gate.held_seconds("a") == 1.0
 
 
 def test_enforces_holds_is_true_for_fcfs_or_wait_and_false_for_off_record() -> None:

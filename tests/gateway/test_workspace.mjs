@@ -593,3 +593,24 @@ test('the machine payload does not add a request', async () => {
   assert.equal(h.state.machine.lock, 'foreign');
   assert.match(h.element('machine-state').textContent, /\(chats wait\)/);
 });
+
+test('initialization adds no machine request', async () => {
+  const paths = [];
+  const h = harness(async path => {
+    paths.push(path);
+    if (path === '/scenarios') return {scenarios: []};
+    if (path === '/sessions')
+      return {
+        sessions: [],
+        machine: {
+          lock: 'foreign', holder: 'bench', purpose: 'a run', stale: false,
+          readable: true, on_ac: true, battery_pct: null,
+          battery_state: '', band: 4, gate: 'record',
+        },
+      };
+    throw new Error('unexpected request: ' + path);
+  });
+  await h.run('init()');
+  assert.deepEqual(paths, ['/scenarios', '/sessions']);
+  assert.match(h.element('machine-state').textContent, /\(recorded\)/);
+});

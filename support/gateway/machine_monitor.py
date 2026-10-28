@@ -77,6 +77,9 @@ class LockSnapshot:
     stale: bool = False
     error: str = ""
     alarms: tuple[str, ...] = ()
+    # The string this snapshot was parsed for, so classify_lock() can be
+    # called with the snapshot alone as well as with the string.
+    self_holder: str = ""
 
     @classmethod
     def absent(cls) -> LockSnapshot:
@@ -117,9 +120,12 @@ def _parse_instant(raw: str) -> datetime | None:
     return None
 
 
-def _timestamp(value: datetime) -> float:
+def _timestamp(value: datetime) -> float | None:
     """The instant as a Unix timestamp; a naive value is local time."""
-    return value.timestamp()
+    try:
+        return value.timestamp()
+    except (OverflowError, ValueError, OSError):
+        return None
 
 
 _ETA_SUFFIX = re.compile(r"\s*\(\s*\d+(?:\.\d+)?\s*min\s*\)\s*$", re.IGNORECASE)
@@ -137,7 +143,12 @@ def _eta_instant(eta: str, start: datetime | None) -> datetime | None:
             return None
         from datetime import timedelta
 
-        return start + timedelta(minutes=float(minutes.group(1)))
+        try:
+            return start + timedelta(minutes=float(minutes.group(1)))
+        except (OverflowError, ValueError, OSError):
+            # A writer's malformed or absurd duration is display-only, never
+            # a reason to fail the monitor (section 3.3).
+            return None
     absolute = _ETA_SUFFIX.sub("", text)
     return _parse_instant(absolute)
 
@@ -156,11 +167,9 @@ def parse_lock(
 ) -> LockSnapshot:
     """Parse the lock's ``key: value`` lines (section 3.3).
 
-    ``self_holder`` is not used here: comparing a holder with it is
-    :func:`classify_lock`'s job. The parameter is accepted so a caller can
-    parse and classify in one call.
+    ``self_holder`` is carried on the snapshot; comparing a holder with it
+    is :func:`classify_lock`'s job.
     """
-    del self_holder  # classification, not parsing
     if not text.strip():
         return LockSnapshot.unreadable("empty lock file")
     values: dict[str, str] = {}
@@ -188,7 +197,8 @@ def parse_lock(
     eta = values.get("eta", "")
     start_at = _parse_instant(start)
     eta_at = _eta_instant(eta, start_at)
-    stale = eta_at is not None and now_wall >= _timestamp(eta_at) + float(stale_grace_s)
+    eta_ts = None if eta_at is None else _timestamp(eta_at)
+    stale = eta_ts is not None and now_wall >= eta_ts + float(stale_grace_s)
     mem_gib = 0.0
     raw_mem = values.get("mem_gib", "").strip()
     if raw_mem:
@@ -209,10 +219,11 @@ def parse_lock(
         mem_gib=mem_gib,
         stale=stale,
         alarms=tuple(alarms),
+        self_holder=self_holder,
     )
 
 
-def classify_lock(snapshot: LockSnapshot, self_holder: str) -> LockState:
+def classify_lock(snapshot: LockSnapshot, self_holder: str | None = None) -> LockState:
     """``none`` / ``self`` / ``foreign`` for *snapshot* (section 3.4).
 
     Exact and case-sensitive. ``lock_self`` is the whole holder, or
@@ -223,7 +234,7 @@ def classify_lock(snapshot: LockSnapshot, self_holder: str) -> LockState:
         return "none"
     if not snapshot.readable:
         return "foreign"
-    wanted = self_holder.strip()
+    wanted = (snapshot.self_holder if self_holder is None else self_holder).strip()
     if not wanted:
         return "foreign"
     if snapshot.holder == wanted:
@@ -232,6 +243,10 @@ def classify_lock(snapshot: LockSnapshot, self_holder: str) -> LockState:
     if sep and holder and snapshot.holder == holder and snapshot.run == run:
         return "self"
     return "foreign"
+
+
+# The spec also names the one-argument classifier ``classify``.
+classify = classify_lock
 
 
 def read_lock_file(
@@ -327,6 +342,11 @@ def parse_battery(text: str) -> BatterySnapshot:
     )
 
 
+def _battery_usable(snapshot: BatterySnapshot) -> bool:
+    """A reading that names a power source or a percentage; else unparseable."""
+    return snapshot.known and (snapshot.on_ac is not None or snapshot.pct is not None)
+
+
 def read_pmset() -> str:
     """Run the read-only ``pmset -g batt``; raise when it cannot be read."""
     result = subprocess.run(
@@ -377,8 +397,8 @@ class BatteryReader:
         try:
             text = await asyncio.to_thread(self._runner)
             parsed = parse_battery(text)
-            if not parsed.known:
-                raise ValueError("pmset output was empty")
+            if not _battery_usable(parsed):
+                raise ValueError("pmset output was not parseable")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -387,7 +407,7 @@ class BatteryReader:
                 self._warned = True
             return self.snapshot
         self._good = parsed
-        self._warned = False
+        # ``battery_unknown`` is one warning per process, not one per outage.
         if parsed != self._last:
             self._last = parsed
             self._on_change(parsed)
@@ -476,7 +496,10 @@ class LockWatcher:
         return read_lock_file(self._path, now_wall=time.time())
 
     def _check(self) -> None:
-        snapshot = self._read_once()
+        try:
+            snapshot = self._read_once()
+        except Exception as exc:  # a broken reader is shown, never fatal
+            snapshot = LockSnapshot.unreadable(f"{type(exc).__name__}: {exc}")
         if snapshot != self._last:
             self._last = snapshot
             self._on_change(snapshot)
@@ -817,7 +840,10 @@ class MachineMonitor:
         if target is None:
             return LockSnapshot.absent()
         if self._lock_read is not None:
-            return self._lock_read(target)
+            try:
+                return self._lock_read(target)
+            except Exception as exc:  # the seam is a caller's function
+                return LockSnapshot.unreadable(f"{type(exc).__name__}: {exc}")
         return read_lock_file(
             target,
             now_wall=self._now_wall(),
@@ -832,14 +858,13 @@ class MachineMonitor:
         try:
             text = await asyncio.to_thread(runner)
             parsed = parse_battery(text)
-            if not parsed.known:
-                raise ValueError("pmset output was empty")
+            if not _battery_usable(parsed):
+                raise ValueError("pmset output was not parseable")
             return parsed
         except asyncio.CancelledError:
             raise
-        except Exception as exc:
+        except Exception:
             self._alarm("battery_unknown")
-            logger.warning("battery unknown: %s", exc)
             return BatterySnapshot()
 
     def _on_lock(self, snapshot: LockSnapshot) -> None:
@@ -972,7 +997,12 @@ def read_machine(path: Path | str) -> tuple[dict[str, Any], ...]:
             raise ValueError(f"{target}:{number}: invalid JSON: {exc}") from exc
         if not isinstance(value, dict):
             raise ValueError(f"{target}:{number}: not a JSON object")
-        if value.get("schema") != MACHINE_SCHEMA or value.get("version") != 1:
+        version = value.get("version")
+        if (
+            value.get("schema") != MACHINE_SCHEMA
+            or isinstance(version, bool)
+            or version != 1
+        ):
             raise ValueError(
                 f"{target}:{number}: not {MACHINE_SCHEMA} version {MACHINE_VERSION}"
             )

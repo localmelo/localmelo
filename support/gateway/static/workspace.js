@@ -190,13 +190,21 @@ function machineLine(machine) {
   } else if (machine.lock === "foreign") {
     const holder = machine.holder || "another session";
     const purpose = machine.purpose || "";
-    const short = purpose.length > 48 ? purpose.slice(0, 47) + "…" : purpose;
     const mode = machine.gate === "wait" ? "(chats wait)" : "(recorded)";
     const stale = machine.stale ? " · ETA passed" : "";
-    parts.push(
-      `GPU lock: ${holder}${short ? ` · ${short}` : ""} ${mode}${stale}`,
-    );
-    label = `GPU lock: ${holder}${purpose ? ` · ${purpose}` : ""} ${mode}${stale}`;
+    const prefix = `GPU lock: ${holder}`;
+    const suffix = ` ${mode}${stale}`;
+    // Keep the mode (and holder) visible in the header: spend the line's
+    // character budget on the purpose only after the suffix has room.
+    const room = Math.max(0, 78 - prefix.length - suffix.length);
+    const short =
+      purpose && room > 5
+        ? purpose.length > room - 3
+          ? purpose.slice(0, room - 4) + "…"
+          : purpose
+        : "";
+    parts.push(`${prefix}${short ? ` · ${short}` : ""}${suffix}`);
+    label = `${prefix}${purpose ? ` · ${purpose}` : ""}${suffix}`;
   } else if (machine.lock === "self") {
     const stale = machine.stale ? " · ETA passed" : "";
     parts.push(`GPU lock: yours${stale}`);
@@ -204,19 +212,29 @@ function machineLine(machine) {
   }
   if (machine.on_ac === false && typeof machine.battery_pct === "number") {
     const state = machine.battery_state ? ` · ${machine.battery_state}` : "";
-    parts.push(`Battery ${Math.round(machine.battery_pct)}%${state}`);
+    const battery = `Battery ${Math.round(machine.battery_pct)}%${state}`;
+    parts.push(battery);
+    label = label ? `${label} · ${battery}` : battery;
   }
   return {text: parts.join(" · "), label: label || parts.join(" · ")};
 }
+let machineSnapshot = "";
 function syncUI() {
   const s = active();
   const busy = !!s && (s.is_busy || S.pending.has(s.session_id));
   const held = busy && s?.held ? s.held : "";
   const machine = machineLine(S.machine);
-  $("machine-state").textContent = machine.text;
-  $("machine-state").hidden = !machine.text;
-  $("machine-state").setAttribute("aria-label", machine.label || "Machine status");
-  $("machine-state").title = machine.label;
+  const chip = $("machine-state");
+  const snapshot = `${machine.text}\n${machine.label}`;
+  if (snapshot !== machineSnapshot) {
+    machineSnapshot = snapshot;
+    // Unhide before the text write, so a screen reader announces the first
+    // lock instead of a mutation inside a hidden live region.
+    chip.hidden = !machine.text;
+    chip.textContent = machine.text;
+    chip.setAttribute("aria-label", machine.label || "Machine status");
+    chip.title = machine.label;
+  }
   $("header-title").textContent = s ? title(s) : "New chat";
   $("header-model").textContent = s ? s.chat_model : "Connect your model to get started";
   $("connection-label").textContent = !S.online
@@ -569,6 +587,7 @@ async function createSession() {
   } catch (error) {
     $("create-error").textContent = error.message;
     $("create-error").hidden = false;
+    notify(error.message, true);
   } finally {
     S.working = false;
     $("create-btn").innerHTML = 'Create chat <span aria-hidden="true">→</span>';

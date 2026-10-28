@@ -87,9 +87,10 @@ The lane is the chat being typed in: `POST /v1/playground/presence` sets it
 while you type, and every run sets it too. Its next call is admitted before
 the background calls and bypasses their limit, but never the server's
 `n_srv`. The non-lane limit is `max(1, n_srv - 1 - r_f)`; embedding,
-`retrieve` and `estimate` calls are never held and never orderable, but they
-count in flight: a foreground embedding can fill the last `n_srv` slot, and
-the lane then waits for it.
+`retrieve` and `estimate` calls are never held by the policy and never
+orderable, but they count in flight (and a foreign lock under `lock_gate =
+"wait"` holds them before the policy sees them, below): a foreground
+embedding can fill the last `n_srv` slot, and the lane then waits for it.
 
 A level is P1-P4 per chat, P2 by default; the chip in the chat header sets
 it, and `fcfs` records it and ignores it. A level lives in the gateway's
