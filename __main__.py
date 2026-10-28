@@ -672,11 +672,6 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             "--host and --port are for --serve and --daemon; "
             "bare melo opens the interactive UI"
         )
-    if interactive and (args.mcp_config is not None or args.mcp_only):
-        parser.error(
-            "--mcp-config and --mcp-only are not in the interactive UI yet; "
-            'give them with a task (melo -- "<task>")'
-        )
     # main() joins the words into the query, and an empty one (`melo ""`)
     # runs no task, so the direct-mode flags would have nothing to apply to.
     direct = bool(" ".join(args.query)) and not args.serve

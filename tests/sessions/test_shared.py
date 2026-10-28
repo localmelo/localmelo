@@ -294,3 +294,25 @@ def test_approval_target_does_not_follow_a_final_symlink_or_open_a_fifo(
         }
     )
     assert piped == {"path_label": "pipe", "exists": True, "size_bytes": 0}
+
+
+def test_load_mcp_providers_reads_a_file_and_refuses_a_bad_one(tmp_path: Path) -> None:
+    import sys
+
+    from localmelo.support.mcp import McpConfigError
+
+    path = tmp_path / "mcp.json"
+    path.write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "notes": {"command": sys.executable, "args": ["-c", "pass"]}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    providers = agents.load_mcp_providers(str(path))
+    assert len(providers) == 1
+    with pytest.raises(McpConfigError):
+        agents.load_mcp_providers(str(tmp_path / "missing.json"))

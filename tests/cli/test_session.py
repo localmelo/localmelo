@@ -1163,3 +1163,79 @@ async def test_approvals_under_yolo_says_how_to_turn_prompts_on(setup: Setup) ->
     session.enter("/approvals ask")
     await _until(lambda: "✗ YOLO is on; /approvals ask turns prompts on." in out.text())
     assert session.approvals.mode == "yolo"
+
+
+# ── U2a.3's /status, /retry and /mcp ──
+
+
+async def test_status_shows_the_facts(
+    setup: Setup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def list_models(key: str, url: str, **kwargs: object) -> list[str]:
+        return ["m1"]
+
+    monkeypatch.setattr("localmelo.support.backends.discovery.list_models", list_models)
+    session, out = setup.session, setup.out
+    session.enter("hello")
+    await setup.idle()
+    session.enter("/status")
+    await _until(lambda: "version    melo " in out.text())
+    text = out.text()
+    assert "model      m1 · " in text and " · reachable" in text
+    assert "workspace  " in text and "fence      file tools stay here" in text
+    assert "session    'hello' · " in text and " · 1 turn" in text
+    assert "approvals  ask · allowed in this session: none" in text
+    assert "tools      4 built-in (3 ask first)" in text
+    assert "memory     2 of 20 messages · " in text
+    assert "limits     30 steps a turn, 10 an attempt, 5 attempts" in text
+    assert "files      " in text and "sessions.db" in text
+    assert "version    melo " in text
+
+
+async def test_retry_runs_the_last_turn_again(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    setup.factory.scripts["m1"] = [answer("Paris."), answer("Paris.")]
+    session.agent = await setup.factory.build()
+    session.enter("What is the capital of France?")
+    await setup.idle()
+    session.enter("/retry")
+    await _until(
+        lambda: "↻ Retrying turn 1: What is the capital of France?" in out.text()
+    )
+    await _until(lambda: session.state == "idle" and out.text().count("● Paris.") == 2)
+    turns = await setup.rows()
+    assert [(turn.turn, turn.status, turn.undone) for turn in turns] == [
+        (1, "completed", True),
+        (2, "completed", False),
+    ]
+
+
+async def test_retry_with_nothing_to_retry_says_so(setup: Setup) -> None:
+    setup.session.enter("/retry")
+    await _until(lambda: "✗ Nothing to retry." in setup.out.text())
+
+
+async def test_mcp_without_a_config_explains_how_to_add_one(setup: Setup) -> None:
+    setup.session.enter("/mcp")
+    await _until(lambda: "No MCP servers." in setup.out.text())
+
+
+async def test_mcp_lists_the_servers_and_a_start_failure(setup: Setup) -> None:
+    from localmelo.support.mcp import McpServerConfig
+
+    session, out = setup.session, setup.out
+    factory = session.factory
+    factory.mcp_config = "~/mcp.json"
+    factory.mcp_source = "mcp_config"
+    factory.mcp_servers = [
+        McpServerConfig(name="notes", command="notes-mcp", args=["--stdio"])
+    ]
+    session.enter("/mcp")
+    await _until(lambda: "notes: running, 0 tools · notes-mcp --stdio" in out.text())
+    assert "MCP servers from ~/mcp.json (mcp_config)" in out.text()
+    factory.mcp_error = "the server exited"
+    session.enter("/mcp")
+    await _until(
+        lambda: "MCP is off for this session: the server exited." in out.text()
+    )
+    assert "Fix the config, then restart melo." in " ".join(out.text().split())

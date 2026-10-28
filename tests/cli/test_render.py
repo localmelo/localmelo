@@ -382,13 +382,18 @@ def test_a_blank_answer_says_so() -> None:
             "✗",
             "if it says the model does not support tools",
         ),
-        ("budget_exhausted", "Max steps reached", "⚠", None),
-        ("stuck", "repeated", "⚠", "The model repeated itself; rephrase the request."),
+        ("budget_exhausted", "Max steps reached", "⚠", "/retry tries again."),
+        (
+            "stuck",
+            "repeated",
+            "⚠",
+            "The model repeated itself; rephrase the request, or /retry.",
+        ),
         (
             "failed",
             "empty replies",
             "⚠",
-            "The model returned only empty replies; try another model.",
+            "The model returned only empty replies; /retry, or try another model.",
         ),
         (
             "gate_stopped",

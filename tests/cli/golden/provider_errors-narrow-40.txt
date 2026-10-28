@@ -5,7 +5,8 @@
 ↻ Model request failed; retrying in 4 s…
 ✗ melo: run ended with status provider_…
   Is the model server running at
-  http://127.0.0.1:18431/v1?
+  http://127.0.0.1:18431/v1? /status
+  checks again.
 ✻ Worked for 0.1s · 0 tool calls
 
 › Check it once more.
@@ -16,7 +17,7 @@
 ✗ melo: run ended with status provider_…
   The model server did not answer in
   time; it may still be loading the
-  model.
+  model. /retry tries again.
 ✻ Worked for 0.1s · 0 tool calls
 
 › Try the missing model.
@@ -51,5 +52,8 @@
 
   No approvals for this turn (--yolo).
 ✗ melo: run ended with status provider_…
+  /status checks the model server at
+  http://127.0.0.1:18431/v1; /retry
+  tries again.
 ✻ Worked for 0.2s · 0 tool calls
 

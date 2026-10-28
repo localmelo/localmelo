@@ -249,6 +249,18 @@ def run_interactive(
         return 1
     if isinstance(choice, int):
         return choice
+    # Step 4: the MCP config, --mcp-config first, else the config file's key.
+    requested = getattr(args, "mcp_config", None)
+    mcp_config = requested or config.load().mcp_config or None
+    mcp_source = "--mcp-config" if requested else ("mcp_config" if mcp_config else "")
+    if mcp_config is not None:
+        from localmelo.support.mcp import McpConfigError, load_mcp_config
+
+        try:
+            load_mcp_config(os.path.expanduser(mcp_config))
+        except McpConfigError as exc:
+            print(f"melo: error: {exc}", file=sys.stderr)
+            return 2
     try:
         log_path = configure_logging()
     except OSError as exc:
@@ -265,6 +277,8 @@ def run_interactive(
                 options=options,
                 workspace=workspace,
                 log_path=log_path,
+                mcp_config=mcp_config,
+                mcp_source=mcp_source,
             )
         )
     except KeyboardInterrupt:
@@ -284,6 +298,8 @@ async def main_async(
     options: AgentOptions,
     workspace: str,
     log_path: str,
+    mcp_config: str | None = None,
+    mcp_source: str = "",
 ) -> tuple[int, int | None]:
     """Run the session: open the store, build the Agent, show the banner, run the app.
 
@@ -353,6 +369,8 @@ async def main_async(
             embedding_base_url=args.embedding_base_url,
             embedding_model=args.embedding_model,
             request_timeout_s=args.request_timeout,
+            mcp_config=mcp_config,
+            mcp_source=mcp_source,
             saves=choice.saves,
         )
         try:

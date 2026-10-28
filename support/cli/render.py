@@ -197,11 +197,11 @@ def status_hint(
         failed = _FAILED_WITH.search(error)
         name = failed.group(1) if failed and not http else ""
         if name in ("ConnectError", "ConnectTimeout"):
-            return f"Is the model server running at {url}?"
+            return f"Is the model server running at {url}? /status checks again."
         if name in ("ReadTimeout", "WriteTimeout", "PoolTimeout"):
             return (
                 "The model server did not answer in time; it may still be "
-                "loading the model."
+                "loading the model. /retry tries again."
             )
         if code == 404:
             hint = (
@@ -227,22 +227,29 @@ def status_hint(
                 f"The server refused the key in {backend.key_env or 'its key variable'}; "
                 "melo --reconfigure changes the backend."
             )
-        return None
+        return f"/status checks the model server at {url}; /retry tries again."
     if status == "setup_error":
-        return "A tool server failed to start."
+        return "A tool server failed to start; /mcp shows why."
     if status == "failed":
         if error == "empty replies":
-            return "The model returned only empty replies; try another model."
-        return "A check stopped the run (the reason is above); try another model."
+            return (
+                "The model returned only empty replies; /retry, or try another model."
+            )
+        return "A check stopped the run (the reason is above); /retry, or try another model."
     if status == "gate_stopped":
-        return "melo judged that another attempt would not help. Rephrase the request."
+        return (
+            "melo judged that another attempt would not help. "
+            "Rephrase the request, or /retry."
+        )
+    if status == "budget_exhausted":
+        return "/retry tries again."
     if status == "stuck":
-        return "The model repeated itself; rephrase the request."
+        return "The model repeated itself; rephrase the request, or /retry."
     if status == "crashed":
         if cause == "crash":
             return (
                 "melo stopped before this turn finished (the process was killed "
-                "or the computer lost power)."
+                "or the computer lost power). /retry runs it again."
             )
         return f"This is a bug in localmelo; the log is {LOG_PATH}."
     return None
@@ -254,7 +261,7 @@ def stopped_line(cause: str, symbols: Symbols) -> Text:
     elif cause in ("shutdown", "crash"):
         text = "Interrupted"
     else:
-        text = "Stopped"
+        text = f"Stopped {symbols.dot} /retry runs it again"
     return Text(f"{symbols.stopped} {text}", style="warn")
 
 

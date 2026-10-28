@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import os
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts.tools import BaseToolProvider
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -20,6 +22,17 @@ if TYPE_CHECKING:
 # Shell and Python commands of a session stop after this many seconds: test
 # suites, installs and builds take longer than a task's 30 s and 60 s.
 SESSION_TOOL_TIMEOUT_S: Final = 600.0
+
+
+def load_mcp_providers(path: str) -> list[BaseToolProvider]:
+    """Fresh MCP tool providers for the config file at *path*.
+
+    ``~`` is expanded; a file that cannot be read or is not a valid MCP
+    config raises :class:`~localmelo.support.mcp.McpConfigError`.
+    """
+    from localmelo.support.mcp import McpToolProvider, load_mcp_config
+
+    return [McpToolProvider(load_mcp_config(os.path.expanduser(path)))]
 
 
 def session_options(options: AgentOptions, workspace: str) -> AgentOptions:
@@ -43,6 +56,7 @@ async def build_session_agent(
     embedding_base_url: str | None = None,
     embedding_model: str | None = None,
     request_timeout_s: float | None = None,
+    mcp_config: str | None = None,
 ) -> Agent:
     """A started Agent for a session in *workspace*.
 
@@ -55,6 +69,7 @@ async def build_session_agent(
     Agent is closed and the exception propagates.
     """
     agent_options = session_options(options, workspace)
+    providers = load_mcp_providers(mcp_config) if mcp_config else []
     if base_url:
         from localmelo.support.providers.embedding.openai_compat import (
             OpenAICompatEmbedding,
@@ -73,7 +88,12 @@ async def build_session_agent(
             if embedding_base_url
             else None
         )
-        agent = Agent(llm=llm, embedding=embedding, options=agent_options)
+        agent = Agent(
+            llm=llm,
+            embedding=embedding,
+            options=agent_options,
+            tool_providers=providers,
+        )
     else:
         if cfg is None:
             raise ValueError("build_session_agent needs a cfg or a base_url")
@@ -83,7 +103,7 @@ async def build_session_agent(
             section.chat_model = model
         if request_timeout_s is not None:
             cfg.request_timeout_s = request_timeout_s
-        agent = Agent(config=cfg, options=agent_options)
+        agent = Agent(config=cfg, options=agent_options, tool_providers=providers)
     try:
         await agent.start()
     except BaseException:

@@ -784,7 +784,10 @@ class InteractiveApp:
             else:
                 keys = []
         limit = max(1, min(BODY_LINES, room))
-        body = [(style, "  " + line) for style, line in text.body]
+        body = [
+            (f"class:{style}" if style else "", "  " + line)
+            for style, line in text.body
+        ]
         if len(body) > limit:
             hidden = len(body) - (limit - 1)
             body = body[: limit - 1] + [

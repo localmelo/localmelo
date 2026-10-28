@@ -12,8 +12,9 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
+import os
 from dataclasses import replace
-from typing import Final
+from typing import Any, Final
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.support import config, onboard
@@ -77,6 +78,8 @@ class AgentFactory:
         embedding_base_url: str | None = None,
         embedding_model: str | None = None,
         request_timeout_s: float | None = None,
+        mcp_config: str | None = None,
+        mcp_source: str = "",
         saves: bool = True,
     ) -> None:
         self.backend = backend
@@ -86,6 +89,16 @@ class AgentFactory:
         self._embedding_base_url = embedding_base_url
         self._embedding_model = embedding_model
         self._request_timeout_s = request_timeout_s
+        # The MCP servers file, where it came from, and why MCP is off after
+        # a server failed to start.
+        self.mcp_config = mcp_config
+        self.mcp_source = mcp_source
+        self.mcp_error: str | None = None
+        self.mcp_servers: list[Any] = []
+        if mcp_config:
+            from localmelo.support.mcp import load_mcp_config
+
+            self.mcp_servers = load_mcp_config(os.path.expanduser(mcp_config))
         # Whether /model and /backend save their choice as the default: not
         # for a --base-url session whose save question was answered no.
         self.saves = saves
@@ -112,8 +125,24 @@ class AgentFactory:
         runs on a copy of it as /backend saves it (see :meth:`use_url`).
         """
         model = model or self.backend.model
+        try:
+            agent = await self._build(
+                model, url, self.mcp_config if self.mcp_error is None else None
+            )
+        except Exception as exc:
+            if self.mcp_config is None or self.mcp_error is not None:
+                raise
+            # A server that did not start: this session runs without MCP.
+            self.mcp_error = str(exc) or type(exc).__name__
+            agent = await self._build(model, url, None)
+        self._live.append(agent)
+        return agent
+
+    async def _build(
+        self, model: str, url: str | None, mcp_config: str | None
+    ) -> Agent:
         if self._cfg is None:
-            agent = await build_session_agent(
+            return await build_session_agent(
                 cfg=None,
                 base_url=url or self.backend.base_url,
                 model=model,
@@ -122,21 +151,20 @@ class AgentFactory:
                 embedding_base_url=self._embedding_base_url,
                 embedding_model=self._embedding_model,
                 request_timeout_s=self._request_timeout_s,
+                mcp_config=mcp_config,
             )
-        else:
-            cfg = self._cfg
-            if url is not None:
-                cfg = self._with_server(url, model, ollama=await self._is_ollama(url))
-            agent = await build_session_agent(
-                cfg=cfg,
-                base_url=None,
-                model=model,
-                workspace=self._workspace,
-                options=self._options,
-                request_timeout_s=self._request_timeout_s,
-            )
-        self._live.append(agent)
-        return agent
+        cfg = self._cfg
+        if url is not None:
+            cfg = self._with_server(url, model, ollama=await self._is_ollama(url))
+        return await build_session_agent(
+            cfg=cfg,
+            base_url=None,
+            model=model,
+            workspace=self._workspace,
+            options=self._options,
+            request_timeout_s=self._request_timeout_s,
+            mcp_config=mcp_config,
+        )
 
     def _with_server(self, url: str, model: str, *, ollama: bool) -> config.Config:
         """The session's config with its chat on *url*, as /backend saves it.

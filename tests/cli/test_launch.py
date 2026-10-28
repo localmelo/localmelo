@@ -490,3 +490,20 @@ async def test_a_new_server_keeps_the_sessions_embedding_server() -> None:
     )
     await factory.use_url("http://127.0.0.1:19/v1", "n")
     assert factory.backend.embedding == "E · e"
+
+
+def test_a_bad_mcp_config_file_is_one_line_and_exit_2(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    path = tmp_path / "mcp.json"
+    path.write_text("{", encoding="utf-8")
+    monkeypatch.setattr(
+        launch,
+        "choose_backend",
+        lambda args: launch.Choice(backend=mock.MagicMock(), cfg=None),
+    )
+    assert _run(monkeypatch, terminal=True, mcp_config=str(path)) == 2
+    err = capsys.readouterr().err
+    assert err.startswith("melo: error: ") and err.count("\n") == 1

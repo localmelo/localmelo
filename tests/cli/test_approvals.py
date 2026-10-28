@@ -699,3 +699,17 @@ def test_the_diff_uses_the_uis_minus() -> None:
     )
     assert text.header.endswith("+1 -1 lines")
     assert [line for _, line in text.body] == ["   1 - a", "   1 + b"]
+
+
+async def test_the_panel_draws_a_diff_with_the_theme_styles(tmp_path: Path) -> None:
+    path = tmp_path / "notes.txt"
+    path.write_text("buy milk\n", encoding="utf-8")
+    approver = TerminalApprover()
+    request = _request("file_write", path=str(path), content="remember the milk\n")
+    async with running_app(approver=approver, columns=80, clock=lambda: 100.0) as app:
+        asking = asyncio.ensure_future(approver.ask(request))
+        await app.wait(lambda: "Change a file?" in app.text())
+        assert "+1 −1 lines" in app.text()
+        assert "− buy milk" in app.text() and "+ remember the milk" in app.text()
+        approver.answer("once")
+        await asking
