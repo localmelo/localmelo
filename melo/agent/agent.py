@@ -1392,6 +1392,7 @@ class Agent:
             names=self.options.builtins,
             workspace_root=workspace_root,
             tool_timeout_s=self.options.tool_timeout_s,
+            tool_env=self.options.tool_env,
         )
         # The names of the built-ins registered above (see list_tools).
         self._builtin_names = (

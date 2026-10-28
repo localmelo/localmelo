@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal, get_args
 
@@ -116,6 +116,14 @@ class AgentOptions:
       ``None`` keeps their defaults, 30 s for a shell command and the
       executor's 60 s for Python. It needs a ``workspace_root``. The file
       tools keep the executor's limit, and provided tools their own.
+    - ``tool_env``: extra variables for the ``shell_exec`` and
+      ``python_exec`` children, with or without a ``workspace_root``. A
+      child does not inherit this process's environment: it gets ``PATH``,
+      ``HOME``, ``USER``, ``LOGNAME``, ``SHELL``, ``TERM``, ``LANG``, every
+      ``LC_*`` variable and ``TMPDIR``, then this mapping on top. So an API
+      key in the agent's environment reaches no tool; ``VIRTUAL_ENV``,
+      ``PYTHONPATH``, ``SSH_AUTH_SOCK`` and the proxy variables pass only
+      when this mapping names them.
     - ``reasoning``: how the run sends a reply's reasoning back.
       ``"legacy"``, the default, keeps the behavior before this option: an
       OpenAI-compatible provider sends none, Ollama native sends its own
@@ -155,6 +163,7 @@ class AgentOptions:
     workspace_root: str | None = None
     record_answers: bool = False
     tool_timeout_s: float | None = None
+    tool_env: Mapping[str, str] | None = None
     reasoning: ReasoningMode = "legacy"
     replay_turns: int | None = None
     replay_scope: Literal["task", "window"] = "task"
@@ -225,6 +234,25 @@ class AgentOptions:
                 )
             if self.workspace_root is None:
                 raise ValueError("tool_timeout_s needs a workspace_root")
+
+        if self.tool_env is not None:
+            object.__setattr__(self, "tool_env", self._checked_env(self.tool_env))
+
+    @staticmethod
+    def _checked_env(value: object) -> dict[str, str]:
+        if not isinstance(value, Mapping):
+            raise ValueError(
+                f"tool_env must be None or a mapping of names to values, "
+                f"got {value!r}"
+            )
+        env: dict[str, str] = {}
+        for name, text in value.items():
+            if not isinstance(name, str) or not name or "=" in name or "\0" in name:
+                raise ValueError(f"tool_env has an invalid variable name {name!r}")
+            if not isinstance(text, str):
+                raise ValueError(f"tool_env[{name!r}] must be a str, got {text!r}")
+            env[name] = text
+        return env
 
     @staticmethod
     def _checked_builtins(value: object) -> frozenset[str]:
