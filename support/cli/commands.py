@@ -45,6 +45,8 @@ class Command:
 COMMANDS: Final[tuple[Command, ...]] = (
     Command("help", (), "[command]", "Show commands and keys", True),
     Command("new", ("clear",), "", "Start a new session", False),
+    Command("sessions", (), "[filter]", "Pick a session to resume", False),
+    Command("resume", (), "[id|title]", "Resume a session", False),
     Command("verbose", (), "[on|off]", "Toggle verbose rendering", True),
     Command("thinking", (), "[on|off]", "Toggle thinking excerpts", True),
     Command("expand", (), "[turn.call]", "Show a tool call's full output", True),

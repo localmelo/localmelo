@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Final, Literal
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.schema import Message
+from localmelo.support.config import gateway_workspace_problem
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import build_session_agent
@@ -542,18 +543,7 @@ class ConsoleSessions:
         settings = self._settings()
         gateway = getattr(settings, "gateway", None)
         raw = getattr(gateway, "workspace", "") if gateway is not None else ""
-        if (
-            isinstance(raw, str)
-            and raw
-            and (os.path.isabs(raw) or raw.startswith("~/"))
-            and not any(
-                ord(ch) < 0x20
-                or 0x7F <= ord(ch) <= 0x9F
-                or ch in (" ", " ")
-                or 0xD800 <= ord(ch) <= 0xDFFF
-                for ch in raw
-            )
-        ):
+        if gateway_workspace_problem(raw, allow_empty=False) is None:
             return os.path.expanduser(raw)
         return os.path.expanduser(DEFAULT_WORKSPACE)
 

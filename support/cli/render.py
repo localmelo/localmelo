@@ -53,7 +53,11 @@ from localmelo.support.sessions.display import (
     status_line,
     status_text,
 )
-from localmelo.support.sessions.store import StoredEvent
+from localmelo.support.sessions.store import (
+    SessionBusyError,
+    StoredEvent,
+    UnknownSessionError,
+)
 
 # Output lines a tool block shows under its header (20 with /verbose).
 BLOCK_LINES: Final = 3
@@ -240,7 +244,9 @@ def status_hint(
             "Rephrase the request, or /retry."
         )
     if status == "budget_exhausted":
-        return "/retry tries again."
+        return (
+            "/retry tries again, or quit and run melo -c --max-steps 60 for more steps."
+        )
     if status == "stuck":
         return "The model repeated itself; rephrase the request, or /retry."
     if status == "crashed":
@@ -355,6 +361,8 @@ class TurnRenderer:
     def on_event(self, stored: StoredEvent) -> None:
         """One stored event of the turn (the runner's ``on_event``)."""
         event = stored.event
+        if stored.turn is not None:
+            self._turn = stored.turn
         kind = event.get("type")
         data = event.get("data")
         if not isinstance(kind, str) or not isinstance(data, Mapping):
@@ -379,11 +387,12 @@ class TurnRenderer:
                     if message
                     else (type(error).__name__)
                 )
+                if isinstance(error, SessionBusyError | UnknownSessionError):
+                    text = message
+                else:
+                    text = f"The turn could not run: {text}"
                 self.out.print(
-                    Text(
-                        f"{self.symbols.failed} The turn could not run: {text}",
-                        style="error",
-                    )
+                    Text(f"{self.symbols.failed} {clean_output(text)}", style="error")
                 )
             elif result is not None and result.status == "cancelled":
                 self._print_unstarted()
@@ -684,8 +693,8 @@ class TurnRenderer:
             if hint:
                 self.out.print(Padding(Text(hint, style="muted"), (0, 0, 0, 2)))
 
-    def new_session(self) -> None:
-        """Forget this process's calls, progress facts and turn numbers (/new)."""
+    def clear_session(self) -> None:
+        """Forget calls, progress and numbering, retaining display preferences on resume."""
         self.tool_outputs = []
         self.progress = None
         self._turn = 0
@@ -698,6 +707,10 @@ class TurnRenderer:
         self._cancelled_pending = False
         self._tool_count = 0
         self._stop_cause = ""
+
+    def new_session(self) -> None:
+        """Start a new conversation with the default display preferences."""
+        self.clear_session()
         self.verbose = False
         self.thinking = True
 

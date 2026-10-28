@@ -22,6 +22,77 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   console's Content-Security-Policy on `/api` and baseline security headers
   on every response; and `melo --serve --allow-unconfigured` so the gateway
   can boot before a backend is configured ([#NN]).
+- `--workspace DIR` in direct mode: a task run keeps its file tools inside
+  the folder and starts `shell_exec` and `python_exec` there. Without the
+  flag a run keeps the current folder, exactly as before; `~` is expanded
+  and the path is resolved like the interactive UI's. `melo ""` and
+  `--serve` refuse it, and a path that is not a folder exits 2 with one
+  line ([#98]).
+- R6-lite's typed long-term store: `long_term.db` migrates in place to
+  `user_version` 1 with `kind`, `source`, `status`, `admitted_by`,
+  provenance, task/session ids, links and uses beside the text and vector,
+  plus a `decisions` table. A candidate is admitted only by a rehearsal
+  (restatement, a successful call it acted on, a cited note), a user
+  request or statement, or `--admit-on-outcome on` for the final digest;
+  the policy picks `NEW`, `UPDATE`, `RELATED`, `CONFLICT` or `IGNORE`, and
+  every stored text, provenance included, passes the candidate boundary and
+  `redact_secrets` (with its task text, paths and commands bounded). A long
+  entry's llm catalog line carries a bounded text snippet, a BM25 row is
+  exempt from the cosine floor, two items of one note stay two entries, a
+  restatement merges the new note's records and supersedes its candidate, a
+  newer file keeps a legacy run alive with one WARNING, a user signal needs
+  a declarative, non-meta sentence, `call me` is a profile, and the three
+  store modes accept and ignore model flags.
+  `--keep-decision-text` keeps a decision's text beside its hash, and the
+  `[memory]` table saves the outcome default. The `start` recall reads
+  active entries of other tasks of every kind, by cosine or BM25, with
+  `long:<entry id>` doc ids; `memory_stats` gains `admitted`, `written` and
+  `ignored`, and a `memory` event reports each decision. `melo-retrieve`
+  gains `--export-store`, `--export-decisions` and `--route` for the
+  bench. Legacy requests, JSON line, window, `tasks`/`steps` and search
+  order are unchanged; an existing `long_term.db` migrates with its rows
+  intact. ([#97])
+- Resume saved terminal chats with `melo -c`, `melo -r [ID|TITLE]`,
+  `/sessions [filter]` or `/resume [ID|TITLE]`. The inline picker filters
+  eligible chats by folder or across folders before the startup banner,
+  which names the chosen chat; the recap explains what
+  was restored with `[sessions] resume_mode = "pairs"` (default) or
+  `"window"`. Resuming keeps the current model/workspace and clears
+  approval grants, while retaining `/verbose` and `/thinking` preferences.
+  Changes in another terminal are reloaded before the
+  next turn; a busy or deleted session keeps the draft. `/retry` preserves
+  a resumed turn's typed text, `/expand` reads stored tool output across
+  event pages, and quitting prints a saved session's resume command.
+  Direct runs keep their legacy parsing and output ([#95]).
+- Recall in the loop: `--retriever auto|off|bm25|llm|embedding`,
+  `--recall-at`, `--recall-k`, `--recall-kinds`, `--recall-placement`,
+  `--recall-min-score` and `--retrieval-extra-body`, plus the `[retrieval]`
+  config table and the `recall` tool. The compress modes recall the task's
+  notes, drafts and thought chunks, and earlier tasks' long-term entries,
+  at `start`, `attempt` and `step`: a frozen boundary block on the task
+  query, one sticky block after a turn's tool results (or in its own user
+  message), and the model-requested tool. `auto` uses the embedding
+  retriever when configured and otherwise `llm` at `start`/`attempt` and
+  `bm25` at `step`/`tool`; every failure falls back to `bm25`. Blocks are
+  delimited, framed as data, checked by the candidate boundary and bounded
+  (9,500 per turn, 12,000 live, 4,000 boundary); the system prompt gains
+  one static data note. Each block is recorded once in
+  `llm_calls.recall_json` with its hits' `origin_task_ids`, and in the
+  `recall` event and `memory_stats.recall_log`. A step's query carries the
+  latest note's plan, what it found and its open questions and outcome, and
+  its candidates include a superseded note whose turn the window no longer
+  shows, so a later attempt's earlier thinking stays reachable; such a line
+  names its attempt and is marked `(superseded)`, and `recall_json` records
+  each hit's `stage`.
+  `memory_stats.recall_empty` counts a triggered recall that found nothing.
+  `history.db` is schema
+  version 2: a v1 file gains the `recall_json` column in the same
+  transaction, and the column is `NULL` in `legacy`. `legacy` keeps its
+  requests, JSON line, window and `tasks`/`steps` rows byte-identical; the
+  new flags, the block and the data note are off there (and `drop`/`replay`
+  recall only when a retriever is named). The JSON line gains
+  `config.retriever`/`retriever_effective`/`recall_*` and the recall
+  counters ([#94]).
 - Console session details over API v2, and the scheduler gate in front of
   a console turn: `GET /api/sessions/{id}/tools` lists each tool's source,
   whether it asks first and whether the session allows it, `/memory` the
@@ -437,6 +508,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A thought chunk recalled with `--recall-kinds thought` no longer replays
+  the reply that produced it: its alias stays with that step's turn, so
+  step recall and the `recall` tool return it only after the turn left the
+  window, as they already did for notes and drafts ([#96]).
 - The test suite no longer writes into the user's own `~/.cache/localmelo`:
   every test runs with `HOME` in a temporary directory, the defaults of the
   gateway's call log, the web workspace's memory and `config.toml` resolve
@@ -611,4 +686,8 @@ earlier milestones.
 [#91]: https://github.com/localmelo/localmelo/pull/91
 [#92]: https://github.com/localmelo/localmelo/pull/92
 [#89]: https://github.com/localmelo/localmelo/pull/89
+[#94]: https://github.com/localmelo/localmelo/pull/94
+[#95]: https://github.com/localmelo/localmelo/pull/95
+[#96]: https://github.com/localmelo/localmelo/pull/96
 [#90]: https://github.com/localmelo/localmelo/pull/90
+[#97]: https://github.com/localmelo/localmelo/pull/97

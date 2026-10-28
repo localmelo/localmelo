@@ -398,6 +398,9 @@ class LLMCallRecord:
     usage: dict[str, int] | None
     duration_s: float
     timestamp: float
+    # The recall records the request carried for the first time (R5), or
+    # None when it carried no new block. Serialized as ``recall_json``.
+    recall: Any | None = None
 
 
 @dataclass
@@ -528,3 +531,39 @@ class ReflectionDecision:
     repeat_risk: float = 0.0
     novelty: float = 0.0
     feasibility: float = 0.0
+
+
+# ── Long-term memory candidates (R6-lite) ──
+
+
+@dataclass(frozen=True)
+class CandidateItem:
+    """One item of a note or user message: its text and the records behind it."""
+
+    text: str
+    source_ids: tuple[str, ...] = ()
+
+
+@dataclass
+class MemoryCandidate:
+    """One document offered to long-term memory, before the write boundary.
+
+    ``candidate_id`` is the note id for a note and a fresh record id for a
+    user fact; ``items`` carries a note's found/decided items so the policy
+    routes each one, ``()`` routes the whole text. ``entry_id`` and
+    ``processed`` are the staged copy's bookkeeping: an unchanged candidate
+    that was already decided is not written twice.
+    """
+
+    candidate_id: str
+    source: str
+    text: str
+    remember_by: str
+    task_id: str
+    session_id: str = ""
+    provenance: dict[str, Any] = field(default_factory=dict)
+    created_at: float = 0.0
+    remember: bool = False
+    items: tuple[CandidateItem, ...] = ()
+    entry_id: int | None = None
+    processed: bool = False

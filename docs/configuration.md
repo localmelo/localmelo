@@ -167,11 +167,19 @@ tables of the chosen backends.
 | `reasoning` | `[agent]` | `"legacy"` | `legacy`, `drop`, `replay`, `compress` or `compress+replay`; the default is direct mode's `--reasoning`. See [Reasoning](#reasoning). |
 | `replay_turns` | `[agent]` | not set | With `replay` or `compress+replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
 | `note_writer` | `[agent]` | `"auto"` | In the compress modes, `auto` (the model's `<note>`, else the heuristic) or `heuristic`. |
+| `retriever` | `[retrieval]` | `"auto"` | `auto`, `off`, `bm25`, `llm` or `embedding`: how recall ranks documents. See [Recall in the loop](memory.md#recall-in-the-loop). |
+| `recall_at` | `[retrieval]` | not set | A list of `start`, `attempt`, `step` and `tool`. Omit for `start`, `attempt` and `step`; `tool` is never on unless named. |
+| `k` | `[retrieval]` | `3` | Task-local hits per recall, from 1 to 10. |
+| `kinds` | `[retrieval]` | not set | A list of `note`, `draft`, `thought`, `digest`, `reflection` and `long`. Omit for all but `thought`. |
+| `placement` | `[retrieval]` | `"tool"` | `tool` (append to the last tool result) or `message` (its own user message). `message` is refused in `replay` and `compress+replay`. |
+| `min_score` | `[retrieval]` | `0.35` | The cosine floor for embedding and long-term cosine hits, from 0 to 1. Inert for the task-local `bm25` and `llm` ranking and for a long-term row that only BM25 scored. |
+| `admit_on_outcome` | `[memory]` | `false` | R6-lite: admit only the final attempt digest at the run's end, with the terminal status in its provenance. The `--admit-on-outcome` flag wins for one run; direct mode applies the table, the interactive UI and the gateway do not read it, and it is accepted and inert in `legacy`. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. |
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
 | `host` | `[gateway]` | `"127.0.0.1"` | The address the gateway listens on: keep `127.0.0.1`, or use `localhost` or `::1`. On a host that is not `localhost` or a loopback IP address, such as `0.0.0.0`, the gateway does not check the `Host` and `Origin` of requests; see [Keep the gateway private](gateway.md#keep-the-gateway-private). |
 | `port` | `[gateway]` | `8401` | The port the gateway listens on. |
 | `workspace` | `[gateway]` | `""` | The default workspace folder for web console sessions (`~/localmelo-workspace` when empty); written only when set. |
+| `resume_mode` | `[sessions]` | `"pairs"` | Terminal conversation restoration: `pairs` loads recent user/answer pairs; `window` loads the saved working window plus later pairs, falling back when no checkpoint is usable. Invalid values warn/fall back only in the UI; direct runs do not consume this setting. |
 | `policy` | `[scheduler]` | `"off"` | How the web workspace's calls reach the model server: `off` records only, `fcfs` admits first come and `class` admits P1 before P2 (and so on); see [Scheduler](scheduler.md#the-gate-on-chats-s2). |
 | `n_srv` | `[scheduler]` | `8` | The model server's slots. |
 | `r_f` | `[scheduler]` | `1` | Slots kept for the CLI and direct runs; forced to 0 when `n_srv <= 2`. |
@@ -181,6 +189,12 @@ tables of the chosen backends.
 | `gpu_lock_file` | `[scheduler]` | `""` | The shared GPU lock to read; empty means no lock reader. The battery reader is always on in the gateway. |
 | `lock_self` | `[scheduler]` | `""` | This bench's own holder: the exact `holder:` value, or `holder:run` when the lock carries a `run:` line. Matching is exact and case-sensitive. |
 | `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](scheduler.md#the-gpu-lock-and-the-battery-s2b). |
+
+A `[memory]` table that is all defaults is not written. Its one key,
+`admit_on_outcome`, must be a bool; any other value is a configuration error
+(exit 1). It is accepted and inert in `legacy`. The `--keep-decision-text`
+switch is flag-only, because it writes potentially personal text to the
+store and a saved default would be a privacy footgun.
 
 A `[scheduler]` table that is all defaults is not written, and unknown
 scheduler keys are dropped, so a config file without such a table keeps its
@@ -205,8 +219,9 @@ reply's note and drafts in working memory; `compress+replay` does both. A
 backend with `requires_reasoning_replay = true` runs `compress` as
 `compress+replay`. Every explicit mode also stops reading `[RECALL]` and
 removes an inline `<think>` block from the answer, and stops writing the
-raw step summary to long-term memory. The compress modes recall nothing
-yet; see [Reasoning notes](memory.md#reasoning-notes).
+raw step summary to long-term memory. The compress modes recall notes,
+drafts and earlier thinking by default; see
+[Recall in the loop](memory.md#recall-in-the-loop).
 
 ```toml
 [agent]
@@ -214,6 +229,24 @@ reasoning = "replay"      # legacy, drop, replay, compress, compress+replay
 replay_turns = 3          # optional; omit for every turn
 note_writer = "auto"      # optional: auto or heuristic
 ```
+
+`[retrieval]` sets recall's defaults; a direct-mode flag wins over it, and
+the table is accepted and inert in `legacy`. A value outside its range (an
+unknown retriever or name, `k` outside 1-10, `min_score` outside 0-1) is a
+configuration error, exit 1 with one line.
+
+```toml
+[retrieval]
+retriever = "auto"        # auto, off, bm25, llm or embedding
+recall_at = ["start", "attempt", "step"]
+k = 3                     # 1-10
+kinds = ["note", "draft"] # omit for all but thought
+placement = "tool"        # tool or message
+min_score = 0.35          # 0-1
+```
+
+`save` writes the table only when a value differs from its default, so an
+existing config file is unchanged.
 
 A direct-mode flag wins over `[agent]`, and a `--base-url` run uses only the
 flags (it does not read this file). The interactive UI and the gateway do

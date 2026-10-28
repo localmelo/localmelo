@@ -76,15 +76,30 @@ BASE_OPTIONS = [
 
 # Options added after R1, each by a stage whose spec calls for it: P3's
 # progress line (progress_spec.md section 11, "New flags only"), U2a.1's
-# interactive UI (u2_spec.md section 1, "Flags"), R4's note writer
-# (r4_spec.md Requirement 12) and U3 PR 4's unconfigured gateway boot
-# (app_spec.md "The lead's decisions" item 3).
+# interactive UI and U2b's session selection (u2_spec.md section 1, "Flags"),
+# R4's note writer (r4_spec.md Requirement 12), R5's recall flags, R6-lite's
+# admission flags, and U3 PR 4's unconfigured gateway boot (app_spec.md
+# "The lead's decisions" item 3). P5 moved --workspace from the interactive
+# UI to direct mode; the list is the same.
 LATER_OPTIONS = [
     "--progress",
     "--routine",
     "--workspace",
     "--yolo",
+    "-c",
+    "--continue",
+    "-r",
+    "--resume",
     "--note-writer",
+    "--retriever",
+    "--recall-at",
+    "--recall-k",
+    "--recall-kinds",
+    "--recall-placement",
+    "--recall-min-score",
+    "--retrieval-extra-body",
+    "--admit-on-outcome",
+    "--keep-decision-text",
     "--allow-unconfigured",
 ]
 
@@ -310,5 +325,17 @@ def test_no_new_flag_and_the_same_exit_codes() -> None:
     """R1 adds no flag: the options are R1's base and those of later stages."""
     assert sorted(cli._build_parser()._option_string_actions) == sorted(
         BASE_OPTIONS + LATER_OPTIONS
+    )
+    ui_or_help = {
+        "--yolo",
+        "-c",
+        "--continue",
+        "-r",
+        "--resume",
+        "--help",
+        "-h",
+    }
+    assert set(cli._build_parser(direct_only=True)._option_string_actions) == (
+        set(BASE_OPTIONS + LATER_OPTIONS) - ui_or_help
     )
     assert (cli.EXIT_COMPLETED, cli.EXIT_CRASHED, cli.EXIT_NOT_COMPLETED) == (0, 1, 2)

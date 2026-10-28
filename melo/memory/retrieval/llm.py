@@ -229,10 +229,17 @@ def _catalog(docs: Sequence[Doc]) -> list[tuple[str, Doc, str]]:
     are appended the cut point moves only when m does.
     """
     counts: dict[str, int] = {}
+    used: set[str] = set()
     entries: list[tuple[str, Doc, str]] = []
     for doc in docs:
-        counts[doc.kind] = counts.get(doc.kind, 0) + 1
-        alias = f"{_KIND_LETTERS[doc.kind]}{counts[doc.kind]}"
+        alias = _declared_alias(doc, used)
+        if alias is None:
+            counts[doc.kind] = counts.get(doc.kind, 0) + 1
+            alias = f"{_KIND_LETTERS[doc.kind]}{counts[doc.kind]}"
+            while alias in used:
+                counts[doc.kind] += 1
+                alias = f"{_KIND_LETTERS[doc.kind]}{counts[doc.kind]}"
+        used.add(alias)
         entries.append((alias, doc, _entry_line(alias, doc) + "\n"))
     total = sum(len(line) for _alias, _doc, line in entries)
     if total <= CATALOG_CHARS:
@@ -247,12 +254,23 @@ def _catalog(docs: Sequence[Doc]) -> list[tuple[str, Doc, str]]:
     return entries[first:]
 
 
+def _declared_alias(doc: Doc, used: set[str]) -> str | None:
+    """``doc.meta["alias"]`` when it is a unique non-empty string, else ``None``."""
+    alias = doc.meta.get("alias")
+    if isinstance(alias, str) and alias and alias not in used:
+        return alias
+    return None
+
+
 def _entry_line(alias: str, doc: Doc) -> str:
     """``[<alias>] <label> · step <n> · <title>``, shortened to fit.
 
     The step part appears when ``meta["step"]`` is a positive int. The
     title is ``doc.title``, else the text's first non-blank line, with
-    whitespace collapsed.
+    whitespace collapsed. A long entry's title is only its date, so its
+    line also carries the text's first non-blank line (T53R finding 1):
+    without it the llm retriever's catalog names no fact to select, and
+    the default ``auto`` start leg finds nothing when no embedding exists.
     """
     parts = [f"[{alias}] {_KIND_LABELS[doc.kind]}"]
     step = int_step(doc.meta)
@@ -261,6 +279,10 @@ def _entry_line(alias: str, doc: Doc) -> str:
     title = _collapse(doc.title) or _collapse(_first_nonblank_line(doc.text))
     if title:
         parts.append(title)
+    if doc.kind == "long":
+        snippet = _collapse(_first_nonblank_line(doc.text))
+        if snippet and snippet != title:
+            parts.append(snippet)
     return _shorten(" · ".join(parts), CATALOG_ENTRY_CHARS)
 
 

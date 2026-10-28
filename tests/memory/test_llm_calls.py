@@ -1,4 +1,4 @@
-"""History schema version 1 and its ``llm_calls`` table (R1).
+"""History schema version 2 and its ``llm_calls`` table (R1, R5).
 
 Every database lives under ``tmp_path``. A file "written before R1" (version
 0) is made with ``sqlite3`` and the unchanged ``_SCHEMA``, as an older
@@ -67,6 +67,7 @@ LLM_CALLS_COLUMNS = [
     (12, "usage_json", "TEXT", 0, None, 0),
     (13, "duration_s", "REAL", 0, None, 0),
     (14, "timestamp", "REAL", 1, None, 0),
+    (15, "recall_json", "TEXT", 0, None, 0),
 ]
 
 
@@ -95,6 +96,11 @@ def _tables(path: Path) -> set[str]:
 def _rows(path: Path, table: str) -> list[tuple[Any, ...]]:
     with _connect(path) as connection:
         return connection.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+
+
+def _row_without_recall(row: tuple[Any, ...]) -> tuple[Any, ...]:
+    """A row of ``llm_calls`` before R5's ``recall_json`` column."""
+    return row[:-1]
 
 
 def _write_v0(path: Path) -> None:
@@ -151,14 +157,14 @@ def _migration_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
     ]
 
 
-# ── Schema version 1 ────────────────────────────────────────────────────────
+# ── Schema version 2 ────────────────────────────────────────────────────────
 
 
-async def test_a_new_file_is_at_version_1_with_the_table(tmp_path: Path) -> None:
+async def test_a_new_file_is_at_version_2_with_the_table(tmp_path: Path) -> None:
     path = tmp_path / "history.db"
     await _open(path)
-    assert HISTORY_SCHEMA_VERSION == 1
-    assert _user_version(path) == 1
+    assert HISTORY_SCHEMA_VERSION == 2
+    assert _user_version(path) == 2
     with _connect(path) as connection:
         columns = connection.execute("PRAGMA table_info(llm_calls)").fetchall()
         stored = dict(
@@ -201,13 +207,13 @@ async def test_a_v0_file_is_migrated_with_its_rows(
 
     await _open(path)
 
-    assert _user_version(path) == 1
+    assert _user_version(path) == 2
     assert (_rows(path, "tasks"), _rows(path, "steps")) == (tasks, steps)
     assert _rows(path, "llm_calls") == []
-    assert _migration_lines(caplog) == [f"Migrated {path} to history schema version 1"]
+    assert _migration_lines(caplog) == [f"Migrated {path} to history schema version 2"]
 
 
-async def test_reopening_a_v1_file_changes_nothing_and_logs_nothing(
+async def test_reopening_a_v2_file_changes_nothing_and_logs_nothing(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     path = tmp_path / "history.db"
@@ -219,28 +225,70 @@ async def test_reopening_a_v1_file_changes_nothing_and_logs_nothing(
 
     await _open(path)
 
-    assert _user_version(path) == 1
+    assert _user_version(path) == 2
     assert {table: _rows(path, table) for table in before} == before
     assert [r for r in caplog.records if r.name == HISTORY_LOGGER] == []
 
 
 async def test_a_half_migrated_file_keeps_its_row(tmp_path: Path) -> None:
-    # The table and a row, but version 0.
+    # The table and a row, but version 1.
     path = tmp_path / "history.db"
     await _open(path)
     _add_call_row(path)
     with _connect(path) as connection:
-        connection.execute("PRAGMA user_version = 0")
+        connection.execute("PRAGMA user_version = 1")
         connection.commit()
-    row = _rows(path, "llm_calls")
+    row = [r[:-1] for r in _rows(path, "llm_calls")]
 
     await _open(path)
 
-    assert _user_version(path) == 1
-    assert _rows(path, "llm_calls") == row
+    assert _user_version(path) == 2
+    # The new last column is NULL on the row that was there before.
+    assert [_row_without_recall(r) for r in _rows(path, "llm_calls")] == row
 
 
-async def test_a_v1_file_without_the_table_gets_it_back(tmp_path: Path) -> None:
+_V1_LLM_CALLS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS llm_calls (
+  task_id TEXT NOT NULL, seq INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  step INTEGER, attempt INTEGER,
+  outcome TEXT NOT NULL,
+  content TEXT NOT NULL DEFAULT '', thinking TEXT NOT NULL DEFAULT '',
+  reasoning_key TEXT NOT NULL DEFAULT '',
+  step_ids_json TEXT,
+  redactions INTEGER NOT NULL DEFAULT 0,
+  tool_calls_json TEXT, usage_json TEXT, duration_s REAL, timestamp REAL NOT NULL,
+  PRIMARY KEY (task_id, seq));
+"""
+
+
+async def test_a_v1_file_is_migrated_to_v2_with_its_rows(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    path = tmp_path / "history.db"
+    with _connect(path) as connection:
+        connection.executescript(_SCHEMA)
+        connection.execute(_V1_LLM_CALLS_SCHEMA)
+        connection.execute(
+            """INSERT INTO llm_calls (task_id, seq, kind, outcome, content, timestamp)
+               VALUES ('t1', 0, 'plan', 'answer', 'done', 1.0)"""
+        )
+        connection.execute("PRAGMA user_version = 1")
+        connection.commit()
+    before = _rows(path, "llm_calls")
+    caplog.set_level(logging.INFO, logger=HISTORY_LOGGER)
+
+    await _open(path)
+
+    assert _user_version(path) == 2
+    assert [_row_without_recall(r) for r in _rows(path, "llm_calls")] == before
+    with _connect(path) as connection:
+        columns = connection.execute("PRAGMA table_info(llm_calls)").fetchall()
+    assert columns == LLM_CALLS_COLUMNS
+    assert _migration_lines(caplog) == [f"Migrated {path} to history schema version 2"]
+
+
+async def test_a_v2_file_without_the_table_gets_it_back(tmp_path: Path) -> None:
     path = tmp_path / "history.db"
     await _open(path)
     with _connect(path) as connection:
@@ -250,8 +298,11 @@ async def test_a_v1_file_without_the_table_gets_it_back(tmp_path: Path) -> None:
 
     await _open(path)
 
-    assert _user_version(path) == 1
+    assert _user_version(path) == 2
     assert "llm_calls" in _tables(path)
+    with _connect(path) as connection:
+        columns = connection.execute("PRAGMA table_info(llm_calls)").fetchall()
+    assert columns == LLM_CALLS_COLUMNS
 
 
 async def test_two_openers_of_a_v0_file_migrate_it_once(
@@ -263,22 +314,22 @@ async def test_two_openers_of_a_v0_file_migrate_it_once(
 
     await asyncio.gather(_open(path), _open(path))
 
-    assert _user_version(path) == 1
+    assert _user_version(path) == 2
     assert len(_migration_lines(caplog)) == 1
 
 
-def _write_v2(path: Path) -> None:
+def _write_v3(path: Path) -> None:
     with _connect(path) as connection:
         connection.executescript(_SCHEMA)
-        connection.execute("PRAGMA user_version = 2")
+        connection.execute("PRAGMA user_version = 3")
         connection.commit()
 
 
 async def test_a_newer_file_is_refused_at_every_call(tmp_path: Path) -> None:
     path = tmp_path / "history.db"
-    _write_v2(path)
+    _write_v3(path)
     history = SqliteHistory(path)
-    message = f"{path} has schema version 2; this localmelo reads version 1"
+    message = f"{path} has schema version 3; this localmelo reads version 2"
     try:
         with pytest.raises(HistorySchemaError) as first:
             await history.save_task(TaskRecord(query="q", task_id="t1"))
@@ -290,7 +341,7 @@ async def test_a_newer_file_is_refused_at_every_call(tmp_path: Path) -> None:
     finally:
         await history.aclose()
     assert isinstance(first.value, RuntimeError)
-    assert _user_version(path) == 2
+    assert _user_version(path) == 3
     assert _rows(path, "tasks") == []
     assert _rows(path, "steps") == []
     assert "llm_calls" not in _tables(path)
@@ -300,7 +351,7 @@ async def test_a_failed_open_closes_its_connection(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = tmp_path / "history.db"
-    _write_v2(path)
+    _write_v3(path)
     opened: list[aiosqlite.Connection] = []
     connect = aiosqlite.connect
 
@@ -338,7 +389,7 @@ async def test_a_run_on_a_newer_file_ends_crashed(tmp_path: Path) -> None:
     memory_dir = tmp_path / "memory"
     memory_dir.mkdir()
     path = memory_dir / "history.db"
-    _write_v2(path)
+    _write_v3(path)
     agent = Agent(
         llm=_FakeLLM([Message(role="assistant", content="42")]),
         options=AgentOptions(memory_dir=str(memory_dir)),
@@ -349,8 +400,8 @@ async def test_a_run_on_a_newer_file_ends_crashed(tmp_path: Path) -> None:
         await agent.close()
     assert result.status == "crashed"
     assert result.error == (
-        f"HistorySchemaError: {path} has schema version 2; "
-        "this localmelo reads version 1"
+        f"HistorySchemaError: {path} has schema version 3; "
+        "this localmelo reads version 2"
     )
     assert _rows(path, "tasks") == []
 
@@ -421,7 +472,7 @@ async def test_an_existing_long_term_file_keeps_its_mode(tmp_path: Path) -> None
     assert _mode(path) == 0o644
 
 
-async def test_eight_openers_of_a_missing_file_make_one_private_v1_file(
+async def test_eight_openers_of_a_missing_file_make_one_private_v2_file(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     path = tmp_path / "history.db"
@@ -430,7 +481,7 @@ async def test_eight_openers_of_a_missing_file_make_one_private_v1_file(
         await asyncio.gather(*(_open(path) for _ in range(8)))
     assert sorted(p.name for p in tmp_path.iterdir()) == ["history.db"]
     assert _mode(path) == 0o600
-    assert _user_version(path) == 1
+    assert _user_version(path) == 2
     assert "llm_calls" in _tables(path)
     assert len(_migration_lines(caplog)) == 1
 
@@ -754,7 +805,9 @@ async def test_rows_round_trip_every_column(tmp_path: Path) -> None:
     path = tmp_path / "history.db"
     history = SqliteHistory(path, clock=lambda: 0.0)
     try:
-        await history.add_llm_call(_record(0))
+        await history.add_llm_call(
+            _record(0, recall=[{"trigger": "step", "chars": 12, "hits": []}])
+        )
         await history.add_llm_call(
             _record(
                 1,
@@ -799,6 +852,7 @@ async def test_rows_round_trip_every_column(tmp_path: Path) -> None:
             ),
             "duration_s": 1.25,
             "timestamp": 1761200000.5,
+            "recall_json": '[{"trigger": "step", "chars": 12, "hits": []}]',
         },
         {
             "task_id": "t1",
@@ -816,6 +870,7 @@ async def test_rows_round_trip_every_column(tmp_path: Path) -> None:
             "usage_json": None,
             "duration_s": 1.25,
             "timestamp": 1761200000.5,
+            "recall_json": None,
         },
     ]
 
@@ -826,7 +881,9 @@ async def test_linking_again_with_the_same_ids_keeps_the_value(
     path = tmp_path / "history.db"
     history = SqliteHistory(path, clock=lambda: 0.0)
     try:
-        await history.add_llm_call(_record(0))
+        await history.add_llm_call(
+            _record(0, recall=[{"trigger": "step", "chars": 12, "hits": []}])
+        )
         await history.link_llm_call_steps("t1", 0, ("s1", "s2"))
         first = _call_rows(path)
         await history.link_llm_call_steps("t1", 0, ("s1", "s2"))
@@ -937,4 +994,4 @@ async def test_a_refused_fchmod_still_opens_the_history(
         await _open(path)
     # Created with 0600 less the umask: no group or other bit.
     assert _mode(path) == 0o600
-    assert _user_version(path) == 1
+    assert _user_version(path) == 2

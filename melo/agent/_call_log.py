@@ -12,7 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Mapping, Sequence
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.schema import LLMCallRecord, Message
@@ -99,6 +99,7 @@ class CallLog:
         usage: Mapping[str, int] | None,
         duration_s: float,
         timestamp: float,
+        recall: Sequence[Any] | None = None,
     ) -> None:
         """Write *response*, of call kind *kind*, as the run's next row.
 
@@ -132,6 +133,7 @@ class CallLog:
                 usage=None if usage is None else dict(usage),
                 duration_s=duration_s,
                 timestamp=timestamp,
+                recall=None if recall is None else list(recall),
             )
             await self._history.add_llm_call(record)
         except asyncio.CancelledError as exc:

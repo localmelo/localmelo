@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Final
@@ -10,10 +11,30 @@ from typing import Final
 from rich.console import Group, RenderableType
 from rich.text import Text
 
-from localmelo.melo.schema import ToolInfo
-from localmelo.support.cli.text import cells, pad_cells, wrap_words
-from localmelo.support.cli.theme import Symbols
-from localmelo.support.sessions.display import clean_output, home_label
+from localmelo.melo.schema import (
+    INTERRUPT_LABEL,
+    NO_ANSWER_LABEL,
+    ToolInfo,
+    split_thinking,
+)
+from localmelo.support.cli.text import (
+    cells,
+    cut_cells,
+    expand_tabs,
+    pad_cells,
+    wrap_words,
+)
+from localmelo.support.cli.theme import Symbols, in_symbols
+from localmelo.support.sessions.attachments import parse_user_text
+from localmelo.support.sessions.display import (
+    clean_output,
+    home_label,
+    resume_note,
+    session_age,
+    status_text,
+)
+from localmelo.support.sessions.runner import ResumeInfo
+from localmelo.support.sessions.store import SessionInfo, TurnInfo
 
 # Narrower than this, the banner's rows print without the box.
 BOX_MIN_COLUMNS: Final = 50
@@ -119,6 +140,7 @@ def banner(
     yolo: bool,
     width: int,
     symbols: Symbols,
+    session_title: str | None = None,
 ) -> RenderableType:
     """The startup banner: a box of rows, its warnings and the key hints."""
     rows: list[tuple[str, str, str]] = []
@@ -130,7 +152,15 @@ def banner(
         ("workspace", clean_output(home_label(workspace)), ""),
         ("tools", tools_text(tools), ""),
         ("memory", memory_text(backend, memory=memory), ""),
-        ("session", "new", ""),
+        (
+            "session",
+            (
+                f'"{clean_output(session_title)}" (resumed)'
+                if session_title is not None
+                else "new"
+            ),
+            "",
+        ),
     ]
     # The rows join their parts with " · ": the symbol set's dot.
     rows = [
@@ -175,3 +205,53 @@ def banner(
     lines.append(Text(f"  / commands {dot} esc stop {dot} ctrl+d quit", style="muted"))
     lines.append(Text(""))
     return Group(*lines)
+
+
+def resume_recap(
+    info: SessionInfo,
+    turns: Sequence[TurnInfo],
+    loaded: ResumeInfo,
+    *,
+    width: int,
+    symbols: Symbols,
+) -> Text:
+    """A short, plain recap from stored redacted copies, never a live event replay."""
+    finished = [t for t in turns if not t.undone and t.status != "running"]
+    lines = [
+        f'◆ Resumed "{info.title}" · {info.turns} turn{"s" if info.turns != 1 else ""} · last active {session_age(info.updated_at, time.time())}',
+    ]
+    lines.extend(
+        "  " + line
+        for line in wrap_words(
+            resume_note(loaded.mode, loaded.turns, loaded.checkpoint_turns),
+            max(1, width - 2),
+        )
+    )
+    if len(finished) > 3:
+        lines.append(f"  … {len(finished) - 3} earlier turns")
+    for turn in finished[-3:]:
+        typed, attachments = parse_user_text(turn.user_text)
+        typed = turn.typed_text or typed
+        lines.extend("  › " + text for text in clean_output(typed).splitlines()[:2])
+        lines.extend(
+            f"    └ attached {a.name} ({a.chars:,} chars)" for a in attachments
+        )
+        answer = split_thinking(turn.answer)[1]
+        mark = symbols.assistant
+        if not answer.strip() or answer in (
+            INTERRUPT_LABEL,
+            NO_ANSWER_LABEL.format(status=turn.status),
+        ):
+            mark = symbols.stopped if turn.status == "cancelled" else symbols.failed
+            answer = status_text(turn.status, turn.cause).title + " (no answer)"
+        lines.extend(
+            f"  {mark} " + text for text in clean_output(answer).splitlines()[:4]
+        )
+    return Text(
+        "\n".join(
+            cut_cells(
+                expand_tabs(clean_output(in_symbols(line, symbols))), max(1, width)
+            )
+            for line in lines
+        )
+    )

@@ -86,7 +86,7 @@ def _write_v0(path: Path) -> None:
 def _check(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
     assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
     return connection
 
 
@@ -144,3 +144,134 @@ def test_a_killed_writer_leaves_every_committed_row(tmp_path: Path) -> None:
     # Every row the child saw committed reads back; a later one may too.
     assert seqs[: len(committed)] == committed
     assert seqs == list(range(len(seqs)))
+
+
+# ── The typed long store's slice (R6-lite) ──
+
+
+def test_twenty_sessions_migrate_once_and_read_the_same_store(tmp_path: Path) -> None:
+    import asyncio
+
+    from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+
+    path = tmp_path / "long_term.db"
+
+    async def run() -> None:
+        first = SqliteLongTerm(path)
+        await first.apply(
+            text="I live in Berlin near the river and work at Acme",
+            kind="profile",
+            source="user",
+            admitted_by="user_statement",
+            provenance={"source_ids": ["r1"]},
+            task_id="t1",
+            session_id="",
+            created_at=1.0,
+            embedding=None,
+            action="NEW",
+            target_id=None,
+            reason="new",
+            source_ids=["r1"],
+            keep_text=False,
+            candidate_id="c1",
+        )
+        await first.aclose()
+        for _session in range(20):
+            store = SqliteLongTerm(path)
+            try:
+                entries = await store.active_entries()
+                decisions = await store.decisions()
+                assert len(entries) == 1
+                assert len(decisions) == 1
+            finally:
+                await store.aclose()
+
+    asyncio.run(run())
+    with sqlite3.connect(path) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+
+
+def test_repeated_identical_facts_do_not_grow_the_store(tmp_path: Path) -> None:
+    import asyncio
+
+    from localmelo.melo.memory.hippo import decide
+    from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+
+    path = tmp_path / "long_term.db"
+    text = "the deployment checklist is owned by Alice"
+
+    async def run() -> None:
+        store = SqliteLongTerm(path)
+        try:
+            for session in range(20):
+                active = list(await store.active_entries("episodic"))
+                decision = decide(
+                    text,
+                    kind="episodic",
+                    source="reasoning_note",
+                    provenance={"task_text": "the release"},
+                    active=active,
+                )
+                await store.apply(
+                    text=text,
+                    kind="episodic",
+                    source="reasoning_note",
+                    admitted_by="rehearsal",
+                    provenance={"task_text": "the release", "source_ids": []},
+                    task_id=f"t{session}",
+                    session_id="",
+                    created_at=float(session + 1),
+                    embedding=None,
+                    action=decision.action,
+                    target_id=decision.target_id,
+                    reason=decision.reason,
+                    source_ids=[],
+                    keep_text=False,
+                    candidate_id=f"c{session}",
+                )
+            assert len(await store.active_entries()) == 1
+            assert len(await store.decisions()) == 20
+        finally:
+            await store.aclose()
+
+    asyncio.run(run())
+
+
+def test_a_forgotten_task_leaves_no_row_behind_on_restart(tmp_path: Path) -> None:
+    import asyncio
+
+    from localmelo.melo.memory.long.sqlite import SqliteLongTerm
+
+    path = tmp_path / "long_term.db"
+
+    async def run() -> None:
+        store = SqliteLongTerm(path)
+        try:
+            await store.apply(
+                text="I live in Berlin near the river and work at Acme",
+                kind="profile",
+                source="user",
+                admitted_by="user_statement",
+                provenance={"source_ids": []},
+                task_id="t1",
+                session_id="",
+                created_at=1.0,
+                embedding=None,
+                action="NEW",
+                target_id=None,
+                reason="new",
+                source_ids=[],
+                keep_text=False,
+                candidate_id="c1",
+            )
+            await store.forget("t1")
+        finally:
+            await store.aclose()
+        reopened = SqliteLongTerm(path)
+        try:
+            assert await reopened.active_entries() == []
+            assert await reopened.decisions() == []
+        finally:
+            await reopened.aclose()
+
+    asyncio.run(run())

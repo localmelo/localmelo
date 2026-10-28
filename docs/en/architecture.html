@@ -361,8 +361,10 @@
         <p>
           The four built-in tools are <code>shell_exec</code>,
           <code>python_exec</code>, <code>file_read</code> and
-          <code>file_write</code>. Direct mode and the gateway give them no
-          workspace root, so file tools reach any file you can. In the Python
+          <code>file_write</code>. Direct mode gives them no
+          workspace root, and the gateway never does, so file tools reach any
+          file you can; a direct run's <code>--workspace DIR</code> sets the
+          same root as the Python API below. In the Python
           API, <code>AgentOptions(workspace_root=…)</code> turns
           <code>policy.py</code> on: the file tools then reach only files
           inside the root, and <code>shell_exec</code> and

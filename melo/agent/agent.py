@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import copy
 import dataclasses
 import functools
@@ -38,6 +39,7 @@ from localmelo.melo.agent.options import (
     AgentOptions,
     ReflectionGate,
     reasoning_refusal,
+    retrieval_refusal,
 )
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
@@ -46,6 +48,7 @@ from localmelo.melo.checker.payloads import (
     MemoryWritePayload,
     ToolResolutionResult,
 )
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
 from localmelo.melo.contracts.approvals import (
@@ -69,23 +72,35 @@ from localmelo.melo.executor import (
 )
 from localmelo.melo.executor.models import ExecutionRequest
 from localmelo.melo.memory.coordinator import Hippo
+from localmelo.melo.memory.hippo import (
+    KINDS,
+    SIGNALS,
+    MemoryDecision,
+    classify_user_text,
+    user_candidates,
+)
 from localmelo.melo.memory.notes import (
     NOTE_MAX_DECIDED,
     NOTE_MAX_FOUND,
     NOTE_SHOWN_CHARS,
     Draft,
     ReasoningNote,
+    candidate_items,
+    candidate_text,
     digest_note,
     draft_title,
     extract_draft,
     mark_drafts_written,
     note_from_reply,
+    note_title,
     path_spans,
+    reflection_candidate_text,
     render_digest,
     render_draft_block,
     render_note,
     same_path,
     split_note,
+    thought_chunks,
 )
 from localmelo.melo.memory.procedures.normalize import (
     RoutineKey,
@@ -102,6 +117,37 @@ from localmelo.melo.memory.procedures.tracker import (
     progress_state,
     shown_view,
 )
+from localmelo.melo.memory.recall import (
+    DEFAULT_TRIGGERS,
+    LONG_POOL,
+    RECALL_BOUNDARY_CHARS,
+    RECALL_DATA_NOTE,
+    RECALL_END,
+    RECALL_K_MAX,
+    RECALL_LIVE_CHARS,
+    RECALL_LONG_K,
+    RECALL_THOUGHT_PER_TASK,
+    RECALL_TOOL_DEF,
+    RECALL_TOOL_TIMEOUT_S,
+    RECALL_TURN_CHARS,
+    RecallHit,
+    RecallRecord,
+    build_attempt_query,
+    build_start_query,
+    build_step_query,
+    compact_record,
+    default_kinds,
+    docs_from_entries,
+    docs_from_notes,
+    fit_recall_block,
+    hit_from_doc,
+    recall_span_chars,
+    recall_spans,
+    record_to_dict,
+    resolve_plan,
+)
+from localmelo.melo.memory.retrieval import build_retriever
+from localmelo.melo.memory.retrieval.base import Doc, RetrievalResult, Retriever
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.memory.short.note_store import NoteStoreEntry
 from localmelo.melo.schema import (
@@ -113,7 +159,9 @@ from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
+    CandidateItem,
     ImagePart,
+    MemoryCandidate,
     Message,
     ReflectionDecision,
     ReflectionEntry,
@@ -276,16 +324,32 @@ def _find_reflection(text: str) -> dict[str, Any] | None:
     return None
 
 
-def _as_planned(window: list[Message], query: str) -> list[Message]:
+def _as_planned(
+    window: list[Message], query: str, query_block: str = ""
+) -> list[Message]:
     """*window* as a planning request carries it, for size checks.
 
     That is with the task *query* in front once the window no longer holds
     it, as :meth:`Chat.plan_step` puts it back (see
-    :func:`~localmelo.melo.agent._chat.lacks_task_query`).
+    :func:`~localmelo.melo.agent._chat.lacks_task_query`). *query_block*,
+    the attempt's boundary recall block, rides on that query message, in
+    the request copy only.
     """
+    text = f"{query}\n\n{query_block}" if query_block else query
     if lacks_task_query(window, query):
-        return [Message(role="user", content=query), *window]
-    return window
+        return [Message(role="user", content=text), *window]
+    if not query_block:
+        return window
+    out = list(window)
+    matches = [
+        index
+        for index, message in enumerate(out)
+        if message.role == "user" and message.content == query
+    ]
+    if matches:
+        index = matches[-1]
+        out[index] = dataclasses.replace(out[index], content=text)
+    return out
 
 
 def _split_inline_reasoning(response: Message) -> Message:
@@ -870,6 +934,10 @@ class _InflightStep:
     # and whether it carried a model note.
     rest: str = ""
     has_model_note: bool = False
+    # The aliases of the thought chunks stored from this reply. They count
+    # as shown while the reply's turn is in the window, so they leave with
+    # it (see _do_memorize).
+    thought_aliases: list[str] = dataclasses.field(default_factory=list)
     # The task's most recent successful read or write before this reply, a
     # draft target when the reply names none. The exporter takes the same
     # value: a path used in this reply is not the fallback for it.
@@ -970,6 +1038,45 @@ class _RunState:
     view: TemplateView | None = None
     # The run's budgets, which run.progress reports.
     limits: Limits | None = None
+    # R5: the attempt's frozen boundary block, whether the start trigger has
+    # run, the recall records not yet sent, and the aliases shown but not yet
+    # in the window.
+    boundary_block: str = ""
+    boundary_done: bool = False
+    pending_recalls: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    pending_recall_records: list[RecallRecord] = dataclasses.field(default_factory=list)
+    pending_shown: set[str] = dataclasses.field(default_factory=set)
+    # R6-lite: the run's user request, its last digest and final reflection,
+    # and the admission counters (see memory_stats on RunResult).
+    task_text: str = ""
+    remember_request: bool = False
+    final_digest: MemoryCandidate | None = None
+    final_reflection: MemoryCandidate | None = None
+    admitted: dict[str, int] = dataclasses.field(
+        default_factory=lambda: {signal: 0 for signal in SIGNALS}
+    )
+    written: dict[str, int] = dataclasses.field(
+        default_factory=lambda: {kind: 0 for kind in KINDS}
+    )
+    ignored: int = 0
+    # R5's recall counters (see memory_stats on RunResult).
+    recalls: int = 0
+    recalls_by_trigger: dict[str, int] = dataclasses.field(
+        default_factory=lambda: {trigger: 0 for trigger in (*DEFAULT_TRIGGERS, "tool")}
+    )
+    recall_hits: int = 0
+    recall_chars: int = 0
+    recall_ms: int = 0
+    recall_fallbacks: int = 0
+    recall_skipped: int = 0
+    recall_refused: int = 0
+    recall_empty: int = 0
+    aux_retrieve_calls: int = 0
+    retrieve_errors: int = 0
+    retrieve_prompt_tokens: int = 0
+    retrieve_completion_tokens: int = 0
+    thought_chunks: int = 0
+    recall_log: list[dict[str, Any]] = dataclasses.field(default_factory=list)
 
     @property
     def running(self) -> bool:
@@ -1029,6 +1136,24 @@ class _RunState:
             )
             return
         self.events.progress(state)
+
+
+# The run a ``recall`` tool call belongs to, set by run_task beside
+# CALL_RECORDER. The tool's handler reads it; outside a run it is None and
+# the handler answers in one line.
+RECALL_RUN: contextvars.ContextVar[_RunState | None] = contextvars.ContextVar(
+    "RECALL_RUN", default=None
+)
+
+
+def _checked_title(text: str) -> str:
+    """The first sentence of checked *text*, at most 120 characters."""
+    first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    for separator in (". ", "。", "! ", "? "):
+        head, found, _tail = first.partition(separator)
+        if found and head.strip():
+            return _shorten(head.strip() + separator.strip(), 120)
+    return _shorten(first, 120)
 
 
 def _exception_text(exc: BaseException) -> str:
@@ -1334,7 +1459,11 @@ class Agent:
                 os.path.join(self._memory_dir, "history.db"),
                 thinking_retention_days=retention_days,
             )
-            if self._embedding and self.options.memory:
+            # In legacy the file exists only with an embedding provider,
+            # exactly as before; the explicit modes add a text-only store.
+            if self.options.memory and (
+                self._embedding is not None or self.options.reasoning != "legacy"
+            ):
                 long_backend = SqliteLongTerm(
                     os.path.join(self._memory_dir, "long_term.db")
                 )
@@ -1353,16 +1482,39 @@ class Agent:
             long=long_backend,
             procedures=procedures_backend,
             short_term_empty_prefix=self.options.reasoning != "legacy",
+            memory=self.options.memory,
+            admit_on_outcome=self.options.admit_on_outcome,
+            keep_decision_text=self.options.keep_decision_text,
         )
         self.checker = Checker()
         self.executor = Executor(
             self.hippo, self.checker, workspace_root=workspace_root
+        )
+        # R5's retriever plan, resolved once: the effective trigger map, the
+        # data note and (after Chat) the lazily built retrievers.
+        self._plan = resolve_plan(
+            self.options.retriever,
+            reasoning=self.options.reasoning,
+            has_embedding=self.hippo.embedding is not None,
+            recall_at=self.options.recall_at,
+        )
+        refusal = self._retrieval_refusal()
+        if refusal is not None:
+            raise ValueError(refusal)
+        self._retrievers: dict[str, Retriever] = {}
+        self._recall_tool_registered = False
+        self._effective_kinds = frozenset(
+            default_kinds()
+            if self.options.recall_kinds is None
+            else self.options.recall_kinds
         )
         notes = (
             []
             if workspace_root is None
             else [WORKSPACE_NOTE.format(root=workspace_root)]
         )
+        if self._plan.enabled() and self.options.reasoning != "legacy":
+            notes.append(RECALL_DATA_NOTE)
         instruction = ""
         if self.options.reasoning in ("compress", "compress+replay"):
             instruction = NOTE_INSTRUCTION
@@ -1386,18 +1538,32 @@ class Agent:
             empty_prefix=self.options.reasoning != "legacy",
         )
 
+        names = (
+            None
+            if self.options.builtins is None
+            else frozenset(self.options.builtins - {"recall"})
+        )
         register_builtins(
             self.executor,
             self.hippo,
-            names=self.options.builtins,
+            names=names,
             workspace_root=workspace_root,
             tool_timeout_s=self.options.tool_timeout_s,
             tool_env=self.options.tool_env,
         )
-        # The names of the built-ins registered above (see list_tools).
-        self._builtin_names = (
-            builtin_names() if self.options.builtins is None else self.options.builtins
-        )
+        # The names of the built-ins registered above (see list_tools), and
+        # R5's recall tool when its trigger is on. It is not a builtin_names()
+        # member, so register_builtins never registers it.
+        self._builtin_names = builtin_names() if names is None else names
+        if "tool" in self._plan.enabled():
+            self.hippo.register_tool(RECALL_TOOL_DEF)
+            self.executor.register(
+                "recall",
+                self._recall_tool,
+                timeout_ms=RECALL_TOOL_TIMEOUT_S * 1000,
+            )
+            self._builtin_names = self._builtin_names | {"recall"}
+            self._recall_tool_registered = True
 
     # ── Workspace, tools and conversation ──
 
@@ -1587,6 +1753,438 @@ class Agent:
         """Whether the run compresses its replies into notes."""
         return self.options.reasoning in ("compress", "compress+replay")
 
+    # ── Recall (R5) ──
+
+    def _retrieval_refusal(self) -> str | None:
+        return retrieval_refusal(
+            self.options.retriever,
+            self._plan,
+            self.hippo.embedding is not None,
+            self.options.reasoning,
+            memory=self.options.memory,
+            placement=self.options.recall_placement,
+            recall_at=self.options.recall_at or (),
+            builtins=self.options.builtins,
+        )
+
+    def _get_retriever(self, name: str) -> Retriever:
+        """The Agent's one retriever called *name*, built on first use."""
+        retriever = self._retrievers.get(name)
+        if retriever is not None:
+            return retriever
+        options: dict[str, Any] = {}
+        if name == "embedding":
+            options["min_score"] = self.options.recall_min_score
+        retriever = build_retriever(
+            name,
+            send=self.chat.retrieve,
+            embedding=self.hippo.embedding,
+            **options,
+        )
+        self._retrievers[name] = retriever
+        return retriever
+
+    async def _long_docs(self, query: str, run: _RunState) -> list[Doc]:
+        """The other tasks' active long entries that may answer *query*, aliased."""
+        if "long" not in self._effective_kinds:
+            return []
+        try:
+            rows = await self.hippo.recall_long(
+                query,
+                exclude_task_ids={run.task_id},
+                pool=LONG_POOL,
+            )
+        except ProviderError as exc:
+            run.retrieve_errors += 1
+            logger.info("Long-term recall of task %s failed: %s", run.task_id, exc)
+            return []
+        except (IndexError, ValueError) as exc:
+            run.retrieve_errors += 1
+            logger.info("Long-term recall of task %s failed: %s", run.task_id, exc)
+            return []
+        # The cosine floor applies only to an embedding score; BM25 has no
+        # absolute floor, and docs_from_entries reads each row's retriever.
+        docs = docs_from_entries(
+            rows,
+            exclude_task_ids={run.task_id},
+            min_score=self.options.recall_min_score,
+        )
+        # Keep the two best by score, then order and alias them by creation
+        # time so an appended entry never renumbers an old one.
+        docs.sort(key=lambda doc: float(doc.meta.get("score") or 0.0), reverse=True)
+        docs = docs[:RECALL_LONG_K]
+        docs.sort(
+            key=lambda doc: (float(doc.meta.get("created_at") or 0.0), doc.doc_id)
+        )
+        return [
+            dataclasses.replace(doc, meta={**doc.meta, "alias": f"m{index}"})
+            for index, doc in enumerate(docs, start=1)
+        ]
+
+    def _hits_from_result(
+        self,
+        result: RetrievalResult,
+        docs: Sequence[Doc],
+        *,
+        k: int,
+    ) -> list[RecallHit]:
+        """The task-local hits of *result*, at most *k*, in rank order."""
+        by_id = {doc.doc_id: doc for doc in docs}
+        hits: list[RecallHit] = []
+        for item in result.hits:
+            doc = by_id.get(item.doc_id)
+            if doc is None:
+                continue
+            hits.append(hit_from_doc(doc, score=item.score, rank=len(hits) + 1))
+            if len(hits) == k:
+                break
+        return hits
+
+    def _merge_llm_hits(
+        self,
+        result: RetrievalResult,
+        docs: Sequence[Doc],
+        *,
+        k: int,
+        long_ids: set[str],
+    ) -> list[RecallHit]:
+        """The llm hits split into at most *k* task and 2 long, in its order."""
+        by_id = {doc.doc_id: doc for doc in docs}
+        hits: list[RecallHit] = []
+        task_kept = 0
+        long_kept = 0
+        for item in result.hits:
+            doc = by_id.get(item.doc_id)
+            if doc is None:
+                continue
+            if doc.doc_id in long_ids:
+                if long_kept >= RECALL_LONG_K:
+                    continue
+                long_kept += 1
+                score = float(doc.meta.get("score") or item.score)
+            else:
+                if task_kept >= k:
+                    continue
+                task_kept += 1
+                score = item.score
+            hits.append(hit_from_doc(doc, score=score, rank=len(hits) + 1))
+        return hits
+
+    async def _run_recall(
+        self,
+        trigger: str,
+        query: str,
+        run: _RunState,
+        *,
+        boundary: bool = False,
+        include_superseded: bool = False,
+        k: int | None = None,
+        placement: str = "",
+        exclude: Iterable[str] = (),
+    ) -> tuple[RecallRecord | None, str, list[RecallHit]]:
+        """Run one recall trigger and return its record, block and hits.
+
+        ``([], "")`` when the trigger is off, when nothing is a candidate,
+        or when the block cannot be made to fit; a refused block counts
+        ``recall_refused`` and returns nothing.
+        """
+        name = getattr(self._plan, trigger, None)
+        if name is None:
+            return None, "", []
+        started = time.perf_counter()
+        # The query can carry a tool call's command or path, so it is a
+        # request path P4 must redact too: before an llm or embedding
+        # retriever sees it (bm25 ranks on the raw text; decision 1).
+        redacted_query, query_spans = redact_secrets(query)
+        search_query = redacted_query if name in ("llm", "embedding") else query
+        limit_k = (
+            self.options.recall_k if k is None else max(1, min(int(k), RECALL_K_MAX))
+        )
+        excluded = set(exclude) | set(run.pending_shown)
+        task_docs: list[Doc] = []
+        if trigger != "start":
+            task_docs = docs_from_notes(
+                self.hippo.working.notes.entries(),
+                task_id=run.task_id,
+                kinds=self._effective_kinds,
+                exclude_aliases=excluded,
+                include_superseded=include_superseded,
+            )
+        long_docs = await self._long_docs(redacted_query, run)
+        if long_docs:
+            shown = "\n".join(
+                [*recall_spans(self.hippo.working.get_window()), run.boundary_block]
+            )
+            long_docs = [
+                doc
+                for doc in long_docs
+                if hit_from_doc(doc, score=0.0, rank=1).text not in shown
+            ]
+        if not task_docs and not long_docs:
+            run.recall_empty += 1
+            return None, "", []
+        hits: list[RecallHit] = []
+        retriever = name
+        fallback = ""
+        if name == "llm":
+            docs = [*task_docs, *long_docs]
+            long_ids = {doc.doc_id for doc in long_docs}
+            result = await self._get_retriever("llm").search(
+                search_query,
+                docs,
+                k=limit_k + min(len(long_docs), RECALL_LONG_K),
+            )
+            if search_query.strip():
+                run.aux_retrieve_calls += 1
+            self._count_retrieve_usage(result, run)
+            retriever, fallback = result.retriever, result.fallback
+            hits = self._merge_llm_hits(result, docs, k=limit_k, long_ids=long_ids)
+        else:
+            if task_docs:
+                result = await self._get_retriever(name).search(
+                    search_query, task_docs, k=limit_k
+                )
+                retriever, fallback = result.retriever, result.fallback
+                self._count_retrieve_usage(result, run)
+                hits = self._hits_from_result(result, task_docs, k=limit_k)
+            for doc in long_docs:
+                score = float(doc.meta.get("score") or 0.0)
+                # The floor is a cosine floor; a BM25-scored row has none.
+                if (
+                    doc.meta.get("retrieval") != "bm25"
+                    and score < self.options.recall_min_score - 1e-6
+                ):
+                    continue
+                hits.append(hit_from_doc(doc, score=score, rank=len(hits) + 1))
+        if fallback:
+            run.recall_fallbacks += 1
+            run.retrieve_errors += 1
+        if trigger == "start":
+            hits = [hit for hit in hits if hit.kind == "long"][:RECALL_LONG_K]
+        if not hits:
+            run.recall_empty += 1
+            return None, "", []
+        candidates = len(task_docs) + len(long_docs)
+        checked_hits: list[RecallHit] = []
+        for hit in hits:
+            text = hit.text
+            checked = text
+            if hit.kind == "long":
+                checked_text = self._check_candidate(
+                    text, "recall", run, target="prompt"
+                )
+                if checked_text is None:
+                    continue
+                checked = checked_text
+            checked_hits.append(
+                dataclasses.replace(
+                    hit, text=checked, chars=len(checked), rank=len(checked_hits) + 1
+                )
+            )
+        if not checked_hits:
+            return None, "", []
+        if boundary:
+            limit = RECALL_BOUNDARY_CHARS
+        else:
+            live = RECALL_LIVE_CHARS - recall_span_chars(
+                self.hippo.working.get_window()
+            )
+            limit = min(RECALL_TURN_CHARS, max(live, 0))
+        if limit <= 0:
+            run.recall_skipped += 1
+            return None, "", []
+        # Fit with the recorded latency, not with 0 and a re-render after:
+        # a block at the exact limit could otherwise grow by a few digits.
+        ms = round((time.perf_counter() - started) * 1000)
+        kept, block = fit_recall_block(
+            checked_hits,
+            trigger=trigger,
+            retriever=retriever,
+            ms=ms,
+            placement=placement,
+            limit=limit,
+        )
+        if not kept or not block:
+            run.recall_skipped += 1
+            return None, "", []
+        checked_block = self._check_recall_block(block, run)
+        if checked_block is None:
+            return None, "", []
+        run.redactions += query_spans
+        record_hits = [
+            dataclasses.replace(
+                hit,
+                doc_id=redact_secrets(hit.doc_id)[0],
+                alias=redact_secrets(hit.alias)[0],
+            )
+            for hit in kept
+        ]
+        record = RecallRecord(
+            trigger=trigger,
+            placement=placement,
+            retriever=retriever,
+            query=redacted_query,
+            k=limit_k,
+            candidates=candidates,
+            hits=record_hits,
+            chars=len(checked_block),
+            ms=ms,
+            fallback=fallback,
+            boundary=boundary,
+            step=run.steps,
+            attempt=run.attempts,
+        )
+        run.pending_recalls.append(record_to_dict(record))
+        run.pending_recall_records.append(record)
+        return record, checked_block, record_hits
+
+    @staticmethod
+    def _count_retrieve_usage(result: RetrievalResult, run: _RunState) -> None:
+        if not result.usage:
+            return
+        run.retrieve_prompt_tokens += int(result.usage.get("prompt_tokens", 0) or 0)
+        run.retrieve_completion_tokens += int(
+            result.usage.get("completion_tokens", 0) or 0
+        )
+
+    @staticmethod
+    def _commit_recalls(records: Sequence[RecallRecord], run: _RunState) -> None:
+        """Count, log and emit the recall records a request has just carried."""
+        for record in records:
+            run.recalls += 1
+            run.recalls_by_trigger[record.trigger] = (
+                run.recalls_by_trigger.get(record.trigger, 0) + 1
+            )
+            run.recall_hits += len(record.hits)
+            run.recall_chars += record.chars
+            run.recall_ms += record.ms
+            run.recall_log.append(compact_record(record))
+            run.events.recall(record)
+
+    def _check_recall_block(self, text: str, run: _RunState) -> str | None:
+        """Run one whole recall block through the candidate boundary."""
+        run.candidates += 1
+        check = self.checker.check_memory_candidate(
+            MemoryCandidatePayload(text=text, source="recall", target="prompt")
+        )
+        if not check.allowed:
+            run.candidates_refused += 1
+            run.recall_refused += 1
+            logger.debug(
+                "Refused a recall block of task %s: %s", run.task_id, check.reason
+            )
+            return None
+        payload = check.sanitized_payload
+        run.redactions += int(payload.metadata.get("redactions", 0) or 0)
+        checked = str(payload.text)
+        if not checked.endswith(RECALL_END):
+            run.recall_refused += 1
+            logger.debug(
+                "Refused a recall block of task %s: the boundary cut its "
+                "closing delimiter",
+                run.task_id,
+            )
+            return None
+        return checked
+
+    async def _step_recall(
+        self,
+        run: _RunState,
+        note_entry: NoteStoreEntry | None,
+        calls: Sequence[ToolCall],
+        *,
+        fallback: str,
+        exclude: Iterable[str] = (),
+    ) -> tuple[str, list[RecallHit]]:
+        """The step trigger's block for the next planning call, and its hits.
+
+        A note from an earlier attempt is ``superseded`` at that attempt's
+        boundary, but its turn can still be evicted from the window, and
+        R5's step trigger is what makes an evicted turn reachable again;
+        step recall therefore ranks superseded notes too. The window's
+        aliases still exclude what the request already shows.
+        """
+        if self._plan.step is None:
+            return "", []
+        note_text = "" if note_entry is None else note_entry.text
+        outcome = ""
+        if note_entry is not None and note_entry.note is not None:
+            outcome = note_entry.note.outcome
+        query = build_step_query(note_text, calls, fallback=fallback, outcome=outcome)
+        _record, block, hits = await self._run_recall(
+            "step",
+            query,
+            run,
+            placement=self.options.recall_placement,
+            exclude=exclude,
+            include_superseded=True,
+        )
+        if block:
+            run.pending_shown.update(hit.alias for hit in hits if hit.kind != "long")
+        return block, hits
+
+    async def _store_thought_chunks(
+        self, response: Message, run: _RunState
+    ) -> list[str]:
+        """Store up to the task's remaining thought chunks from *response*.
+
+        Returns the aliases of the chunks stored, so the caller can mark
+        them shown with the reply's turn.
+        """
+        if "thought" not in self._effective_kinds or not self._notes_mode:
+            return []
+        stored = sum(
+            1
+            for entry in self.hippo.working.notes.of_kind("thought")
+            if entry.task_id == run.task_id
+        )
+        remaining = RECALL_THOUGHT_PER_TASK - max(run.thought_chunks, stored)
+        if remaining <= 0 or not response.thinking:
+            return []
+        aliases: list[str] = []
+        for chunk in thought_chunks(response.thinking)[:remaining]:
+            checked = self._check_candidate(chunk.text, "thought", run)
+            if checked is None:
+                continue
+            entry = self.hippo.working.notes.add(
+                "thought",
+                checked,
+                step=run.steps,
+                attempt=run.attempts,
+                task_id=run.task_id,
+                title=_checked_title(checked),
+            )
+            if entry is not None:
+                run.thought_chunks += 1
+                aliases.append(entry.alias)
+        return aliases
+
+    async def _recall_tool(self, query: str, k: int | None = None) -> str:
+        """The ``recall`` tool: rank the task's documents for *query*."""
+        run = RECALL_RUN.get()
+        if run is None:
+            return "recall is only available inside a run"
+        if not isinstance(query, str) or not query.strip():
+            return "recall needs a non-empty query"
+        if isinstance(k, bool) or not isinstance(k, int):
+            k = self.options.recall_k
+        refused_before = run.recall_refused
+        _record, block, hits = await self._run_recall(
+            "tool",
+            query,
+            run,
+            include_superseded=True,
+            k=k,
+            placement="tool-result",
+            exclude=self.hippo.working.shown_aliases(),
+        )
+        if not block:
+            if run.recall_refused > refused_before:
+                return "recall refused: the block did not pass the boundary"
+            return "recall found nothing for that query"
+        run.pending_shown.update(hit.alias for hit in hits if hit.kind != "long")
+        return block
+
     @staticmethod
     def _last_call_seq() -> int:
         """The ``llm_calls.seq`` of the reply that just arrived, or 0."""
@@ -1622,11 +2220,13 @@ class Agent:
         )
         return note, rest
 
-    def _check_candidate(self, text: str, source: str, run: _RunState) -> str | None:
+    def _check_candidate(
+        self, text: str, source: str, run: _RunState, *, target: str = "candidate"
+    ) -> str | None:
         """Run one document through the candidate boundary; its checked text."""
         run.candidates += 1
         check = self.checker.check_memory_candidate(
-            MemoryCandidatePayload(text=text, source=source, target="candidate")
+            MemoryCandidatePayload(text=text, source=source, target=target)
         )
         if not check.allowed:
             run.candidates_refused += 1
@@ -1641,6 +2241,137 @@ class Agent:
         run.redactions += int(payload.metadata.get("redactions", 0) or 0)
         return str(payload.text)
 
+    def _checked_candidate_text(
+        self, text: str, source: str, run: _RunState
+    ) -> str | None:
+        """A candidate text through the boundary, counted as one boundary check.
+
+        The note or draft it comes from was counted when it entered its own
+        store; this pass is the one R6-lite requires before a candidate is
+        staged, so the policy never compares raw text. ``candidates`` counts
+        boundary checks, not documents (T53R finding 11).
+        """
+        run.candidates += 1
+        check = self.checker.check_memory_candidate(
+            MemoryCandidatePayload(text=text, source=source, target="candidate")
+        )
+        if not check.allowed:
+            run.candidates_refused += 1
+            return None
+        payload = check.sanitized_payload
+        run.redactions += int((payload.metadata or {}).get("redactions", 0) or 0)
+        return str(payload.text)
+
+    def _memory_provenance(
+        self,
+        run: _RunState,
+        *,
+        note: ReasoningNote | None = None,
+        calls: Sequence[ToolCall] = (),
+    ) -> dict[str, Any]:
+        """The provenance a candidate records about the turn that made it."""
+        paths: list[str] = []
+        commands: list[str] = []
+        for call in calls:
+            for name in self._touched_names(call):
+                bucket = paths if path_spans(name) else commands
+                if name not in bucket:
+                    bucket.append(name)
+        source_ids = list(note.source_ids) if note is not None else []
+        return {
+            "task_id": run.task_id,
+            "session_id": "",
+            "step": run.steps,
+            "attempt": run.attempts,
+            "call_seq": self._last_call_seq(),
+            "task_text": run.task_text[:300],
+            "paths": paths,
+            "commands": commands,
+            "source_ids": source_ids,
+            "note_id": note.note_id if note is not None else "",
+        }
+
+    def _propose_note_candidate(
+        self,
+        note: ReasoningNote,
+        run: _RunState,
+        calls: Sequence[ToolCall] = (),
+    ) -> None:
+        """Stage a rememberable note's items for long-term memory."""
+        if not note.remember or not (note.found or note.decided):
+            return
+        text = self._checked_candidate_text(candidate_text(note), "reasoning_note", run)
+        if text is None:
+            return
+        items: list[CandidateItem] = []
+        for item in candidate_items(note):
+            checked = self._checked_candidate_text(item.text, "reasoning_note", run)
+            if checked is not None:
+                items.append(CandidateItem(checked, item.source_ids))
+        candidate = MemoryCandidate(
+            candidate_id=note.note_id,
+            source="reasoning_note",
+            text=text,
+            remember_by=note.remember_by or "rule",
+            task_id=run.task_id,
+            session_id="",
+            provenance=self._memory_provenance(run, note=note, calls=calls),
+            created_at=note.created_at,
+            remember=True,
+            items=tuple(items),
+        )
+        self.hippo.propose(candidate)
+
+    def _drain_decisions(
+        self, decisions: Sequence[MemoryDecision], run: _RunState
+    ) -> None:
+        """Count the decisions an admission made and emit one event each."""
+        for decision in decisions:
+            if decision.refused:
+                run.candidates_refused += 1
+                continue
+            run.redactions += decision.redactions
+            run.admitted[decision.admitted_by] = (
+                run.admitted.get(decision.admitted_by, 0) + 1
+            )
+            if decision.action == "IGNORE":
+                run.ignored += 1
+            else:
+                run.written[decision.kind] = run.written.get(decision.kind, 0) + 1
+            run.events.memory(
+                candidate_id=decision.candidate_id,
+                action=decision.action,
+                kind=decision.kind,
+                admitted_by=decision.admitted_by,
+                entry_id=decision.entry_id,
+            )
+
+    def _propose_reflection(
+        self, entry: ReflectionEntry, run: _RunState, *, note_id: str = ""
+    ) -> None:
+        """Stage the final reflection, with its next directions and open questions."""
+        candidate_id = note_id or new_record_id()
+        text = self._checked_candidate_text(
+            reflection_candidate_text(entry), "reflection", run
+        )
+        if text is None:
+            return
+        provenance = self._memory_provenance(run, note=None)
+        provenance["note_id"] = candidate_id
+        candidate = MemoryCandidate(
+            candidate_id=candidate_id,
+            source="reflection",
+            text=text,
+            remember_by="rule",
+            task_id=run.task_id,
+            session_id="",
+            provenance=provenance,
+            created_at=time.time(),
+            remember=True,
+        )
+        run.final_reflection = candidate
+        self.hippo.propose(candidate)
+
     def _store_note(
         self,
         note: ReasoningNote,
@@ -1648,6 +2379,7 @@ class Agent:
         *,
         source: str,
         drafts: Sequence[str] = (),
+        calls: Sequence[ToolCall] = (),
     ) -> NoteStoreEntry | None:
         """Check and store one note; emit its ``note`` event."""
         text = render_note(note, executor=True)
@@ -1663,6 +2395,8 @@ class Agent:
             attempt=note.attempt,
             remember=note.remember,
             remember_by=note.remember_by,
+            task_id=note.task_id,
+            title=note_title(note),
         )
         if entry is None:
             run.candidates_refused += 1
@@ -1689,6 +2423,8 @@ class Agent:
             remember=note.remember,
             stage=entry.stage,
         )
+        if source == "reasoning_note":
+            self._propose_note_candidate(note, run, calls)
         return entry
 
     def _store_draft(self, draft: Draft, run: _RunState) -> NoteStoreEntry | None:
@@ -1702,6 +2438,8 @@ class Agent:
             draft=draft,
             step=draft.step,
             attempt=run.attempts,
+            task_id=draft.task_id,
+            title=draft_title(draft),
         )
         if entry is None:
             run.candidates_refused += 1
@@ -1710,7 +2448,7 @@ class Agent:
         self.hippo.working.notes.supersede_drafts(draft.target, keep=entry.alias)
         return entry
 
-    def _prepare_note_turn(
+    async def _prepare_note_turn(
         self,
         response: Message,
         step: _InflightStep,
@@ -1754,10 +2492,14 @@ class Agent:
         )
         aliases = [] if draft_entry is None else [draft_entry.alias]
         note_entry = self._store_note(
-            note, run, source="reasoning_note", drafts=aliases
+            note,
+            run,
+            source="reasoning_note",
+            drafts=aliases,
+            calls=[call for call, _result in pairs],
         )
         if note_entry is not None:
-            self._restate(note, run)
+            await self._restate(note, run)
         note_text = "" if note_entry is None else note_entry.text
         if step.has_model_note:
             content = response.content
@@ -1775,8 +2517,11 @@ class Agent:
         tool_msgs: list[Message],
         draft_entry: NoteStoreEntry | None,
         run: _RunState,
-    ) -> None:
-        """Append the turn's pending targeted draft to its last tool result."""
+    ) -> bool:
+        """Append the turn's pending targeted draft to its last tool result.
+
+        Returns whether the draft was placed, so the step block skips it.
+        """
         if (
             draft_entry is None
             or draft_entry.draft is None
@@ -1784,7 +2529,7 @@ class Agent:
             or not draft_entry.draft.target
             or not tool_msgs
         ):
-            return
+            return False
         block = render_draft_block(
             draft_entry.alias,
             draft_entry.step,
@@ -1797,6 +2542,8 @@ class Agent:
             tool_msgs[-1] = dataclasses.replace(
                 last, content=f"{last.content}\n{checked}"
             )
+            return True
+        return False
 
     @staticmethod
     def _checked_note_copy(entry: NoteStoreEntry) -> ReasoningNote:
@@ -1861,6 +2608,8 @@ class Agent:
             attempt=note.attempt,
             remember=True,
             remember_by="rule",
+            task_id=task_id,
+            title=note_title(note),
         )
         if entry is None:
             run.candidates_refused += 1
@@ -1878,9 +2627,22 @@ class Agent:
             remember=True,
             stage=entry.stage,
         )
+        candidate = MemoryCandidate(
+            candidate_id=note.note_id,
+            source="digest",
+            text=checked,
+            remember_by="rule",
+            task_id=task_id,
+            session_id="",
+            provenance=self._memory_provenance(run, note=note),
+            created_at=note.created_at,
+            remember=True,
+        )
+        run.final_digest = candidate
+        self.hippo.propose(candidate)
         return checked
 
-    def _restate(self, note: ReasoningNote, run: _RunState) -> bool:
+    async def _restate(self, note: ReasoningNote, run: _RunState) -> bool:
         """Compact *note*'s new items into an older note with the same facts.
 
         A later note whose ``found`` or ``decided`` items match an existing
@@ -1915,10 +2677,26 @@ class Agent:
                 if key not in old_keys and len(decided) < NOTE_MAX_DECIDED:
                     decided.append(item)
                     old_keys.add(key)
+            source_ids = list(older.source_ids)
+            for source_id in note.source_ids:
+                if source_id not in source_ids:
+                    source_ids.append(source_id)
+            source_records = list(older.source_records)
+            seen = {record_id for record_id, _text in source_records}
+            for record in note.source_records:
+                if record[0] not in seen:
+                    source_records.append(record)
+                    seen.add(record[0])
+            remember = older.remember or note.remember
+            remember_by = older.remember_by if older.remember else note.remember_by
             updated = dataclasses.replace(
                 older,
                 found=found,
                 decided=decided,
+                source_ids=source_ids,
+                source_records=source_records,
+                remember=remember,
+                remember_by=remember_by,
                 stage="rehearsed",
                 uses=older.uses + 1,
                 last_used_at=time.time(),
@@ -1932,6 +2710,12 @@ class Agent:
                 return False
             self.hippo.working.notes.touch(entry.alias, use=True, stage="rehearsed")
             run.rehearsed["restated"] += 1
+            # The new note's candidate is superseded by the merged one; a
+            # request would otherwise be able to admit both (T53R finding 8).
+            self.hippo.staged.drop(note.note_id)
+            self._propose_note_candidate(updated, run)
+            decisions = await self.hippo.admit(updated.note_id, "rehearsal")
+            self._drain_decisions(decisions, run)
             return True
         return False
 
@@ -2003,7 +2787,7 @@ class Agent:
                 return True
             start = index + 1
 
-    def _rehearse_acted(
+    async def _rehearse_acted(
         self,
         call: ToolCall,
         result: ToolResult,
@@ -2028,8 +2812,10 @@ class Agent:
             note.stage = "rehearsed"
             self.hippo.working.notes.touch(entry.alias, stage="rehearsed")
             run.rehearsed["acted"] += 1
+            decisions = await self.hippo.admit(note.note_id, "rehearsal")
+            self._drain_decisions(decisions, run)
 
-    def _cite_notes(self, aliases: Sequence[str], run: _RunState) -> None:
+    async def _cite_notes(self, aliases: Sequence[str], run: _RunState) -> None:
         """Mark the notes a reflection cited in ``used_notes`` as rehearsed."""
         for alias in aliases:
             entry = self.hippo.working.notes.get(alias)
@@ -2039,6 +2825,9 @@ class Agent:
                 entry.note.stage = "rehearsed"
             self.hippo.working.notes.touch(alias, use=True, stage="rehearsed")
             run.rehearsed["cited"] += 1
+            if entry.note is not None:
+                decisions = await self.hippo.admit(entry.note.note_id, "rehearsal")
+                self._drain_decisions(decisions, run)
 
     @staticmethod
     def _used_notes(content: str, flags: bool) -> list[str]:
@@ -2297,6 +3086,7 @@ class Agent:
         query: str,
         *,
         task_query: Message | None = None,
+        query_block: str = "",
         run: _RunState | None = None,
     ) -> None:
         """Drop or strip the oldest working memory the planning prompt cannot hold.
@@ -2330,7 +3120,7 @@ class Agent:
                 requires_replay=self._requires_replay,
             )
             check = await self.checker.pre_plan(
-                others + _as_planned(sent, query),
+                others + _as_planned(sent, query, query_block),
                 count_thinking=self._counts_thinking,
             )
             return check.allowed
@@ -2416,11 +3206,29 @@ class Agent:
             long_context = await self.hippo.retrieve_context(query)
         else:
             long_context = []
+        if (
+            run is not None
+            and not run.boundary_done
+            and run.steps == 0
+            and run.attempts == 1
+            and self._plan.start is not None
+        ):
+            run.boundary_done = True
+            _record, block, _hits = await self._run_recall(
+                "start",
+                build_start_query(query),
+                run,
+                boundary=True,
+                placement="query",
+            )
+            run.boundary_block = block
+        query_block = "" if run is None else run.boundary_block
         reflection_msgs = _serialize_reflections(self.hippo.working.get_reflections())
         await self._fit_prompt_cap(
             long_context + reflection_msgs,
             query,
             task_query=task_query,
+            query_block=query_block,
             run=run,
         )
         short_window = self.hippo.working.get_window()
@@ -2435,7 +3243,7 @@ class Agent:
             # and BM25 choose among the other tools only, which follow,
             # sorted by name too: the list stays byte-identical for as long
             # as the chosen set does not change, whatever the hint order.
-            builtins = builtin_names()
+            builtins = self._builtin_names
             # Hints are the model's tool calls, which live in the window; the
             # long-term and reflection messages carry none.
             hint_sources = long_context + short_window + reflection_msgs
@@ -2475,7 +3283,11 @@ class Agent:
             task_query=task_query,
             requires_replay=self._requires_replay,
         )
-        all_msgs = long_context + _as_planned(sent, query) + reflection_msgs
+        all_msgs = (
+            long_context
+            + _as_planned(sent, query, "" if run is None else run.boundary_block)
+            + reflection_msgs
+        )
         check = await self.checker.pre_plan(
             all_msgs, count_thinking=self._counts_thinking
         )
@@ -2522,13 +3334,26 @@ class Agent:
                 len(msg.thinking) for msg in sent if msg.role == "assistant"
             )
             run.replay_skipped += len(skipped)
+        recalls = []
+        recall_records: list[RecallRecord] = []
+        query_block = ""
+        if run is not None:
+            query_block = run.boundary_block
+            recalls = run.pending_recalls
+            recall_records = run.pending_recall_records
+            run.pending_recalls = []
+            run.pending_recall_records = []
         response = await self.chat.plan_step(
             context=long_context,
             short=sent,
             tools=tools,
             query=query,
             reflections=reflections,
+            query_block=query_block,
+            recalls=recalls,
         )
+        if run is not None and recall_records:
+            self._commit_recalls(recall_records, run)
         if self.options.reasoning != "legacy":
             before = response.thinking
             response = _split_inline_reasoning(response)
@@ -2655,7 +3480,7 @@ class Agent:
             if isinstance(path, str) and path.strip():
                 run.recent_path = path
         if self._notes_mode:
-            self._rehearse_acted(call, result, run, exit_codes or ())
+            await self._rehearse_acted(call, result, run, exit_codes or ())
         return result, cut
 
     async def _do_memorize(
@@ -2734,7 +3559,7 @@ class Agent:
         content = response.content
         thinking = response.thinking
         if self._notes_mode:
-            content, thinking, note_entry, draft_entry = self._prepare_note_turn(
+            content, thinking, note_entry, draft_entry = await self._prepare_note_turn(
                 response, step, list(zip(calls, kept, strict=True)), run
             )
             assistant_msg, tool_msgs = self._checked_tool_turn(
@@ -2744,13 +3569,73 @@ class Agent:
                 content=content,
                 thinking=thinking,
             )
-            self._pin_pending_draft(tool_msgs, draft_entry, run)
-            self.hippo.working.append_turn(assistant_msg, tool_msgs)
+            pinned = self._pin_pending_draft(tool_msgs, draft_entry, run)
+            recall_aliases = set(run.pending_shown)
+            thought_aliases = set(step.thought_aliases)
+            if note_entry is not None:
+                # The note belongs to the turn now in the window; its full
+                # checked text need not be in the content (the model's block
+                # is the plan only), so the alias marks the turn, not the
+                # literal text.
+                recall_aliases.add(note_entry.alias)
+            if pinned and draft_entry is not None:
+                recall_aliases.add(draft_entry.alias)
+            # A thought chunk counts as shown while its step's turn is in the
+            # window: its alias leaves with the same message, and recall
+            # reaches the chunk only once that turn was evicted.
+            recall_aliases.update(thought_aliases)
+            block, _hits = await self._step_recall(
+                run,
+                note_entry,
+                calls,
+                fallback=step.rest or EMPTY_REPLY_LABEL,
+                exclude={
+                    *self.hippo.working.shown_aliases(),
+                    *({note_entry.alias} if note_entry is not None else set()),
+                    *(
+                        {draft_entry.alias}
+                        if pinned and draft_entry is not None
+                        else set()
+                    ),
+                    *thought_aliases,
+                },
+            )
+            if block:
+                if self.options.recall_placement == "tool" and tool_msgs:
+                    last = tool_msgs[-1]
+                    tool_msgs[-1] = dataclasses.replace(
+                        last, content=f"{last.content}\n{block}"
+                    )
+                else:
+                    tool_msgs.append(Message(role="user", content=block))
+                recall_aliases.update(hit.alias for hit in _hits if hit.kind != "long")
+            self.hippo.working.append_turn(
+                assistant_msg, tool_msgs, aliases=recall_aliases
+            )
+            run.pending_shown.clear()
             return
         assistant_msg, tool_msgs = self._checked_tool_turn(
             response, kept, step.cut_before
         )
-        self.hippo.working.append_turn(assistant_msg, tool_msgs)
+        recall_aliases = set(run.pending_shown)
+        block, _hits = await self._step_recall(
+            run,
+            None,
+            calls,
+            fallback=response.content or EMPTY_REPLY_LABEL,
+            exclude=self.hippo.working.shown_aliases(),
+        )
+        if block:
+            if self.options.recall_placement == "tool" and tool_msgs:
+                last = tool_msgs[-1]
+                tool_msgs[-1] = dataclasses.replace(
+                    last, content=f"{last.content}\n{block}"
+                )
+            else:
+                tool_msgs.append(Message(role="user", content=block))
+            recall_aliases.update(hit.alias for hit in _hits if hit.kind != "long")
+        run.pending_shown.clear()
+        self.hippo.working.append_turn(assistant_msg, tool_msgs, aliases=recall_aliases)
 
     def _memory_write_allowed(self, text: str, role: str) -> bool:
         check = self.checker.check_memory_write(
@@ -3196,6 +4081,7 @@ class Agent:
                     self.chat.stats.reasoning_chars += len(response.thinking)
             if replies is not None:
                 replies.append(response)
+        reflection_note_id = ""
         if run is not None:
             run.reflection_thinking = response.thinking
             readable = (
@@ -3204,8 +4090,10 @@ class Agent:
                 else _holds_reflection_object(response.content)
             )
             if self._notes_mode and readable:
-                self._cite_notes(self._used_notes(response.content, flags), run)
-                self._store_reflection_note(response, task, run)
+                await self._cite_notes(self._used_notes(response.content, flags), run)
+                reflection_entry = self._store_reflection_note(response, task, run)
+                if reflection_entry is not None and reflection_entry.note is not None:
+                    reflection_note_id = reflection_entry.note.note_id
         if flags:
             data = _find_reflection(response.content)
             if data is None:
@@ -3215,6 +4103,8 @@ class Agent:
             )
             entry = _fit_reflection(entry, MAX_REFLECTION_CHARS)
             decision.tried_memory = entry
+            if run is not None and self._notes_mode:
+                self._propose_reflection(entry, run, note_id=reflection_note_id)
             return entry, decision
         entry, decision = self._parse_reflection(
             response.content, attempt_id, failure_type
@@ -3225,6 +4115,8 @@ class Agent:
             decision.recommended_action = "decompose"
             note = f" (reflection budget exceeded: {size} > {MAX_REFLECTION_CHARS})"
             decision.rationale = (decision.rationale or "") + note
+        if run is not None and self._notes_mode:
+            self._propose_reflection(entry, run, note_id=reflection_note_id)
         return entry, decision
 
     @staticmethod
@@ -3394,6 +4286,9 @@ class Agent:
                 has_model_note = (
                     block is not None and self.options.note_writer == "auto"
                 )
+            thought_aliases: list[str] = []
+            if self._notes_mode and "thought" in self._effective_kinds:
+                thought_aliases = await self._store_thought_chunks(response, run)
             if rest.strip():
                 run.last_text = rest
                 run.last_text_thinking = response.thinking
@@ -3413,12 +4308,13 @@ class Agent:
                         )
                         entry = self._store_note(note, run, source="reasoning_note")
                         if entry is not None:
-                            self._restate(note, run)
+                            await self._restate(note, run)
                     run.answer_thinking = response.thinking
                     run.end("completed", result=rest)
                     return step + 1, ""
                 # An empty reply is no answer: ask for one and plan again.
                 label_content = EMPTY_REPLY_LABEL
+                entry = None
                 if self._notes_mode:
                     note, _ = self._reply_note(
                         response,
@@ -3440,9 +4336,28 @@ class Agent:
                 label = Message(role="assistant", content=label_content)
                 if self.options.reasoning not in ("legacy", "compress"):
                     label = dataclasses.replace(label, thinking=response.thinking)
+                nudge = EMPTY_REPLY_NUDGE
+                aliases: set[str] = set(thought_aliases)
+                block, _hits = await self._step_recall(
+                    run,
+                    entry,
+                    (),
+                    fallback=EMPTY_REPLY_LABEL,
+                    exclude={
+                        *self.hippo.working.shown_aliases(),
+                        *({entry.alias} if entry is not None else set()),
+                        *thought_aliases,
+                    },
+                )
+                if block:
+                    nudge = f"{nudge}\n\n{block}"
+                    aliases.update(hit.alias for hit in _hits if hit.kind != "long")
+                aliases.update(run.pending_shown)
+                run.pending_shown.clear()
                 self.hippo.working.append_turn(
                     label,
-                    [Message(role="user", content=EMPTY_REPLY_NUDGE)],
+                    [Message(role="user", content=nudge)],
+                    aliases=aliases,
                 )
                 run.events.empty_reply(run.empty_replies)
                 continue
@@ -3459,6 +4374,7 @@ class Agent:
                 rest=rest,
                 has_model_note=has_model_note,
                 recent_path=run.recent_path,
+                thought_aliases=thought_aliases,
             )
             for call in calls:
                 # Counted when handed over, so a call that timeout_s cuts
@@ -3694,6 +4610,7 @@ class Agent:
         task = TaskRecord(query=query)
         run = _RunState(
             task_id=task.task_id,
+            task_text=query,
             events=_Emitter(
                 on_event if observe is None else observe,
                 task.task_id,
@@ -3720,6 +4637,7 @@ class Agent:
             if isinstance(history, CallHistory)
             else None
         )
+        recall_run = RECALL_RUN.set(run)
         self._active_runs += 1
         try:
             run.events.run_started(
@@ -3745,6 +4663,33 @@ class Agent:
                     self.hippo.working.append(query_msg)
                     run.task_query_msg = query_msg
                     run.query_in_memory = True
+                    if self.options.reasoning != "legacy":
+                        # Only the user's own text gives a user signal; a
+                        # stated fact is admitted at once, a bare request
+                        # covers the run at flush.
+                        signals = classify_user_text(query)
+                        for candidate in user_candidates(
+                            query,
+                            task_id=run.task_id,
+                            provenance={
+                                "task_text": run.task_text[:300],
+                                "source_ids": [],
+                            },
+                        ):
+                            checked = self._checked_candidate_text(
+                                candidate.text, "user", run
+                            )
+                            if checked is None:
+                                continue
+                            candidate.text = checked
+                            self.hippo.propose(candidate)
+                            decisions = await self.hippo.admit(
+                                candidate.candidate_id, "user_statement"
+                            )
+                            self._drain_decisions(decisions, run)
+                        run.remember_request = signals.remember and not (
+                            signals.states_facts
+                        )
                     if self.options.attempt_policy == "none":
                         await self._run_single_attempt(task, query, run)
                     else:
@@ -3772,7 +4717,7 @@ class Agent:
             except BaseException as exc:
                 if run.interactive and _is_cancellation(exc):
                     # A caller stopped a run that it follows.
-                    self._on_cancelled(query, run, exc)
+                    await self._on_cancelled(query, run, exc)
                 else:
                     if (
                         isinstance(exc, asyncio.CancelledError)
@@ -3826,6 +4771,7 @@ class Agent:
             if retries is not None:
                 RETRY_HOOK.reset(retries)
             CALL_RECORDER.reset(recorder)
+            RECALL_RUN.reset(recall_run)
 
     # ── Procedural memory ──
 
@@ -4008,8 +4954,22 @@ class Agent:
                 )
             if self.options.reasoning != "legacy":
                 # R4 gates the promotion too: the explicit modes write
-                # nothing unchecked to long-term memory (R6-lite adds
-                # their own path through the candidate boundary).
+                # nothing unchecked to long-term memory. R6-lite's flush
+                # admits the run's candidates through the boundary and
+                # policy; its failure is logged, never raised.
+                if (
+                    run.final_digest is not None
+                    and self.options.admit_on_outcome
+                    and not run.remember_request
+                ):
+                    run.final_digest.provenance["final_status"] = run.status
+                decisions = await self.hippo.flush(
+                    run_request=run.remember_request,
+                    digest=run.final_digest,
+                    final_reflection=run.final_reflection,
+                    task_id=run.task_id,
+                )
+                self._drain_decisions(decisions, run)
                 self.hippo.working.clear_reflections()
             else:
                 bound = asyncio.timeout(PROMOTION_TIMEOUT_S)
@@ -4086,7 +5046,7 @@ class Agent:
 
     # ── Cancelled interactive runs ──
 
-    def _on_cancelled(
+    async def _on_cancelled(
         self, query: str, run: _RunState, exc: asyncio.CancelledError
     ) -> None:
         """End *run*, an interactive run that a cancellation stopped.
@@ -4109,7 +5069,7 @@ class Agent:
         if run.inflight is None:
             return
         try:
-            self._close_interrupted_step(run.inflight, run.waiting_call_id, run)
+            await self._close_interrupted_step(run.inflight, run.waiting_call_id, run)
         except Exception:
             # Logged, not raised: nothing may take the cancellation's place.
             logger.exception(
@@ -4131,7 +5091,7 @@ class Agent:
             return message
         return CANCELLED_ERROR
 
-    def _close_interrupted_step(
+    async def _close_interrupted_step(
         self, step: _InflightStep, waiting_call_id: str, run: _RunState
     ) -> None:
         """Answer every call of *step* and append the step to working memory.
@@ -4160,7 +5120,7 @@ class Agent:
         step.closed = closed
         cut_before = [*step.cut_before, *[0] * (len(calls) - returned)]
         if self._notes_mode:
-            content, thinking, _note_entry, draft_entry = self._prepare_note_turn(
+            content, thinking, _note_entry, draft_entry = await self._prepare_note_turn(
                 step.response,
                 step,
                 list(zip(calls, closed, strict=True)),
@@ -4174,12 +5134,18 @@ class Agent:
                 thinking=thinking,
             )
             self._pin_pending_draft(tool_msgs, draft_entry, run)
-            self.hippo.working.append_turn(assistant_msg, tool_msgs)
+            # The step's thought chunks still count as shown with this turn,
+            # as in _do_memorize.
+            self.hippo.working.append_turn(
+                assistant_msg, tool_msgs, aliases=step.thought_aliases
+            )
             return
         assistant_msg, tool_msgs = self._checked_tool_turn(
             step.response, closed, cut_before
         )
-        self.hippo.working.append_turn(assistant_msg, tool_msgs)
+        self.hippo.working.append_turn(
+            assistant_msg, tool_msgs, aliases=step.thought_aliases
+        )
 
     async def _finalize_in_task(
         self, task: TaskRecord, run: _RunState, stats: RequestStats, started: float
@@ -4409,6 +5375,24 @@ class Agent:
                 "redactions": run.redactions,
                 "rehearsed": dict(run.rehearsed),
                 "digests": run.digests,
+                "recalls": run.recalls,
+                "recalls_by_trigger": dict(run.recalls_by_trigger),
+                "recall_hits": run.recall_hits,
+                "recall_chars": run.recall_chars,
+                "recall_ms": run.recall_ms,
+                "recall_fallbacks": run.recall_fallbacks,
+                "recall_skipped": run.recall_skipped,
+                "recall_refused": run.recall_refused,
+                "recall_empty": run.recall_empty,
+                "aux_retrieve_calls": run.aux_retrieve_calls,
+                "retrieve_errors": run.retrieve_errors,
+                "retrieve_prompt_tokens": run.retrieve_prompt_tokens,
+                "retrieve_completion_tokens": run.retrieve_completion_tokens,
+                "thought_chunks": run.thought_chunks,
+                "recall_log": list(run.recall_log),
+                "admitted": dict(run.admitted),
+                "written": dict(run.written),
+                "ignored": run.ignored,
             }
         return RunResult(
             task_id=task.task_id,
@@ -4449,6 +5433,15 @@ class Agent:
             config["reasoning"] = opts.reasoning
             config["replay_turns"] = opts.replay_turns
             config["note_writer"] = opts.note_writer
+            config["retriever"] = opts.retriever
+            config["retriever_effective"] = dict(sorted(self._plan.as_map().items()))
+            config["recall_at"] = sorted(self._plan.enabled())
+            config["recall_k"] = opts.recall_k
+            config["recall_kinds"] = sorted(self._effective_kinds)
+            config["recall_placement"] = opts.recall_placement
+            config["recall_min_score"] = opts.recall_min_score
+            config["admit_on_outcome"] = opts.admit_on_outcome
+            config["keep_decision_text"] = opts.keep_decision_text
         return config
 
     async def _run_reflective_attempts(
@@ -4539,6 +5532,38 @@ class Agent:
                 replies=run.events.replies,
                 run=run,
             )
+            entry = None
+            decision = None
+            continue_run = False
+            if reflection is None:  # only with reflection_gate="flags"
+                continue_run = not out_of
+            else:
+                entry, decision = reflection
+                continue_run = (
+                    not out_of
+                    and decision.recommended_action != "done"
+                    and _should_continue(decision, opts.reflection_gate)
+                )
+            if self._plan.attempt is not None:
+                if continue_run:
+                    # The new attempt's block replaces the old one; do not
+                    # dedupe its long hits against the block being replaced.
+                    run.boundary_block = ""
+                    _record, block, _hits = await self._run_recall(
+                        "attempt",
+                        build_attempt_query(
+                            entry,
+                            failure_type=failure_type,
+                            fallback=run.last_text,
+                        ),
+                        run,
+                        boundary=True,
+                        placement="query",
+                        exclude=self.hippo.working.shown_aliases(),
+                    )
+                    run.boundary_block = block
+                else:
+                    run.boundary_block = ""
             record_digest()
             if reflection is None:  # only with reflection_gate="flags"
                 run.events.reflection(None, continue_run=not out_of)
@@ -4559,7 +5584,7 @@ class Agent:
                     run.attempts + 1,
                 )
                 continue
-            entry, decision = reflection
+            assert entry is not None and decision is not None
             self.hippo.working.add_reflection(entry)
 
             best_effort = decision.best_effort_result

@@ -87,19 +87,8 @@ class SettingsPutBody(_SettingsBaseBody):
     revision: StrictStr
 
 
-def _has_control_or_surrogate(text: str) -> bool:
-    """Whether *text* holds a control character, newline or lone surrogate."""
-    return any(
-        ord(ch) < 0x20
-        or 0x7F <= ord(ch) <= 0x9F
-        or ch in (" ", " ")
-        or 0xD800 <= ord(ch) <= 0xDFFF
-        for ch in text
-    )
-
-
 def _check_single_line(field: str, value: str) -> None:
-    if _has_control_or_surrogate(value):
+    if config.has_control_or_surrogate(value):
         raise ApiError(
             400,
             "invalid_request",
@@ -108,12 +97,12 @@ def _check_single_line(field: str, value: str) -> None:
 
 
 def _check_workspace(workspace: str) -> None:
-    _check_single_line("workspace", workspace)
-    if not (os.path.isabs(workspace) or workspace.startswith("~/")):
+    problem = config.gateway_workspace_problem(workspace, allow_empty=False)
+    if problem is not None:
         raise ApiError(
             400,
             "invalid_request",
-            "workspace: Must be an absolute path or start with ~/.",
+            f"workspace: {problem}",
         )
 
 
@@ -204,12 +193,8 @@ def settings_json() -> dict[str, Any]:
         }
     ws = (
         cfg.gateway.workspace
-        if isinstance(cfg.gateway.workspace, str)
-        and not _has_control_or_surrogate(cfg.gateway.workspace)
-        and (
-            os.path.isabs(cfg.gateway.workspace)
-            or cfg.gateway.workspace.startswith("~/")
-        )
+        if config.gateway_workspace_problem(cfg.gateway.workspace, allow_empty=False)
+        is None
         else ""
     )
     return {

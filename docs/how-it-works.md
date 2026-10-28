@@ -36,9 +36,14 @@ before the next step: the note asks what the reply planned, found, decided
 and left open, plus what its tools returned, and the model may write it
 itself in a `<note>` block. The notes, the reply's code drafts and one digest
 per attempt stay in a RAM-only note store beside the window; a pending draft
-is pinned once after its tool results. Nothing is recalled from earlier steps
-yet, and nothing harness-derived is written to `history.db`. See
-[Reasoning notes](memory.md#reasoning-notes).
+is pinned once after its tool results. The loop then recalls: a frozen block
+of earlier thinking rides on the task query at the start of an attempt, each
+tool turn appends a block of the notes and drafts the window no longer
+shows, and the `recall` tool lets the model ask for more. Every block is
+delimited, framed as data and checked by the candidate boundary, and the
+first request that carries one records it in `history.db`'s
+`llm_calls.recall_json`. `legacy` keeps its own path unchanged. See
+[Recall in the loop](memory.md#recall-in-the-loop).
 
 ## Reflection
 
@@ -97,6 +102,18 @@ it did (its step counts and the classes and labels of its tool calls) is
 recorded in [procedural memory](procedures.md), which no prompt includes.
 See [How memory works](memory.md#how-memory-works) for the limits and the
 exact behavior.
+
+In the explicit modes, a reply's note, the attempt digest and the reflection
+are also **candidates** for long-term memory. A candidate is written only
+when a signal admits it: a rehearsal (a restatement, a successful call that
+acted on it, a reflection's `used_notes`), a user statement, a user request
+covering the run, or `--admit-on-outcome` for the final digest. The checked
+write classifies the fact, compares it with the active entries of its kind
+and records one action (`NEW`, `UPDATE`, `RELATED`, `CONFLICT` or `IGNORE`)
+in the store's decision log. The text passes the candidate boundary with
+target `long`, so every stored text is redacted first. `legacy` keeps its
+old path: a step summary and the reflection promotion, unchanged. See
+[Long-term memory](memory.md#long-term-memory).
 
 ## Timeouts
 
