@@ -49,7 +49,7 @@
         <p class="lead">localmelo 的各部分如何协同工作：<code>melo/</code> 中是智能体及其检查、记忆和工具，<code>support/</code> 中是后端、网关和配置。</p>
       </header>
 
-      <p lang="en"><strong>Translation behind (2026-10-28):</strong> The Boundaries and What exists today sections need updating. English source revision (Git blob): <code>a8bef65083ef1ab7ba504183048267780943f6f3</code>. Owner: Docs-1 maintainers. Follow-up: <a href="https://github.com/localmelo/localmelo/issues/117">#117</a>. See the <a href="../en/architecture.html">English architecture page</a>.</p>
+      <p lang="en"><strong>Translation behind (2026-10-28):</strong> The What exists today section needs updating. English source revision (Git blob): <code>a8bef65083ef1ab7ba504183048267780943f6f3</code>. Owner: Docs-1 maintainers. Follow-up: <a href="https://github.com/localmelo/localmelo/issues/117">#117</a>. See the <a href="../en/architecture.html">English architecture page</a>.</p>
 
       <section class="section" id="diagram">
         <h2>架构图</h2>
@@ -213,7 +213,7 @@
               </tr>
               <tr>
                 <td>智能体和记忆</td>
-                <td>写入记忆要经过检查器的大小限制。只有配置了嵌入后端并且记忆开启时，才会写入长期记忆。</td>
+                <td>写入记忆要经过检查器的大小限制。记忆开启时，<code>legacy</code> 模式写入长期记忆需要嵌入后端；显式推理模式无需嵌入后端也可以接纳纯文本记录。</td>
                 <td>提示词和存储都不会无限增长。</td>
               </tr>
               <tr>
