@@ -37,6 +37,7 @@ from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import Approvals, Mode, TerminalApprover
 from localmelo.support.cli.output import Out
 from localmelo.support.cli.render import EXPAND_LINES, ToolOutput, TurnRenderer
+from localmelo.support.cli.session_tools import SessionTools
 from localmelo.support.cli.sessions import BUSY, DELETED, SessionNavigation
 from localmelo.support.cli.text import expand_tabs, wrap_cells
 from localmelo.support.cli.theme import ASCII, in_symbols
@@ -47,7 +48,7 @@ from localmelo.support.sessions.display import (
     format_tokens,
     home_label,
 )
-from localmelo.support.sessions.runner import ResumeMode, SessionRunner
+from localmelo.support.sessions.runner import ResumeLoader, ResumeMode, SessionRunner
 from localmelo.support.sessions.store import (
     NewSession,
     SessionBusyError,
@@ -200,6 +201,7 @@ class CliSession:
         self._stop_landed = False
         self._closed = False
         self.navigation = SessionNavigation(self, resume_mode)
+        self.session_tools = SessionTools(self)
         self.exit_code = 0
         self.saved_resume_hint = ""
 
@@ -254,7 +256,11 @@ class CliSession:
             )
             if self._state != "idle" and not allowed:
                 return f"/{command.name} is not available while a turn runs (esc stops it)."
-            if command.name in ("sessions", "resume", "retry"):
+            if command.name == "title" and arguments and self._state == "switching":
+                return (
+                    "Wait for the session switch to finish before changing its title."
+                )
+            if command.name in ("sessions", "resume", "retry", "undo", "new"):
                 self._state = "switching"
                 self._work = self.spawn(
                     self._run_command(command.name, arguments, text)
@@ -312,7 +318,7 @@ class CliSession:
         self._state = "running"
         self._stop_wanted = self._stop_landed = False
         if self.runner is None or self.runner.session_id is None:
-            self.title = title_from_text(text)  # no session row yet
+            self.title = self.session_tools.pending_title or title_from_text(text)
         first_turn = self.runner is None or self.runner.session_id is None
         self.renderer.begin_turn(text, first_turn=first_turn)
         self._work = self.spawn(self._turn(text))
@@ -322,6 +328,10 @@ class CliSession:
         if self.runner is None:
             return await self.approver.ask(request)
         return await self.runner.observe(self.approver.ask)(request)
+
+    async def _prepare_turn(self, reload: ResumeLoader) -> None:
+        await self.navigation.synchronize(reload)
+        await self.session_tools.apply_title()
 
     async def _turn(self, text: str, *, typed_text: str | None = None) -> None:
         started = self._clock()
@@ -337,7 +347,7 @@ class CliSession:
                 on_event=self.renderer.on_event,
                 progress=True,
                 resume_mode=self.navigation.mode,
-                before_turn=self.navigation.synchronize,
+                before_turn=self._prepare_turn,
             )
         runner = self.runner
         result: RunResult | None = None
@@ -360,6 +370,8 @@ class CliSession:
         # finishes the turn: the next message must not meet it.
         while runner.busy:
             await asyncio.sleep(0.05)
+        with contextlib.suppress(SessionStoreError):
+            await self.session_tools.apply_title()
         cause = "user_stop" if self._stop_wanted else ""
         self.renderer.end_turn(result, error, cause=cause)
         with contextlib.suppress(SessionStoreError):
@@ -473,6 +485,8 @@ class CliSession:
             await self.model(arguments)
         elif name == "backend":
             await self.backend(arguments)
+        elif name in ("title", "undo", "usage", "memory", "copy"):
+            await self.session_tools.run(name, arguments)
         elif name == "verbose":
             self.toggle_verbose(arguments)
         elif name == "thinking":
@@ -814,6 +828,7 @@ class CliSession:
         if self.runner is not None:
             await self.runner.close()
         self.runner = None
+        self.session_tools.reset()
         self.navigation.mark = SessionMark(0, 0)
         self.agent.load_conversation([])
         self.approvals.reset()

@@ -127,7 +127,7 @@ class SessionNavigation:
             on_event=s.renderer.on_event,
             progress=True,
             resume_mode=self.mode,
-            before_turn=self.synchronize,
+            before_turn=s._prepare_turn,
         )
         previous = s.agent.conversation()
         try:
@@ -148,6 +148,7 @@ class SessionNavigation:
         old, s.runner = s.runner, candidate
         self.mark = mark
         s.approvals.reset()
+        s.session_tools.reset()
         s.title = current.title
         s.renderer.new_session()
         s.renderer.context_tokens = 0
@@ -190,6 +191,7 @@ class SessionNavigation:
         info = await s.store.get_session(sid)
         if info is None:
             raise UnknownSessionError(f"Unknown session: {sid}")
+        s.title = info.title
         mark = await session_mark(s.store, sid, holder=process_holder("cli"))
         if mark != self.mark:
             await (reload or s.runner.resume)()
@@ -200,7 +202,6 @@ class SessionNavigation:
                 )
             )
         self.mark = mark
-        s.title = info.title
         await self.metadata(info)
 
     async def tool_outputs(self, argument: str) -> list[ToolOutput]:
