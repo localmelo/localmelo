@@ -56,17 +56,19 @@ class SessionTools:
 
     async def title(self, text: str) -> None:
         s = self.session
+        runner = s.runner
         if text:
             if not 1 <= len(text) <= 200:
                 raise ValueError("A title has 1 to 200 characters.")
             self.pending_title = text
             s.title = text
             await self.apply_title()
-        elif s.runner is not None and s.runner.session_id is not None:
-            info = await s.store.get_session(s.runner.session_id)
-            if info is None:
-                raise UnknownSessionError("The session was deleted.")
-            s.title = info.title
+        elif runner is not None and runner.session_id is not None:
+            info = await s.store.get_session(runner.session_id)
+            if s.runner is runner:
+                if info is None:
+                    raise UnknownSessionError("The session was deleted.")
+                s.title = info.title
         s.out.print(s._text(f"Title: {s.title or 'New session'}"))
 
     async def apply_title(self) -> None:
@@ -79,6 +81,7 @@ class SessionTools:
         if s.runner is runner and self.pending_title == text:
             self.pending_title = None
             s.title = text
+        await s.navigation.refresh_refs()
 
     def _remember_undo(self, turn: TurnInfo) -> None:
         s = self.session

@@ -139,6 +139,7 @@ def memory_view(
             cut_cells(
                 expand_tabs(clean_output(in_symbols("  " + prefix + content, symbols))),
                 max(1, width),
+                ellipsis=symbols.ellipsis,
             )
         )
     chars = sum(len(message.content) for message in messages)
