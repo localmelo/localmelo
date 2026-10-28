@@ -9,6 +9,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The gateway's `sessions.db` can hold the scheduler's `scheduler` component
+  version 1: `tasks`, `task_deps`, `priority_events`, `questions`,
+  `sched_rules`, `sched_log` and `idle_windows` are created in one
+  transaction in that file only, `PRAGMA user_version` stays the session
+  schema's, and a newer component is refused. A task and its `kind="task"`
+  session are created together behind `UNIQUE(origin, request_key)`, so a
+  repeated request returns its task and a reused key with a different
+  payload is a conflict; level and state changes write `priority_events` and
+  `sched_log`, and 30-day retention clears the log and idle windows.
+  The task boundary normalizes the `TaskSpec`, resolves a worker's folder
+  under the user's home or `[gateway] workspace`, and gives only `user` and
+  `user_rule` origins remembered approvals, unmarked MCP tools and session
+  grants. `ChatGate` can register a worker task, so its calls are logged as
+  `session_kind="task"`, its P0 is the user's single task P0, and only the
+  runner ends it. No `/api/tasks` route or worker runs yet; the console
+  wiring is S3a.2 ([#NN]).
+
 - Terminal session commands: `/title [text]` shows or sets a title, including
   before the first message; `/undo` forgets the latest finished turn and
   keeps its typed history without reversing file changes (a committed undo

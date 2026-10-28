@@ -26,10 +26,10 @@ import re
 import shutil
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, get_args
 
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
@@ -65,10 +65,13 @@ from localmelo.support.scheduler import (
 from localmelo.support.scheduler.costs import Rates, charge_s
 from localmelo.support.scheduler.machine_gates import battery_band
 from localmelo.support.scheduler.model import (
+    ACCOUNTING_FIELDS,
+    TERMINAL_PHASES,
     CallKind,
     Event,
     LevelSource,
     Outcome,
+    Phase,
     SessionKind,
     is_terminal,
 )
@@ -85,6 +88,24 @@ _KINDS: tuple[str, ...] = ("plan", "reflect", "retrieve", "estimate", "embed")
 
 # A workspace chat call is a planning or reflection request.
 _CHAT_KINDS: tuple[str, ...] = ("plan", "reflect")
+
+# The Task fields a caller may change through `update_task`: everything the
+# policy's `advance()`/`apply_dispatch()` does not own, and nothing that
+# identifies the task.
+_TASK_MUTABLE = tuple(
+    name
+    for name in (field.name for field in fields(Task))
+    if name not in ACCOUNTING_FIELDS
+    and name
+    not in {
+        "task_id",
+        "root_id",
+        "kind",
+        "origin",
+        "created_mono_us",
+        "created_wall_us",
+    }
+)
 
 # The trace's ``service_source`` for each vocabulary ``charge_s()`` returns
 # (R20). S1 will align its own strings later (decision D9).
@@ -462,7 +483,7 @@ class ChatGate:
                 idle_gate=False,
                 battery_gate_enforce=False,
                 reservation_policy="respect",
-                p0_meaning="conversation",
+                p0_meaning="task",
             )
         self._clock = clock if clock is not None else _default_clock
         days = (
@@ -491,6 +512,10 @@ class ChatGate:
         self._observed_band = 4
         self._machine_payload: dict[str, Any] | None = None
         self._levels: dict[str, tuple[int, str]] = {}
+        # The worker tasks the console registered on this gate, by task id
+        # (which is the worker session's id). Kept under `policy="off"` too,
+        # so the trace still tags their calls `session_kind="task"`.
+        self._task_registry: dict[str, Task] = {}
         self._counts: dict[str, int] = {}
         self._first_submit: dict[str, int] = {}
         self._last_end: dict[str, int] = {}
@@ -671,13 +696,17 @@ class ChatGate:
         first = self._first_submit.setdefault(session_id, now.mono_us)
         level = self.level(session_id)
         planning = call_kind in _CHAT_KINDS
+        worker = session_id in self._task_registry
         # Only a planning call can be a lane call: an embedding or a
         # retrieval is never held (R14), and S1's lane path would hold it.
         # The trace still logs every call of the focused chat as "front"
         # (4.7), so the logged kind and the policy's kind are separate
-        # (decision 1b).
-        lane = planning and session_id == self._focus
-        session_kind = "front" if session_id == self._focus else "chat"
+        # (decision 1b). A registered worker task is never the lane, even
+        # if a caller focuses it by mistake.
+        lane = planning and not worker and session_id == self._focus
+        session_kind = (
+            "task" if worker else ("front" if session_id == self._focus else "chat")
+        )
         meta = CallMeta(
             session_id=session_id,
             call_id=f"{session_id}:{index}",
@@ -732,9 +761,11 @@ class ChatGate:
         """
         events: list[Event] = []
         planning = meta.kind in _CHAT_KINDS
-        if planning:
+        worker = meta.session_id in self._task_registry
+        if planning and not worker:
             # Only a chat call opens (or reopens) the chat's task; an
-            # embedding or a retrieval is taskless in S1 (section 4.2).
+            # embedding or a retrieval is taskless in S1 (section 4.2), and
+            # a worker task is already registered by `register_task`.
             already = opened is not None and meta.session_id in opened
             current = self._task(meta.session_id)
             if current is None:
@@ -765,10 +796,18 @@ class ChatGate:
             CallSubmitted(
                 Call(
                     call_id=meta.call_id,
-                    # R11: a lane call is taskless; only a background plan or
-                    # reflect call belongs to the chat's task.
-                    task_id=(meta.session_id if planning and not meta.lane else None),
-                    session_kind=cast(SessionKind, "front" if meta.lane else "chat"),
+                    # R11: a lane call is taskless; a background plan or
+                    # reflect call belongs to the chat's task, and every call
+                    # of a registered worker belongs to that task.
+                    task_id=(
+                        meta.session_id
+                        if worker or (planning and not meta.lane)
+                        else None
+                    ),
+                    session_kind=cast(
+                        SessionKind,
+                        "task" if worker else ("front" if meta.lane else "chat"),
+                    ),
                     kind=cast(CallKind, meta.kind),
                     attempt=meta.attempt,
                     submit_mono_us=meta.submit_mono_us,
@@ -829,11 +868,18 @@ class ChatGate:
                     completion_tokens=completion,
                 )
             ]
-            if self._task(meta.session_id) is not None and not any(
-                c.meta.session_id == meta.session_id for c in self._calls.values()
+            if (
+                meta.session_kind != "task"
+                and meta.session_id not in self._task_registry
+                and self._task(meta.session_id) is not None
+                and not any(
+                    c.meta.session_id == meta.session_id for c in self._calls.values()
+                )
             ):
                 # The chat's last call ends: mark it done in the same
                 # transition, so an idle chat is never a reason of its own.
+                # A registered worker's phase belongs to its runner, never to
+                # one call ending mid-turn (S3a.1).
                 events.append(TaskUpdated(meta.session_id, (("phase", "done"),)))
             self._transition(events)
         self._last_end[meta.session_id] = now.mono_us
@@ -893,6 +939,222 @@ class ChatGate:
             )
         return level
 
+    # ── Worker tasks (S3a.1) ──
+
+    def register_task(self, task: Task) -> None:
+        """Register a worker task; its calls run as ``session_kind="task"``.
+
+        The task's id is its worker session's id. An already registered task
+        is updated instead of added, so a recovered task can be registered
+        again. Under ``policy="off"`` this only records the id (the call log
+        still says ``task``) and sends no event.
+        """
+        if task.kind != "task":
+            raise ValueError("register_task needs a task with kind='task'")
+        if isinstance(task.level, bool) or not 0 <= task.level <= 5:
+            raise ValueError("a task's level must be from 0 (P0) to 5 (Later)")
+        if task.level == 0 and task.level_source != "user":
+            raise ValueError("P0 is the user's setting; level 0 needs a user source")
+        if task.level_source == "user" and task.origin != "user":
+            raise ValueError("only a user-origin task may carry a user-set level")
+        if task.level_source == "user_rule" and task.origin not in (
+            "user",
+            "user_rule",
+        ):
+            raise ValueError("a user rule levels its own tasks only")
+        current = self._task(task.task_id) if self.policy != "off" else None
+        if current is not None and current.kind != "task":
+            raise ValueError(
+                f"A chat task with id {task.task_id} already exists; a worker "
+                "task must register before its first call"
+            )
+        if task.level == 0 and task.level_source == "user":
+            for other in list(self._task_registry.values()):
+                if (
+                    other.task_id != task.task_id
+                    and other.level == 0
+                    and other.level_source == "user"
+                    and not is_terminal(other.phase)
+                ):
+                    self.update_task(
+                        other.task_id,
+                        level=1,
+                        level_source="user",
+                        user_rank=None,
+                        paused=False,
+                    )
+        self._task_registry[task.task_id] = task
+        self._levels[task.task_id] = (task.level, task.level_source)
+        if self.policy == "off" or self._closed:
+            return
+        if current is None:
+            self._transition((TaskAdded(task),))
+        else:
+            changes = self._task_changes(current, task)
+            if changes:
+                self._transition((TaskUpdated(task.task_id, changes),))
+
+    def update_task(
+        self, task_id: str, *, force_level: bool = False, **changes: object
+    ) -> Task:
+        """Change a registered task's caller fields and tell the policy.
+
+        Rejects an unknown field and, like :meth:`register_task`, a P0 whose
+        source is not the user. The phase and wait reason are the runner's
+        (S3a.2); hold and admission stay the policy's own.
+        """
+        current = self._task_registry.get(task_id)
+        if current is None:
+            raise ValueError(f"No task is registered with id {task_id}")
+        unknown = sorted(set(changes) - set(_TASK_MUTABLE))
+        if unknown:
+            raise ValueError(f"task fields that may not change: {', '.join(unknown)}")
+        if "level" in changes:
+            level = changes["level"]
+            if (
+                isinstance(level, bool)
+                or not isinstance(level, int)
+                or not 0 <= level <= 5
+            ):
+                raise ValueError("a task's level must be from 0 (P0) to 5 (Later)")
+        source = changes.get("level_source", current.level_source)
+        if source not in ("user", "user_rule", "computed"):
+            raise ValueError("level_source must be 'user', 'user_rule' or 'computed'")
+        level = changes.get("level", current.level)
+        if level == 0 and source != "user":
+            raise ValueError("P0 is the user's setting; level 0 needs a user source")
+        if source == "user" and current.origin != "user":
+            raise ValueError("only a user-origin task may carry a user-set level")
+        if (
+            current.level_source in ("user", "user_rule")
+            and source == "computed"
+            and not force_level
+        ):
+            raise ValueError(
+                "this task's level is set by the user; force_level hands it back"
+            )
+        if "phase" in changes and changes["phase"] not in get_args(Phase):
+            raise ValueError(f"unknown task phase {changes['phase']!r}")
+        if "size" in changes and changes["size"] not in (
+            "",
+            "small",
+            "medium",
+            "large",
+        ):
+            raise ValueError(f"unknown task size {changes['size']!r}")
+        for name in ("paused", "blocked_now", "budget_exhausted"):
+            if name in changes and not isinstance(changes[name], bool):
+                raise ValueError(f"{name} must be a boolean")
+        updated = replace(current, **cast(Any, changes))
+        self._task_registry[task_id] = updated
+        self._levels[task_id] = (updated.level, updated.level_source)
+        if self.policy != "off" and not self._closed:
+            if self._task(task_id) is None:
+                self._transition((TaskAdded(updated),))
+            elif changes:
+                self._transition((TaskUpdated(task_id, tuple(changes.items())),))
+        return updated
+
+    def set_task_level(
+        self, task_id: str, choice: int | str, *, rank: float | None = None
+    ) -> int:
+        """Set a worker task's priority from the chip's choices.
+
+        *choice* is ``0``-``5``/``"P0"``-``"P5"``, ``"auto"`` (P2, computed)
+        or ``"first"`` (keep the level, set ``user_rank``). A user's P0 is
+        single: another task at user P0 returns to P1 with no rank first, as
+        S1's ``compute_levels()`` does for a conflict (design 2.5).
+        """
+        task = self._task_registry.get(task_id)
+        if task is None:
+            raise ValueError(f"No task is registered with id {task_id}")
+        text = choice.strip().lower() if isinstance(choice, str) else choice
+        if text == "auto":
+            self.update_task(
+                task_id,
+                level=2,
+                level_source="computed",
+                user_rank=None,
+                paused=False,
+                force_level=True,
+            )
+        elif text == "first":
+            first_rank = self._clock().wall_us / 1_000_000 if rank is None else rank
+            self.update_task(task_id, user_rank=first_rank)
+        else:
+            if (
+                isinstance(text, str)
+                and len(text) == 2
+                and text[0] == "p"
+                and text[1].isdigit()
+            ):
+                text = int(text[1])
+            if (
+                isinstance(text, bool)
+                or not isinstance(text, int)
+                or not 0 <= text <= 5
+            ):
+                raise ValueError("priority must be P0-P5, auto or first")
+            if text == 0:
+                for other in list(self._task_registry.values()):
+                    if (
+                        other.task_id != task_id
+                        and other.level == 0
+                        and other.level_source == "user"
+                        and not is_terminal(other.phase)
+                    ):
+                        self.update_task(
+                            other.task_id,
+                            level=1,
+                            level_source="user",
+                            user_rank=None,
+                            paused=False,
+                        )
+            self.update_task(
+                task_id,
+                level=text,
+                level_source="user",
+                user_rank=None,
+                paused=text == 5,
+            )
+        return self._task_registry[task_id].level
+
+    def finish_task(self, task_id: str, phase: str = "done") -> Task:
+        """End a worker task: ``done``, ``failed``, ``cancelled`` or ``expired``.
+
+        The worker's runner owns this call. It is never inferred from a
+        model call ending, which is why a worker's phase survives its tools
+        and its next call.
+        """
+        if phase not in TERMINAL_PHASES:
+            raise ValueError(
+                "a finished task's phase must be done, failed, cancelled or expired"
+            )
+        task = self.update_task(task_id, phase=phase, wait_reason="")
+        # A call parked at the gate must not wait for a task that is over:
+        # the policy skips a terminal task's calls, so its future would never
+        # resolve (a stop while a worker's call is held).
+        for call in list(self._calls.values()):
+            if call.meta.session_id != task_id:
+                continue
+            if call.future is not None and not call.future.done():
+                call.future.cancel()
+            self.finish(call, "refused")
+        return task
+
+    @property
+    def registered_tasks(self) -> tuple[Task, ...]:
+        """The worker tasks this gate registered, in registration order."""
+        return tuple(self._task_registry.values())
+
+    @staticmethod
+    def _task_changes(current: Task, new: Task) -> tuple[tuple[str, object], ...]:
+        return tuple(
+            (name, getattr(new, name))
+            for name in _TASK_MUTABLE
+            if getattr(current, name) != getattr(new, name)
+        )
+
     def turn_start(self, session_id: str) -> int:
         """Reset the turn's hold clock; return its start instant in µs."""
         if not self.enforces_holds:
@@ -928,6 +1190,7 @@ class ChatGate:
             self._reason_by_task,
         ):
             mapping.pop(session_id, None)
+        self._task_registry.pop(session_id, None)
         if self._closed or self.policy == "off":
             return
         if any(c.meta.session_id == session_id for c in self._calls.values()):

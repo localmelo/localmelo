@@ -228,6 +228,71 @@ no lock shows nothing. A seeding create under a foreign lock in `wait` fails
 fast with HTTP 409 naming the holder, because the seed embeddings would
 otherwise send a model call before the chat exists.
 
+## Tasks, workers and the scheduler store (S3a.1)
+
+The gateway's `sessions.db` gains a `scheduler` component beside the session
+tables. `support/gateway/task_store.py` creates version 1 of it — `tasks`,
+`task_deps`, `priority_events`, `questions`, `sched_rules`, `sched_log` and
+`idle_windows`, with indexes on `tasks(state, level_eff)`,
+`priority_events(task_id, ts)` and `sched_log(ts)` — in one
+`BEGIN IMMEDIATE` transaction, then records `('scheduler', 1)` in
+`schema_components`. `PRAGMA user_version` stays the session schema's, and a
+terminal `melo` never creates the component or reads its tables; a component
+newer than 1 is refused like a newer `user_version`. `TaskStore.open()` is
+the entry point S3a.2's console calls after it opens the store; this PR adds
+no route, worker or console wiring.
+
+A task row's id is its `kind="task"` session's id. `create_task()` writes the
+session, the task, its first `priority_events` row and a `sched_log` row in
+the same transaction, so a crash leaves none of them. `UNIQUE(origin,
+request_key)` makes a repeated create idempotent: the same payload returns
+the stored row with `repeated=True`, a different payload raises
+`TaskConflictError`, which S3a.2 maps to 409. `set_level()` writes a
+`priority_events` row and a `sched_log` row; a user's P0 is single, so a
+second user P0 returns the prior one to P1 with no `user_rank` in the same
+transaction. `set_priority()` also takes `auto` (P2, computed) and `first`
+(keeps the level, sets a rank that sorts earlier first choices first).
+`set_state()` writes a task's state (`queued`, `running`, `held`, `waiting`,
+`parked`, `interrupted`, `done`, `failed`, `cancelled`, `expired`) and its
+start/finish time. `apply_retention()` clears `sched_log` and
+`idle_windows` older than the session store's thinking retention — 30 days
+by default. The task store registers it as a hook of the session store's
+sweep, so the gateway's daily `apply_retention()` prunes both, and
+`TaskStore.open()` prunes them too after downtime. Tasks,
+`priority_events`, `questions` and rules are not pruned.
+
+`support/gateway/task_policy.py` is the code-side boundary, never a model's
+JSON:
+
+- `TaskSpec.from_payload()` normalizes a create request (accepting `prompt`
+  as an alias for `objective`), derives a 60-character title when none is
+  given, bounds every field (1,500 characters of `context`, 32
+  `done_when` items, 32 `inputs`), parses `deadline` from an epoch or an
+  ISO-8601 string (naive means local time), and refuses a `P0` that is not
+  the user's.
+- `validate_task_workspace()` returns the folder's real path. A missing
+  folder means `[gateway] workspace`, or `~/localmelo-workspace` when that
+  key is empty, and that default is created. The user's own tasks may use
+  any existing folder strictly inside `~` with no dot component and nothing
+  under `~/Library`; every other origin must be strictly inside the
+  configured workspace, though a request that names no folder gets that
+  root itself. `/` and `~` are never a worker's root.
+- `worker_tool_allowlist()` returns the gateway built-ins
+  (`file_read`, `file_write`, `python_exec`; never `shell_exec`) and, for
+  `user` and `user_rule` only, remembered approvals, unmarked MCP tools and
+  session grants. `front`, `harness`, `agent`, `channel` and `sleep` get
+  none of those, so every marked call needs a fresh approval.
+
+`ChatGate.register_task()` gives a worker its task lifecycle. Its calls are
+submitted with `task_id` and `session_kind="task"`, never take the lane, and
+a call ending does not mark the task `done` — the runner calls
+`finish_task()` with `done`, `failed`, `cancelled` or `expired`.
+`update_task()` carries the caller-owned fields (phase, wait reason, level,
+rank, deadline, paused), `set_task_level()` handles the chip's `P0`-`P5`,
+`auto` and `first`, and `held(task_id)` reports the gate's reason as it does
+for a chat. Gate levels remain in memory; S3a.2 writes them through the
+store.
+
 ## Run one simulation
 
 A 30-minute W2 under each mode takes about a second:
