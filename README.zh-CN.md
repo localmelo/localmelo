@@ -12,7 +12,7 @@
   <a href="README.md"><img alt="English" src="https://img.shields.io/badge/English-255EDB?style=for-the-badge"></a>
   <br>
   <a href="https://localmelo.github.io/localmelo/zh-CN/updates.html#roadmap"><img alt="状态：早期预览版，v0.1.0 计划于 2026-12-20" src="https://img.shields.io/badge/%E7%8A%B6%E6%80%81-%E6%97%A9%E6%9C%9F%E9%A2%84%E8%A7%88_%C2%B7_v0.1.0_%E8%AE%A1%E5%88%92_2026--12--20-9A5A00?style=flat-square&labelColor=F0F3F7"></a>
-  <a href="pyproject.toml"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-5C6573?style=flat-square&labelColor=F0F3F7&logo=python&logoColor=white"></a>
+  <a href="pyproject.toml"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-5C6573?style=flat-square&labelColor=F0F3F7&logo=python&logoColor=3776AB"></a>
   <a href="LICENSE"><img alt="许可证：MIT" src="https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-MIT-0F766E?style=flat-square&labelColor=F0F3F7"></a>
   <a href="docs/llms.txt"><img alt="给 AI 智能体：llms.txt" src="https://img.shields.io/badge/%E7%BB%99%E6%99%BA%E8%83%BD%E4%BD%93-llms.txt-5C6573?style=flat-square&labelColor=F0F3F7"></a>
 </p>

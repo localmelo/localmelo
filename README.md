@@ -12,7 +12,7 @@
   <a href="README.zh-CN.md"><img alt="简体中文" src="https://img.shields.io/badge/%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87-255EDB?style=for-the-badge"></a>
   <br>
   <a href="https://localmelo.github.io/localmelo/en/updates.html#roadmap"><img alt="Status: pre-alpha, v0.1.0 due 2026-12-20" src="https://img.shields.io/badge/status-pre--alpha_%C2%B7_v0.1.0_due_2026--12--20-9A5A00?style=flat-square&labelColor=F0F3F7"></a>
-  <a href="pyproject.toml"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-5C6573?style=flat-square&labelColor=F0F3F7&logo=python&logoColor=white"></a>
+  <a href="pyproject.toml"><img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-5C6573?style=flat-square&labelColor=F0F3F7&logo=python&logoColor=3776AB"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-0F766E?style=flat-square&labelColor=F0F3F7"></a>
   <a href="docs/llms.txt"><img alt="For AI agents: llms.txt" src="https://img.shields.io/badge/for_agents-llms.txt-5C6573?style=flat-square&labelColor=F0F3F7"></a>
 </p>
