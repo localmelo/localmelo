@@ -27,10 +27,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   resuming them comes later ([#53]).
 - A first run in a terminal: `melo` with no config file looks for a model
   server on this computer, asks for its URL and for a model from the
-  server's list, saves them and opens the chat. It sends `GET /v1/models`,
-  and `GET /api/version` once when saving to tell an Ollama server apart,
-  to ports 8000, 8400, 11434 and 30000 of `127.0.0.1`
-  (`LOCALMELO_DETECT_URLS` replaces them); a server that cannot be used is
+  server's list, saves them and opens the chat. It looks with
+  `GET /v1/models` on ports 8000, 8400, 11434 and 30000 of `127.0.0.1`
+  (`LOCALMELO_DETECT_URLS` replaces them), and sends the chosen server one
+  `GET /api/version` when saving, to tell Ollama apart; a server that cannot be used is
   named with the reason, and you can retry, start without saving or quit
   ([#52]).
 - A progress line in the terminal. While `melo "<task>"` runs with stderr
