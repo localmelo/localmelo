@@ -33,6 +33,12 @@ melo "What is 6*7?"
   text-only entries without one and find them with BM25. In explicit modes,
   recall must be enabled and include the `long` kind; `drop` and `replay`
   leave `auto` recall off by default.
+- Attempt digests are admitted to long-term memory only when they contain a
+  confirmed file write or an eligible passing check. Recall prefers digests
+  from the same task; older keyless digests count as cross-task. By default,
+  a new task receives no cross-task digests until a same-task digest matches.
+  General facts and other non-digest memories are not gated. See
+  [digest recall](../reference/memory.md#digest-recall).
 
 ## Turn long-term memory off
 

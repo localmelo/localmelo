@@ -9,6 +9,7 @@ import pytest
 
 from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.memory.long import LongTerm
+from localmelo.melo.memory.recall_gate import digest_task_key
 
 from .test_compress import FakeLLM, _agent, _answer, _options
 
@@ -66,11 +67,91 @@ async def test_start_recalls_active_entries_of_other_tasks(tmp_path: Path) -> No
     assert result.status == "completed"
     prompt = _prompt(server)
     assert "earlier tasks" in prompt
-    # R5's start trigger keeps two long hits.
+    # General facts retain their existing recall; keyless digests are gated.
     assert "Alice" in prompt
-    assert "runbook" in prompt or "Fridays" in prompt
+    assert "Fridays" in prompt
+    assert "runbook" not in prompt
     assert result.memory_stats is not None
+    assert result.memory_stats["recall_cross_task"] == 0
+    assert result.memory_stats["recall_same_task"] == 0
     assert result.memory_stats["recalls"] == 1
+
+
+@pytest.mark.asyncio
+async def test_default_cold_recall_drops_cross_task_entries(tmp_path: Path) -> None:
+    server = FakeLLM(_answer("done"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            retriever="bm25",
+            max_steps=1,
+        ),
+    )
+    await _seed(
+        agent,
+        [
+            ("the deployment checklist is owned by Alice", "semantic", "user", "t-a"),
+            ("deployment notes from another task", "episodic", "digest", "t-b"),
+        ],
+    )
+    result = await agent.run_task("deployment checklist")
+    await agent.close()
+    assert "Alice" in _prompt(server)
+    assert "deployment notes from another task" not in _prompt(server)
+    assert result.memory_stats is not None
+    assert result.memory_stats["recall_cross_task"] == 0
+
+
+@pytest.mark.asyncio
+async def test_same_task_survives_top_twenty_and_is_counted(tmp_path: Path) -> None:
+    server = FakeLLM(_answer("done"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            retriever="bm25",
+            max_steps=1,
+        ),
+    )
+    query = "transpose matrix"
+    await _seed(
+        agent,
+        [
+            (
+                f"transpose transpose matrix unrelated {i}",
+                "episodic",
+                "digest",
+                f"other{i}",
+            )
+            for i in range(25)
+        ],
+    )
+    await agent.hippo.long.apply(
+        text="transpose matrix same task marker",
+        kind="episodic",
+        source="digest",
+        admitted_by="outcome",
+        provenance={"task_key": digest_task_key(query)},
+        task_id="previous-run",
+        session_id="",
+        created_at=1.0,
+        embedding=None,
+        action="NEW",
+        target_id=None,
+        reason="seed",
+        source_ids=[],
+        keep_text=False,
+        candidate_id="same",
+    )
+    result = await agent.run_task(query)
+    await agent.close()
+    assert "same task marker" in _prompt(server)
+    assert result.memory_stats is not None
+    assert result.memory_stats["recall_same_task"] == 1
+    assert result.memory_stats["recall_log"][0]["same_task"] == 1
 
 
 @pytest.mark.asyncio

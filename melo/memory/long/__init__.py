@@ -351,6 +351,7 @@ class LongTerm:
         *,
         kinds: Any = None,
         exclude_task_ids: Any = (),
+        task_key: str = "",
     ) -> list[tuple[str, float, dict[str, Any]]]:
         q = np.asarray(query_embedding, dtype=np.float32)
         q_norm = np.linalg.norm(q)
@@ -365,6 +366,12 @@ class LongTerm:
             if norm == 0:
                 continue
             scored.append((entry, float(np.dot(q, entry.vector / norm))))
+        if task_key:
+            scored = [
+                item
+                for item in scored
+                if item[0].provenance.get("task_key") == task_key
+            ]
         scored.sort(key=lambda item: _tie_key(item[0], item[1]), reverse=True)
         return [(entry.text, score, _meta(entry)) for entry, score in scored[:top_k]]
 
@@ -379,6 +386,7 @@ class LongTerm:
         *,
         kinds: Any = None,
         exclude_task_ids: Any = (),
+        task_key: str = "",
     ) -> list[tuple[str, float, dict[str, Any]]]:
         rows = self._active(kinds, exclude_task_ids)
         if not rows or not query.strip():
@@ -393,6 +401,12 @@ class LongTerm:
             for doc_id, score in index.search(query, len(rows))
             if score > 0
         ]
+        if task_key:
+            scored = [
+                item
+                for item in scored
+                if item[0].provenance.get("task_key") == task_key
+            ]
         scored.sort(key=lambda item: _tie_key(item[0], item[1]), reverse=True)
         return [(entry.text, score, _meta(entry)) for entry, score in scored[:top_k]]
 

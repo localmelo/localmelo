@@ -203,6 +203,9 @@ class AgentOptions:
     recall_kinds: frozenset[str] | None = None
     recall_placement: RecallPlacement = "tool"
     recall_min_score: float = RECALL_MIN_SCORE
+    cross_task_ratio: float = 1.1
+    cross_task_cap: int = 1
+    cross_task_cold: int = 0
     # R6-lite's write path: admit the final digest at the run's end, and
     # keep a decision's text (an evaluation switch). Both are inert in
     # ``legacy``.
@@ -280,6 +283,22 @@ class AgentOptions:
                 "recall_min_score must be a number from 0 to 1, "
                 f"got {self.recall_min_score!r}"
             )
+
+        ratio = self.cross_task_ratio
+        if (
+            isinstance(ratio, bool)
+            or not isinstance(ratio, int | float)
+            or not 1 <= ratio <= 10
+        ):
+            raise ValueError("cross_task_ratio must be a number from 1 to 10")
+        for name, maximum in (("cross_task_cap", 2), ("cross_task_cold", 1)):
+            value = getattr(self, name)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value <= maximum
+            ):
+                raise ValueError(f"{name} must be an int from 0 to {maximum}")
 
         if not isinstance(self.memory, bool):
             raise ValueError(f"memory must be a bool, got {self.memory!r}")

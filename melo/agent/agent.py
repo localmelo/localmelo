@@ -159,6 +159,13 @@ from localmelo.melo.memory.recall import (
     record_to_dict,
     resolve_plan,
 )
+from localmelo.melo.memory.recall_gate import (
+    digest_has_evidence,
+    digest_task_key,
+    gate_long_docs,
+    is_task_digest,
+    same_task,
+)
 from localmelo.melo.memory.retrieval import build_retriever
 from localmelo.melo.memory.retrieval.base import Doc, RetrievalResult, Retriever
 from localmelo.melo.memory.short import group_turns
@@ -1092,6 +1099,8 @@ class _RunState:
         default_factory=lambda: {trigger: 0 for trigger in (*DEFAULT_TRIGGERS, "tool")}
     )
     recall_hits: int = 0
+    recall_same_task: int = 0
+    recall_cross_task: int = 0
     recall_chars: int = 0
     recall_ms: int = 0
     recall_fallbacks: int = 0
@@ -1842,6 +1851,8 @@ class Agent:
                 query,
                 exclude_task_ids={run.task_id},
                 pool=LONG_POOL,
+                task_key=digest_task_key(run.task_text),
+                min_score=self.options.recall_min_score,
             )
         except ProviderError as exc:
             run.retrieve_errors += 1
@@ -1858,17 +1869,32 @@ class Agent:
             exclude_task_ids={run.task_id},
             min_score=self.options.recall_min_score,
         )
-        # Keep the two best by score, then order and alias them by creation
-        # time so an appended entry never renumbers an old one.
-        docs.sort(key=lambda doc: float(doc.meta.get("score") or 0.0), reverse=True)
-        docs = docs[:RECALL_LONG_K]
+        docs = gate_long_docs(
+            docs,
+            digest_task_key(run.task_text),
+            ratio=self.options.cross_task_ratio,
+            cap=self.options.cross_task_cap,
+            cold=self.options.cross_task_cold,
+        )[:RECALL_LONG_K]
         docs.sort(
             key=lambda doc: (float(doc.meta.get("created_at") or 0.0), doc.doc_id)
         )
-        return [
-            dataclasses.replace(doc, meta={**doc.meta, "alias": f"m{index}"})
+        docs = [
+            dataclasses.replace(
+                doc,
+                meta={
+                    **doc.meta,
+                    "alias": f"m{index}",
+                    "task_relation": (
+                        "same"
+                        if same_task(doc, digest_task_key(run.task_text))
+                        else "cross" if is_task_digest(doc) else "unscoped"
+                    ),
+                },
+            )
             for index, doc in enumerate(docs, start=1)
         ]
+        return sorted(docs, key=lambda doc: doc.meta["task_relation"] != "same")
 
     def _hits_from_result(
         self,
@@ -2005,6 +2031,10 @@ class Agent:
                 ):
                     continue
                 hits.append(hit_from_doc(doc, score=score, rank=len(hits) + 1))
+        hits.sort(key=lambda hit: hit.task_relation != "same")
+        hits = [
+            dataclasses.replace(hit, rank=index) for index, hit in enumerate(hits, 1)
+        ]
         if fallback:
             run.recall_fallbacks += 1
             run.retrieve_errors += 1
@@ -2104,6 +2134,12 @@ class Agent:
                 run.recalls_by_trigger.get(record.trigger, 0) + 1
             )
             run.recall_hits += len(record.hits)
+            run.recall_same_task += sum(
+                hit.task_relation == "same" for hit in record.hits
+            )
+            run.recall_cross_task += sum(
+                hit.task_relation == "cross" for hit in record.hits
+            )
             run.recall_chars += record.chars
             run.recall_ms += record.ms
             run.recall_log.append(compact_record(record))
@@ -2689,6 +2725,11 @@ class Agent:
             remember=True,
             stage=entry.stage,
         )
+        task_line = next(
+            (line[6:] for line in checked.splitlines() if line.startswith("task: ")), ""
+        )
+        provenance = self._memory_provenance(run, note=note)
+        provenance["task_key"] = digest_task_key(task_line)
         candidate = MemoryCandidate(
             candidate_id=note.note_id,
             source="digest",
@@ -2696,12 +2737,14 @@ class Agent:
             remember_by="rule",
             task_id=task_id,
             session_id="",
-            provenance=self._memory_provenance(run, note=note),
+            provenance=provenance,
             created_at=note.created_at,
             remember=True,
         )
-        run.final_digest = candidate
-        self.hippo.propose(candidate)
+        has_evidence = digest_has_evidence(checked)
+        run.final_digest = candidate if has_evidence else None
+        if has_evidence:
+            self.hippo.propose(candidate)
         return checked
 
     async def _restate(self, note: ReasoningNote, run: _RunState) -> bool:
@@ -5557,6 +5600,8 @@ class Agent:
                 "recalls": run.recalls,
                 "recalls_by_trigger": dict(run.recalls_by_trigger),
                 "recall_hits": run.recall_hits,
+                "recall_same_task": run.recall_same_task,
+                "recall_cross_task": run.recall_cross_task,
                 "recall_chars": run.recall_chars,
                 "recall_ms": run.recall_ms,
                 "recall_fallbacks": run.recall_fallbacks,
@@ -5634,6 +5679,9 @@ class Agent:
             config["recall_kinds"] = sorted(self._effective_kinds)
             config["recall_placement"] = opts.recall_placement
             config["recall_min_score"] = opts.recall_min_score
+            config["cross_task_ratio"] = opts.cross_task_ratio
+            config["cross_task_cap"] = opts.cross_task_cap
+            config["cross_task_cold"] = opts.cross_task_cold
             config["admit_on_outcome"] = opts.admit_on_outcome
             config["keep_decision_text"] = opts.keep_decision_text
         return config

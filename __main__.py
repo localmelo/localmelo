@@ -2074,6 +2074,12 @@ def _build_direct_mode_agent(
             and retrieval.min_score != 0.35
         ):
             options = dataclasses.replace(options, recall_min_score=retrieval.min_score)
+        options = dataclasses.replace(
+            options,
+            cross_task_ratio=retrieval.cross_task_ratio,
+            cross_task_cap=retrieval.cross_task_cap,
+            cross_task_cold=retrieval.cross_task_cold,
+        )
     elif _recall_flag_given(args):
         parser.error(
             "argument --retriever/--recall-*/--retrieval-*: retrieval is not "

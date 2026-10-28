@@ -448,6 +448,7 @@ class SqliteLongTerm(LongTerm):
         *,
         kinds: Any = None,
         exclude_task_ids: Any = (),
+        task_key: str = "",
     ) -> list[tuple[str, float, dict[str, Any]]]:
         q = np.asarray(query_embedding, dtype=np.float32)
         q_norm = np.linalg.norm(q)
@@ -457,7 +458,7 @@ class SqliteLongTerm(LongTerm):
         conn = await self._ensure_ready()
         sql = (
             f"SELECT {_SELECT_COLUMNS} FROM long_term "
-            "WHERE status = 'active' AND length(vector) > 0 ORDER BY id"
+            "WHERE status = 'active' AND length(vector) > 0"
         )
         params: list[Any] = []
         if kinds:
@@ -468,11 +469,12 @@ class SqliteLongTerm(LongTerm):
         if excluded:
             sql += f" AND task_id NOT IN ({', '.join('?' for _ in excluded)})"
             params.extend(excluded)
+        sql += " ORDER BY id"
         async with conn.execute(sql, params) as cur:
             rows = [tuple(row) for row in await cur.fetchall()]
         if not rows:
             return []
-        return await asyncio.to_thread(_rank_rows, rows, q_unit, top_k)
+        return await asyncio.to_thread(_rank_rows, rows, q_unit, top_k, task_key)
 
     async def search_embedding(self, *args: Any, **kwargs: Any) -> list[Any]:
         """Alias of :meth:`search`, the name the typed API uses."""
@@ -485,6 +487,7 @@ class SqliteLongTerm(LongTerm):
         *,
         kinds: Any = None,
         exclude_task_ids: Any = (),
+        task_key: str = "",
     ) -> list[tuple[str, float, dict[str, Any]]]:
         conn = await self._ensure_ready()
         filtered = bool(kinds) or bool(tuple(exclude_task_ids))
@@ -498,6 +501,9 @@ class SqliteLongTerm(LongTerm):
                 rows, tuple(kinds or ()), tuple(exclude_task_ids)
             )
             filtered = True
+            index = BM25Index()
+            for doc_id, text in texts.items():
+                index.add(doc_id, text)
         elif filtered:
             metas, texts = await asyncio.to_thread(
                 _fetch_and_index,
@@ -527,6 +533,12 @@ class SqliteLongTerm(LongTerm):
             for doc_id, score in index.search(query, len(metas))
             if score > 0
         ]
+        if task_key:
+            scored = [
+                item
+                for item in scored
+                if item[0]["provenance"].get("task_key") == task_key
+            ]
         scored.sort(key=lambda item: _tie_key(item[0], item[1]), reverse=True)
         return [
             (str(meta["text"]), score, _strip_index_meta(meta))
@@ -626,7 +638,7 @@ def _strip_index_meta(meta: dict[str, Any]) -> dict[str, Any]:
 
 
 def _rank_rows(
-    rows: list[tuple[Any, ...]], q_unit: np.ndarray, top_k: int
+    rows: list[tuple[Any, ...]], q_unit: np.ndarray, top_k: int, task_key: str = ""
 ) -> list[tuple[str, float, dict[str, Any]]]:
     scored: list[tuple[dict[str, Any], float, str]] = []
     for row in rows:
@@ -639,6 +651,8 @@ def _rank_rows(
         if norm == 0:
             continue
         meta = _row_meta(row)
+        if task_key and meta["provenance"].get("task_key") != task_key:
+            continue
         scored.append((meta, float(np.dot(q_unit, vector / norm)), str(row[1])))
     scored.sort(key=lambda item: _tie_key(item[0], item[1]), reverse=True)
     return [(text, score, meta) for meta, score, text in scored[:top_k]]

@@ -75,6 +75,19 @@ async def test_a_restatement_re_proposes_and_updates() -> None:
     assert active[0].supersedes == 1
 
 
+async def test_distinct_task_digests_keep_separate_provenance() -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    for key in ("one", "two"):
+        hippo.propose(_candidate(
+            "task: migrate data\nfiles: migration.py\nfacts: migration completed",
+            candidate_id=key, source="digest", task_id=key, provenance={"task_key": key},
+        ))
+        decisions = await hippo.admit(key, "user_request")
+        assert [decision.action for decision in decisions] == ["NEW"]
+    assert {entry.provenance["task_key"] for entry in await store.active_entries()} == {"one", "two"}
+
+
 async def test_an_unknown_signal_is_a_value_error() -> None:
     hippo = Hippo(long=LongTerm())
     hippo.propose(_candidate("I live in Berlin and work at Acme"))
@@ -90,7 +103,7 @@ async def test_a_run_request_admits_remembered_notes_and_the_digest_only() -> No
         "the migration is done and the test passed", candidate_id="n2", remember=False
     )
     digest = _candidate(
-        "task: migrate\nfacts: the migration is done",
+        "task: migrate\nfiles: migration.py\nfacts: the migration is done",
         candidate_id="d1",
         source="digest",
     )
@@ -111,7 +124,7 @@ async def test_a_run_request_admits_remembered_notes_and_the_digest_only() -> No
     }
     assert {entry.text for entry in await store.active_entries()} == {
         "I live in Berlin and work at Acme",
-        "task: migrate\nfacts: the migration is done",
+        "task: migrate\nfiles: migration.py\nfacts: the migration is done",
     }
     assert {decision.admitted_by for decision in decisions} == {"user_request"}
 
@@ -121,7 +134,7 @@ async def test_the_outcome_switch_off_writes_nothing_and_on_writes_only_the_dige
 ):
     store = LongTerm()
     digest = _candidate(
-        "task: migrate\nfacts: the migration is done",
+        "task: migrate\nfiles: migration.py\nfacts: the migration is done",
         candidate_id="d1",
         source="digest",
     )
@@ -147,7 +160,7 @@ async def test_the_outcome_switch_off_writes_nothing_and_on_writes_only_the_dige
     assert [decision.admitted_by for decision in decisions] == ["outcome"]
     entries = await on.long.active_entries()
     assert [entry.text for entry in entries] == [
-        "task: migrate\nfacts: the migration is done"
+        "task: migrate\nfiles: migration.py\nfacts: the migration is done"
     ]
     assert entries[0].provenance["final_status"] == "completed"
 
@@ -258,7 +271,7 @@ async def test_a_failed_write_is_logged_and_flush_does_not_raise(
     store = LongTerm()
     hippo = Hippo(long=store)
     digest = _candidate(
-        "task: migrate\nfacts: the migration is done",
+        "task: migrate\nfiles: migration.py\nfacts: the migration is done",
         source="digest",
         candidate_id="d1",
     )
@@ -452,8 +465,18 @@ async def test_completed_outcome_exempts_a_bare_meta_digest() -> None:
     decisions = await hippo.flush(
         run_request=False, digest=digest, final_reflection=None
     )
-    assert [(d.action, d.admitted_by) for d in decisions] == [("NEW", "outcome")]
-    assert [entry.text for entry in await store.active_entries()] == [text]
+    policy = hippo.policy.decide(
+        text,
+        kind="episodic",
+        source="digest",
+        provenance={"final_status": "completed"},
+        active=[],
+        admitted_by="outcome",
+    )
+    assert policy.action == "NEW"  # The policy exemption still exists.
+    assert len(decisions) == 1 and decisions[0].refused
+    assert "no file or verification evidence" in decisions[0].reason
+    assert await store.active_entries() == []
 
 
 async def test_each_item_keeps_its_own_source_ids_in_the_entry() -> None:

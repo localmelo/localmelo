@@ -16,6 +16,7 @@ from localmelo.melo.memory.long.sqlite import (
     read_export_decisions,
     read_export_entries,
 )
+from localmelo.melo.memory.recall_gate import digest_task_key
 from localmelo.melo.schema import Message, ToolCall
 
 from .test_compress import FakeLLM, _agent, _answer, _options
@@ -103,8 +104,8 @@ async def test_a_request_that_states_no_fact_admits_notes_and_the_digest(
     assert result.memory_stats is not None
     assert result.memory_stats["admitted"]["user_request"] >= 1
     entries = await _entries(tmp_path)
-    assert len(entries) == 2
-    assert {entry["source"] for entry in entries} == {"reasoning_note", "digest"}
+    assert len(entries) == 1
+    assert {entry["source"] for entry in entries} == {"reasoning_note"}
     assert {entry["admitted_by"] for entry in entries} == {"user_request"}
     assert result.memory_stats["written"]["reflection"] == 0
 
@@ -139,9 +140,7 @@ async def test_a_remember_request_admits_the_fact_it_carries_and_the_digest(
     assert facts[0]["admitted_by"] == "user_request"
     assert facts[0]["provenance"]["source_ids"] == []
     digests = [entry for entry in entries if entry["source"] == "digest"]
-    assert len(digests) == 1
-    assert digests[0]["kind"] == "episodic"
-    assert digests[0]["admitted_by"] == "user_request"
+    assert digests == []  # No successful file write or eligible check.
     assert result.memory_stats is not None
     assert result.memory_stats["admitted"]["user_request"] >= 2
     assert result.memory_stats["admitted"]["user_statement"] == 0
@@ -175,11 +174,7 @@ async def test_a_remember_request_admits_a_third_party_fact_as_semantic(
     assert facts[0]["kind"] == "semantic"
     assert facts[0]["admitted_by"] == "user_request"
     digests = [entry for entry in entries if entry["source"] == "digest"]
-    assert len(digests) == 1
-    assert (
-        "task: Remember that the Bluebird launch code is NECTAR-42."
-        in digests[0]["text"]
-    )
+    assert digests == []  # A factual request alone is not file/check evidence.
     assert result.memory_stats is not None
     assert result.memory_stats["admitted"]["user_request"] >= 2
 
@@ -203,7 +198,7 @@ async def test_a_remember_request_does_not_admit_a_meta_sentence(
 
     entries = await _entries(tmp_path)
     assert [entry for entry in entries if entry["source"] == "user"] == []
-    assert [entry["source"] for entry in entries] == ["digest"]
+    assert [entry["source"] for entry in entries] == []
 
 
 @pytest.mark.asyncio
@@ -233,13 +228,17 @@ async def test_a_remember_request_redacts_the_fact_it_carries(
 async def test_admit_on_outcome_writes_the_digest_with_its_terminal_status(
     tmp_path: Path,
 ) -> None:
-    server = FakeLLM(_answer("done"))
+    server = FakeLLM(
+        _write_note_reply("plan: write a.py", "a.py", "x = 1\n"), _answer("done")
+    )
     agent = _agent(
         server,
         _options(
             reasoning="compress",
             memory_dir=str(tmp_path / "memory"),
-            max_steps=1,
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_write"}),
+            max_steps=2,
             admit_on_outcome=True,
         ),
     )
@@ -259,13 +258,22 @@ async def test_admit_on_outcome_writes_the_digest_with_its_terminal_status(
 async def test_an_aider_final_digest_is_admitted_on_outcome(tmp_path: Path) -> None:
     # T68b: the digest has a task: line, a file name and a function name
     # but no dates or amounts; the meta filter must not drop it.
-    server = FakeLLM(_answer("done"))
+    server = FakeLLM(
+        _write_note_reply(
+            "plan: implement transpose",
+            "transpose.py",
+            "def transpose(x): return list(zip(*x))\n",
+        ),
+        _answer("done"),
+    )
     agent = _agent(
         server,
         _options(
             reasoning="compress",
             memory_dir=str(tmp_path / "memory"),
-            max_steps=1,
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_write"}),
+            max_steps=2,
             admit_on_outcome=True,
         ),
     )
@@ -449,13 +457,17 @@ async def test_a_secret_in_a_note_item_is_checked_before_it_is_staged(
 
 @pytest.mark.asyncio
 async def test_the_store_can_be_reopened_after_the_run(tmp_path: Path) -> None:
-    server = FakeLLM(_answer("done"))
+    server = FakeLLM(
+        _write_note_reply("plan: write a.py", "a.py", "x = 1\n"), _answer("done")
+    )
     agent = _agent(
         server,
         _options(
             reasoning="compress",
             memory_dir=str(tmp_path / "memory"),
-            max_steps=1,
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_write"}),
+            max_steps=2,
             admit_on_outcome=True,
         ),
     )
@@ -616,6 +628,7 @@ async def test_a_run_without_a_check_has_no_verified_line(tmp_path: Path) -> Non
     digests = [entry for entry in entries if entry["source"] == "digest"]
     assert len(digests) == 1
     assert "files: a.py" in digests[0]["text"]
+    assert digests[0]["provenance"]["task_key"] == digest_task_key("Write a.py.")
     assert "verified:" not in digests[0]["text"]
 
 
@@ -630,7 +643,12 @@ async def test_a_trivial_observation_is_not_admitted(tmp_path: Path) -> None:
                     tool_name="python_exec",
                     arguments={"code": "print(True)"},
                     id=CALL_ID,
-                )
+                ),
+                ToolCall(
+                    tool_name="file_write",
+                    arguments={"path": "a.py", "content": "x = 1\n"},
+                    id="write_2",
+                ),
             ],
         ),
         _answer("done"),
@@ -640,7 +658,8 @@ async def test_a_trivial_observation_is_not_admitted(tmp_path: Path) -> None:
         _options(
             reasoning="compress",
             memory_dir=str(tmp_path / "memory"),
-            builtins=frozenset({"python_exec"}),
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"python_exec", "file_write"}),
             max_steps=2,
             admit_on_outcome=True,
         ),

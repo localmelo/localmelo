@@ -126,6 +126,11 @@ transpose in transpose.py … outcome: completed") is kept.
 
 ## Recall in the loop
 
+Episodic attempt digests prefer the same task; a cold task receives no
+cross-task digest by default. General memories bypass this gate. Only digests
+with file or check evidence enter long-term memory. See
+[digest recall](../reference/memory.md#digest-recall) for the settings and limits.
+
 The compress modes read the note store back. `--reasoning compress` with the
 default `--retriever auto` recalls at three points; an explicit
 `--recall-at` replaces them, and `tool` is never on unless named:

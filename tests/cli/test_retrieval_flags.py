@@ -242,6 +242,9 @@ def test_the_config_table_applies_only_when_the_flag_is_absent(
             'kinds = ["note"]\n'
             'placement = "message"\n'
             "min_score = 0.2\n"
+            "cross_task_ratio = 1.4\n"
+            "cross_task_cap = 2\n"
+            "cross_task_cold = 1\n"
         ),
     )
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
@@ -256,6 +259,11 @@ def test_the_config_table_applies_only_when_the_flag_is_absent(
     assert built.recall_kinds == frozenset({"note"})
     assert built.recall_placement == "message"
     assert built.recall_min_score == 0.2
+    assert (built.cross_task_ratio, built.cross_task_cap, built.cross_task_cold) == (
+        1.4,
+        2,
+        1,
+    )
 
     parser, args = _parse(
         [
@@ -304,6 +312,9 @@ def test_the_table_round_trips_only_when_set(tmp_path: Path) -> None:
         kinds=["note", "long"],
         placement="message",
         min_score=0.2,
+        cross_task_ratio=1.5,
+        cross_task_cap=2,
+        cross_task_cold=1,
     )
     with (
         mock.patch.object(config, "CONFIG_PATH", str(path)),
