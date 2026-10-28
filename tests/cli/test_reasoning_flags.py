@@ -80,9 +80,10 @@ def test_replay_with_base_url_needs_a_reasoning_field(
         )
     assert exc.value.code == 2
     assert _error_line(capsys) == (
-        "melo: error: argument --reasoning: replay needs a reasoning field: give "
-        "--reasoning-field (auto, reasoning_content or reasoning) with --base-url, "
-        "or set reasoning_field in the backend's config"
+        "melo: error: argument --reasoning: replay and compress+replay need a "
+        "reasoning field: give --reasoning-field (auto, reasoning_content or "
+        "reasoning) with --base-url, or set reasoning_field in the backend's "
+        "config"
     )
 
 
@@ -94,8 +95,8 @@ def test_the_configured_backend_needs_a_reasoning_field(
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
     assert _main(["--reasoning", "replay", "q"], monkeypatch) == 2
     assert _error_line(capsys) == (
-        "melo: error: argument --reasoning: replay needs a reasoning field: set "
-        "reasoning_field in the chat backend's config section"
+        "melo: error: argument --reasoning: replay and compress+replay need a "
+        "reasoning field: set reasoning_field in the chat backend's config section"
     )
 
 
@@ -111,7 +112,7 @@ def test_drop_on_a_replay_required_backend_is_refused(
     assert _main(["--reasoning", "drop", "q"], monkeypatch) == 2
     assert _error_line(capsys) == (
         "melo: error: argument --reasoning: this backend requires reasoning "
-        "replay, so drop is not possible: use replay"
+        "replay, so drop is not possible: use replay or compress+replay"
     )
 
 
@@ -133,11 +134,12 @@ def test_invalid_reasoning_values_are_argparse_errors(
 ) -> None:
     parser = cli._build_parser()
     with pytest.raises(SystemExit) as exc:
-        parser.parse_args(["--reasoning", "compress", "q"])
+        parser.parse_args(["--reasoning", "summarize", "q"])
     assert exc.value.code == 2
     assert _error_line(capsys) == (
-        "melo: error: argument --reasoning: invalid choice: 'compress' "
-        "(choose from 'legacy', 'drop', 'replay')"
+        "melo: error: argument --reasoning: invalid choice: 'summarize' "
+        "(choose from 'legacy', 'drop', 'replay', 'compress', "
+        "'compress+replay')"
     )
 
     with pytest.raises(SystemExit) as exc:
@@ -339,7 +341,10 @@ def test_the_backend_reasoning_keys_round_trip_only_when_set(tmp_path: Path) -> 
 @pytest.mark.parametrize(
     ("argument", "message"),
     [
-        ('reasoning = "compress"', "[agent] reasoning 'compress' is not recognised"),
+        (
+            'reasoning = "summarize"',
+            "[agent] reasoning 'summarize' is not recognised",
+        ),
         ("replay_turns = 0", "[agent] replay_turns must be an int >= 1"),
         ('replay_turns = "three"', "[agent] replay_turns must be an int >= 1"),
     ],
@@ -425,6 +430,19 @@ def test_the_json_line_reports_the_mode_and_counters(
         "replayed_chars": 0,
         "replay_skipped": 0,
         "replay_stripped": 0,
+        "notes": 0,
+        "notes_model": 0,
+        "notes_heuristic": 0,
+        "note_chars": 0,
+        "drafts": 0,
+        "drafts_written": 0,
+        "candidates": 0,
+        "remember_model": 0,
+        "remember_heuristic": 0,
+        "candidates_refused": 0,
+        "redactions": 0,
+        "rehearsed": {"restated": 0, "acted": 0, "cited": 0},
+        "digests": 0,
     }
 
 
@@ -455,9 +473,10 @@ def test_the_legacy_json_line_has_none_of_the_new_keys(
 
 def test_the_interactive_help_lists_the_flags() -> None:
     text = cli._build_parser().format_help()
-    assert "--reasoning {legacy,drop,replay}" in text
+    assert "--reasoning {legacy,drop,replay,compress,compress+replay}" in text
     assert "--reasoning-field {auto,reasoning_content,reasoning}" in text
     assert "--replay-turns N" in text
+    assert "--note-writer {auto,heuristic}" in text
 
 
 def test_a_config_refusal_leaves_no_memory_dir(
@@ -474,7 +493,7 @@ def test_a_config_refusal_leaves_no_memory_dir(
         )
         == 2
     )
-    assert "replay needs a reasoning field" in _error_line(capsys)
+    assert "replay and compress+replay need a reasoning field" in _error_line(capsys)
     assert not memory_dir.exists()
 
 
@@ -510,3 +529,218 @@ def test_the_interactive_ui_refuses_the_reasoning_field(
         "melo: error: --reasoning-field is not in the interactive UI yet; "
         'give it with a task (melo -- "<task>")'
     )
+
+
+# ── R4: compress modes and the note writer ──
+
+
+def test_compress_replay_with_base_url_needs_a_reasoning_field(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = cli._build_parser()
+    with pytest.raises(SystemExit) as exc:
+        cli._check_args(
+            parser,
+            parser.parse_args(
+                [
+                    "--base-url",
+                    "http://127.0.0.1:1/v1",
+                    "--reasoning",
+                    "compress+replay",
+                    "q",
+                ]
+            ),
+        )
+    assert exc.value.code == 2
+    assert _error_line(capsys) == (
+        "melo: error: argument --reasoning: replay and compress+replay need a "
+        "reasoning field: give --reasoning-field (auto, reasoning_content or "
+        "reasoning) with --base-url, or set reasoning_field in the backend's "
+        "config"
+    )
+
+
+def test_compress_with_base_url_needs_no_reasoning_field() -> None:
+    parser, args = _parse(
+        ["--base-url", "http://127.0.0.1:1/v1", "--reasoning", "compress", "q"]
+    )
+    options = cli._direct_options(parser, args)
+    assert options.reasoning == "compress"
+    assert options.note_writer == "auto"
+
+
+def test_the_note_writer_flag_reaches_the_options(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser, args = _parse(
+        [
+            "--base-url",
+            "http://127.0.0.1:1/v1",
+            "--reasoning",
+            "compress",
+            "--note-writer",
+            "heuristic",
+            "q",
+        ]
+    )
+    options = cli._direct_options(parser, args)
+    assert (options.reasoning, options.note_writer) == ("compress", "heuristic")
+
+
+def test_the_note_writer_is_accepted_in_the_interactive_ui() -> None:
+    parser, args = _parse(["--note-writer", "heuristic"])
+    assert args.note_writer == "heuristic"
+
+
+def test_the_agent_table_passes_the_note_writer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.toml"
+    _write_config(
+        path,
+        agent='\n[agent]\nreasoning = "compress"\nnote_writer = "heuristic"\n',
+    )
+    monkeypatch.setattr(config, "CONFIG_PATH", str(path))
+    parser, args = _parse(["q"])
+    options = cli._direct_options(parser, args)
+    with mock.patch.object(cli, "Agent") as agent_cls:
+        cli._build_direct_mode_agent(args, options=options)
+    built = agent_cls.call_args.kwargs["options"]
+    assert (built.reasoning, built.note_writer) == ("compress", "heuristic")
+
+    parser, args = _parse(["--note-writer", "auto", "q"])
+    options = cli._direct_options(parser, args)
+    with mock.patch.object(cli, "Agent") as agent_cls:
+        cli._build_direct_mode_agent(args, options=options)
+    assert agent_cls.call_args.kwargs["options"].note_writer == "auto"
+
+
+def test_an_unknown_note_writer_is_a_configuration_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "config.toml"
+    _write_config(path, agent='\n[agent]\nnote_writer = "mystery"\n')
+    monkeypatch.setattr(config, "CONFIG_PATH", str(path))
+    assert _main(["q"], monkeypatch) == 1
+    assert "[agent] note_writer 'mystery' is not recognised" in (
+        capsys.readouterr().err
+    )
+
+
+def test_the_note_writer_round_trips_only_when_set(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    cfg = Config(chat_backend="vllm", embedding_backend="none")
+    cfg.agent = AgentConfig(reasoning="compress", note_writer="heuristic")
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        save(cfg)
+        text = path.read_text(encoding="utf-8")
+        assert 'reasoning = "compress"' in text
+        assert 'note_writer = "heuristic"' in text
+        loaded = config.load()
+        assert (loaded.agent.reasoning, loaded.agent.note_writer) == (
+            "compress",
+            "heuristic",
+        )
+        loaded.agent = AgentConfig()
+        save(loaded)
+        assert "[agent]" not in path.read_text(encoding="utf-8")
+
+
+def test_the_compress_json_line_has_its_config_and_counters(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def build(
+        args: Any,
+        *,
+        parser: Any = None,
+        options: AgentOptions,
+        tool_providers: Any,
+    ) -> Agent:
+        return _fake_agent(options)
+
+    monkeypatch.setattr(cli, "_build_direct_mode_agent", build)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "melo",
+            "--base-url",
+            "http://x/v1",
+            "--reasoning",
+            "compress",
+            "--note-writer",
+            "heuristic",
+            "--output-format",
+            "json",
+            "q",
+        ],
+    )
+    cli.main()
+    record = json.loads(capsys.readouterr().out.strip())
+    assert record["config"]["reasoning"] == "compress"
+    assert record["config"]["note_writer"] == "heuristic"
+    assert record["memory_stats"]["notes"] == 0
+    assert record["memory_stats"]["digests"] == 1
+
+
+def test_the_note_writer_is_inert_in_legacy(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    def build(
+        args: Any,
+        *,
+        parser: Any = None,
+        options: AgentOptions,
+        tool_providers: Any,
+    ) -> Agent:
+        assert options.note_writer == "heuristic"
+        return _fake_agent(options)
+
+    monkeypatch.setattr(cli, "_build_direct_mode_agent", build)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "melo",
+            "--base-url",
+            "http://x/v1",
+            "--note-writer",
+            "heuristic",
+            "--output-format",
+            "json",
+            "q",
+        ],
+    )
+    cli.main()
+    record = json.loads(capsys.readouterr().out.strip())
+    assert "note_writer" not in record["config"]
+    assert "memory_stats" not in record
+
+
+def test_compress_on_a_replay_required_backend_becomes_compress_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "config.toml"
+    _write_config(
+        path,
+        extra='reasoning_field = "auto"\nrequires_reasoning_replay = true\n',
+        agent='\n[agent]\nreasoning = "compress"\n',
+    )
+    monkeypatch.setattr(config, "CONFIG_PATH", str(path))
+    parser, args = _parse(["q"])
+    options = cli._direct_options(parser, args)
+    with mock.patch.object(cli, "Agent") as agent_cls:
+        cli._build_direct_mode_agent(args, options=options)
+    built = agent_cls.call_args.kwargs["options"]
+    assert (built.reasoning, built.replay_turns) == ("compress+replay", None)
+
+    path.write_text(
+        CONFIG.format(backend="vllm", extra="requires_reasoning_replay = true\n")
+        + '\n[agent]\nreasoning = "compress"\n',
+        encoding="utf-8",
+    )
+    assert _main(["q"], monkeypatch) == 2
+    assert "replay and compress+replay need a reasoning field" in (_error_line(capsys))

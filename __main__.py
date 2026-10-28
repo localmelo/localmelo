@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent.options import ReasoningMode, reasoning_refusal
+from localmelo.melo.agent.options import NoteWriter, ReasoningMode, reasoning_refusal
 from localmelo.melo.executor import builtin_names
 from localmelo.melo.schema import RunResult
 
@@ -71,6 +71,7 @@ _DIRECT_FLAGS = {
     "reasoning": "--reasoning",
     "reasoning_field": "--reasoning-field",
     "replay_turns": "--replay-turns",
+    "note_writer": "--note-writer",
 }
 
 # Flags of the interactive UI (bare melo), by dest.
@@ -662,13 +663,14 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
     if (
         args.base_url
         and not (args.serve or args.daemon)
-        and reasoning == "replay"
+        and reasoning in ("replay", "compress+replay")
         and reasoning_field is None
     ):
         parser.error(
-            "argument --reasoning: replay needs a reasoning field: give "
-            "--reasoning-field (auto, reasoning_content or reasoning) with "
-            "--base-url, or set reasoning_field in the backend's config"
+            "argument --reasoning: replay and compress+replay need a reasoning "
+            "field: give --reasoning-field (auto, reasoning_content or "
+            "reasoning) with --base-url, or set reasoning_field in the "
+            "backend's config"
         )
     if (args.serve or args.daemon) and (args.base_url or args.chat_model):
         parser.error(
@@ -753,6 +755,9 @@ def _direct_options(
     replay_turns = getattr(args, "replay_turns", None)
     if replay_turns is not None:
         fields["replay_turns"] = replay_turns
+    note_writer = getattr(args, "note_writer", None)
+    if note_writer is not None:
+        fields["note_writer"] = note_writer
     try:
         return AgentOptions(**fields)
     except ValueError as exc:  # the flag types should have caught it
@@ -886,16 +891,20 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     direct.add_argument(
         "--reasoning",
-        choices=["legacy", "drop", "replay"],
+        choices=["legacy", "drop", "replay", "compress", "compress+replay"],
         help="How a reply's reasoning is sent back: legacy (default, the "
-        "provider's own behavior), drop (never), or replay (on assistant "
-        "turns in scope, under one key)",
+        "provider's own behavior), drop (never), replay (on assistant turns "
+        "in scope, under one key), compress (no reasoning; each reply becomes "
+        "a short note, with its drafts, in working memory), or "
+        "compress+replay (compress and replay); the compress modes recall "
+        "nothing yet",
     )
     direct.add_argument(
         "--reasoning-field",
         choices=["auto", "reasoning_content", "reasoning"],
-        help="The request key replay uses (with --base-url, or a backend's "
-        "reasoning_field); auto follows the key the last reply came from",
+        help="The request key replay and compress+replay use (with --base-url, "
+        "or a backend's reasoning_field); auto follows the key the last reply "
+        "came from",
     )
     direct.add_argument(
         "--replay-turns",
@@ -904,13 +913,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="With replay, keep the newest N assistant turns' reasoning "
         "(default: every turn in scope)",
     )
+    direct.add_argument(
+        "--note-writer",
+        choices=["auto", "heuristic"],
+        help="With compress or compress+replay, who writes a reply's note: "
+        "auto (default: read the model's <note>, else the heuristic) or "
+        "heuristic (always from the reply's text and thinking). Accepted and "
+        "inert in the other modes",
+    )
 
     interactive = parser.add_argument_group(
         "interactive mode",
         "Options for bare melo, which opens the interactive UI on a terminal. "
         "It also takes --base-url, --chat-model, --max-steps, --attempt-policy, "
         "--reflection-gate, --builtins, --memory, --memory-dir, "
-        "--request-timeout, --reasoning, --replay-turns "
+        "--request-timeout, --reasoning, --replay-turns, --note-writer "
         "and the --embedding-* options. It refuses --reasoning-field until a "
         "later release wires it.",
     )
@@ -1178,7 +1195,7 @@ def _build_direct_mode_agent(
         )
         reasoning_field = getattr(args, "reasoning_field", None)
         mode = options.reasoning if options is not None else "legacy"
-        if reasoning_field is not None and mode == "replay":
+        if reasoning_field is not None and mode in ("replay", "compress+replay"):
             llm_options["reasoning_field"] = reasoning_field
         llm = OpenAICompatLLM(base_url=base_url, model=model, **llm_options)
         if options is not None and options.memory_dir is not None:
@@ -1239,10 +1256,25 @@ def _build_direct_mode_agent(
         and cfg.agent.replay_turns is not None
     ):
         options = dataclasses.replace(options, replay_turns=cfg.agent.replay_turns)
+    if getattr(args, "note_writer", None) is None and cfg.agent.note_writer != "auto":
+        options = dataclasses.replace(
+            options, note_writer=cast(NoteWriter, cfg.agent.note_writer)
+        )
+
+    requires_replay = bool(getattr(section, "requires_reasoning_replay", False))
+    if options.reasoning == "compress" and requires_replay:
+        # A provider that requires replay runs compress as compress+replay;
+        # resolve it here too, so the field and the refusal agree.
+        options = dataclasses.replace(
+            options,
+            reasoning="compress+replay",
+            replay_turns=None,
+            replay_scope="task",
+        )
 
     # The field only has meaning in replay; legacy keeps the provider's own
     # behavior (OpenAI-compatible sends none) even if the file names one.
-    if options.reasoning == "replay":
+    if options.reasoning in ("replay", "compress+replay"):
         if reasoning_field is not None:
             section.reasoning_field = reasoning_field
     else:
@@ -1251,11 +1283,10 @@ def _build_direct_mode_agent(
     field = getattr(section, "reasoning_field", "") or (
         "thinking" if cfg.chat_backend == "ollama" else None
     )
-    requires_replay = bool(getattr(section, "requires_reasoning_replay", False))
-    if options.reasoning == "replay" and not field:
+    if options.reasoning in ("replay", "compress+replay") and not field:
         parser.error(
-            "argument --reasoning: replay needs a reasoning field: set "
-            "reasoning_field in the chat backend's config section"
+            "argument --reasoning: replay and compress+replay need a reasoning "
+            "field: set reasoning_field in the chat backend's config section"
         )
     refusal = reasoning_refusal(options.reasoning, field, requires_replay)
     if refusal is not None:

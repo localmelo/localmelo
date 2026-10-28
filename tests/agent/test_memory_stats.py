@@ -153,8 +153,21 @@ async def test_replay_usage_adds_reasoning_and_reported_details() -> None:
         "replayed_chars": 0,
         "replay_skipped": 0,
         "replay_stripped": 0,
+        "notes": 0,
+        "notes_model": 0,
+        "notes_heuristic": 0,
+        "note_chars": 0,
+        "drafts": 0,
+        "drafts_written": 0,
+        "candidates": 0,
+        "remember_model": 0,
+        "remember_heuristic": 0,
+        "candidates_refused": 0,
+        "redactions": 0,
+        "rehearsed": {"restated": 0, "acted": 0, "cited": 0},
+        "digests": 0,
     }
-    assert list(result.config)[-2:] == ["reasoning", "replay_turns"]
+    assert list(result.config)[-3:] == ["reasoning", "replay_turns", "note_writer"]
     assert (result.config["reasoning"], result.config["replay_turns"]) == (
         "replay",
         3,
