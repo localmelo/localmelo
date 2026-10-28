@@ -8,6 +8,16 @@ from dataclasses import dataclass
 from typing import Literal, get_args
 
 from localmelo.melo.executor.builtins import builtin_names
+from localmelo.melo.memory.recall import (
+    DEFAULT_TRIGGERS,
+    RECALL_K_DEFAULT,
+    RECALL_K_MAX,
+    RECALL_MIN_SCORE,
+    RECALL_PLACEMENTS,
+    RETRIEVER_MODES,
+    RecallPlacement,
+    RetrieverMode,
+)
 from localmelo.melo.schema import MAX_AGENT_STEPS, MAX_ATTEMPTS, STEPS_PER_ATTEMPT
 
 AttemptPolicy = Literal["reflect", "none"]
@@ -168,6 +178,14 @@ class AgentOptions:
     replay_turns: int | None = None
     replay_scope: Literal["task", "window"] = "task"
     note_writer: NoteWriter = "auto"
+    # R5's recall: the retriever plan, its triggers, hits, kinds, placement
+    # and the embedding/long score floor. Inert in ``legacy``.
+    retriever: RetrieverMode = "auto"
+    recall_at: frozenset[str] | None = None
+    recall_k: int = RECALL_K_DEFAULT
+    recall_kinds: frozenset[str] | None = None
+    recall_placement: RecallPlacement = "tool"
+    recall_min_score: float = RECALL_MIN_SCORE
 
     def __post_init__(self) -> None:
         for name in ("max_steps", "steps_per_attempt", "max_attempts"):
@@ -182,6 +200,8 @@ class AgentOptions:
             ("reasoning", get_args(ReasoningMode)),
             ("replay_scope", ("task", "window")),
             ("note_writer", get_args(NoteWriter)),
+            ("retriever", RETRIEVER_MODES),
+            ("recall_placement", RECALL_PLACEMENTS),
         ):
             value = getattr(self, name)
             if value not in allowed:
@@ -191,6 +211,33 @@ class AgentOptions:
 
         if self.builtins is not None:
             object.__setattr__(self, "builtins", self._checked_builtins(self.builtins))
+
+        if self.recall_at is not None:
+            object.__setattr__(
+                self, "recall_at", frozenset(_checked_triggers(self.recall_at))
+            )
+        if self.recall_kinds is not None:
+            object.__setattr__(
+                self, "recall_kinds", frozenset(_checked_kinds(self.recall_kinds))
+            )
+        if (
+            isinstance(self.recall_k, bool)
+            or not isinstance(self.recall_k, int)
+            or not 1 <= self.recall_k <= RECALL_K_MAX
+        ):
+            raise ValueError(
+                f"recall_k must be an int from 1 to {RECALL_K_MAX}, "
+                f"got {self.recall_k!r}"
+            )
+        if (
+            isinstance(self.recall_min_score, bool)
+            or not isinstance(self.recall_min_score, int | float)
+            or not 0 <= self.recall_min_score <= 1
+        ):
+            raise ValueError(
+                "recall_min_score must be a number from 0 to 1, "
+                f"got {self.recall_min_score!r}"
+            )
 
         if not isinstance(self.memory, bool):
             raise ValueError(f"memory must be a bool, got {self.memory!r}")
@@ -266,7 +313,7 @@ class AgentOptions:
             raise ValueError(
                 f"builtins must contain tool names (str), got {value!r}"
             ) from None
-        known = builtin_names()
+        known = builtin_names() | {"recall"}
         unknown = names - known
         if unknown:
             raise ValueError(
@@ -299,3 +346,84 @@ def reasoning_refusal(
             "--base-url, or set reasoning_field in the backend's config"
         )
     return None
+
+
+def _checked_triggers(values: Iterable[str]) -> tuple[str, ...]:
+    """*values* deduplicated to the canonical trigger order."""
+    names = {_checked_trigger(value) for value in values}
+    return tuple(trigger for trigger in (*DEFAULT_TRIGGERS, "tool") if trigger in names)
+
+
+def _checked_trigger(value: object) -> str:
+    if not isinstance(value, str) or value not in (*DEFAULT_TRIGGERS, "tool"):
+        raise ValueError(
+            f"recall_at has an unknown trigger {value!r}; the triggers are "
+            "start, attempt, step, tool"
+        )
+    return value
+
+
+def _checked_kinds(values: Iterable[str]) -> tuple[str, ...]:
+    """*values* deduplicated to the canonical kind order."""
+    return tuple(
+        kind
+        for kind in _KIND_ORDER
+        if kind in {_checked_kind(value) for value in values}
+    )
+
+
+def _checked_kind(value: object) -> str:
+    if not isinstance(value, str) or value not in _KIND_ORDER:
+        raise ValueError(
+            f"recall_kinds has an unknown kind {value!r}; the kinds are "
+            f"{', '.join(_KIND_ORDER)}"
+        )
+    return value
+
+
+_KIND_ORDER = ("note", "draft", "thought", "digest", "reflection", "long")
+
+
+def retrieval_refusal(
+    mode: str,
+    plan: object,
+    has_embedding: bool,
+    reasoning: str,
+    *,
+    memory: bool = True,
+    placement: str = "tool",
+    recall_at: Iterable[str] = (),
+    mcp_only: bool = False,
+    builtins: frozenset[str] | None = None,
+) -> str | None:
+    """Why this recall configuration cannot run, or ``None``.
+
+    *plan* is a :class:`~localmelo.melo.memory.recall.RecallPlan` (or the
+    options' retriever string); only its trigger map is read. The recall
+    options are inert in ``legacy`` (decision 10), so nothing is refused
+    there; the CLI refuses the flags themselves before this runs.
+    """
+    if reasoning == "legacy":
+        return None
+    if mode == "embedding" and not has_embedding:
+        return "--retriever embedding needs an embedding provider"
+    if mode == "embedding" and not memory:
+        return "--retriever embedding needs --memory on"
+    if placement == "message" and reasoning in ("replay", "compress+replay"):
+        return "--recall-placement message is not available in replay modes"
+    triggers: set[str] = set()
+    enabled = getattr(plan, "enabled", None)
+    if callable(enabled):
+        triggers.update(enabled())
+    if recall_at:
+        triggers.update(recall_at)
+    if not triggers and mode != "off":
+        triggers.update(DEFAULT_TRIGGERS)
+    if "tool" in triggers and mcp_only:
+        return "--recall-at tool is not available with --mcp-only"
+    if builtins is not None and "recall" in builtins and "tool" not in triggers:
+        return "--builtins recall needs --recall-at tool"
+    return None
+
+
+__all__ = ["AgentOptions", "reasoning_refusal", "retrieval_refusal"]

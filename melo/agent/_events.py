@@ -33,6 +33,7 @@ from localmelo.melo.schema import (
 
 if TYPE_CHECKING:
     from localmelo.melo.memory.procedures.tracker import ProgressState
+    from localmelo.melo.memory.recall import RecallRecord
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +240,19 @@ class _Emitter:
                 }
             ),
         )
+
+    def recall(self, record: RecallRecord) -> None:
+        """A recall block entered a request (R5).
+
+        The query and hit ids are already redacted, and the record holds no
+        item text (see :func:`~localmelo.melo.memory.recall.event_fields`).
+        The CLI ignores the event until U2 draws a recall line.
+        """
+        if self._sink is None:
+            return
+        from localmelo.melo.memory.recall import event_fields
+
+        self._emit("recall", lambda: json_safe_payload(event_fields(record)))
 
     def tool_started(self, call: ToolCall) -> None:
         if self._sink is None:

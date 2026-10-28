@@ -325,6 +325,7 @@ class ListRecorder:
         usage: Any,
         duration_s: float,
         timestamp: float,
+        recall: Sequence[Any] | None = None,
     ) -> None:
         self.calls.append(
             {
@@ -334,6 +335,7 @@ class ListRecorder:
                 "usage": usage,
                 "duration_s": duration_s,
                 "timestamp": timestamp,
+                "recall": recall,
                 # The counters already count the response.
                 "n_llm": None if self.stats is None else self.stats.n_llm,
             }

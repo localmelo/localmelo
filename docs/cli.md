@@ -450,6 +450,13 @@ These options apply to a task run without `--serve`.
 | `--reasoning-field auto\|reasoning_content\|reasoning` | not set | The request key `--reasoning replay` uses. `auto` follows the key the last reply's reasoning came from; the others fix it. Needed with `--base-url`, or set `reasoning_field` in the chat backend's config section. |
 | `--replay-turns N` | every turn in scope | With `replay` or `compress+replay`, keep the newest `N` assistant turns' reasoning; older ones are sent without it. It is inert in `legacy`, `drop` and `compress`. |
 | `--note-writer auto\|heuristic` | `auto` | In the compress modes, who writes each reply's note: `auto` reads the model's `<note>` block and falls back to the heuristic, `heuristic` always writes it from the reply's text and reasoning. Accepted and inert in the other modes. |
+| `--retriever auto\|off\|bm25\|llm\|embedding` | `auto` | How recall ranks documents. `auto` uses `embedding` when an embedding provider is configured, else `llm` at `start`/`attempt` and `bm25` at `step`/`tool`. `off` turns recall off. See [Recall in the loop](memory.md#recall-in-the-loop). |
+| `--recall-at LIST` | `start,attempt,step` | The recall triggers: a comma list of `start`, `attempt`, `step` and `tool`. `tool` registers the `recall` tool and is never on unless named. |
+| `--recall-k N` | `3` | Task-local hits per recall, from 1 to 10 (plus at most 2 long-term hits). |
+| `--recall-kinds LIST` | all but `thought` | A comma list of `note`, `draft`, `thought`, `digest`, `reflection` and `long`. |
+| `--recall-placement tool\|message` | `tool` | Where a step block goes: appended to the last tool result, or in its own user message. `message` is refused in `replay` and `compress+replay`. |
+| `--recall-min-score F` | `0.35` | The cosine floor for the long-term leg and for embedding task hits, from 0 to 1. It is inert only for the task-local `bm25` and `llm` ranking. |
+| `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. It is a provider setting, not a `config` key. The interactive UI refuses it for now, like `--reasoning-field`: use it with a task. |
 
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
@@ -458,7 +465,9 @@ These options apply to a task run without `--serve`.
   no effect with `--attempt-policy none`.
 - `--tool-exposure`: see [How tools are offered](tools.md#how-tools-are-offered).
 - `--builtins`: `all`, `none`, or a comma-separated list of `file_read`,
-  `file_write`, `python_exec` and `shell_exec`.
+  `file_write`, `python_exec` and `shell_exec`. `recall` is accepted only
+  with `--recall-at tool`, which registers it; without that trigger it is a
+  usage error.
 - `--mcp-only` needs `--mcp-config` and cannot be combined with `--builtins`
   or `--tool-exposure`. See [Tools and MCP](tools.md#add-tools-from-mcp-servers).
 - `--memory-dir` turns persistence on for this run, whatever the environment
@@ -502,6 +511,25 @@ These options apply to a task run without `--serve`.
   assistant turn in the window is replayed, and neither the task scope nor
   `--replay-turns` applies. `--base-url` runs use these flags and do not
   read the config file.
+- `--retriever`, `--recall-*` and `--retrieval-extra-body`: see
+  [Recall in the loop](memory.md#recall-in-the-loop). `--retriever` and
+  `--recall-*` are accepted in the interactive UI; `--retrieval-extra-body`
+  is refused there for now. They have no effect in `legacy`: every one of
+  them is a usage error there (exit 2, one line), as are `--retriever
+  embedding` without an embedding provider or with `--memory off`,
+  `--recall-placement message` in `replay`/`compress+replay`, `--recall-at
+  tool` with `--mcp-only` or a `--builtins` list without `recall`,
+  `--builtins recall` without `--recall-at tool`, and
+  `--retrieval-extra-body` with an explicit `off`, `bm25` or `embedding`
+  retriever. A provided tool named `recall` while the tool is registered is
+  a setup error. The arms differ only in these flags:
+
+  ```bash
+  melo --base-url http://127.0.0.1:11434/v1 --chat-model MODEL \
+    --reasoning compress --retriever bm25 -- "List the files"
+  melo --base-url http://127.0.0.1:11434/v1 --chat-model MODEL \
+    --reasoning compress --retriever off -- "List the files"
+  ```
 - `--note-writer`: `auto` (default) parses the model's
   `<note>plan: … found: … open: … remember: …</note>` block and falls back
   to a heuristic when there is none; `heuristic` ignores the block. A note
@@ -509,7 +537,9 @@ These options apply to a task run without `--serve`.
   candidate for later memory. The flag is accepted in every mode and only
   the compress modes use it. In `config.toml` it is the `[agent]`
   `note_writer` key, and `[agent] reasoning` takes the same five values.
-  It does not recall anything yet: retrieval is a later release.
+  In `compress` and `compress+replay` the default `--retriever auto` also
+  recalls notes and drafts at `start`, `attempt` and `step`; see
+  [Recall in the loop](memory.md#recall-in-the-loop).
 - `--reasoning-field`: `auto` resolves to the key the last reply's
   reasoning came from, and sends no key before the first such reply. The
   flag, and a backend's `reasoning_field`, are used only in `replay` and
@@ -530,8 +560,9 @@ These options apply to `melo` without a task.
 
 - The UI also takes `--max-steps`, `--attempt-policy`, `--reflection-gate`,
   `--builtins`, `--memory`, `--memory-dir`, `--request-timeout`,
-  `--reasoning`, `--replay-turns`, `--note-writer` and the
-  `--embedding-*` options, for every turn of the session. It accepts
+  `--reasoning`, `--replay-turns`, `--note-writer`, `--retriever`,
+  `--recall-*`, `--retrieval-extra-body` and the `--embedding-*` options,
+  for every turn of the session. It accepts
   `compress` and `compress+replay` but draws nothing for the notes yet.
   The UI does not yet apply `[agent]`; use direct mode for that.
   `--tool-exposure` (the UI offers every tool), `--timeout`,
@@ -597,6 +628,15 @@ These are usage errors:
   `--host and --port are for --serve and --daemon; bare melo opens the interactive UI`;
 - `--reconfigure` with `--base-url` and no task, reported as
   `--reconfigure sets up the config file, which --base-url does not use; give one of them`;
+- a recall flag in `legacy`, reported as
+  `argument --retriever/--recall-*/--retrieval-*: retrieval is not available in legacy; use --reasoning compress, compress+replay, drop or replay`;
+- `--retriever embedding` without an embedding provider or with
+  `--memory off`;
+- `--recall-placement message` with `--reasoning replay` or
+  `compress+replay`;
+- `--recall-at tool` with `--mcp-only`, without `recall` in `--builtins`,
+  or with `--retriever off`;
+- `--retrieval-extra-body` with `--retriever off`, `bm25` or `embedding`;
 - `--reasoning replay` or `--reasoning compress+replay` with `--base-url`
   and no `--reasoning-field`, reported as
   `argument --reasoning: replay and compress+replay need a reasoning field: give --reasoning-field (auto, reasoning_content or reasoning) with --base-url, or set reasoning_field in the backend's config`;
@@ -611,6 +651,9 @@ These are usage errors:
 - `--reasoning-field` with bare `melo`, whose interactive UI does not apply it
   yet, reported as
   `--reasoning-field is not in the interactive UI yet; give it with a task (melo -- "<task>")`;
+- `--retrieval-extra-body` with bare `melo`, whose interactive UI does not
+  apply it yet, reported as
+  `--retrieval-extra-body is not in the interactive UI yet; give it with a task (melo -- "<task>")`;
 - an MCP config file that cannot be read or is not valid;
 - an invalid `LOCALMELO_THINKING_RETENTION_DAYS`, also with `--serve` or
   `melo ""`, which prints its one `melo: error:` line without the usage

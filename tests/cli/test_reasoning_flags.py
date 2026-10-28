@@ -443,6 +443,21 @@ def test_the_json_line_reports_the_mode_and_counters(
         "redactions": 0,
         "rehearsed": {"restated": 0, "acted": 0, "cited": 0},
         "digests": 0,
+        "recalls": 0,
+        "recalls_by_trigger": {"start": 0, "attempt": 0, "step": 0, "tool": 0},
+        "recall_hits": 0,
+        "recall_chars": 0,
+        "recall_ms": 0,
+        "recall_fallbacks": 0,
+        "recall_skipped": 0,
+        "recall_refused": 0,
+        "recall_empty": 0,
+        "aux_retrieve_calls": 0,
+        "retrieve_errors": 0,
+        "retrieve_prompt_tokens": 0,
+        "retrieve_completion_tokens": 0,
+        "thought_chunks": 0,
+        "recall_log": [],
     }
 
 

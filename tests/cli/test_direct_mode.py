@@ -420,7 +420,7 @@ class TestUsageErrors:
     ) -> None:
         ran = _main("--builtins", "file_read,teleport", "q")
         assert ran.code == 2
-        known = ", ".join(sorted(builtin_names()))
+        known = ", ".join(sorted(builtin_names() | {"recall"}))
         assert (
             f"unknown built-in tools teleport; known: {known}"
             in capsys.readouterr().err

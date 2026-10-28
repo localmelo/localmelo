@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import dataclasses
 import json
 import logging
 import re
 import time
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
@@ -51,6 +52,7 @@ class CallRecorder(Protocol):
         usage: Mapping[str, int] | None,
         duration_s: float,
         timestamp: float,
+        recall: Sequence[Any] | None = None,
     ) -> None:
         """Keep *response*, the reply to a request of call kind *kind*."""
 
@@ -195,6 +197,30 @@ def lacks_task_query(short: Sequence[Message], query: str) -> bool:
     agent's note after an empty reply, do not stand in for it.
     """
     return not any(m.role == "user" and m.content == query for m in short)
+
+
+def _query_text(query: str, block: str) -> str:
+    return f"{query}\n\n{block}" if block else query
+
+
+def _with_query_block(
+    messages: Sequence[Message], query: str, block: str
+) -> list[Message]:
+    """*messages* with *block* appended to the request's task-query message."""
+    if not block:
+        return list(messages)
+    out = list(messages)
+    matches = [
+        index
+        for index, message in enumerate(out)
+        if message.role == "user" and message.content == query
+    ]
+    if matches:
+        index = matches[-1]
+        out[index] = dataclasses.replace(
+            out[index], content=_query_text(out[index].content, block)
+        )
+    return out
 
 
 def _build_system_prompt(
@@ -344,7 +370,13 @@ class Chat:
         return self.stats
 
     async def _request(
-        self, messages: list[Message], tools: list[ToolDef] | None, *, kind: str = ""
+        self,
+        messages: list[Message],
+        tools: list[ToolDef] | None,
+        *,
+        kind: str = "",
+        retry: bool = True,
+        recall: Sequence[Any] = (),
     ) -> Message:
         """Send one request to the LLM and count it in :attr:`stats`.
 
@@ -376,7 +408,7 @@ class Chat:
                 break
             except ProviderError as exc:
                 self.stats.llm_errors += 1
-                if not exc.retryable or attempt > len(self.retry_delays):
+                if not retry or not exc.retryable or attempt > len(self.retry_delays):
                     raise
                 delay = self.retry_delays[attempt - 1]
                 logger.info(
@@ -421,6 +453,7 @@ class Chat:
                 usage=full_usage if full_usage is not None else response.usage,
                 duration_s=duration_s,
                 timestamp=timestamp,
+                recall=recall or None,
             )
         return response
 
@@ -459,6 +492,9 @@ class Chat:
         tools: list[ToolDef],
         query: str,
         reflections: list[ReflectionEntry] | None = None,
+        *,
+        query_block: str = "",
+        recalls: Sequence[Any] = (),
     ) -> Message:
         system_prompt, other_msgs = _build_system_prompt(
             context, short, reflections, self.system_notes, self.note_instruction
@@ -470,10 +506,20 @@ class Chat:
             # turns so the conversation still opens with the request instead
             # of ending with it. The agent counts it when it checks the
             # prompt's size (see Agent._fit_prompt_cap).
-            messages.append(Message(role="user", content=query))
-        messages.extend(other_msgs)
+            messages.append(
+                Message(role="user", content=_query_text(query, query_block))
+            )
+        messages.extend(
+            _with_query_block(other_msgs, query, query_block)
+            if query_block
+            else other_msgs
+        )
 
-        return await self._request(messages, tools=tools, kind="plan")
+        return await self._request(messages, tools=tools, kind="plan", recall=recalls)
+
+    async def retrieve(self, messages: list[Message]) -> Message:
+        """One retrieval request: no tools, no retry, kind ``retrieve``."""
+        return await self._request(messages, tools=None, kind="retrieve", retry=False)
 
     async def reflect(
         self,
