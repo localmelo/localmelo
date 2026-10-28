@@ -2221,10 +2221,12 @@ class Agent:
         store; this pass is the one R6-lite requires before a candidate is
         staged, so the policy never compares raw text.
         """
+        run.candidates += 1
         check = self.checker.check_memory_candidate(
             MemoryCandidatePayload(text=text, source=source, target="candidate")
         )
         if not check.allowed:
+            run.candidates_refused += 1
             return None
         payload = check.sanitized_payload
         run.redactions += int((payload.metadata or {}).get("redactions", 0) or 0)
@@ -4046,7 +4048,7 @@ class Agent:
             )
             entry = _fit_reflection(entry, MAX_REFLECTION_CHARS)
             decision.tried_memory = entry
-            if run is not None:
+            if run is not None and self._notes_mode:
                 self._propose_reflection(entry, run, note_id=reflection_note_id)
             return entry, decision
         entry, decision = self._parse_reflection(
@@ -4058,7 +4060,7 @@ class Agent:
             decision.recommended_action = "decompose"
             note = f" (reflection budget exceeded: {size} > {MAX_REFLECTION_CHARS})"
             decision.rationale = (decision.rationale or "") + note
-        if run is not None:
+        if run is not None and self._notes_mode:
             self._propose_reflection(entry, run, note_id=reflection_note_id)
         return entry, decision
 
