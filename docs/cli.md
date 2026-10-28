@@ -512,7 +512,8 @@ Use nomic-embed-text for long-term memory? [Y/n]:
 
 ### Direct mode
 
-These options apply to a task run without `--serve`.
+These options apply to a task run without `--serve`; the interactive UI also
+accepts the options named in [Interactive UI](#interactive-ui).
 
 | Option | Default | Description |
 |---|---|---|
@@ -618,8 +619,10 @@ These options apply to a task run without `--serve`.
   `--recall-placement message` in `replay`/`compress+replay`, `--recall-at
   tool` with `--mcp-only` or a `--builtins` list without `recall`,
   `--builtins recall` without `--recall-at tool`, and
-  `--retrieval-extra-body` with an explicit `off`, `bm25` or `embedding`
-  retriever. A provided tool named `recall` while the tool is registered is
+  `--retrieval-extra-body` when the resolved retriever is `off`, `bm25` or
+  `embedding` (including a saved default). With `auto`, the extra body is
+  used only if a recall actually makes an `llm` retrieve request. A provided
+  tool named `recall` while the tool is registered is
   a setup error. The arms differ only in these flags:
 
   ```bash
