@@ -70,6 +70,7 @@ from localmelo.support.scheduler.model import (
     CallKind,
     Event,
     LevelSource,
+    Origin,
     Outcome,
     Phase,
     SessionKind,
@@ -725,6 +726,14 @@ class ChatGate:
         )
         call = GateCall(meta)
         self._calls[meta.call_id] = call
+        registered = self._task_registry.get(session_id)
+        if registered is not None and is_terminal(registered.phase):
+            # Refuse before either the lock pre-gate or policy sees the call.
+            call.future = asyncio.get_running_loop().create_future()
+            call.future.cancel()
+            self._calls.pop(meta.call_id, None)
+            call.done = True
+            return call
         if (
             self.lock_gate == "wait"
             and self.machine.lock == "foreign"
@@ -921,6 +930,8 @@ class ChatGate:
 
     def set_level(self, session_id: str, level: int) -> int:
         """Set the chat's level, P1-P4; re-dispatch if its task exists."""
+        if session_id in self._task_registry:
+            raise ValueError("use set_task_level for registered worker tasks")
         if isinstance(level, bool) or not isinstance(level, int) or not 1 <= level <= 4:
             raise ValueError("level must be an integer from 1 to 4")
         self._levels[session_id] = (level, "user")
@@ -951,90 +962,101 @@ class ChatGate:
         """
         if task.kind != "task":
             raise ValueError("register_task needs a task with kind='task'")
-        if isinstance(task.level, bool) or not 0 <= task.level <= 5:
+        if (
+            isinstance(task.level, bool)
+            or not isinstance(task.level, int)
+            or not 0 <= task.level <= 5
+        ):
             raise ValueError("a task's level must be from 0 (P0) to 5 (Later)")
+        if task.origin not in get_args(Origin):
+            raise ValueError(f"unknown task origin {task.origin!r}")
+        if task.phase not in get_args(Phase):
+            raise ValueError(f"unknown task phase {task.phase!r}")
+        if task.level_source not in get_args(LevelSource):
+            raise ValueError(f"unknown task level source {task.level_source!r}")
+        if task.size not in ("", "small", "medium", "large"):
+            raise ValueError(f"unknown task size {task.size!r}")
+        if task.wait_reason not in ("", "input", "approval", "dependency", "lease"):
+            raise ValueError(f"unknown task wait reason {task.wait_reason!r}")
         if task.level == 0 and task.level_source != "user":
             raise ValueError("P0 is the user's setting; level 0 needs a user source")
-        if task.level_source == "user" and task.origin != "user":
-            raise ValueError("only a user-origin task may carry a user-set level")
-        if task.level_source == "user_rule" and task.origin not in (
-            "user",
-            "user_rule",
-        ):
-            raise ValueError("a user rule levels its own tasks only")
+        registered = self._task_registry.get(task.task_id)
+        if registered is not None:
+            if is_terminal(registered.phase) and not is_terminal(task.phase):
+                raise ValueError("a finished task cannot return to a live phase")
+            if (
+                registered.level_source in ("user", "user_rule")
+                and task.level_source == "computed"
+            ):
+                raise ValueError("the task's level is pinned; use set_task_level auto")
         current = self._task(task.task_id) if self.policy != "off" else None
         if current is not None and current.kind != "task":
             raise ValueError(
                 f"A chat task with id {task.task_id} already exists; a worker "
                 "task must register before its first call"
             )
-        if task.level == 0 and task.level_source == "user":
-            for other in list(self._task_registry.values()):
-                if (
-                    other.task_id != task.task_id
-                    and other.level == 0
-                    and other.level_source == "user"
-                    and not is_terminal(other.phase)
-                ):
-                    self.update_task(
-                        other.task_id,
-                        level=1,
-                        level_source="user",
-                        user_rank=None,
-                        paused=False,
+        self._apply_task_update(task)
+
+    def _apply_task_update(self, task: Task, fields: set[str] | None = None) -> None:
+        """Apply a task change and any P0 demotions in one policy transition."""
+        updates: dict[str, Task] = {}
+        if (
+            task.level == 0
+            and task.level_source == "user"
+            and not is_terminal(task.phase)
+        ):
+            updates = {
+                other.task_id: replace(
+                    other, level=1, level_source="user", user_rank=None, paused=False
+                )
+                for other in self._task_registry.values()
+                if other.task_id != task.task_id
+                and other.level == 0
+                and other.level_source == "user"
+                and not is_terminal(other.phase)
+            }
+        updates[task.task_id] = task
+        events: list[Event] = []
+        for task_id, updated in updates.items():
+            current = self._task(task_id) if self.policy != "off" else None
+            self._task_registry[task_id] = updated
+            self._levels[task_id] = (updated.level, updated.level_source)
+            if current is None:
+                events.append(TaskAdded(updated))
+            else:
+                changes = self._task_changes(current, updated)
+                allowed = (
+                    fields
+                    if task_id == task.task_id
+                    else {"level", "level_source", "user_rank", "paused"}
+                )
+                if allowed is not None:
+                    changes = tuple(
+                        (name, value) for name, value in changes if name in allowed
                     )
-        self._task_registry[task.task_id] = task
-        self._levels[task.task_id] = (task.level, task.level_source)
-        if self.policy == "off" or self._closed:
-            return
-        if current is None:
-            self._transition((TaskAdded(task),))
-        else:
-            changes = self._task_changes(current, task)
-            if changes:
-                self._transition((TaskUpdated(task.task_id, changes),))
+                if changes:
+                    events.append(TaskUpdated(task_id, changes))
+        if events and self.policy != "off" and not self._closed:
+            self._transition(events)
 
-    def update_task(
-        self, task_id: str, *, force_level: bool = False, **changes: object
-    ) -> Task:
-        """Change a registered task's caller fields and tell the policy.
-
-        Rejects an unknown field and, like :meth:`register_task`, a P0 whose
-        source is not the user. The phase and wait reason are the runner's
-        (S3a.2); hold and admission stay the policy's own.
-        """
+    def update_task(self, task_id: str, **changes: object) -> Task:
+        """Change runner fields; priority changes go through set_task_level."""
         current = self._task_registry.get(task_id)
         if current is None:
             raise ValueError(f"No task is registered with id {task_id}")
-        unknown = sorted(set(changes) - set(_TASK_MUTABLE))
+        unknown = sorted(
+            set(changes) - (set(_TASK_MUTABLE) - {"level", "level_source"})
+        )
         if unknown:
             raise ValueError(f"task fields that may not change: {', '.join(unknown)}")
-        if "level" in changes:
-            level = changes["level"]
-            if (
-                isinstance(level, bool)
-                or not isinstance(level, int)
-                or not 0 <= level <= 5
-            ):
-                raise ValueError("a task's level must be from 0 (P0) to 5 (Later)")
-        source = changes.get("level_source", current.level_source)
-        if source not in ("user", "user_rule", "computed"):
-            raise ValueError("level_source must be 'user', 'user_rule' or 'computed'")
-        level = changes.get("level", current.level)
-        if level == 0 and source != "user":
-            raise ValueError("P0 is the user's setting; level 0 needs a user source")
-        if "level_source" in changes and source == "user" and current.origin != "user":
-            raise ValueError("only a user-origin task may carry a user-set level")
-        if (
-            current.level_source in ("user", "user_rule")
-            and source == "computed"
-            and not force_level
-        ):
-            raise ValueError(
-                "this task's level is set by the user; force_level hands it back"
-            )
         if "phase" in changes and changes["phase"] not in get_args(Phase):
             raise ValueError(f"unknown task phase {changes['phase']!r}")
+        if (
+            "phase" in changes
+            and is_terminal(current.phase)
+            and not is_terminal(cast(Phase, changes["phase"]))
+        ):
+            raise ValueError("a finished task cannot return to a live phase")
         if "size" in changes and changes["size"] not in (
             "",
             "small",
@@ -1042,17 +1064,19 @@ class ChatGate:
             "large",
         ):
             raise ValueError(f"unknown task size {changes['size']!r}")
+        if "wait_reason" in changes and changes["wait_reason"] not in (
+            "",
+            "input",
+            "approval",
+            "dependency",
+            "lease",
+        ):
+            raise ValueError(f"unknown task wait reason {changes['wait_reason']!r}")
         for name in ("paused", "blocked_now", "budget_exhausted"):
             if name in changes and not isinstance(changes[name], bool):
                 raise ValueError(f"{name} must be a boolean")
         updated = replace(current, **cast(Any, changes))
-        self._task_registry[task_id] = updated
-        self._levels[task_id] = (updated.level, updated.level_source)
-        if self.policy != "off" and not self._closed:
-            if self._task(task_id) is None:
-                self._transition((TaskAdded(updated),))
-            elif changes:
-                self._transition((TaskUpdated(task_id, tuple(changes.items())),))
+        self._apply_task_update(updated, set(changes))
         return updated
 
     def set_task_level(
@@ -1068,19 +1092,16 @@ class ChatGate:
         task = self._task_registry.get(task_id)
         if task is None:
             raise ValueError(f"No task is registered with id {task_id}")
+        if is_terminal(task.phase):
+            raise ValueError("cannot change the priority of a finished task")
         text = choice.strip().lower() if isinstance(choice, str) else choice
         if text == "auto":
-            self.update_task(
-                task_id,
-                level=2,
-                level_source="computed",
-                user_rank=None,
-                paused=False,
-                force_level=True,
+            updated = replace(
+                task, level=2, level_source="computed", user_rank=None, paused=False
             )
         elif text == "first":
             first_rank = self._clock().wall_us / 1_000_000 if rank is None else rank
-            self.update_task(task_id, user_rank=first_rank)
+            updated = replace(task, user_rank=first_rank)
         else:
             if (
                 isinstance(text, str)
@@ -1095,29 +1116,13 @@ class ChatGate:
                 or not 0 <= text <= 5
             ):
                 raise ValueError("priority must be P0-P5, auto or first")
-            if text == 0:
-                for other in list(self._task_registry.values()):
-                    if (
-                        other.task_id != task_id
-                        and other.level == 0
-                        and other.level_source == "user"
-                        and not is_terminal(other.phase)
-                    ):
-                        self.update_task(
-                            other.task_id,
-                            level=1,
-                            level_source="user",
-                            user_rank=None,
-                            paused=False,
-                        )
-            self.update_task(
-                task_id,
-                level=text,
-                level_source="user",
-                user_rank=None,
-                paused=text == 5,
+            updated = replace(
+                task, level=text, level_source="user", user_rank=None, paused=text == 5
             )
-        return self._task_registry[task_id].level
+        self._apply_task_update(
+            updated, {"level", "level_source", "user_rank", "paused"}
+        )
+        return updated.level
 
     def finish_task(self, task_id: str, phase: str = "done") -> Task:
         """End a worker task: ``done``, ``failed``, ``cancelled`` or ``expired``.
@@ -1135,7 +1140,10 @@ class ChatGate:
         # the policy skips a terminal task's calls, so its future would never
         # resolve (a stop while a worker's call is held).
         for call in list(self._calls.values()):
-            if call.meta.session_id != task_id:
+            if (
+                call.meta.session_id != task_id
+                or call.meta.admitted_mono_us is not None
+            ):
                 continue
             if call.future is not None and not call.future.done():
                 call.future.cancel()

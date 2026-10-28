@@ -240,17 +240,21 @@ tables. `support/gateway/task_store.py` creates version 1 of it — `tasks`,
 terminal `melo` never creates the component or reads its tables; a component
 newer than 1 is refused like a newer `user_version`. `TaskStore.open()` is
 the entry point S3a.2's console calls after it opens the store; this PR adds
-no route, worker or console wiring.
+no route, worker or console wiring. A gateway takes the session file's owner
+lock: a second gateway process is refused rather than concurrently migrating
+or writing the same file.
 
 A task row's id is its `kind="task"` session's id. `create_task()` writes the
 session, the task, its first `priority_events` row and a `sched_log` row in
 the same transaction, so a crash leaves none of them. `UNIQUE(origin,
 request_key)` makes a repeated create idempotent: the same payload returns
 the stored row with `repeated=True`, a different payload raises
-`TaskConflictError`, which S3a.2 maps to 409. `set_level()` writes a
-`priority_events` row and a `sched_log` row; a user's P0 is single, so a
+`TaskConflictError`, which S3a.2 maps to 409. `set_level()` records actual
+level changes in `priority_events` and writes `sched_log`; state-only and
+same-level changes do not add priority labels. The user's P0 is single, so a
 second user P0 returns the prior one to P1 with no `user_rank` in the same
-transaction. `set_priority()` also takes `auto` (P2, computed) and `first`
+transaction, regardless of task origin. Finished tasks cannot be reprioritized.
+`set_priority()` also takes `auto` (P2, computed) and `first`
 (keeps the level, sets a rank that sorts earlier first choices first).
 `set_state()` writes a task's state (`queued`, `running`, `held`, `waiting`,
 `parked`, `interrupted`, `done`, `failed`, `cancelled`, `expired`) and its
@@ -264,19 +268,19 @@ sweep, so the gateway's daily `apply_retention()` prunes both, and
 `support/gateway/task_policy.py` is the code-side boundary, never a model's
 JSON:
 
-- `TaskSpec.from_payload()` normalizes a create request (accepting `prompt`
-  as an alias for `objective`), derives a 60-character title when none is
-  given, bounds every field (1,500 characters of `context`, 32
-  `done_when` items, 32 `inputs`), parses `deadline` from an epoch or an
-  ISO-8601 string (naive means local time), and refuses a `P0` that is not
-  the user's.
-- `validate_task_workspace()` returns the folder's real path. A missing
-  folder means `[gateway] workspace`, or `~/localmelo-workspace` when that
-  key is empty, and that default is created. The user's own tasks may use
-  any existing folder strictly inside `~` with no dot component and nothing
-  under `~/Library`; every other origin must be strictly inside the
-  configured workspace, though a request that names no folder gets that
-  root itself. `/` and `~` are never a worker's root.
+- `TaskSpec.from_payload()` normalizes an untrusted request (accepting `prompt`
+  as an alias for `objective`), bounds fields, parses `deadline` from an epoch
+  or ISO-8601 string, and rejects a payload-supplied `level_source`.
+  After authorizing the actor, `TaskSpec.from_user_payload()` pins an explicit
+  user-selected P0–P5; without an explicit level it uses computed P2. The
+  adapter does not itself authenticate or authorize a caller.
+- `validate_task_workspace()` resolves the real folder. The configured root
+  must be absolute or `~/` and cannot resolve to `/` or the home folder. A
+  user's task may use any existing folder strictly inside `~` with no dot
+  component and nothing under `~/Library`. For other origins an explicit
+  folder must be strictly inside the configured root; when omitted, pass a
+  trusted `task_id` to create a non-symlink child of that root. The root
+  defaults to `~/localmelo-workspace` when not configured.
 - `worker_tool_allowlist()` returns the gateway built-ins
   (`file_read`, `file_write`, `python_exec`; never `shell_exec`) and, for
   `user` and `user_rule` only, remembered approvals, unmarked MCP tools and
@@ -285,13 +289,14 @@ JSON:
 
 `ChatGate.register_task()` gives a worker its task lifecycle. Its calls are
 submitted with `task_id` and `session_kind="task"`, never take the lane, and
-a call ending does not mark the task `done` — the runner calls
-`finish_task()` with `done`, `failed`, `cancelled` or `expired`.
-`update_task()` carries the caller-owned fields (phase, wait reason, level,
-rank, deadline, paused), `set_task_level()` handles the chip's `P0`-`P5`,
-`auto` and `first`, and `held(task_id)` reports the gate's reason as it does
-for a chat. Gate levels remain in memory; S3a.2 writes them through the
-store.
+a call ending does not finish the worker. The runner calls `finish_task()`
+with `done`, `failed`, `cancelled` or `expired`.
+It cancels parked calls but retains admitted calls until their providers end;
+new calls for a terminal task are refused. `update_task()` carries
+caller-owned fields such as phase and wait reason, but not level or source;
+`set_task_level()` handles the chip's `P0`-`P5`, `auto` and `first`, and
+`held(task_id)` reports the gate's reason as it does for a chat. Gate levels
+remain in memory; S3a.2 writes them through the store.
 
 ## Run one simulation
 

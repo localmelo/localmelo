@@ -25,7 +25,9 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from collections.abc import Mapping, Sequence
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Final, cast, get_args
@@ -116,13 +118,29 @@ class TaskSpec:
 
     @classmethod
     def from_payload(cls, payload: Mapping[str, Any]) -> TaskSpec:
-        """Normalize a create request; *payload* may use ``prompt`` for ``objective``.
+        """Normalize an untrusted request; its level is never user-set.
 
-        Keys outside the TaskSpec are ignored: the API route adds ``origin``,
-        ``request_key`` and the session's ``task_id`` itself.
+        The ingress must use :meth:`from_user_payload` only after authorizing
+        the user. Neither constructor accepts a payload-provided level_source.
         """
+        return cls._from_payload(payload, user_level=False)
+
+    @classmethod
+    def from_user_payload(cls, payload: Mapping[str, Any]) -> TaskSpec:
+        """Normalize a request from an authorized user, pinning an explicit level.
+
+        This is a trusted adapter, not an authorization check. Callers must
+        authenticate and authorize the actor before invoking it.
+        """
+        return cls._from_payload(payload, user_level=True)
+
+    @classmethod
+    def _from_payload(cls, payload: Mapping[str, Any], *, user_level: bool) -> TaskSpec:
+        """Normalize a request; ``prompt`` is an alias for ``objective``."""
         if not isinstance(payload, Mapping):
             raise TaskSpecError("The task spec must be a JSON object")
+        if "level_source" in payload:
+            raise TaskSpecError("level_source is reserved for trusted code")
         objective = payload.get("objective")
         if objective is None:
             objective = payload.get("prompt")
@@ -150,12 +168,7 @@ class TaskSpec:
             names = ", ".join(sorted(WORKSPACE_MODES))
             raise TaskSpecError(f"workspace_mode must be one of {names}, got {mode!r}")
         level = _level(payload.get("level", 2))
-        source = payload.get("level_source", "computed")
-        if source not in ("user", "user_rule", "computed"):
-            raise TaskSpecError(
-                "level_source must be 'user', 'user_rule' or 'computed', "
-                f"got {source!r}"
-            )
+        source = "user" if user_level and "level" in payload else "computed"
         if level == 0 and source != "user":
             raise TaskSpecError("P0 is the user's setting; level 0 needs a user source")
         features = payload.get("features", {})
@@ -190,9 +203,9 @@ class TaskSpec:
             workspace_mode=cast(str, mode),
             budget_s=_budget(payload.get("budget_s")),
             deadline=_deadline(payload.get("deadline")),
-            features=dict(features),
+            features=json.loads(feature_text),
             level=level,
-            level_source=cast(str, source),
+            level_source=source,
             reason=_text(
                 payload.get("reason", ""),
                 "reason",
@@ -287,7 +300,7 @@ def _inputs(value: object) -> tuple[Mapping[str, Any], ...]:
             raise TaskSpecError(
                 f"inputs[{index}] must be at most {MAX_INPUT_JSON_CHARS} characters"
             )
-        out.append(dict(item))
+        out.append(json.loads(item_text))
     return tuple(out)
 
 
@@ -372,37 +385,92 @@ def _configured_workspace(cfg: object) -> str:
     return text or DEFAULT_WORKSPACE
 
 
+def _relative_parts(path: str, root: str) -> list[str] | None:
+    """Return components below root, including on case-insensitive filesystems."""
+    parts: list[str] = []
+    current = path
+    while True:
+        if current == root:
+            return parts
+        try:
+            if os.path.samefile(current, root):
+                return parts
+        except OSError:
+            pass
+        parent, name = os.path.split(current)
+        if parent == current or not name:
+            return None
+        parts.insert(0, name)
+        current = parent
+
+
 def _inside(path: str, root: str) -> bool:
-    if path == root:
-        return False
+    parts = _relative_parts(path, root)
+    return bool(parts)
+
+
+def _default_task_workspace(root: str, task_id: str | None) -> str:
+    """Create a single non-symlink child selected by a trusted task ID."""
+    if not isinstance(task_id, str) or not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", task_id
+    ):
+        raise WorkspaceError("A safe task_id is required for a default workspace")
     try:
-        return os.path.commonpath((path, root)) == root
-    except ValueError:  # different drives on Windows
-        return False
+        os.makedirs(root, mode=0o700, exist_ok=True)
+        flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+        root_fd = os.open(root, flags)
+        try:
+            with suppress(FileExistsError):
+                os.mkdir(task_id, mode=0o700, dir_fd=root_fd)
+            child_fd = os.open(task_id, flags, dir_fd=root_fd)
+            os.close(child_fd)
+        finally:
+            os.close(root_fd)
+    except OSError as exc:
+        raise WorkspaceError(f"Could not create the task workspace: {exc}") from exc
+    path = os.path.realpath(os.path.join(root, task_id))
+    if not _inside(path, root):
+        raise WorkspaceError("The task workspace must be strictly inside the root")
+    return path
 
 
 def validate_task_workspace(
-    workspace: str | None, cfg: object, *, origin: str = "user"
+    workspace: str | None,
+    cfg: object,
+    *,
+    origin: str = "user",
+    task_id: str | None = None,
 ) -> str:
-    """The worker's real workspace path, or :class:`WorkspaceError`.
+    """Resolve a worker folder or raise :class:`WorkspaceError`.
 
-    A missing *workspace* means ``[gateway] workspace`` (or
-    :data:`DEFAULT_WORKSPACE`), and that default is created if needed, as the
-    console does for a chat session. Every other request must name an existing
-    absolute or ``~/`` folder. Only ``origin="user"`` gets the home boundary:
-    a user's task may run anywhere strictly under ``~`` with no dot component
-    and nothing under ``~/Library``; every other origin must stay strictly
-    inside the configured workspace.
+    A missing user workspace uses the configured root or the default. A missing
+    non-user workspace creates a child named by the trusted single-component
+    task_id. Explicit paths must already exist. The configured root must be an
+    absolute or ``~/`` path, and cannot resolve to / or the home directory.
     """
     checked_origin = check_origin(origin)
     home = os.path.realpath(os.path.expanduser("~"))
-    root = os.path.realpath(os.path.expanduser(_configured_workspace(cfg)))
+    configured = _configured_workspace(cfg)
+    if not (os.path.isabs(configured) or configured.startswith("~/")):
+        raise WorkspaceError(
+            "The configured workspace must be an absolute path or start with ~/."
+        )
+    root = os.path.realpath(os.path.expanduser(configured))
+    if root == "/" or _relative_parts(root, home) == []:
+        raise WorkspaceError(
+            "The configured workspace may not be / or your home folder"
+        )
     defaulted = workspace is None or (
         isinstance(workspace, str) and not workspace.strip()
     )
     if defaulted:
+        if checked_origin != "user":
+            path = _default_task_workspace(root, task_id)
+            if _relative_parts(path, home) == []:
+                raise WorkspaceError("A worker may not be rooted at your home folder")
+            return path
         path = root
-        if checked_origin == "user" and not _user_workspace(path, home):
+        if not _user_workspace(path, home):
             # The configured root may be outside ~, under ~/Library or in a
             # dot folder; a user's task then starts at the plain default.
             path = os.path.realpath(os.path.expanduser(DEFAULT_WORKSPACE))
@@ -422,7 +490,7 @@ def validate_task_workspace(
         if not os.path.isdir(candidate):
             raise WorkspaceError(f"Not a directory: {candidate}")
         path = os.path.realpath(candidate)
-    if path in ("/", home):
+    if path == "/" or _relative_parts(path, home) == []:
         raise WorkspaceError("A worker may not be rooted at / or your home folder")
     if checked_origin == "user":
         if not _user_workspace(path, home):
@@ -430,8 +498,7 @@ def validate_task_workspace(
                 raise WorkspaceError(
                     "A user task's workspace must be strictly inside your home folder"
                 )
-            relative = os.path.relpath(path, home)
-            parts = relative.split(os.sep)
+            parts = _relative_parts(path, home) or []
             if any(part.startswith(".") for part in parts):
                 raise WorkspaceError(
                     "A user task's workspace may not be in a hidden folder"
@@ -453,9 +520,9 @@ def validate_task_workspace(
 
 def _user_workspace(path: str, home: str) -> bool:
     """Whether *path* is a user task's allowed folder under *home*."""
-    if path == home or not _inside(path, home):
+    parts = _relative_parts(path, home)
+    if not parts:
         return False
-    parts = os.path.relpath(path, home).split(os.sep)
     if any(part.startswith(".") for part in parts):
         return False
     return not (parts and parts[0].casefold() == "library")

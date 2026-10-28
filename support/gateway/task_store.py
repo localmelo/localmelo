@@ -201,21 +201,6 @@ def _json_columns(values: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-@dataclass(frozen=True)
-class PriorityEvent:
-    """One ``priority_events`` row: a level change, also triage's label."""
-
-    event_id: int
-    task_id: str
-    ts: float
-    actor: str
-    from_level: int | None
-    to_level: int
-    pinned: bool
-    reason: str
-    quote: str
-
-
 class TaskStore:
     """The scheduler's component over one gateway :class:`SessionStore`."""
 
@@ -259,97 +244,6 @@ class TaskStore:
         await self.apply_retention()
         return self._version
 
-    # ── Reads ──
-
-    async def get_task(self, task_id: str) -> TaskRecord | None:
-        """The task, or ``None``."""
-        async with self._store.component_read() as conn:
-            return await self._get(conn, task_id)
-
-    async def list_tasks(
-        self,
-        *,
-        state: str | None = None,
-        level: int | None = None,
-        limit: int = 200,
-    ) -> list[TaskRecord]:
-        """Tasks, newest first, optionally filtered by *state* and *level*."""
-        if state is not None and state not in TASK_STATES:
-            raise ValueError(f"unknown task state {state!r}")
-        if level is not None and (
-            isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 5
-        ):
-            raise ValueError("level must be from 0 (P0) to 5 (Later)")
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 1 <= limit <= 1000
-        ):
-            raise ValueError("limit must be an integer from 1 to 1000")
-        clauses: list[str] = []
-        params: list[Any] = []
-        if state is not None:
-            clauses.append("state = ?")
-            params.append(state)
-        if level is not None:
-            clauses.append("level = ?")
-            params.append(level)
-        where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
-        params.append(limit)
-        async with self._store.component_read() as conn:
-            rows = await _rows(
-                conn,
-                f"{_SELECT_TASK}{where} ORDER BY created_at DESC, task_id LIMIT ?",
-                tuple(params),
-            )
-        return [TaskRecord.from_row(row) for row in rows]
-
-    async def priority_events(self, task_id: str) -> list[PriorityEvent]:
-        """The task's level history, oldest first (design 2.5, "Record")."""
-        async with self._store.component_read() as conn:
-            rows = await _rows(
-                conn,
-                "SELECT id, task_id, ts, actor, from_level, to_level, pinned, "
-                "reason, quote FROM priority_events WHERE task_id = ? ORDER BY id",
-                (task_id,),
-            )
-        return [
-            PriorityEvent(
-                event_id=row[0],
-                task_id=row[1],
-                ts=row[2],
-                actor=row[3],
-                from_level=row[4],
-                to_level=row[5],
-                pinned=bool(row[6]),
-                reason=row[7],
-                quote=row[8],
-            )
-            for row in rows
-        ]
-
-    async def recent_log(
-        self, *, task_id: str | None = None, limit: int = 50
-    ) -> list[tuple[float, str, str | None, Mapping[str, Any]]]:
-        """The newest ``sched_log`` rows, oldest of the slice first."""
-        if (
-            isinstance(limit, bool)
-            or not isinstance(limit, int)
-            or not 1 <= limit <= 500
-        ):
-            raise ValueError("limit must be an integer from 1 to 500")
-        clause = " WHERE task_id = ?" if task_id is not None else ""
-        params: tuple[Any, ...] = (task_id, limit) if task_id is not None else (limit,)
-        async with self._store.component_read() as conn:
-            rows = await _rows(
-                conn,
-                "SELECT ts, kind, task_id, data FROM sched_log"
-                + clause
-                + " ORDER BY id DESC LIMIT ?",
-                params,
-            )
-        return [(row[0], row[1], row[2], json.loads(row[3])) for row in reversed(rows)]
-
     # ── Creation ──
 
     async def create_task(
@@ -371,10 +265,6 @@ class TaskStore:
         """
         if origin not in TASK_ORIGINS:
             raise ValueError(f"unknown origin {origin!r}")
-        if spec.level_source == "user" and origin != "user":
-            raise ValueError("only a user-origin task may carry a user-set level")
-        if spec.level_source == "user_rule" and origin not in ("user", "user_rule"):
-            raise ValueError("a user rule levels its own tasks only")
         if request_key is not None and not isinstance(request_key, str):
             raise ValueError("request_key must be a string or None")
         if request_key == "":
@@ -515,6 +405,8 @@ class TaskStore:
             current = await self._get(conn, task_id)
             if current is None:
                 raise TaskNotFoundError(f"No task has id {task_id}")
+            if current.state in _TERMINAL_STATES:
+                raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
             if current.level_pinned and source == "computed" and not force:
                 raise TaskStoreError(
                     f"Task {task_id}'s level is set by the user; use force to "
@@ -522,18 +414,19 @@ class TaskStore:
                 )
             if level == 0 and source == "user":
                 await self._demote_other_p0(conn, task_id, actor, now)
-            await self._write_level(conn, current, level, source, None, now)
-            await self._event(
-                conn,
-                task_id,
-                from_level=current.level,
-                to_level=level,
-                actor=actor,
-                reason=reason,
-                quote=quote,
-                pinned=_pinned(source),
-                ts=now,
-            )
+            await self._write_level(conn, current, level, source, None, reason, now)
+            if current.level != level:
+                await self._event(
+                    conn,
+                    task_id,
+                    from_level=current.level,
+                    to_level=level,
+                    actor=actor,
+                    reason=reason,
+                    quote=quote,
+                    pinned=_pinned(source),
+                    ts=now,
+                )
             await self._log(
                 conn,
                 "task.level",
@@ -622,17 +515,7 @@ class TaskStore:
                 "started_at = ?, finished_at = ?, updated_at = ? WHERE task_id = ?",
                 (state, wait_reason, hold_site, started, finished, now, task_id),
             )
-            await self._event(
-                conn,
-                task_id,
-                from_level=current.level,
-                to_level=current.level,
-                actor=actor,
-                reason=reason,
-                quote="",
-                pinned=current.level_pinned,
-                ts=now,
-            )
+            await self._touch_session(conn, task_id, now)
             await self._log(
                 conn,
                 "task.state",
@@ -643,48 +526,6 @@ class TaskStore:
             record = await self._get(conn, task_id)
         assert record is not None
         return record
-
-    async def set_wait_reason(
-        self, task_id: str, reason: str, *, hold_site: str = ""
-    ) -> TaskRecord:
-        """Record the gate's reason and hold site without a priority event."""
-        now = self._clock()
-        async with self._store.component_transaction("task_wait_reason") as conn:
-            current = await self._get(conn, task_id)
-            if current is None:
-                raise TaskNotFoundError(f"No task has id {task_id}")
-            await conn.execute(
-                "UPDATE tasks SET wait_reason = ?, hold_site = ?, updated_at = ? "
-                "WHERE task_id = ?",
-                (reason, hold_site, now, task_id),
-            )
-            await self._log(
-                conn,
-                "task.wait",
-                task_id,
-                {
-                    "from": current.wait_reason,
-                    "to": reason,
-                    "hold_site": hold_site,
-                },
-                ts=now,
-            )
-            record = await self._get(conn, task_id)
-        assert record is not None
-        return record
-
-    async def log(
-        self,
-        kind: str,
-        task_id: str | None = None,
-        data: Mapping[str, Any] | None = None,
-    ) -> None:
-        """Append one ``sched_log`` decision row."""
-        if not isinstance(kind, str) or not kind:
-            raise ValueError("kind must be a non-empty string")
-        now = self._clock()
-        async with self._store.component_transaction("task_log") as conn:
-            await self._log(conn, kind, task_id, dict(data or {}), ts=now)
 
     # ── Retention ──
 
@@ -721,9 +562,10 @@ class TaskStore:
             await conn.execute(
                 "UPDATE tasks SET level = 1, level_eff = 1, "
                 "peak_level = MIN(peak_level, 1), user_rank = NULL, "
-                "updated_at = ? WHERE task_id = ?",
+                "reason = 'p0_conflict', updated_at = ? WHERE task_id = ?",
                 (now, other_id),
             )
+            await self._touch_session(conn, other_id, now)
             await self._event(
                 conn,
                 other_id,
@@ -750,12 +592,13 @@ class TaskStore:
         level: int,
         source: str,
         user_rank: float | None,
+        reason: str,
         now: float,
     ) -> None:
         await conn.execute(
             "UPDATE tasks SET level = ?, level_source = ?, level_pinned = ?, "
             "level_eff = ?, peak_level = MIN(peak_level, ?), user_rank = ?, "
-            "updated_at = ? WHERE task_id = ?",
+            "reason = ?, updated_at = ? WHERE task_id = ?",
             (
                 level,
                 source,
@@ -763,10 +606,12 @@ class TaskStore:
                 level,
                 level,
                 user_rank,
+                reason,
                 now,
                 current.task_id,
             ),
         )
+        await self._touch_session(conn, current.task_id, now)
 
     async def _set_first(
         self, task_id: str, *, actor: str, reason: str, quote: str
@@ -779,31 +624,28 @@ class TaskStore:
             current = await self._get(conn, task_id)
             if current is None:
                 raise TaskNotFoundError(f"No task has id {task_id}")
+            if current.state in _TERMINAL_STATES:
+                raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
             await conn.execute(
                 "UPDATE tasks SET user_rank = ?, updated_at = ? WHERE task_id = ?",
                 (rank, now, task_id),
             )
-            await self._event(
-                conn,
-                task_id,
-                from_level=current.level,
-                to_level=current.level,
-                actor=actor,
-                reason=reason or "first",
-                quote=quote,
-                pinned=current.level_pinned,
-                ts=now,
-            )
+            await self._touch_session(conn, task_id, now)
             await self._log(
                 conn,
                 "task.first",
                 task_id,
-                {"rank": rank, "actor": actor},
+                {"rank": rank, "actor": actor, "reason": reason, "quote": quote},
                 ts=now,
             )
             record = await self._get(conn, task_id)
         assert record is not None
         return record
+
+    async def _touch_session(self, conn: Any, task_id: str, now: float) -> None:
+        await conn.execute(
+            "UPDATE sessions SET updated_at = ? WHERE id = ?", (now, task_id)
+        )
 
     async def _event(
         self,
@@ -858,7 +700,9 @@ def _same_request(
         "request_key": request_key,
         "front_id": front_id,
     }
-    return record.front_id == front_id and stored == expected
+    return record.front_id == front_id and stored == json.loads(
+        json.dumps(expected, sort_keys=True)
+    )
 
 
 def _new_id() -> str:
@@ -885,7 +729,6 @@ __all__ = [
     "SCHEDULER_VERSION",
     "TASK_ORIGINS",
     "TASK_STATES",
-    "PriorityEvent",
     "TaskConflictError",
     "TaskNotFoundError",
     "TaskRecord",

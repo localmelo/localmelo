@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from localmelo.support.gateway.chat_gate import ChatGate
+from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.schema import Message, ToolDef
+from localmelo.support.gateway.chat_gate import ChatGate, GatedLLM
 from localmelo.support.scheduler import Clock, Machine, Task
 
 
@@ -154,6 +157,18 @@ async def test_a_finished_task_is_not_demoted_by_a_new_p0() -> None:
     await gate.close()
 
 
+async def test_relevel_preserves_policy_phase_after_admission() -> None:
+    gate = ChatGate(policy="class")
+    gate.register_task(task(phase="queued"))
+    call = gate.submit("worker")
+    await gate.acquire(call)
+    assert state_task(gate).phase == "running"  # type: ignore[union-attr]
+    gate.set_task_level("worker", "P1")
+    assert state_task(gate).phase == "running"  # type: ignore[union-attr]
+    gate.finish(call)
+    await gate.close()
+
+
 async def test_registering_a_second_p0_demotes_the_first() -> None:
     gate = ChatGate(policy="class")
     gate.register_task(task("a", level=0, level_source="user"))
@@ -180,26 +195,87 @@ async def test_finish_task_cancels_a_call_parked_at_the_gate() -> None:
     await gate.close()
 
 
-async def test_a_non_user_task_cannot_claim_a_user_level() -> None:
+@pytest.mark.parametrize(
+    "origin", ["user", "user_rule", "front", "harness", "agent", "channel", "sleep"]
+)
+async def test_user_may_relevel_any_origin_and_recover_it(origin: str) -> None:
     gate = ChatGate(policy="class")
-    with pytest.raises(ValueError, match="user-origin"):
-        gate.register_task(task("front", origin="front", level_source="user"))
-    gate.register_task(task("front", origin="front"))
-    with pytest.raises(ValueError, match="user-origin"):
-        gate.update_task("front", level=1, level_source="user")
+    gate.register_task(task("worker", origin=origin))
+    assert gate.set_task_level("worker", "P1") == 1
+    recovered = gate.registered_tasks[0]
+    assert (recovered.level, recovered.level_source) == (1, "user")
+    await gate.close()
+    gate = ChatGate(policy="class")
+    gate.register_task(recovered)
+    assert gate.set_task_level("worker", "P0") == 0
     await gate.close()
 
 
-async def test_a_pinned_gate_level_needs_force_to_become_computed() -> None:
+@pytest.mark.parametrize("origin", ["agent", "front", "channel", "sleep"])
+async def test_recover_user_rule_level_on_any_origin(origin: str) -> None:
     gate = ChatGate(policy="class")
-    gate.register_task(task())
-    gate.set_task_level("worker", "P1")
-    with pytest.raises(ValueError, match="force_level"):
-        gate.update_task("worker", level=3, level_source="computed")
-    changed = gate.update_task(
-        "worker", level=3, level_source="computed", force_level=True
-    )
-    assert (changed.level, changed.level_source) == (3, "computed")
+    gate.register_task(task(origin=origin, level=1, level_source="user_rule"))
+    assert gate.level("worker") == 1
+    assert gate.level_source("worker") == "user_rule"
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "class"])
+@pytest.mark.parametrize("phase", ["done", "failed", "cancelled", "expired"])
+async def test_terminal_task_cannot_be_revived(policy: str, phase: str) -> None:
+    gate = ChatGate(policy=policy)
+    gate.register_task(task("live", level=0, level_source="user"))
+    gate.register_task(task("dead", phase=phase))
+    with pytest.raises(ValueError, match="terminal|finished"):
+        gate.update_task("dead", phase="running")
+    with pytest.raises(ValueError, match="terminal|finished"):
+        gate.register_task(task("dead", phase="running", level=0, level_source="user"))
+    with pytest.raises(ValueError, match="terminal|finished"):
+        gate.set_task_level("dead", "P0")
+    assert gate.level("live") == 0
+    assert next(t for t in gate.registered_tasks if t.task_id == "dead").phase == phase
+    await gate.close()
+
+
+@pytest.mark.parametrize("source", ["user", "user_rule"])
+async def test_reregistration_cannot_replace_a_pinned_level_with_computed(
+    source: str,
+) -> None:
+    gate = ChatGate(policy="class")
+    gate.register_task(task(level=1, level_source=source))
+    with pytest.raises(ValueError, match="pinned|set by"):
+        gate.register_task(task(level=3, level_source="computed"))
+    assert (gate.level("worker"), gate.level_source("worker")) == (1, source)
+    assert gate.set_task_level("worker", "auto") == 2
+    gate.register_task(task(level=3, level_source="computed"))
+    assert gate.level("worker") == 3
+    await gate.close()
+
+
+async def test_update_task_cannot_change_level_or_source() -> None:
+    gate = ChatGate(policy="class", n_srv=1, r_f=0)
+    gate.register_task(task("first", phase="running"))
+    gate.register_task(task("second", phase="running"))
+    gate.set_task_level("first", "P0")
+    for changes in (
+        {"level": 0},
+        {"level_source": "user"},
+        {"level": 0, "level_source": "user"},
+    ):
+        with pytest.raises(ValueError, match="may not change"):
+            gate.update_task("second", **changes)
+    assert gate.level("first") == 0
+    assert gate.level("second") == 2
+    busy = gate.submit("busy")
+    first = gate.submit("first")
+    second = gate.submit("second")
+    assert first.future is not None and not first.future.done()
+    assert second.future is not None and not second.future.done()
+    gate.finish(busy)
+    assert first.future.done() and not second.future.done()
+    gate.finish(first)
+    await gate.acquire(second)
+    gate.finish(second)
     await gate.close()
 
 
@@ -222,7 +298,7 @@ async def test_update_task_rejects_identifying_fields_and_a_computed_p0() -> Non
     assert (changed.phase, changed.wait_reason) == ("waiting", "input")
     with pytest.raises(ValueError, match="may not change"):
         gate.update_task("worker", kind="chat")
-    with pytest.raises(ValueError, match="P0 is the user"):
+    with pytest.raises(ValueError, match="may not change"):
         gate.update_task("worker", level=0, level_source="computed")
     with pytest.raises(ValueError, match="No task is registered"):
         gate.update_task("missing", phase="running")
@@ -242,6 +318,99 @@ async def test_off_still_tags_the_call_and_forget_drops_the_task() -> None:
     assert [t.task_id for t in gate.registered_tasks] == ["worker"]
     gate.forget("worker")
     assert gate.registered_tasks == ()
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "fcfs", "class"])
+@pytest.mark.parametrize("lock", ["record", "wait"])
+@pytest.mark.parametrize("kind", ["plan", "embed"])
+async def test_terminal_task_submissions_are_immediately_refused(
+    policy: str, lock: str, kind: str
+) -> None:
+    gate = ChatGate(policy=policy, lock_gate=lock)
+    gate.register_task(task())
+    gate.finish_task("worker", "cancelled")
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("worker", kind=kind)
+    assert call.future is not None and call.future.cancelled()
+    assert not call.lock_waiting
+    with pytest.raises(asyncio.CancelledError):
+        await gate.acquire(call)
+    gate.finish(call, "refused")
+    await gate.close()
+
+
+async def test_terminal_or_invalid_target_does_not_demote_live_p0() -> None:
+    gate = ChatGate(policy="class")
+    gate.register_task(task("live", level=0, level_source="user"))
+    gate.register_task(task("dead", phase="done"))
+    for target, choice in [("dead", "P0"), ("missing", "P0"), ("dead", "P9")]:
+        with pytest.raises(ValueError):
+            gate.set_task_level(target, choice)
+        assert gate.level("live") == 0
+    gate.register_task(task("old", phase="done", level=0, level_source="user"))
+    assert gate.level("live") == 0
+    await gate.close()
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        {"level": 2.5},
+        {"level": True},
+        {"origin": "robot"},
+        {"phase": "bogus"},
+        {"level_source": "bad"},
+        {"size": "huge"},
+        {"wait_reason": "bogus"},
+    ],
+)
+async def test_register_task_rejects_invalid_fields(changes: dict[str, object]) -> None:
+    gate = ChatGate(policy="class")
+    with pytest.raises(ValueError):
+        gate.register_task(replace(task(), **changes))
+    assert gate.registered_tasks == ()
+    await gate.close()
+
+
+async def test_finish_task_does_not_release_a_blocked_provider_slot() -> None:
+    class BlockingProvider(BaseLLMProvider):
+        model = "fake"
+        last_reasoning_key = ""
+        last_usage = {"prompt_tokens": 3, "completion_tokens": 2}
+
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def chat(
+            self, messages: list[Message], tools: list[ToolDef] | None = None
+        ) -> Message:
+            self.started.set()
+            await self.release.wait()
+            return Message(role="assistant", content="ok")
+
+        async def close(self) -> None:
+            pass
+
+    gate = ChatGate(policy="class", n_srv=1, r_f=0)
+    gate.register_task(task("first", phase="running"))
+    gate.register_task(task("second", phase="running"))
+    provider = BlockingProvider()
+    running = asyncio.create_task(GatedLLM(provider, gate.client("first")).chat([]))
+    await asyncio.wait_for(provider.started.wait(), 1)
+    pending = gate.submit("first")
+    assert pending.future is not None and not pending.future.done()
+    gate.finish_task("first", "cancelled")
+    assert pending.done and pending.future.cancelled()
+    assert gate._inflight() == 1
+    second = gate.submit("second")
+    assert second.future is not None and not second.future.done()
+    provider.release.set()
+    await asyncio.wait_for(running, 1)
+    await asyncio.wait_for(gate.acquire(second), 1)
+    assert gate._inflight() == 1
+    gate.finish(second)
     await gate.close()
 
 

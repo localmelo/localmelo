@@ -19,6 +19,8 @@ from localmelo.support.gateway.task_policy import (
     validate_task_workspace,
     worker_tool_allowlist,
 )
+from localmelo.support.gateway.task_store import TaskStore, TaskStoreError
+from localmelo.support.sessions.store import SessionStore
 
 
 def cfg(workspace: str = "") -> SimpleNamespace:
@@ -100,9 +102,12 @@ def test_a_non_user_workspace_must_be_strictly_inside_the_configured_root(
     for folder in (root, outside):
         with pytest.raises(WorkspaceError, match="strictly inside"):
             validate_task_workspace(str(folder), cfg(str(root)), origin="front")
-    assert validate_task_workspace(None, cfg(str(root)), origin="agent") == (
-        os.path.realpath(root)
-    )
+    for origin in ("agent", "user_rule"):
+        child = root / f"task-{origin}"
+        assert validate_task_workspace(
+            None, cfg(str(root)), origin=origin, task_id=f"task-{origin}"
+        ) == os.path.realpath(child)
+        assert child.is_dir()
     # A user rule is not the user: it follows the configured root too.
     with pytest.raises(WorkspaceError, match="strictly inside"):
         validate_task_workspace(str(outside), cfg(str(root)), origin="user_rule")
@@ -224,8 +229,103 @@ def test_a_bad_spec_names_the_field(payload: dict[str, object], message: str) ->
         TaskSpec.from_payload(payload)
 
 
-def test_a_user_p0_is_allowed_but_a_computed_one_is_not() -> None:
-    task = TaskSpec.from_payload(
-        {"objective": "urgent", "level": 0, "level_source": "user"}
+@pytest.mark.parametrize("level", range(6))
+def test_trusted_user_level_is_pinned(level: int) -> None:
+    task = TaskSpec.from_user_payload({"objective": "urgent", "level": level})
+    assert (task.level, task.level_source) == (level, "user")
+
+
+@pytest.mark.parametrize("level", [0, 1])
+async def test_trusted_create_stays_pinned_against_computed_updates(
+    level: int, tmp_path: Path
+) -> None:
+    sessions = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await sessions.open()
+    try:
+        tasks = TaskStore(sessions)
+        await tasks.open()
+        spec = TaskSpec.from_user_payload({"objective": "urgent", "level": level})
+        record, _ = await tasks.create_task(spec, origin="user")
+        assert (record.level, record.level_source, record.level_pinned) == (
+            level,
+            "user",
+            1,
+        )
+        with pytest.raises(TaskStoreError, match="set by the user"):
+            await tasks.set_level(record.task_id, 3, source="computed")
+    finally:
+        await sessions.aclose()
+
+
+def test_user_default_and_untrusted_levels_are_computed() -> None:
+    assert TaskSpec.from_user_payload({"objective": "x"}).level_source == "computed"
+    assert (
+        TaskSpec.from_payload({"objective": "x", "level": 1}).level_source == "computed"
     )
-    assert task.level == 0
+    for source in ("user", "user_rule", "computed"):
+        for constructor in (TaskSpec.from_payload, TaskSpec.from_user_payload):
+            with pytest.raises(TaskSpecError, match="reserved"):
+                constructor({"objective": "x", "level": 0, "level_source": source})
+
+
+def test_spec_normalizes_json_for_idempotent_repeats() -> None:
+    task = TaskSpec.from_payload(
+        {"objective": "x", "features": {1: ("x", "y")}, "inputs": [{2: (3, 4)}]}
+    )
+    assert task.features == {"1": ["x", "y"]}
+    assert task.inputs == ({"2": [3, 4]},)
+
+
+@pytest.mark.parametrize("root", ["/", "~", "~/", "relative"])
+def test_invalid_configured_root_is_rejected_even_with_explicit_child(
+    root: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    child = tmp_path / "child"
+    child.mkdir()
+    with pytest.raises(WorkspaceError, match="configured workspace"):
+        validate_task_workspace(str(child), cfg(root), origin="agent")
+
+
+@pytest.mark.parametrize(
+    "task_id", [None, "", ".", "..", "../outside", "/tmp/x", "a/b", "a\\b"]
+)
+def test_unsafe_task_ids_are_rejected(
+    task_id: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    with pytest.raises(WorkspaceError, match="safe task_id"):
+        validate_task_workspace(
+            None, cfg(str(tmp_path / "root")), origin="agent", task_id=task_id
+        )
+
+
+def test_non_user_symlinks_cannot_escape(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    root, outside = tmp_path / "root", tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    (root / "task").symlink_to(outside, target_is_directory=True)
+    with pytest.raises(WorkspaceError):
+        validate_task_workspace(None, cfg(str(root)), origin="agent", task_id="task")
+    with pytest.raises(WorkspaceError, match="strictly inside"):
+        validate_task_workspace(str(root / "task"), cfg(str(root)), origin="agent")
+    (root / "link").symlink_to(root, target_is_directory=True)
+    with pytest.raises(WorkspaceError):
+        validate_task_workspace(None, cfg(str(root)), origin="agent", task_id="link")
+
+
+def test_case_variant_home_uses_filesystem_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "HomeCase"
+    (home / "Work").mkdir(parents=True)
+    variant = tmp_path / "homecase"
+    if not variant.exists():
+        pytest.skip("requires a case-insensitive filesystem")
+    monkeypatch.setenv("HOME", str(home))
+    assert validate_task_workspace(str(variant / "Work"), cfg()) == os.path.realpath(
+        variant / "Work"
+    )
