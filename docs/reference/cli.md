@@ -425,14 +425,18 @@ is wrapped as `{ "v": 1, "type": "event", "event": ... }`, followed by a
 finishes normally. A broken or undrained output pipe is a failure; signals,
 process death or a broken pipe can leave no result. Drain stdout and check
 both the final record and the exit code. Agent construction failures after a
-valid brief produce `startup_error` with `run: null` and exit 1. For event
-output failures the worker attempts a `transport_error` result with `run: null`
-and exits 1; a failed or blocked output may prevent that record from arriving.
-Usage errors remain resultless. Worker output uses pattern-based
+valid brief, including config-file values the agent would refuse and an
+invalid TOML file, produce `startup_error` with `run: null` and exit 1. For
+event output failures the worker attempts a `transport_error` result with
+`run: null` and exits 1; a failed or blocked output may prevent that record
+from arriving. A broken pipe while the startup record is written still exits
+1. Usage errors remain resultless. Worker output uses pattern-based
 redaction and omits some recognizable sensitive-file reads, including simple
-shell and Python reads. Arbitrary commands, code and model output can still
-expose secrets: the stream is not a secret boundary. Review before sharing. `--inbox` is not yet
-available. `--save-session` can record the same run.
+shell and Python reads. A startup error's text is redacted too, and the
+user's home directory is shown as `~`. Arbitrary commands, code and model
+output can still expose secrets: the stream is not a secret boundary. Review
+before sharing. `--inbox` is not yet available. `--save-session` can record
+the same run.
 
 **In both formats:**
 
@@ -441,7 +445,7 @@ available. `--save-session` can record the same run.
   output, goes to stderr instead.
 - Warnings go to stderr, one line each.
 - A traceback appears only when the run ends as `crashed`, after Ctrl+C, or
-  when the config file is not valid TOML.
+  when the config file is not valid TOML and no `--brief` was given.
 
 ## Progress line
 

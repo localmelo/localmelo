@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -34,6 +36,7 @@ def test_startup_error_result(
         cli.main()
     assert exc.value.code == 1
     output = capsys.readouterr()
+    assert output.out.count("\n") == 1
     record = json.loads(output.out)
     if fmt == "stream-json":
         assert record["type"] == "result"
@@ -43,6 +46,67 @@ def test_startup_error_result(
     assert record["exit_code"] == 1
     assert record["tests"] == {"state": "not_recorded", "items": []}
     assert "backend unavailable" in output.err
+
+
+@pytest.mark.parametrize("fmt", ["json", "stream-json"])
+def test_config_value_after_brief_reports_startup_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fmt: str,
+) -> None:
+    from localmelo.support import config
+
+    brief = tmp_path / "brief"
+    brief.write_text("Task", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys, "argv", ["melo", "--brief", str(brief), "--output-format", fmt]
+    )
+    monkeypatch.setattr(
+        config,
+        "load",
+        lambda: config.Config(agent=config.AgentConfig(context_window=-1)),
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    result = records[-1]["result"] if fmt == "stream-json" else records[-1]
+    assert result["status"] == "startup_error" and result["run"] is None
+    assert result["exit_code"] == 1
+    assert "context_window" in result["error"]
+
+
+@pytest.mark.parametrize("fmt", ["json", "stream-json"])
+def test_fixed_prefix_config_after_brief_reports_startup_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    fmt: str,
+) -> None:
+    from localmelo.support import config
+
+    brief = tmp_path / "brief"
+    brief.write_text("Task", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys, "argv", ["melo", "--brief", str(brief), "--output-format", fmt]
+    )
+    monkeypatch.setattr(
+        config,
+        "load",
+        lambda: config.Config(agent=config.AgentConfig(fixed_prefix="yes")),  # type: ignore[arg-type]
+    )
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    result = records[-1]["result"] if fmt == "stream-json" else records[-1]
+    assert result["status"] == "startup_error" and result["run"] is None
+    assert "fixed_prefix must be a boolean" in result["error"]
 
 
 @pytest.mark.parametrize("fmt", ["json", "stream-json"])
@@ -96,6 +160,67 @@ def test_config_failure_is_redacted_and_usage_stays_resultless(
     output = capsys.readouterr()
     assert "privatevalue" not in output.out + output.err
     assert json.loads(output.out)["status"] == "startup_error"
+
+
+def test_startup_error_shows_home_as_tilde_and_redacts_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from localmelo.support import config
+
+    brief = tmp_path / "brief"
+    brief.write_text("Task", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    home_config = tmp_path / ".cache" / "localmelo" / "config.toml"
+
+    def fail() -> config.Config:
+        raise OSError(f"cannot read {home_config}: API_TOKEN=privatevalue")
+
+    monkeypatch.setattr(config, "load", fail)
+    monkeypatch.setattr(sys, "argv", ["melo", "--brief", str(brief)])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    output = capsys.readouterr()
+    record = json.loads(output.out)
+    assert record["error"] == (
+        "cannot read ~/.cache/localmelo/config.toml: API_TOKEN=[redacted]"
+    )
+    assert str(tmp_path) not in output.out + output.err
+    assert "privatevalue" not in output.out + output.err
+
+
+_FAKE_STARTUP_FAILURE = r"""
+import sys
+import localmelo.__main__ as cli
+
+def fail(*args, **kwargs):
+    raise RuntimeError("backend unavailable")
+
+cli._build_direct_mode_agent = fail
+sys.argv = ["melo", "--brief", sys.argv[1], "--output-format", sys.argv[2]]
+cli.main()
+"""
+
+
+@pytest.mark.parametrize("fmt", ["json", "stream-json"])
+def test_startup_error_on_a_broken_pipe_exits_one(tmp_path: Path, fmt: str) -> None:
+    brief = tmp_path / "brief"
+    brief.write_text("task", encoding="utf-8")
+    env = {**os.environ, "HOME": str(tmp_path)}
+    argv = [sys.executable, "-c", _FAKE_STARTUP_FAILURE, str(brief), fmt]
+    read_fd, write_fd = os.pipe()
+    os.close(read_fd)
+    try:
+        broken = subprocess.run(
+            argv, env=env, stdout=write_fd, stderr=subprocess.PIPE, timeout=20
+        )
+    finally:
+        os.close(write_fd)
+    assert broken.returncode == 1
+    assert b"worker output failed" in broken.stderr
+    assert b"Exception ignored" not in broken.stderr
+    assert b"Traceback" not in broken.stderr
 
 
 def test_legacy_startup_exception_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -183,10 +308,16 @@ def test_brief_main_reports_executed_test_evidence(
         ),
     )
     cli.main()
-    records = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    out = capsys.readouterr().out
+    records = [json.loads(line) for line in out.splitlines()]
+    if fmt == "json":
+        assert len(records) == 1 and out.count("\n") == 1
+    else:
+        assert sum(record["type"] == "result" for record in records) == 1
     result = records[-1]["result"] if fmt == "stream-json" else records[-1]
     assert result["tests"]["state"] == "recorded"
     assert result["tests"]["items"][0]["command"] == "pytest -q"
+    assert result["tests"]["items"][0]["exit_code"] is None
     assert result["tests"]["items"][0]["source"] == "tool_event"
 
 
@@ -231,6 +362,7 @@ async def test_oversized_event_reports_transport_error(
     )
     assert code == 1
     records = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert sum(record["type"] == "result" for record in records) == 1
     assert records[-1]["type"] == "result"
     assert records[-1]["result"]["status"] == "transport_error"
     assert records[-1]["result"]["run"] is None
