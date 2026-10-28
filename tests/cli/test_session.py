@@ -194,6 +194,11 @@ async def test_text_attachment_snapshot_survives_retry(setup: Setup) -> None:
     assert turn.attachments is not None
     assert [(a.name, a.text) for a in turn.attachments] == [("input.txt", "café")]
     path.write_text("changed on disk", encoding="utf-8")
+    assert session.enter("/new") is None
+    await setup.idle()
+    assert session.enter(f"/resume {turn.session_id}") is None
+    await setup.idle()
+    assert setup.out.text().count("attached input.txt (5 bytes)") == 2
     model = session.agent._llm
     assert isinstance(model, ScriptedLLM)
     model.replies.append(answer("Again."))
