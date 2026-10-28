@@ -199,40 +199,28 @@ def _checked_name(value: object, allowed: Sequence[str], what: str) -> str:
 
 def parse_triggers(text: str) -> frozenset[str]:
     """A comma list of triggers, in canonical order; ``ValueError`` when bad."""
-    return frozenset(
-        _checked_triggers([part.strip() for part in text.split(",") if part.strip()])
-    )
+    parts = [part.strip() for part in text.split(",") if part.strip()]
+    if not parts:
+        raise ValueError(
+            f"give at least one recall trigger; the triggers are "
+            f"{', '.join(RECALL_TRIGGERS)}"
+        )
+    return frozenset(_checked_triggers(parts))
 
 
 def parse_kinds(text: str) -> frozenset[str]:
     """A comma list of kinds, in canonical order; ``ValueError`` when bad."""
-    return frozenset(
-        _checked_kinds([part.strip() for part in text.split(",") if part.strip()])
-    )
+    parts = [part.strip() for part in text.split(",") if part.strip()]
+    if not parts:
+        raise ValueError(
+            f"give at least one recall kind; the kinds are {', '.join(RECALL_KINDS)}"
+        )
+    return frozenset(_checked_kinds(parts))
 
 
 def default_kinds() -> frozenset[str]:
     """The kinds recall uses unless the user names them: all but ``thought``."""
     return frozenset(kind for kind in RECALL_KINDS if kind != "thought")
-
-
-def check_retriever_options(
-    *, retriever: str, k: object, min_score: object, placement: str
-) -> str | None:
-    """Why these values cannot be used, or ``None``."""
-    if retriever not in RETRIEVER_MODES:
-        return f"--retriever must be one of {', '.join(RETRIEVER_MODES)}"
-    if isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= RECALL_K_MAX:
-        return f"--recall-k must be an integer from 1 to {RECALL_K_MAX}"
-    if (
-        isinstance(min_score, bool)
-        or not isinstance(min_score, int | float)
-        or not 0 <= min_score <= 1
-    ):
-        return "--recall-min-score must be a number from 0 to 1"
-    if placement not in RECALL_PLACEMENTS:
-        return f"--recall-placement must be one of {', '.join(RECALL_PLACEMENTS)}"
-    return None
 
 
 # ── The state query ──
@@ -498,15 +486,18 @@ def docs_from_notes(
     entries = list(entries)
     pending_keep = ""
     if one_pending_draft:
+        # The newest pending draft decides: when the window already shows
+        # it, every pending draft is a candidate the window covers, so none
+        # goes into the block (Requirement 7).
         pending = [
             entry
             for entry in entries
             if entry.kind == "draft"
             and entry.draft is not None
             and entry.draft.status == "pending"
-            and entry.alias not in excluded
+            and not (entry.task_id and task_id and entry.task_id != task_id)
         ]
-        if pending:
+        if pending and pending[-1].alias not in excluded:
             pending_keep = pending[-1].alias
     docs: list[Doc] = []
     for entry in entries:
@@ -803,7 +794,11 @@ def fit_recall_block(
         ]
         if draft:
             index = draft[-1]
-            kept[index] = dataclasses.replace(kept[index], omitted=True)
+            # The record's item text is the text the block carries: the
+            # pointer line, not the draft behind it (Requirement 8).
+            kept[index] = dataclasses.replace(
+                kept[index], omitted=True, text="", chars=0
+            )
             continue
         longs = [index for index, item in enumerate(kept) if item.kind == "long"]
         if longs:
@@ -964,7 +959,6 @@ __all__ = [
     "build_attempt_query",
     "build_start_query",
     "build_step_query",
-    "check_retriever_options",
     "compact_record",
     "default_kinds",
     "docs_from_long",
