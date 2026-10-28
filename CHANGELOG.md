@@ -7,6 +7,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
+### Fixed
+
+- Attempt digests skip task headings and report verification only for passing
+  checks, rather than treating trivial Python imports as tests ([#NN]).
+
 ### Added
 
 - Opt-in context-window request accounting reports estimated and measured planning/reflection

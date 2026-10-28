@@ -1387,13 +1387,18 @@ def _observed_key(line: str) -> str:
 
 
 def _task_line(query: str) -> str:
-    """The task's first sentence or heading, at most :data:`DIGEST_TASK_CHARS`."""
-    text = query.strip()
-    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
-    if first_line.startswith("#"):
-        heading = first_line.lstrip("#").strip()
-        if heading:
-            text = heading
+    """The first meaningful sentence, ignoring headings and bare labels."""
+    lines = []
+    for line in query.splitlines():
+        stripped = line.strip()
+        if not stripped or re.match(r"^#{1,6}(?:\s|$)", stripped):
+            continue
+        if re.fullmatch(
+            r"(?:instructions?|task|description|requirements?)\s*:?", stripped, re.I
+        ):
+            continue
+        lines.append(line)
+    text = "\n".join(lines)
     sentences = split_sentences(text)
     if sentences:
         text = sentences[0][1]
@@ -1437,19 +1442,13 @@ def _digest_files(calls: Sequence[tuple[ToolCall, ToolResult]], root: str) -> li
     return files
 
 
-# A command that runs the tests, or the program the attempt wrote. The
-# shell case reads the command's words; the python case reads the code.
-_CHECK_RE = re.compile(
-    r"pytest|\bunittest\b|_test\.py|\btest_[A-Za-z0-9_]*\.py|\bverify\b"
-    r"|\bcheck\b|\bassert\b|\bmake\s+test\b|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?test\b"
-    r"|\bcargo\s+test\b|\bgo\s+test\b",
+_TEST_RUNNER_RE = re.compile(
+    r"\bpytest\b|\bunittest\.(?:main|TextTestRunner|defaultTestLoader)\b"
+    r"|\bpython[0-9.]*\s+-m\s+[\w.]+|\bnode\s+--test\b"
+    r"|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?test\b"
+    r"|\b(?:cargo|go)\s+test\b|\bmake\s+test\b",
     re.IGNORECASE,
 )
-_PROGRAM_RE = re.compile(
-    r"(?:^|[;&|]\s*)(?:python[0-9.]*|node|ruby|php|perl|java|make|npm|pnpm"
-    r"|yarn|cargo|go|\./[^\s;&|]+)\b"
-)
-_PYTHON_RUN_RE = re.compile(r"\b(?:import|from\s+\w+\s+import|__main__)\b")
 
 
 def _call_text(call: ToolCall) -> str:
@@ -1464,16 +1463,22 @@ def _call_text(call: ToolCall) -> str:
     return ""
 
 
-def _is_check(call: ToolCall) -> bool:
-    """Whether *call* runs tests or the program the attempt wrote."""
+def _is_check(call: ToolCall, written: Sequence[str], root: str) -> bool:
+    """A test runner or code naming a file written earlier in this attempt."""
     text = _call_text(call)
     if not text.strip():
         return False
-    if _CHECK_RE.search(text):
+    if _TEST_RUNNER_RE.search(text):
         return True
-    if call.tool_name == "python_exec":
-        return bool(_PYTHON_RUN_RE.search(text))
-    return bool(_PROGRAM_RE.search(text))
+    for path in written:
+        relative = _workspace_relative(path, root)
+        if relative and re.search(
+            r"(?<![\w./-])" + re.escape(relative) + r"(?![\w./-])", text
+        ):
+            return True
+        if path != relative and path in text:
+            return True
+    return False
 
 
 def _check_command(call: ToolCall) -> str:
@@ -1513,13 +1518,32 @@ def _check_result(result: ToolResult) -> str:
     return _shorten(last, DIGEST_RESULT_CHARS) if last else "no output"
 
 
-def _digest_verified(calls: Sequence[tuple[ToolCall, ToolResult]]) -> str:
-    """The last check call of this attempt and its result, if any."""
+def _digest_verified(calls: Sequence[tuple[ToolCall, ToolResult]], root: str) -> str:
+    """The last check, only when it passed."""
+    written: list[str] = []
     last: tuple[ToolCall, ToolResult] | None = None
     for call, result in calls:
-        if _is_check(call):
+        if call.tool_name == "file_write" and not result.error.strip():
+            path = _string_argument(call, "path")
+            if path:
+                written.append(path)
+        if _is_check(call, written, root):
             last = (call, result)
     if last is None:
+        return ""
+    call, result = last
+    output = result.output
+    if result.error.strip() or re.search(
+        r"\[exit code (?!0\])-?\d+\]|\b(?:FAILED|ERROR|Traceback)\b|\b[1-9]\d* (?:failed|errors?)\b|\bRan 0 tests?\b",
+        output,
+        re.I,
+    ):
+        return ""
+    if _TEST_RUNNER_RE.search(_call_text(call)) and not re.search(
+        r"\b[1-9]\d* passed\b|\bRan [1-9]\d* tests?\b.*\bOK\b|\[exit code 0\]",
+        output,
+        re.I | re.S,
+    ):
         return ""
     return f"{_check_command(last[0])} -> {_check_result(last[1])}"
 
@@ -1545,9 +1569,10 @@ def digest_note(
     become ``open_questions`` (deduplicated). *calls* are the attempt's
     own tool calls and results: a successful ``file_write`` gives one
     ``files`` path, relative to *root* when it is absolute (at most
-    :data:`DIGEST_FILES`, then ``+N``), and the last call that runs tests
-    or the program gives ``verified`` (none when there is no such call).
-    ``plan`` is *query*'s first sentence or heading, shortened to
+    :data:`DIGEST_FILES`, then ``+N``), and the last passing test runner or
+    call referencing a previously written file gives ``verified``. A later
+    failed check clears it. ``plan`` is *query*'s first meaningful sentence,
+    shortened to
     :data:`DIGEST_TASK_CHARS`; ``outcome`` is the attempt's failure type
     or the run's status. ``source_ids`` is the union of the contributing
     notes' ids and the records behind their items, in order. The digest
@@ -1609,7 +1634,7 @@ def digest_note(
         open_questions=open_questions,
         observed=observed,
         files=_digest_files(calls, root),
-        verified=_digest_verified(calls),
+        verified=_digest_verified(calls, root),
         outcome=_shorten(_collapse(outcome), NOTE_OBSERVED_CHARS),
         reasoning_chars=reasoning_chars,
         source_ids=source_ids,

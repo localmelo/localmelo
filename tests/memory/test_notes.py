@@ -1375,11 +1375,11 @@ def test_render_digest_lines_for_files_verified_and_decisions() -> None:
     )
 
 
-def test_digest_task_line_is_the_first_sentence_or_heading() -> None:
+def test_digest_task_line_is_the_first_meaningful_sentence() -> None:
     first = digest_note("Implement transpose.py. Then run its tests.", "completed")
     assert first.plan == "Implement transpose.py."
     heading = digest_note("# Fix the parser\n\nThe body follows.", "completed")
-    assert heading.plan == "Fix the parser"
+    assert heading.plan == "The body follows."
     long = digest_note("x " * 300, "completed")
     assert len(long.plan) <= notes.DIGEST_TASK_CHARS
 
@@ -1416,24 +1416,77 @@ def test_digest_names_the_files_written_and_the_last_check(tmp_path: Path) -> No
         root=root,
     )
     assert digest.files == ["transpose.py"]
-    assert digest.verified == (
-        "python -m pytest -q transpose_test.py -> 2 failed, 1 passed"
-    )
+    assert digest.verified == ""
 
 
-def test_a_program_run_gives_its_last_line_or_exit_code_as_the_check() -> None:
+def test_a_program_run_requires_an_earlier_write_and_success() -> None:
     run = ToolCall("shell_exec", {"command": "python transpose.py"})
+    write = ToolCall("file_write", {"path": "transpose.py", "content": "x"})
+    wrote = ToolResult("file_write", "written")
     output = ToolResult("shell_exec", "loading\nall rows transposed")
-    digest = digest_note(
-        "q",
-        "completed",
-        [],
-        calls=[(run, output)],
-    )
+    assert digest_note("q", calls=[(run, output)]).verified == ""
+    digest = digest_note("q", calls=[(write, wrote), (run, output)])
     assert digest.verified == "python transpose.py -> all rows transposed"
     exited = ToolResult("shell_exec", "[exit code 1]\nTraceback: boom")
-    digest = digest_note("q", "completed", [], calls=[(run, exited)])
-    assert digest.verified == "python transpose.py -> exit 1"
+    assert digest_note("q", calls=[(write, wrote), (run, exited)]).verified == ""
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    [
+        (
+            "# Instructions\n\nFor want of a horseshoe nail, a kingdom was lost.",
+            "For want of a horseshoe nail, a kingdom was lost.",
+        ),
+        (
+            "# Instructions\n\nImplement basic list operations.",
+            "Implement basic list operations.",
+        ),
+        (
+            "# Instructions\n\nGiven an input text output it transposed.",
+            "Given an input text output it transposed.",
+        ),
+        ("Instructions:\n\nCreate a fourth example.", "Create a fourth example."),
+    ],
+)
+def test_digest_skips_instruction_headings(prompt: str, expected: str) -> None:
+    assert digest_note(prompt).plan == expected
+
+
+def test_digest_verification_rejects_trivial_import_and_failing_tests() -> None:
+    call = ToolCall("python_exec", {"code": "import os"})
+    assert (
+        digest_note("q", calls=[(call, ToolResult("python_exec", "pass"))]).verified
+        == ""
+    )
+    call = ToolCall("python_exec", {"code": "import unittest\nunittest.main()"})
+    assert digest_note(
+        "q", calls=[(call, ToolResult("python_exec", "Ran 8 tests\nOK"))]
+    ).verified
+    assert not digest_note(
+        "q",
+        calls=[(call, ToolResult("python_exec", "Ran 8 tests\nFAILED (failures=1)"))],
+    ).verified
+    assert not digest_note(
+        "q", calls=[(call, ToolResult("python_exec", "Ran 0 tests\nOK"))]
+    ).verified
+
+
+def test_written_test_file_passes_and_failed_checks_do_not() -> None:
+    write = ToolCall(
+        "file_write", {"path": "test_example.py", "content": "def test_one(): pass"}
+    )
+    test = ToolCall("shell_exec", {"command": "python -m pytest test_example.py"})
+    calls = [
+        (write, ToolResult("file_write", "written")),
+        (test, ToolResult("shell_exec", "1 passed in 0.1s")),
+    ]
+    assert (
+        digest_note("q", calls=calls).verified
+        == "python -m pytest test_example.py -> 1 passed"
+    )
+    calls[-1] = (test, ToolResult("shell_exec", "[exit code -9]"))
+    assert digest_note("q", calls=calls).verified == ""
 
 
 def test_digest_has_no_verified_without_a_check() -> None:
