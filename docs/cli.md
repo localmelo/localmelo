@@ -160,6 +160,10 @@ type more letters to narrow them, Tab or Enter to take one.
 | `/thinking [on\|off]` | The thinking excerpt on (the default) or off, leaving only `Thought for 1.2s`; without an argument, flips it. |
 | `/expand [turn.call]` | A tool call's whole output or error: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
 | `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
+| `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). Under `--yolo`, says how to turn prompts on. |
+| `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, files and version. |
+| `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp-config` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
+| `/retry` | Undo the newest turn and run it again. |
 | `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
 | `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default (as `ollama` when the server answers like Ollama, else `vllm`). |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
@@ -201,6 +205,9 @@ type more letters to narrow them, Tab or Enter to take one.
 
 ### A turn's output
 
+- **Approvals show what changes.** A `file_write` over an existing file shows a diff (removed
+  lines in red, added in green, with the counts), and a write too large or not text says why;
+  `/approvals` switches between `ask`, `auto` and `deny`, and the session's grants.
 - **The live area.** The first row names what melo does (`Starting`,
   `Thinking`, `Running`, `Waiting for your approval`, `Retrying in 4s`,
   `Reflecting`, `Wrapping up`, `Stopping`), then the run's facts: the step
@@ -522,8 +529,6 @@ These are usage errors:
   `only for direct mode (a query without --serve): --max-steps`; without a
   task, only those the interactive UI cannot use (`--tool-exposure`,
   `--timeout`, `--output-format`, `--progress`, `--routine`);
-- `--mcp-config` or `--mcp-only` without a task, reported as
-  `--mcp-config and --mcp-only are not in the interactive UI yet; give them with a task (melo -- "<task>")`;
 - `--workspace` or `--yolo` with a task, `--serve` or `--daemon`, reported as
   `only for the interactive UI (melo without a query, --serve or --daemon): --yolo`;
 - `--base-url` or `--chat-model` with `--serve` or `--daemon`, reported as

@@ -9,6 +9,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Diffs in the approval panel: a `file_write` over an existing file shows
+  the change (`+a -b lines`, removed lines in red and added in green),
+  a new file its line count, and a file too large or not text says why.
+  `/approvals` shows the mode and this session's grants and switches
+  between `ask`, `auto` and `deny` (or forgets one tool's grant). The
+  terminal UI accepts `--mcp-config`, and the config file's top-level
+  `mcp_config` key names an MCP servers file the UI loads (direct mode
+  never reads it); `/mcp` lists the servers and their tools and says why
+  MCP is off after a failure, `/status` shows the model and server, the
+  session, the tools, memory, limits and files, and `/retry` runs the
+  newest turn again. The hints name them where they apply ([#NN]).
 - Tools have a permission tier, and an approval policy asks by tier rather
   than by a fixed list of names. The built-ins keep their tiers (`file_read`
   read, `file_write` write, `shell_exec` and `python_exec` exec), and a
