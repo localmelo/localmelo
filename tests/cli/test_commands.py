@@ -59,6 +59,14 @@ def test_slash_lists_every_command_with_its_line() -> None:
         "/help",
         "/new",
         "/clear",
+        "/verbose",
+        "/thinking",
+        "/expand",
+        "/approvals",
+        "/progress",
+        "/status",
+        "/mcp",
+        "/retry",
         "/model",
         "/backend",
         "/exit",
@@ -73,6 +81,12 @@ def test_typing_narrows_the_list() -> None:
         ("/model", "/model [name]", "Show, list or switch the model (saved)")
     ]
     assert _complete("hello /he") == []
+
+
+def test_verbose_and_thinking_complete_on_and_off() -> None:
+    assert [text for text, _, _ in _complete("/verbose ")] == ["on", "off"]
+    assert [text for text, _, _ in _complete("/thinking of")] == ["off"]
+    assert _complete("/verbose on") == []
 
 
 def test_model_completes_the_listed_models() -> None:
@@ -104,4 +118,8 @@ def test_an_alias_row_names_the_other_spelling() -> None:
     assert _complete("/cl") == [("/clear", "/clear", "Start a new session (also /new)")]
     assert _complete("/ne") == [("/new", "/new", "Start a new session (also /clear)")]
     assert _complete("/q") == [("/quit", "/quit", "Quit (also /exit, ctrl+d)")]
-    assert _complete("/ex") == [("/exit", "/exit", "Quit (also /quit, ctrl+d)")]
+    assert _complete("/exi") == [("/exit", "/exit", "Quit (also /quit, ctrl+d)")]
+    assert _complete("/ex") == [
+        ("/expand", "/expand [turn.call]", "Show a tool call's full output"),
+        ("/exit", "/exit", "Quit (also /quit, ctrl+d)"),
+    ]

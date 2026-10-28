@@ -446,6 +446,11 @@ class RunResult:
     ``duration_s`` is the run's wall-clock time in seconds, and
     ``config`` is the effective run configuration (see
     :meth:`Agent.run_task`), so every record says which mode it ran in.
+
+    ``memory_stats`` holds the run's replay counters in the explicit
+    reasoning modes (see :meth:`Agent.run_task`), and is ``None`` in
+    ``legacy``; :meth:`to_dict` leaves the key out then, so a legacy JSON
+    line keeps the shape it had before R2.
     """
 
     task_id: str
@@ -462,10 +467,18 @@ class RunResult:
     usage: dict[str, int] = field(default_factory=dict)
     duration_s: float = 0.0
     config: dict[str, Any] = field(default_factory=dict)
+    memory_stats: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        """A deep copy as a plain dict, with keys in field order."""
-        return asdict(self)
+        """A deep copy as a plain dict, with keys in field order.
+
+        ``memory_stats`` is omitted when it is ``None``, which keeps a
+        ``legacy`` line byte-identical to the one before this field.
+        """
+        data = asdict(self)
+        if data.get("memory_stats") is None:
+            del data["memory_stats"]
+        return data
 
 
 @dataclass

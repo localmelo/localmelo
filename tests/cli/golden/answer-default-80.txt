@@ -1,0 +1,7 @@
+› What does the demo project do?
+
+  No approvals for this turn (--yolo).
+● The demo project is a small notes app. notes.txt holds the one note, and
+  summary.md is written from it.
+✻ Worked for 0.1s · 0 tool calls · ↓ 28 tokens
+

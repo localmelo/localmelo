@@ -16,6 +16,8 @@ tools and memory on your own model server or a cloud API. The website is at
 - [Configuration](configuration.md): the setup wizard, the config file,
   backends, API keys, timeouts and environment variables, and how to update
   or uninstall localmelo.
+- [Set up an embedding model](embedding.md): what long-term memory needs,
+  the probe, and the Ollama, oMLX, vLLM, SGLang and MLC commands.
 - [Tools and MCP](tools.md): the built-in tools, MCP servers, which tools a
   step offers, and what the checks do.
 - [Gateway and HTTP API](gateway.md): the HTTP API, sessions, the web
@@ -60,6 +62,9 @@ tools and memory on your own model server or a cloud API. The website is at
 
 ## Project
 
+- [Developer guide](https://localmelo.github.io/localmelo/en/developers.html)
+  (website): the repository layout, the development setup, the tests and
+  checks, and how to add a backend, a built-in tool or a check.
 - [Contributing](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md)
 - [Maintaining the docs](maintaining.md): the layout, publishing,
   translation rules and glossary

@@ -12,8 +12,9 @@ from __future__ import annotations
 import contextlib
 import copy
 import io
+import os
 from dataclasses import replace
-from typing import Final
+from typing import Any, Final
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.support import config, onboard
@@ -24,22 +25,37 @@ from localmelo.support.sessions.agents import build_session_agent
 URL_LABEL: Final = "OpenAI-compatible"
 
 
-def config_backend(cfg: config.Config, model: str | None) -> BackendInfo:
-    """The configured chat backend, with *model* when one is given."""
+def _backend_label(key: str) -> str:
+    """The backend's display name, or *key* when it is not registered."""
     from localmelo.support.backends.registry import get_backend
 
+    try:
+        return get_backend(key).display_name
+    except KeyError:
+        return key
+
+
+def _embedding_name(cfg: config.Config) -> str:
+    """How the banner names the configured embedding: backend and model."""
+    if not cfg.has_embedding:
+        return ""
+    key = cfg.embedding_backend
+    section = getattr(cfg, key, None)
+    model = getattr(section, "embedding_model", "")
+    label = _backend_label(key)
+    return f"{label} · {model}" if model else label
+
+
+def config_backend(cfg: config.Config, model: str | None) -> BackendInfo:
+    """The configured chat backend, with *model* when one is given."""
     key = cfg.chat_backend
     section = getattr(cfg, key, None)
-    try:
-        label = get_backend(key).display_name
-    except KeyError:
-        label = key
     return BackendInfo(
         key=key,
-        label=label,
+        label=_backend_label(key),
         model=model or getattr(section, "chat_model", "") or "default",
         base_url=getattr(section, "chat_url", "") or getattr(section, "base_url", ""),
-        embedding="" if not cfg.has_embedding else cfg.embedding_backend,
+        embedding=_embedding_name(cfg),
         key_env=getattr(section, "api_key_env", ""),
     )
 
@@ -77,6 +93,9 @@ class AgentFactory:
         embedding_base_url: str | None = None,
         embedding_model: str | None = None,
         request_timeout_s: float | None = None,
+        mcp_config: str | None = None,
+        mcp_source: str = "",
+        mcp_servers: list[Any] | None = None,
         saves: bool = True,
     ) -> None:
         self.backend = backend
@@ -86,6 +105,16 @@ class AgentFactory:
         self._embedding_base_url = embedding_base_url
         self._embedding_model = embedding_model
         self._request_timeout_s = request_timeout_s
+        # The MCP servers file, where it came from, and why MCP is off after
+        # a server failed to start.
+        self.mcp_config = mcp_config
+        self.mcp_source = mcp_source
+        self.mcp_error: str | None = None
+        if mcp_servers is None and mcp_config:
+            from localmelo.support.mcp import load_mcp_config
+
+            mcp_servers = load_mcp_config(os.path.expanduser(mcp_config))
+        self.mcp_servers: list[Any] = list(mcp_servers or [])
         # Whether /model and /backend save their choice as the default: not
         # for a --base-url session whose save question was answered no.
         self.saves = saves
@@ -112,8 +141,24 @@ class AgentFactory:
         runs on a copy of it as /backend saves it (see :meth:`use_url`).
         """
         model = model or self.backend.model
+        try:
+            agent = await self._build(
+                model, url, self.mcp_config if self.mcp_error is None else None
+            )
+        except Exception as exc:
+            if self.mcp_config is None or self.mcp_error is not None:
+                raise
+            # A server that did not start: this session runs without MCP.
+            self.mcp_error = str(exc) or type(exc).__name__
+            agent = await self._build(model, url, None)
+        self._live.append(agent)
+        return agent
+
+    async def _build(
+        self, model: str, url: str | None, mcp_config: str | None
+    ) -> Agent:
         if self._cfg is None:
-            agent = await build_session_agent(
+            return await build_session_agent(
                 cfg=None,
                 base_url=url or self.backend.base_url,
                 model=model,
@@ -122,21 +167,20 @@ class AgentFactory:
                 embedding_base_url=self._embedding_base_url,
                 embedding_model=self._embedding_model,
                 request_timeout_s=self._request_timeout_s,
+                mcp_config=mcp_config,
             )
-        else:
-            cfg = self._cfg
-            if url is not None:
-                cfg = self._with_server(url, model, ollama=await self._is_ollama(url))
-            agent = await build_session_agent(
-                cfg=cfg,
-                base_url=None,
-                model=model,
-                workspace=self._workspace,
-                options=self._options,
-                request_timeout_s=self._request_timeout_s,
-            )
-        self._live.append(agent)
-        return agent
+        cfg = self._cfg
+        if url is not None:
+            cfg = self._with_server(url, model, ollama=await self._is_ollama(url))
+        return await build_session_agent(
+            cfg=cfg,
+            base_url=None,
+            model=model,
+            workspace=self._workspace,
+            options=self._options,
+            request_timeout_s=self._request_timeout_s,
+            mcp_config=mcp_config,
+        )
 
     def _with_server(self, url: str, model: str, *, ollama: bool) -> config.Config:
         """The session's config with its chat on *url*, as /backend saves it.

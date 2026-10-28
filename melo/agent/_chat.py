@@ -155,8 +155,9 @@ def render_transcript(messages: Sequence[Message]) -> str:
     Tool calls read ``Assistant called <tool>(<JSON arguments>)`` and tool
     results ``Result of <tool>: <content>``. Images are not shown: a tool
     result's content already names its images, and a line counts the
-    images of any other message. Thinking is left out, as in every other
-    request.
+    images of any other message. Thinking is left out, as in legacy and in
+    this transcript; a ``replay`` planning or reflection request carries
+    it, but the retry's written-out turns do not.
     """
     paragraphs: list[str] = []
     for message in messages:
@@ -253,7 +254,10 @@ class RequestStats:
     raised instead: every failed attempt of a retried request, and a
     request cut short by a cancellation, so ``n_llm + llm_errors`` is the
     number of requests sent. ``usage`` sums the integer usage fields of
-    the responses by name.
+    the responses by name. ``reasoning_chars`` sums the characters of the
+    reasoning each response received (``Message.thinking``);
+    ``details`` sums the extra usage fields beyond the three standard ones
+    (such as ``cached_tokens`` and ``reasoning_tokens``).
     """
 
     n_llm: int = 0
@@ -261,12 +265,22 @@ class RequestStats:
     n_aux: int = 0
     llm_errors: int = 0
     usage: dict[str, int] = field(default_factory=dict)
+    reasoning_chars: int = 0
+    details: dict[str, int] = field(default_factory=dict)
 
     def add_usage(self, usage: Mapping[str, object] | None) -> None:
         """Add the integer fields of one response's usage to the totals."""
         for name, value in (usage or {}).items():
             if isinstance(value, int) and not isinstance(value, bool):
                 self.usage[name] = self.usage.get(name, 0) + value
+
+    def add_details(self, usage: Mapping[str, object] | None) -> None:
+        """Add the fields beyond prompt/completion/total to the details."""
+        for name, value in (usage or {}).items():
+            if name in ("prompt_tokens", "completion_tokens", "total_tokens"):
+                continue
+            if isinstance(value, int) and not isinstance(value, bool):
+                self.details[name] = self.details.get(name, 0) + value
 
 
 class Chat:
@@ -373,6 +387,8 @@ class Chat:
         else:
             self.stats.n_aux += 1
         self.stats.add_usage(response.usage)
+        self.stats.reasoning_chars += len(response.thinking)
+        self.stats.add_details(full_usage)
         recorder = CALL_RECORDER.get()
         if recorder is not None:
             await recorder.record(
@@ -446,7 +462,8 @@ class Chat:
         *,
         final: bool = False,
         retry: bool = False,
-    ) -> Message:
+        fit: Callable[[list[Message]], Awaitable[list[Message] | None]] | None = None,
+    ) -> Message | None:
         """Ask the LLM to reflect on the current attempt.
 
         The request is a user message after the newest turns of *short*.
@@ -457,6 +474,13 @@ class Chat:
         window's turns written out as text (:func:`render_transcript`),
         the same request and :data:`REFLECTION_RETRY_NOTE`. With no tool
         turns left, a model has no tool call to continue.
+
+        *fit*, when given, receives the built messages before they are
+        sent and returns them, maybe shortened, or ``None`` to refuse the
+        request. The explicit reasoning modes pass it to keep the
+        reflection under the prompt cap; ``legacy`` sends unchecked. A
+        refused request returns ``None``: no reply is invented and no
+        request is sent.
         """
         # Build system prompt with prior reflection context
         system_parts = [REFLECTION_PROMPT]
@@ -505,4 +529,10 @@ class Chat:
         else:
             messages.extend(tail)
             messages.append(Message(role="user", content=request))
+        if fit is not None:
+            fitted = await fit(messages)
+            if fitted is None:
+                # Refused before it is sent: no request and no reply.
+                return None
+            messages = fitted
         return await self._request(messages, tools=None, kind="reflect")

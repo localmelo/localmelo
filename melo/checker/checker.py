@@ -26,9 +26,16 @@ from localmelo.melo.checker.validators import (
 from localmelo.melo.schema import CheckResult, Message, ToolCall, ToolDef, ToolTier
 
 
-def _prompt_chars(msg: Message) -> int:
-    """Characters *msg* contributes to a planning prompt."""
+def _prompt_chars(msg: Message, *, count_thinking: bool = False) -> int:
+    """Characters *msg* contributes to a planning prompt.
+
+    With *count_thinking*, an assistant message's ``thinking`` counts too:
+    a replay request sends it, so it must fit the cap. The default counts
+    the content and tool calls only, as every request before replay did.
+    """
     total = len(msg.content)
+    if count_thinking and msg.role == "assistant":
+        total += len(msg.thinking)
     for tc in msg.tool_calls:
         total += len(tc.tool_name)
         total += len(json.dumps(tc.arguments, ensure_ascii=False, default=str))
@@ -47,10 +54,13 @@ class Checker:
 
     # ── Core → Memory boundary ──
 
-    async def pre_plan(self, messages: list[Message]) -> CheckResult:
+    async def pre_plan(
+        self, messages: list[Message], *, count_thinking: bool = False
+    ) -> CheckResult:
         # Tool-call arguments are replayed to the model with the assistant
-        # message, so they count toward the prompt size as well.
-        total = sum(_prompt_chars(m) for m in messages)
+        # message, so they count toward the prompt size as well. With
+        # *count_thinking*, so does the reasoning a replay request sends.
+        total = sum(_prompt_chars(m, count_thinking=count_thinking) for m in messages)
         if total > 100_000:
             return CheckResult(allowed=False, reason=f"Prompt too large: {total} chars")
         return CheckResult(allowed=True)

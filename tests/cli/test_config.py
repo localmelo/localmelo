@@ -18,6 +18,7 @@ from localmelo.support.config import (
     ConfigError,
     GatewayConfig,
     LocalBackendConfig,
+    SchedulerConfig,
     load,
     save,
 )
@@ -1048,3 +1049,144 @@ class TestRequestTimeoutConfig:
         )
         assert "config not saved" in out
         assert config_path.read_bytes() == before
+
+
+def test_the_mcp_config_key_round_trips(tmp_path: Path) -> None:
+    from localmelo.support import config
+
+    path = tmp_path / "config.toml"
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        cfg = config.Config(chat_backend="vllm", embedding_backend="none")
+        cfg.mcp_config = "~/mcp.json"
+        config.save(cfg)
+        assert config.load().mcp_config == "~/mcp.json"
+        cfg.mcp_config = ""
+        config.save(cfg)
+        assert "mcp_config" not in path.read_text(encoding="utf-8")
+
+
+# -- The scheduler's settings (S2) --
+
+
+class TestSchedulerConfig:
+    def test_scheduler_defaults_are_not_written(self, config_path: Path) -> None:
+        save(_timeout_cfg())
+        # The exact file of a config without scheduler settings is unchanged.
+        assert config_path.read_text(encoding="utf-8") == _SAVED_BEFORE_REQUEST_TIMEOUT
+
+    def test_a_non_default_scheduler_section_round_trips(
+        self, config_path: Path
+    ) -> None:
+        cfg = _timeout_cfg()
+        cfg.scheduler = SchedulerConfig(
+            policy="class",
+            n_srv=2,
+            r_f=0,
+            n_fg=0,
+            call_log=False,
+            call_log_dir="/tmp/x",
+        )
+        save(cfg)
+        assert "[scheduler]" in config_path.read_text(encoding="utf-8")
+        loaded = load()
+        assert loaded.scheduler.policy == "class"
+        assert loaded.scheduler.n_srv == 2
+        assert loaded.scheduler.r_f == 0
+        assert loaded.scheduler.n_fg == 0
+        assert loaded.scheduler.call_log is False
+        assert loaded.scheduler.call_log_dir == "/tmp/x"
+        assert loaded.validate() == []
+
+    @pytest.mark.parametrize(
+        "changes",
+        [
+            {"policy": "x"},
+            {"n_srv": 0},
+            {"n_srv": True},
+            {"r_f": -1},
+            {"n_fg": -1},
+            {"call_log": "yes"},
+            {"call_log_dir": 3},
+        ],
+        ids=["policy", "n_srv", "n_srv-bool", "r_f", "n_fg", "call_log", "dir"],
+    )
+    def test_a_bad_scheduler_value_is_a_config_error(
+        self, changes: dict[str, Any]
+    ) -> None:
+        cfg = _timeout_cfg()
+        cfg.scheduler = SchedulerConfig(**changes)
+        errors = cfg.validate()
+        assert any(error.startswith("[scheduler]") for error in errors)
+        with pytest.raises(ConfigError, match=r"\[scheduler\]"):
+            cfg.validate_or_raise()
+
+    def test_a_non_table_scheduler_is_ignored_on_load(self, config_path: Path) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\nscheduler = "off"\n',
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert loaded.scheduler == SchedulerConfig()
+
+    def test_an_unknown_scheduler_key_is_ignored_on_load(
+        self, config_path: Path
+    ) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+            '[scheduler]\npolicy = "fcfs"\nn_fg = 0\nfuture_key = 1\n',
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert loaded.scheduler.policy == "fcfs"
+        assert loaded.scheduler.n_fg == 0
+        assert not hasattr(loaded.scheduler, "future_key")
+
+    def test_a_non_default_lock_section_round_trips(self, config_path: Path) -> None:
+        cfg = _timeout_cfg()
+        cfg.scheduler = SchedulerConfig(
+            gpu_lock_file="~/Developer/mlsys/experiments/.gpu-lock",
+            lock_self="local_ai-benchmark session",
+            lock_gate="wait",
+        )
+        save(cfg)
+        text = config_path.read_text(encoding="utf-8")
+        assert 'gpu_lock_file = "~/Developer/mlsys/experiments/.gpu-lock"' in text
+        assert 'lock_self = "local_ai-benchmark session"' in text
+        assert 'lock_gate = "wait"' in text
+        loaded = load()
+        assert loaded.scheduler == cfg.scheduler
+        assert loaded.validate() == []
+
+    @pytest.mark.parametrize(
+        "changes",
+        [
+            {"lock_gate": "x"},
+            {"gpu_lock_file": 3},
+            {"lock_self": 3},
+            {"gpu_lock_file": "/tmp/a\x00b"},
+            {"lock_self": "a\x00b"},
+        ],
+        ids=["gate", "path", "self", "path-nul", "self-nul"],
+    )
+    def test_a_bad_lock_setting_is_a_config_error(
+        self, changes: dict[str, Any]
+    ) -> None:
+        cfg = _timeout_cfg()
+        cfg.scheduler = SchedulerConfig(**changes)
+        errors = cfg.validate()
+        assert any(error.startswith("[scheduler]") for error in errors)
+        with pytest.raises(ConfigError, match=r"\[scheduler\]"):
+            cfg.validate_or_raise()
+
+    def test_an_unknown_lock_key_is_ignored_on_load(self, config_path: Path) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+            '[scheduler]\nlock_gate = "wait"\nlock_future = 1\n',
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert loaded.scheduler.lock_gate == "wait"
+        assert not hasattr(loaded.scheduler, "lock_future")

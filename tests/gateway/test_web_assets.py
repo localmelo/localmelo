@@ -179,3 +179,68 @@ def test_package_data_includes_all_workspace_runtime_resources() -> None:
     required.add(_SCENARIOS_PATH.resolve())
     missing = sorted(str(path.relative_to(root)) for path in required - declared)
     assert not missing, f"Runtime resources missing from package-data: {missing}"
+
+
+def _shell_attributes(html: str, tag: str, element_id: str) -> dict[str, str | None]:
+    """The attributes of the first *tag* with *element_id* in *html*."""
+    pattern = rf'<{tag}\b[^>]*\bid="{re.escape(element_id)}"[^>]*>'
+    match = re.search(pattern, html, re.S)
+    assert match is not None, f"missing <{tag} id={element_id}>"
+    attributes = dict(re.findall(r'([A-Za-z-]+)="([^"]*)"', match.group(0)))
+    return attributes
+
+
+async def test_the_shell_has_a_level_chip_with_aria_attributes(
+    client: httpx.AsyncClient,
+) -> None:
+    page = await client.get("/")
+    chip = _shell_attributes(page.text, "button", "level-btn")
+    assert chip.get("aria-haspopup") == "listbox"
+    assert chip.get("aria-expanded") == "false"
+    assert chip.get("aria-label") == "Chat level"
+    body = re.search(
+        r'<button\b[^>]*\bid="level-btn"[^>]*>(.*?)</button>', page.text, re.S
+    )
+    assert body is not None
+    assert "P2" in body.group(1)
+    menu = _shell_attributes(page.text, "div", "level-menu")
+    assert menu.get("role") == "listbox"
+    assert re.search(r'<div\b[^>]*\bid="level-menu"[^>]*\bhidden\b', page.text)
+
+
+async def test_the_shell_loads_the_same_assets_as_before(
+    client: httpx.AsyncClient,
+) -> None:
+    page = await client.get("/")
+    parser = ShellAssets()
+    parser.feed(page.text)
+    assert set(parser.paths) == {
+        "/assets/icon_small.png",
+        "/assets/melo.png",
+        "/assets/workspace.css",
+        "/assets/workspace.js",
+    }
+
+
+async def test_the_shell_has_a_machine_state_span_with_an_accessible_name(
+    client: httpx.AsyncClient,
+) -> None:
+    page = await client.get("/")
+    span = _shell_attributes(page.text, "span", "machine-state")
+    assert span.get("role") == "status"
+    assert span.get("aria-label")
+    assert re.search(r'<span\b[^>]*\bid="machine-state"[^>]*\bhidden\b', page.text)
+    assert re.search(
+        r'<span\b[^>]*\bid="machine-state"[^>]*\baria-live="polite"', page.text
+    )
+
+
+async def test_the_shell_keeps_the_machine_line_between_the_title_and_the_level(
+    client: httpx.AsyncClient,
+) -> None:
+    page = await client.get("/")
+    header = re.search(r"<header\b.*?</header>", page.text, re.S)
+    assert header is not None
+    text = header.group(0)
+    assert text.index('id="machine-state"') > text.index('id="header-model"')
+    assert text.index('id="machine-state"') < text.index('id="level-btn"')

@@ -183,6 +183,11 @@ class OllamaNativeChat(BaseLLMProvider):
         ``model``, ``messages``, ``tools`` and ``stream`` cannot be set.
     transport : httpx.AsyncBaseTransport | None
         Optional HTTP transport, e.g. ``httpx.MockTransport`` in tests.
+    requires_reasoning_replay : bool
+        Whether the server rejects requests that omit a reply's reasoning.
+        This provider sends ``thinking`` back anyway when it is present;
+        the agent's ``drop`` mode strips it first, and is refused for a
+        provider that sets this. ``False`` by default.
     """
 
     def __init__(
@@ -193,9 +198,13 @@ class OllamaNativeChat(BaseLLMProvider):
         *,
         extra_body: Mapping[str, Any] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
+        requires_reasoning_replay: bool = False,
     ) -> None:
         self.model = model
         self.extra_body = prepare_extra_body(extra_body)
+        # The native wire field is fixed; it has no "auto" or other key.
+        self.reasoning_field = "thinking"
+        self.requires_reasoning_replay = requires_reasoning_replay
         self._http = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=timeout,

@@ -62,8 +62,11 @@ BASE_OPTIONS = [
     "--memory-dir",
     "--output-format",
     "--port",
+    "--reasoning",
+    "--reasoning-field",
     "--reconfigure",
     "--reflection-gate",
+    "--replay-turns",
     "--request-timeout",
     "--serve",
     "--timeout",
@@ -181,7 +184,9 @@ async def test_the_only_change_on_the_wire_is_the_kind_header(
 
 
 def test_run_result_and_message_keep_their_fields() -> None:
-    assert [f.name for f in dataclasses.fields(RunResult)] == [
+    assert [
+        f.name for f in dataclasses.fields(RunResult) if f.name != "memory_stats"
+    ] == [
         "task_id",
         "status",
         "result",

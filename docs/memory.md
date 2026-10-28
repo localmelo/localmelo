@@ -25,7 +25,7 @@ page.
 |---|---|---|
 | Working memory | The conversation of a run, of the `melo ""` loop, of a gateway session or of a web workspace chat: the last 20 messages. | RAM only. |
 | History | Every task with its status and result, and every step with its tool call and result. In `history.db`, also every reply of the model with its reasoning; the history in RAM keeps no model calls. | RAM, or `history.db`. |
-| Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an embedding backend. | RAM, or `long_term.db`. |
+| Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an [embedding backend](embedding.md). | RAM, or `long_term.db`. |
 | Procedural memory | What the runs of each recurring task did: the classes and short labels of their tool calls, their step counts and times. Written at the end of every run; never put in a prompt. See [Procedural memory](procedures.md). | RAM, or `procedures.db`. |
 
 By default everything stays in RAM and is lost when the process ends. In RAM,
@@ -68,7 +68,8 @@ melo "What is 6*7?"
 memory off for a run: nothing is recalled from it or written to it, and
 reflections are not promoted. Working memory and history work as usual.
 `embedding_backend = "none"` in the config file has the same effect for every
-run.
+run; to set an embedding model instead, see
+[Set up an embedding model](embedding.md).
 
 ## Files on disk
 
@@ -204,6 +205,18 @@ planning and reflection requests alike. The history in RAM keeps none.
 | `duration_s` | How long the request took, without earlier failed attempts and the waits before retries. |
 | `timestamp` | When the reply arrived, in seconds since the epoch. |
 
+- The working-memory window keeps each reply's reasoning, including an
+  empty reply's and a turn whose text a size cut cleared; `llm_calls`
+  records it as received (R1's `thinking` and `reasoning_key`). In
+  `legacy` the provider decides whether it is sent again: OpenAI-compatible
+  no, Ollama native yes. `drop` strips it at send. `replay` sends it on the
+  assistant turns in scope (by default the current task's; a provider that
+  requires replay gets every turn in the window), under one request key
+  (`reasoning_content`, `reasoning`, or Ollama's `thinking`), at most
+  40,000 characters per turn (no cap on a provider that requires replay).
+  Both explicit modes skip `[RECALL]` when they build the prompt, so an
+  embedding provider's long-term memory is written but not read back;
+  `legacy` reads it as before.
 - A request that was retried gives one row, for the reply that came back.
   So the rows of a run number its `n_llm`, unless a row could not be
   written: a row that waits more than 5 seconds for another process's write
@@ -458,7 +471,7 @@ that directory instead.
   a result left less than 200 characters is replaced by a short notice.
   History keeps the result as the tool returned it, up to 50,000 characters.
 
-**Long-term memory** needs an embedding backend:
+**Long-term memory** needs an [embedding backend](embedding.md):
 
 - After each tool call, a summary of the step is written to it: the model's
   text, the tool's name and the start of the tool's output.
@@ -466,6 +479,10 @@ that directory instead.
   id. This may take at most 10 seconds.
 - On each step, the 5 entries closest to the task are recalled into the
   prompt.
+- Stored vectors carry no model id. A vector whose dimension differs from
+  the query's is skipped, so changing the embedding model stops old entries
+  ranking instead of raising an error; see
+  [Set up an embedding model](embedding.md#what-changes).
 
 **History** is a record. localmelo writes every task and step to it, and,
 with persistence on, every model call, but never reads it back.

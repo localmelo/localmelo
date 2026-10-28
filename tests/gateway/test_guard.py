@@ -185,7 +185,7 @@ def _build_gateway(
     """The real gateway app with the web UI, its sessions and playground faked."""
     playground = RecordingPlayground()
     monkeypatch.setattr(
-        "localmelo.support.gateway.webapp.SmokePlayground", lambda: playground
+        "localmelo.support.gateway.webapp.SmokePlayground", lambda **kwargs: playground
     )
     cfg = Config(
         chat_backend="mlc",
@@ -810,7 +810,7 @@ def _standalone_playground_server(
 ) -> ModuleType:
     """A fresh copy of _test_webapp whose playground is *playground*."""
     monkeypatch.setattr(
-        "localmelo.support.gateway.webapp.SmokePlayground", lambda: playground
+        "localmelo.support.gateway.webapp.SmokePlayground", lambda **kwargs: playground
     )
     spec = importlib.util.find_spec("localmelo.support.gateway._test_webapp")
     assert spec is not None and spec.loader is not None

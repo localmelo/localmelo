@@ -1,0 +1,26 @@
+› Echo one line at a time, nine times.
+
+  No approvals for this turn (--yolo).
+✓ shell_exec  echo 1 · 0.1s
+  └ 1
+✓ shell_exec  echo 2 · 0.1s
+  └ 2
+✓ shell_exec  echo 3 · 0.2s
+  └ 3
+✓ shell_exec  echo 4 · 0.2s
+  └ 4
+✓ shell_exec  echo 5 · 0.2s
+  └ 5
+✓ shell_exec  echo 6 · 0.3s
+  └ 6
+✓ shell_exec  echo 7 · 0.3s
+  └ 7
+✓ shell_exec  echo 8 · 0.4s
+  └ 8
+✓ shell_exec  echo 9 · 0.4s
+  └ 9
+⚠ The attempt used its step budget.
+⚠ melo: run ended with status budget_exhausted: Max steps reached
+  /retry tries again.
+✻ Worked for 0.4s · 9 tool calls · ↓ 72 tokens
+

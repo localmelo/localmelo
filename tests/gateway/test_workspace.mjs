@@ -22,12 +22,13 @@ function harness(api, {mobile = false, renderMessages = false} = {}) {
       elements.set(id, {
         id, value: '', options: [], style: {}, hidden: false, disabled: false,
         textContent: '', innerHTML: '', scrollHeight: 50, scrollTop: 0, clientHeight: 40, dataset: {},
-        inert: false, attributes: {}, children: [], replacements: 0,
+        inert: false, attributes: {}, children: [], replacements: 0, listeners: {},
         classList: {
           toggle(name, force = !classes.has(name)) { if (force) classes.add(name); else classes.delete(name); return force; },
           contains: name => classes.has(name),
         },
-        addEventListener() {}, setAttribute(name, value) { this.attributes[name] = value; }, close() {}, showModal() {},
+        addEventListener(type, handler) { this.listeners[type] = handler; },
+        setAttribute(name, value) { this.attributes[name] = value; }, close() {}, showModal() {},
         focus() { document.activeElement = this; },
         querySelector() { return element(id + '-child'); },
         closest(selector) {
@@ -58,11 +59,12 @@ function harness(api, {mobile = false, renderMessages = false} = {}) {
   vm.runInContext(source, context, {filename: 'workspace.js'});
   // Most tests isolate production state and API flows. The snapshot test opts
   // into message rendering; Markdown and browser layout have separate coverage.
+  const renderSessionsOriginal = vm.runInContext('renderSessions', context);
   vm.runInContext('renderSessions = () => {};', context);
   if (!renderMessages) vm.runInContext('renderMessages = () => {};', context);
   context.api = api;
   return {
-    element, context,
+    element, context, renderSessions: () => renderSessionsOriginal(),
     state: vm.runInContext('S', context),
     run: expression => vm.runInContext(expression, context),
     local: context.localStorage,
@@ -340,3 +342,275 @@ for (const failure of [false, true]) {
     if (failure) assert.equal(h.state.drafts.a, 'A prompt without browser storage');
   });
 }
+
+test('the level chip posts the level and updates the session', async () => {
+  const calls = [];
+  const h = harness(async (path, body, method) => {
+    calls.push([path, body, method]);
+    return {session_id: 'a', level: 1};
+  });
+  h.state.sessions = [session('a', {level: 2})]; h.state.activeId = 'a';
+  h.element('level-btn').listeners.click();
+  const menu = h.element('level-menu');
+  assert.equal(menu.hidden, false);
+  assert.equal(h.element('level-btn').attributes['aria-expanded'], 'true');
+  assert.equal(menu.children.length, 4);
+  assert.equal(menu.children[1].attributes['aria-selected'], 'true', 'P2 is the current level');
+  await menu.children[0].onclick();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], '/session/a/level');
+  assert.equal(calls[0][1].level, 1);
+  assert.equal(h.state.sessions[0].level, 1);
+  assert.equal(h.element('level-btn').textContent, 'P1');
+  assert.equal(menu.hidden, true, 'Choosing a level closes the menu');
+});
+
+test('the status label shows waiting with the reason', () => {
+  const h = harness(async () => ({}), {renderMessages: true});
+  h.state.sessions = [session('a', {is_busy: true, held: 'Resources', messages: [{role: 'user', content: 'Hi'}]})];
+  h.state.activeId = 'a';
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('run-status').textContent, 'Waiting: Resources');
+  const rows = h.element('messages').children;
+  const working = rows[rows.length - 1];
+  assert.equal(working.children[1].textContent, 'Waiting: Resources…');
+  h.state.sessions[0].held = '';
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('run-status').textContent, 'Running on your backend');
+});
+
+test('the header pill and the bubble show a hold, then Working when it ends', () => {
+  const h = harness(async () => ({}), {renderMessages: true});
+  h.state.sessions = [session('a', {is_busy: true, held: 'Resources', messages: [{role: 'user', content: 'Hi'}]})];
+  h.state.activeId = 'a';
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('connection-label').textContent, 'Waiting: Resources');
+  let rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Waiting: Resources…');
+  h.state.sessions[0].held = '';
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('connection-label').textContent, 'Working');
+  rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Working on your request…');
+});
+
+test('a pending send follows the hold without re-selecting the chat', async () => {
+  const run = deferred();
+  const details = [];
+  let held = 'Resources';
+  const h = harness(async path => {
+    if (path === '/sessions')
+      return {sessions: [session('a', {is_busy: true, held, last_active: 2})]};
+    if (path === '/session/a') {
+      details.push(path);
+      return session('a', {is_busy: true, messages: [{role: 'user', content: 'Hi'}]});
+    }
+    if (path.endsWith('/run')) return run.promise;
+    return {};
+  }, {renderMessages: true});
+  h.state.sessions = [session('a')];
+  h.state.activeId = 'a';
+  h.element('input').value = 'Hi';
+  const sending = h.run('send()');
+  assert.equal(h.state.pending.has('a'), true);
+  await h.run('poll()');
+  assert.equal(h.element('connection-label').textContent, 'Waiting: Resources');
+  let rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Waiting: Resources…');
+  assert.deepEqual(details, [], 'The detail is not fetched while the send is pending');
+  held = '';
+  await h.run('poll()');
+  assert.equal(h.element('connection-label').textContent, 'Working');
+  rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Working on your request…');
+  run.resolve({result: 'Done'});
+  await sending;
+  assert.equal(h.state.pending.has('a'), false);
+});
+
+test('presence is throttled to one request per 2.5 seconds', async () => {
+  const posts = [];
+  const h = harness(async () => ({}));
+  h.context.fetch = (path, options) => {
+    posts.push([path, options]);
+    return Promise.resolve({ok: true});
+  };
+  h.state.sessions = [session('a')]; h.state.activeId = 'a';
+  h.run('presence()');
+  await h.run('presence()');
+  assert.equal(posts.length, 1, 'Two heartbeats in a row are one request');
+  assert.equal(posts[0][0], '/v1/playground/presence');
+  assert.equal(JSON.parse(posts[0][1].body).session_id, 'a');
+  h.state.lastPresenceAt = Date.now() - 2400;
+  await h.run('presence()');
+  assert.equal(posts.length, 1, 'Inside 2.5 s a typing heartbeat is throttled');
+  h.state.lastPresenceAt = Date.now() - 2600;
+  await h.run('presence()');
+  assert.equal(posts.length, 2, 'After 2.5 s a new heartbeat is sent');
+  h.state.lastPresenceAt = Date.now();
+  await h.run('presence(true)');
+  assert.equal(posts.length, 3, 'A focus change is not throttled');
+});
+
+test('presence is sent when a chat is selected', async () => {
+  const posts = [];
+  const h = harness(async () => session('a'));
+  h.context.fetch = (path, options) => {
+    posts.push([path, options]);
+    return Promise.resolve({ok: true});
+  };
+  h.state.sessions = [session('a')];
+  h.state.lastPresenceAt = 0;
+  await h.run('selectSession("a")');
+  assert.equal(posts.length, 1);
+  assert.equal(JSON.parse(posts[0][1].body).session_id, 'a');
+});
+
+test('the send path is not blocked by presence', async () => {
+  const paths = [];
+  let presenceCalls = 0;
+  const pending = new Promise(() => {});
+  const h = harness(async path => {
+    paths.push(path);
+    if (path.endsWith('/run')) return {result: 'Completed'};
+    return session('a', {last_active: 2, messages: [{role: 'user', content: 'Hi'}, {role: 'assistant', content: 'Completed'}]});
+  });
+  h.context.fetch = () => {
+    presenceCalls++;
+    return pending;  // presence never answers
+  };
+  h.state.sessions = [session('a')]; h.state.activeId = 'a'; h.element('input').value = 'Hi';
+  await h.run('send()');
+  assert.equal(presenceCalls, 1, 'A send sends one heartbeat');
+  assert.equal(paths.includes('/session/a/run'), true, 'The run must not wait for presence');
+  assert.equal(h.state.pending.size, 0);
+});
+
+test('the sidebar and the bubble follow a change of held', () => {
+  const h = harness(async () => ({}), {renderMessages: true});
+  h.state.sessions = [session('a', {is_busy: true, held: 'Resources', messages: [{role: 'user', content: 'Hi'}]})];
+  h.state.activeId = 'a';
+  h.renderSessions();
+  const info = h.element('session-list').children[0].children[0];
+  assert.match(info.innerHTML, /● Waiting · /);
+  h.run('renderMessages()');
+  let rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Waiting: Resources…');
+  h.state.sessions[0].held = '';
+  h.renderSessions();
+  const released = h.element('session-list').children[0].children[0];
+  assert.match(released.innerHTML, /● Working · /, 'A released hold returns the sidebar marker');
+  h.run('renderMessages()');
+  rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Working on your request…');
+});
+
+test('the machine line shows a foreign lock and hides on ac', () => {
+  const h = harness(async () => ({}));
+  h.state.machine = {
+    lock: 'foreign', holder: 'agent-benchmark session (personal-agent-bench)',
+    purpose: 'real-web UI eval', stale: false, readable: true,
+    on_ac: true, battery_pct: 100, battery_state: 'charged', band: 4, gate: 'record',
+  };
+  h.run('syncUI()');
+  const line = h.element('machine-state');
+  assert.equal(line.hidden, false);
+  assert.match(line.textContent, /GPU lock: agent-benchmark session/);
+  assert.match(line.textContent, /\(recorded\)/);
+  assert.match(line.attributes['aria-label'], /real-web UI eval/);
+  h.state.machine = {
+    lock: 'none', holder: '', purpose: '', stale: false, readable: true,
+    on_ac: true, battery_pct: 100, battery_state: 'charged', band: 4, gate: 'record',
+  };
+  h.run('syncUI()');
+  assert.equal(line.hidden, true, 'AC with no lock says nothing');
+  assert.equal(line.textContent, '');
+});
+
+test('the machine line says recorded or chats wait', () => {
+  const h = harness(async () => ({}));
+  const foreign = {
+    lock: 'foreign', holder: 'bench', purpose: 'a run', stale: false, readable: true,
+    on_ac: true, battery_pct: null, battery_state: '', band: 4, gate: 'record',
+  };
+  h.state.machine = foreign;
+  h.run('syncUI()');
+  assert.match(h.element('machine-state').textContent, /\(recorded\)/);
+  h.state.machine = {...foreign, gate: 'wait'};
+  h.run('syncUI()');
+  assert.match(h.element('machine-state').textContent, /\(chats wait\)/);
+  h.state.machine = {...foreign, stale: true};
+  h.run('syncUI()');
+  assert.match(h.element('machine-state').textContent, /· ETA passed/);
+  h.state.machine = {...foreign, readable: false};
+  h.run('syncUI()');
+  assert.equal(h.element('machine-state').textContent, 'GPU lock unreadable');
+});
+
+test('the machine line shows the battery on battery power', () => {
+  const h = harness(async () => ({}));
+  h.state.machine = {
+    lock: 'none', holder: '', purpose: '', stale: false, readable: true,
+    on_ac: false, battery_pct: 55, battery_state: 'discharging', band: 2, gate: 'record',
+  };
+  h.run('syncUI()');
+  assert.equal(h.element('machine-state').textContent, 'Battery 55% · discharging');
+  assert.equal(h.element('machine-state').hidden, false);
+});
+
+test('a reservation hold uses the waiting label and sidebar marker', () => {
+  const h = harness(async () => ({}), {renderMessages: true});
+  h.state.sessions = [session('a', {
+    is_busy: true, held: 'Reservation', messages: [{role: 'user', content: 'Hi'}],
+  })];
+  h.state.activeId = 'a';
+  h.renderSessions();
+  const info = h.element('session-list').children[0].children[0];
+  assert.match(info.innerHTML, /● Waiting · /);
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('run-status').textContent, 'Waiting: Reservation');
+  const rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Waiting: Reservation…');
+});
+
+test('the machine payload does not add a request', async () => {
+  const paths = [];
+  const h = harness(async path => {
+    paths.push(path);
+    if (path === '/sessions')
+      return {
+        sessions: [],
+        machine: {
+          lock: 'foreign', holder: 'bench', purpose: 'a run', stale: false,
+          readable: true, on_ac: false, battery_pct: 55,
+          battery_state: 'discharging', band: 2, gate: 'wait',
+        },
+      };
+    throw new Error('unexpected request');
+  });
+  await h.run('poll()');
+  assert.deepEqual(paths, ['/sessions']);
+  assert.equal(h.state.machine.lock, 'foreign');
+  assert.match(h.element('machine-state').textContent, /\(chats wait\)/);
+});
+
+test('initialization adds no machine request', async () => {
+  const paths = [];
+  const h = harness(async path => {
+    paths.push(path);
+    if (path === '/scenarios') return {scenarios: []};
+    if (path === '/sessions')
+      return {
+        sessions: [],
+        machine: {
+          lock: 'foreign', holder: 'bench', purpose: 'a run', stale: false,
+          readable: true, on_ac: true, battery_pct: null,
+          battery_state: '', band: 4, gate: 'record',
+        },
+      };
+    throw new Error('unexpected request: ' + path);
+  });
+  await h.run('init()');
+  assert.deepEqual(paths, ['/scenarios', '/sessions']);
+  assert.match(h.element('machine-state').textContent, /\(recorded\)/);
+});

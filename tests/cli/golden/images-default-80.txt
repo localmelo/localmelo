@@ -1,0 +1,9 @@
+› Take a screenshot of the demo page.
+
+  No approvals for this turn (--yolo).
+✓ screenshot  {} · 0.1s
+  └ a screenshot of the demo page
+    ▪ image/png · 22 bytes · not shown
+● I took a screenshot of the page.
+✻ Worked for 0.1s · 1 tool call · ↓ 22 tokens
+

@@ -23,6 +23,7 @@
         <a href="./quickstart.html">快速开始</a>
         <a href="./architecture.html">架构</a>
         <a href="./updates.html" aria-current="page">路线图</a>
+        <a href="./developers.html">开发者</a>
         <a href="https://github.com/localmelo/localmelo/blob/main/docs/README.md">参考文档（英文）<span aria-hidden="true">↗</span></a>
         <a href="https://github.com/localmelo/localmelo">GitHub <span aria-hidden="true">↗</span></a>
       </nav>
@@ -63,7 +64,7 @@
         </div>
         <p>计划中：</p>
         <ul>
-          <li>交互式命令行的后续部分：回合运行时显示模型的思考和重试、审批中显示改动的 diff、可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
+          <li>交互式命令行的后续部分：审批中显示改动的 diff、可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
           <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
           <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
@@ -75,6 +76,109 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-27-gpu-lock">
+          <h3>网关读取 GPU 锁和电池</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/76">#76</a>
+          </p>
+          <ul>
+            <li>网页工作区的标题栏会显示外部的 GPU 锁（持有者和用途，并标注 <code>(recorded)</code> 或 <code>(chats wait)</code>）、自己的锁、无法读取的锁、<code>· ETA passed</code>，以及使用电池时的电量和状态。同样的变化会写入 <code>calls.jsonl</code> 旁边的 <code>machine.jsonl</code>。</li>
+            <li><code>[scheduler] lock_gate</code> 默认是 <code>record</code>：只显示和记录锁与电池，不改变任何请求。<code>wait</code> 会在外部锁存在时扣住工作区的每个调用（包括向量调用），聊天显示 <code>Waiting: Reservation</code>。</li>
+            <li><code>lock_self</code> 必须与持有者完全一致（或写成 <code>holder:run</code>）。无法读取或已过期的锁仍算外部锁，永远不会被自动清除；localmelo 从不写入、重命名或删除锁。直接运行、命令行和 <code>/v1/agent/run</code> 都不变。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-approval-diffs">
+          <h3>审批中显示改动，新增恢复命令</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/75">#75</a>
+          </p>
+          <ul>
+            <li>批准对已有文本文件的 <code>file_write</code> 之前，界面现在会显示将要发生的变化：头部有 <code>+a -b lines</code> 的统一 diff，删除的行显示为红色、新增的行显示为绿色；新文件显示内容和行数；文件太大、不是文本或不是普通文件时会说明原因。</li>
+            <li>终端界面新增 <code>/approvals</code>（当前模式和本次会话的授权，并可切换 <code>ask</code>、<code>auto</code> 或 <code>deny</code>）、<code>/status</code>（模型与服务器、会话、工具、记忆、限制和文件）、<code>/retry</code>（重新运行最近一轮）和 <code>/mcp</code>（服务器、它们的工具，以及 MCP 为什么关闭）。相应的提示会在适用时列出这些命令。</li>
+            <li>界面可以通过 <code>--mcp-config</code> 或配置文件新增的顶层 <code>mcp_config</code> 键加载 MCP 服务器文件；服务器启动失败时只会让该会话关闭 MCP，不会结束界面。直接模式从不读取这个键。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-embedding-setup">
+          <h3>为长期记忆设置嵌入模型</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/74">#74</a>
+          </p>
+          <ul>
+            <li>第一次运行会提供聊天服务器已经列出的嵌入模型（<code>Use nomic-embed-text for long-term memory? [Y/n]:</code>），配置向导会把服务器的嵌入模型追加为后端之后的选项，并默认选择推荐的那个。</li>
+            <li>banner 会写明已配置的嵌入后端和模型（<code>long-term memory · vLLM · Qwen3-Embedding-0.6B</code>），没有配置时提示 <code>melo --reconfigure adds one</code>；来自其他模型的已存向量会被跳过，而不是让召回失败。</li>
+            <li>新增的<a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">指南（英文）</a>覆盖 Ollama、oMLX、vLLM、SGLang 和 MLC。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-held-labels">
+          <h3>被挂起的聊天处处显示 Waiting</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/71">#71</a>
+          </p>
+          <ul>
+            <li>聊天的模型调用在等待调度器时，标题栏的状态标签也会显示 <code>Waiting: Resources</code>（或策略给出的其他原因），与侧栏、输入框上方和消息区一致；挂起结束后它们都回到 Working。</li>
+            <li>刚发送的聊天不会再在整个挂起期间一直显示 <code>Working on your request…</code>：发送还在等待时，消息区会跟随页面轮询到的挂起状态更新。</li>
+            <li>只影响网页工作区；直接运行、命令行和 localmelo 发出的请求都不变。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-scheduler-gate">
+          <h3>网页工作区的聊天开始经过调度器</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/69">#69</a>
+          </p>
+          <ul>
+            <li>网页工作区里每个聊天发出的规划、反思和向量调用现在都经过调度器的策略：聊天调用要么立刻发出，要么等一个槽位；向量调用从不被扣住，但会计入在途数量；等待时页面显示 <code>Waiting: Resources</code>（或策略给出的其他原因）。</li>
+            <li>标题栏的等级按钮（P1 到 P4，默认 P2）决定这个聊天相对其他聊天的顺序；你正在输入的聊天就是快车道，在不超出服务器槽位的前提下优先放行。</li>
+            <li><code>[scheduler] policy</code> 默认是 <code>off</code>：只把每次调用记录到 <code>~/.cache/localmelo/scheduler/</code>，不扣住任何调用。<code>fcfs</code> 和 <code>class</code> 会真正执行策略。直接运行、命令行和 <code>/v1/agent/run</code> 都不变。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-turn-work">
+          <h3>回合的工作实时可见</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time>
+          </p>
+          <ul>
+            <li>交互式界面现在会把回合的每个事件画出来：模型的思考（<code>Thought for 1.2s</code> 加一段摘录）、中间文本、与最终答案不同的最后一条消息、带倒计时的重试、空回复/卡住/步数预算通知，以及反思（包括读不出来的反思）。</li>
+            <li>实时区域显示本回合的进度事实（步数、尝试、阶段和轮次、测试、用时）、正在运行的工具的计时和时限；会话的第一个回合还会用一行暗色文字显示上次运行做了什么，措辞与直接模式的进度行一致。</li>
+            <li>新增命令：<code>/verbose</code> 显示更长的摘录、工具参数和 20 行输出；<code>/thinking</code> 关闭思考摘录；<code>/expand</code> 打印某个工具调用的完整输出；<code>/progress</code> 显示实时区域依据的进度事实。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-short-readme">
+          <h3>精简的 README 和开发者说明</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/67">#67</a>
+          </p>
+          <ul>
+            <li>README 现在是一页简短的入口：两行徽章（一行通往网站的各个页面，一行是事实信息）、localmelo 是什么、安装、几条命令、一个“了解更多”列表和安全警告。中文 README 与之对应，<code>CONTRIBUTING.md</code> 也精简为简版。</li>
+            <li>新增<a href="./developers.html">开发者说明</a>（中英文各一份），每个页面的导航都链接到它：仓库布局、环境搭建、测试和检查、添加后端、内置工具或检查、提交和 pull request，以及文档和网站的布局。</li>
+            <li>参考文档仍放在 <code>docs/</code>，从 README 的“了解更多”列表链接过去（英文）。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-permission-tiers">
+          <h3>审批按权限级别进行</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/66">#66</a>
+          </p>
+          <ul>
+            <li>每个工具现在都有一个权限级别：<code>read</code>、<code>write</code>、<code>exec</code> 或 <code>network</code>。内置工具沿用固定的级别（<code>file_read</code> 为 read，<code>file_write</code> 为 write，<code>shell_exec</code> 和 <code>python_exec</code> 为 exec）；MCP 工具的级别来自它的 <code>annotations</code>，并谨慎解读：<code>openWorldHint</code> 给出 network，<code>readOnlyHint</code> 给出 read（除非 <code>destructiveHint</code> 与之矛盾），其余情况为 write。</li>
+            <li>带审批策略的运行会在每次权限级别不是 <code>read</code> 的调用前询问，所以没有标注的 MCP 工具现在也会询问；<code>require_approval</code> 只是额外加一个标记，也可以让 read 工具询问。终端的审批面板会显示权限级别，<code>ToolInfo.tier</code> 和 <code>ApprovalRequest.tier</code> 也会报告它。</li>
+            <li>直接模式、简单对话循环和网关不传入审批策略，行为不变；<code>--yolo</code> 仍然表示不审批，而不是只读。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-27-forget">
           <h3>在 Python 中忘掉一个任务的记忆</h3>
@@ -261,7 +365,7 @@
           <ul>
             <li>调度器将让你的对话、后台任务和聊天共用一个本地模型服务器。它的策略决定下一个发给模型的调用，说明每个任务为什么在等，并让你的对话优先得到回答。</li>
             <li>模拟器用这个策略重放工作负载，可以离线比较策略的几种变体，用合成的工作负载或基准测试的记录都行。</li>
-            <li>现在还没有任何地方使用调度器：运行和网关都和以前一样。下一步会把它放到模型服务器前面。</li>
+            <li>目前只有网页工作区的聊天经过这道门；直接运行和命令行仍然和以前一样。下一步会把它们的调用也放进来。</li>
           </ul>
         </article>
 

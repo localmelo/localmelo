@@ -1,0 +1,9 @@
+› Check the demo project.
+
+  No approvals for this turn (--yolo).
+↻ Model request failed; retrying in 1 s: POST /chat/completions failed with HTT…
+✗ melo: run ended with status provider_error: POST /chat/completions failed wit…
+  The server refused the request; if it says the model does not support tools,
+  choose one that does.
+✻ Worked for 0.1s · 0 tool calls
+

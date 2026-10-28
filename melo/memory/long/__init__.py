@@ -40,6 +40,10 @@ class LongTerm:
 
         scores: list[tuple[int, float]] = []
         for i, entry in enumerate(self._entries):
+            # A vector from another embedding model has another dimension;
+            # it cannot be compared, so it is left out rather than crashing.
+            if entry.vector.shape != q.shape:
+                continue
             e_norm = np.linalg.norm(entry.vector)
             if e_norm == 0:
                 continue

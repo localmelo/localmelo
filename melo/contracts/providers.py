@@ -97,6 +97,17 @@ class BaseLLMProvider(ABC):
     # as "cached_tokens". Set as last_reasoning_key is; None when unknown.
     last_usage: dict[str, int] | None = None
 
+    # The request key this provider can send Message.thinking back under:
+    # None (never sends it), "auto" (the key the last reply came from),
+    # "reasoning_content" or "reasoning" (an OpenAI-compatible server), or
+    # "thinking" (Ollama native). A provider sets it on the instance; the
+    # class default means the agent has no field to replay.
+    reasoning_field: str | None = None
+    # Whether the server rejects a request whose assistant turns omit the
+    # reasoning it produced. Such a provider gets whole-unit eviction and
+    # no cap; ``drop`` is refused for it.
+    requires_reasoning_replay: bool = False
+
     @abstractmethod
     async def chat(
         self,

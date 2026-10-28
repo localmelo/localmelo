@@ -13,6 +13,12 @@ from localmelo.melo.schema import MAX_AGENT_STEPS, MAX_ATTEMPTS, STEPS_PER_ATTEM
 AttemptPolicy = Literal["reflect", "none"]
 ReflectionGate = Literal["flags", "utility"]
 ToolExposure = Literal["retrieve", "all"]
+ReasoningMode = Literal["legacy", "drop", "replay"]
+
+# The reasoning a replay request carries for one turn is capped at this many
+# characters. At the plan's 3.45 characters per token that is about 11,600
+# tokens; a longer turn is left out and counted (see Agent._as_sent).
+REPLAY_TURN_CAP = 40_000
 
 
 def _quoted(names: Iterable[object]) -> str:
@@ -109,6 +115,17 @@ class AgentOptions:
       ``None`` keeps their defaults, 30 s for a shell command and the
       executor's 60 s for Python. It needs a ``workspace_root``. The file
       tools keep the executor's limit, and provided tools their own.
+    - ``reasoning``: how the run sends a reply's reasoning back.
+      ``"legacy"``, the default, keeps the behavior before this option: an
+      OpenAI-compatible provider sends none, Ollama native sends its own
+      field and inline copy. ``"drop"`` never sends it. ``"replay"`` sends
+      it on the assistant turns in scope, under the provider's one key.
+    - ``replay_turns``: with ``reasoning="replay"``, the newest K assistant
+      turns that carry reasoning are replayed; ``None`` keeps every turn in
+      scope. It is ignored in the other modes.
+    - ``replay_scope``: ``"task"`` (default) replays only the current
+      task's turns; ``"window"`` replays every turn in the window, earlier
+      tasks included. It is API-only in R2.
     """
 
     max_steps: int = MAX_AGENT_STEPS
@@ -124,6 +141,9 @@ class AgentOptions:
     workspace_root: str | None = None
     record_answers: bool = False
     tool_timeout_s: float | None = None
+    reasoning: ReasoningMode = "legacy"
+    replay_turns: int | None = None
+    replay_scope: Literal["task", "window"] = "task"
 
     def __post_init__(self) -> None:
         for name in ("max_steps", "steps_per_attempt", "max_attempts"):
@@ -135,6 +155,8 @@ class AgentOptions:
             ("attempt_policy", get_args(AttemptPolicy)),
             ("reflection_gate", get_args(ReflectionGate)),
             ("tool_exposure", get_args(ToolExposure)),
+            ("reasoning", get_args(ReasoningMode)),
+            ("replay_scope", ("task", "window")),
         ):
             value = getattr(self, name)
             if value not in allowed:
@@ -173,6 +195,12 @@ class AgentOptions:
                 f"record_answers must be a bool, got {self.record_answers!r}"
             )
 
+        if self.replay_turns is not None and not _is_positive_int(self.replay_turns):
+            raise ValueError(
+                "replay_turns must be None or an int >= 1, "
+                f"got {self.replay_turns!r}"
+            )
+
         if self.tool_timeout_s is not None:
             if not _is_positive_finite(self.tool_timeout_s):
                 raise ValueError(
@@ -202,3 +230,28 @@ class AgentOptions:
                 f"known names: {_quoted(known)}"
             )
         return names
+
+
+def reasoning_refusal(
+    mode: str, reasoning_field: str | None, requires_replay: bool
+) -> str | None:
+    """Why *mode* cannot run on a provider with these capabilities, or ``None``.
+
+    The arguments are the capability values, not a provider, so the CLI can
+    check a flag before an Agent exists and :class:`Agent` can check after
+    its provider is built. ``legacy`` is never refused, even on a provider
+    that requires replay: it keeps the behavior before this option, which
+    may draw an HTTP 400 there.
+    """
+    if mode == "drop" and requires_replay:
+        return (
+            "this backend requires reasoning replay, so drop is not possible: "
+            "use replay"
+        )
+    if mode == "replay" and not reasoning_field:
+        return (
+            "replay needs a reasoning field: give --reasoning-field "
+            "(auto, reasoning_content or reasoning) with --base-url, or set "
+            "reasoning_field in the backend's config"
+        )
+    return None

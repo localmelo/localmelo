@@ -234,6 +234,80 @@ def pick_model(models: Sequence[str]) -> str | None:
     return models[0] if models else None
 
 
+# Families that serve embeddings but whose ids do not say "embed".
+_EMBEDDING_FAMILIES: Final = ("bge-", "e5-", "gte-")
+
+# The order is a recommendation, not a quality claim: the first family is the
+# one the recall measurements used, and each later one is smaller or older.
+_EMBEDDING_PREFERENCE: Final = (
+    "qwen3-embedding",
+    "embeddinggemma",
+    "nomic-embed",
+    "bge-base",
+    "snowflake-arctic-embed",
+    "bge-m3",
+    "e5-",
+    "gte-",
+)
+
+
+def is_embedding_model(model: str) -> bool:
+    """Whether *model*'s id names an embedding model.
+
+    An id that says ``embed`` is one, and so is a known embedding family
+    whose id does not (``bge-m3``). A reranking id never is, even when it
+    also says ``embed``. :func:`is_chat_model` keeps its own rule; it is
+    not this function's inverse (``bge-m3`` is both by those rules).
+    """
+    lowered = model.lower()
+    if "rerank" in lowered:
+        return False
+    return "embed" in lowered or any(
+        family in lowered for family in _EMBEDDING_FAMILIES
+    )
+
+
+def embedding_models(models: Sequence[str]) -> list[str]:
+    """The ids of *models* that name embedding models, in listing order.
+
+    Reranking and chat ids are left out. Duplicates keep their first
+    place. A listing is only a candidate source: the proof that a model
+    serves embeddings is an embeddings probe.
+    """
+    found: list[str] = []
+    seen: set[str] = set()
+    for model in models:
+        if model in seen:
+            continue
+        seen.add(model)
+        if is_embedding_model(model):
+            found.append(model)
+    return found
+
+
+def _embedding_rank(model: str) -> int:
+    lowered = model.lower()
+    for rank, family in enumerate(_EMBEDDING_PREFERENCE):
+        if family in lowered:
+            return rank
+    return len(_EMBEDDING_PREFERENCE)
+
+
+def recommend_embedding(models: Sequence[str]) -> str | None:
+    """The embedding candidate to suggest first; None for no candidates.
+
+    Qwen3-Embedding comes first, then embeddinggemma, nomic-embed,
+    bge-base, snowflake-arctic-embed, bge-m3, e5 and gte; an unknown
+    family comes after those, in listing order. The order is a
+    recommendation, not a quality claim.
+    """
+    if not models:
+        return None
+    return min(enumerate(models), key=lambda item: (_embedding_rank(item[1]), item[0]))[
+        1
+    ]
+
+
 def detect_urls() -> tuple[str, ...]:
     """DETECT_URLS, or the URLs that ``LOCALMELO_DETECT_URLS`` names."""
     value = os.environ.get(DETECT_URLS_ENV)
