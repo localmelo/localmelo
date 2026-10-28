@@ -514,26 +514,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
-- The heuristic note writer reads a factual bullet reply: with no `<note>`
-  block, every bullet, numbered item, table row and sentence of a plain
-  paragraph that carries a strong key becomes a `found` item, in text order,
-  up to 12 per reply (an explicit `<note>` may list 12 too). The rendered
-  note keeps its 1,200-character budget, so it shows fewer than it stores.
-  A completion or self-work claim ("The session is complete.", "I've read
-  and remembered all of Jamie's records…") is not admitted as a fact; the
-  policy `IGNORE`s it with the reason `meta claim about the agent's own
-  work`, for a note and for the episodic digest. A `task:` line, or a file,
-  path or function name, marks the text as content instead, and a final
-  digest admitted by `--admit-on-outcome on` for a completed run is exempt
-  from this filter, so an Aider-style outcome digest with no dates or
-  amounts is still stored. Strong keys are now a date
-  (ISO, `m/d`, `April 9`, normalised so `4/9` matches `2026-04-09`), a time
-  with a colon or am/pm, an amount with a currency or unit, an identifier of
-  three or more characters with a digit, a number of three or more digits,
-  or a non-sentence-initial capitalised name; a bare one- or two-digit number
-  is never a key, so `4/9 3-4 Room 4B` no longer cites `1-3PM … Apt 3`. An
-  item's record is now the best match rather than the first that shares its
-  user's name. ([#NN])
+- The heuristic note writer reads factual replies without a `<note>` into up
+  to 12 `found` items, and an explicit note can also hold 12. Questions,
+  options, plans and negated or cancelled statements are not promoted as
+  positive facts. Self-work claims are filtered unless a keyed content
+  clause follows the frame; `task:`/code markers and completed outcome
+  digests remain exempt. Source matching scores typed keys independently,
+  retains date years, currencies and whole phone numbers, rejects conflicts,
+  and leaves ties and unmatched items unsourced even after admission. Slash
+  dates require a date cue, year or item-start position, with US order for
+  ambiguous forms; digit runs over 20 characters are ignored as keys.
+  Factual extraction remains heuristic and does not extract CJK-only keys.
+  ([#NN])
 - A note's items now take their `source_ids` from the observation that
   established them, even when it came in an earlier reply of the same task:
   the reply's own tool results first, then the results still in the window,

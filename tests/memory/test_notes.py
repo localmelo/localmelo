@@ -859,19 +859,24 @@ def _item_note(
     return note
 
 
-def test_an_item_sources_its_own_pairs_before_earlier_results() -> None:
+def test_equal_own_and_earlier_matches_are_not_sourced() -> None:
     note = _item_note(own=("own", FACT), window=("w1",), task=("t1",))
-    assert [item.source_ids for item in candidate_items(note)] == [("own",)]
+    assert [item.source_ids for item in candidate_items(note)] == [()]
 
 
-def test_an_item_sources_the_window_before_the_rest_of_the_task() -> None:
+def test_equal_window_and_task_matches_are_not_sourced() -> None:
     note = _item_note(own=("own", UNRELATED), window=("w1",), task=("t1",))
-    assert [item.source_ids for item in candidate_items(note)] == [("w1",)]
+    assert [item.source_ids for item in candidate_items(note)] == [()]
 
 
-def test_an_item_sources_the_rest_of_the_task_newest_first() -> None:
+def test_equal_task_matches_are_not_sourced() -> None:
     note = _item_note(own=("own", UNRELATED), task=("t-new", "t-old"))
-    assert [item.source_ids for item in candidate_items(note)] == [("t-new",)]
+    assert [item.source_ids for item in candidate_items(note)] == [()]
+
+
+def test_a_unique_earlier_match_is_sourced() -> None:
+    note = _item_note(own=("own", UNRELATED), task=("t1",))
+    assert [item.source_ids for item in candidate_items(note)] == [("t1",)]
 
 
 def test_an_unrelated_earlier_record_is_not_attached() -> None:

@@ -31,6 +31,7 @@ def _bullet_reply() -> ReasoningNote:
 def _source(items: list[CandidateItem], fragment: str) -> tuple[str, ...]:
     for item in items:
         if fragment in item.text:
+            assert item.source_ids is not None
             return item.source_ids
     raise AssertionError(f"no item holds {fragment!r}")
 

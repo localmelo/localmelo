@@ -363,8 +363,10 @@ class Hippo:
             payload = check.sanitized_payload
             checked = str(payload.text)
             redactions = int((payload.metadata or {}).get("redactions", 0) or 0)
-            source_ids = tuple(item.source_ids) or tuple(
-                candidate.provenance.get("source_ids") or ()
+            source_ids = (
+                tuple(candidate.provenance.get("source_ids") or ())
+                if item.source_ids is None
+                else item.source_ids
             )
             try:
                 active = await self.long.active_entries(kind)
