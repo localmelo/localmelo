@@ -75,11 +75,34 @@ class TestGatewayIngress:
         result = validate_gateway_ingress(payload)
         assert result.allowed
 
+    def test_query_limit_applies_after_trim(self) -> None:
+        padded = "  " + "x" * MAX_QUERY_LEN + "  "
+        result = validate_gateway_ingress(GatewayIngressPayload(query=padded))
+        assert result.allowed
+        assert result.sanitized_payload is not None
+        assert result.sanitized_payload.query == "x" * MAX_QUERY_LEN
+
+    def test_padded_query_over_limit_rejected(self) -> None:
+        padded = "  " + "x" * (MAX_QUERY_LEN + 1) + "  "
+        result = validate_gateway_ingress(GatewayIngressPayload(query=padded))
+        assert not result.allowed
+        assert f"{MAX_QUERY_LEN + 1} chars" in result.reason
+
     def test_invalid_session_id_format(self) -> None:
         payload = GatewayIngressPayload(query="hi", session_id="bad session id!")
         result = validate_gateway_ingress(payload)
         assert not result.allowed
         assert "session_id" in result.reason
+
+    @pytest.mark.parametrize("session_id", [12345, ["abc"], {"id": "abc"}])
+    def test_non_string_session_id_rejected(self, session_id: object) -> None:
+        payload = GatewayIngressPayload(
+            query="hi",
+            session_id=session_id,  # type: ignore[arg-type]
+        )
+        result = validate_gateway_ingress(payload)
+        assert not result.allowed
+        assert result.reason == f"Invalid session_id format: {session_id!r}"
 
     def test_session_id_too_long(self) -> None:
         payload = GatewayIngressPayload(query="hi", session_id="a" * 65)
