@@ -23,7 +23,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   is loopback-only, carries the one error envelope and `Cache-Control:
   no-store`, and is additive-only and documented in
   [docs/api.md](docs/api.md); `/` and every `/v1/*` route are unchanged, and
-  no turn starts yet ([#NN]).
+  no turn starts yet ([#84]).
 - A reasoning mode for direct runs: `--reasoning legacy|drop|replay`
   (default `legacy`), `--reasoning-field auto|reasoning_content|reasoning`
   and `--replay-turns N`, or the same `[agent]` keys in `config.toml`.
@@ -525,3 +525,4 @@ earlier milestones.
 [#80]: https://github.com/localmelo/localmelo/pull/80
 [#81]: https://github.com/localmelo/localmelo/pull/81
 [#83]: https://github.com/localmelo/localmelo/pull/83
+[#84]: https://github.com/localmelo/localmelo/pull/84
