@@ -532,7 +532,8 @@ These options apply to a task run without `--serve`.
   [Long-term memory](memory.md#long-term-memory). They are accepted in
   `legacy` and do nothing there. `--keep-decision-text` writes potentially
   personal text to the store, so the interactive UI refuses it (exit 2, one
-  line). `[memory] admit_on_outcome` is the saved default for the first;
+  line). `[memory] admit_on_outcome` is the saved default for the first
+  in direct mode (the interactive UI and the gateway do not read the table);
   the second is flag-only.
 - `--note-writer`: `auto` (default) parses the model's
   `<note>plan: … found: … open: … remember: …</note>` block and falls back

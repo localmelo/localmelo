@@ -26,7 +26,7 @@ page.
 |---|---|---|
 | Working memory | The conversation of a run, of the `melo ""` loop, of a gateway session or of a web workspace chat: the last 20 messages. | RAM only. |
 | History | Every task with its status and result, and every step with its tool call and result. In `history.db`, also every reply of the model with its reasoning; the history in RAM keeps no model calls. | RAM, or `history.db`. |
-| Long-term memory | Short summaries of steps, and the reflections of past runs. On each step, the 5 entries closest to the task are recalled. Needs an [embedding backend](embedding.md). | RAM, or `long_term.db`. |
+| Long-term memory | In `legacy`, short summaries of steps and the reflections of past runs; each step recalls the 5 entries closest to the task, and it needs an [embedding backend](embedding.md). Outside `legacy`, typed entries (semantic, episodic, profile, reflection) admitted by a signal, recalled at `start` even without an embedding. | RAM, or `long_term.db` (in `legacy` only with an embedding backend). |
 | Procedural memory | What the runs of each recurring task did: the classes and short labels of their tool calls, their step counts and times. Written at the end of every run; never put in a prompt. See [Procedural memory](procedures.md). | RAM, or `procedures.db`. |
 | Reasoning notes | In the compress modes only, what each reply planned, found, decided and left open, its code drafts, and one digest per attempt. Recall reads them back at `start`, `attempt` and `step`. See [Reasoning notes](#reasoning-notes). | RAM only. |
 
@@ -102,7 +102,7 @@ default `--retriever auto` recalls at three points; an explicit
 
 | Trigger | When | What it ranks |
 |---|---|---|
-| `start` | Before the task's first planning call. | Earlier tasks' long-term entries only: each must score at least `--recall-min-score` (0.35). The current task's own entries are never returned. |
+| `start` | Before the task's first planning call. | Earlier tasks' long-term entries only. A cosine hit must reach `--recall-min-score` (0.35); a BM25 hit has no absolute floor. The current task's own entries are never returned. |
 | `attempt` | After a reflection, before the attempt's digest is built. | The failed attempt's notes and drafts, the reflection's note, and long-term entries, minus what the window shows. |
 | `step` | After each tool turn's results, for the next planning call. | This task's notes, drafts, digests and thought chunks the window does not show, and long-term entries when `long` is in `--recall-kinds`. |
 | `tool` | When the model calls the `recall` tool. | The step candidates plus superseded notes. |

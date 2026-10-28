@@ -14,7 +14,7 @@ the model's reasoning, code drafts and chunks of its thinking, for a query:
 | `llm` | The chat model picks the documents from a catalog of them. |
 | `embedding` | The cosine similarity of embedding vectors. |
 
-`melo` does not use these retrievers during a run. `melo-retrieve` is
+`melo-retrieve` evaluates these retrievers offline; the compress modes use the same `bm25`, `llm` and `embedding` retrievers in the loop. `melo-retrieve` is
 installed with localmelo, next to `melo`, and runs the same way: for example
 `uv run melo-retrieve --help` inside the clone.
 
@@ -142,6 +142,10 @@ melo-retrieve --export-run DIR|FILE
 | `--embedding-base-url URL` | not set | The OpenAI-compatible embedding server, for `embedding`. |
 | `--embedding-model NAME` | `default` | The model to request from `--embedding-base-url`. |
 | `--export-run DIR\|FILE` | not set | Print a run's model calls as corpus lines; see [Export a run](#export-a-run). |
+| `--export-store DIR\|FILE` | not set | Print the active entries of a typed `long_term.db`; see [The typed long-term store](#the-typed-long-term-store). |
+| `--export-decisions DIR\|FILE` | not set | Print its decision log, in `seq` order. |
+| `--route CANDIDATES.jsonl` | not set | Score synthetic candidates through the boundary and policy; needs `--memory-dir`. |
+| `--memory-dir DIR` | not set | The scratch directory `--route` writes; never the user's memory directory. |
 
 - An evaluation needs `--retriever`, `--corpus` and `--queries`.
   `--export-run` takes no other option.
@@ -531,7 +535,8 @@ A database that has the table is read as follows:
 
 Three modes read or write the typed `long_term.db` of R6-lite. Each is
 mutually exclusive with the evaluation flags and with `--export-run`, and none
-contacts a model. `DIR` may be a memory directory (the file is
+contacts a model. The same store is what [recall in the loop](memory.md#recall-in-the-loop)
+reads at `start`, and what `--export-store` shows the bench. `DIR` may be a memory directory (the file is
 `long_term.db`) or the file itself.
 
 ```bash
