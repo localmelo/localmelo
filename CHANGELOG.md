@@ -9,6 +9,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Setup can add the embedding model that long-term memory needs. The first
+  run offers an embedding model the chat server already lists, the wizard
+  appends such models as options `6+`, the banner names the configured
+  backend and model (or the flag that adds one), and a stored vector from
+  another model is skipped instead of failing recall. A new
+  [guide](docs/embedding.md) covers Ollama, oMLX, vLLM, SGLang and MLC
+  ([#74]).
 - The terminal and the web console share one set of words for a session.
   `support/sessions/display.py` re-exports `split_thinking` and adds the
   status table `STATUS_TEXT`, keyed by status and by `(status, cause)` and
@@ -432,3 +439,4 @@ earlier milestones.
 [#69]: https://github.com/localmelo/localmelo/pull/69
 [#71]: https://github.com/localmelo/localmelo/pull/71
 [#72]: https://github.com/localmelo/localmelo/pull/72
+[#74]: https://github.com/localmelo/localmelo/pull/74
