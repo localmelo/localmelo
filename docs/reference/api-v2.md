@@ -13,8 +13,11 @@ submissions, approvals, tools, grants, memory, runs and scheduler tasks.
 
 `POST /api/auth/login` exchanges a valid single-use code for a browser cookie;
 `POST /api/auth/logout` revokes the cookie. `POST /api/auth/rotate` requires
-the bearer and rotates it. The login exchange requires a matching Origin.
-See [gateway security](../guides/gateway.md#keep-the-gateway-private).
+the bearer and rotates it. The login exchange requires a matching Origin. When
+the macOS app started the gateway, it also requires the app's
+`X-LocalMelo-Instance` header, and a code is valid only for the instance it was
+issued for; a missing, different or differently bound value is refused before
+the code is consumed. See [gateway security](../guides/gateway.md#keep-the-gateway-private).
 
 A console turn passes the same scheduler gate a workspace chat does: every
 model call waits for its slot under `[scheduler]`, and the call log records
@@ -51,7 +54,7 @@ every route below:
 | 409 | `settings_changed` | `config.toml` changed on disk since `GET /api/settings` read its `revision` |
 | 413 | `too_large` | the request body is over 1 MiB |
 | 415 | `unsupported_media_type` | a non-empty request body without `Content-Type: application/json` |
-| 421 | `misdirected_request` | the `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>` |
+| 421 | `misdirected_request` | the `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`, or an app-started gateway's `/api/auth/login` has no matching `X-LocalMelo-Instance` |
 | 500 | `internal_error` | an unexpected failure; the message is `Internal error; see the gateway log.` and never a traceback or a value from the request |
 | 502 | `backend_unreachable` | listing models failed or returned no models |
 | 503 | `store_unavailable` | the gateway's session store could not open, or stopped recording changes; restart the gateway in the second case |
@@ -87,7 +90,7 @@ output or log the header; same-user processes can still read the token file.
   "model": {"backend": "ollama", "backend_label": "Ollama", "name": "qwen3:8b", "embedding": "none"},
   "model_server": {"url_label": "http://127.0.0.1:11434/v1", "reachable": true, "error": "", "checked_s_ago": 4},
   "limits": {"text_chars": 100000, "attachment_budget_chars": 8000, "body_bytes": 1048576},
-  "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_error": "", "resume_mode": "pairs"},
+  "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_reason": null, "store_error": "", "resume_mode": "pairs"},
   "uptime_s": 132.4
 }
 ```
@@ -111,6 +114,10 @@ output or log the header; same-user processes can still read the token file.
 - `sessions.store` is `ok`, `unavailable` (the store could not open and the
   gateway retries every 5 s) or `failed` (a write failed; restart the
   gateway). `store_error` says why, with the home folder written as `~`.
+  `store_reason` is `null` when healthy, `owned` when another gateway owns
+  the store, `open-error` for any other open failure, or `failed` after a
+  write failure. Clients should use this stable reason instead of parsing
+  `store_error`; it clears when the store opens successfully.
 - `sessions.resume_mode` is the resume arm in use; it is `pairs` today.
 
 ## GET /api/settings

@@ -476,7 +476,7 @@ function gateway(routes) {
   const fetch = async (url, options = {}) => {
     const method = options.method ?? 'GET';
     const path = String(url).replace(/^\/api/, '');
-    calls.push({method, path, body: options.body ? JSON.parse(options.body) : undefined});
+    calls.push({method, path, headers: options.headers ?? {}, body: options.body ? JSON.parse(options.body) : undefined});
     const handler = routes[`${method} ${path}`] ?? routes[path];
     if (handler === undefined) throw new Error(`Unexpected request: ${method} ${path}`);
     let result = typeof handler === 'function' ? handler(options.body ? JSON.parse(options.body) : undefined) : handler;
@@ -651,6 +651,20 @@ test('login removes the fragment before exchange and health precedes workspace i
   assert.equal(h.element('lock-screen').hidden, true);
   assert.equal(h.local.getItem('single-use-code'), null);
   assert.equal(h.session.getItem('single-use-code'), null);
+});
+
+test('login sends the app launch identifier from the fragment', async () => {
+  const instance = '0123456789abcdef0123456789abcdef';
+  let h;
+  h = harness(baseRoutes({'POST /auth/login': (body) => {
+    assert.equal(body.code, 'single-use-code');
+    assert.equal(h.context.location.hash, '');
+    return {status: 204};
+  }}));
+  h.context.location.hash = `#login=single-use-code&instance=${instance}`;
+  await h.run('init()');
+  const [call] = h.net.callsTo('/auth/login');
+  assert.equal(call.headers['X-LocalMelo-Instance'], instance);
 });
 
 test('invalid login never proceeds to health or displays the code', async () => {

@@ -44,7 +44,7 @@ bearer 令牌在首次使用时生成，并存储于 `~/.cache/localmelo/gateway
 
 | HTTP 状态码 | `code` | 情况 |
 |---|---|---|
-| 421 | `misdirected_request` | `Host` 请求头不是 `127.0.0.1:<port>`、`localhost:<port>` 或 `[::1]:<port>`。这可以阻止其他网站上的页面使用自己的域名访问网关（DNS 重绑定）。 |
+| 421 | `misdirected_request` | `Host` 请求头不是 `127.0.0.1:<port>`、`localhost:<port>` 或 `[::1]:<port>`。这可以阻止其他网站上的页面使用自己的域名访问网关（DNS 重绑定）。由 macOS 应用启动的网关还会拒绝不带应用匹配 `X-LocalMelo-Instance` 的 `/api/auth/login`，登录码也与该实例绑定。 |
 | 403 | `foreign_origin` | 提供的 `Origin` 与请求的 Host 不完全匹配，或者 `/v1/` 或 `/api/` 下的请求带有不允许的 `Sec-Fetch-Site`。登录交换要求提供 Origin。 |
 | 413 | `too_large` | 请求体超过 1 MiB（1,048,576 字节）。 |
 | 415 | `unsupported_media_type` | `/api/` 下的请求带有非空请求体，但没有 `Content-Type: application/json`。 |
