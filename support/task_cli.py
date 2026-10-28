@@ -1,0 +1,334 @@
+"""HTTP client for gateway scheduler tasks; never starts a gateway."""
+
+from __future__ import annotations
+
+import argparse
+import ipaddress
+import json
+import os
+import re
+import stat
+import sys
+import uuid
+from pathlib import Path
+from typing import Any, TextIO
+from urllib.parse import urlsplit
+
+import httpx
+
+from localmelo.support.task_follow import FollowError, follow
+
+MAX_BRIEF_BYTES = 1024 * 1024
+MAX_OBJECTIVE_CHARS = 100_000
+LEVELS = tuple(f"P{n}" for n in range(6))
+
+
+class ClientError(Exception):
+    """An operation failed without exposing the server response or credential."""
+
+
+def address(url: str) -> str:
+    """Validate an explicit local gateway URL without DNS or proxy discovery."""
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+        port = parsed.port
+        if (
+            parsed.scheme not in ("http", "https")
+            or not host
+            or port is None
+            or not 1 <= port <= 65535
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.path not in ("", "/")
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError
+        if host == "localhost":
+            host = "127.0.0.1"
+        ip = ipaddress.ip_address(host)
+        if not ip.is_loopback:
+            raise ValueError
+        rendered = f"[{ip}]" if ip.version == 6 else str(ip)
+        return f"{parsed.scheme}://{rendered}:{port}"
+    except ValueError:
+        raise ValueError(
+            "gateway must be a loopback HTTP(S) address with a port"
+        ) from None
+
+
+def read_token(path: Path) -> str:
+    """Read an existing private gateway token without creating any files."""
+    path = Path(os.path.abspath(path))
+    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.parts[1:]:
+            child = os.open(
+                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd
+            )
+            os.close(fd)
+            fd = child
+        info = os.fstat(fd)
+        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+            raise PermissionError("gateway auth directory must be private")
+        token_fd = os.open(
+            "token", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd
+        )
+        try:
+            token_info = os.fstat(token_fd)
+            if (
+                not stat.S_ISREG(token_info.st_mode)
+                or token_info.st_uid != os.getuid()
+                or stat.S_IMODE(token_info.st_mode) != 0o600
+                or token_info.st_nlink != 1
+            ):
+                raise PermissionError("gateway token must be a private regular file")
+            value = os.read(token_fd, 129)
+            if len(value) != 64 or any(c not in b"0123456789abcdef" for c in value):
+                raise ValueError("gateway token is invalid")
+            return value.decode("ascii")
+        finally:
+            os.close(token_fd)
+    finally:
+        os.close(fd)
+
+
+def parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False, argument_default=argparse.SUPPRESS)
+    common.add_argument("--gateway", help="Loopback gateway URL")
+    common.add_argument(
+        "--json", action="store_true", help="Write machine-readable JSON"
+    )
+    p = argparse.ArgumentParser(prog="melo-task", allow_abbrev=False, parents=[common])
+    subs = p.add_subparsers(dest="command", required=True)
+    new = subs.add_parser("new", parents=[common], allow_abbrev=False)
+    new.add_argument("text", nargs="?")
+    source = new.add_mutually_exclusive_group()
+    source.add_argument("--brief", metavar="FILE")
+    source.add_argument("--stdin", action="store_true")
+    new.add_argument("--title")
+    new.add_argument("--workspace")
+    new.add_argument("--level", choices=LEVELS)
+    new.add_argument("--request-key")
+    listing = subs.add_parser("list", parents=[common], allow_abbrev=False)
+    listing.add_argument("--state")
+    listing.add_argument("--level", choices=LEVELS)
+    for name in ("show", "pause", "resume", "stop", "follow", "level"):
+        sub = subs.add_parser(name, parents=[common], allow_abbrev=False)
+        sub.add_argument("id")
+        if name == "resume":
+            sub.add_argument("--level", choices=LEVELS[:-1])
+        if name == "level":
+            sub.add_argument("level", choices=(*LEVELS, "auto"))
+        if name == "follow":
+            sub.add_argument("--wait", action="store_true")
+            sub.add_argument("--after", type=int, default=0)
+    return p
+
+
+def _objective(args: argparse.Namespace, stdin: TextIO) -> str:
+    text = args.text
+    if (args.brief or args.stdin) and text is not None:
+        raise ValueError("choose one task text source")
+    if args.brief:
+        try:
+            fd = os.open(args.brief, os.O_RDONLY | os.O_NONBLOCK)
+            with os.fdopen(fd, "rb") as f:
+                if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+                    raise ValueError("brief must be a regular file")
+                raw = f.read(MAX_BRIEF_BYTES + 1)
+            text = raw.decode("utf-8")
+        except (OSError, UnicodeError) as exc:
+            raise ValueError("cannot read UTF-8 brief") from exc
+    elif args.stdin:
+        text = stdin.read(MAX_BRIEF_BYTES + 1)
+    if not isinstance(text, str) or not text.strip():
+        raise ValueError("task text must not be empty")
+    if len(text) > MAX_OBJECTIVE_CHARS or len(text.encode("utf-8")) > MAX_BRIEF_BYTES:
+        raise ValueError("task text exceeds the gateway limit")
+    return text
+
+
+def _identifier(value: str) -> str:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", value):
+        raise ValueError("invalid task id")
+    return value
+
+
+def _safe(value: object) -> str:
+    return "".join(c if c.isprintable() else "?" for c in str(value))
+
+
+def _level_label(task: dict[str, Any]) -> str:
+    level = task.get("level")
+    return f"P{level}" if type(level) is int and 0 <= level <= 5 else "not recorded"
+
+
+def execute(
+    args: argparse.Namespace, client: httpx.Client, *, out: TextIO, stdin: TextIO
+) -> int:
+    """Run a parsed operation using an already authenticated client."""
+    cmd = args.command
+    if cmd == "follow":
+        return follow(
+            client,
+            _identifier(args.id),
+            json_mode=getattr(args, "json", False),
+            wait=args.wait,
+            out=out,
+            after=args.after,
+        )
+    request_key: str | None = None
+    if cmd == "new":
+        payload: dict[str, Any] = {"objective": _objective(args, stdin)}
+        for name in ("title", "workspace", "level"):
+            value = getattr(args, name)
+            if value is not None:
+                payload[name] = value
+        request_key = args.request_key or uuid.uuid4().hex
+        if args.request_key == "":
+            raise ValueError("request key must not be empty")
+        payload["request_key"] = request_key
+        method, path, params = "POST", "/api/tasks", None
+    elif cmd == "list":
+        payload = {}
+        params = {
+            k: v
+            for k, v in {
+                "state": args.state,
+                "level": int(args.level[1:]) if args.level else None,
+            }.items()
+            if v is not None
+        }
+        method, path = "GET", "/api/tasks"
+    else:
+        payload = {}
+        params = None
+        path = "/api/tasks/" + _identifier(args.id)
+        method = "GET" if cmd == "show" else "PATCH"
+        if cmd in ("pause", "resume", "stop"):
+            payload["state"] = cmd
+            if cmd == "resume" and args.level is not None:
+                payload["level"] = args.level
+        elif cmd == "level":
+            payload["level"] = args.level
+    try:
+        response = client.request(
+            method, path, params=params, json=payload if method != "GET" else None
+        )
+    except httpx.RequestError as exc:
+        suffix = f"; retry with --request-key {request_key}" if request_key else ""
+        raise ClientError(
+            "gateway connection failed; start melo --serve or check --gateway" + suffix
+        ) from exc
+    if response.is_redirect or response.status_code >= 400:
+        suffix = (
+            f"; retry with --request-key {request_key}"
+            if request_key and response.status_code >= 500
+            else ""
+        )
+        try:
+            code = response.json().get("error", {}).get("code", "")
+        except (ValueError, AttributeError):
+            code = ""
+        known = {
+            "invalid_task",
+            "invalid_request",
+            "invalid_workspace",
+            "submission_conflict",
+            "not_found",
+            "not_paused",
+            "invalid_transition",
+            "unauthorized",
+        }
+        label = f" ({code})" if isinstance(code, str) and code in known else ""
+        raise ClientError(
+            f"gateway returned HTTP {response.status_code}{label}" + suffix
+        )
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise ClientError("gateway returned invalid JSON") from exc
+    if not isinstance(data, dict) or not isinstance(
+        data.get("tasks" if cmd == "list" else "task"), list if cmd == "list" else dict
+    ):
+        raise ClientError("gateway returned an invalid task response")
+    if getattr(args, "json", False):
+        print(
+            json.dumps({**data, "v": 1, "command": cmd}, ensure_ascii=False),
+            file=out,
+            flush=True,
+        )
+    elif cmd == "list":
+        for task in data["tasks"]:
+            if not isinstance(task, dict):
+                raise ClientError("gateway returned an invalid task response")
+            spec = task.get("spec")
+            title = task.get("title") or (
+                spec.get("title", "") if isinstance(spec, dict) else ""
+            )
+            print(
+                f"{_safe(task.get('task_id', ''))}  {_level_label(task)}  {_safe(task.get('state', ''))}  {_safe(title)}",
+                file=out,
+            )
+        out.flush()
+    else:
+        task = data["task"]
+        print(
+            f"{_safe(task.get('task_id', ''))}  {_safe(task.get('state', ''))}",
+            file=out,
+            flush=True,
+        )
+        if cmd == "show":
+            print(f"  Title: {_safe(task.get('title') or 'not recorded')}", file=out)
+            print(f"  Level: {_level_label(task)}", file=out)
+            print(f"  Reason: {_safe(task.get('reason') or 'not recorded')}", file=out)
+            print(
+                f"  Waiting: {_safe(task.get('wait_reason') or 'not recorded')}",
+                file=out,
+            )
+        out.flush()
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parser().parse_args(argv)
+    try:
+        from localmelo.support.config import load
+
+        cfg = load().gateway
+        url = address(getattr(args, "gateway", None) or f"http://{cfg.host}:{cfg.port}")
+        try:
+            token = read_token(
+                Path.home() / ".cache" / "localmelo" / "gateway" / "auth"
+            )
+        except (OSError, ValueError) as exc:
+            raise ClientError(
+                "gateway token unavailable or unsafe; start melo --serve or check permissions"
+            ) from exc
+        with httpx.Client(
+            base_url=url,
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            return execute(args, client, out=sys.stdout, stdin=sys.stdin)
+    except (ValueError, ClientError, FollowError, OSError, httpx.HTTPError) as exc:
+        code = 2 if isinstance(exc, ValueError) else 1
+        message = _safe(exc)
+        print(f"melo-task: {message}", file=sys.stderr)
+        if getattr(args, "json", False) and not isinstance(exc, BrokenPipeError):
+            try:
+                print(
+                    json.dumps({"v": 1, "command": args.command, "error": message}),
+                    flush=True,
+                )
+            except (OSError, ValueError):
+                return 1
+        return code
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
