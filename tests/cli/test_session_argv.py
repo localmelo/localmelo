@@ -73,8 +73,9 @@ R6_DEFAULTS = {"admit_on_outcome": None, "keep_decision_text": False}
 U3_PR4_DEFAULTS = {"allow_unconfigured": False}
 # Fixed prefix is opt-in; historical invocations leave it unset.
 FIXED_PREFIX_DEFAULTS = {"fixed_prefix": None}
+CAPTURED_DEFAULTS = {"captured_history": None}
 WORKER_DEFAULTS = dict.fromkeys(
-    ("save_session", "parent_run", "import_session", "title")
+    ("save_session", "parent_run", "import_session", "title", "brief")
 )
 
 
@@ -140,6 +141,7 @@ def test_historical_dispatch(
             **U3_PR4_DEFAULTS,
             **WORKER_DEFAULTS,
             **FIXED_PREFIX_DEFAULTS,
+            **CAPTURED_DEFAULTS,
             "continue_session": False,
             "resume": None,
             **case["namespace"],
@@ -167,6 +169,7 @@ def test_historical_dispatch(
         **U3_PR4_DEFAULTS,
         **WORKER_DEFAULTS,
         **FIXED_PREFIX_DEFAULTS,
+        **CAPTURED_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:

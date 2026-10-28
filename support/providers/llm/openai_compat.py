@@ -1,14 +1,21 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from typing import Any
 
 import httpx
 
-from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, BaseLLMProvider
+from localmelo.melo.contracts.providers import (
+    LLM_REQUEST_KIND,
+    BaseLLMProvider,
+    ProviderError,
+    StreamFragment,
+)
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, describe_images
 from localmelo.support.providers._http import (
+    RETRYABLE_STATUS_CODES,
+    _context_overflow,
     attempt_headers,
     malformed_body,
     post_json,
@@ -18,6 +25,11 @@ from localmelo.support.providers.llm._protocol import (
     prepare_extra_body,
     raw_tool_arguments,
 )
+from localmelo.support.providers.llm._sse import sse_data
+
+
+def _reject_nonfinite(value: str) -> None:
+    raise ValueError(f"Invalid JSON constant: {value}")
 
 
 def _tool_def_to_openai(td: ToolDef) -> dict[str, Any]:
@@ -384,6 +396,198 @@ class OpenAICompatLLM(BaseLLMProvider):
             usage=_normalize_usage(data.get("usage")),
             thinking=_reasoning_text(msg),
         )
+
+    async def stream_chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> AsyncGenerator[StreamFragment, None]:
+        """Stream one OpenAI-compatible response; never retry after a delta."""
+        reasoning_key = self.reasoning_field
+        if reasoning_key == "auto":
+            reasoning_key = self.last_reasoning_key or None
+        payload: dict[str, Any] = {
+            **self.extra_body,
+            **self.extra_body_by_kind.get(LLM_REQUEST_KIND.get(), {}),
+            "model": self.model,
+            "messages": _messages_to_openai(messages, reasoning_key=reasoning_key),
+            "stream": True,
+        }
+        if tools:
+            payload["tools"] = [_tool_def_to_openai(t) for t in tools]
+            payload["tool_choice"] = "auto"
+        content: list[str] = []
+        thinking: list[str] = []
+        calls: dict[int, dict[str, str]] = {}
+        usage: dict[str, int] | None = None
+        raw_usage: Any = None
+        reason_key = ""
+        text_chars = 0
+        tool_chars = 0
+        finish = ""
+        done = False
+        emitted = False
+        try:
+            async with self._http.stream(
+                "POST", "/chat/completions", json=payload, headers=attempt_headers()
+            ) as response:
+                if not response.is_success:
+                    error_body = bytearray()
+                    async for part in response.aiter_bytes(chunk_size=8192):
+                        error_body.extend(part)
+                        if len(error_body) >= 65_536:
+                            break
+                    error_response = httpx.Response(
+                        response.status_code, content=bytes(error_body[:65_536])
+                    )
+                    raise ProviderError(
+                        f"POST /chat/completions failed with HTTP {response.status_code}",
+                        status_code=response.status_code,
+                        retryable=response.status_code in RETRYABLE_STATUS_CODES,
+                        context_overflow=_context_overflow(error_response),
+                    )
+                async for frame in sse_data(response.aiter_bytes()):
+                    if frame == "[DONE]":
+                        done = True
+                        break
+                    try:
+                        obj = json.loads(frame, parse_constant=_reject_nonfinite)
+                    except ValueError as exc:
+                        raise ProviderError("Malformed SSE JSON") from exc
+                    if not isinstance(obj, dict) or obj.get("error") is not None:
+                        raise ProviderError("Malformed SSE response or server error")
+                    if obj.get("usage") is not None:
+                        raw_usage = obj["usage"]
+                        usage = _normalize_usage(raw_usage)
+                        if usage is None:
+                            raise ProviderError("Malformed SSE usage")
+                        emitted = True
+                        yield StreamFragment(kind="usage", usage=usage)
+                    choices = obj.get(
+                        "choices", [] if obj.get("usage") is not None else None
+                    )
+                    if not isinstance(choices, list):
+                        raise ProviderError("Malformed SSE choices")
+                    for choice in choices:
+                        if not isinstance(choice, dict):
+                            raise ProviderError("Malformed SSE choice")
+                        if choice.get("index", 0) != 0:
+                            continue
+                        delta = choice.get("delta", {})
+                        if not isinstance(delta, dict):
+                            raise ProviderError("Malformed SSE delta")
+                        if finish and delta:
+                            raise ProviderError("SSE delta after finish")
+                        for field, kind, parts in (
+                            ("content", "content", content),
+                            ("reasoning_content", "reasoning", thinking),
+                            ("reasoning", "reasoning", thinking),
+                        ):
+                            value = delta.get(field)
+                            if value is not None:
+                                if not isinstance(value, str):
+                                    raise ProviderError("Malformed SSE text")
+                                if value:
+                                    text_chars += len(value)
+                                    if text_chars > 1_048_576:
+                                        raise ProviderError(
+                                            "SSE text exceeds size limit"
+                                        )
+                                    parts.append(value)
+                                    if kind == "reasoning":
+                                        reason_key = field
+                                    emitted = True
+                                    yield StreamFragment(kind=kind, text=value)  # type: ignore[arg-type]
+                        fragments = delta.get("tool_calls")
+                        if fragments is not None:
+                            if not isinstance(fragments, list):
+                                raise ProviderError("Malformed SSE tool fragments")
+                            for fragment in fragments:
+                                if not isinstance(fragment, dict):
+                                    raise ProviderError("Malformed SSE tool fragment")
+                                if fragment.get("type") not in (None, "function"):
+                                    raise ProviderError("Unsupported SSE tool type")
+                                index = fragment.get("index")
+                                if (
+                                    isinstance(index, bool)
+                                    or not isinstance(index, int)
+                                    or not 0 <= index < 256
+                                ):
+                                    raise ProviderError("Malformed SSE tool index")
+                                call = calls.setdefault(
+                                    index, {"id": "", "name": "", "arguments": ""}
+                                )
+                                function = fragment.get("function") or {}
+                                if not isinstance(function, dict):
+                                    raise ProviderError("Malformed SSE tool function")
+                                for key, value in (
+                                    ("id", fragment.get("id")),
+                                    ("name", function.get("name")),
+                                    ("arguments", function.get("arguments")),
+                                ):
+                                    if value is not None:
+                                        if not isinstance(value, str):
+                                            raise ProviderError(
+                                                "Malformed SSE tool field"
+                                            )
+                                        tool_chars += len(value)
+                                        if tool_chars > 1_048_576:
+                                            raise ProviderError(
+                                                "SSE tool fields exceed size limit"
+                                            )
+                                        if (
+                                            key not in ("id", "name")
+                                            or value != call[key]
+                                        ):
+                                            call[key] += value
+                                emitted = True
+                                yield StreamFragment(kind="tool", tool_index=index)
+                        final = choice.get("finish_reason")
+                        if final is not None:
+                            if not isinstance(final, str) or finish:
+                                raise ProviderError("Malformed SSE finish reason")
+                            finish = final
+        except httpx.TransportError as exc:
+            raise ProviderError(
+                f"Streaming request failed: {type(exc).__name__}", retryable=not emitted
+            ) from exc
+        except (httpx.RequestError, httpx.StreamError) as exc:
+            raise ProviderError(
+                f"Streaming request failed: {type(exc).__name__}"
+            ) from exc
+        if not done or not finish:
+            raise ProviderError(
+                "Streaming response ended before completion", retryable=not emitted
+            )
+        if bool(calls) != (finish == "tool_calls"):
+            raise ProviderError("Tool calls were not completed")
+        raw_calls = []
+        for index in sorted(calls):
+            call = calls[index]
+            try:
+                args = (
+                    json.loads(call["arguments"], parse_constant=_reject_nonfinite)
+                    if call["arguments"].strip()
+                    else {}
+                )
+            except ValueError as exc:
+                raise ProviderError("Malformed completed tool arguments") from exc
+            if not isinstance(args, dict) or not call["name"]:
+                raise ProviderError("Malformed completed tool call")
+            raw_calls.append(
+                {
+                    "id": call["id"],
+                    "function": {"name": call["name"], "arguments": args},
+                }
+            )
+        reply = Message(
+            role="assistant",
+            content="".join(content),
+            thinking="".join(thinking),
+            tool_calls=parse_tool_calls(raw_calls),
+            usage=usage,
+        )
+        self.last_reasoning_key = reason_key
+        self.last_usage = _usage_details(raw_usage)
+        yield StreamFragment(kind="reply", reply=reply, finish_reason=finish)
 
     async def close(self) -> None:
         await self._http.aclose()

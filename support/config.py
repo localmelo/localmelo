@@ -117,6 +117,7 @@ class AgentConfig:
     context_window: int | None = None
     output_reserve: int | None = None
     safety_margin: int | None = None
+    captured_history: bool = False  # opt-in redacted captured tool results
 
 
 @dataclass
@@ -344,6 +345,8 @@ class Config:
         errors: list[str] = []
         if not isinstance(self.agent.fixed_prefix, bool):
             errors.append("[agent] fixed_prefix must be a boolean")
+        if not isinstance(self.agent.captured_history, bool):
+            errors.append("[agent] captured_history must be a boolean")
         if self.agent.reasoning not in REASONING_MODES:
             errors.append(
                 f"[agent] reasoning {self.agent.reasoning!r} is not recognised. "
@@ -873,6 +876,7 @@ def save(cfg: Config) -> None:
         or cfg.agent.note_writer != "auto"
         or cfg.agent.tool_env
         or cfg.agent.fixed_prefix
+        or cfg.agent.captured_history
         or cfg.agent.context_window is not None
         or cfg.agent.output_reserve is not None
         or cfg.agent.safety_margin is not None
@@ -885,6 +889,8 @@ def save(cfg: Config) -> None:
             lines.append(f"note_writer = {_toml_string(cfg.agent.note_writer)}")
         if cfg.agent.fixed_prefix:
             lines.append("fixed_prefix = true")
+        if cfg.agent.captured_history:
+            lines.append("captured_history = true")
         if cfg.agent.tool_env:
             lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
         for name in ("context_window", "output_reserve", "safety_margin"):

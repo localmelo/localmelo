@@ -101,8 +101,10 @@ accepts the options named in [Interactive UI](#interactive-ui).
 
 | Option | Default | Description |
 |---|---|---|
+| `--brief FILE` | not set | Read a direct task from a nonempty UTF-8 file, at most 1 MiB, relative to the invocation directory. Requires no positional task, defaults to worker JSON output and rejects text output. |
 | `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](../guides/tools-mcp.md#with-a-workspace-root). |
 | `--fixed-prefix on\|off` | `off` | Opt in to a versioned fixed system prefix with the local date frozen at run start; overrides `[agent] fixed_prefix`. |
+| `--captured-history on\|off` | `off` | Store a bounded, pattern-redacted captured result separately from the model preview; see [configuration](configuration.md#context-accounting). |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
@@ -115,7 +117,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | `--memory-dir DIR` | not set | Save history, long-term and procedural memory as SQLite files in `DIR`: `history.db`, `long_term.db` and `procedures.db`. |
 | `--timeout SECONDS` | not set | End the run with status `timeout` after this many seconds. |
 | `--request-timeout SECONDS` | `120` | How long each chat request may wait for the server. |
-| `--output-format text\|json` | `text` | Print the result as text, or the run record as one JSON line. |
+| `--output-format text\|json\|stream-json` | `text` (`json` with `--brief`) | Text, one JSON result, or newline-delimited events and result (`stream-json` requires `--brief`). |
 | `--embedding-base-url URL` | not set | An OpenAI-compatible embedding server for long-term memory; see [Set up an embedding model](../guides/embedding.md). |
 | `--embedding-model NAME` | `default` | The model to request from the `--embedding-base-url` server. |
 | `--progress auto\|off` | `auto` | Draw a [progress line](#progress-line) on stderr while the task runs: `auto` when stderr is a terminal and the output is text, `off` never. |
@@ -392,7 +394,7 @@ These are usage errors:
   The error is joined into one line and cut to 500 characters. An empty
   error reads `no error message`.
 
-**JSON** (`--output-format json`):
+**JSON without `--brief`** (`--output-format json`):
 
 - stdout gets exactly one line: the run record, with the
   [fields of a run result](run-results.md#fields) in order, plus
@@ -406,6 +408,30 @@ These are usage errors:
   them) and `memory_stats`, with the note counters zeroed in the modes that
   do not use them; see [Run results](run-results.md#fields). A `legacy`
   record has none of them.
+
+**With `--brief`:** JSON is a versioned worker result: `v`, `status`, `run_id`,
+`exit_code`, `head_sha`, `git_dirty`, `tests`, `run` and `error`. HEAD and dirty
+state come from the workspace, and are null when unavailable. `run` is the
+run record without `config`; `tests` is `recorded` only for the last passing
+recognized test check of the final attempt, otherwise `not_recorded`. A
+recorded item contains the raw command or Python code, redacted and capped at
+2,000 characters with `command_truncated`, its nullable exit code and
+`tool_event` source. It is evidence from tool output, not a guarantee that a task is correct.
+
+With `--brief --output-format stream-json`, stdout is NDJSON: each agent event
+is wrapped as `{ "v": 1, "type": "event", "event": ... }`, followed by a
+`{ "v": 1, "type": "result", "result": ... }` worker result when the run
+finishes normally. A broken or undrained output pipe is a failure; signals,
+process death or a broken pipe can leave no result. Drain stdout and check
+both the final record and the exit code. A valid brief can exit 1 with empty
+stdout and a startup error on stderr (for example, no backend, invalid config,
+or agent construction failure); no `startup_error` or `transport_error` result
+is emitted yet, and `run` is non-null when a result is emitted. Worker
+output uses pattern-based
+redaction and omits some recognizable sensitive-file reads, including simple
+shell and Python reads. Arbitrary commands, code and model output can still
+expose secrets: the stream is not a secret boundary. Review before sharing. `--inbox` is not yet
+available. `--save-session` can record the same run.
 
 **In both formats:**
 

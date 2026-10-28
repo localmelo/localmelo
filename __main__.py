@@ -65,6 +65,7 @@ STATUS_LINE_ERROR_CHARS = 500
 _DIRECT_FLAGS = {
     "workspace": "--workspace",
     "fixed_prefix": "--fixed-prefix",
+    "captured_history": "--captured-history",
     "context_window": "--context-window",
     "output_reserve": "--output-reserve",
     "safety_margin": "--safety-margin",
@@ -452,6 +453,75 @@ async def _run_one(
         progress.close()
 
 
+async def _run_worker_brief(
+    agent: Agent,
+    query: str,
+    output_format: str,
+    out: TextIO,
+    save_session: str | None,
+    parent_run: str | None,
+    routine: str | None,
+) -> int:
+    """Run one opt-in worker and write its versioned report."""
+    from localmelo.support.cli.worker_contract import WorkerObserver, result_record
+
+    loop = asyncio.get_running_loop()
+    task = asyncio.current_task()
+    assert task is not None
+    workspace = agent.workspace_root or os.getcwd()
+    observer = WorkerObserver(
+        out,
+        workspace,
+        stream=output_format == "stream-json",
+        on_failure=lambda: loop.call_soon_threadsafe(task.cancel),
+    )
+    try:
+        if save_session is None:
+            outcome = await agent.run_task(query, observe=observer, routine=routine)
+        else:
+            from localmelo.support.sessions.worker import run_worker
+
+            outcome = await run_worker(
+                agent,
+                query,
+                title=save_session,
+                parent_run=parent_run,
+                observe=observer,
+                routine=routine,
+            )
+        code = _exit_code(outcome.status)
+        record = await asyncio.to_thread(
+            result_record, outcome, observer, workspace, code
+        )
+        if output_format == "stream-json":
+            observer._enqueue({"v": 1, "type": "result", "result": record})
+        else:
+            print(
+                json.dumps(record, ensure_ascii=True, allow_nan=False),
+                file=out,
+                flush=True,
+            )
+        await asyncio.to_thread(observer.close)
+        if observer.error is not None:
+            print(
+                f"melo: worker output failed: {_one_line(str(observer.error))}",
+                file=sys.stderr,
+            )
+            return EXIT_CRASHED
+        return code
+    except asyncio.CancelledError:
+        if observer.error is None:
+            raise
+        print(
+            f"melo: worker output failed: {_one_line(str(observer.error))}",
+            file=sys.stderr,
+        )
+        return EXIT_CRASHED
+    finally:
+        if observer.thread is not None and observer.thread.is_alive():
+            await asyncio.to_thread(observer.close)
+
+
 async def _run(
     agent: Agent,
     query: str | None,
@@ -464,6 +534,7 @@ async def _run(
     routine: str | None = None,
     save_session: str | None = None,
     parent_run: str | None = None,
+    worker_brief: bool = False,
 ) -> int:
     """Run *query*, or with no query the interactive loop; return the exit code.
 
@@ -480,6 +551,16 @@ async def _run(
         exit_signals.install()
     try:
         if query:
+            if worker_brief:
+                return await _run_worker_brief(
+                    agent,
+                    query,
+                    output_format,
+                    out or sys.stdout,
+                    save_session,
+                    parent_run,
+                    routine,
+                )
             if save_session is None:
                 outcome = await _run_one(
                     agent, query, progress=progress, routine=routine
@@ -589,6 +670,7 @@ def _run_direct(
     routine: str | None = None,
     save_session: str | None = None,
     parent_run: str | None = None,
+    worker_brief: bool = False,
 ) -> int:
     """Run *query*, or for an empty one the interactive loop; return the exit code.
 
@@ -610,6 +692,7 @@ def _run_direct(
     exit_signals = _ExitSignals(
         agent, tool_providers, before_exit=None if line is None else line.close
     )
+    reported = False
     try:
         output = (
             _stdout_for_the_report() if query else contextlib.nullcontext(sys.stdout)
@@ -627,11 +710,21 @@ def _run_direct(
                     routine=routine,
                     save_session=save_session,
                     parent_run=parent_run,
+                    **({"worker_brief": True} if worker_brief else {}),
                 )
             )
+            reported = code == EXIT_CRASHED
     except BaseException as exc:
         if line is not None:
             line.close()  # before a traceback or the line below
+        if (
+            isinstance(exc, BrokenPipeError)
+            and worker_brief
+            and exit_signals.received is None
+        ):
+            if not reported:
+                print("melo: worker output failed: broken pipe", file=sys.stderr)
+            return EXIT_CRASHED
         if exit_signals.received is None:
             if not query and isinstance(exc, KeyboardInterrupt):
                 _exit_by_signal(signal.SIGINT)
@@ -1049,6 +1142,8 @@ def _direct_options(
         fields["timeout_s"] = args.timeout
     if getattr(args, "fixed_prefix", None) is not None:
         fields["fixed_prefix"] = args.fixed_prefix == "on"
+    if getattr(args, "captured_history", None) is not None:
+        fields["captured_history"] = args.captured_history == "on"
     reasoning = getattr(args, "reasoning", None)
     if reasoning is not None:
         fields["reasoning"] = reasoning
@@ -1116,13 +1211,20 @@ def _direct_tool_providers(
 class _WorkerFlagParser(argparse.ArgumentParser):
     """Keep old abbreviations unambiguous; new options require full names."""
 
+    def _check_value(self, action: argparse.Action, value: str) -> None:
+        if action.dest == "output_format" and value == "stream-json":
+            return
+        super()._check_value(action, value)
+
     def _get_option_tuples(self, option_string: str) -> Any:
         full_name_only = {
             "--save-session",
+            "--brief",
             "--parent-run",
             "--import-session",
             "--title",
             "--fixed-prefix",
+            "--captured-history",
             "--context-window",
             "--output-reserve",
             "--safety-margin",
@@ -1176,6 +1278,9 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
             f"--{name}", type=_positive_int, metavar="TOKENS", default=argparse.SUPPRESS
         )
     direct.add_argument(
+        "--brief", metavar="FILE", help="Read a direct worker task from a UTF-8 file"
+    )
+    direct.add_argument(
         "--save-session",
         nargs="?",
         const="",
@@ -1207,6 +1312,11 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         help="After a reflection, start the next attempt when it chooses continue "
         "and its three checks hold (flags, default), or also require its utility "
         "score to reach 0.1 (utility, the behavior before this option)",
+    )
+    direct.add_argument(
+        "--captured-history",
+        choices=["on", "off"],
+        help="Store bounded, redacted captured tool results (default off)",
     )
     direct.add_argument(
         "--fixed-prefix",
@@ -1259,8 +1369,8 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     )
     direct.add_argument(
         "--output-format",
-        choices=["text", "json"],
-        help="text (default), or one JSON line with the run's record",
+        choices=["text", "json", "stream-json"],
+        help="text (default), one JSON line, or stream-json with --brief",
     )
     direct.add_argument(
         "--embedding-base-url",
@@ -1472,6 +1582,27 @@ def main() -> None:
         parser.validation_error = legacy.validation_error
     if args is None or unknown or not args.query or args.serve or args.daemon:
         args = parser.parse_args()
+    if args.brief is not None:
+        if (
+            args.query
+            or args.serve
+            or args.daemon
+            or args.reconfigure
+            or args.import_session
+        ):
+            parser.error("--brief cannot be combined with a task or another mode")
+        if args.output_format not in (None, "json", "stream-json"):
+            parser.error("--brief requires json or stream-json output")
+        from localmelo.support.cli.worker_contract import read_brief
+
+        try:
+            args.query = [read_brief(args.brief)]
+        except ValueError as exc:
+            parser.error(f"--brief: {_one_line(str(exc))}")
+        if args.output_format is None:
+            args.output_format = "json"
+    elif args.output_format == "stream-json":
+        parser.error("--output-format stream-json requires --brief")
     _check_args(parser, args)
 
     if getattr(args, "gateway_login", False) or getattr(
@@ -1578,6 +1709,9 @@ def main() -> None:
         agent = _build_direct_mode_agent(
             args, options=options, tool_providers=tool_providers
         )
+        worker_args: dict[str, Any] = (
+            {"worker_brief": True} if args.brief is not None else {}
+        )
         code = _run_direct(
             agent,
             query,
@@ -1585,6 +1719,7 @@ def main() -> None:
             tool_providers,
             progress=args.progress,
             routine=args.routine,
+            **worker_args,
             **(
                 {"save_session": args.save_session, "parent_run": args.parent_run}
                 if args.save_session is not None
@@ -1800,6 +1935,14 @@ def _build_direct_mode_agent(
         parser.error("[agent] fixed_prefix must be a boolean")
     if getattr(args, "fixed_prefix", None) is None and budget_cfg.agent.fixed_prefix:
         options = dataclasses.replace(options, fixed_prefix=True)
+
+    if not isinstance(budget_cfg.agent.captured_history, bool):
+        parser.error("[agent] captured_history must be a boolean")
+    if (
+        getattr(args, "captured_history", None) is None
+        and budget_cfg.agent.captured_history
+    ):
+        options = dataclasses.replace(options, captured_history=True)
 
     if base_url:
         # Generic OpenAI-compatible endpoint
