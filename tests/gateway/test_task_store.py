@@ -22,7 +22,11 @@ from localmelo.support.gateway.task_store import (
     TaskStore,
     TaskStoreError,
 )
-from localmelo.support.sessions.store import SessionStore, SessionStoreError
+from localmelo.support.sessions.store import (
+    SCHEMA_VERSION,
+    SessionStore,
+    SessionStoreError,
+)
 
 
 class Clock:
@@ -127,7 +131,7 @@ async def test_open_creates_eight_tables_and_leaves_user_version_alone(
     store: SessionStore, clock: Clock
 ) -> None:
     assert await component_version(store, COMPONENT) is None
-    assert await one(store, "PRAGMA user_version") == (1,)
+    assert await one(store, "PRAGMA user_version") == (SCHEMA_VERSION,)
 
     tasks = TaskStore(store, clock=clock)
     assert await tasks.open() == SCHEDULER_VERSION
@@ -135,7 +139,7 @@ async def test_open_creates_eight_tables_and_leaves_user_version_alone(
     assert await component_version(store, COMPONENT) == SCHEDULER_VERSION
     # A second open is a no-op, not a second migration.
     assert await tasks.open() == SCHEDULER_VERSION
-    assert await one(store, "PRAGMA user_version") == (1,)
+    assert await one(store, "PRAGMA user_version") == (SCHEMA_VERSION,)
 
     objects = {
         row[0]
@@ -390,7 +394,7 @@ async def test_v1_migration_preserves_rows_and_pause_before_retention(
         "urgent",
         rank,
     )
-    assert await one(store, "PRAGMA user_version") == (1,)
+    assert await one(store, "PRAGMA user_version") == (SCHEMA_VERSION,)
 
 
 async def test_identity_retention(

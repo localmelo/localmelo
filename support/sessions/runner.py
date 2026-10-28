@@ -50,6 +50,7 @@ from localmelo.melo.schema import (
     split_thinking,
 )
 from localmelo.support.sessions.approvals import AskFunction
+from localmelo.support.sessions.attachments import TextAttachment, compose_user_text
 from localmelo.support.sessions.store import (
     APPROVAL_EVENT_TYPES,
     CAUSES,
@@ -68,6 +69,7 @@ from localmelo.support.sessions.store import (
     StoredEvent,
     TurnInfo,
     UnknownSessionError,
+    check_attachment_submission,
     process_holder,
     redacted_event,
 )
@@ -347,6 +349,7 @@ class SessionRunner:
         approval: ApprovalPolicy | None = None,
         title: str | None = None,
         routine: str | None = None,
+        attachments: Sequence[TextAttachment] = (),
     ) -> RunResult:
         """Run a turn of *text* in this task and return its RunResult.
 
@@ -361,7 +364,9 @@ class SessionRunner:
         propagates once the turn has ended, or at once when it comes while
         the turn ends, which then ends on its own.
         """
-        turn = await self._start(text, approval, title, None, routine, own_task=False)
+        turn = await self._start(
+            text, approval, title, None, routine, tuple(attachments), own_task=False
+        )
         if turn.finish is not None:  # stopped before its run began
             task = asyncio.current_task()
             assert task is not None
@@ -376,6 +381,7 @@ class SessionRunner:
         title: str | None = None,
         client_request_id: str | None = None,
         routine: str | None = None,
+        attachments: Sequence[TextAttachment] = (),
     ) -> TurnInfo:
         """Begin a turn of *text* and return it once its row exists.
 
@@ -387,7 +393,13 @@ class SessionRunner:
         and one used for another text ``SubmissionConflict``.
         """
         turn = await self._start(
-            text, approval, title, client_request_id, routine, own_task=True
+            text,
+            approval,
+            title,
+            client_request_id,
+            routine,
+            tuple(attachments),
+            own_task=True,
         )
         return turn.turn
 
@@ -411,16 +423,22 @@ class SessionRunner:
         title: str | None,
         client_request_id: str | None,
         routine: str | None,
+        attachments: tuple[TextAttachment, ...],
         *,
         own_task: bool,
     ) -> _Turn:
         self._check_open()
+        typed_text = text
+        if attachments:
+            if self._worker:
+                raise ValueError("worker sessions do not support attachments")
+            text = compose_user_text(text, attachments)
         if self._worker and self._last is not None:
             raise ValueError("worker sessions have only one turn")
         # 0. The key decides before the busy check, so a repeat of the
         # running turn gets that turn.
         if client_request_id is not None:
-            await self._check_key(text, client_request_id)
+            await self._check_key(text, client_request_id, attachments, typed_text)
         # 1. Checks.
         if not isinstance(text, str) or not text.strip():
             raise ValueError("text must not be blank")
@@ -436,7 +454,7 @@ class SessionRunner:
                 # A begin_turn under way may accept this very key: once it
                 # has ended, the key decides again.
                 await asyncio.wait({begin})
-                await self._check_key(text, client_request_id)
+                await self._check_key(text, client_request_id, attachments, typed_text)
             elif self._loading.locked():
                 # An undo or a resume loads the conversation: the turn runs
                 # on the conversation it leaves.
@@ -451,7 +469,16 @@ class SessionRunner:
         assert task is not None
         caller = None if own_task else task
         begin = asyncio.ensure_future(
-            self._begin_turn(text, approval, title, client_request_id, routine, caller)
+            self._begin_turn(
+                text,
+                approval,
+                title,
+                client_request_id,
+                routine,
+                caller,
+                attachments,
+                typed_text,
+            )
         )
         self._begin = begin
         try:
@@ -470,9 +497,16 @@ class SessionRunner:
                 raise
             return turn  # run_turn returns its RunResult
 
-    async def _check_key(self, text: str, client_request_id: str) -> None:
+    async def _check_key(
+        self,
+        text: str,
+        client_request_id: str,
+        attachments: tuple[TextAttachment, ...],
+        typed_text: str,
+    ) -> None:
         """Step 0: raise what ``begin_turn`` step 1 would for this key."""
         found = await self._store.get_submission(self._session_id, client_request_id)
+        check_attachment_submission(found, attachments, typed_text)
         check_submission(found, text)
 
     async def _begin_turn(
@@ -483,6 +517,8 @@ class SessionRunner:
         client_request_id: str | None,
         routine: str | None,
         caller: asyncio.Task[Any] | None,
+        attachments: tuple[TextAttachment, ...],
+        typed_text: str,
     ) -> _Turn:
         try:
             # The last turn's end must be stored before the next turn: in a
@@ -496,6 +532,8 @@ class SessionRunner:
                 client_request_id=client_request_id,
                 new_session=self._new_session if self._session_id is None else None,
                 create_scope=self._create_scope_key,
+                attachments=attachments,
+                typed_text=typed_text if attachments else None,
             )
             self._create_scope_key = False
         finally:
@@ -1259,12 +1297,18 @@ class SessionRunner:
         pairs: list[tuple[TurnInfo, str, str]] = []
         total = 0
         for turn in await self._eligible_turns(session_id, max_turns, above=above):
-            user = clip_session_text(turn.user_text)
+            user = (
+                turn.user_text
+                if turn.attachments
+                else clip_session_text(turn.user_text)
+            )
             # As _record_answer derives the live answer, from the stored copy.
             answer = clip_session_text(
                 answer_text(turn.status, split_thinking(turn.answer)[1])
             )
             if total + len(user) + len(answer) > RESUME_BUDGET_CHARS:
+                if turn.attachments:
+                    continue
                 break
             total += len(user) + len(answer)
             pairs.append((turn, user, answer))
