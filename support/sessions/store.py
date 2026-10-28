@@ -75,6 +75,7 @@ from localmelo.melo.schema import (
     decode_base64,
     split_thinking,
 )
+from localmelo.support.sessions.display import home_label
 from localmelo.support.sessions.submissions import (
     WITHDRAWN_ERROR,
     SubmissionConflict,
@@ -104,7 +105,7 @@ CLI_SESSIONS_DB: Final = "~/.cache/localmelo/cli/sessions.db"
 RETENTION_SWEEP_S: Final = 86_400.0
 # Seconds a turn's lease lasts; the runner refreshes it every LEASE_S / 3.
 LEASE_S: Final = 30.0
-SESSION_KINDS: Final = frozenset({"chat", "front", "front_bg", "task"})
+SESSION_KINDS: Final = frozenset({"chat", "front", "front_bg", "task", "worker"})
 # Event types the scheduler owns; only a gateway file stores them.
 RESERVED_EVENT_PREFIXES: Final = ("task.", "sched.", "attention.")
 Cause = Literal["run", "user_stop", "closed", "shutdown", "crash", "takeover", "park"]
@@ -150,7 +151,7 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         "turn.finished": frozenset({"turn", "turn_id", "status", "error", "cause"}),
         "turn.undone": frozenset({"turn", "turn_id"}),
         "session.title": frozenset({"title"}),
-        "session.updated": frozenset({"model", "workspace", "meta"}),
+        "session.updated": frozenset({"model", "workspace", "workspace_label", "meta"}),
         "approval.requested": frozenset(
             {
                 "request_id",
@@ -1688,6 +1689,11 @@ class SessionStore:
                         {
                             "model": info.model,
                             "workspace": info.workspace,
+                            "workspace_label": (
+                                ""
+                                if info.workspace is None
+                                else home_label(info.workspace)
+                            ),
                             "meta": info.meta,
                         },
                         now,

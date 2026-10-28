@@ -13,10 +13,13 @@
  */
 
 import { renderMarkdown } from "./markdown.mjs";
+import { setupSettings } from "./settings.mjs";
 import {
   activity,
   applyEvent,
   approvalTag,
+  canContinue,
+  canRetry,
   cleanOutput,
   formatBytes,
   formatDuration,
@@ -27,6 +30,7 @@ import {
   newView,
   printable,
   reflectionLine,
+  statusLine,
   statusText,
   toolState,
   turnDuration,
@@ -63,6 +67,10 @@ let messageSnapshot = "";
 const liveNodes = new Map();
 // The tool cards still running, so `tick` can move their clocks.
 const runningCards = new Map();
+// Request state survives ordinary SSE-driven rerenders, including the guard.
+const approvalStates = new Map();
+let earlierLoading = false;
+let retrying = false;
 
 // ── Small helpers ──
 
@@ -130,7 +138,7 @@ function notify(message, { sticky = false, kind = "" } = {}) {
   }
 }
 
-/** One `/api` call; an API v2 error keeps its code and message. */
+/** One `/api` call; an API v2 error keeps its code, message and details. */
 async function api(path, { body, method } = {}) {
   const response = await fetch("/api" + path, {
     method: method ?? (body ? "POST" : "GET"),
@@ -143,6 +151,7 @@ async function api(path, { body, method } = {}) {
     );
     error.status = response.status;
     error.code = payload?.error?.code || "";
+    error.details = payload?.error?.details;
     throw error;
   }
   return payload;
@@ -480,6 +489,7 @@ async function openSession(id, { saveCurrent = true, scroll = true } = {}) {
     return;
   }
   if (saveCurrent) saveDraft();
+  if (S.activeId !== id) approvalStates.clear();
   closeStream();
   S.activeId = id;
   S.view = newView(id);
@@ -526,6 +536,7 @@ function newChat({ saveCurrent = true } = {}) {
   // Closing the last chat has already deleted its draft: saving the composer
   // then would write that chat's text over a waiting new-chat draft.
   if (saveCurrent) saveDraft();
+  if (S.activeId !== null) approvalStates.clear();
   closeStream();
   S.activeId = null;
   S.view = null;
@@ -563,6 +574,8 @@ function startStream(id) {
       return;
     }
     applyOutcome(applyEvent(S.view, frame));
+    if (frame.type === "approval.requested") refreshApproval(id, String(frame.data?.request_id ?? ""));
+    if (frame.type === "approval.resolved") approvalStates.delete(String(frame.data?.request_id ?? ""));
     noteFrame(frame);
     renderMessages(false);
     syncUI();
@@ -583,6 +596,20 @@ function startStream(id) {
       scheduleReconnect();
     }
   };
+}
+
+async function refreshApproval(id, requestId) {
+  try {
+    const detail = await api(`/sessions/${encodeURIComponent(id)}`);
+    if (S.activeId !== id || !S.view?.pending.has(requestId)) return;
+    const request = (detail.pending_approvals ?? []).find((item) => String(item.request_id) === requestId);
+    if (request) S.view.pending.set(requestId, {...S.view.pending.get(requestId), ...request});
+    renderMessages(false);
+  } catch (error) {
+    if (S.activeId === id && S.view?.pending.has(requestId)) {
+      notify("Could not load approval details: " + error.message, {sticky: true});
+    }
+  }
 }
 
 function closeStream() {
@@ -637,11 +664,8 @@ function applyOutcome(outcome) {
   if (outcome.clientRequestId) {
     for (const [slot, entry] of Object.entries(S.outbox)) {
       if (entry.clientRequestId !== outcome.clientRequestId) continue;
-      // A text this page restored to the draft on a failed or unknown send
-      // is now a real turn, so it is not a draft any more.
-      if (entry.state === "failed" || entry.state === "checking") {
-        forgetDraft(slot, entry.text);
-      }
+      // An accepted message is no longer a draft, including during a retry.
+      forgetDraft(slot, entry.text);
       delete S.outbox[slot];
     }
   }
@@ -653,11 +677,12 @@ function applyOutcome(outcome) {
     // The sidebar's row carries the title; the next 4 s poll is too late.
     renderSessions();
   }
-  if (outcome.model !== undefined || outcome.workspace !== undefined) {
+  if (outcome.model !== undefined || outcome.workspace !== undefined || outcome.workspaceLabel !== undefined) {
     const session = S.sessions.find((item) => item.id === S.activeId);
     if (session) {
       if (outcome.model !== undefined) session.model = outcome.model;
       if (outcome.workspace !== undefined) session.workspace = outcome.workspace;
+      if (outcome.workspaceLabel !== undefined) session.workspace_label = outcome.workspaceLabel;
     }
     sessionListSnapshot = "";
     renderSessions();
@@ -706,6 +731,7 @@ function viewSnapshot() {
     turn.status,
     turn.cause,
     turn.answer,
+    turn.result,
     turn.undone,
     turn.runningHere,
     turn.items,
@@ -721,13 +747,16 @@ function viewSnapshot() {
     S.activeId,
     view?.session?.title,
     view?.session?.held,
-    view?.pending?.size ?? 0,
+    [...(view?.pending?.values() ?? [])],
+    view?.hasEarlier ?? false,
+    earlierLoading,
     turns,
     S.outbox[S.activeId ?? "new"] ?? null,
   ]);
 }
 
-function renderMessages(forceScroll = false) {
+function renderMessages(forceScroll = false, preserveScroll = false) {
+  persist(KEY + "-outbox", S.outbox, "sessionStorage");
   const scroller = $("scroll");
   const nearBottom =
     scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 100;
@@ -737,21 +766,90 @@ function renderMessages(forceScroll = false) {
     if (forceScroll) scroller.scrollTop = scroller.scrollHeight;
     return;
   }
-  messageSnapshot = snapshot;
-  liveNodes.clear();
-  runningCards.clear();
   const view = S.view;
   const turns = view?.turns ?? [];
   const outbox = pendingOutbox();
   const container = $("messages");
+  const focus = document.activeElement;
+  let focusCard = focus;
+  while (focusCard && focusCard !== container && !focusCard.dataset?.requestId) focusCard = focusCard.parentElement;
+  const focusRequest = focusCard !== container ? focusCard?.dataset?.requestId : null;
+  const focusKey = focusRequest ? focus?.dataset?.approvalFocus : null;
+  const focusState = focusRequest ? approvalStates.get(focusRequest) : null;
+  if (focusState?.composing && view?.pending.has(focusRequest)) return;
+  const selection = focusKey === "reason" ? [focus.selectionStart, focus.selectionEnd, focus.selectionDirection] : null;
+  messageSnapshot = snapshot;
+  liveNodes.clear();
+  runningCards.clear();
   const nodes = turns.map((turn) => turnNode(turn));
+  if (view?.hasEarlier) {
+    const earlier = button("earlier-turns link-button", earlierLoading ? "Loading earlier turns…" : "Show earlier turns", loadEarlier);
+    earlier.disabled = earlierLoading;
+    nodes.unshift(earlier);
+  }
   if (outbox && !turns.some((turn) => turn.clientRequestId === outbox.clientRequestId)) {
     nodes.push(outboxNode(outbox, S.activeId ?? "new"));
   }
   container.replaceChildren(...nodes);
+  if (focusKey && focusRequest) {
+    const card = document.getElementById(`approval-card-${focusRequest}`);
+    const replacement = card?.querySelector(`[data-approval-focus="${focusKey}"]`);
+    if (replacement && !replacement.disabled) {
+      replacement.focus({preventScroll: true});
+      if (selection && selection[0] !== null) replacement.setSelectionRange?.(...selection);
+    }
+  }
   $("welcome").hidden = nodes.length > 0 || !!S.activeId;
-  if (forceScroll || nearBottom) scroller.scrollTop = scroller.scrollHeight;
+  if (forceScroll || (nearBottom && !preserveScroll)) scroller.scrollTop = scroller.scrollHeight;
   else scroller.scrollTop = oldTop;
+  updateApprovalBar();
+}
+
+async function loadEarlier() {
+  const view = S.view;
+  const id = S.activeId;
+  const first = view?.turns[0];
+  if (!view || !id || !first || earlierLoading) return;
+  const scroller = $("scroll");
+  const restoreFocus = document.activeElement?.classList?.contains("earlier-turns") === true;
+  earlierLoading = true;
+  renderMessages(false, true);
+  if (restoreFocus) {
+    scroller.tabIndex = -1;
+    scroller.focus({preventScroll: true});
+  }
+  try {
+    const page = await api(`/sessions/${encodeURIComponent(id)}/turns?before=${encodeURIComponent(first.turn)}&limit=10&events=true`);
+    if (S.view !== view || S.activeId !== id) return;
+    // History must not change the active cursor, grants, pending approvals or outbox.
+    const history = newView(id);
+    history.turns = (page.turns ?? []).map((row) => newTurn(row));
+    for (const row of page.turns ?? []) {
+      for (const frame of row.events ?? []) applyEvent(history, frame, {ignoreCursor: true});
+    }
+    const existing = new Set(view.turns.map((turn) => turn.turn));
+    view.turns = [...history.turns.filter((turn) => !existing.has(turn.turn)), ...view.turns];
+    view.hasEarlier = page.has_earlier === true;
+    const top = scroller.scrollTop;
+    const height = scroller.scrollHeight;
+    earlierLoading = false;
+    renderMessages(false, true);
+    scroller.scrollTop = top + scroller.scrollHeight - height;
+  } catch (error) {
+    if (S.view === view) notify("Could not load earlier turns: " + error.message, {sticky: true});
+  } finally {
+    earlierLoading = false;
+    renderMessages(false, true);
+    if (restoreFocus && S.view === view && S.activeId === id && document.activeElement === scroller) {
+      const children = Array.from($("messages").children);
+      const target = children.find((node) => node.classList.contains("earlier-turns"))
+        || children.find((node) => node.classList.contains("turn"));
+      if (target) {
+        if (!target.classList.contains("earlier-turns")) target.tabIndex = -1;
+        target.focus({preventScroll: true});
+      }
+    }
+  }
 }
 
 function turnNode(turn) {
@@ -791,8 +889,8 @@ function assistantNode(turn) {
   if (!turn.finishedAt || turn.items.length > 0) article.append(workGroup(turn));
   if (turn.finishedAt && turn.status !== "completed") {
     if (turn.answer) {
-      article.append(answerNode(turn.answer));
       article.append(el("p", "turn-caption", "Best effort"));
+      article.append(answerNode(turn.answer));
     }
     article.append(statusNode(turn));
   } else if (turn.answer) {
@@ -829,12 +927,72 @@ function actionsNode(turn) {
 }
 
 function statusNode(turn) {
-  const text = statusText(turn.status, turn.cause);
-  const mark = text.severity === "error" ? "[x]" : text.severity === "ok" ? "[ok]" : "[-]";
-  const node = el("p", "turn-status", `${mark} ${text.title}.`);
-  node.dataset.severity = text.severity;
-  if (turn.error) node.title = turn.error;
+  const info = statusText(turn.status, turn.cause);
+  const stopped = turn.status === "cancelled" || (turn.status === "crashed" && turn.cause === "crash");
+  const node = el("div", stopped ? "turn-status stopped-line" : "failure-card");
+  node.dataset.severity = info.severity;
+  node.append(el("p", "failure-title", `${stopped ? "[-]" : info.severity === "error" ? "[x]" : "[!]"} ${info.title}.`));
+  const error = String(turn.result?.error || turn.error || "");
+  if (!stopped && error) node.append(el("p", "failure-error", cleanOutput(error).split("\n")[0]));
+  if (!stopped) {
+    let hint = "";
+    if (turn.status === "budget_exhausted") hint = "Continue gives it a new step budget; Try again starts over.";
+    if (turn.status === "stuck") hint = "melo repeated itself. Rephrase the request, or try again.";
+    if (turn.status === "setup_error") hint = "An MCP server failed to start.";
+    if (turn.status === "crashed" && turn.cause === "run") hint = "This is a bug in localmelo. The log is in the terminal running melo --serve, or in ~/.localmelo/logs/gateway.stderr.log when it runs as a service.";
+    if (turn.status === "provider_error") {
+      const backend = S.health?.model?.backend;
+      hint = ["mlc", "ollama", "vllm", "sglang"].includes(backend)
+        ? `Is it running at ${S.health?.model_server?.url_label || "the configured server"}?`
+        : "Check the API key and the model name.";
+    }
+    if (hint) node.append(el("p", "failure-hint", hint));
+    if (turn.status === "provider_error") node.append(button("link-button", "Open settings", () => openSettings()));
+  }
+  const actions = el("div", "failure-actions");
+  const newest = S.view?.turns[S.view.turns.length - 1] === turn;
+  if (canContinue(turn, newest)) actions.append(button("link-button", "Continue", () => queueMessage("Continue the task from where you stopped.")));
+  if (canRetry(turn, newest)) {
+    const retry = button("link-button", "Try again", () => retryTurn(turn));
+    retry.disabled = retrying;
+    retry.title = "Run this message again from the start. Files it changed stay changed.";
+    actions.append(retry);
+  }
+  if (!stopped) {
+    actions.append(button("link-button", "Copy error", async () => {
+      try { await navigator.clipboard.writeText(`${statusLine(turn.status, error)}\nrun ${turn.runId}`); }
+      catch { notify("Clipboard unavailable. Select the error text to copy it."); }
+    }));
+  }
+  node.append(actions);
+  if (!stopped) {
+    const details = el("details", "failure-details");
+    details.append(el("summary", "", "Details"));
+    const result = turn.result ?? {};
+    const fields = [
+      `Status: ${turn.status}`, `Cause: ${turn.cause || "run"}`,
+      `Error: ${cleanOutput(error) || "no error message"}`,
+      `Steps: ${result.steps ?? turn.step ?? 0}`, `Attempts: ${result.attempts ?? turn.attempt ?? 0}`,
+      `Tool calls: ${result.n_tool ?? 0}`, `Tokens: ${turn.outputTokens}`,
+      `Duration: ${formatDuration(turnDuration(turn))}`, `Run: ${turn.runId}`,
+    ];
+    details.append(el("pre", "", fields.join("\n")));
+    node.append(details);
+  }
   return node;
+}
+
+async function retryTurn(turn) {
+  const id = S.activeId;
+  if (!id || retrying || runningTurn() !== null || pendingOutbox() || !canRetry(turn, S.view?.turns[S.view.turns.length - 1] === turn)) return;
+  retrying = true;
+  try {
+    await api(`/sessions/${encodeURIComponent(id)}/retry`, {body: {turn_id: turn.id}});
+  } catch (error) {
+    notify("Could not retry the turn: " + error.message, {sticky: true});
+  } finally {
+    retrying = false;
+  }
 }
 
 function workGroup(turn) {
@@ -849,7 +1007,11 @@ function workGroup(turn) {
   group.addEventListener("toggle", () => {
     if (group.open !== open) turn.userToggledGroup = group.open;
   });
-  for (const item of turn.items) group.append(itemNode(item, turn));
+  for (const item of turn.items) {
+    group.append(itemNode(item, turn));
+    const request = item.pendingRequestId && S.view?.pending.get(item.pendingRequestId);
+    if (request) group.append(approvalCard(request));
+  }
   if (!turn.finishedAt) group.append(liveRow(turn));
   return group;
 }
@@ -903,6 +1065,188 @@ function itemNode(item, turn) {
     }
     default:
       return el("div", "");
+  }
+}
+
+function approvalNow() {
+  return globalThis.performance?.now?.() ?? Date.now();
+}
+
+function approvalCard(request) {
+  const id = String(request.request_id);
+  let state = approvalStates.get(id);
+  if (!state) {
+    state = {mountedAt: approvalNow(), deny: false, reason: "", showAll: false, submitting: false};
+    approvalStates.set(id, state);
+  }
+  const card = el("section", "approval-card");
+  card.id = `approval-card-${id}`;
+  card.dataset.requestId = id;
+  card.setAttribute("role", "region");
+  card.setAttribute("aria-label", "Approval needed");
+  const tool = String(request.tool_name || "tool");
+  const args = request.arguments || {};
+  const workspace = request.workspace_label || S.view?.session?.workspace_label || "the workspace";
+  let title = `${tool} wants to run with these arguments:`;
+  let content = JSON.stringify(args, null, 2);
+  if (tool === "shell_exec") {
+    title = `shell_exec wants to run a command in ${workspace}:`;
+    content = typeof args.command === "string" ? args.command : JSON.stringify(args.command ?? "");
+  } else if (tool === "python_exec") {
+    title = `python_exec wants to run Python in ${workspace}:`;
+    content = String(args.code ?? "");
+  } else if (tool === "file_write") {
+    const target = request.target;
+    const path = target?.path_label || String(args.path ?? "the file");
+    content = String(args.content ?? "");
+    title = target
+      ? target.exists
+        ? `file_write wants to overwrite ${path} (${formatBytes(target.size_bytes)}) with ${content.length} chars:`
+        : `file_write wants to create ${path} (${content.length} chars):`
+      : `file_write wants to write ${path} (checking target):`;
+  }
+  card.append(el("p", "approval-title", title));
+  const lines = content.split("\n");
+  const canFold = tool === "python_exec" || tool === "file_write";
+  card.append(el("pre", "approval-content", !canFold || state.showAll ? content : lines.slice(0, 20).join("\n")));
+  if (canFold && !state.showAll && lines.length > 20) {
+    card.append(button("link-button", `Show all ${lines.length} lines`, () => {
+      state.showAll = true;
+      messageSnapshot = "";
+      renderMessages(false);
+    }));
+  }
+  const actions = el("div", "approval-actions");
+  const denyView = el("div", "deny-view");
+  const once = button("secondary-button", "Allow once", () => answerApproval(request, state, "once"));
+  once.dataset.approvalOnce = "";
+  once.dataset.approvalFocus = "once";
+  const session = button("secondary-button", `Allow every ${tool} call in this session`, () => answerApproval(request, state, "session"));
+  session.dataset.approvalFocus = "session";
+  const deny = button("secondary-button", "Deny…", () => {
+    state.deny = true;
+    actions.hidden = true;
+    denyView.hidden = false;
+    reason.focus();
+  });
+  deny.dataset.approvalDeny = "";
+  deny.dataset.approvalFocus = "deny";
+  actions.append(once, session, deny);
+  card.append(actions);
+  if (tool === "shell_exec" || tool === "python_exec") {
+    const kind = tool === "shell_exec" ? "shell command" : "Python code";
+    card.append(el("p", "approval-warning", `“Allow every” lets any ${kind} run without asking for the rest of this session. Commands can reach files outside ${workspace}.`));
+  }
+  const label = el("label", "", "Tell melo why (optional)");
+  const reason = el("input", "deny-reason");
+  reason.value = state.reason;
+  reason.dataset.approvalFocus = "reason";
+  reason.addEventListener("compositionstart", () => { state.composing = true; });
+  reason.addEventListener("compositionend", () => {
+    state.composing = false;
+    state.reason = reason.value.slice(0, 500);
+    messageSnapshot = "";
+    renderMessages(false);
+  });
+  reason.maxLength = 500;
+  reason.setAttribute("aria-label", "Tell melo why (optional)");
+  const counter = el("span", "deny-counter", `${state.reason.length} / 500`);
+  reason.addEventListener("input", () => {
+    state.reason = reason.value.slice(0, 500);
+    counter.textContent = `${state.reason.length} / 500`;
+  });
+  const confirm = button("secondary-button", "Deny", () => answerApproval(request, state, "deny"));
+  const back = button("link-button", "Back", () => {
+    state.deny = false;
+    denyView.hidden = true;
+    actions.hidden = false;
+    deny.focus();
+  });
+  reason.addEventListener("keydown", (event) => {
+    if (event.isComposing || event.keyCode === 229) return;
+    if (event.key === "Enter") {
+      event.preventDefault();
+      event.stopPropagation();
+      answerApproval(request, state, "deny");
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      back.click();
+    }
+  });
+  label.append(reason);
+  denyView.append(label, counter, confirm, back);
+  denyView.hidden = !state.deny;
+  actions.hidden = state.deny;
+  card.append(denyView);
+  if (request.arguments_complete !== true) {
+    card.append(el("p", "approval-warning", request.arguments_complete === false
+      ? "Approval arguments were truncated or changed; they cannot safely be allowed here. You can deny or stop the run."
+      : "Complete approval details are not available; allow is disabled."));
+  }
+  if (request.arguments_complete !== true || (tool === "file_write" && !request.target)) {
+    card.append(button("link-button", "Reload approval details", () => refreshApproval(S.activeId, id)));
+  }
+  const controls = [once, session, deny, confirm];
+  const enable = () => {
+    const waiting = approvalNow() - state.mountedAt < 500;
+    const unavailable = request.arguments_complete !== true || (tool === "file_write" && !request.target);
+    for (const control of controls) control.disabled = waiting || state.submitting || (unavailable && (control === once || control === session));
+  };
+  enable();
+  setTimeout(enable, Math.max(0, 500 - (approvalNow() - state.mountedAt)));
+  return card;
+}
+
+async function answerApproval(request, state, choice) {
+  const id = String(request.request_id);
+  if (state.submitting || approvalNow() - state.mountedAt < 500 || !S.view?.pending.has(id)) return;
+  if (choice !== "deny" && (request.arguments_complete !== true || (request.tool_name === "file_write" && !request.target))) return;
+  state.submitting = true;
+  messageSnapshot = "";
+  renderMessages(false);
+  try {
+    await api(`/approvals/${encodeURIComponent(id)}`, {
+      body: {choice, ...(choice === "deny" ? {reason: state.reason} : {})},
+    });
+  } catch (error) {
+    state.submitting = false;
+    notify("Could not answer approval: " + error.message, {sticky: true});
+    messageSnapshot = "";
+    renderMessages(false);
+  }
+}
+
+function updateApprovalBar() {
+  const bar = $("approval-bar");
+  const request = S.view?.pending.values().next().value;
+  if (!request) { bar.hidden = true; return; }
+  const card = document.getElementById(`approval-card-${request.request_id}`);
+  const scroller = $("scroll");
+  if (!card || !card.getBoundingClientRect || !scroller.getBoundingClientRect) {
+    bar.hidden = false;
+    return;
+  }
+  const bounds = card.getBoundingClientRect();
+  const area = scroller.getBoundingClientRect();
+  bar.hidden = bounds.bottom > area.top && bounds.top < area.bottom;
+}
+
+function goToApproval() {
+  const request = S.view?.pending.values().next().value;
+  if (!request) return;
+  const card = document.getElementById(`approval-card-${request.request_id}`);
+  if (!card) return;
+  const group = card.closest(".work-group");
+  if (group) group.open = true;
+  card.scrollIntoView?.({block: "center"});
+  const once = card.querySelector("[data-approval-once]");
+  if (once && !once.disabled) once.focus();
+  else if (once) {
+    const state = approvalStates.get(String(request.request_id));
+    setTimeout(() => {
+      if (document.activeElement === $("approval-go") && !once.disabled) once.focus();
+    }, Math.max(0, 500 - (approvalNow() - state.mountedAt)));
   }
 }
 
@@ -1069,19 +1413,24 @@ function outboxNode(entry, slot) {
 // ── Sending, stopping, deleting ──
 
 async function send() {
-  const text = input.value.trim();
+  return queueMessage(input.value.trim(), {clearInput: true});
+}
+
+async function queueMessage(text, {clearInput = false} = {}) {
   const slot = S.activeId ?? "new";
   const previous = S.outbox[slot];
   if (!text || runningTurn() !== null) return;
-  if (previous && previous.state !== "failed") return;
+  if (previous && (previous.state !== "failed" || !clearInput)) return;
   // The same text, failed after a check of unknown outcome, keeps its key:
   // the store answers `repeated` instead of running it twice.
   const again = previous && previous.state === "failed" && previous.text === text;
   const key = again ? previous.clientRequestId : newClientRequestId();
   S.outbox[slot] = { clientRequestId: key, text, state: "sending", error: "" };
-  input.value = "";
-  saveDraft();
-  resizeInput();
+  if (clearInput) {
+    input.value = "";
+    saveDraft();
+    resizeInput();
+  }
   presence(true);
   renderMessages(true);
   syncUI();
@@ -1099,6 +1448,7 @@ async function submit(slot, key, text) {
           ...(S.newWorkspace ? { workspace: S.newWorkspace } : {}),
         },
       });
+      if (S.outbox[slot]?.clientRequestId !== key) return;
       const created = body.session;
       forgetDraft("new", text);
       delete S.outbox.new;
@@ -1124,6 +1474,7 @@ async function submit(slot, key, text) {
       body: { text, client_request_id: key },
     });
     // A repeat is accepted too, so either way the text is not a draft now.
+    if (S.outbox[slot]?.clientRequestId !== key) return;
     forgetDraft(sessionId, text);
     if (body.repeated === true) {
       // The key was accepted already: this is the turn it started, not a
@@ -1146,8 +1497,7 @@ async function submit(slot, key, text) {
     if (refused) {
       entry.state = "failed";
       entry.error = error.message;
-      // The outbox is memory only: the chat's saved draft is what survives
-      // a reload, and the composer shows it again.
+      // Keep the text in the draft as well as the tab's persisted outbox.
       keepDraft(slot, text);
       renderMessages(false);
       syncUI();
@@ -1170,6 +1520,7 @@ async function checkSubmission(slot, key) {
     const body = sessionId
       ? await api(`/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(key)}`)
       : await api(`/submissions/${encodeURIComponent(key)}`);
+    if (S.outbox[slot] !== entry || entry.clientRequestId !== key) return;
     const submission = body.submission ?? {};
     if (submission.state === "accepted") {
       forgetDraft(slot, entry.text);
@@ -1193,9 +1544,10 @@ async function checkSubmission(slot, key) {
     entry.state = "failed";
     entry.error = "";
     entry.unknown = true;
-    // Nothing in the outbox survives a reload; the draft does.
+    // Keep the text editable; the persisted key prevents a duplicate retry.
     keepDraft(slot, entry.text);
   } catch (error) {
+    if (S.outbox[slot] !== entry || entry.clientRequestId !== key) return;
     entry.state = "failed";
     entry.error = error.message;
     entry.unknown = true;
@@ -1212,23 +1564,17 @@ async function cancelSend(slot, entry) {
     : `/submissions/${encodeURIComponent(entry.clientRequestId)}/cancel`;
   try {
     await api(path, { body: { text: entry.text } });
+    if (S.outbox[slot] !== entry) return;
     delete S.outbox[slot];
-    if (!input.value) {
-      input.value = entry.text;
-      saveDraft();
-      resizeInput();
-    }
+    keepDraft(slot, entry.text);
     renderMessages(false);
     syncUI();
   } catch (error) {
+    if (S.outbox[slot] !== entry) return;
     if (error.code === "submission_withdrawn") {
       // The store never took it, so the text comes back to the composer.
       delete S.outbox[slot];
-      if (!input.value) {
-        input.value = entry.text;
-        saveDraft();
-        resizeInput();
-      }
+      keepDraft(slot, entry.text);
       renderMessages(false);
       syncUI();
       return;
@@ -1381,11 +1727,17 @@ function sidebar(open) {
   }
 }
 
-function settingsNotice() {
-  notify(
-    "Connection settings are not on this page yet. Set your model with melo --reconfigure, then reload.",
-  );
-}
+const openSettings = setupSettings({
+  api,
+  onSaved: async () => {
+    try {
+      S.health = await api("/health");
+      syncUI();
+    } catch (error) {
+      notify("Settings saved, but health could not be refreshed: " + error.message, {sticky: true});
+    }
+  },
+});
 
 // ── The clock ──
 
@@ -1416,6 +1768,13 @@ function tick() {
 
 async function init() {
   S.drafts = stored(KEY + "-drafts", {}, "sessionStorage");
+  const savedOutbox = stored(KEY + "-outbox", {}, "sessionStorage");
+  S.outbox = {};
+  for (const [slot, entry] of Object.entries(savedOutbox)) {
+    if (!entry || typeof entry !== "object" || typeof entry.clientRequestId !== "string" || typeof entry.text !== "string") continue;
+    if (!["sending", "checking", "failed"].includes(entry.state)) continue;
+    S.outbox[slot] = {...entry, state: entry.state === "failed" ? "failed" : "checking"};
+  }
   input.value = S.drafts.new || "";
   resizeInput();
   sidebar(false);
@@ -1429,7 +1788,7 @@ async function init() {
   if (!S.online) {
     notify("Could not reach the gateway. Check that the gateway is running.", { sticky: true });
   } else if (S.health && S.health.configured === false) {
-    notify("No model is configured yet. Run melo --reconfigure to connect one.", { sticky: true });
+    notify("No model is configured yet. Open connection settings to connect one.", { sticky: true });
   } else if (S.health?.sessions && S.health.sessions.store !== "ok") {
     notify(S.health.sessions.store_error || "Chats are unavailable.", { sticky: true });
   }
@@ -1455,6 +1814,9 @@ async function init() {
     renderSessions();
     renderMessages(true);
     syncUI();
+  }
+  for (const [slot, entry] of Object.entries(S.outbox)) {
+    if (entry.state === "checking") await checkSubmission(slot, entry.clientRequestId);
   }
   setInterval(tick, 1000);
   setInterval(() => {
@@ -1486,13 +1848,15 @@ input.addEventListener("input", () => {
 for (const id of ["new-btn", "settings-btn", "connection-btn", "model-btn", "setup-btn"]) {
   const node = $(id);
   if (id === "new-btn") node.addEventListener("click", () => newChat());
-  else node.addEventListener("click", settingsNotice);
+  else node.addEventListener("click", openSettings);
 }
 $("close-settings").addEventListener("click", () => {
   const dialog = $("settings-dialog");
   if (dialog?.close) dialog.close();
 });
 $("stop-btn").addEventListener("click", stop);
+$("approval-go").addEventListener("click", goToApproval);
+$("scroll").addEventListener("scroll", updateApprovalBar);
 $("level-btn").addEventListener("click", () => {
   if (!activeSession()) return;
   showLevelMenu(!S.levelsOpen);
@@ -1533,16 +1897,25 @@ document.addEventListener("keydown", (event) => {
   }
   if (event.key !== "Escape") return;
   // Close what is open first; a stop is the last thing Escape does.
+  if ($("settings-dialog")?.open) {
+    event.preventDefault();
+    $("settings-dialog").close?.();
+    return;
+  }
   if (S.levelsOpen) {
     showLevelMenu(false);
     return;
   }
-  if ($("app").classList.contains("sidebar-open")) {
-    sidebar(false);
+  for (const [id, state] of approvalStates) {
+    if (!state.deny || !S.view?.pending.has(id)) continue;
+    state.deny = false;
+    messageSnapshot = "";
+    renderMessages(false);
+    document.getElementById(`approval-card-${id}`)?.querySelector("[data-approval-deny]")?.focus();
     return;
   }
-  if ($("settings-dialog")?.open) {
-    $("settings-dialog").close?.();
+  if ($("app").classList.contains("sidebar-open")) {
+    sidebar(false);
     return;
   }
   if (runningTurn() !== null) stop();

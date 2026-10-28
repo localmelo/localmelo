@@ -80,7 +80,8 @@ BASE_OPTIONS = [
 # R4's note writer (r4_spec.md Requirement 12), R5's recall flags, R6-lite's
 # admission flags, and U3 PR 4's unconfigured gateway boot (app_spec.md
 # "The lead's decisions" item 3). P5 moved --workspace from the interactive
-# UI to direct mode; the list is the same.
+# UI to direct mode; the list is the same. #108 adds four opt-in worker
+# recording/import options; the legacy exit-code assertions stay unchanged.
 LATER_OPTIONS = [
     "--progress",
     "--routine",
@@ -101,6 +102,13 @@ LATER_OPTIONS = [
     "--admit-on-outcome",
     "--keep-decision-text",
     "--allow-unconfigured",
+    "--save-session",
+    "--parent-run",
+    "--import-session",
+    "--title",
+    "--context-window",
+    "--output-reserve",
+    "--safety-margin",
 ]
 
 
@@ -209,7 +217,9 @@ async def test_the_only_change_on_the_wire_is_the_kind_header(
 
 def test_run_result_and_message_keep_their_fields() -> None:
     assert [
-        f.name for f in dataclasses.fields(RunResult) if f.name != "memory_stats"
+        f.name
+        for f in dataclasses.fields(RunResult)
+        if f.name not in ("memory_stats", "context_budget")
     ] == [
         "task_id",
         "status",

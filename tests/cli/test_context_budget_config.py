@@ -58,7 +58,7 @@ def test_full_and_partial_budgets_round_trip(
     config_path: Path, values: dict[str, int]
 ) -> None:
     cfg = Config(agent=AgentConfig(**values))
-    assert cfg._validate_agent() == []
+    assert bool(cfg._validate_agent()) == (len(values) != 3)
     save(cfg)
     text = config_path.read_text(encoding="utf-8")
     for name in ("context_window", "output_reserve", "safety_margin"):
@@ -142,3 +142,23 @@ def test_partial_budget_is_refused_before_session() -> None:
     cfg = Config(agent=AgentConfig(context_window=100))
     with pytest.raises(ValueError, match="positive integers"):
         configured_session_options(cfg)
+    with pytest.raises(ConfigError, match="context budget is missing"):
+        cfg.validate_or_raise()
+
+
+def test_explicit_session_budget_survives_unset_config() -> None:
+    opts = AgentOptions(context_window=1000, output_reserve=100, safety_margin=100)
+    assert configured_session_options(Config(), opts).context_window == 1000
+
+
+def test_invalid_ui_budget_flag_is_usage_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from argparse import Namespace
+    from localmelo.support.cli.launch import _configured
+
+    cfg = Config(
+        agent=AgentConfig(context_window=1000, output_reserve=100, safety_margin=100)
+    )
+    assert _configured(cfg, None, Namespace(safety_margin=950)) == 2
+    assert "melo: error:" in capsys.readouterr().err

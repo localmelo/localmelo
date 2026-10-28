@@ -20,6 +20,46 @@ def request(tool_name: str, path: str, root: str | None) -> ApprovalRequest:
     )
 
 
+def test_approval_reports_when_arguments_were_truncated() -> None:
+    pending = approval_json(
+        ApprovalRequest(
+            request_id="req",
+            run_id="",
+            call_id="call",
+            tool_name="shell_exec",
+            arguments={"command": "a" * 100_001},
+            preview="command",
+            workspace_root=None,
+        )
+    )
+    assert pending["arguments_complete"] is False
+    assert pending["arguments"]["command"].endswith("… [+1 chars]")
+    assert (
+        approval_json(request("shell_exec", "ls", None))["arguments_complete"] is True
+    )
+
+
+def test_approval_reports_converted_and_deep_arguments() -> None:
+    for arguments in (
+        {"x": (1, 2)},
+        {"x": float("nan")},
+        {"x": {1: "value"}},
+        {"x": {"y": "z" * 100_001}},
+    ):
+        pending = approval_json(
+            ApprovalRequest(
+                request_id="req",
+                run_id="",
+                call_id="call",
+                tool_name="custom",
+                arguments=arguments,
+                preview="",
+                workspace_root=None,
+            )
+        )
+        assert pending["arguments_complete"] is False
+
+
 def test_a_missing_file_target(tmp_path: Path) -> None:
     workspace = tmp_path / "ws"
     pending = approval_json(

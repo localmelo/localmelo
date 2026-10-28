@@ -41,12 +41,12 @@ RETRY_HOOK: contextvars.ContextVar[
 ] = contextvars.ContextVar("RETRY_HOOK", default=None)
 
 
-BUDGET_ACCOUNTING: contextvars.ContextVar[RequestAccounting | None] = (
-    contextvars.ContextVar("BUDGET_ACCOUNTING", default=None)
-)
-BUDGET_HOOK: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = (
-    contextvars.ContextVar("BUDGET_HOOK", default=None)
-)
+BUDGET_ACCOUNTING: contextvars.ContextVar[
+    tuple[object, RequestAccounting | None] | None
+] = contextvars.ContextVar("BUDGET_ACCOUNTING", default=None)
+BUDGET_HOOK: contextvars.ContextVar[
+    tuple[object, Callable[[dict[str, Any]], None]] | None
+] = contextvars.ContextVar("BUDGET_HOOK", default=None)
 
 
 class CallRecorder(Protocol):
@@ -392,7 +392,12 @@ class Chat:
 
     def _emit_context_budget(self, record: dict[str, Any] | None) -> None:
         """Notify the run sink once per attempted request, without exposing state."""
-        hook = BUDGET_HOOK.get() or self.on_context_budget
+        scoped = BUDGET_HOOK.get()
+        hook = (
+            scoped[1]
+            if scoped is not None and scoped[0] is self
+            else self.on_context_budget
+        )
         if record is not None and hook is not None:
             try:
                 hook(dict(record))
@@ -432,8 +437,13 @@ class Chat:
         """
         attempt = 1
         while True:
+            scoped = BUDGET_ACCOUNTING.get()
             accounting = (
-                (BUDGET_ACCOUNTING.get() or self._accounting)
+                (
+                    scoped[1]
+                    if scoped is not None and scoped[0] is self
+                    else self._accounting
+                )
                 if kind in ("plan", "reflect")
                 else None
             )

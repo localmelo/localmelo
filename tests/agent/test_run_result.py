@@ -53,7 +53,7 @@ SPEC_FIELDS = [
 
 # The dataclass gained R2's memory_stats; to_dict() omits it while it is None,
 # so SPEC_FIELDS stays the legacy JSON line's shape.
-DATACLASS_FIELDS = [*SPEC_FIELDS, "memory_stats"]
+DATACLASS_FIELDS = [*SPEC_FIELDS, "memory_stats", "context_budget"]
 
 
 class TestRunResult:

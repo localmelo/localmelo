@@ -69,8 +69,10 @@ class ScriptedServer:
     def __init__(self, replies: Iterable[dict[str, Any]]) -> None:
         self.replies: deque[dict[str, Any]] = deque(replies)
         self.bodies: list[Any] = []
+        self.raw_bodies: list[str] = []
 
     def handler(self, request: httpx.Request) -> httpx.Response:
+        self.raw_bodies.append(request.content.decode("utf-8"))
         self.bodies.append(json.loads(request.content))
         if not self.replies:
             raise AssertionError("no reply is scripted for this request")
@@ -386,6 +388,7 @@ async def record_run(
     scenario: Scenario,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    raw_bodies: list[str] | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """Run *scenario* on *provider* and return its RunResult and document."""
     work = tmp_path / "work"
@@ -418,6 +421,8 @@ async def record_run(
             "history": history,
         }
     )
+    if raw_bodies is not None:
+        raw_bodies.extend(server.raw_bodies)
     return result, document
 
 
@@ -439,12 +444,17 @@ async def test_legacy_run_matches_its_golden(
 async def test_default_two_step_wire_and_result_remain_golden(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    raw: list[str] = []
     result, document = await record_run(
-        "openai", _usage_details(), tmp_path, monkeypatch
+        "openai", _usage_details(), tmp_path, monkeypatch, raw
     )
-    assert len(document["requests"]) == 2
+    golden = json.loads((GOLDEN_DIR.parent / "context_budget_wire.json").read_text())
+    assert len(raw) == 2
     assert "context_budget" not in result.to_dict()
-    check_golden(GOLDEN_DIR / "openai_usage_details.json", document)
+    assert raw == golden["requests"]
+    assert json.dumps(document["result"], ensure_ascii=False) == golden["result"]
+    with pytest.raises(AssertionError):
+        assert [raw[0] + " ", raw[1]] == golden["requests"]
 
 
 def test_every_legacy_golden_file_has_its_run() -> None:

@@ -332,6 +332,25 @@ export function statusText(status, cause = "") {
   return {word: unknown, severity: "warn", title: unknown};
 }
 
+/** `status_line`: one bounded line, without the user's task text. */
+export function statusLine(status, error) {
+  let reason = String(error ?? "").split(/\s+/).filter(Boolean).join(" ");
+  const characters = Array.from(reason);
+  if (characters.length > 500) reason = characters.slice(0, 497).join("") + "...";
+  return `melo: run ended with status ${status}: ${reason || "no error message"}`;
+}
+
+/** Continue keeps tool side effects and is only safe to offer on the newest turn. */
+export function canContinue(turn, newest) {
+  return newest && !!turn.finishedAt && !turn.undone && Number(turn.result?.n_tool) > 0 &&
+    ["budget_exhausted", "gate_stopped", "provider_error", "timeout", "cancelled"].includes(turn.status);
+}
+
+/** A retry undoes the newest finished turn, never an earlier or undone one. */
+export function canRetry(turn, newest) {
+  return newest && !turn.undone && !!turn.finishedAt && turn.status !== "completed";
+}
+
 /** `approval_tag`: the short and long text of how an approval ended, or null. */
 export function approvalTag(status, errorCategory, approval) {
   if (!isObject(approval)) return null;
@@ -570,10 +589,11 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
   if (type === "session.title") return {title: String(data.title ?? "")};
   if (type === "session.updated") {
     if (view.session !== null) {
-      view.session.model = data.model ?? view.session.model;
-      view.session.workspace = data.workspace ?? view.session.workspace;
+      if (data.model !== undefined) view.session.model = data.model;
+      if (data.workspace !== undefined) view.session.workspace = data.workspace;
+      if (data.workspace_label !== undefined) view.session.workspace_label = data.workspace_label;
     }
-    return {model: data.model, workspace: data.workspace};
+    return {model: data.model, workspace: data.workspace, ...(data.workspace_label === undefined ? {} : {workspaceLabel: data.workspace_label})};
   }
   if (turn === null) return {};
 
@@ -664,7 +684,8 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
       const item = newestTool(turn, data.call_id, data.tool_name);
       item.status = "waiting_approval";
       item.pendingRequestId = String(data.request_id ?? "");
-      view.pending.set(String(data.request_id ?? ""), {
+      const requestId = String(data.request_id ?? "");
+      view.pending.set(requestId, {
         request_id: data.request_id,
         call_id: data.call_id,
         tool_name: data.tool_name,
@@ -672,6 +693,7 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
         preview: data.preview ?? "",
         workspace_root: data.workspace_root ?? null,
         target: null,
+        ...(view.pending.get(requestId) ?? {}),
       });
       break;
     }

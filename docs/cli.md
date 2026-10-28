@@ -15,6 +15,7 @@ melo [--base-url URL] [--chat-model NAME] "" # the plain conversation loop
 melo --reconfigure                           # run setup, then the interactive UI
 melo --serve [--host HOST] [--port PORT]     # start the gateway
 melo --serve --reconfigure                   # run setup, then start the gateway
+melo --import-session dsh-jsonl FILE [--title TITLE] # import worker history
 melo --daemon install|uninstall|status       # macOS background service
 ```
 
@@ -49,6 +50,27 @@ character, Chinese and other wide characters included, and the Up arrow
 recalls earlier lines of this loop. A line that is not valid UTF-8 prints
 `melo: that line was not valid UTF-8; type it again.` and the loop asks
 again.
+
+## Worker histories
+
+`--save-session [TITLE]` records a direct task as a `worker` session in the
+CLI sessions file. Put the task after `--`; without a title, the first task
+line supplies one. `--parent-run ID` requires `--save-session` and links a
+launcher. Without the flag, direct runs do not open the session store. Workers
+are not offered by `-c`, `-r`, or the chat picker. Workspace and git metadata
+use `--workspace` when supplied, otherwise the current working directory.
+
+`--import-session dsh-jsonl FILE [--title TITLE]` imports a dsh JSONL log
+without a task. Reimporting identical file contents is a no-op; unknown or
+invalid lines are counted. The gateway can list and read worker history via
+its read-only [worker API](api.md#get-apisessions), but cannot continue or edit it.
+
+Worker records are local, unencrypted, and stored with file mode 0600. Stored
+text passes the existing secret redactor, and recognizable reads of sensitive
+files are replaced by a path-labelled placeholder. Redaction is pattern-based:
+arbitrary secrets printed by a command, echoed by the model, or loaded through
+an unrecognized tool can still be retained. Review the data before sharing it.
+Thinking is subject to the session retention policy.
 
 ## The interactive UI
 
@@ -512,7 +534,8 @@ Use nomic-embed-text for long-term memory? [Y/n]:
 
 ### Direct mode
 
-These options apply to a task run without `--serve`.
+These options apply to a task run without `--serve`; the interactive UI also
+accepts the options named in [Interactive UI](#interactive-ui).
 
 | Option | Default | Description |
 |---|---|---|
@@ -622,8 +645,10 @@ These options apply to a task run without `--serve`.
   `--recall-placement message` in `replay`/`compress+replay`, `--recall-at
   tool` with `--mcp-only` or a `--builtins` list without `recall`,
   `--builtins recall` without `--recall-at tool`, and
-  `--retrieval-extra-body` with an explicit `off`, `bm25` or `embedding`
-  retriever. A provided tool named `recall` while the tool is registered is
+  `--retrieval-extra-body` when the resolved retriever is `off`, `bm25` or
+  `embedding` (including a saved default). With `auto`, the extra body is
+  used only if a recall actually makes an `llm` retrieve request. A provided
+  tool named `recall` while the tool is registered is
   a setup error. The arms differ only in these flags:
 
   ```bash

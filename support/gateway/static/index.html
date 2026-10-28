@@ -141,6 +141,10 @@
           ></div>
         </section>
         <div class="composer-area">
+          <div id="approval-bar" class="approval-bar" role="status" hidden>
+            <span>Approval needed</span>
+            <button type="button" id="approval-go" class="link-button">Go to approval</button>
+          </div>
           <form class="composer" id="composer">
             <label class="sr-only" for="input">Message</label>
             <textarea
@@ -184,79 +188,69 @@
       <div class="settings-head">
         <div>
           <p class="eyebrow">WORKSPACE SETTINGS</p>
-          <h2 id="settings-title">Connect your model</h2>
+          <h2 id="settings-title">Connection settings</h2>
         </div>
-        <button class="icon-button" id="close-settings" aria-label="Close settings">×</button>
+        <button type="button" class="icon-button" id="close-settings" aria-label="Close settings">×</button>
       </div>
-      <p class="settings-description">
-        Choose a backend for your next chat. Existing chats keep their connection.
-      </p>
+      <p class="settings-description">Settings apply to subsequent turns. Current turns finish with their existing connection.</p>
+      <p id="settings-status" class="field-hint" role="status" aria-live="polite"></p>
       <div class="field">
-        <label for="s-chat-url">Chat API URL</label
-        ><input
-          id="s-chat-url"
-          placeholder="http://127.0.0.1:8000/v1"
-          spellcheck="false"
-          autocomplete="url"
-        />
-        <p class="field-hint">
-          Use your model server's API address. oMLX supports the OpenAI-compatible adapter.
-        </p>
+        <label for="s-adapter">Chat backend</label>
+        <select id="s-adapter" disabled></select>
       </div>
-      <div class="field">
-        <label for="s-adapter">Adapter</label
-        ><select id="s-adapter">
-          <option value="auto">Auto-detect</option>
-          <option value="mlc">OpenAI-compatible / oMLX / MLC</option>
-          <option value="ollama">Ollama native</option>
-          <option value="vllm">vLLM</option>
-          <option value="sglang">SGLang</option>
-        </select>
+      <div class="field" id="s-chat-url-field">
+        <label for="s-chat-url">Chat API URL</label>
+        <input id="s-chat-url" placeholder="http://127.0.0.1:8000/v1" spellcheck="false" autocomplete="url" />
+        <p class="field-hint">Use your model server's API address. oMLX supports the OpenAI-compatible adapter.</p>
       </div>
-      <button class="secondary-button" id="discover-btn">Discover models</button>
-      <p id="discover-status" class="field-hint" role="status">
-        Discovery only lists models; it does not start a chat.
-      </p>
+      <div id="s-cloud-fields" hidden>
+        <div class="field">
+          <label for="s-key-env">API key environment variable</label>
+          <input id="s-key-env" spellcheck="false" autocomplete="off" aria-describedby="s-key-status" />
+          <p id="s-key-status" class="field-hint" role="status" aria-live="polite"></p>
+        </div>
+        <div class="field">
+          <label for="s-base-url">Base URL (optional)</label>
+          <input id="s-base-url" spellcheck="false" autocomplete="url" />
+        </div>
+      </div>
+      <button type="button" class="secondary-button" id="discover-btn">Discover models</button>
+      <p id="discover-status" class="field-hint" role="status" aria-live="polite"></p>
+      <datalist id="s-model-options"></datalist>
       <div class="field model-field">
-        <label for="s-chat-model">Chat model</label
-        ><select id="s-chat-model">
-          <option value="">Discover models first</option>
-        </select>
+        <label for="s-chat-model">Chat model</label>
+        <input id="s-chat-model" list="s-model-options" spellcheck="false" autocomplete="off" />
+        <p class="field-hint">Type a model name or choose a discovered model.</p>
       </div>
       <details class="advanced">
         <summary>Memory & advanced settings <span>Optional</span></summary>
         <div class="advanced-body">
           <div class="field">
-            <label for="s-embed-url">Embedding API URL</label
-            ><input id="s-embed-url" placeholder="Use Chat API URL" spellcheck="false" />
+            <label for="s-embed-backend">Embedding backend</label>
+            <select id="s-embed-backend" disabled></select>
+          </div>
+          <div id="s-embed-fields">
+            <div class="field">
+              <label for="s-embed-url">Embedding API URL</label>
+              <input id="s-embed-url" spellcheck="false" autocomplete="url" />
+            </div>
+            <div class="field">
+              <label for="s-embed-model">Embedding model</label>
+              <input id="s-embed-model" spellcheck="false" autocomplete="off" />
+            </div>
           </div>
           <div class="field">
-            <label for="s-embed-model">Embedding model</label
-            ><select id="s-embed-model">
-              <option value="">Disabled</option>
-            </select>
-            <p class="field-hint">Disabled by default. Select a model that supports embeddings.</p>
+            <label for="s-workspace">Workspace path</label>
+            <input id="s-workspace" spellcheck="false" autocomplete="off" />
+            <p class="field-hint">Use an absolute path or a path beginning with ~/.</p>
           </div>
-          <div class="field">
-            <label for="s-memory">Seed memory set</label
-            ><select id="s-memory">
-              <option value="">None</option>
-              <option value="__all__">All</option>
-            </select>
-            <p id="memory-count" class="field-hint">No seed memories will be loaded.</p>
-          </div>
-          <p class="field-hint">
-            Seed memories may send embedding requests when the chat is created. The workspace shares
-            its long-term memory store across chats.
-          </p>
         </div>
       </details>
       <p id="create-error" class="error" role="alert" hidden></p>
+      <button type="button" class="secondary-button" id="settings-reload" hidden>Reload settings</button>
       <div class="settings-footer">
-        <span>Chats remain available until the gateway restarts or they expire.</span
-        ><button class="primary-button" id="create-btn" disabled>
-          Create chat <span aria-hidden="true">→</span>
-        </button>
+        <span>Changes are saved to your local settings file.</span>
+        <button type="button" class="primary-button" id="create-btn" disabled>Save settings</button>
       </div>
     </dialog>
   </body>

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent._chat import Chat
+from localmelo.melo.agent._chat import BUDGET_ACCOUNTING, BUDGET_HOOK, Chat
 from localmelo.melo.agent._request_accounting import (
     IMAGE_TOKENS,
     ContextBudget,
@@ -162,6 +162,21 @@ async def test_agent_reports_budget_in_result_and_event():
     assert records[0]["measured_prompt_tokens"] == 9999
     assert [dict(e.data) for e in events if e.type == "context_budget"] == records
     assert events[-1].to_dict()["data"]["result"]["context_budget"] == records
+
+
+async def test_nested_chat_does_not_use_outer_accounting_or_sink():
+    outer = Chat(FakeLLM([]), context_budget=ContextBudget(1000, 100, 100))
+    inner = Chat(FakeLLM([None]), context_budget=ContextBudget(300, 10, 10))
+    emitted = []
+    token = BUDGET_ACCOUNTING.set((outer, outer._accounting))
+    hook = BUDGET_HOOK.set((outer, emitted.append))
+    try:
+        await inner.plan_step([], [Message(role="user", content="q")], [], "q")
+    finally:
+        BUDGET_HOOK.reset(hook)
+        BUDGET_ACCOUNTING.reset(token)
+    assert outer.stats.context_budget == [] and emitted == []
+    assert inner.stats.context_budget[0]["input_limit"] == 280
 
 
 @pytest.mark.parametrize("values", [(1, None, None), (10, 5, 5), (True, 1, 1)])

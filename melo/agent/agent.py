@@ -4674,9 +4674,9 @@ class Agent:
             limits=self._limits() if progress else None,
         )
         stats = self.chat.reset_stats()
-        budget_accounting = BUDGET_ACCOUNTING.set(self.chat._accounting)
+        budget_accounting = BUDGET_ACCOUNTING.set((self.chat, self.chat._accounting))
         budget_hook = BUDGET_HOOK.set(
-            run.events.context_budget
+            (self.chat, run.events.context_budget)
             if self.options.context_window is not None
             else None
         )

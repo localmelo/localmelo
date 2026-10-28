@@ -85,6 +85,15 @@ def _configured(
             value = getattr(args, name, None)
             if value is not None:
                 setattr(cfg.agent, name, value)
+        if any(
+            getattr(args, name, None) is not None
+            for name in ("context_window", "output_reserve", "safety_margin")
+        ):
+            try:
+                configured_context_options(cfg, AgentOptions(), {})
+            except ValueError as exc:
+                print(f"melo: error: {exc}", file=sys.stderr)
+                return 2
     try:
         cfg.validate_or_raise()
     except config.ConfigError as exc:

@@ -369,6 +369,19 @@ class Config:
                 errors.append(
                     f"[agent] {name} must be a positive integer, got {value!r}"
                 )
+        if any(value is not None for value in budget) and any(
+            value is None for value in budget
+        ):
+            missing = [
+                name
+                for name, value in zip(
+                    ("context_window", "output_reserve", "safety_margin"),
+                    budget,
+                    strict=True,
+                )
+                if value is None
+            ]
+            errors.append("[agent] context budget is missing " + ", ".join(missing))
         if all(
             isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in budget
         ):

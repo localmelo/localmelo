@@ -47,7 +47,7 @@ def configured_context_options(
             if overrides.get(name) is not None
             else (
                 getattr(cfg.agent, name, None)
-                if cfg is not None
+                if cfg is not None and getattr(cfg.agent, name, None) is not None
                 else getattr(options, name)
             )
         )
@@ -67,10 +67,16 @@ def configured_session_options(
 ) -> AgentOptions:
     """Config defaults for a session; names in *explicit* retain the caller's values."""
     options = options or AgentOptions()
-    options = configured_context_options(cfg, options, budget_overrides or {})
+    overrides = {
+        name: getattr(options, name)
+        for name in ("context_window", "output_reserve", "safety_margin")
+        if name in explicit
+    }
+    overrides.update(budget_overrides or {})
+    options = configured_context_options(cfg, options, overrides)
     if cfg is None:
         return options
-    if budget_overrides:
+    if overrides:
         cfg = copy.deepcopy(cfg)
         for name in ("context_window", "output_reserve", "safety_margin"):
             setattr(cfg.agent, name, getattr(options, name))

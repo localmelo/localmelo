@@ -300,11 +300,34 @@ curl 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
   A row a create made without ever starting its message (a shutdown in the
   middle, say) has no turn and is left out; `GET /api/sessions/{id}` still
   shows it.
-- `kind` is `chat` (default), `front`, `front_bg` or `task`; any other
-  value is 400 `invalid_request`.
+- `kind` is `chat` (default), `front`, `front_bg`, `task` or `worker`; any
+  other value is 400 `invalid_request`. `worker` reads the CLI sessions file
+  in SQLite read-only mode; it does not include terminal chat sessions. A
+  missing CLI file gives an empty list and is not created by the gateway.
+  SQLite may create `-wal` and `-shm` bookkeeping sidecars during a read;
+  the reader does not open the main database for writing or use immutable mode.
+- Worker lists accept exact-match `status`, `source`, and `parent_run`
+  filters, and an opaque `cursor` from the previous response's `next_cursor`.
+  Results are ordered by the first turn's start time descending, then session
+  id descending. `next_cursor` is `null` at the end; keep the same filters
+  and query on later pages. Invalid cursors or using these parameters without
+  `kind=worker` return 400. Pages are not a snapshot: concurrent changes may
+  affect subsequent pages.
+- Worker list and detail session objects include nullable `source`,
+  `parent_run`, `git_branch`, `git_head`, `exit_code`, `status`, `steps`, and
+  `tokens`. `tokens` is the integer total token count, and `meta.usage` holds
+  the full usage map. Status falls back to the first turn's status; steps and
+  tokens fall back to its stored result. Missing values are `null`, not zero.
+  The detail response's top-level `tokens` separately counts completion tokens.
+- Worker sessions are read-only. Their session detail and turns (including
+  `events=true`) and stored image blobs are available by id; write routes and the `/events` SSE
+  route return 404. If an id exists in both files, the gateway session wins.
+  Worker session objects add `meta` with the stored provenance, and their
+  `running_here` is always false. `busy` reflects an unexpired worker lease;
+  the gateway does not recover stale turns or apply retention to the CLI file.
 - `workspace_label` is the workspace with the home folder written as `~`.
-- `busy` says a turn is running. `running_here` equals `busy`: only this
-  gateway runs turns in its own sessions file.
+- `busy` says a turn is running. For gateway sessions, `running_here` equals
+  `busy`: only this gateway runs turns in its own sessions file.
 - `pending_approvals` counts this session's approval cards that wait for an
   answer.
 - `level` and `held` are the scheduler's view of the chat: its P1 to P4
@@ -331,7 +354,7 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 ```json
 {
   "session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""},
-  "pending_approvals": [{"request_id": "0d6c2a9e8f7b41c3a5e9d1b3f5a7c9e1", "call_id": "call_1", "tool_name": "file_write", "arguments": {"path": "/home/me/demo-project/todo.md"}, "preview": "~/demo-project/todo.md", "workspace_root": "/home/me/demo-project", "workspace_label": "~/demo-project", "target": {"path_label": "todo.md", "exists": false, "size_bytes": 0}}],
+  "pending_approvals": [{"request_id": "0d6c2a9e8f7b41c3a5e9d1b3f5a7c9e1", "call_id": "call_1", "tool_name": "file_write", "arguments": {"path": "/home/me/demo-project/todo.md"}, "arguments_complete": true, "preview": "~/demo-project/todo.md", "workspace_root": "/home/me/demo-project", "workspace_label": "~/demo-project", "target": {"path_label": "todo.md", "exists": false, "size_bytes": 0}}],
   "grants": ["file_write"],
   "granted_at": {"file_write": 1761141604.9},
   "mcp_error": "",
@@ -351,6 +374,11 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
   first open since the gateway started, and a closed Agent reads `paused`.
 - `tokens` sums the `completion_tokens` of the session's finished turns,
   the same field the answers report.
+- A `pending_approvals` entry's `arguments_complete` is true only when the
+  JSON-safe `arguments` preserve the original values without clipping or
+  conversion. Clients should not allow a request when it is false or missing;
+  denial remains available. Approval event arguments alone may be truncated,
+  so fetch session details before allowing.
 - A `pending_approvals` entry's `target` is set for a `file_write`: the
   path `path_label` (relative to the workspace, else with the home folder
   as `~`), whether the file `exists`, and its `size_bytes`, read when the
@@ -370,8 +398,9 @@ curl 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/turns?limit=10&events=true
 
 - `limit` is 1 to 50 (default 10). Without `before`, the page is the newest
   turns and `replay_from` is the event id just before the oldest returned
-  turn's `turn.started`, or 0 when the session has no turn. Pass it as the
-  event stream's `after` to replay the page's events.
+  turn's `turn.started`, or 0 when the session has no turn. For gateway
+  sessions, pass it as the event stream's `after` to replay the page's events.
+  Worker sessions expose events only through `events=true`, not SSE.
 - With `before=N` (1 to SQLite's largest integer), the page is the newest
   turns numbered below `N`, and there is no `replay_from`.
 - `has_earlier` says that older turns exist beyond the page.
