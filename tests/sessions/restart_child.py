@@ -84,7 +84,12 @@ async def main(scenario: str, path: str, root: str) -> None:
         replies = []  # the model blocks: the run is under way
     model = Model(replies)
     agent = Agent(
-        llm=model, options=AgentOptions(workspace_root=root, record_answers=True)
+        llm=model,
+        # The c2_approval scenario needs shell_exec to reach the approval
+        # panel; interactive mode is the one that offers it (P13b).
+        options=AgentOptions(
+            workspace_root=root, record_answers=True, mode="interactive"
+        ),
     )
     await agent.start()
     session = await store.create_session()

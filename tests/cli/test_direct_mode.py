@@ -57,6 +57,7 @@ def _agent(*outcomes: RunResult) -> mock.MagicMock:
     agent = mock.MagicMock()
     agent.run_task = mock.AsyncMock(side_effect=list(outcomes))
     agent.close = mock.AsyncMock()
+    agent.options = AgentOptions(mode="direct")
     return agent
 
 
@@ -170,12 +171,22 @@ class TestFlags:
         )
 
     @pytest.mark.parametrize(
-        ("value", "builtins"), [("all", None), ("none", frozenset())]
+        ("value", "builtins"),
+        [("all", frozenset(builtin_names())), ("none", frozenset())],
     )
     def test_builtins_all_and_none(
         self, value: str, builtins: frozenset[str] | None
     ) -> None:
         assert _main("--builtins", value, "q").options.builtins == builtins
+
+    def test_builtins_is_the_one_direct_flag_the_loop_takes(self) -> None:
+        # `melo ""` runs turns, so --builtins can apply to them; the other
+        # direct-mode flags stay usage errors (see test_rejected_before_the_run).
+        with mock.patch.object(cli, "_run_direct", return_value=0):
+            ran = _main("--builtins", "all", "")
+        assert ran.code == 0
+        assert ran.options.mode == "direct"
+        assert ran.options.builtins == frozenset(builtin_names())
 
     def test_memory_on(self) -> None:
         assert _main("--memory", "on", "q").options.memory is True
@@ -432,6 +443,20 @@ class TestUsageErrors:
                 # `melo ""` runs no task, so the folder would apply to nothing.
                 ["--workspace", "/tmp", ""],
                 "only for direct mode (a query without --serve): --workspace",
+            ),
+            # --builtins is the loop's one direct-mode flag; --serve and
+            # --daemon are not the loop, so it stays a usage error there.
+            (
+                ["--serve", "--builtins", "all", "q"],
+                "only for direct mode (a query without --serve): --builtins",
+            ),
+            (
+                ["--serve", "--builtins", "all", ""],
+                "only for direct mode (a query without --serve): --builtins",
+            ),
+            (
+                ["--daemon", "status", "", "--builtins", "all"],
+                "only for direct mode (a query without --serve): --builtins",
             ),
         ],
     )
@@ -879,6 +904,8 @@ class TestInteractive:
         assert out == (
             "localmelo · local agent\n"
             "Enter a task to begin. Type /help for commands or /exit to quit.\n"
+            'shell_exec is off in this loop (direct mode); run melo "" '
+            "--builtins all to turn it on.\n"
             "\nsecond answer\n"
         )
         assert err == "melo: run ended with status provider_error: HTTP 500\n"
@@ -890,6 +917,16 @@ class TestInteractive:
             assert asyncio.run(cli._run(agent, None)) == cli.EXIT_COMPLETED
         agent.run_task.assert_not_awaited()
         agent.close.assert_awaited_once()
+
+    def test_the_notice_is_not_printed_when_shell_exec_is_on(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        agent = _agent()
+        agent.options = AgentOptions(mode="direct", builtins=frozenset({"shell_exec"}))
+        with mock.patch("builtins.input", side_effect=EOFError):
+            assert asyncio.run(cli._run(agent, None)) == cli.EXIT_COMPLETED
+        out, _ = capsys.readouterr()
+        assert "shell_exec" not in out
 
 
 # ── SIGTERM and SIGHUP ──────────────────────────────────────────────────────

@@ -666,7 +666,12 @@ class TestStartAndTools:
 
     @pytest.mark.asyncio
     async def test_list_tools_reports_sources_and_marks(self) -> None:
-        agent = _agent(ScriptedLLM(), providers=[WeatherProvider()], builtins=None)
+        agent = _agent(
+            ScriptedLLM(),
+            providers=[WeatherProvider()],
+            builtins=None,
+            mode="interactive",
+        )
 
         before = [tool.name for tool in agent.list_tools()]
         await agent.start()

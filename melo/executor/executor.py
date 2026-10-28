@@ -106,6 +106,12 @@ class Executor:
     ) -> ExecutionOutcome:
         """Structured execution path with rich outcome metadata.
 
+        A name that is no tool of the run is ``TOOL_NOT_FOUND``: a
+        built-in that the run does not offer (``shell_exec`` under the
+        default direct set) gets an error naming the run's available
+        tools, while any other unknown name keeps
+        ``Tool not found in registry: <name>``.
+
         *allowed* names the tools the caller offered the model in this
         step. A registered tool outside it is refused with
         ``TOOL_NOT_OFFERED`` before its arguments are looked at. ``None``
@@ -147,10 +153,21 @@ class Executor:
         # 1. Authoritative registry resolution
         tool_def = self.hippo.get_tool(request.tool_name)
         if tool_def is None:
+            # A built-in that the run's mode leaves out (P13b): say what the
+            # run does offer, so the model can pick a tool that exists. No
+            # other hint (e.g. no "use python_exec for a shell"). An unknown
+            # name that is no built-in keeps the plain registry message.
+            error = f"Tool not found in registry: {request.tool_name}"
+            if request.tool_name in builtin_names():
+                available = sorted(tool.name for tool in self.hippo.list_tools())
+                error = (
+                    f"{request.tool_name} is not available in this run. "
+                    f"Available tools: {', '.join(available) or 'none'}."
+                )
             return ExecutionOutcome(
                 tool_name=request.tool_name,
                 status=ExecutionStatus.ERROR,
-                error=f"Tool not found in registry: {request.tool_name}",
+                error=error,
                 error_category=ErrorCategory.TOOL_NOT_FOUND,
             )
 

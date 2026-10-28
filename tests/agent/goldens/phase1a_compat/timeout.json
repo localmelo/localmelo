@@ -19,6 +19,7 @@
       "max_attempts": 5,
       "reflection_gate": "flags",
       "tool_exposure": "retrieve",
+      "mode": "python",
       "builtins": [
         "file_read",
         "file_write",

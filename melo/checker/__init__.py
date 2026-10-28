@@ -2,7 +2,6 @@
 
 from localmelo.melo.checker.checker import Checker
 from localmelo.melo.checker.payloads import (
-    ExecutorRequest,
     ExecutorResultPayload,
     GatewayIngressPayload,
     MemoryWritePayload,
@@ -27,7 +26,6 @@ __all__ = [
     "BUILTIN_TIERS",
     "Checker",
     "DEFAULT_BUILTINS",
-    "ExecutorRequest",
     "ExecutorResultPayload",
     "GatewayIngressPayload",
     "MemoryWritePayload",

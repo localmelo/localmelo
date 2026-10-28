@@ -281,7 +281,7 @@ def test_an_item_keeps_the_records_that_share_its_number_or_name() -> None:
         found=["the amount is 42 thousand", "the office is on Main Street"],
         source_ids=["r1", "r2"],
         source_records=[
-            ("r1", '{"amount": 42}'),
+            ("r1", '{"amount": "42 thousand"}'),
             ("r2", '{"address": "Main Street"}'),
         ],
     )
@@ -326,6 +326,93 @@ async def test_flush_does_not_admit_an_earlier_run_s_candidate() -> None:
         run_request=True, digest=None, final_reflection=None, task_id="t1"
     )
     assert [decision.action for decision in decisions] == ["NEW"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "I could check the offsite on 4/16.",
+        "Is yoga at 9:00?",
+        "The plumber is not coming on 4/9.",
+        "Option A: meet on 4/9 at 9:00.",
+        "Maybe the meeting is at 9:00.",
+    ],
+)
+async def test_heuristic_nonfacts_are_not_admitted_with_user_signal(text: str) -> None:
+    from localmelo.melo.memory.notes import note_from_reply
+
+    note, _ = note_from_reply(text, writer="heuristic")
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    hippo.propose(_candidate(text, remember=note.remember, items=candidate_items(note)))
+    assert await hippo.flush(run_request=True, digest=None, final_reflection=None) == []
+    assert await store.count_entries() == 0
+
+
+async def test_mixed_bullet_admits_the_fact_not_the_question() -> None:
+    from localmelo.melo.memory.notes import note_from_reply
+
+    note, _ = note_from_reply(
+        "- Yoga starts at 9:00 every Saturday. Is it at Studio Verde?"
+    )
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    hippo.propose(
+        _candidate("Yoga starts at 9:00 every Saturday.", items=candidate_items(note))
+    )
+    await hippo.flush(run_request=True, digest=None, final_reflection=None)
+    assert [entry.text for entry in await store.active_entries()] == [
+        "Yoga starts at 9:00 every Saturday."
+    ]
+
+
+async def test_no_item_match_does_not_restore_candidate_sources() -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    note = ReasoningNote(
+        found=["the deployment happens on Friday"],
+        source_ids=["unrelated"],
+        source_records=[("unrelated", '{"name": "Alice"}')],
+    )
+    items = candidate_items(note)
+    assert items[0].source_ids == ()
+    hippo.propose(
+        _candidate(note.found[0], items=items, provenance={"source_ids": ["unrelated"]})
+    )
+    decisions = await hippo.admit("n1", "rehearsal")
+    assert decisions[0].action == "NEW"
+    assert decisions[0].source_ids == ()
+    assert (await store.active_entries())[0].provenance["source_ids"] == []
+    assert (await store.decisions())[0]["source_ids"] == []
+
+
+async def test_missing_item_sources_fall_back_to_candidate_sources() -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store)
+    hippo.propose(
+        _candidate(
+            "the deployment happens on Friday", provenance={"source_ids": ["r1"]}
+        )
+    )
+    decisions = await hippo.admit("n1", "rehearsal")
+    assert decisions[0].source_ids == ("r1",)
+
+
+async def test_completed_outcome_exempts_a_bare_meta_digest() -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store, admit_on_outcome=True)
+    text = "I've read and remembered all of Jamie's records."
+    digest = _candidate(
+        text,
+        candidate_id="d1",
+        source="digest",
+        provenance={"final_status": "completed"},
+    )
+    decisions = await hippo.flush(
+        run_request=False, digest=digest, final_reflection=None
+    )
+    assert [(d.action, d.admitted_by) for d in decisions] == [("NEW", "outcome")]
+    assert [entry.text for entry in await store.active_entries()] == [text]
 
 
 async def test_each_item_keeps_its_own_source_ids_in_the_entry() -> None:
