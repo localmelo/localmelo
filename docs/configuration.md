@@ -174,6 +174,7 @@ tables of the chosen backends.
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
 | `host` | `[gateway]` | `"127.0.0.1"` | The address the gateway listens on: keep `127.0.0.1`, or use `localhost` or `::1`. On a host that is not `localhost` or a loopback IP address, such as `0.0.0.0`, the gateway does not check the `Host` and `Origin` of requests; see [Keep the gateway private](gateway.md#keep-the-gateway-private). |
 | `port` | `[gateway]` | `8401` | The port the gateway listens on. |
+| `resume_mode` | `[sessions]` | `"pairs"` | Terminal conversation restoration: `pairs` loads recent user/answer pairs; `window` loads the saved working window plus later pairs, falling back when no checkpoint is usable. Invalid values warn/fall back only in the UI; direct runs do not consume this setting. |
 | `policy` | `[scheduler]` | `"off"` | How the web workspace's calls reach the model server: `off` records only, `fcfs` admits first come and `class` admits P1 before P2 (and so on); see [Scheduler](scheduler.md#the-gate-on-chats-s2). |
 | `n_srv` | `[scheduler]` | `8` | The model server's slots. |
 | `r_f` | `[scheduler]` | `1` | Slots kept for the CLI and direct runs; forced to 0 when `n_srv <= 2`. |

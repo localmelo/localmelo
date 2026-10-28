@@ -9,6 +9,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Resume saved terminal chats with `melo -c`, `melo -r [ID|TITLE]`,
+  `/sessions [filter]` or `/resume [ID|TITLE]`. The inline picker filters
+  eligible chats by folder or across folders before the startup banner,
+  which names the chosen chat; the recap explains what
+  was restored with `[sessions] resume_mode = "pairs"` (default) or
+  `"window"`. Resuming keeps the current model/workspace and clears
+  approval grants, while retaining `/verbose` and `/thinking` preferences.
+  Changes in another terminal are reloaded before the
+  next turn; a busy or deleted session keeps the draft. `/retry` preserves
+  a resumed turn's typed text, `/expand` reads stored tool output across
+  event pages, and quitting prints a saved session's resume command.
+  Direct runs keep their legacy parsing and output ([#95]).
 - Recall in the loop: `--retriever auto|off|bm25|llm|embedding`,
   `--recall-at`, `--recall-k`, `--recall-kinds`, `--recall-placement`,
   `--recall-min-score` and `--retrieval-extra-body`, plus the `[retrieval]`
@@ -628,4 +640,5 @@ earlier milestones.
 [#92]: https://github.com/localmelo/localmelo/pull/92
 [#89]: https://github.com/localmelo/localmelo/pull/89
 [#94]: https://github.com/localmelo/localmelo/pull/94
+[#95]: https://github.com/localmelo/localmelo/pull/95
 [#90]: https://github.com/localmelo/localmelo/pull/90
