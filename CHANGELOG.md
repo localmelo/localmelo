@@ -50,7 +50,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Experimental Python opt-in typed memory assertions: conservative evidence
   checks (timezone-aware `timestamp`/`date` records), ordered same-task updates
   (record time or per-task user order), cancellation markers, exact-duplicate-only
-  retention and wall-clock labelled recall with source-dated titles ([#NN]).
+  retention and wall-clock labelled recall with source-dated titles ([#162]).
 - `melo-task` creates, inspects and controls gateway tasks, with authenticated
   loopback requests and an optional event follow stream that prints one readable
   line per event and a terminal snapshot. ([#159])
@@ -1029,3 +1029,4 @@ earlier milestones.
 [#157]: https://github.com/localmelo/localmelo/pull/157
 [#158]: https://github.com/localmelo/localmelo/pull/158
 [#159]: https://github.com/localmelo/localmelo/pull/159
+[#162]: https://github.com/localmelo/localmelo/pull/162
