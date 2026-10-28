@@ -26,7 +26,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `recall` event and `memory_stats.recall_log`. A step's query carries the
   latest note's plan, what it found and its open questions and outcome, and
   its candidates include a superseded note whose turn the window no longer
-  shows, so a later attempt's earlier thinking stays reachable.
+  shows, so a later attempt's earlier thinking stays reachable; such a line
+  names its attempt and is marked `(superseded)`, and `recall_json` records
+  each hit's `stage`.
   `memory_stats.recall_empty` counts a triggered recall that found nothing.
   `history.db` is schema
   version 2: a v1 file gains the `recall_json` column in the same

@@ -594,6 +594,7 @@ class RecallHit:
     text: str
     chars: int
     omitted: bool = False  # a draft turned into a pointer
+    stage: str = ""  # the note store's stage: fresh | rehearsed | superseded
     # Rendering metadata, not part of the record's public shape.
     step: int = 0
     attempt: int = 0
@@ -634,6 +635,7 @@ def hit_from_doc(
     origin_task_ids = tuple(doc.meta.get("origin_task_ids") or ())
     step = doc.meta.get("step")
     attempt = doc.meta.get("attempt")
+    stage = doc.meta.get("stage")
     origin = str(doc.meta.get("origin", "")) if kind == "long" else "this task"
     return RecallHit(
         doc_id=doc.doc_id,
@@ -644,6 +646,7 @@ def hit_from_doc(
         origin_task_ids=origin_task_ids,
         text=text,
         chars=len(text),
+        stage=stage if isinstance(stage, str) else "",
         step=step if isinstance(step, int) and not isinstance(step, bool) else 0,
         attempt=(
             attempt if isinstance(attempt, int) and not isinstance(attempt, bool) else 0
@@ -720,6 +723,14 @@ def _item_line(item: RecallHit) -> str:
     if item.kind == "digest":
         attempt = f" · attempt {item.attempt}" if item.attempt else ""
         return f"[{item.alias}] {label}{attempt} · this task:\n{text}".rstrip()
+    if item.kind in ("note", "reflection") and item.stage == "superseded":
+        # An earlier attempt's note, replaced by a reflection at the
+        # attempt boundary: name its attempt and say it is not the
+        # current plan. A note the store has not superseded keeps the
+        # line below byte for byte.
+        attempt = f" · attempt {item.attempt}" if item.attempt else ""
+        head = f"[{item.alias}] {label}{step}{attempt} (superseded):"
+        return f"{head}\n{text}".rstrip()
     origin = f" · {item.origin}" if item.origin else ""
     head = f"[{item.alias}] {label}{step}{origin}:"
     if item.kind == "thought":
@@ -884,6 +895,7 @@ def record_to_dict(record: RecallRecord) -> dict[str, Any]:
                 "doc_id": hit.doc_id,
                 "alias": hit.alias,
                 "kind": hit.kind,
+                "stage": hit.stage,
                 "score": hit.score,
                 "rank": hit.rank,
                 "origin_task_ids": list(hit.origin_task_ids),
