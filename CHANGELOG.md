@@ -37,7 +37,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   new flags, the block and the data note are off there (and `drop`/`replay`
   recall only when a retriever is named). The JSON line gains
   `config.retriever`/`retriever_effective`/`recall_*` and the recall
-  counters ([#NN]).
+  counters ([#94]).
 - Console session details over API v2, and the scheduler gate in front of
   a console turn: `GET /api/sessions/{id}/tools` lists each tool's source,
   whether it asks first and whether the session allows it, `/memory` the
@@ -627,5 +627,5 @@ earlier milestones.
 [#91]: https://github.com/localmelo/localmelo/pull/91
 [#92]: https://github.com/localmelo/localmelo/pull/92
 [#89]: https://github.com/localmelo/localmelo/pull/89
-[#NN]: https://github.com/localmelo/localmelo/pull/NN
+[#94]: https://github.com/localmelo/localmelo/pull/94
 [#90]: https://github.com/localmelo/localmelo/pull/90
