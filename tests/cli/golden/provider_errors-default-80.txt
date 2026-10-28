@@ -4,7 +4,8 @@
 ↻ Model request failed; retrying in 1 s: POST /chat/completions failed: Connect…
 ↻ Model request failed; retrying in 4 s: POST /chat/completions failed: Connect…
 ✗ melo: run ended with status provider_error: POST /chat/completions failed: Co…
-  Is the model server running at http://127.0.0.1:18431/v1?
+  Is the model server running at http://127.0.0.1:18431/v1? /status checks
+  again.
 ✻ Worked for 0.1s · 0 tool calls
 
 › Check it once more.
@@ -14,6 +15,7 @@
 ↻ Model request failed; retrying in 4 s: POST /chat/completions failed: ReadTim…
 ✗ melo: run ended with status provider_error: POST /chat/completions failed: Re…
   The model server did not answer in time; it may still be loading the model.
+  /retry tries again.
 ✻ Worked for 0.1s · 0 tool calls
 
 › Try the missing model.
@@ -44,5 +46,7 @@
 
   No approvals for this turn (--yolo).
 ✗ melo: run ended with status provider_error: POST /chat/completions failed wit…
+  /status checks the model server at http://127.0.0.1:18431/v1; /retry tries
+  again.
 ✻ Worked for 0.2s · 0 tool calls
 

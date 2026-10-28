@@ -5,5 +5,5 @@
   └ (no output)
 ◌ hold  {} · stopped after 0.1s
 ◌ shell_exec  false · not run
-■ Stopped
+■ Stopped · /retry runs it again
 

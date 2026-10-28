@@ -6,6 +6,7 @@
 ⚠ The attempt used its step budget.
 ✻ Reflected after attempt 1: continue · Trying the same command again would tel…
 ⚠ melo: run ended with status gate_stopped: Trying the same command again would…
-  melo judged that another attempt would not help. Rephrase the request.
+  melo judged that another attempt would not help. Rephrase the request, or
+  /retry.
 ✻ Worked for 0.1s · 1 tool call · ↓ 40 tokens
 

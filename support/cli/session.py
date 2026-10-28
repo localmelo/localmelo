@@ -16,15 +16,17 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import os
 import time
 from collections.abc import Callable, Coroutine
-from typing import Any, Final, Literal
+from typing import Any, Final, Literal, cast
 
 from prompt_toolkit.document import Document
 from rich.text import Text
 
 from localmelo.melo.agent import Agent
 from localmelo.melo.agent.agent import FINALIZE_TIMEOUT_S
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.schema import RunResult
 from localmelo.support.backends import discovery
@@ -40,6 +42,7 @@ from localmelo.support.cli.theme import ASCII, in_symbols
 from localmelo.support.progress_line import run_elapsed, wall_range
 from localmelo.support.sessions.display import (
     clean_output,
+    format_duration,
     format_tokens,
     home_label,
 )
@@ -177,7 +180,7 @@ class CliSession:
         self.renderer = renderer
         self.approver = approver
         self.out = out
-        self.approvals = Approvals(self._ask, mode)
+        self.approvals = Approvals(self._ask, mode, snapshots=self.approver.snapshots)
         self.runner: SessionRunner | None = None
         self.app: InteractiveApp | None = None
         self.queued: str | None = None
@@ -204,13 +207,14 @@ class CliSession:
     def status_bar(self) -> StatusBar:
         backend = self.factory.backend
         context = self.renderer.context_tokens
-        yolo = self.approvals.mode == "yolo"
+        mode = self.approvals.mode
+        yolo = mode == "yolo"
         return StatusBar(
             model=backend.model,
             workspace=home_label(self.agent.workspace_root or ""),
             context=f"ctx {format_tokens(context)}" if context else "",
             title=self.title or "New session",
-            mode=f"{self.renderer.symbols.warn} YOLO: no approvals" if yolo else "ask",
+            mode=f"{self.renderer.symbols.warn} YOLO: no approvals" if yolo else mode,
             mode_style="class:yolo" if yolo else "class:muted",
         )
 
@@ -448,6 +452,14 @@ class CliSession:
             self.expand(arguments)
         elif name == "progress":
             self.progress()
+        elif name == "approvals":
+            self.approvals_command(arguments)
+        elif name == "status":
+            await self.status()
+        elif name == "retry":
+            await self.retry()
+        elif name == "mcp":
+            self.mcp()
 
     def toggle_verbose(self, arguments: str) -> None:
         """``/verbose [on|off]``: verbose rendering, or the other way."""
@@ -542,6 +554,200 @@ class CliSession:
                     style="muted",
                 )
             )
+
+    async def status(self) -> None:
+        """``/status``: the model, workspace, session, approvals, tools, memory, limits, files."""
+        from localmelo.support.cli.render import LOG_PATH
+        from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
+        from localmelo.support.sessions.display import localmelo_version
+
+        backend = self.factory.backend
+        state = "not checked"
+        if self.factory.listable():
+            try:
+                await discovery.list_models(
+                    discovery.OPENAI_COMPATIBLE, backend.base_url, timeout_s=2
+                )
+                state = "reachable"
+            except discovery.DiscoveryError as exc:
+                state = f"not reachable: {exc}" if not exc.reachable else str(exc)
+        where = home_label(self.agent.workspace_root or "")
+        source = "" if backend.source == "config" else f" · {backend.source}"
+        self.out.print(
+            self._text(
+                f"model      {backend.model} · {backend.label} · "
+                f"{redact_secrets(backend.base_url or backend.label)[0]} · "
+                f"{state}{source}"
+            )
+        )
+        self.out.print(self._text(f"workspace  {where}"))
+        self.out.print(
+            self._text(
+                "fence      file tools stay here; commands and Python can reach "
+                "other files",
+                "muted",
+            )
+        )
+        turns = []
+        if self.runner is not None and self.runner.session_id is not None:
+            turns = await self.store.list_turns(self.runner.session_id)
+        title = self.title or "New session"
+        session_id = self.runner.session_id if self.runner is not None else ""
+        short = (session_id or "")[:12]
+        count = len(turns)
+        self.out.print(
+            self._text(
+                f"session    {title!r} · {short or 'new'} · {count} turn"
+                + ("" if count == 1 else "s")
+            )
+        )
+        grants = ", ".join(sorted(self.approvals.allowed_tools)) or "none"
+        self.out.print(
+            self._text(
+                f"approvals  {self.approvals.mode} · allowed in this session: {grants}"
+            )
+        )
+        tools = self.agent.list_tools()
+        builtin = [tool for tool in tools if tool.source == "builtin"]
+        provided = [tool for tool in tools if tool.source == "provided"]
+        asking = sum(1 for tool in builtin if tool.requires_approval)
+        self.out.print(
+            self._text(
+                f"tools      {len(builtin)} built-in ({asking} ask first)"
+                + (f" · {len(provided)} MCP" if provided else "")
+            )
+        )
+        messages = len(self.agent.conversation())
+        embedding = backend.embedding
+        self.out.print(
+            self._text(
+                f"memory     {messages} of 20 messages · "
+                + (
+                    f"long-term memory · {embedding}"
+                    if embedding
+                    else "no long-term memory (no embedding backend)"
+                )
+            )
+        )
+        options = self.agent.options
+        limit = format_duration(SESSION_TOOL_TIMEOUT_S)
+        self.out.print(
+            self._text(
+                f"limits     {options.max_steps} steps a turn, "
+                f"{options.steps_per_attempt} an attempt, "
+                f"{options.max_attempts} attempts · commands stop after {limit}"
+            )
+        )
+        files = [getattr(self.store, "path", ""), LOG_PATH]
+        if os.environ.get("LOCALMELO_PERSIST_MEMORY") == "1" or getattr(
+            self.agent.options, "memory_dir", None
+        ):
+            memory_dir = os.environ.get("LOCALMELO_MEMORY_DIR") or os.path.join(
+                os.path.expanduser("~"), ".cache", "localmelo", "memory"
+            )
+            files += [
+                os.path.join(memory_dir, "procedures.db"),
+                os.path.join(memory_dir, "history.db"),
+            ]
+        files = [home_label(str(path)) for path in files if path]
+        self.out.print(self._text("files      " + " · ".join(files)))
+        self.out.print(self._text(f"version    melo {localmelo_version()}"))
+
+    async def retry(self) -> None:
+        """``/retry``: undo the newest turn and run it again, keeping its title."""
+        if self.runner is None or self.state != "idle":
+            self.out.print(self._text("✗ Nothing to retry.", style="error"))
+            return
+        try:
+            turn = await self.runner.undo()
+        except SessionBusyError:
+            self.out.print(self._text("✗ Nothing to retry.", style="error"))
+            return
+        if turn is None:
+            self.out.print(self._text("✗ Nothing to retry.", style="error"))
+            return
+        first = " ".join(turn.user_text.split())[:60]
+        self.out.print(self._text(f"↻ Retrying turn {turn.turn}: {first}"))
+        self._state = "running"
+        self._stop_wanted = self._stop_landed = False
+        self.renderer.begin_turn(turn.user_text, first_turn=False)
+        self._work = self.spawn(self._turn(turn.user_text))
+
+    def mcp(self) -> None:
+        """``/mcp``: the MCP servers, their tools, and where the file came from."""
+        factory = self.factory
+        if not factory.mcp_config:
+            self.out.print(
+                self._text(
+                    "No MCP servers. Name a config file with mcp_config in "
+                    "config.toml, or start melo with --mcp-config FILE "
+                    "(the mcpServers JSON format)."
+                )
+            )
+            return
+        from localmelo.melo.checker.redaction import redact_secrets
+
+        path = home_label(os.path.expanduser(factory.mcp_config))
+        self.out.print(
+            self._text(
+                f"MCP servers from {redact_secrets(path)[0]} ({factory.mcp_source})"
+            )
+        )
+        tools = self.agent.list_tools() if factory.mcp_error is None else []
+        for server in factory.mcp_servers:
+            prefix = f"mcp__{server.namespace}__"
+            count = sum(1 for tool in tools if tool.name.startswith(prefix))
+            command = redact_secrets(" ".join([server.command, *server.args]))[0]
+            if factory.mcp_error is not None:
+                line = f"  {server.name}: not running · {command}"
+            else:
+                line = (
+                    f"  {server.name}: running, {count} tool"
+                    + ("" if count == 1 else "s")
+                    + f" · {command}"
+                )
+            self.out.print(self._text(line, "muted"))
+        if factory.mcp_error:
+            problem = redact_secrets(factory.mcp_error)[0]
+            self.out.print(
+                self._text(
+                    f"MCP is off for this session: {problem}. "
+                    "Fix the config, then restart melo.",
+                    "warn",
+                )
+            )
+
+    def approvals_command(self, arguments: str) -> None:
+        """``/approvals``: the mode and grants, or switch, or forget one."""
+        approvals = self.approvals
+        mode = approvals.mode
+        if mode == "yolo":
+            self.out.print(self._text("Approvals: YOLO (--yolo); no grants.", "muted"))
+            if arguments:
+                self.out.print(
+                    self._text(
+                        "✗ YOLO is on; /approvals ask turns prompts on.",
+                        style="error",
+                    )
+                )
+            return
+        parts = arguments.split()
+        if parts:
+            what = parts[0].lower()
+            if what in ("ask", "auto", "deny"):
+                approvals.set_mode(cast(Literal["ask", "auto", "deny"], what))
+            elif what == "forget":
+                approvals.forget(parts[1] if len(parts) > 1 else None)
+            else:
+                self.out.print(
+                    self._text(
+                        "✗ Use /approvals ask, auto, deny, or forget [tool].",
+                        style="error",
+                    )
+                )
+                return
+        grants = ", ".join(sorted(approvals.allowed_tools)) or "none"
+        self.out.print(self._text(f"Approvals: {approvals.mode} · grants: {grants}"))
 
     def progress(self) -> None:
         """``/progress``: the latest run.progress of this session, in full."""
