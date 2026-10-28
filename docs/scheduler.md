@@ -90,9 +90,10 @@ it, and `fcfs` records it and ignores it. A level lives in the gateway's
 memory: it is not written to `sessions.db`.
 
 The gate writes one file per gateway run,
-`<call_log_dir>/runs/<UTC yyyymmddThhmmss>/calls.jsonl` (mode 0600, run
-directories older than the thinking retention, 30 days by default, are
-removed at startup). Each line is S1's schema-1 trace record for one call,
+`<call_log_dir>/runs/<UTC yyyymmddThhmmss>/calls.jsonl` (mode 0600; a `-N`
+suffix when two runs start in the same second; run directories older than the
+thinking retention, 30 days by default, are removed at startup). Each line is
+S1's schema-1 trace record for one call,
 with the submit, admit and end times, the hold (`admit_s - submit_s`), the
 tokens and the charge. Read a file back with `read_trace()`:
 
