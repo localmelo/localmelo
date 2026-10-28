@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections import deque
 from typing import Any
+from unittest import mock
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import (
@@ -729,6 +730,75 @@ async def test_a_long_entry_is_recalled_once_while_its_block_is_shown() -> None:
         for message in request
         if message.role == "tool"
     )
+
+
+async def test_the_block_is_fitted_with_the_recorded_latency() -> None:
+    from localmelo.melo.agent.agent import _RunState
+    from localmelo.melo.memory import recall as library
+    from localmelo.melo.memory.retrieval.base import Hit, RetrievalResult
+
+    class NoClock:
+        name = "bm25"
+
+        async def search(self, query: Any, docs: Any, *, k: int) -> RetrievalResult:
+            return RetrievalResult(
+                hits=[Hit(doc.doc_id, 1.0, index) for index, doc in enumerate(docs, 1)],
+                retriever="bm25",
+                ms=0,
+            )
+
+    agent = _agent(
+        FakeLLM(),
+        _options(reasoning="compress", retriever="bm25", max_steps=1),
+    )
+    assert agent.load_notes([_entry("n0", "plan: the answer is 42")]) == 1
+    seen: list[int] = []
+
+    def spy(items: Any, **kwargs: Any) -> Any:
+        seen.append(kwargs["ms"])
+        return library.fit_recall_block(items, **kwargs)
+
+    try:
+        with (
+            mock.patch.object(agent, "_get_retriever", return_value=NoClock()),
+            mock.patch(
+                "localmelo.melo.agent.agent.time.perf_counter",
+                side_effect=[100.0, 102.345],
+            ),
+            mock.patch("localmelo.melo.agent.agent.fit_recall_block", spy),
+        ):
+            _record, block, _hits = await agent._run_recall(
+                "step", "the answer 42", _RunState(task_id="t")
+            )
+    finally:
+        await agent.close()
+    # The fit sees the 2,345 ms the block is rendered with, not 0.
+    assert seen == [2_345]
+    assert "2345 ms" in block
+
+
+async def test_the_long_search_asks_the_store_for_two_rows() -> None:
+    from localmelo.melo.agent.agent import _RunState
+
+    agent = _agent(
+        FakeLLM(),
+        _options(reasoning="compress", retriever="embedding", max_steps=1),
+        embedding=FakeEmbedding(),
+    )
+    await agent.hippo.long.add(
+        "a memory", [1.0, 0.0], {"task_id": "t-old", "created_at": 1.0}
+    )
+    search = mock.AsyncMock(
+        return_value=[("a memory", 0.9, {"task_id": "t-old", "created_at": 1.0})]
+    )
+    try:
+        with mock.patch.object(agent.hippo.long, "search", search):
+            docs = await agent._long_docs("q", _RunState(task_id="current"))
+    finally:
+        await agent.close()
+    assert [doc.text for doc in docs] == ["a memory"]
+    assert search.await_args is not None
+    assert search.await_args.kwargs["top_k"] == 2
 
 
 async def test_long_candidates_are_the_two_best_not_the_two_oldest() -> None:
