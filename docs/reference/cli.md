@@ -418,8 +418,10 @@ is wrapped as `{ "v": 1, "type": "event", "event": ... }`, followed by a
 `{ "v": 1, "type": "result", "result": ... }` worker result when the run
 finishes normally. A broken or undrained output pipe is a failure; signals,
 process death or a broken pipe can leave no result. Drain stdout and check
-both the final record and the exit code. Startup and transport errors may
-exit without a worker result; explicit error records are deferred. Worker
+both the final record and the exit code. A valid brief can exit 1 with empty
+stdout and a startup error on stderr (for example, no backend, invalid config,
+or agent construction failure); no `startup_error` or `transport_error` result
+is emitted yet, and `run` is non-null when a result is emitted. Worker
 output uses pattern-based
 redaction and omits some recognizable sensitive-file reads, including simple
 shell and Python reads. Arbitrary commands, code and model output can still

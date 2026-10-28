@@ -22,6 +22,51 @@ def emit(observer: WorkerObserver, kind: str, **data: Any) -> None:
     observer(AgentEvent(type=kind, run_id="r", seq=1, ts=0, data=data))
 
 
+def test_output_format_help_and_invalid_choice(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import localmelo.__main__ as cli
+
+    parser = cli._build_parser()
+    assert "stream-json" in parser.format_help()
+    with pytest.raises(SystemExit) as exc:
+        parser.parse_args(["--output-format", "bogus", "task"])
+    assert exc.value.code == 2
+    assert "choose from 'text', 'json', 'stream-json'" in capsys.readouterr().err
+
+
+def test_directory_brief_error_names_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import localmelo.__main__ as cli
+
+    monkeypatch.setattr(sys, "argv", ["melo", "--brief", str(tmp_path)])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 2
+    error = capsys.readouterr().err
+    assert str(tmp_path) in error and "not a regular file" in error
+    assert "directory: 3" not in error
+
+
+def test_assignment_in_assistant_and_tool_arguments_is_masked(tmp_path: Path) -> None:
+    out = io.StringIO()
+    observer = WorkerObserver(out, str(tmp_path), stream=True)
+    emit(observer, "assistant.message", content="echo ACME_CREDENTIAL=privatevalue")
+    emit(
+        observer,
+        "tool.started",
+        name="shell_exec",
+        call_id="x",
+        arguments={"command": "echo ACME_CREDENTIAL=privatevalue"},
+    )
+    observer.close()
+    records = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert len(records) == 2
+    assert "privatevalue" not in out.getvalue()
+    assert all("[redacted]" in json.dumps(record) for record in records)
+
+
 def test_unreadable_brief_paths_fail_without_blocking(tmp_path: Path) -> None:
     fifo = tmp_path / "fifo"
     os.mkfifo(fifo)

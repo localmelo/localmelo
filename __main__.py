@@ -1340,8 +1340,7 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     )
     direct.add_argument(
         "--output-format",
-        choices=["text", "json"],
-        metavar="{text,json,stream-json}",
+        choices=["text", "json", "stream-json"],
         help="text (default), one JSON line, or stream-json with --brief",
     )
     direct.add_argument(
