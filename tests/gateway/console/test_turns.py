@@ -7,7 +7,14 @@ from fastapi.testclient import TestClient
 from localmelo.support.gateway.console import Console
 from localmelo.support.sessions.store import SessionStore, TurnInfo
 
-from .conftest import HOLDER, core_event, run_result, seed_turn
+from .conftest import (
+    HOLDER,
+    all_events,
+    core_event,
+    run_result,
+    seed_many_events,
+    seed_turn,
+)
 
 TURN_KEYS = {
     "id",
@@ -105,6 +112,17 @@ async def test_events_are_included_and_shaped_like_the_stream(
         "data",
     }
     assert [event["id"] for event in events] == sorted(event["id"] for event in events)
+
+
+async def test_events_read_past_one_page(
+    client: TestClient, console: Console, workspace: str
+) -> None:
+    turn = await seed_many_events(console.store, workspace)
+    body = client.get(f"/api/sessions/{turn.session_id}/turns?events=true").json()
+    events = body["turns"][0]["events"]
+    stored = await all_events(console.store, turn.session_id)
+    assert len(stored) > 1000
+    assert [event["id"] for event in events] == [event.id for event in stored]
 
 
 async def test_undone_turns_are_listed(

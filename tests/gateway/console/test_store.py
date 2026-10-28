@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 import localmelo.support.gateway.console as console_mod
 from localmelo.support.gateway import GatewayServer
 from localmelo.support.gateway.console import Console, ConsoleOptions
-from localmelo.support.sessions.store import SessionStore
+from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 from .conftest import FakeBuilder, FakeProbe, make_cfg
 
@@ -52,6 +52,52 @@ async def test_the_open_is_retried_after_the_owner_releases(
         assert client.get("/api/sessions").status_code == 200
     finally:
         await console.aclose()
+
+
+async def test_an_owned_store_never_names_its_holder(
+    tmp_path: Path, builder: FakeBuilder, probe: FakeProbe
+) -> None:
+    path = str(tmp_path / "sessions.db")
+    owner = SessionStore(path, writer="gateway")
+    await owner.open()
+    console = Console(
+        make_cfg(),
+        port=8401,
+        options=ConsoleOptions(store_path=path, builder=builder, probe=probe),
+    )
+    await console.start()
+    try:
+        assert console.store_state() == "unavailable"
+        message = console.store_error()
+        assert "Another melo gateway is using" in message
+        assert "pid" not in message
+        resp = _client(console).get("/api/sessions")
+        assert resp.status_code == 503
+        error = resp.json()["error"]
+        assert error["code"] == "store_unavailable"
+        assert "Another melo gateway is using" in error["message"]
+        assert "pid" not in error["message"]
+    finally:
+        await console.aclose()
+        await owner.aclose()
+
+
+async def test_a_store_message_labels_the_home_folder(
+    console: Console, home: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The re-read after a failed store call can itself fail; that message
+    # must still write the home folder as "~" (docs/api.md).
+    async def broken(session_id: str) -> None:
+        raise SessionStoreError("reread failed")
+
+    monkeypatch.setattr(console.store, "get_session", broken)
+    error = await console.store_api_error(
+        SessionStoreError(f"{home}/gateway/sessions.db: disk I/O error"), "sess"
+    )
+    assert error.status_code == 503
+    assert error.code == "store_unavailable"
+    assert error.message.startswith("~")
+    assert str(home) not in error.message
 
 
 async def test_aclose_releases_the_owner_lock(

@@ -21,13 +21,18 @@ import os
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, Literal
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.schema import Message
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import build_session_agent
-from localmelo.support.sessions.approvals import ApprovalBroker, RememberingPolicy
+from localmelo.support.sessions.approvals import (
+    ApprovalBroker,
+    AskFunction,
+    RememberingPolicy,
+)
 from localmelo.support.sessions.runner import (
     DEFAULT_RESUME_MODE,
     ResumeInfo,
@@ -64,6 +69,26 @@ DEFAULT_WORKSPACE: Final = "~/localmelo-workspace"
 
 SettingsSource = Callable[[], "Config"]
 AgentBuilder = Callable[["Config", str, str | None], Awaitable[Agent]]
+
+
+class SessionLock(asyncio.Lock):
+    """An :class:`asyncio.Lock` that remembers which task holds it.
+
+    :meth:`ConsoleSessions.open` needs to know that its caller holds the
+    lock, not only that someone does; a lock held by another task is not
+    the caller's to open under.
+    """
+
+    owner: asyncio.Task[object] | None = None
+
+    async def acquire(self) -> Literal[True]:
+        await super().acquire()
+        self.owner = asyncio.current_task()
+        return True
+
+    def release(self) -> None:
+        self.owner = None
+        super().release()
 
 
 async def default_builder(
@@ -103,7 +128,7 @@ class OpenSession:
     mcp_error: str = ""
     built_with_mcp: bool = False
     resumed: ResumeInfo | None = None
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    lock: SessionLock = field(default_factory=SessionLock)
     last_used: float = 0.0
 
 
@@ -140,7 +165,7 @@ class ConsoleSessions:
         self._default_workspace = os.path.expanduser(DEFAULT_WORKSPACE)
         self._holder = process_holder("gateway")
         self._sessions: dict[str, OpenSession] = {}
-        self._locks: dict[str, asyncio.Lock] = {}
+        self._locks: dict[str, SessionLock] = {}
         self._closed = False
 
     # ── Reading ──
@@ -155,11 +180,11 @@ class ConsoleSessions:
     def entries(self) -> list[OpenSession]:
         return list(self._sessions.values())
 
-    def lock(self, session_id: str) -> asyncio.Lock:
+    def lock(self, session_id: str) -> SessionLock:
         """The lock that serializes this session's opens and turns."""
         lock = self._locks.get(session_id)
         if lock is None:
-            lock = asyncio.Lock()
+            lock = SessionLock()
             self._locks[session_id] = lock
         return lock
 
@@ -186,7 +211,7 @@ class ConsoleSessions:
         """
         if self._closed:
             raise RuntimeError("The console's sessions are closed")
-        if not self.lock(session_id).locked():
+        if self.lock(session_id).owner is not asyncio.current_task():
             raise RuntimeError(
                 "ConsoleSessions.open() must be called with the session's lock held"
             )
@@ -260,16 +285,20 @@ class ConsoleSessions:
                 holder=self._holder,
                 resume_mode=DEFAULT_RESUME_MODE,
             )
+            granted_at: dict[str, float] = {}
             policy = RememberingPolicy(
-                ask=runner.observe(self._broker.asker(session_id))
+                ask=runner.observe(self._timed_ask(session_id, granted_at))
             )
             entry = OpenSession(
                 session_id=session_id,
                 runner=runner,
                 policy=policy,
-                granted_at={},
+                granted_at=granted_at,
                 agent=agent,
-                built_with_mcp=mcp_config is not None,
+                # MCP is deferred (decision 5 B) and default_builder never
+                # reads mcp_config, so no console Agent has MCP tools yet:
+                # the idle sweep must not close it as if it did (2.10).
+                built_with_mcp=False,
                 lock=self.lock(session_id),
                 last_used=self._clock(),
             )
@@ -282,7 +311,7 @@ class ConsoleSessions:
                     await agent.close()
                 raise ApiError(409, "session_busy", str(exc)) from exc
             entry.agent = agent
-            entry.built_with_mcp = mcp_config is not None
+            entry.built_with_mcp = False
             entry.last_used = self._clock()
 
         try:
@@ -302,6 +331,16 @@ class ConsoleSessions:
                     503, "store_unavailable", display.home_label(str(exc))
                 ) from exc
             raise
+        if self._closed:
+            # close_all() may have run while _load() awaited. It closed this
+            # Agent and cleared the registry, so never hand the entry back.
+            if entry.agent is agent:
+                entry.agent = None
+            with contextlib.suppress(Exception):
+                await agent.close()
+            if is_new:
+                self._sessions.pop(session_id, None)
+            raise RuntimeError("The console's sessions are closed")
         return entry
 
     async def _load(self, entry: OpenSession) -> None:
@@ -346,6 +385,22 @@ class ConsoleSessions:
             # next open: the kept conversation is what it loads.
             entry.agent = None
         entry.last_used = self._clock()
+
+    def _timed_ask(self, session_id: str, granted_at: dict[str, float]) -> AskFunction:
+        """The broker's ask, recording when an allowed-with-remember grant began."""
+        ask = self._broker.asker(session_id)
+
+        async def timed(request: ApprovalRequest) -> ApprovalDecision:
+            decision = await ask(request)
+            if (
+                isinstance(decision, ApprovalDecision)
+                and decision.allow
+                and decision.remember
+            ):
+                granted_at[request.tool_name] = self._clock()
+            return decision
+
+        return timed
 
     async def _make_room(self, session_id: str) -> None:
         """Close the least recently used idle Agent when at the cap."""

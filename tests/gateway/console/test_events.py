@@ -18,7 +18,7 @@ from localmelo.support.gateway import _ConsoleServer
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.sse import EventStream
 
-from .conftest import seed_turn
+from .conftest import all_events, seed_many_events, seed_turn
 
 
 def parse_frames(text: str) -> tuple[list[dict[str, Any]], list[str]]:
@@ -53,17 +53,28 @@ async def test_a_one_shot_stream_carries_every_event(
     assert resp.headers["content-type"].startswith("text/event-stream")
     assert resp.headers["cache-control"] == "no-store"
     events, comments = parse_frames(resp.text)
-    stored = await console.store.list_events(turn.session_id)
+    stored = await all_events(console.store, turn.session_id)
     assert [event["id"] for event in events] == [event.id for event in stored]
     assert comments[0] == "retry: 2000"
     assert console.open_streams == 0
+
+
+async def test_a_one_shot_stream_pages_past_one_thousand(
+    client: TestClient, console: Console, workspace: str
+) -> None:
+    turn = await seed_many_events(console.store, workspace)
+    resp = client.get(f"/api/sessions/{turn.session_id}/events?follow=false")
+    events, _ = parse_frames(resp.text)
+    stored = await all_events(console.store, turn.session_id)
+    assert len(stored) > 1000
+    assert [event["id"] for event in events] == [event.id for event in stored]
 
 
 async def test_the_last_event_id_wins_over_after(
     client: TestClient, console: Console, workspace: str
 ) -> None:
     turn = await seed_turn(console.store, workspace)
-    stored = await console.store.list_events(turn.session_id)
+    stored = await all_events(console.store, turn.session_id)
     stored_ids = [event.id for event in stored if event.id is not None]
     assert len(stored_ids) == len(stored) >= 3
     cutoff = stored_ids[1]
@@ -82,7 +93,7 @@ async def test_after_starts_the_replay(
     client: TestClient, console: Console, workspace: str
 ) -> None:
     turn = await seed_turn(console.store, workspace)
-    stored = await console.store.list_events(turn.session_id)
+    stored = await all_events(console.store, turn.session_id)
     stored_ids = [event.id for event in stored if event.id is not None]
     assert len(stored_ids) == len(stored) >= 2
     after = stored_ids[-2]
@@ -134,7 +145,7 @@ async def test_a_store_error_at_a_keepalive_does_not_end_the_stream(
 
     monkeypatch.setattr(sse_mod, "SSE_KEEPALIVE_S", 0.01)
     turn = await seed_turn(console.store, workspace)
-    stored = await console.store.list_events(turn.session_id)
+    stored = await all_events(console.store, turn.session_id)
     after = stored[-1].id
     assert after is not None
 
@@ -157,7 +168,7 @@ async def test_after_the_newest_event_yields_only_retry(
     client: TestClient, console: Console, workspace: str
 ) -> None:
     turn = await seed_turn(console.store, workspace)
-    stored = await console.store.list_events(turn.session_id)
+    stored = await all_events(console.store, turn.session_id)
     newest = stored[-1].id
     assert newest is not None
     resp = client.get(
@@ -309,7 +320,7 @@ async def test_a_silent_stream_sends_a_keepalive(
 
     monkeypatch.setattr(sse_mod, "SSE_KEEPALIVE_S", 0.01)
     turn = await seed_turn(console.store, workspace)
-    stored = await console.store.list_events(turn.session_id)
+    stored = await all_events(console.store, turn.session_id)
     after = stored[-1].id
     assert after is not None
     stream = EventStream(
@@ -331,7 +342,7 @@ async def test_a_deleted_session_ends_the_stream(
 
     monkeypatch.setattr(sse_mod, "SSE_KEEPALIVE_S", 0.01)
     turn = await seed_turn(console.store, workspace)
-    stored = await console.store.list_events(turn.session_id)
+    stored = await all_events(console.store, turn.session_id)
     after = stored[-1].id
     assert after is not None
     stream = EventStream(

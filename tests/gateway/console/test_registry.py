@@ -13,6 +13,7 @@ from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.registry import ConsoleSessions, SettingsSource
+from localmelo.support.sessions.runner import SessionRunner
 from localmelo.support.sessions.store import NewSession, SessionStoreError
 
 from .conftest import FakeAgent, FakeBuilder, make_cfg, open_session, seed_turn
@@ -97,13 +98,30 @@ async def test_the_idle_sweep_keeps_the_conversation(
     console: Console, builder: FakeBuilder, workspace: str
 ) -> None:
     turn = await seed_turn(console.store, workspace)
-    reg = registry(console, builder, idle_close_s=0, mcp_config="/tmp/mcp.json")
+    reg = registry(console, builder, idle_close_s=0)
     entry = await open_session(reg, turn.session_id)
+    # Only an Agent a builder really gave MCP tools is swept; the flag is
+    # what that builder will report when MCP lands (PR 3+).
+    entry.built_with_mcp = True
     cast(FakeAgent, entry.agent).messages = [Message(role="user", content="idle")]
     entry.last_used = 0
     assert await reg.close_idle() == 1
     assert entry.agent is None
     assert entry.kept is not None
+
+
+async def test_an_mcp_config_alone_does_not_mark_the_agent(
+    console: Console, builder: FakeBuilder, workspace: str
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+    reg = registry(console, builder, idle_close_s=0, mcp_config="/tmp/mcp.json")
+    entry = await open_session(reg, turn.session_id)
+    # default_builder does not read mcp_config and builds no MCP tools, so
+    # the sweep must not close this Agent as if it held MCP processes.
+    assert entry.built_with_mcp is False
+    entry.last_used = 0
+    assert await reg.close_idle() == 0
+    assert entry.agent is not None
 
 
 async def test_the_idle_sweep_leaves_an_agent_without_mcp(
@@ -197,6 +215,29 @@ async def test_open_requires_the_session_lock(console: Console, workspace: str) 
         await console.sessions.open(turn.session_id)
 
 
+async def test_open_refuses_a_lock_another_task_holds(
+    console: Console, workspace: str
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+    holding = asyncio.Event()
+    release = asyncio.Event()
+
+    async def hold() -> None:
+        async with console.sessions.lock(turn.session_id):
+            holding.set()
+            await release.wait()
+
+    holder = asyncio.create_task(hold())
+    await holding.wait()
+    try:
+        # A lock another task holds is not the caller's to open under.
+        with pytest.raises(RuntimeError, match="lock held"):
+            await console.sessions.open(turn.session_id)
+    finally:
+        release.set()
+        await holder
+
+
 async def test_open_maps_a_store_read_failure(
     console: Console, workspace: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -251,6 +292,34 @@ async def test_close_all_closes_the_registry(
     await reg.close_all()
     with pytest.raises(RuntimeError):
         await open_session(reg, turn.session_id)
+
+
+async def test_open_during_a_close_all_load_raises_and_closes(
+    console: Console,
+    builder: FakeBuilder,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+    loaded = asyncio.Event()
+    release = asyncio.Event()
+    resume = SessionRunner.resume
+
+    async def blocked(self: SessionRunner) -> Any:
+        loaded.set()
+        await release.wait()
+        return await resume(self)
+
+    monkeypatch.setattr(SessionRunner, "resume", blocked)
+    opening = asyncio.create_task(open_session(console.sessions, turn.session_id))
+    await loaded.wait()
+    await console.sessions.close_all()
+    release.set()
+    with pytest.raises(RuntimeError):
+        await opening
+    assert builder.agents
+    assert all(agent.closed for agent in builder.agents)
+    assert console.sessions.get(turn.session_id) is None
 
 
 async def test_a_failed_keep_leaves_no_agent_to_reuse(

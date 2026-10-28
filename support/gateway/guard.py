@@ -40,11 +40,10 @@ _API_REFUSAL_HEADERS = {"cache-control": "no-store"}
 
 # Headers of every HTTP response: no page may show the gateway's pages in
 # a frame, where a page on another site could trick the user into
-# clicking them.
-_NO_FRAMING_HEADERS = (
-    (b"x-frame-options", b"DENY"),
-    (b"content-security-policy", b"frame-ancestors 'none'"),
-)
+# clicking them. The CSP rule is added to a response's own policy when it
+# has one, so a blob's ``default-src 'none'; sandbox`` stays one header.
+_NO_FRAMING_HEADERS = ((b"x-frame-options", b"DENY"),)
+_FRAMING_CSP = b"frame-ancestors 'none'"
 
 
 def is_loopback(host: str) -> bool:
@@ -87,7 +86,24 @@ def _forbid_framing(send: Send) -> Send:
 
     async def send_forbidding_framing(message: Message) -> None:
         if message["type"] == "http.response.start":
-            headers = [*message.get("headers", ()), *_NO_FRAMING_HEADERS]
+            headers = list(message.get("headers", ()))
+            # A response may set its own CSP, as a blob does. Appending a
+            # second policy would make the browser intersect two headers;
+            # one header with both directives says the same and keeps the
+            # documented "every response has one CSP" contract.
+            policies = [
+                value
+                for name, value in headers
+                if name.lower() == b"content-security-policy"
+            ]
+            headers = [
+                (name, value)
+                for name, value in headers
+                if name.lower() != b"content-security-policy"
+            ]
+            value = b"; ".join([*policies, _FRAMING_CSP]) if policies else _FRAMING_CSP
+            headers.append((b"content-security-policy", value))
+            headers.extend(_NO_FRAMING_HEADERS)
             message = {**message, "headers": headers}
         await send(message)
 

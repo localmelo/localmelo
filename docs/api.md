@@ -25,7 +25,7 @@ every route below:
 |---|---|---|
 | 400 | `invalid_request` | a malformed query parameter, or a malformed `client_request_id` |
 | 403 | `foreign_origin` | a request under `/api/` from another site (`Sec-Fetch-Site` is neither `same-origin` nor `none`), or a state-changing request from another origin |
-| 404 | `not_found` | an unknown session, turn, blob or route |
+| 404 | `not_found` | an unknown session, blob or route |
 | 405 | `method_not_allowed` | a known path with a method it does not serve; the `Allow` header names the methods it does |
 | 421 | `misdirected_request` | the `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>` |
 | 500 | `internal_error` | an unexpected failure; the message is `Internal error; see the gateway log.` and never a traceback or a value from the request |
@@ -119,7 +119,7 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 ```json
 {
   "session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0},
-  "pending_approvals": [{"request_id": "0d6c2a9e8f7b41c3a5e9d1b3f5a7c9e1", "call_id": "call_1", "tool_name": "file_write", "arguments": {"path": "/home/me/demo-project/todo.md"}, "preview": "~/demo-project/todo.md", "workspace_root": "/home/me/demo-project", "workspace_label": "~/demo-project", "target": null}],
+  "pending_approvals": [{"request_id": "0d6c2a9e8f7b41c3a5e9d1b3f5a7c9e1", "call_id": "call_1", "tool_name": "file_write", "arguments": {"path": "/home/me/demo-project/todo.md"}, "preview": "~/demo-project/todo.md", "workspace_root": "/home/me/demo-project", "workspace_label": "~/demo-project", "target": {"path_label": "todo.md", "exists": false, "size_bytes": 0}}],
   "grants": ["shell_exec"],
   "granted_at": {"shell_exec": 1761141604.9},
   "mcp_error": "",
@@ -137,9 +137,10 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
   that has not run a turn reads `not_loaded`.
 - `tokens` sums the `completion_tokens` of the session's finished turns,
   the same field the answers report.
-- `pending_approvals` entries carry `target: null` until the shared
-  approval-target helper lands; API v2 only adds keys, so a later object
-  is compatible.
+- A `pending_approvals` entry's `target` is set for a `file_write`: the
+  path `path_label` (relative to the workspace, else with the home folder
+  as `~`), whether the file `exists`, and its `size_bytes`, read when the
+  response is made. Every other tool's `target` is `null`.
 
 ## GET /api/sessions/{id}/turns
 
@@ -150,7 +151,7 @@ curl 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/turns?limit=10&events=true
 ```
 
 ```json
-{"turns": [{"id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "turn": 3, "run_id": "4b1e7c9a2f3d4e5b8a6c0d1e2f3a4b5c", "user_text": "Summarize these notes", "status": "completed", "cause": "run", "answer": "The notes say ...", "result": {"task_id": "4b1e7c9a2f3d4e5b8a6c0d1e2f3a4b5c", "status": "completed", "result": "...", "error": "", "steps": 3, "attempts": 1, "n_llm": 3, "n_main": 3, "n_aux": 0, "n_tool": 4, "llm_errors": 0, "usage": {"prompt_tokens": 1180, "completion_tokens": 24, "total_tokens": 1204}, "duration_s": 12.2, "config": {}}, "undone": false, "started_at": 1761141600.2, "finished_at": 1761141612.4, "client_request_id": null, "running_here": false}], "has_earlier": false, "replay_from": 789}
+{"turns": [{"id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "turn": 3, "run_id": "4b1e7c9a2f3d4e5b8a6c0d1e2f3a4b5c", "user_text": "Summarize these notes", "status": "completed", "cause": "run", "answer": "The notes say ...", "result": {"task_id": "4b1e7c9a2f3d4e5b8a6c0d1e2f3a4b5c", "status": "completed", "result": "...", "error": "", "steps": 3, "attempts": 1, "n_llm": 3, "n_main": 3, "n_aux": 0, "n_tool": 4, "llm_errors": 0, "usage": {"prompt_tokens": 1180, "completion_tokens": 24, "total_tokens": 1204}, "duration_s": 12.2, "config": {}}, "undone": false, "started_at": 1761141600.2, "finished_at": 1761141612.4, "client_request_id": null, "running_here": false, "events": [{"id": 790, "session_id": "3f9c2a7b1d4e", "turn": 3, "v": 1, "type": "turn.started", "run_id": "", "seq": null, "ts": 1761141600.2, "data": {"turn": 3, "turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "user_text": "Summarize these notes", "client_request_id": null}}]}], "has_earlier": false, "replay_from": 789}
 ```
 
 - `limit` is 1 to 50 (default 10). Without `before`, the page is the newest
@@ -220,8 +221,10 @@ curl -o shot.png http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/blobs/823ceb99f
   with their type. Any other stored type, SVG included, is
   `application/octet-stream` with
   `Content-Disposition: attachment; filename="<sha256>.bin"`.
-- Every response has `X-Content-Type-Options: nosniff`,
-  `Content-Security-Policy: default-src 'none'; sandbox` and
+- Every response has `X-Content-Type-Options: nosniff`, one
+  `Content-Security-Policy` header whose value is
+  `default-src 'none'; sandbox; frame-ancestors 'none'` (the gateway's
+  framing rule is merged into the blob's own policy) and
   `Cache-Control: no-store`.
 
 ## GET /api/sessions/{id}/submissions/{client_request_id}

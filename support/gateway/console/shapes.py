@@ -91,8 +91,8 @@ def turn_json(
 def approval_json(request: ApprovalRequest) -> dict[str, Any]:
     """One pending approval, as the console's card reads it.
 
-    ``target`` stays ``None`` until the shared ``approval_target`` helper
-    lands; API v2 only adds keys, so a later value is additive.
+    ``target`` is the shared ``approval_target`` shape for a ``file_write``
+    request, read per response, and ``None`` for every other tool.
     """
     root = request.workspace_root
     return {
@@ -103,7 +103,13 @@ def approval_json(request: ApprovalRequest) -> dict[str, Any]:
         "preview": request.preview,
         "workspace_root": root,
         "workspace_label": "" if root is None else display.home_label(root),
-        "target": None,
+        "target": display.approval_target(
+            {
+                "tool_name": request.tool_name,
+                "arguments": request.arguments,
+                "workspace_root": root,
+            }
+        ),
     }
 
 

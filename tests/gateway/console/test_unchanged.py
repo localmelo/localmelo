@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from localmelo.support.gateway import GatewayServer
@@ -40,22 +41,24 @@ def test_the_workspace_page_is_the_same_file(tmp_path: Path) -> None:
     assert resp.content == static.read_bytes()
 
 
-def test_v1_health_is_byte_identical(tmp_path: Path) -> None:
+def test_v1_health_is_byte_identical(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A fixed clock makes the no-lifespan client's uptime exactly 0.0, so
+    # the whole body can be compared as the bytes a client receives.
+    monkeypatch.setattr("localmelo.support.gateway.time.time", lambda: 1000.0)
     server = build(tmp_path)
     client = TestClient(server.app, base_url="http://127.0.0.1:8401")
-    assert client.get("/v1/health").json() == {
-        "status": "ok",
-        "uptime": 0.0,
-        "sessions": {"active": 0, "busy": 0, "max": 50},
-        "chat_backend": "mlc",
-        "embedding_backend": "none",
-    }
+    assert client.get("/v1/health").content == (
+        b'{"status":"ok","uptime":0.0,"sessions":{"active":0,"busy":0,"max":50},'
+        b'"chat_backend":"mlc","embedding_backend":"none"}'
+    )
 
 
 def test_v1_sessions_is_byte_identical(tmp_path: Path) -> None:
     server = build(tmp_path)
     client = TestClient(server.app, base_url="http://127.0.0.1:8401")
-    assert client.get("/v1/sessions").json() == {"sessions": []}
+    assert client.get("/v1/sessions").content == b'{"sessions":[]}'
 
 
 def test_the_api_description_pages_are_off(tmp_path: Path) -> None:

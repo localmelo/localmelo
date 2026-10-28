@@ -67,9 +67,11 @@ A refused request under `/api/` uses [API v2](api.md)'s envelope instead:
 - curl and scripts send no `Origin` header, so only the `Host` check applies
   to them.
 - Every response tells the browser not to show it in a frame, with
-  `X-Frame-Options: DENY` and
-  `Content-Security-Policy: frame-ancestors 'none'`, so a page on another
-  site cannot embed the web workspace and trick you into clicking in it.
+  `X-Frame-Options: DENY` and a `Content-Security-Policy` that ends
+  `frame-ancestors 'none'`, so a page on another site cannot embed the web
+  workspace and trick you into clicking in it. A response with a policy of
+  its own, such as a blob's `default-src 'none'; sandbox`, keeps one header
+  with both.
 - The checks are on when the host is `localhost` or a loopback IP address:
   `127.0.0.1`, `::1` or another address in `127.0.0.0/8`. Requests must
   still name the gateway as `127.0.0.1`, `localhost` or `[::1]`, so use one

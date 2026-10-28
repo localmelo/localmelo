@@ -36,6 +36,7 @@ from localmelo.support.sessions.store import (
     RETENTION_SWEEP_S,
     SessionStore,
     SessionStoreError,
+    StoreOwnedError,
 )
 
 from . import errors, routes_sessions, routes_settings
@@ -50,6 +51,21 @@ logger = logging.getLogger(__name__)
 
 # Seconds between retries of a store open that failed.
 STORE_RETRY_S: Final = 5.0
+
+# What an API v2 message says when another process holds the store's owner
+# lock. It never names the other process: spec 2.2 keeps lease holder
+# strings out of API messages. The terminal keeps the store's own text.
+STORE_OWNED_MESSAGE: Final = (
+    "Another melo gateway is using the console's session file. "
+    "Stop it to use the console here."
+)
+
+
+def store_message(exc: SessionStoreError) -> str:
+    """A store failure as an API v2 message, with the home folder written ``~``."""
+    if isinstance(exc, StoreOwnedError):
+        return STORE_OWNED_MESSAGE
+    return display.home_label(str(exc))
 
 
 @dataclass(frozen=True)
@@ -134,7 +150,7 @@ class Console:
             await self.store.open()
         except SessionStoreError as exc:
             self._store_ok = False
-            self._store_error = display.home_label(str(exc))
+            self._store_error = store_message(exc)
             logger.warning("The session store is unavailable: %s", self._store_error)
             return False
         self._store_ok = True
@@ -259,13 +275,15 @@ class Console:
             try:
                 info = await self.store.get_session(session_id)
             except SessionStoreError:
-                return ApiError(503, "store_unavailable", self._store_error or str(exc))
+                return ApiError(
+                    503, "store_unavailable", self._store_error or store_message(exc)
+                )
             if info is None:
                 return ApiError(404, "not_found", "This session was deleted.")
         return ApiError(
             503,
             "store_unavailable",
-            self._store_error or display.home_label(str(exc)),
+            self._store_error or store_message(exc),
         )
 
     # ── Event streams ──

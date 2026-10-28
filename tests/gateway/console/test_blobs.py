@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from localmelo.melo.schema import ImagePart
 from localmelo.support.gateway.console import Console
+from localmelo.support.gateway.guard import LoopbackGuard
 
-from .conftest import seed_turn
+from .conftest import PORT, seed_turn
 
 PNG = b"\x89PNG\r\n\x1a\n" + b"payload"
 SVG = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>"
@@ -40,6 +42,24 @@ async def test_a_non_image_is_an_attachment(
         f'attachment; filename="{image.sha256}.bin"'
     )
     assert resp.content == SVG
+
+
+async def test_a_blob_through_the_guard_has_one_csp(
+    app: FastAPI, console: Console, workspace: str
+) -> None:
+    image = ImagePart.from_bytes(PNG, "image/png")
+    turn = await seed_turn(console.store, workspace, images=[image])
+    guarded = TestClient(
+        LoopbackGuard(app, port=PORT), base_url=f"http://127.0.0.1:{PORT}"
+    )
+    resp = guarded.get(f"/api/sessions/{turn.session_id}/blobs/{image.sha256}")
+    assert resp.status_code == 200
+    # The guard adds the framing rule to the blob's own policy instead of
+    # sending a second Content-Security-Policy header.
+    assert resp.headers.get_list("content-security-policy") == [
+        "default-src 'none'; sandbox; frame-ancestors 'none'"
+    ]
+    assert resp.headers["x-frame-options"] == "DENY"
 
 
 async def test_an_unknown_blob_is_404(

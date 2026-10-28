@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
+from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.support.gateway.console import Console
 from localmelo.support.sessions.store import SessionStore
 
@@ -48,10 +50,16 @@ async def test_the_list_shape_and_a_session(
 
 
 async def test_the_list_is_newest_first_and_pages(
-    client: TestClient, console: Console, workspace: str
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # A clock that only moves forward makes the order independent of how
+    # loaded the machine is.
+    ticks = iter(range(1, 1000))
+    monkeypatch.setattr(console.store, "_clock", lambda: float(next(ticks)))
     first = await seed_turn(console.store, workspace, title="First")
-    await asyncio.sleep(0.01)
     second = await seed_turn(console.store, workspace, title="Second")
     body = client.get("/api/sessions?limit=1").json()
     assert [s["id"] for s in body["sessions"]] == [second.session_id]
@@ -124,6 +132,43 @@ async def test_a_session_with_its_tokens_and_agent_state(
     await console.sessions.keep(turn.session_id)
     body = client.get(f"/api/sessions/{turn.session_id}").json()
     assert body["agent"] == "paused"
+
+
+async def test_a_pending_file_write_shows_its_target(
+    client: TestClient, console: Console, workspace: str
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+    entry = await open_session(console.sessions, turn.session_id)
+    request = ApprovalRequest(
+        request_id="req-1",
+        run_id="",
+        call_id="call_1",
+        tool_name="file_write",
+        arguments={"path": str(Path(workspace) / "todo.md")},
+        preview="todo.md",
+        workspace_root=workspace,
+    )
+    deciding = asyncio.create_task(entry.policy.decide(request))
+    for _ in range(10):
+        if console.broker.pending(turn.session_id):
+            break
+        await asyncio.sleep(0)
+
+    pending = client.get(f"/api/sessions/{turn.session_id}").json()["pending_approvals"]
+    assert pending[0]["target"] == {
+        "path_label": "todo.md",
+        "exists": False,
+        "size_bytes": 0,
+    }
+
+    answer = ApprovalDecision(True, remember=True)
+    assert console.broker.answer("req-1", answer) == "resolved"
+    assert (await deciding).remember is True
+    body = client.get(f"/api/sessions/{turn.session_id}").json()
+    assert body["grants"] == ["file_write"]
+    # A remembered grant is timed when it begins, not left at the 0.0
+    # placeholder the route fills for a missing entry.
+    assert body["granted_at"]["file_write"] > 0
 
 
 async def test_an_unknown_session_is_404(client: TestClient) -> None:

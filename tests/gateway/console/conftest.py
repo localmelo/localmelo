@@ -202,6 +202,50 @@ async def seed_turn(
     )
 
 
+async def all_events(store: SessionStore, session_id: str) -> list[Any]:
+    """Every stored event of *session_id*, paged past the store's 1000 cap."""
+    events: list[Any] = []
+    after = 0
+    while True:
+        page = await store.list_events(session_id, after_id=after, limit=1000)
+        events.extend(page)
+        if len(page) < 1000 or page[-1].id is None:
+            return events
+        after = page[-1].id
+
+
+async def seed_many_events(
+    store: SessionStore, workspace: str, count: int = 1005
+) -> TurnInfo:
+    """A finished turn with *count* assistant events, in writer-sized batches."""
+    turn = await store.begin_turn(
+        None,
+        "many",
+        holder=HOLDER,
+        title="Many",
+        new_session=NewSession(model="stub-model", workspace=workspace),
+    )
+    events = [
+        core_event("assistant.message", content=f"m{index}") for index in range(count)
+    ]
+    for start in range(0, count, 200):
+        await store.append_events(
+            turn.session_id,
+            turn.turn,
+            events[start : start + 200],
+            holder=HOLDER,
+        )
+    return await store.finish_turn(
+        turn.session_id,
+        turn.turn,
+        holder=HOLDER,
+        status="completed",
+        cause="run",
+        result=run_result(),
+        answer="done",
+    )
+
+
 # ── The two event helpers the sessions tests use ──
 
 # Copied from tests/sessions/helpers.py: importing that module from here makes
