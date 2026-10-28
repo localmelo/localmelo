@@ -104,9 +104,7 @@ _UI_FLAGS = {
 
 # Direct-mode flags the interactive UI refuses: its Agents offer every tool,
 # an approval's wait would count toward a timeout, it has no machine output,
-# it draws its own progress, and it does not wire the reasoning field or the
-# retrieval extra body yet (each has its own message below; R2b wires the
-# first, a later change the second). `--keep-decision-text` is an evaluation
+# it draws its own progress. `--keep-decision-text` is an evaluation
 # switch, so the UI never accepts it.
 _UI_REFUSED = (
     "tool_exposure",
@@ -114,8 +112,6 @@ _UI_REFUSED = (
     "output_format",
     "progress",
     "routine",
-    "reasoning_field",
-    "retrieval_extra_body",
     "keep_decision_text",
 )
 
@@ -878,6 +874,18 @@ def _check_effective_recall(
         parser.error("argument --retrieval-extra-body: it needs --retriever llm")
 
 
+def _check_ui_options(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    options: AgentOptions,
+) -> None:
+    """Apply the direct recall refusals after the UI resolves its config defaults."""
+    effective = argparse.Namespace(**vars(args))
+    effective.reasoning = options.reasoning
+    _check_recall_args(parser, effective)
+    _check_effective_recall(parser, args, options)
+
+
 def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Reject flag combinations before anything runs (argparse exit code 2)."""
     if args.import_session is not None:
@@ -967,16 +975,6 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         parser.error(
             "--host and --port are for --serve and --daemon; "
             "bare melo opens the interactive UI"
-        )
-    if interactive and args.reasoning_field is not None:
-        parser.error(
-            "--reasoning-field is not in the interactive UI yet; "
-            'give it with a task (melo -- "<task>")'
-        )
-    if interactive and args.retrieval_extra_body is not None:
-        parser.error(
-            "--retrieval-extra-body is not in the interactive UI yet; "
-            'give it with a task (melo -- "<task>")'
         )
     # main() joins the words into the query, and an empty one (`melo ""`)
     # runs no task, so the direct-mode flags would have nothing to apply to.
@@ -1351,10 +1349,9 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
             "Options for bare melo, which opens the interactive UI on a terminal. "
             "It also takes --base-url, --chat-model, --workspace, --max-steps, "
             "--attempt-policy, --reflection-gate, --builtins, --memory, "
-            "--memory-dir, --request-timeout, --reasoning, --replay-turns, "
-            "--note-writer, --retriever, --recall-*, --retrieval-extra-body and "
-            "the --embedding-* options. It refuses --reasoning-field and "
-            "--retrieval-extra-body until a later release wires them.",
+            "--memory-dir, --request-timeout, --reasoning, --reasoning-field, "
+            "--replay-turns, --note-writer, --retriever, --recall-*, "
+            "--retrieval-extra-body and the --embedding-* options.",
         )
         interactive.add_argument(
             "--yolo",
@@ -1512,7 +1509,12 @@ def main() -> None:
         # Without a terminal the UI refuses: no folder is made for it.
         if options.memory_dir is not None and ui.ui_terminal():
             _make_memory_dir(options.memory_dir)
-        code = ui.run_interactive(args, parser=parser, options=options)
+        code = ui.run_interactive(
+            args,
+            parser=parser,
+            options=options,
+            validate_options=lambda resolved: _check_ui_options(parser, args, resolved),
+        )
         if code != EXIT_COMPLETED:
             raise SystemExit(code)
         return
@@ -1754,6 +1756,10 @@ def _build_direct_mode_agent(
 
     if options is None:
         options = AgentOptions()
+    if inherited := cfg.tool_environment():
+        options = dataclasses.replace(
+            options, tool_env={**inherited, **(options.tool_env or {})}
+        )
     if getattr(args, "reasoning", None) is None and cfg.agent.reasoning != "legacy":
         options = dataclasses.replace(
             options, reasoning=cast(ReasoningMode, cfg.agent.reasoning)

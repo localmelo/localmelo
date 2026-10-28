@@ -1679,7 +1679,9 @@ class Agent:
         with a result missing or extra, or a tool message without its call,
         is dropped with a WARNING. Working memory evicts its oldest units
         as usual. Returns the number of messages kept; ``[]`` clears the
-        conversation.
+        conversation. Explicit reasoning modes split a legacy inline
+        thinking block in the loaded copies; the caller's messages are
+        unchanged, and prompt-cap fitting can strip thinking before facts.
 
         Raises ``RuntimeError`` during a run, and ``TypeError``, before
         anything is cleared, for an item that is not a
@@ -1693,11 +1695,17 @@ class Agent:
                 raise TypeError(
                     f"load_conversation takes Message objects, got {type(msg).__name__}"
                 )
+        loaded = copy.deepcopy(loaded)
+        if self.options.reasoning != "legacy":
+            # Normalize legacy checkpoints once, before prompt-cap fitting
+            # tracks canonical message identities and strips thinking.
+            loaded = [
+                _split_inline_reasoning(msg) if msg.role == "assistant" else msg
+                for msg in loaded
+            ]
         working = self.hippo.working
         working.clear_all()
-        for unit in group_turns(
-            copy.deepcopy(loaded), empty_prefix=working.empty_prefix
-        ):
+        for unit in group_turns(loaded, empty_prefix=working.empty_prefix):
             head = unit[0]
             if head.role == "assistant" and head.tool_calls:
                 if _answers_every_call(head, unit[1:]):

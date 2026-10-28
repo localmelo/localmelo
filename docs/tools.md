@@ -29,10 +29,13 @@ address-space limit is not set: macOS refuses a finite one.
 `shell_exec` and `python_exec` start their child with a minimal
 environment: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`,
 every `LC_*` variable and `TMPDIR`, then whatever
-`AgentOptions(tool_env={...})` adds, and nothing else. An API key in melo's
-own environment therefore reaches no tool; `VIRTUAL_ENV`, `PYTHONPATH`,
-`SSH_AUTH_SOCK` and the proxy variables pass only through `tool_env` (see
-[The Python API](python-api.md#work-in-a-directory)).
+`AgentOptions(tool_env={...})` adds, and nothing else. Config-backed runs
+and sessions can additionally inherit names listed in `[agent] tool_env`;
+see [Tool environment](configuration.md#tool-environment). An API key in
+melo's own environment reaches no tool unless explicitly named or mapped.
+`VIRTUAL_ENV`, `PYTHONPATH`, `SSH_AUTH_SOCK` and proxy variables are not
+inherited by default. Exposing `SSH_AUTH_SOCK` permits tools to use your SSH
+agent, and exposing a proxy variable also exposes any credentials in it.
 
 This is how the built-in tools work in a direct run without `--workspace`
 and in the gateway. A direct run with `--workspace DIR` and a Python agent
@@ -229,13 +232,14 @@ The checks are guardrails, not a sandbox:
   child process of melo, not in a sandbox: it reaches any file you can too.
 - With a workspace root, `shell_exec` and `python_exec` still reach any
   file you can: only the file tools are kept inside the root.
-- Approvals apply only to a run with an approval policy, and in the
-  interactive UI (unless `--yolo`). Direct mode, `melo ""` and the gateway
-  have none.
-- A mode with no approver offers no shell at all, so there is no command
-  to get around: direct, the gateway, the console and the Python API's
-  default `python` mode do not register `shell_exec`. The interactive UI
-  keeps it behind its panel, and `--yolo` means no panel.
+- Approvals apply to a run with an approval policy, including the
+  interactive UI (unless `--yolo`) and console sessions. Direct mode,
+  `melo ""` and the legacy gateway API have no approval policy.
+- Direct and Python modes do not offer `shell_exec` by default, but an
+  explicit `--builtins all` or `--builtins shell_exec` (Python:
+  `AgentOptions(builtins=frozenset({"shell_exec"}))`) enables it without
+  an approval policy. Gateway and console modes never offer it. The
+  interactive UI keeps it behind its approval panel, unless `--yolo`.
 
 To limit what a task can do, use `--builtins none` or a subset of tools,
 `--mcp-only`, a container or virtual machine, or a separate user account.
@@ -328,9 +332,11 @@ without the flag and the gateway never set a workspace root.
 - **Environment.** The child of `shell_exec` and `python_exec` does not
   inherit melo's environment: it gets `PATH`, `HOME`, `USER`, `LOGNAME`,
   `SHELL`, `TERM`, `LANG`, every `LC_*` variable and `TMPDIR`, plus
-  `AgentOptions(tool_env={...})`. Direct mode and the interactive UI pass
-  nothing else; the Python API can pass any variable in `tool_env`. An MCP
-  server gets the same base environment plus its `env`.
+  `AgentOptions(tool_env={...})`. Config-backed direct runs, the UI and
+  console sessions also resolve the extra names in `[agent] tool_env`;
+  `--base-url` sessions/runs ignore that setting. The Python API can pass
+  any variable in its mapping. An MCP server gets the same base environment
+  plus its own `env`, not the agent's extra names.
 - **Exit status.** A `shell_exec` command that exits with a non-zero status
   starts its text with the line `[exit code <n>]` (`-<signal>` for a command
   that a signal ended), and the call still succeeds. The line comes first,
