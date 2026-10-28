@@ -8,8 +8,11 @@ the lane open whatever ``decide()`` does. It reads no clock and does no
 I/O, so the trace-driven simulator and the live service run the same
 code.
 
-Nothing is wired into the gateway, the CLI or any request before S2: only
-tests import this package. The design is ``.melo/scheduler_design.md``
+S2 wires the web workspace's chats: ``support/gateway/chat_gate.py`` runs
+``dispatch()`` for every plan, reflect and embed call a chat sends, with
+``[scheduler] policy`` (default ``off``, which only records). The CLI, the
+legacy route and direct mode are still ungated, and only tests import
+this package directly. The design is ``.melo/scheduler_design.md``
 (sections 2-3) in the workspace, outside the repository.
 """
 

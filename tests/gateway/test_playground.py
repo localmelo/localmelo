@@ -27,6 +27,7 @@ from localmelo.melo.schema import (  # noqa: E402
     TaskRecord,
     ToolDef,
 )
+from localmelo.support.gateway.chat_gate import GatedLLM  # noqa: E402
 from localmelo.support.gateway.playground import (  # noqa: E402
     SessionBusyError,
     SmokePlayground,
@@ -240,12 +241,14 @@ async def test_shutdown_cancels_work_before_closing_provider(
 ) -> None:
     sid = await create(manager)
     llm = manager._sessions[sid].agent._llm
-    assert isinstance(llm, FakeLLM)
+    # The gate wraps the builder's fake; close() still reaches it.
+    assert isinstance(llm, GatedLLM)
+    assert isinstance(llm.inner, FakeLLM)
     task, stopped = await start_blocked(manager, sid)
     await manager.close_all()
     assert (await task)["cancelled"]
     assert stopped.is_set()
-    assert llm.closed
+    assert llm.inner.closed
     assert manager.list_sessions() == []
 
 
@@ -279,7 +282,8 @@ async def test_failed_replacement_preserves_existing_chat(
     manager._max = 1
     sid = await create(manager)
     existing_provider = manager._sessions[sid].agent._llm
-    assert isinstance(existing_provider, FakeLLM)
+    assert isinstance(existing_provider, GatedLLM)
+    assert isinstance(existing_provider.inner, FakeLLM)
     new_provider = FakeLLM()
     monkeypatch.setattr(manager, "_build_llm_provider", lambda *args: new_provider)
     monkeypatch.setattr(

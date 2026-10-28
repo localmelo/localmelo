@@ -21,6 +21,11 @@ from localmelo.melo.memory.procedures.store import SqliteProcedures
 from localmelo.melo.schema import RunResult, answer_text, split_thinking
 from localmelo.support.backends.discovery import parse_model_ids
 from localmelo.support.backends.openai_compat import normalize_url
+from localmelo.support.gateway.chat_gate import (
+    ChatGate,
+    GatedEmbedding,
+    GatedLLM,
+)
 from localmelo.support.gateway.session import SessionBusyError
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
@@ -146,6 +151,9 @@ class PlaygroundSession:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     task: asyncio.Task[RunResult] | None = field(default=None, repr=False)
     cancel_requested: bool = False
+    # The chat's scheduling level, P1-P4; set by the page's chip.
+    level: int = 2
+    level_source: str = "computed"
 
     def touch(self) -> None:
         self.last_active = time.time()
@@ -157,6 +165,11 @@ class SmokePlayground:
         max_sessions: int = 12,
         idle_ttl: float = 7200.0,
         memory_dir: Path | str | None = None,
+        policy: str = "off",
+        n_srv: int = 8,
+        r_f: int = 1,
+        n_fg: int = 1,
+        call_log_dir: Path | str | None = None,
     ) -> None:
         self._sessions: dict[str, PlaygroundSession] = {}
         self._max = max_sessions
@@ -174,6 +187,15 @@ class SmokePlayground:
         self._thinking_retention_days = thinking_retention_days()
         self._long_term_path = mem_dir / "long_term.db"
         self._procedures_path = mem_dir / "procedures.db"
+        # One gate for every chat; call_log_dir=None writes no call log.
+        self._gate = ChatGate(
+            policy=policy,
+            n_srv=n_srv,
+            r_f=r_f,
+            n_fg=n_fg,
+            call_log_dir=call_log_dir,
+            retention_days=self._thinking_retention_days,
+        )
 
     def scenarios_payload(self) -> list[dict[str, Any]]:
         payload: list[dict[str, Any]] = []
@@ -288,8 +310,18 @@ class SmokePlayground:
         embedding_model: str,
         scenario_id: str,
     ) -> PlaygroundSession:
-        llm = self._build_llm_provider(detected, chat_url, chat_model)
-        embedding = self._build_embedding_provider(embedding_url, embedding_model)
+        # The session id exists before its providers do: a gated provider
+        # tags every call with it, and the gate keys lanes, levels and the
+        # log by it.
+        session_id = uuid.uuid4().hex[:12]
+        client = self._gate.client(session_id)
+        llm = GatedLLM(self._build_llm_provider(detected, chat_url, chat_model), client)
+        inner_embedding = self._build_embedding_provider(embedding_url, embedding_model)
+        embedding = (
+            GatedEmbedding(inner_embedding, client)
+            if inner_embedding is not None
+            else None
+        )
         # Each chat keeps its answers, so a follow-up sees them (#37's option).
         agent = Agent(
             llm=llm, embedding=embedding, options=AgentOptions(record_answers=True)
@@ -311,6 +343,7 @@ class SmokePlayground:
 
         return PlaygroundSession(
             agent=agent,
+            session_id=session_id,
             adapter=detected,
             chat_url=chat_url,
             chat_model=chat_model,
@@ -371,6 +404,8 @@ class SmokePlayground:
             "last_active": session.last_active,
             "title": " ".join(title.split())[:80],
             "is_busy": session.lock.locked(),
+            "level": session.level,
+            "held": self._gate.held(session.session_id),
         }
 
     async def run(
@@ -389,6 +424,10 @@ class SmokePlayground:
         async with session.lock:
             session.touch()
             session.cancel_requested = False
+            # The run sets the lane itself, so its first call is a lane call
+            # whatever order the page's presence heartbeat arrives in (R29).
+            started = self._gate.turn_start(session_id)
+            self._gate.focus(session_id)
             session.messages.append({"role": "user", "content": query.strip()})
             task = asyncio.create_task(_answer(session.agent, query.strip()))
             session.task = task
@@ -397,7 +436,12 @@ class SmokePlayground:
             try:
                 # Shielded, so that only _stop cancels the run: the chat
                 # stays busy until the run is saved.
-                outcome = await asyncio.wait_for(asyncio.shield(task), timeout)
+                if self._gate.policy == "off":
+                    outcome = await asyncio.wait_for(asyncio.shield(task), timeout)
+                else:
+                    outcome = await self._wait_for_turn(
+                        session_id, task, timeout, started
+                    )
             except TimeoutError:
                 if task.done():  # raised by the run, not this timeout
                     session.messages.append(
@@ -425,6 +469,44 @@ class SmokePlayground:
             if timed_out and response["cancelled"]:
                 raise TimeoutError(f"Timed out after {timeout:g} s")
             return response
+
+    async def _wait_for_turn(
+        self,
+        session_id: str,
+        task: asyncio.Task[RunResult],
+        timeout: float,
+        started: int,
+    ) -> RunResult:
+        """The run's wait while the gate may hold: *timeout* counts active time.
+
+        While the chat is held the wait carries no timeout at all (a hold is
+        a wait, section 4.6); the event the gate sets on every hold change
+        wakes the loop to recompute the remaining time. Both the clock read
+        and the event clear happen in one synchronous segment, so a hold
+        cannot start between them unnoticed.
+        """
+        gate = self._gate
+        while True:
+            gate.wait_event.clear()
+            now = gate.now()
+            if gate.held_since(session_id) is not None:
+                remaining: float | None = None
+            else:
+                spent = gate.held_seconds(session_id)
+                remaining = timeout - ((now - started) / 1_000_000 - spent)
+                if remaining <= 0:
+                    raise TimeoutError
+            waiter = asyncio.ensure_future(gate.wait_event.wait())
+            try:
+                await asyncio.wait(
+                    {task, waiter},
+                    timeout=remaining,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                waiter.cancel()
+            if task.done():
+                return task.result()
 
     def _close_turn(
         self, session: PlaygroundSession, outcome: RunResult | None, note: str
@@ -465,6 +547,22 @@ class SmokePlayground:
             "answer": answer,
         }
 
+    def presence(self, session_id: str) -> None:
+        """A presence heartbeat: the chat is focused and being typed in."""
+        if session_id not in self._sessions:
+            raise KeyError("session not found")
+        self._gate.presence(session_id)
+
+    def set_level(self, session_id: str, level: int) -> dict[str, Any]:
+        """Set and return a chat's level, P1-P4."""
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise KeyError("session not found")
+        value = self._gate.set_level(session_id, level)
+        session.level = value
+        session.level_source = "user"
+        return {"session_id": session_id, "level": value}
+
     async def cancel(self, session_id: str) -> bool:
         session = self._sessions.get(session_id)
         if session is None:
@@ -495,6 +593,8 @@ class SmokePlayground:
                 await self.cancel(session.session_id)
                 await session.agent.close()
         self._sessions.clear()
+        # After the agents: the wrappers' inner providers are closed already.
+        await self._gate.close()
 
     async def _fetch_models(self, url: str) -> list[str]:
         async with httpx.AsyncClient(

@@ -340,3 +340,72 @@ for (const failure of [false, true]) {
     if (failure) assert.equal(h.state.drafts.a, 'A prompt without browser storage');
   });
 }
+
+test('the level chip posts the level and updates the session', async () => {
+  const calls = [];
+  const h = harness(async (path, body, method) => {
+    calls.push([path, body, method]);
+    return {session_id: 'a', level: 1};
+  });
+  h.state.sessions = [session('a', {level: 2})]; h.state.activeId = 'a';
+  h.run('showLevelMenu(true)');
+  const menu = h.element('level-menu');
+  assert.equal(menu.hidden, false);
+  assert.equal(h.element('level-btn').attributes['aria-expanded'], 'true');
+  assert.equal(menu.children.length, 4);
+  assert.equal(menu.children[1].attributes['aria-selected'], 'true', 'P2 is the current level');
+  await menu.children[0].onclick();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], '/session/a/level');
+  assert.equal(calls[0][1].level, 1);
+  assert.equal(h.state.sessions[0].level, 1);
+  assert.equal(h.element('level-btn').textContent, 'P1');
+  assert.equal(menu.hidden, true, 'Choosing a level closes the menu');
+});
+
+test('the status label shows waiting with the reason', () => {
+  const h = harness(async () => ({}), {renderMessages: true});
+  h.state.sessions = [session('a', {is_busy: true, held: 'Resources', messages: [{role: 'user', content: 'Hi'}]})];
+  h.state.activeId = 'a';
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('run-status').textContent, 'Waiting: Resources');
+  const rows = h.element('messages').children;
+  const working = rows[rows.length - 1];
+  assert.equal(working.children[1].textContent, 'Waiting: Resources…');
+  h.state.sessions[0].held = '';
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('run-status').textContent, 'Running on your backend');
+});
+
+test('presence is throttled to one request per 2.5 seconds', async () => {
+  const posts = [];
+  const h = harness(async () => ({}));
+  h.context.fetch = (path, options) => {
+    posts.push([path, options]);
+    return Promise.resolve({ok: true});
+  };
+  h.state.sessions = [session('a')]; h.state.activeId = 'a';
+  h.run('presence()');
+  await h.run('presence()');
+  assert.equal(posts.length, 1, 'Two heartbeats in a row are one request');
+  assert.equal(posts[0][0], '/v1/playground/presence');
+  assert.deepEqual(JSON.parse(posts[0][1].body), {session_id: 'a'});
+  h.state.lastPresenceAt = 0;
+  await h.run('presence()');
+  assert.equal(posts.length, 2, 'After the window a new heartbeat is sent');
+});
+
+test('the send path is not blocked by presence', async () => {
+  const paths = [];
+  const pending = new Promise(() => {});
+  const h = harness(async path => {
+    paths.push(path);
+    if (path.endsWith('/run')) return {result: 'Completed'};
+    return session('a', {last_active: 2, messages: [{role: 'user', content: 'Hi'}, {role: 'assistant', content: 'Completed'}]});
+  });
+  h.context.fetch = () => pending;  // presence never answers
+  h.state.sessions = [session('a')]; h.state.activeId = 'a'; h.element('input').value = 'Hi';
+  await h.run('send()');
+  assert.equal(paths.includes('/session/a/run'), true, 'The run must not wait for presence');
+  assert.equal(h.state.pending.size, 0);
+});

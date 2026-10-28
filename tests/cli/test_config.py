@@ -18,6 +18,7 @@ from localmelo.support.config import (
     ConfigError,
     GatewayConfig,
     LocalBackendConfig,
+    SchedulerConfig,
     load,
     save,
 )
@@ -1048,3 +1049,72 @@ class TestRequestTimeoutConfig:
         )
         assert "config not saved" in out
         assert config_path.read_bytes() == before
+
+
+# -- The scheduler's settings (S2) --
+
+
+class TestSchedulerConfig:
+    def test_scheduler_defaults_are_not_written(self, config_path: Path) -> None:
+        save(_timeout_cfg())
+        # The exact file of a config without scheduler settings is unchanged.
+        assert config_path.read_text(encoding="utf-8") == _SAVED_BEFORE_REQUEST_TIMEOUT
+
+    def test_a_non_default_scheduler_section_round_trips(
+        self, config_path: Path
+    ) -> None:
+        cfg = _timeout_cfg()
+        cfg.scheduler = SchedulerConfig(
+            policy="class",
+            n_srv=2,
+            r_f=0,
+            n_fg=0,
+            call_log=False,
+            call_log_dir="/tmp/x",
+        )
+        save(cfg)
+        assert "[scheduler]" in config_path.read_text(encoding="utf-8")
+        loaded = load()
+        assert loaded.scheduler.policy == "class"
+        assert loaded.scheduler.n_srv == 2
+        assert loaded.scheduler.r_f == 0
+        assert loaded.scheduler.n_fg == 0
+        assert loaded.scheduler.call_log is False
+        assert loaded.scheduler.call_log_dir == "/tmp/x"
+        assert loaded.validate() == []
+
+    @pytest.mark.parametrize(
+        "changes",
+        [
+            {"policy": "x"},
+            {"n_srv": 0},
+            {"n_srv": True},
+            {"r_f": -1},
+            {"n_fg": -1},
+            {"call_log": "yes"},
+            {"call_log_dir": 3},
+        ],
+        ids=["policy", "n_srv", "n_srv-bool", "r_f", "n_fg", "call_log", "dir"],
+    )
+    def test_a_bad_scheduler_value_is_a_config_error(
+        self, changes: dict[str, Any]
+    ) -> None:
+        cfg = _timeout_cfg()
+        cfg.scheduler = SchedulerConfig(**changes)
+        errors = cfg.validate()
+        assert any(error.startswith("[scheduler]") for error in errors)
+        with pytest.raises(ConfigError, match=r"\[scheduler\]"):
+            cfg.validate_or_raise()
+
+    def test_an_unknown_scheduler_key_is_ignored_on_load(
+        self, config_path: Path
+    ) -> None:
+        config_path.write_text(
+            'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+            '[scheduler]\npolicy = "fcfs"\nn_fg = 0\nfuture_key = 1\n',
+            encoding="utf-8",
+        )
+        loaded = load()
+        assert loaded.scheduler.policy == "fcfs"
+        assert loaded.scheduler.n_fg == 0
+        assert not hasattr(loaded.scheduler, "future_key")

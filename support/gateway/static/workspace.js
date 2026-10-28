@@ -14,6 +14,8 @@ const S = {
   polling: false,
   online: true,
   detailVersions: new Map(),
+  levelsOpen: false,
+  lastPresenceAt: 0,
 };
 const dialog = $("settings-dialog");
 const input = $("input");
@@ -117,6 +119,66 @@ function sidebar(open) {
   if (mobile && open) $("new-btn").focus();
   if (mobile && !open && document.activeElement?.closest(".sidebar")) $("sidebar-toggle").focus();
 }
+function levelName(level) {
+  return `P${level || 2}`;
+}
+function renderLevelMenu() {
+  const s = active();
+  const level = s?.level || 2;
+  const menu = $("level-menu");
+  menu.replaceChildren();
+  for (const n of [1, 2, 3, 4]) {
+    const item = document.createElement("button");
+    item.type = "button";
+    item.className = "level-item";
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(n === level));
+    item.textContent = levelName(n) + (n === 1 ? " · urgent" : n === 4 ? " · background" : "");
+    item.onclick = () => setLevel(n);
+    menu.append(item);
+  }
+}
+function showLevelMenu(open) {
+  S.levelsOpen = open;
+  $("level-menu").hidden = !open;
+  $("level-btn").setAttribute("aria-expanded", String(open));
+  if (open) renderLevelMenu();
+}
+async function setLevel(level) {
+  const s = active();
+  showLevelMenu(false);
+  if (!s) return;
+  const previous = s.level;
+  s.level = level;
+  syncUI();
+  try {
+    const data = await api(`/session/${encodeURIComponent(s.session_id)}/level`, { level });
+    s.level = data.level;
+    s.level_source = "user";
+  } catch (error) {
+    s.level = previous;
+    notify("Could not change the chat level: " + error.message, true);
+  }
+  syncUI();
+}
+function presence() {
+  const s = active();
+  if (!s) return;
+  const now = Date.now();
+  if (now - S.lastPresenceAt < 2500) return;
+  S.lastPresenceAt = now;
+  try {
+    const request = fetch("/v1/playground/presence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: s.session_id }),
+      keepalive: true,
+    });
+    request?.catch?.(() => {});
+  } catch {
+    /* A browser may refuse fetch, or a test may not allow it. */
+  }
+}
 function syncUI() {
   const s = active();
   const busy = !!s && (s.is_busy || S.pending.has(s.session_id));
@@ -137,7 +199,15 @@ function syncUI() {
   $("stop-btn").querySelector("span").textContent =
     s && S.cancelling.has(s.session_id) ? "Stopping…" : "Stop";
   $("send-btn").disabled = S.working || busy || !S.online || !input.value.trim();
-  $("run-status").textContent = busy ? "Running on your backend" : "";
+  const held = busy && s?.held ? s.held : "";
+  $("run-status").textContent = busy
+    ? held
+      ? `Waiting: ${held}`
+      : "Running on your backend"
+    : "";
+  $("level-btn").textContent = levelName(s?.level);
+  $("level-btn").disabled = !s;
+  if (!s && S.levelsOpen) showLevelMenu(false);
   fields.forEach((id) => {
     $(id).disabled = S.working;
   });
@@ -182,7 +252,8 @@ function renderSessions() {
     const button = document.createElement("button");
     button.className = "session-info";
     if (s.session_id === S.activeId) button.setAttribute("aria-current", "page");
-    button.innerHTML = `<div class="session-title">${esc(title(s))}</div><div class="session-meta">${s.is_busy ? "● Working · " : ""}${esc(s.chat_model)}</div>`;
+    const marker = s.is_busy ? (s.held ? "● Waiting · " : "● Working · ") : "";
+    button.innerHTML = `<div class="session-title">${esc(title(s))}</div><div class="session-meta">${marker}${esc(s.chat_model)}</div>`;
     button.onclick = () => selectSession(s.session_id);
     const close = document.createElement("button");
     close.className = "session-close";
@@ -270,7 +341,14 @@ function renderMessages(forceScroll = false) {
     const working = document.createElement("div");
     working.className = "msg working";
     working.setAttribute("role", "status");
-    working.innerHTML = '<span class="status-dot"></span><span>Working on your request…</span>';
+    const dot = document.createElement("span");
+    dot.className = "status-dot";
+    const label = document.createElement("span");
+    // A held chat says why the model server has not been asked yet (R30).
+    label.textContent = s?.held
+      ? `Waiting: ${s.held}…`
+      : "Working on your request…";
+    working.append(dot, label);
     $("messages").append(working);
   }
   if (forceScroll || nearBottom) scroller.scrollTop = messages.length ? scroller.scrollHeight : 0;
@@ -320,6 +398,7 @@ async function selectSession(id, { saveCurrent = true } = {}) {
   renderSessions();
   renderMessages(true);
   syncUI();
+  presence();
   try {
     await refreshSession(id, true);
   } catch (error) {
@@ -480,6 +559,7 @@ async function send() {
   renderMessages(true);
   renderSessions();
   syncUI();
+  presence();
   try {
     await api("/session/" + encodeURIComponent(id) + "/run", { query });
   } catch (error) {
@@ -592,6 +672,7 @@ input.addEventListener("keydown", (event) => {
   }
 });
 input.addEventListener("input", () => {
+  presence();
   saveDraft();
   resizeInput();
   syncUI();
@@ -606,6 +687,10 @@ dialog.addEventListener("close", () => {
 $("discover-btn").addEventListener("click", discover);
 $("create-btn").addEventListener("click", createSession);
 $("stop-btn").addEventListener("click", stop);
+$("level-btn").addEventListener("click", () => {
+  if (!active()) return;
+  showLevelMenu(!S.levelsOpen);
+});
 $("search").addEventListener("input", renderSessions);
 $("sidebar-toggle").addEventListener("click", () =>
   sidebar(!$("app").classList.contains("sidebar-open")),
@@ -637,7 +722,10 @@ document.addEventListener("keydown", (event) => {
     event.preventDefault();
     openSettings();
   }
-  if (event.key === "Escape" && !dialog.open) sidebar(false);
+  if (event.key === "Escape" && !dialog.open) {
+    if (S.levelsOpen) showLevelMenu(false);
+    else sidebar(false);
+  }
 });
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) poll();
