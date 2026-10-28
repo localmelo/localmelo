@@ -159,7 +159,7 @@ State = Literal["idle", "running", "stopping", "switching"]
 
 _STATE_HINTS: Final = {
     "stopping": "Stopping the turn; enter sends once it has stopped.",
-    "switching": "Switching the model; esc cancels it.",
+    "switching": "Switching the session or model; esc cancels it.",
 }
 
 
