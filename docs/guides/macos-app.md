@@ -13,9 +13,8 @@ uv run python scripts/build_macos_app.py --output /tmp/LocalMelo.app
 
 The builder refuses to overwrite an existing output. It copies a Python runtime and the gateway
 extra into the bundle, compiles the Swift host with release Xcode, and includes a relocatable
-`Contents/Resources/runtime/bin/melo`. The generated app is for local testing only; its Python
-version is pinned, but the standalone interpreter archive is not independently hash-pinned by
-this script. Wheel hashes are checked against the lock file.
+`Contents/Resources/runtime/bin/melo`. The exact standalone interpreter archive is pinned and
+SHA-256 checked before extraction; wheel hashes are checked against the lock file.
 
 Opening the app starts an owned gateway on `127.0.0.1:8401`; it does not adopt an existing
 listener. Stop a conflicting listener or gateway holding the console store first. For isolated
@@ -33,3 +32,10 @@ user. Do not expose it on a network or use it with untrusted tasks.
 The app and console use the regular localmelo config and session store under `~/.cache/localmelo`;
 first-run setup is the web console's settings dialog. The app does not install or remove the
 separate launchd service. Quit the app before removing its bundle.
+
+The WebKit integration tests open native windows and require a graphical macOS session. They
+are opt-in so a normal test run never steals focus; run them with a temporary HOME:
+
+```bash
+HOME="$(mktemp -d)" LOCALMELO_MACOS_UI_TESTS=1 nice -n 19 uv run pytest -q tests/test_macos_webview_integration.py
+```

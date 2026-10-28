@@ -15,9 +15,13 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-pytestmark = pytest.mark.skipif(
-    sys.platform != "darwin", reason="requires macOS WebKit"
-)
+pytestmark = [
+    pytest.mark.skipif(sys.platform != "darwin", reason="requires macOS WebKit"),
+    pytest.mark.skipif(
+        os.environ.get("LOCALMELO_MACOS_UI_TESTS") != "1",
+        reason="requires an opted-in macOS GUI session",
+    ),
+]
 
 # Instrument a temporary copy of the real host at observable lifecycle points.
 # The tests do not replace its navigation, shutdown, or alert decisions.

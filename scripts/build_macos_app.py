@@ -4,16 +4,26 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import plistlib
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
+import tomllib
+import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON_VERSION = "3.11.16"
+# Digest from the official python-build-standalone GitHub release asset metadata.
+PYTHON_URL = (
+    "https://github.com/astral-sh/python-build-standalone/releases/download/20260924/"
+    "cpython-3.11.16%2B20260924-aarch64-apple-darwin-install_only_stripped.tar.gz"
+)
+PYTHON_SHA256 = "e1d745b07b6acc0641dbb3237d3c5953deeeed182141bab2242684076fd86547"
 
 # Resolve every link, including a Homebrew-style link to this launcher. No build
 # paths or shell-interpreted user arguments are embedded in the bundle.
@@ -49,6 +59,32 @@ def verify_links(root: Path) -> None:
                 raise ValueError(f"Python payload has unsafe symlink: {path}") from exc
 
 
+def fetch_python(stage: Path) -> Path:
+    """Verify the exact official archive before opening or extracting it."""
+    download = stage / "download"
+    download.mkdir()
+    archive = download / "python.tar.gz"
+    digest = hashlib.sha256()
+    with (
+        urllib.request.urlopen(PYTHON_URL, timeout=120) as response,
+        archive.open("wb") as out,
+    ):
+        while chunk := response.read(1024 * 1024):
+            digest.update(chunk)
+            out.write(chunk)
+    if digest.hexdigest() != PYTHON_SHA256:
+        raise ValueError("Standalone Python archive SHA-256 mismatch")
+    extracted = stage / "extracted"
+    extracted.mkdir()
+    with tarfile.open(archive, "r:gz") as tar:
+        tar.extractall(extracted, filter="data")
+    python = extracted / "python"
+    if not (python / "bin/python3").is_file():
+        raise ValueError("Standalone Python archive has an unexpected layout")
+    verify_links(python)
+    return python
+
+
 def build(output: Path) -> None:
     if sys.platform != "darwin" or os.uname().machine != "arm64":
         raise RuntimeError("Building requires an arm64 macOS host")
@@ -69,15 +105,8 @@ def build(output: Path) -> None:
         runtime = contents / "Resources/runtime/bin"
         binary.mkdir(parents=True)
         runtime.mkdir(parents=True)
-        managed = stage / "managed"
-        env = os.environ.copy()
-        env["UV_PYTHON_INSTALL_DIR"] = str(managed)
-        run(["uv", "python", "install", "--no-bin", PYTHON_VERSION], env=env)
-        installs = list(managed.glob(f"cpython-{PYTHON_VERSION}-macos-aarch64-*"))
-        if len(installs) != 1:
-            raise RuntimeError("uv did not install the expected standalone Python")
         python = runtime / "python"
-        shutil.copytree(installs[0], python, symlinks=True)
+        shutil.copytree(fetch_python(stage), python, symlinks=True)
         verify_links(python)
         interpreter = python / "bin/python3"
         requirements = stage / "requirements.txt"
@@ -130,6 +159,13 @@ def build(output: Path) -> None:
         scenario = package / "tests/smoke/data/scenarios.json"
         scenario.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(ROOT / "tests/smoke/data/scenarios.json", scenario)
+        with (ROOT / "pyproject.toml").open("rb") as f:
+            version = tomllib.load(f)["project"]["version"]
+        metadata = site / f"localmelo-{version}.dist-info"
+        metadata.mkdir()
+        (metadata / "METADATA").write_text(
+            f"Metadata-Version: 2.1\nName: localmelo\nVersion: {version}\n"
+        )
         launcher = runtime / "melo"
         launcher.write_text(LAUNCHER)
         launcher.chmod(0o755)
@@ -155,7 +191,7 @@ def build(output: Path) -> None:
                     "CFBundleName": "LocalMelo",
                     "CFBundleDisplayName": "LocalMelo",
                     "CFBundlePackageType": "APPL",
-                    "CFBundleShortVersionString": "0.1.0",
+                    "CFBundleShortVersionString": version,
                     "CFBundleVersion": "1",
                     "NSHighResolutionCapable": True,
                     "NSAppTransportSecurity": {"NSAllowsLocalNetworking": True},
