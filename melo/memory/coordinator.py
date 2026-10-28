@@ -150,6 +150,31 @@ class Hippo:
             emb = await self.embedding.embed([text])
             await self.long.add(text=text, embedding=emb[0], metadata=metadata or {})
 
+    # ── Forgetting ──
+
+    async def forget(self, task_id: str) -> None:
+        """Forget one task: its history rows and its long-term entries.
+
+        History loses the task's ``tasks``, ``steps`` and ``llm_calls``
+        rows; long-term memory loses the entries whose metadata names
+        *task_id* as their task, which today are the reflections of its
+        runs. A step summary names only its step, so it stays in long-term
+        memory until :meth:`forget_all`. Working memory (the current
+        conversation) and procedural memory are untouched.
+        """
+        await self.history.forget(task_id)
+        await self.long.forget(task_id)
+
+    async def forget_all(self) -> None:
+        """Forget all of history and long-term memory.
+
+        Working memory (the current conversation), procedural memory
+        (``melo-procedures forget`` clears that) and the session store are
+        separate and stay.
+        """
+        await self.history.forget_all()
+        await self.long.forget_all()
+
     # ── Reflection promotion ──
 
     async def promote_reflections(self, task_id: str) -> None:

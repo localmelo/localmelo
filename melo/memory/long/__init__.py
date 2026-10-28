@@ -51,3 +51,20 @@ class LongTerm:
             (self._entries[i].text, sim, self._entries[i].metadata)
             for i, sim in scores[:top_k]
         ]
+
+    async def forget(self, task_id: str) -> None:
+        """Forget the entries whose metadata names *task_id* as their task.
+
+        An entry's provenance is its ``metadata`` object: it names a task
+        when ``metadata["task_id"] == task_id``. The reflections that
+        ``Hippo.promote_reflections`` writes carry that key; a step summary
+        carries only ``"step_id"``, so a per-task forget leaves it and only
+        :meth:`forget_all` removes it.
+        """
+        self._entries = [
+            entry for entry in self._entries if entry.metadata.get("task_id") != task_id
+        ]
+
+    async def forget_all(self) -> None:
+        """Forget every long-term entry, whatever its provenance."""
+        self._entries.clear()
