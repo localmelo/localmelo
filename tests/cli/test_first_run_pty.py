@@ -100,5 +100,5 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
         term.close()
     text = _text(term)
     assert f"chat-b · vLLM · {url}" in text
-    assert "long-term memory · vllm · nomic-embed-text" in text
+    assert "long-term memory · vLLM · nomic-embed-text" in text
     assert "Model server URL" not in text

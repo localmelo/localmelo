@@ -812,7 +812,7 @@ async def test_a_new_server_keeps_the_configs_embedding_and_timeout(
     assert saved.embedding_backend == "sglang" and saved.request_timeout_s == 2
     assert cfg.chat_backend == "sglang"  # the startup config is not changed
     assert factory.backend.base_url == new_url and factory.backend.model == "m2"
-    assert factory.backend.embedding == "sglang · embed-x"
+    assert factory.backend.embedding == "SGLang · embed-x"
     # A later /model on the new server saves its model only.
     built.clear()
     await factory.build("m3")

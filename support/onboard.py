@@ -292,6 +292,7 @@ def run_backend_setup() -> config.Config | None:
     emb_display = [name for _, name in EMBEDDING_BACKENDS] + [
         choice.label for choice in choices
     ]
+    print("\n  Embedding model for long-term memory:\n")
     emb_choice = _ask_choice("Embedding backend", emb_display, default=default_emb)
 
     picked_choice: EmbeddingChoice | None = None
