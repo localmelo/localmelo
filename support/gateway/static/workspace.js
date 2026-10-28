@@ -1,37 +1,70 @@
+/**
+ * The workspace page: API v2 in the browser.
+ *
+ * The page talks only to `/api`: the session list and the machine's S2
+ * snapshot (`/api/sessions`), one session's detail and turns, its event
+ * stream, its submissions (a send is safe to repeat), the level and
+ * presence writes, stop and delete. The turns themselves are folded by
+ * `turns.mjs`, which mirrors the terminal's wording; this file only builds
+ * the DOM, keeps the drafts and the outbox, and keeps the header in sync.
+ *
+ * No framework and no build step: this module and `turns.mjs` are plain ES
+ * modules, served as they are.
+ */
+
 import { renderMarkdown } from "./markdown.mjs";
+import {
+  activity,
+  applyEvent,
+  approvalTag,
+  cleanOutput,
+  formatBytes,
+  formatDuration,
+  formatPast,
+  formatTokens,
+  liveFacts,
+  newTurn,
+  newView,
+  printable,
+  reflectionLine,
+  statusText,
+  toolState,
+  turnDuration,
+  workSummary,
+} from "./turns.mjs";
 
 const $ = (id) => document.getElementById(id);
-const KEY = "localmelo-pg";
+const KEY = "localmelo-console";
+const STREAM_DELAYS_S = [1, 2, 4, 8, 16, 30];
+const PRESENCE_MS = 2500;
+const LIST_POLL_MS = 4000;
+
 const S = {
+  health: null,
+  machine: null,
   sessions: [],
   activeId: null,
-  discovery: null,
-  working: false,
-  pending: new Set(),
-  cancelling: new Set(),
+  newWorkspace: null,
   drafts: {},
-  scenarios: [],
-  polling: false,
+  outbox: {},
+  cancelling: new Set(),
+  stream: { source: null, sessionId: null, status: "idle", attempt: 0, retryAt: 0, timer: null },
+  view: null,
   online: true,
-  detailVersions: new Map(),
   levelsOpen: false,
   lastPresenceAt: 0,
-  machine: null,
+  noticeKind: "",
 };
-const dialog = $("settings-dialog");
+
 const input = $("input");
-const fields = [
-  "s-adapter",
-  "s-chat-url",
-  "s-embed-url",
-  "s-chat-model",
-  "s-embed-model",
-  "s-memory",
-];
-let previousFocus = null;
-let noticeTimer;
+let noticeTimer = null;
 let sessionListSnapshot = "";
 let messageSnapshot = "";
+const liveNodes = new Map();
+// The tool cards still running, so `tick` can move their clocks.
+const runningCards = new Map();
+
+// ── Small helpers ──
 
 function stored(key, fallback = {}, storageName = "localStorage") {
   try {
@@ -41,6 +74,7 @@ function stored(key, fallback = {}, storageName = "localStorage") {
     return fallback;
   }
 }
+
 function persist(key, value, storageName = "localStorage") {
   try {
     globalThis[storageName].setItem(key, JSON.stringify(value));
@@ -48,140 +82,117 @@ function persist(key, value, storageName = "localStorage") {
     /* Browser policy can deny access to the storage object itself. */
   }
 }
-function active() {
-  return S.sessions.find((s) => s.session_id === S.activeId);
-}
-function title(s) {
-  return s.title || "New chat";
-}
+
 function esc(text) {
   return String(text ?? "").replace(
     /[&<>"']/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+    (character) =>
+      ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"})[character],
   );
 }
-function notify(message, sticky = false) {
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+function button(className, text, onClick) {
+  const node = el("button", className, text);
+  node.type = "button";
+  node.addEventListener("click", onClick);
+  return node;
+}
+
+function activeSession() {
+  return S.sessions.find((session) => session.id === S.activeId) ?? S.view?.session ?? null;
+}
+
+function title(session) {
+  return session?.title || "New chat";
+}
+
+function levelName(level) {
+  return `P${level || 2}`;
+}
+
+function notify(message, { sticky = false, kind = "" } = {}) {
+  S.noticeKind = message ? kind || "message" : "";
   clearTimeout(noticeTimer);
   $("notice").textContent = message;
   $("notice").hidden = !message;
-  if (!sticky && message)
+  if (!sticky && message) {
     noticeTimer = setTimeout(() => {
       $("notice").hidden = true;
+      S.noticeKind = "";
     }, 7000);
+  }
 }
-async function api(path, body, method = body ? "POST" : "GET") {
-  const response = await fetch("/v1/playground" + path, {
-    method,
-    ...(body
-      ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }
-      : {}),
+
+/** One `/api` call; an API v2 error keeps its code and message. */
+async function api(path, { body, method } = {}) {
+  const response = await fetch("/api" + path, {
+    method: method ?? (body ? "POST" : "GET"),
+    ...(body ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {}),
   });
-  const data = await response.json().catch(() => ({}));
+  const payload = response.status === 204 ? {} : await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(data.error || `Request failed (${response.status})`);
+    const error = new Error(
+      payload?.error?.message || `Request failed (${response.status})`,
+    );
     error.status = response.status;
+    error.code = payload?.error?.code || "";
     throw error;
   }
-  return data;
+  return payload;
 }
-function setOptions(id, models, selected, empty) {
-  const select = $(id);
-  select.replaceChildren();
-  if (empty || !models.length) select.add(new Option(empty || "No models available", ""));
-  models.forEach((model) => select.add(new Option(model, model)));
-  if (models.includes(selected)) select.value = selected;
+
+function newClientRequestId() {
+  try {
+    if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  } catch {
+    /* A browser without crypto falls back to the hex below. */
+  }
+  let text = "";
+  for (let index = 0; index < 32; index += 1) {
+    text += Math.floor(Math.random() * 16).toString(16);
+  }
+  return text;
 }
-function saveConfig() {
-  persist(KEY, {
-    adapter: $("s-adapter").value,
-    chat_url: $("s-chat-url").value.trim(),
-    embed_url: $("s-embed-url").value.trim(),
-    chat_model: $("s-chat-model").value,
-    embed_model: $("s-embed-model").value,
-    memory: $("s-memory").value,
-  });
+
+function nowSeconds() {
+  return Date.now() / 1000;
 }
+
+// ── Drafts ──
+
 function saveDraft() {
   S.drafts[S.activeId || "new"] = input.value;
   persist(KEY + "-drafts", S.drafts, "sessionStorage");
 }
+
+function restoreDraft() {
+  input.value = S.drafts[S.activeId || "new"] || "";
+  resizeInput();
+}
+
+function moveDraft(from, to) {
+  if (S.drafts[from] === undefined) return;
+  S.drafts[to] = S.drafts[from];
+  delete S.drafts[from];
+  persist(KEY + "-drafts", S.drafts, "sessionStorage");
+}
+
 function resizeInput() {
   input.style.height = "auto";
   input.style.height = Math.min(input.scrollHeight, 190) + "px";
 }
-function sidebar(open) {
-  $("app").classList.toggle("sidebar-open", open);
-  $("sidebar-backdrop").hidden = !open;
-  $("sidebar-toggle").setAttribute("aria-expanded", String(open));
-  const mobile = matchMedia("(max-width: 700px)").matches;
-  $("sidebar").inert = mobile && !open;
-  document.querySelector(".chat").inert = mobile && open;
-  $("sidebar-backdrop").tabIndex = open ? 0 : -1;
-  if (mobile && open) $("new-btn").focus();
-  if (mobile && !open && document.activeElement?.closest(".sidebar")) $("sidebar-toggle").focus();
-}
-function levelName(level) {
-  return `P${level || 2}`;
-}
-function renderLevelMenu() {
-  const s = active();
-  const level = s?.level || 2;
-  const menu = $("level-menu");
-  menu.replaceChildren();
-  for (const n of [1, 2, 3, 4]) {
-    const item = document.createElement("button");
-    item.type = "button";
-    item.className = "level-item";
-    item.setAttribute("role", "option");
-    item.setAttribute("aria-selected", String(n === level));
-    item.textContent = levelName(n) + (n === 1 ? " · urgent" : n === 4 ? " · background" : "");
-    item.onclick = () => setLevel(n);
-    menu.append(item);
-  }
-}
-function showLevelMenu(open) {
-  S.levelsOpen = open;
-  $("level-menu").hidden = !open;
-  $("level-btn").setAttribute("aria-expanded", String(open));
-  if (open) renderLevelMenu();
-}
-async function setLevel(level) {
-  const s = active();
-  showLevelMenu(false);
-  if (!s) return;
-  const previous = s.level;
-  s.level = level;
-  syncUI();
-  try {
-    const data = await api(`/session/${encodeURIComponent(s.session_id)}/level`, { level });
-    s.level = data.level;
-    s.level_source = "user";
-  } catch (error) {
-    s.level = previous;
-    notify("Could not change the chat level: " + error.message, true);
-  }
-  syncUI();
-}
-function presence(force = false) {
-  const s = active();
-  if (!s) return;
-  const now = Date.now();
-  if (!force && now - S.lastPresenceAt < 2500) return;
-  S.lastPresenceAt = now;
-  try {
-    const request = fetch("/v1/playground/presence", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ session_id: s.session_id }),
-      keepalive: true,
-    });
-    request?.catch?.(() => {});
-  } catch {
-    /* A browser may refuse fetch, or a test may not allow it. */
-  }
-}
+
+// ── The machine line (S2b) ──
+
 function machineLine(machine) {
-  if (!machine) return {text: "", label: ""};
+  if (!machine) return { text: "", label: "" };
   const parts = [];
   let label = "";
   if (machine.readable === false) {
@@ -216,13 +227,31 @@ function machineLine(machine) {
     parts.push(battery);
     label = label ? `${label} · ${battery}` : battery;
   }
-  return {text: parts.join(" · "), label: label || parts.join(" · ")};
+  return { text: parts.join(" · "), label: label || parts.join(" · ") };
 }
+
 let machineSnapshot = "";
+
+// ── The header and the composer ──
+
+function runningTurn() {
+  const turns = S.view?.turns ?? [];
+  for (let index = turns.length - 1; index >= 0; index -= 1) {
+    if (!turns[index].finishedAt) return turns[index];
+  }
+  return null;
+}
+
+function pendingOutbox() {
+  return S.outbox[S.activeId ?? "new"] ?? null;
+}
+
 function syncUI() {
-  const s = active();
-  const busy = !!s && (s.is_busy || S.pending.has(s.session_id));
-  const held = busy && s?.held ? s.held : "";
+  const view = S.activeId ? S.view : null;
+  const session = activeSession();
+  const turn = runningTurn();
+  const held = turn && session?.held ? session.held : "";
+  const pending = view ? view.pending.size : 0;
   const machine = machineLine(S.machine);
   const chip = $("machine-state");
   const snapshot = `${machine.text}\n${machine.label}`;
@@ -235,508 +264,1153 @@ function syncUI() {
     chip.setAttribute("aria-label", machine.label || "Machine status");
     chip.title = machine.label;
   }
-  $("header-title").textContent = s ? title(s) : "New chat";
-  $("header-model").textContent = s ? s.chat_model : "Connect your model to get started";
+  const model = S.health?.model ?? null;
+  $("header-title").textContent = session ? title(session) : "New chat";
+  $("header-model").textContent = session
+    ? session.model || "Your configured model"
+    : model?.name
+      ? `${model.name} · ${model.backend_label}`
+      : "Connect your model to get started";
   $("connection-label").textContent = !S.online
     ? "Gateway offline"
-    : s
-      ? busy
-        ? held
-          ? `Waiting: ${held}`
+    : turn
+      ? held
+        ? `Waiting: ${held}`
+        : pending > 0
+          ? "Approval needed"
           : "Working"
-        : "Ready"
-      : "Set up model";
-  $("connection-dot").classList.toggle("offline", !s || !S.online);
-  $("model-btn").textContent = s ? `${s.chat_model}  ⌄` : "Choose a model  ⌄";
-  $("send-btn").hidden = busy;
-  $("stop-btn").hidden = !busy;
-  $("stop-btn").disabled = !s || S.cancelling.has(s.session_id);
-  $("stop-btn").querySelector("span").textContent =
-    s && S.cancelling.has(s.session_id) ? "Stopping…" : "Stop";
-  $("send-btn").disabled = S.working || busy || !S.online || !input.value.trim();
-  $("run-status").textContent = busy
-    ? held
-      ? `Waiting: ${held}`
-      : "Running on your backend"
-    : "";
-  $("level-btn").textContent = levelName(s?.level);
-  $("level-btn").disabled = !s;
-  if (!s && S.levelsOpen) showLevelMenu(false);
-  fields.forEach((id) => {
-    $(id).disabled = S.working;
-  });
-  $("discover-btn").disabled = S.working;
-  $("create-btn").disabled = S.working || !S.discovery || !$("s-chat-model").value;
-  $("new-btn").disabled = S.working;
+      : session
+        ? "Ready"
+        : "New chat";
+  $("connection-dot").classList.toggle("offline", !S.online);
+  $("model-btn").textContent = model?.name ? `${model.name}  ⌄` : "Choose a model  ⌄";
+  $("send-btn").hidden = !!turn;
+  $("stop-btn").hidden = !turn;
+  $("stop-btn").disabled = !turn || S.cancelling.has(turn.id);
+  $("stop-btn").textContent = turn && S.cancelling.has(turn.id) ? "■ Stopping…" : "■ Stop";
+  const sending = pendingOutbox();
+  $("send-btn").disabled =
+    !S.online ||
+    !!turn ||
+    (sending !== null && sending.state !== "failed") ||
+    !input.value.trim();
+  $("run-status").textContent = turn ? (held ? `Waiting: ${held}` : "Running on your backend") : "";
+  $("level-btn").textContent = levelName(session?.level);
+  $("level-btn").disabled = !session;
+  if (!session && S.levelsOpen) showLevelMenu(false);
+  $("new-btn").disabled = false;
+  const welcome = $("welcome-description");
+  if (welcome) {
+    welcome.textContent = session
+      ? `${session.model || "Your model"} is ready. Start a conversation below.`
+      : "A quiet space to think, build, and explore with your own model.";
+  }
 }
+
+// ── The session list ──
+
 function renderSessions() {
   const query = $("search").value.toLowerCase();
+  const active = S.activeId;
   const snapshot = JSON.stringify([
     query,
-    S.activeId,
-    S.sessions.map((s) => [
-      s.session_id,
-      title(s),
-      s.chat_model,
-      s.is_busy,
-      s.held || "",
-      s.last_active,
-      S.pending.has(s.session_id),
+    active,
+    S.sessions.map((session) => [
+      session.id,
+      session.title,
+      session.model,
+      session.busy,
+      session.held || "",
+      session.pending_approvals || 0,
+      session.updated_at,
     ]),
   ]);
   if (snapshot === sessionListSnapshot) return;
   sessionListSnapshot = snapshot;
   const focused = document.activeElement;
-  const focusedId = focused?.closest(".session-item")?.dataset.sessionId;
-  const focusedClose = focused?.classList.contains("session-close");
+  const focusedId = focused?.closest?.(".session-item")?.dataset?.sessionId;
+  const focusedClose = focused?.classList?.contains?.("session-close") === true;
   $("session-count").textContent = S.sessions.length;
   $("session-list").replaceChildren();
   const shown = [...S.sessions]
-    .sort((a, b) => b.last_active - a.last_active)
-    .filter((s) => `${title(s)} ${s.chat_model}`.toLowerCase().includes(query));
-  if (!shown.length) {
-    const empty = document.createElement("p");
-    empty.className = "list-empty";
-    empty.textContent = query ? "No matching chats." : "Your conversations will appear here.";
+    .sort((left, right) => (right.updated_at || 0) - (left.updated_at || 0))
+    .filter((session) => `${title(session)} ${session.model || ""}`.toLowerCase().includes(query));
+  if (shown.length === 0) {
+    const empty = el("p", "list-empty", query ? "No matching chats." : "Your conversations will appear here.");
     $("session-list").append(empty);
   }
-  for (const s of shown) {
-    const row = document.createElement("div");
-    row.dataset.sessionId = s.session_id;
-    row.className = "session-item" + (s.session_id === S.activeId ? " active" : "");
-    const button = document.createElement("button");
-    button.className = "session-info";
-    if (s.session_id === S.activeId) button.setAttribute("aria-current", "page");
-    const marker = s.is_busy ? (s.held ? "● Waiting · " : "● Working · ") : "";
-    button.innerHTML = `<div class="session-title">${esc(title(s))}</div><div class="session-meta">${marker}${esc(s.chat_model)}</div>`;
-    button.onclick = () => selectSession(s.session_id);
-    const close = document.createElement("button");
-    close.className = "session-close";
-    close.textContent = "×";
-    close.setAttribute("aria-label", `Close chat: ${title(s)}`);
+  for (const session of shown) {
+    const row = el("div", "session-item");
+    row.dataset.sessionId = session.id;
+    if (session.id === active) row.classList.add("active");
+    const info = el("button", "session-info");
+    info.type = "button";
+    if (session.id === active) info.setAttribute("aria-current", "page");
+    const marker =
+      session.pending_approvals > 0
+        ? "● Approval needed · "
+        : session.busy
+          ? session.held
+            ? "● Waiting · "
+            : "● Working · "
+          : "";
+    info.innerHTML = `<div class="session-title">${esc(title(session))}</div><div class="session-meta">${marker}${esc(session.model || "")}</div>`;
+    info.addEventListener("click", () => {
+      openSession(session.id);
+    });
+    const close = el("button", "session-close", "×");
+    close.type = "button";
+    close.setAttribute("aria-label", `Close chat: ${title(session)}`);
     close.title = "Close chat";
-    close.disabled = s.is_busy || S.pending.has(s.session_id);
-    close.onclick = () => deleteSession(s.session_id);
-    row.append(button, close);
+    close.disabled = !!session.busy || (session.pending_approvals || 0) > 0;
+    close.addEventListener("click", () => {
+      deleteSession(session.id);
+    });
+    row.append(info, close);
     $("session-list").append(row);
-    if (s.session_id === focusedId)
-      (focusedClose && !close.disabled ? close : button).focus({ preventScroll: true });
-  }
-}
-function renderMessages(forceScroll = false) {
-  const scroller = $("scroll");
-  const oldTop = scroller.scrollTop;
-  const nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 100;
-  const s = active();
-  const messages = s?.messages || [];
-  const snapshot = JSON.stringify([
-    S.activeId,
-    s?.chat_model,
-    messages,
-    s?.is_busy,
-    s?.held || "",
-    s && S.pending.has(s.session_id),
-  ]);
-  if (snapshot === messageSnapshot) {
-    if (forceScroll) scroller.scrollTop = messages.length ? scroller.scrollHeight : 0;
-    return;
-  }
-  messageSnapshot = snapshot;
-  $("welcome").hidden = messages.length > 0 || !!s?.is_busy;
-  $("setup-btn").hidden = !!s;
-  $("welcome-description").textContent = s
-    ? `${s.chat_model} is ready. Start a conversation below.`
-    : "A quiet space to think, build, and explore with your own model.";
-  $("messages").replaceChildren();
-  for (const message of messages) {
-    const row = document.createElement("article");
-    row.className = "msg " + (["user", "assistant"].includes(message.role) ? message.role : "note");
-    if (message.role === "user") {
-      const bubble = document.createElement("div");
-      bubble.className = "user-bubble";
-      bubble.textContent = message.content;
-      row.append(bubble);
-    } else if (message.role === "assistant") {
-      row.innerHTML =
-        '<div class="assistant-label"><img class="brand-icon" src="/assets/icon_small.png" width="28" height="28" alt=""> localmelo</div>';
-      if (message.thinking) {
-        const thinking = document.createElement("details");
-        thinking.className = "thinking";
-        thinking.innerHTML = '<summary>Reasoning</summary><div class="thinking-body"></div>';
-        thinking.lastElementChild.textContent = message.thinking;
-        row.append(thinking);
-      }
-      const answer = document.createElement("div");
-      answer.className = "answer";
-      answer.innerHTML = renderMarkdown(message.answer || message.content || "");
-      row.append(answer);
-      const actions = document.createElement("div");
-      actions.className = "message-actions";
-      const copy = document.createElement("button");
-      copy.className = "copy-button";
-      copy.textContent = "Copy response";
-      copy.onclick = async () => {
-        try {
-          await navigator.clipboard.writeText(message.answer || message.content || "");
-          copy.textContent = "Copied";
-          setTimeout(() => {
-            copy.textContent = "Copy response";
-          }, 2000);
-        } catch {
-          notify("Clipboard unavailable. Select the response text to copy it.");
-        }
-      };
-      actions.append(copy);
-      row.append(actions);
-    } else {
-      row.textContent = message.content;
-    }
-    $("messages").append(row);
-  }
-  if (s?.is_busy || (s && S.pending.has(s.session_id))) {
-    const working = document.createElement("div");
-    working.className = "msg working";
-    working.setAttribute("role", "status");
-    const dot = document.createElement("span");
-    dot.className = "status-dot";
-    const label = document.createElement("span");
-    // A held chat says why the model server has not been asked yet (R30).
-    label.textContent = s?.held
-      ? `Waiting: ${s.held}…`
-      : "Working on your request…";
-    working.append(dot, label);
-    $("messages").append(working);
-  }
-  if (forceScroll || nearBottom) scroller.scrollTop = messages.length ? scroller.scrollHeight : 0;
-  else scroller.scrollTop = oldTop;
-}
-async function refreshSession(id, forceScroll = false) {
-  try {
-    const detail = await api("/session/" + encodeURIComponent(id));
-    const index = S.sessions.findIndex((s) => s.session_id === id);
-    if (index < 0) return;
-    S.sessions[index] = detail;
-    S.detailVersions.set(id, detail.last_active);
-    if (S.activeId === id) {
-      renderMessages(forceScroll);
-      syncUI();
-    }
-    renderSessions();
-  } catch (error) {
-    if (error.status === 404) {
-      S.sessions = S.sessions.filter((s) => s.session_id !== id);
-      S.detailVersions.delete(id);
-      if (S.activeId === id) {
-        const draft = input.value;
-        saveDraft();
-        S.activeId = null;
-        if (draft) S.drafts.new = draft;
-        input.value = S.drafts.new || "";
-        saveDraft();
-        resizeInput();
-        renderMessages();
-      }
-      renderSessions();
-      syncUI();
-      notify("This chat expired or the gateway restarted. Create a new chat to continue.", true);
-    } else {
-      throw error;
+    if (session.id === focusedId) {
+      (focusedClose && !close.disabled ? close : info).focus({ preventScroll: true });
     }
   }
 }
-async function selectSession(id, { saveCurrent = true } = {}) {
-  if (saveCurrent) saveDraft();
-  S.activeId = id;
-  persist(KEY + "-view", { id });
-  input.value = S.drafts[id] || "";
-  resizeInput();
-  sidebar(false);
-  renderSessions();
-  renderMessages(true);
-  syncUI();
-  presence(true);
+
+async function refreshList() {
   try {
-    await refreshSession(id, true);
-  } catch (error) {
-    notify("Could not load chat: " + error.message, true);
-  }
-}
-async function deleteSession(id) {
-  const s = S.sessions.find((s) => s.session_id === id);
-  if (!s || s.is_busy || S.pending.has(id)) return;
-  try {
-    await api("/session/" + encodeURIComponent(id), null, "DELETE");
-    S.sessions = S.sessions.filter((session) => session.session_id !== id);
-    delete S.drafts[id];
-    persist(KEY + "-drafts", S.drafts, "sessionStorage");
-    if (S.activeId === id) {
-      S.activeId = null;
-      if (S.sessions.length) await selectSession(S.sessions[0].session_id, { saveCurrent: false });
-      else {
-        input.value = S.drafts.new || "";
-        resizeInput();
-        renderMessages();
-      }
-    }
-    renderSessions();
-    syncUI();
-  } catch (error) {
-    notify("Could not close chat: " + error.message, true);
-  }
-}
-function openSettings() {
-  previousFocus = document.activeElement;
-  $("create-error").hidden = true;
-  sidebar(false);
-  if (!dialog.open) dialog.showModal();
-}
-function closeSettings() {
-  dialog.close();
-}
-function connectionChanged() {
-  S.discovery = null;
-  setOptions("s-chat-model", [], "", "Discover models first");
-  setOptions("s-embed-model", [], "", "Disabled");
-  $("discover-status").textContent = "Connection changed. Discover models to refresh the list.";
-  saveConfig();
-  syncUI();
-}
-async function discover() {
-  if (S.working) return;
-  if (!$("s-chat-url").value.trim()) {
-    $("discover-status").textContent = "Enter your Chat API URL first.";
-    $("s-chat-url").focus();
-    return;
-  }
-  const previous = stored(KEY);
-  S.working = true;
-  S.discovery = null;
-  syncUI();
-  $("discover-btn").textContent = "Discovering…";
-  $("discover-status").textContent = "Contacting your backend…";
-  $("create-error").hidden = true;
-  try {
-    const data = await api("/discover", {
-      adapter: $("s-adapter").value,
-      chat_url: $("s-chat-url").value.trim(),
-      embedding_url: $("s-embed-url").value.trim(),
-    });
-    S.discovery = data;
-    const chatModels = data.chat_models || [];
-    const preferred = chatModels.includes(previous.chat_model)
-      ? previous.chat_model
-      : chatModels.find((model) => !/embed|rerank/i.test(model));
-    setOptions("s-chat-model", chatModels, preferred);
-    setOptions("s-embed-model", data.embedding_models || [], previous.embed_model, "Disabled");
-    $("discover-status").textContent =
-      `${chatModels.length} models available. Choose a chat model below.`;
-    saveConfig();
-  } catch (error) {
-    setOptions("s-chat-model", [], "", "Discovery failed");
-    setOptions("s-embed-model", [], "", "Disabled");
-    $("discover-status").textContent = "Could not connect: " + error.message;
-  } finally {
-    S.working = false;
-    $("discover-btn").textContent = "Discover models";
-    syncUI();
-  }
-}
-function memoryPreview() {
-  const id = $("s-memory").value;
-  const count =
-    id === "__all__"
-      ? S.scenarios.reduce((sum, s) => sum + s.seed_count, 0)
-      : S.scenarios.find((s) => s.id === id)?.seed_count;
-  $("memory-count").textContent = count
-    ? `${count} seed memories will be loaded.`
-    : "No seed memories will be loaded.";
-}
-async function createSession() {
-  if (S.working || !S.discovery || !$("s-chat-model").value) return;
-  S.working = true;
-  syncUI();
-  $("create-btn").textContent = "Creating…";
-  $("create-error").hidden = true;
-  try {
-    saveDraft();
-    const data = await api("/session", {
-      adapter: $("s-adapter").value,
-      chat_url: $("s-chat-url").value.trim(),
-      embedding_url: $("s-embed-url").value.trim(),
-      chat_model: $("s-chat-model").value,
-      embedding_model: $("s-embed-model").value,
-      scenario_id: $("s-memory").value,
-    });
-    S.sessions.push({
-      ...data,
-      title: "New chat",
-      last_active: Date.now() / 1000,
-      is_busy: false,
-      messages: [],
-    });
-    if (!S.activeId && input.value) {
-      S.drafts[data.session_id] = input.value;
-      delete S.drafts.new;
-    }
-    persist(KEY + "-drafts", S.drafts, "sessionStorage");
-    saveConfig();
-    closeSettings();
-    await selectSession(data.session_id, { saveCurrent: false });
-    input.focus();
-    notify("Chat ready. Your message is sent only when you press Send.");
-  } catch (error) {
-    $("create-error").textContent = error.message;
-    $("create-error").hidden = false;
-    notify(error.message, true);
-  } finally {
-    S.working = false;
-    $("create-btn").innerHTML = 'Create chat <span aria-hidden="true">→</span>';
-    syncUI();
-  }
-}
-async function send() {
-  const query = input.value.trim();
-  const s = active();
-  if (!query || S.working) return;
-  if (!s) {
-    saveDraft();
-    openSettings();
-    return;
-  }
-  const id = s.session_id;
-  if (s.is_busy || S.pending.has(id)) return;
-  S.pending.add(id);
-  s.is_busy = true;
-  s.messages ||= [];
-  s.messages.push({ role: "user", content: query });
-  s.title = s.title === "New chat" ? query.slice(0, 80) : s.title;
-  input.value = "";
-  saveDraft();
-  resizeInput();
-  renderMessages(true);
-  renderSessions();
-  syncUI();
-  presence(true);
-  try {
-    await api("/session/" + encodeURIComponent(id) + "/run", { query });
-  } catch (error) {
-    if (!S.drafts[id]) S.drafts[id] = query;
-    if (S.activeId === id && !input.value) {
-      input.value = S.drafts[id];
-      resizeInput();
-    }
-    persist(KEY + "-drafts", S.drafts, "sessionStorage");
-    notify("Request failed: " + error.message + " Your message is kept as a draft.", true);
-  } finally {
-    S.pending.delete(id);
-    try {
-      await refreshSession(id, S.activeId === id);
-    } catch (error) {
-      // Keep the last known busy state: losing the HTTP connection is not cancellation.
-      notify("Connection interrupted. Reconnecting to your chat…", true);
-    }
-    syncUI();
-  }
-}
-async function stop() {
-  const s = active();
-  if (!s || S.cancelling.has(s.session_id)) return;
-  const id = s.session_id;
-  S.cancelling.add(id);
-  syncUI();
-  try {
-    await api("/session/" + encodeURIComponent(id) + "/cancel", {});
-    await refreshSession(id);
-  } catch (error) {
-    notify("Could not stop the response: " + error.message, true);
-  } finally {
-    S.cancelling.delete(id);
-    syncUI();
-  }
-}
-async function poll() {
-  if (document.hidden || S.polling) return;
-  S.polling = true;
-  try {
-    const data = await api("/sessions");
+    const body = await api("/sessions");
     S.online = true;
-    S.machine = data.machine || null;
-    const old = new Map(S.sessions.map((s) => [s.session_id, s]));
-    S.sessions = data.sessions.map((s) => ({ ...old.get(s.session_id), ...s }));
+    S.machine = body.machine ?? null;
+    S.sessions = body.sessions ?? [];
+    adoptSummary();
     renderSessions();
-    if (S.activeId) {
-      const summary = active();
-      const previous = old.get(S.activeId);
-      if (S.pending.has(S.activeId)) {
-        // The send is still awaiting its run, so the detail is not refreshed;
-        // the summary's hold moves the header pill and the message area as the
-        // scheduler reports it (R30).
-        if (
-          summary &&
-          (summary.held !== previous?.held ||
-            summary.is_busy !== previous?.is_busy)
-        )
-          renderMessages();
-      } else if (
-        !summary ||
-        summary.is_busy ||
-        previous?.is_busy ||
-        summary.last_active !== S.detailVersions.get(S.activeId) ||
-        !summary.messages
-      ) {
-        await refreshSession(S.activeId);
-      }
-    }
     syncUI();
   } catch {
     S.online = false;
     syncUI();
-  } finally {
-    S.polling = false;
   }
 }
-async function init() {
-  const config = stored(KEY);
-  S.drafts = stored(KEY + "-drafts", {}, "sessionStorage");
-  for (const [key, id] of [
-    ["adapter", "s-adapter"],
-    ["chat_url", "s-chat-url"],
-    ["embed_url", "s-embed-url"],
-  ])
-    if (typeof config[key] === "string") $(id).value = config[key];
-  if (!$("s-adapter").value) $("s-adapter").value = "auto";
-  input.value = S.drafts.new || "";
-  const results = await Promise.allSettled([api("/scenarios"), api("/sessions")]);
-  if (results[0].status === "fulfilled") {
-    S.scenarios = results[0].value.scenarios;
-    S.scenarios.forEach((s) => $("s-memory").add(new Option(s.name, s.id)));
-    if (config.memory) $("s-memory").value = config.memory;
-    memoryPreview();
+
+/** Copy the list's live facts onto the open session's copy. */
+function adoptSummary() {
+  const session = S.view?.session;
+  if (!session) return;
+  const summary = S.sessions.find((item) => item.id === session.id);
+  if (!summary) return;
+  for (const key of ["title", "model", "workspace", "workspace_label", "busy", "held", "pending_approvals", "level", "updated_at"]) {
+    if (summary[key] !== undefined) session[key] = summary[key];
   }
-  if (results[1].status === "fulfilled") {
-    S.sessions = results[1].value.sessions;
-    S.machine = results[1].value.machine || null;
-    const saved = stored(KEY + "-view").id;
-    const id = S.sessions.some((s) => s.session_id === saved) ? saved : S.sessions[0]?.session_id;
-    if (id) await selectSession(id);
-  } else {
-    S.online = false;
-    notify("Could not load chats. Check that the gateway is running.", true);
+}
+
+// ── Loading one session ──
+
+async function loadSession(id) {
+  const [detail, turns] = await Promise.all([
+    api(`/sessions/${encodeURIComponent(id)}`),
+    api(`/sessions/${encodeURIComponent(id)}/turns?limit=10`),
+  ]);
+  if (S.activeId !== id) return null;
+  const view = S.view ?? newView(id);
+  view.id = id;
+  view.session = detail.session ?? view.session;
+  view.tokens = detail.tokens ?? 0;
+  view.grants = detail.grants ?? [];
+  view.grantedAt = detail.granted_at ?? {};
+  view.pending = new Map();
+  for (const approval of detail.pending_approvals ?? []) {
+    view.pending.set(String(approval.request_id), approval);
+  }
+  view.hasEarlier = turns.has_earlier === true;
+  view.replayFrom = turns.replay_from ?? 0;
+  view.lastEventId = view.replayFrom;
+  view.turns = (turns.turns ?? []).map((row) => newTurn(row));
+  S.view = view;
+  renderSessions();
+  renderMessages(true);
+  syncUI();
+  return view;
+}
+
+/**
+ * Reload a chat that is already open. The view is rebuilt at `replay_from`,
+ * so the stream reopens from that cursor and replays what the old one had
+ * already carried.
+ */
+async function reloadSession(id) {
+  const view = await loadSession(id);
+  if (view !== null && S.activeId === id) startStream(id);
+}
+
+async function openSession(id, { saveCurrent = true, scroll = true } = {}) {
+  if (!id) {
+    newChat();
+    return;
+  }
+  if (saveCurrent) saveDraft();
+  closeStream();
+  S.activeId = id;
+  S.view = newView(id);
+  restoreDraft();
+  persist(KEY + "-view", { id });
+  setRoute(id);
+  sidebar(false);
+  renderSessions();
+  renderMessages(true);
+  syncUI();
+  presence(true);
+  try {
+    await loadSession(id);
+  } catch (error) {
+    if (error.status === 404) {
+      forgetSession(id);
+      notify("This chat expired or the gateway restarted. Create a new chat to continue.", { sticky: true });
+      return;
+    }
+    notify("Could not load the chat: " + error.message, { sticky: true });
+  }
+  startStream(id);
+}
+
+function forgetSession(id) {
+  S.sessions = S.sessions.filter((session) => session.id !== id);
+  if (S.activeId === id) {
+    closeStream();
+    S.activeId = null;
+    S.view = null;
+    const draft = S.drafts[id];
+    delete S.drafts[id];
+    if (draft && !S.drafts.new) S.drafts.new = draft;
+    persist(KEY + "-drafts", S.drafts, "sessionStorage");
+    restoreDraft();
+    setRoute(null);
   }
   renderSessions();
-  renderMessages();
+  renderMessages(false);
   syncUI();
+}
+
+function newChat() {
+  saveDraft();
+  closeStream();
+  S.activeId = null;
+  S.view = null;
+  setRoute(null);
+  restoreDraft();
+  sidebar(false);
+  renderSessions();
+  renderMessages(true);
+  syncUI();
+  input.focus();
+}
+
+// ── The event stream ──
+
+function eventsUrl(id) {
+  return `/api/sessions/${encodeURIComponent(id)}/events?after=${S.view?.lastEventId ?? 0}`;
+}
+
+function startStream(id) {
+  // A chat opened and then left before its load finished keeps no stream:
+  // one bound to this id would ignore every frame of the chat now open.
+  if (S.activeId !== id) return;
+  closeStream();
+  if (typeof EventSource !== "function") return;
+  S.stream.sessionId = id;
+  const source = new EventSource(eventsUrl(id));
+  S.stream.source = source;
+  S.stream.status = "live";
+  source.onmessage = (message) => {
+    if (S.activeId !== id || !S.view) return;
+    let frame;
+    try {
+      frame = JSON.parse(message.data);
+    } catch {
+      return;
+    }
+    applyOutcome(applyEvent(S.view, frame));
+    noteFrame(frame);
+    renderMessages(false);
+    syncUI();
+  };
+  source.onopen = () => {
+    S.stream.status = "live";
+    S.stream.attempt = 0;
+    S.stream.retryAt = 0;
+    if (S.noticeKind === "stream") notify("");
+    syncUI();
+  };
+  source.onerror = () => {
+    if (S.activeId !== id || S.view === null) return;
+    // A stream the browser will retry by itself is left alone; one it gave
+    // up on is reopened here, after the same backoff, from our own cursor.
+    if (source.readyState === 2) {
+      S.stream.status = "paused";
+      scheduleReconnect();
+    }
+  };
+}
+
+function closeStream() {
+  if (S.stream.source) {
+    try {
+      S.stream.source.close();
+    } catch {
+      /* A closed source is fine. */
+    }
+  }
+  S.stream.source = null;
+  S.stream.sessionId = null;
+  S.stream.status = "idle";
+  S.stream.retryAt = 0;
+  if (S.stream.timer !== null) {
+    clearTimeout(S.stream.timer);
+    S.stream.timer = null;
+  }
+  if (S.noticeKind === "stream") notify("");
+}
+
+function scheduleReconnect() {
+  const id = S.activeId;
+  if (!id || S.stream.timer !== null) return;
+  const delay = STREAM_DELAYS_S[Math.min(S.stream.attempt, STREAM_DELAYS_S.length - 1)];
+  S.stream.attempt += 1;
+  S.stream.retryAt = nowSeconds() + delay;
+  S.stream.timer = setTimeout(async () => {
+    S.stream.timer = null;
+    if (S.activeId !== id) return;
+    // The chat may be gone (closed in another tab, or the gateway
+    // restarted): a stream reopened on it would only 404 for ever.
+    try {
+      await api(`/sessions/${encodeURIComponent(id)}`);
+    } catch (error) {
+      if (error.status === 404) {
+        forgetSession(id);
+        notify(
+          "This chat expired or the gateway restarted. Create a new chat to continue.",
+          { sticky: true },
+        );
+        return;
+      }
+    }
+    if (S.activeId !== id) return;
+    startStream(id);
+  }, delay * 1000);
+}
+
+/** Mirror what a frame changed outside the view: title, model, the outbox. */
+function applyOutcome(outcome) {
+  if (outcome.clientRequestId) {
+    for (const [slot, entry] of Object.entries(S.outbox)) {
+      if (entry.clientRequestId === outcome.clientRequestId) delete S.outbox[slot];
+    }
+  }
+  if (outcome.title !== undefined) {
+    if (S.view?.session) S.view.session.title = outcome.title;
+    const session = S.sessions.find((item) => item.id === S.activeId);
+    if (session) session.title = outcome.title;
+    sessionListSnapshot = "";
+  }
+  if (outcome.model !== undefined || outcome.workspace !== undefined) {
+    const session = S.sessions.find((item) => item.id === S.activeId);
+    if (session) {
+      if (outcome.model !== undefined) session.model = outcome.model;
+      if (outcome.workspace !== undefined) session.workspace = outcome.workspace;
+    }
+    sessionListSnapshot = "";
+  }
+}
+
+/**
+ * Keep the open chat's sidebar row in step with the frames it is sent.
+ *
+ * The row's facts come from the list's 4 s poll; a turn this page watches
+ * starting or ending, and an approval arriving or being answered, are known
+ * here first, so the marker ("Working", "Waiting", "Approval needed") does
+ * not wait for the poll.
+ */
+function noteFrame(frame) {
+  const row = S.sessions.find((item) => item.id === S.activeId);
+  if (!S.view || !row) return;
+  const type = String(frame?.type ?? "");
+  const busy = type === "turn.started" ? true : type === "turn.finished" ? false : row.busy;
+  const pending = S.view.pending.size;
+  if (busy === row.busy && pending === row.pending_approvals) return;
+  row.busy = busy;
+  row.pending_approvals = pending;
+  renderSessions();
+}
+
+/** Keep the stream's banner honest while it is down. */
+function refreshStreamNotice() {
+  if (S.stream.status !== "paused") return;
+  // A sticky error outranks the banner; the banner returns once it goes.
+  if (S.noticeKind !== "" && S.noticeKind !== "stream") return;
+  const seconds = Math.max(0, Math.ceil(S.stream.retryAt - nowSeconds()));
+  notify(
+    `Live updates paused. Reconnecting in ${seconds}s…`,
+    { sticky: true, kind: "stream" },
+  );
+}
+
+// ── Rendering the turns ──
+
+function viewSnapshot() {
+  const view = S.view;
+  const turns = (view?.turns ?? []).map((turn) => [
+    turn.id,
+    turn.turn,
+    turn.status,
+    turn.cause,
+    turn.answer,
+    turn.undone,
+    turn.runningHere,
+    turn.items,
+    turn.progress,
+    turn.retryUntil,
+    turn.outputTokens,
+    turn.error,
+    turn.finishedAt,
+    turn.userToggledGroup,
+    turn.userText,
+  ]);
+  return JSON.stringify([
+    S.activeId,
+    view?.session?.title,
+    view?.session?.held,
+    view?.pending?.size ?? 0,
+    turns,
+    S.outbox[S.activeId ?? "new"] ?? null,
+  ]);
+}
+
+function renderMessages(forceScroll = false) {
+  const scroller = $("scroll");
+  const nearBottom =
+    scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 100;
+  const oldTop = scroller.scrollTop;
+  const snapshot = viewSnapshot();
+  if (snapshot === messageSnapshot) {
+    if (forceScroll) scroller.scrollTop = scroller.scrollHeight;
+    return;
+  }
+  messageSnapshot = snapshot;
+  liveNodes.clear();
+  runningCards.clear();
+  const view = S.view;
+  const turns = view?.turns ?? [];
+  const outbox = pendingOutbox();
+  const container = $("messages");
+  const nodes = turns.map((turn) => turnNode(turn));
+  if (outbox && !turns.some((turn) => turn.clientRequestId === outbox.clientRequestId)) {
+    nodes.push(outboxNode(outbox, S.activeId ?? "new"));
+  }
+  container.replaceChildren(...nodes);
+  $("welcome").hidden = nodes.length > 0 || !!S.activeId;
+  if (forceScroll || nearBottom) scroller.scrollTop = scroller.scrollHeight;
+  else scroller.scrollTop = oldTop;
+}
+
+function turnNode(turn) {
+  const section = el("section", "turn");
+  if (turn.undone) section.classList.add("undone");
+  section.dataset.turnId = turn.id || String(turn.turn);
+  section.append(userNode(turn), assistantNode(turn));
+  return section;
+}
+
+function userNode(turn) {
+  const article = el("article", "msg user");
+  article.append(el("div", "user-bubble", turn.userText));
+  if (turn.undone) {
+    article.append(
+      el(
+        "p",
+        "turn-caption",
+        "Retried below · not in melo's memory · its file changes stay",
+      ),
+    );
+  }
+  return article;
+}
+
+function assistantNode(turn) {
+  const article = el("article", "msg assistant");
+  const label = el("div", "assistant-label");
+  const icon = document.createElement("img");
+  icon.className = "brand-icon";
+  icon.src = "/assets/icon_small.png";
+  icon.width = 28;
+  icon.height = 28;
+  icon.alt = "";
+  label.append(icon, el("span", "", "localmelo"));
+  article.append(label);
+  if (!turn.finishedAt || turn.items.length > 0) article.append(workGroup(turn));
+  if (turn.finishedAt && turn.status !== "completed") {
+    if (turn.answer) {
+      article.append(answerNode(turn.answer));
+      article.append(el("p", "turn-caption", "Best effort"));
+    }
+    article.append(statusNode(turn));
+  } else if (turn.answer) {
+    article.append(answerNode(turn.answer), actionsNode(turn));
+  }
+  return article;
+}
+
+function answerNode(answer) {
+  const node = el("div", "answer");
+  node.innerHTML = renderMarkdown(answer);
+  return node;
+}
+
+function actionsNode(turn) {
+  const actions = el("div", "message-actions");
+  const steps = typeof turn.result?.steps === "number" ? turn.result.steps : turn.step || 0;
+  const parts = [
+    formatDuration(turnDuration(turn)),
+    steps === 1 ? "1 step" : `${steps} steps`,
+    turn.outputTokens > 0 ? `${formatTokens(turn.outputTokens)} tokens` : "",
+  ].filter(Boolean);
+  actions.append(el("span", "", parts.join(" · ")));
+  actions.append(
+    button("copy-button", "Copy response", async () => {
+      try {
+        await navigator.clipboard.writeText(turn.answer);
+      } catch {
+        notify("Clipboard unavailable. Select the response text to copy it.");
+      }
+    }),
+  );
+  return actions;
+}
+
+function statusNode(turn) {
+  const text = statusText(turn.status, turn.cause);
+  const mark = text.severity === "error" ? "[x]" : text.severity === "ok" ? "[ok]" : "[-]";
+  const node = el("p", "turn-status", `${mark} ${text.title}.`);
+  node.dataset.severity = text.severity;
+  if (turn.error) node.title = turn.error;
+  return node;
+}
+
+function workGroup(turn) {
+  const group = el("details", "work-group");
+  const open =
+    !turn.finishedAt ||
+    (S.view?.pending.size ?? 0) > 0 ||
+    turn.userToggledGroup ||
+    turn.status !== "completed";
+  group.open = open;
+  group.append(el("summary", "work-summary", workSummary(turn, { held: heldOf(turn) })));
+  group.addEventListener("toggle", () => {
+    if (group.open !== open) turn.userToggledGroup = group.open;
+  });
+  for (const item of turn.items) group.append(itemNode(item, turn));
+  if (!turn.finishedAt) group.append(liveRow(turn));
+  return group;
+}
+
+function heldOf(turn) {
+  if (turn.finishedAt) return "";
+  return S.view?.session?.held || "";
+}
+
+function itemNode(item, turn) {
+  switch (item.kind) {
+    case "tool":
+      return toolCard(item, turn);
+    case "thinking": {
+      const card = el("details", "thinking");
+      card.open = item.expanded === true;
+      const duration =
+        item.durationS === null ? "" : ` for ${formatDuration(item.durationS)}`;
+      card.append(el("summary", "", `Thought${duration}`));
+      const body = el("div", "thinking-body", item.text);
+      card.append(body);
+      card.addEventListener("toggle", () => {
+        item.expanded = card.open;
+      });
+      return card;
+    }
+    case "assistant_text": {
+      const node = el("div", "assistant-text");
+      node.innerHTML = renderMarkdown(item.text);
+      return node;
+    }
+    case "notice": {
+      const node = el("div", "notice-item", `[!] ${item.message}`);
+      node.dataset.kind = item.noticeKind || "";
+      return node;
+    }
+    case "reflection": {
+      const card = el("details", "reflection");
+      card.open = item.expanded === true;
+      card.append(el("summary", "", reflectionLine(item)));
+      const body = el("div", "reflection-body");
+      if (item.summary) body.append(el("p", "", item.summary));
+      if (item.rationale && item.rationale !== item.summary) {
+        body.append(el("p", "muted", item.rationale));
+      }
+      card.append(body);
+      card.addEventListener("toggle", () => {
+        item.expanded = card.open;
+      });
+      return card;
+    }
+    default:
+      return el("div", "");
+  }
+}
+
+function toolCard(item, turn) {
+  // A call of a held chat says why the model server is not being asked yet.
+  const state = toolState(item, { held: heldOf(turn), now: nowSeconds() });
+  const card = el("details", "tool-card");
+  card.dataset.state = state.state;
+  card.open = item.expanded === true;
+  const summary = el("summary", "tool-summary");
+  summary.append(el("span", "tool-mark", state.mark));
+  summary.append(el("span", "tool-name", item.name));
+  if (item.preview) summary.append(el("span", "tool-preview", printable(item.preview)));
+  const meta = state.text ? el("span", "tool-meta", state.text) : null;
+  if (meta) summary.append(meta);
+  if (meta && state.state === "running") {
+    runningCards.set(item, {item, turn, node: meta, card});
+  }
+  card.append(summary);
+  card.append(toolBody(item));
+  card.addEventListener("toggle", () => {
+    item.expanded = card.open;
+  });
+  return card;
+}
+
+function toolBody(item) {
+  const body = el("div", "tool-body");
+  const entries = Object.entries(item.arguments ?? {});
+  if (entries.length > 0) {
+    const section = el("div", "tool-section");
+    section.append(el("h4", "", "Arguments"));
+    const pre = el("pre", "tool-arguments");
+    pre.textContent = entries
+      .map(([key, value]) => `${key}: ${typeof value === "string" ? value : JSON.stringify(value)}`)
+      .join("\n");
+    section.append(pre);
+    body.append(section);
+  }
+  const tag = approvalTag(item.status, item.errorCategory, item.approval);
+  if (tag) body.append(el("p", "tool-approval", tag.long));
+  if (item.error) body.append(el("p", "tool-error", cleanOutput(item.error)));
+  if (item.output) body.append(outputBlock(item));
+  for (const image of item.images ?? []) {
+    const node = document.createElement("img");
+    node.className = "tool-image";
+    node.loading = "lazy";
+    node.alt = `Image from ${item.name}`;
+    node.src = `/api/sessions/${encodeURIComponent(S.activeId ?? "")}/blobs/${encodeURIComponent(image.sha256)}`;
+    node.title = `${image.mime_type} · ${formatBytes(image.size_bytes)}`;
+    body.append(node);
+  }
+  return body;
+}
+
+function outputBlock(item) {
+  const section = el("div", "tool-section");
+  section.append(el("h4", "", "Output"));
+  const text = cleanOutput(item.output);
+  const lines = text.split("\n");
+  const shown =
+    item.showAll || (text.length <= 2000 && lines.length <= 40)
+      ? text
+      : lines.slice(0, 40).join("\n").slice(0, 2000);
+  section.append(el("pre", "tool-output", shown));
+  const hidden = item.outputChars || text.length;
+  if (shown !== text) {
+    section.append(
+      button("link-button", `Show all ${formatTokens(hidden)} characters`, () => {
+        item.showAll = true;
+        renderMessages(false);
+      }),
+    );
+  }
+  section.append(
+    button("link-button", "Copy output", async () => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        notify("Clipboard unavailable. Select the output to copy it.");
+      }
+    }),
+  );
+  return section;
+}
+
+function liveRow(turn) {
+  const row = el("div", "live-row");
+  row.setAttribute("role", "status");
+  // Off: the 1 s ticks would otherwise spam a screen reader.
+  row.setAttribute("aria-live", "off");
+  const line = el("div", "live-line");
+  line.append(el("span", "status-dot"));
+  const text = el("span", "live-text", "");
+  line.append(text);
+  row.append(line);
+  const past = pastNode(turn);
+  if (past) row.append(past);
+  liveNodes.set(turn.id || String(turn.turn), { text, turn, row });
+  const now = nowSeconds();
+  text.textContent = liveText(turn, now);
+  row.dataset.activity = activity(turn, activityOptions(turn, now));
+  return row;
+}
+
+function activityOptions(turn, now) {
+  return {
+    held: heldOf(turn),
+    pending: S.view?.pending.size ?? 0,
+    cancelling: S.cancelling.has(turn.id),
+    now,
+  };
+}
+
+/** The live row's first line: `● Running bash · 12s · step 2 · 412 tokens`. */
+function liveText(turn, now) {
+  const parts = [activity(turn, activityOptions(turn, now))];
+  parts.push(formatDuration(Math.max(0, now - turn.startedAt)));
+  parts.push(...liveFacts(turn));
+  if (turn.outputTokens > 0) parts.push(`${formatTokens(turn.outputTokens)} tokens`);
+  parts.push("Esc to stop");
+  return parts.join(" · ");
+}
+
+/** The first turn's past facts, as the terminal's level-1 line shows them. */
+function pastNode(turn) {
+  if (turn.turn !== 1 || !turn.progress) return null;
+  const basis = turn.progress.basis;
+  if (basis?.match === "new") return null;
+  const text = formatPast(turn.progress);
+  if (!text) return null;
+  return el("div", "live-past", text);
+}
+
+function outboxNode(entry, slot) {
+  const article = el("article", "msg user");
+  const bubble = el("div", "user-bubble", entry.text);
+  article.append(bubble);
+  const status = el("p", "outbox-state");
+  if (entry.state === "sending") status.textContent = "Sending…";
+  else if (entry.state === "checking") status.textContent = "Checking…";
+  else {
+    status.append(el("span", "", entry.error ? `Not sent: ${entry.error} · ` : "Not sent · "));
+    status.append(
+      button("link-button", "Retry", () => {
+        entry.state = "sending";
+        renderMessages(false);
+        syncUI();
+        submit(slot, entry.clientRequestId, entry.text);
+      }),
+    );
+    status.append(
+      button("link-button", "Cancel and keep draft", () => {
+        cancelSend(slot, entry);
+      }),
+    );
+  }
+  article.append(status);
+  return article;
+}
+
+// ── Sending, stopping, deleting ──
+
+async function send() {
+  const text = input.value.trim();
+  const slot = S.activeId ?? "new";
+  const previous = S.outbox[slot];
+  if (!text || runningTurn() !== null) return;
+  if (previous && previous.state !== "failed") return;
+  // The same text, failed after a check of unknown outcome, keeps its key:
+  // the store answers `repeated` instead of running it twice.
+  const again = previous && previous.state === "failed" && previous.text === text;
+  const key = again ? previous.clientRequestId : newClientRequestId();
+  S.outbox[slot] = { clientRequestId: key, text, state: "sending", error: "" };
+  input.value = "";
+  saveDraft();
+  resizeInput();
+  presence(true);
+  renderMessages(true);
+  syncUI();
+  await submit(slot, key, text);
+}
+
+async function submit(slot, key, text) {
+  // The slot is where the message was sent from: "new" or its chat.
+  const sessionId = slot === "new" ? null : slot;
+  try {
+    if (!sessionId) {
+      const body = await api("/sessions", {
+        body: {
+          turn: { text, client_request_id: key },
+          ...(S.newWorkspace ? { workspace: S.newWorkspace } : {}),
+        },
+      });
+      const created = body.session;
+      delete S.outbox.new;
+      delete S.outbox[created.id];
+      if (S.activeId === null) {
+        S.sessions.unshift(created);
+        S.activeId = created.id;
+        S.view = newView(created.id);
+        S.view.session = created;
+        moveDraft("new", created.id);
+        persist(KEY + "-view", { id: created.id });
+        setRoute(created.id);
+        renderSessions();
+        await loadSession(created.id);
+        startStream(created.id);
+      }
+      renderMessages(true);
+      syncUI();
+      input.focus();
+      return;
+    }
+    const body = await api(`/sessions/${encodeURIComponent(sessionId)}/turns`, {
+      body: { text, client_request_id: key },
+    });
+    if (body.repeated === true) {
+      // The key was accepted already: this is the turn it started, not a
+      // second one, and no new event will say so.
+      const entry = S.outbox[slot];
+      if (entry && entry.clientRequestId === key) delete S.outbox[slot];
+      await reloadSession(sessionId);
+      renderMessages(true);
+      syncUI();
+    }
+  } catch (error) {
+    const entry = S.outbox[slot];
+    if (!entry || entry.clientRequestId !== key) return;
+    const refused =
+      typeof error.status === "number" &&
+      error.status >= 400 &&
+      error.status < 500 &&
+      error.status !== 408 &&
+      error.status !== 429;
+    if (refused) {
+      entry.state = "failed";
+      entry.error = error.message;
+      renderMessages(false);
+      syncUI();
+      return;
+    }
+    // The answer never arrived: ask the store whether the message was
+    // accepted before offering to send it again.
+    await checkSubmission(slot, key);
+  }
+}
+
+async function checkSubmission(slot, key) {
+  const entry = S.outbox[slot];
+  if (!entry) return;
+  entry.state = "checking";
+  renderMessages(false);
+  syncUI();
+  const sessionId = slot === "new" ? null : slot;
+  try {
+    const body = sessionId
+      ? await api(`/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(key)}`)
+      : await api(`/submissions/${encodeURIComponent(key)}`);
+    const submission = body.submission ?? {};
+    if (submission.state === "accepted") {
+      delete S.outbox[slot];
+      if (sessionId === null && submission.session_id) {
+        await refreshList();
+        if (S.activeId === null) {
+          S.activeId = submission.session_id;
+          S.view = newView(submission.session_id);
+          persist(KEY + "-view", { id: submission.session_id });
+          setRoute(submission.session_id);
+          await reloadSession(submission.session_id);
+        }
+      } else if (sessionId !== null && S.activeId === sessionId) {
+        await reloadSession(sessionId);
+      }
+      renderMessages(true);
+      syncUI();
+      return;
+    }
+    entry.state = "failed";
+    entry.error = "";
+  } catch (error) {
+    entry.state = "failed";
+    entry.error = error.message;
+  }
+  renderMessages(false);
+  syncUI();
+}
+
+async function cancelSend(slot, entry) {
+  const sessionId = slot === "new" ? null : slot;
+  const path = sessionId
+    ? `/sessions/${encodeURIComponent(sessionId)}/submissions/${encodeURIComponent(entry.clientRequestId)}/cancel`
+    : `/submissions/${encodeURIComponent(entry.clientRequestId)}/cancel`;
+  try {
+    await api(path, { body: { text: entry.text } });
+    delete S.outbox[slot];
+    if (!input.value) {
+      input.value = entry.text;
+      saveDraft();
+      resizeInput();
+    }
+    renderMessages(false);
+    syncUI();
+  } catch (error) {
+    if (error.code === "submission_withdrawn") {
+      // The store never took it, so the text comes back to the composer.
+      delete S.outbox[slot];
+      if (!input.value) {
+        input.value = entry.text;
+        saveDraft();
+        resizeInput();
+      }
+      renderMessages(false);
+      syncUI();
+      return;
+    }
+    entry.state = "failed";
+    entry.error = error.message;
+    renderMessages(false);
+    syncUI();
+  }
+}
+
+async function stop() {
+  const turn = runningTurn();
+  if (!turn || !turn.id || S.cancelling.has(turn.id)) return;
+  S.cancelling.add(turn.id);
+  syncUI();
+  try {
+    await api(`/turns/${encodeURIComponent(turn.id)}/cancel`, { body: {} });
+  } catch (error) {
+    if (error.status !== 409 && error.status !== 404) {
+      notify("Could not stop the response: " + error.message, { sticky: true });
+    }
+  } finally {
+    S.cancelling.delete(turn.id);
+    syncUI();
+  }
+}
+
+async function deleteSession(id) {
+  const session = S.sessions.find((item) => item.id === id);
+  if (!session || session.busy || (session.pending_approvals || 0) > 0) return;
+  try {
+    await api(`/sessions/${encodeURIComponent(id)}`, { method: "DELETE" });
+    delete S.drafts[id];
+    delete S.outbox[id];
+    persist(KEY + "-drafts", S.drafts, "sessionStorage");
+    S.sessions = S.sessions.filter((item) => item.id !== id);
+    if (S.activeId === id) {
+      closeStream();
+      S.activeId = null;
+      S.view = null;
+      if (S.sessions.length > 0) await openSession(S.sessions[0].id, { saveCurrent: false });
+      else newChat();
+    }
+    renderSessions();
+    syncUI();
+  } catch (error) {
+    notify("Could not close the chat: " + error.message, { sticky: true });
+  }
+}
+
+// ── The header's S2 controls ──
+
+function renderLevelMenu() {
+  const session = activeSession();
+  const level = session?.level || 2;
+  const menu = $("level-menu");
+  menu.replaceChildren();
+  for (const number of [1, 2, 3, 4]) {
+    const item = el("button", "level-item", levelName(number) + (number === 1 ? " · urgent" : number === 4 ? " · background" : ""));
+    item.type = "button";
+    item.setAttribute("role", "option");
+    item.setAttribute("aria-selected", String(number === level));
+    item.addEventListener("click", () => setLevel(number));
+    menu.append(item);
+  }
+}
+
+function showLevelMenu(open) {
+  S.levelsOpen = open;
+  $("level-menu").hidden = !open;
+  $("level-btn").setAttribute("aria-expanded", String(open));
+  if (open) renderLevelMenu();
+}
+
+async function setLevel(level) {
+  const id = S.activeId;
+  showLevelMenu(false);
+  if (!id) return;
+  const previous = activeSession()?.level;
+  const session = activeSession();
+  if (session) session.level = level;
+  syncUI();
+  try {
+    const body = await api(`/sessions/${encodeURIComponent(id)}/level`, { body: { level } });
+    // The answer can land after a switch: it belongs to that chat, not to
+    // whichever one is open now.
+    const listed = S.sessions.find((item) => item.id === id);
+    if (listed) listed.level = body.level;
+    if (S.view?.session?.id === id) S.view.session.level = body.level;
+  } catch (error) {
+    const listed = S.sessions.find((item) => item.id === id);
+    if (listed) listed.level = previous;
+    if (S.view?.session?.id === id) S.view.session.level = previous;
+    notify("Could not change the chat level: " + error.message, { sticky: true });
+  }
+  sessionListSnapshot = "";
+  renderSessions();
+  syncUI();
+}
+
+function presence(force = false) {
+  const id = S.activeId;
+  if (!id) return;
+  const now = Date.now();
+  if (!force && now - S.lastPresenceAt < PRESENCE_MS) return;
+  S.lastPresenceAt = now;
+  try {
+    const request = fetch("/api/presence", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: id }),
+      keepalive: true,
+    });
+    request?.catch?.(() => {});
+  } catch {
+    /* A browser may refuse fetch, or a test may not allow it. */
+  }
+}
+
+// ── Routing and the sidebar ──
+
+function setRoute(id) {
+  const next = id ? `#/s/${id}` : "#/new";
+  try {
+    if (globalThis.location && globalThis.location.hash !== next) {
+      globalThis.location.hash = next;
+    }
+  } catch {
+    /* A page opened without a location still works. */
+  }
+}
+
+function hashId() {
+  const match = /^#\/s\/([A-Za-z0-9._:-]+)$/.exec(globalThis.location?.hash || "");
+  return match ? match[1] : "";
+}
+
+function sidebar(open) {
+  $("app").classList.toggle("sidebar-open", open);
+  $("sidebar-backdrop").hidden = !open;
+  $("sidebar-toggle").setAttribute("aria-expanded", String(open));
+  const mobile = matchMedia("(max-width: 700px)").matches;
+  $("sidebar").inert = mobile && !open;
+  document.querySelector(".chat").inert = mobile && open;
+  $("sidebar-backdrop").tabIndex = open ? 0 : -1;
+  if (mobile && open) $("new-btn").focus();
+  if (mobile && !open && document.activeElement?.closest?.(".sidebar")) {
+    $("sidebar-toggle").focus();
+  }
+}
+
+function settingsNotice() {
+  notify(
+    "Connection settings are not on this page yet. Set your model with melo --reconfigure, then reload.",
+  );
+}
+
+// ── The clock ──
+
+function tick() {
+  if (document.hidden) return;
+  const now = nowSeconds();
+  for (const [key, entry] of liveNodes) {
+    if (!S.view || !S.view.turns.includes(entry.turn) || entry.turn.finishedAt) {
+      liveNodes.delete(key);
+      continue;
+    }
+    entry.text.textContent = liveText(entry.turn, now);
+    entry.row.dataset.activity = activity(entry.turn, activityOptions(entry.turn, now));
+  }
+  for (const [item, entry] of runningCards) {
+    if (item.status !== "running" || !S.view?.turns.includes(entry.turn)) {
+      runningCards.delete(item);
+      continue;
+    }
+    const state = toolState(item, { held: heldOf(entry.turn), now });
+    entry.node.textContent = state.text;
+    entry.card.dataset.state = state.state;
+  }
+  refreshStreamNotice();
+}
+
+// ── Starting up ──
+
+async function init() {
+  S.drafts = stored(KEY + "-drafts", {}, "sessionStorage");
+  input.value = S.drafts.new || "";
   resizeInput();
   sidebar(false);
-  setInterval(poll, 2500);
+  const health = api("/health")
+    .then((body) => {
+      S.health = body;
+      return body;
+    })
+    .catch(() => null);
+  await Promise.allSettled([health, refreshList()]);
+  if (!S.online) {
+    notify("Could not reach the gateway. Check that the gateway is running.", { sticky: true });
+  } else if (S.health && S.health.configured === false) {
+    notify("No model is configured yet. Run melo --reconfigure to connect one.", { sticky: true });
+  } else if (S.health?.sessions && S.health.sessions.store !== "ok") {
+    notify(S.health.sessions.store_error || "Chats are unavailable.", { sticky: true });
+  }
+  // The hash wins: `#/s/<id>` opens that chat, `#/new` a new one. Without
+  // one, the last chat this tab opened, else the newest.
+  const fromHash = hashId();
+  const wantsNew = (globalThis.location?.hash || "") === "#/new";
+  let wanted = "";
+  if (fromHash) {
+    wanted = S.sessions.some((session) => session.id === fromHash) ? fromHash : "";
+  } else if (!wantsNew) {
+    const saved = stored(KEY + "-view").id;
+    wanted = S.sessions.some((session) => session.id === saved)
+      ? saved
+      : (S.sessions[0]?.id ?? "");
+  }
+  if (wanted) {
+    await openSession(wanted);
+  } else {
+    setRoute(null);
+    renderSessions();
+    renderMessages(true);
+    syncUI();
+  }
+  setInterval(tick, 1000);
+  setInterval(() => {
+    if (!document.hidden) refreshList();
+  }, LIST_POLL_MS);
+  // The first load is done: a screenshot harness (and a curious person) can
+  // tell the page is wired before they type into it.
+  document.documentElement.dataset.ready = "1";
 }
+
+// ── Wiring ──
 
 $("composer").addEventListener("submit", (event) => {
   event.preventDefault();
   send();
 });
 input.addEventListener("keydown", (event) => {
-  if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+  if (event.key === "Enter" && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
     event.preventDefault();
     send();
   }
@@ -747,43 +1421,32 @@ input.addEventListener("input", () => {
   resizeInput();
   syncUI();
 });
-for (const id of ["new-btn", "settings-btn", "connection-btn", "model-btn", "setup-btn"])
-  $(id).addEventListener("click", openSettings);
-$("close-settings").addEventListener("click", closeSettings);
-dialog.addEventListener("close", () => {
-  if (previousFocus?.isConnected && !previousFocus.closest("[inert]")) previousFocus.focus();
-  else $("sidebar-toggle").focus();
+for (const id of ["new-btn", "settings-btn", "connection-btn", "model-btn", "setup-btn"]) {
+  const node = $(id);
+  if (id === "new-btn") node.addEventListener("click", () => newChat());
+  else node.addEventListener("click", settingsNotice);
+}
+$("close-settings").addEventListener("click", () => {
+  const dialog = $("settings-dialog");
+  if (dialog?.close) dialog.close();
 });
-$("discover-btn").addEventListener("click", discover);
-$("create-btn").addEventListener("click", createSession);
 $("stop-btn").addEventListener("click", stop);
 $("level-btn").addEventListener("click", () => {
-  if (!active()) return;
+  if (!activeSession()) return;
   showLevelMenu(!S.levelsOpen);
 });
 document.addEventListener("click", (event) => {
-  if (S.levelsOpen && !event.target.closest(".level-picker")) showLevelMenu(false);
+  if (S.levelsOpen && !event.target.closest?.(".level-picker")) showLevelMenu(false);
 });
 $("search").addEventListener("input", renderSessions);
 $("sidebar-toggle").addEventListener("click", () =>
   sidebar(!$("app").classList.contains("sidebar-open")),
 );
 $("sidebar-backdrop").addEventListener("click", () => sidebar(false));
-matchMedia("(max-width: 700px)").addEventListener("change", () => sidebar(false));
-for (const id of ["s-chat-url", "s-embed-url"]) $(id).addEventListener("input", connectionChanged);
-$("s-adapter").addEventListener("change", connectionChanged);
-for (const id of ["s-chat-model", "s-embed-model"])
-  $(id).addEventListener("change", () => {
-    saveConfig();
-    syncUI();
-  });
-$("s-memory").addEventListener("change", () => {
-  memoryPreview();
-  saveConfig();
-});
-document.querySelectorAll("[data-prompt]").forEach((button) =>
-  button.addEventListener("click", () => {
-    input.value = button.dataset.prompt;
+matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(false));
+document.querySelectorAll("[data-prompt]").forEach((node) =>
+  node.addEventListener("click", () => {
+    input.value = node.dataset.prompt;
     saveDraft();
     resizeInput();
     syncUI();
@@ -791,16 +1454,30 @@ document.querySelectorAll("[data-prompt]").forEach((button) =>
   }),
 );
 document.addEventListener("keydown", (event) => {
+  if (event.isComposing || event.keyCode === 229) return;
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
     event.preventDefault();
-    openSettings();
+    newChat();
+    return;
   }
-  if (event.key === "Escape" && !dialog.open) {
-    if (S.levelsOpen) showLevelMenu(false);
-    else sidebar(false);
+  if (event.key !== "Escape") return;
+  // Close what is open first; a stop is the last thing Escape does.
+  if (S.levelsOpen) {
+    showLevelMenu(false);
+    return;
   }
+  if ($("app").classList.contains("sidebar-open")) {
+    sidebar(false);
+    return;
+  }
+  if ($("settings-dialog")?.open) {
+    $("settings-dialog").close?.();
+    return;
+  }
+  if (runningTurn() !== null) stop();
 });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) poll();
+  if (!document.hidden) refreshList();
 });
+
 init();

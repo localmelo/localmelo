@@ -9,6 +9,27 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The workspace page on API v2. `http://127.0.0.1:8401/` now talks only to
+  `/api`: the session list with its machine snapshot, one chat's turns, its
+  event stream (SSE, reopened from the last applied event id), keyed sends
+  that the store is asked about before `Retry` is offered, stop, close, the
+  level chip and the typing heartbeat. A turn reads as the terminal's: the
+  user's message, a work group with one card per tool call (`Running`,
+  `Waiting: <held>`, `Needs approval`, `[ok]` with a non-zero `exit`,
+  `blocked` with the approval tag, `not run`, `Interrupted: may have partly
+  run`), reasoning and reflections folded away, notices, the live row
+  (`step 4 · attempt 2 · Verify (cycle 1) · tests 3/8`, and on a first turn
+  the routine's `last time …` facts) and the answer with its duration,
+  steps, tokens and `Copy response`. That needs the S2 facts on `/api`:
+  `level` and `held` on a session, `machine` on the list,
+  `POST /api/sessions/{id}/level` and `POST /api/presence` on the one gate
+  both surfaces share, and a console turn sets the gate's turn facts as a
+  chat's message does. The page is plain ES modules with no build step
+  (`workspace.js`, the new `turns.mjs` holding the event reducer and the
+  terminal's wording, `markdown.mjs`). Approval cards, the failure block's
+  `Continue`/`Try again`/`Copy error` and the settings dialog follow in a
+  later update; a waiting approval shows as `Needs approval` until then.
+  `/` and every `/v1/*` route keep their behaviour ([#NN]).
 - Console session details over API v2, and the scheduler gate in front of
   a console turn: `GET /api/sessions/{id}/tools` lists each tool's source,
   whether it asks first and whether the session allows it, `/memory` the

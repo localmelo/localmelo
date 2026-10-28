@@ -26,6 +26,10 @@ SESSION_KEYS = {
     "busy",
     "running_here",
     "pending_approvals",
+    # The scheduler's view of the chat (S2): its P1-P4 and why a model call
+    # waits, read from the one gate the page and the console share.
+    "level",
+    "held",
 }
 
 
@@ -47,6 +51,8 @@ async def test_the_list_shape_and_a_session(
     assert session["busy"] is False
     assert session["running_here"] is False
     assert session["pending_approvals"] == 0
+    assert session["level"] == 2
+    assert session["held"] == ""
 
 
 async def test_the_list_is_newest_first_and_pages(
