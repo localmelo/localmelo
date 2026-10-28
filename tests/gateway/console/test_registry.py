@@ -377,3 +377,79 @@ async def test_a_session_without_a_workspace_gets_the_default(
     assert info.workspace == str(default)
     assert default.is_dir()
     assert workspace != str(default)
+
+
+async def test_a_create_in_flight_at_shutdown_registers_nothing(
+    console: Console, builder: FakeBuilder, tmp_path: Path
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class Slow:
+        """A builder the test holds until the shutdown has run."""
+
+        async def __call__(
+            self, settings: Any, workspace: str, mcp_config: str | None
+        ) -> Any:
+            entered.set()
+            await release.wait()
+            return await builder(settings, workspace, mcp_config)
+
+    reg = ConsoleSessions(console.store, console.broker, make_cfg, builder=Slow())
+    creating = asyncio.create_task(reg.create(str(tmp_path)))
+    await entered.wait()
+    await reg.close_all()
+    release.set()
+    with pytest.raises(RuntimeError):
+        await creating
+    assert reg.entries() == []
+    assert builder.agents and all(agent.closed for agent in builder.agents)
+    assert await console.store.list_sessions() == []
+
+
+async def test_create_keeps_the_open_cap(
+    console: Console, builder: FakeBuilder, tmp_path: Path
+) -> None:
+    reg = registry(console, builder, max_open=1)
+    first, _ = await reg.create(str(tmp_path))
+    second, _ = await reg.create(str(tmp_path))
+    assert reg.get(first.session_id).agent is None  # type: ignore[union-attr]
+    assert reg.get(second.session_id).agent is not None  # type: ignore[union-attr]
+
+
+async def test_a_finished_create_keeps_no_key_lock(
+    console: Console, builder: FakeBuilder, tmp_path: Path
+) -> None:
+    reg = registry(console, builder)
+    await reg.create(str(tmp_path), client_request_id="8d2f6c1e")
+    # A lock that stayed would hold one object per key for the process.
+    assert reg._create_locks == {}
+
+
+async def test_a_workspace_move_whose_save_fails_changes_nothing(
+    console: Console,
+    builder: FakeBuilder,
+    workspace: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+    reg = registry(console, builder)
+    entry = await open_session(reg, turn.session_id)
+    old = cast(FakeAgent, entry.agent)
+    other = tmp_path / "other"
+    other.mkdir()
+
+    async def broken(*args: Any, **kwargs: Any) -> Any:
+        raise SessionStoreError("write failed")
+
+    monkeypatch.setattr(console.store, "update_session", broken)
+    with pytest.raises(SessionStoreError):
+        await reg.change_workspace(turn.session_id, str(other))
+    info = await console.store.get_session(turn.session_id)
+    assert info is not None and info.workspace == workspace
+    assert entry.agent is old
+    assert old.workspace_root == workspace
+    assert not old.closed
+    # The Agent it built for the new folder went away again.
+    assert builder.agents[-1] is not old and builder.agents[-1].closed

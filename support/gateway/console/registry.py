@@ -6,10 +6,10 @@ resume result the next ``202`` reports. :class:`ConsoleSessions` opens a
 session on demand, closes the least recently used idle Agent when too many
 are open, closes idle Agents on a sweep, and closes everything on shutdown.
 
-No turn starts here in this PR: ``create``, ``start_turn``, ``retry`` and
-``change_workspace`` are PR 3. :meth:`ConsoleSessions.open` is what the
-turn routes will call under the session's lock: the caller holds
-:meth:`ConsoleSessions.lock` and ``open`` refuses a call without it.
+:meth:`ConsoleSessions.create`, :meth:`ConsoleSessions.start_turn`,
+:meth:`ConsoleSessions.retry` and :meth:`ConsoleSessions.change_workspace`
+are the writes an API v2 turn makes; each takes the session's lock, and
+``open`` refuses a call without it.
 """
 
 from __future__ import annotations
@@ -39,11 +39,15 @@ from localmelo.support.sessions.runner import (
     SessionRunner,
 )
 from localmelo.support.sessions.store import (
+    NewSession,
     SessionBusyError,
+    SessionInfo,
     SessionStore,
     SessionStoreError,
+    TurnInfo,
     process_holder,
 )
+from localmelo.support.sessions.submissions import check_submission
 
 from .errors import ApiError
 
@@ -166,6 +170,9 @@ class ConsoleSessions:
         self._holder = process_holder("gateway")
         self._sessions: dict[str, OpenSession] = {}
         self._locks: dict[str, SessionLock] = {}
+        # One lock per client_request_id while a keyed create runs, so a
+        # retried create makes one session.
+        self._create_locks: dict[str, asyncio.Lock] = {}
         self._closed = False
 
     # ── Reading ──
@@ -222,6 +229,11 @@ class ConsoleSessions:
             raise RuntimeError("The console's sessions are closed")
         entry = self._sessions.get(session_id)
         if entry is not None and entry.agent is not None:
+            # A folder deleted while the Agent was open is still the 400 a
+            # closed Agent's session gets: the turn must not start.
+            root = entry.agent.workspace_root
+            assert root is not None
+            self.check_workspace(root)
             entry.last_used = self._clock()
             return entry
 
@@ -248,13 +260,7 @@ class ConsoleSessions:
                     f"Could not create the default workspace "
                     f"{display.home_label(workspace)}: {exc}",
                 ) from exc
-        if not os.path.isdir(workspace):
-            raise ApiError(
-                400,
-                "invalid_workspace",
-                f"The workspace {display.home_label(workspace)} no longer exists. "
-                "Change it in the header.",
-            )
+        self.check_workspace(workspace)
 
         await self._make_room(session_id)
         if self._closed:
@@ -262,16 +268,7 @@ class ConsoleSessions:
         is_new = entry is None
         settings = self._settings()
         mcp_config = getattr(settings, "mcp_config", "") or None
-        try:
-            agent = await self._builder(settings, workspace, mcp_config)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            raise ApiError(
-                502,
-                "agent_start_failed",
-                str(exc) or type(exc).__name__,
-            ) from exc
+        agent = await self._build_agent(settings, workspace, mcp_config)
 
         if self._closed:
             with contextlib.suppress(Exception):
@@ -386,12 +383,24 @@ class ConsoleSessions:
             entry.agent = None
         entry.last_used = self._clock()
 
-    def _timed_ask(self, session_id: str, granted_at: dict[str, float]) -> AskFunction:
-        """The broker's ask, recording when an allowed-with-remember grant began."""
-        ask = self._broker.asker(session_id)
+    def _timed_ask(
+        self,
+        session_id: str | Callable[[], str | None],
+        granted_at: dict[str, float],
+    ) -> AskFunction:
+        """The broker's ask, recording when an allowed-with-remember grant began.
+
+        *session_id* may be a callable, for a session whose first turn has
+        not created it yet: the id is read when a request asks.
+        """
 
         async def timed(request: ApprovalRequest) -> ApprovalDecision:
-            decision = await ask(request)
+            current = session_id() if callable(session_id) else session_id
+            if current is None:
+                return ApprovalDecision(
+                    False, "The session is not open yet.", origin="policy"
+                )
+            decision = await self._broker.asker(current)(request)
             if (
                 isinstance(decision, ApprovalDecision)
                 and decision.allow
@@ -424,6 +433,369 @@ class ConsoleSessions:
             async with oldest.lock:
                 if oldest.agent is not None and not oldest.runner.busy:
                     await self._keep_locked(oldest)
+
+    # ── Turns ──
+
+    async def _build_agent(
+        self, settings: Config, workspace: str, mcp_config: str | None
+    ) -> Agent:
+        """The builder's Agent, with a failed start mapped as 2.2 says."""
+        try:
+            return await self._builder(settings, workspace, mcp_config)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise ApiError(
+                502,
+                "agent_start_failed",
+                str(exc) or type(exc).__name__,
+            ) from exc
+
+    def _settings_model(self) -> str:
+        """The chat model the settings name, as ``session.model`` records it."""
+        settings = self._settings()
+        backend = getattr(settings, "chat_backend", "") or ""
+        section = getattr(settings, backend, None) if backend else None
+        return getattr(section, "chat_model", "") or ""
+
+    def check_workspace(self, workspace: str) -> None:
+        """400 ``invalid_workspace`` unless *workspace* is still a directory."""
+        if not os.path.isdir(workspace):
+            raise ApiError(
+                400,
+                "invalid_workspace",
+                f"The workspace {display.home_label(workspace)} no longer exists. "
+                "Change it in the header.",
+            )
+
+    def _resolve_workspace(self, workspace: str | None) -> str:
+        """The folder a new session gets: the default, or a checked path."""
+        if workspace is None:
+            path = self._default_workspace
+            try:
+                os.makedirs(path, mode=0o700, exist_ok=True)
+            except OSError as exc:
+                raise ApiError(
+                    400,
+                    "invalid_workspace",
+                    f"Could not create the default workspace "
+                    f"{display.home_label(path)}: {exc}",
+                ) from exc
+            return path
+        if not isinstance(workspace, str) or not (
+            os.path.isabs(workspace) or workspace.startswith("~/")
+        ):
+            raise ApiError(
+                400,
+                "invalid_workspace",
+                "The workspace must be an absolute path or start with ~/.",
+            )
+        path = os.path.expanduser(workspace)
+        if not os.path.isdir(path):
+            raise ApiError(
+                400,
+                "invalid_workspace",
+                f"Not a directory: {display.home_label(path)}",
+            )
+        return path
+
+    def _create_lock(self, client_request_id: str | None) -> asyncio.Lock | None:
+        """The lock of *client_request_id*'s create, or ``None`` for an unkeyed one."""
+        if client_request_id is None:
+            return None
+        lock = self._create_locks.get(client_request_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._create_locks[client_request_id] = lock
+        return lock
+
+    def _release_create_lock(
+        self, client_request_id: str | None, lock: asyncio.Lock | None
+    ) -> None:
+        """Forget a finished create's lock; a waiter keeps its reference.
+
+        Two creates that race a dropped lock cannot both make a session: the
+        store checks the key again in ``begin_turn``'s transaction.
+        """
+        if client_request_id is not None and lock is not None and not lock.locked():
+            self._create_locks.pop(client_request_id, None)
+
+    async def create(
+        self,
+        workspace: str | None,
+        first: tuple[str, str] | None = None,
+        *,
+        client_request_id: str | None = None,
+    ) -> tuple[OpenSession, TurnInfo | None]:
+        """Create a session, usually with its first turn (``POST /api/sessions``).
+
+        *first* is ``(typed, composed)``: the typed text titles the session,
+        the composed text is the turn's. *workspace* is the folder, or the
+        default when ``None``. With *client_request_id*, a repeat of an
+        accepted key raises :class:`SubmissionRepeated` with its turn and
+        makes no Agent; a raised error after the Agent was built closes it
+        and registers nothing.
+        """
+        lock = self._create_lock(client_request_id)
+        try:
+            async with lock or contextlib.nullcontext():
+                return await self._create_locked(workspace, first, client_request_id)
+        finally:
+            # Outside the block: the lock this task took is free again, so
+            # the entry can go. A waiter keeps the object it already has.
+            self._release_create_lock(client_request_id, lock)
+
+    async def _create_locked(
+        self,
+        workspace: str | None,
+        first: tuple[str, str] | None,
+        client_request_id: str | None,
+    ) -> tuple[OpenSession, TurnInfo | None]:
+        if self._closed:
+            raise RuntimeError("The console's sessions are closed")
+        typed, composed = (None, None) if first is None else first
+        if client_request_id is not None:
+            # The key decides before the directory or the Agent, so a repeat
+            # costs neither, and a rejected key writes no row.
+            found = await self._store.get_submission(None, client_request_id)
+            check_submission(found, composed or "")
+        path = self._resolve_workspace(workspace)
+        settings = self._settings()
+        model = self._settings_model()
+        # A create opens an Agent too, so the cap counts it like an open.
+        await self._make_room("")
+        # MCP is deferred (U3 decision 5 B): the builder gets no config.
+        agent = await self._build_agent(settings, path, None)
+        if self._closed:
+            with contextlib.suppress(Exception):
+                await agent.close()
+            raise RuntimeError("The console's sessions are closed")
+        granted_at: dict[str, float] = {}
+        if first is None:
+            try:
+                info = await self._store.create_session(model=model, workspace=path)
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    await agent.close()
+                raise
+            if self._closed:
+                # close_all() ran while the row was made: register nothing,
+                # and drop the empty row the shutdown never saw.
+                with contextlib.suppress(Exception):
+                    await self._store.delete_session(info.id)
+                with contextlib.suppress(Exception):
+                    await agent.close()
+                raise RuntimeError("The console's sessions are closed")
+            runner = SessionRunner(
+                agent,
+                self._store,
+                info.id,
+                holder=self._holder,
+                resume_mode=DEFAULT_RESUME_MODE,
+            )
+            policy = RememberingPolicy(
+                ask=runner.observe(self._timed_ask(info.id, granted_at))
+            )
+            entry = OpenSession(
+                session_id=info.id,
+                runner=runner,
+                policy=policy,
+                granted_at=granted_at,
+                agent=agent,
+                built_with_mcp=False,
+                lock=self.lock(info.id),
+                last_used=self._clock(),
+            )
+            self._sessions[info.id] = entry
+            return entry, None
+        runner = SessionRunner(
+            agent,
+            self._store,
+            None,
+            new_session=NewSession(model=model, workspace=path),
+            holder=self._holder,
+            resume_mode=DEFAULT_RESUME_MODE,
+        )
+        policy = RememberingPolicy(
+            ask=runner.observe(self._timed_ask(lambda: runner.session_id, granted_at))
+        )
+        try:
+            turn = await runner.start_turn(
+                composed or "",
+                approval=policy,
+                title=typed,
+                client_request_id=client_request_id,
+            )
+        except BaseException:
+            with contextlib.suppress(Exception):
+                await agent.close()
+            raise
+        session_id = runner.session_id
+        assert session_id is not None
+        if self._closed:
+            # close_all() ran while the first turn started: end that turn
+            # and the Agent, and register nothing the shutdown cannot see.
+            with contextlib.suppress(Exception):
+                await runner.close(cause="shutdown")
+            with contextlib.suppress(Exception):
+                await agent.close()
+            raise RuntimeError("The console's sessions are closed")
+        entry = OpenSession(
+            session_id=session_id,
+            runner=runner,
+            policy=policy,
+            granted_at=granted_at,
+            agent=agent,
+            built_with_mcp=False,
+            lock=self.lock(session_id),
+            last_used=self._clock(),
+        )
+        self._sessions[session_id] = entry
+        return entry, turn
+
+    async def start_turn(
+        self,
+        session_id: str,
+        typed: str,
+        composed: str,
+        *,
+        client_request_id: str | None = None,
+    ) -> tuple[TurnInfo, ResumeInfo | None]:
+        """Start a turn in *session_id*; return it and the open's resume.
+
+        The resume is the ``ResumeInfo`` of an open this call made, for the
+        route's 202, else ``None``. The key is checked before the session is
+        opened, so a repeat never builds an Agent.
+        """
+        async with self.lock(session_id):
+            if client_request_id is not None:
+                found = await self._store.get_submission(session_id, client_request_id)
+                check_submission(found, composed)
+            entry = await self.open(session_id)
+            resumed = entry.resumed
+            entry.resumed = None
+            await self._reconcile(entry)
+            turn = await entry.runner.start_turn(
+                composed,
+                approval=entry.policy,
+                title=typed,
+                client_request_id=client_request_id,
+            )
+            entry.last_used = self._clock()
+            return turn, resumed
+
+    async def retry(
+        self, session_id: str, turn_id: str
+    ) -> tuple[TurnInfo, ResumeInfo | None]:
+        """Undo the newest finished turn and run its text again (``/retry``).
+
+        409 ``session_busy`` while a turn runs, and 409 ``not_latest_turn``
+        for a turn that is not the newest finished one. The resume is the one
+        ``undo()`` ended with.
+        """
+        async with self.lock(session_id):
+            entry = await self.open(session_id)
+            entry.resumed = None
+            if entry.runner.busy:
+                raise ApiError(
+                    409,
+                    "session_busy",
+                    "A turn is already running in this session.",
+                )
+            latest = await self._latest_finished_turn(session_id)
+            if latest is None or latest.id != turn_id:
+                raise ApiError(
+                    409,
+                    "not_latest_turn",
+                    "Only the newest finished turn can be tried again.",
+                )
+            undone = await entry.runner.undo()
+            if undone is None:
+                raise ApiError(
+                    409,
+                    "not_latest_turn",
+                    "Only the newest finished turn can be tried again.",
+                )
+            resumed = entry.runner.last_resume
+            turn = await entry.runner.start_turn(
+                undone.user_text, approval=entry.policy
+            )
+            entry.last_used = self._clock()
+            return turn, resumed
+
+    async def change_workspace(self, session_id: str, workspace: str) -> SessionInfo:
+        """Move *session_id* to *workspace*, with a new Agent on its conversation.
+
+        409 ``session_busy`` while a turn runs; a bad folder is 400
+        ``invalid_workspace`` and closes the new Agent, leaving the row as it
+        was. With no open Agent, only the row and the grants change.
+        """
+        path = self._resolve_workspace(workspace)
+        async with self.lock(session_id):
+            entry = self._sessions.get(session_id)
+            if entry is None or entry.agent is None:
+                info = await self._store.update_session(session_id, workspace=path)
+                if entry is not None:
+                    entry.policy.forget()
+                    entry.granted_at.clear()
+                return info
+            if entry.runner.busy:
+                raise ApiError(
+                    409,
+                    "session_busy",
+                    "A turn is already running in this session.",
+                )
+            settings = self._settings()
+            old_root = entry.agent.workspace_root
+            agent = await self._build_agent(settings, path, None)
+            try:
+                agent.load_conversation(entry.agent.conversation())
+                # The row names the new folder before the swap, so a store
+                # failure leaves the old Agent and the old row together, as
+                # the request found them.
+                info = await self._store.update_session(
+                    session_id, workspace=agent.workspace_root
+                )
+                try:
+                    entry.runner.replace_agent(agent)
+                except BaseException:
+                    with contextlib.suppress(Exception):
+                        await self._store.update_session(session_id, workspace=old_root)
+                    raise
+            except BaseException as exc:
+                with contextlib.suppress(Exception):
+                    await agent.close()
+                if isinstance(exc, SessionBusyError):
+                    raise ApiError(
+                        409,
+                        "session_busy",
+                        "A turn is already running in this session.",
+                    ) from exc
+                raise
+            old, entry.agent = entry.agent, agent
+            with contextlib.suppress(Exception):
+                await old.close()
+            entry.policy.forget()
+            entry.granted_at.clear()
+            entry.last_used = self._clock()
+            return info
+
+    async def _reconcile(self, entry: OpenSession) -> None:
+        """Record the settings' chat model on the session, when it changed."""
+        model = self._settings_model()
+        if not model:
+            return
+        info = await self._store.get_session(entry.session_id)
+        if info is not None and info.model != model:
+            await self._store.update_session(entry.session_id, model=model)
+
+    async def _latest_finished_turn(self, session_id: str) -> TurnInfo | None:
+        """The newest turn that is finished and not undone, or ``None``."""
+        turns = await self._store.list_turns(session_id, limit=2)
+        for turn in reversed(turns):
+            if not turn.undone and turn.status != "running":
+                return turn
+        return None
 
     # ── Sweeps ──
 
@@ -475,30 +847,26 @@ class ConsoleSessions:
 
     async def delete(self, session_id: str) -> None:
         """Close the session's runner and delete its row; 404 when unknown."""
-        removed = False
-        try:
-            async with self.lock(session_id):
-                entry = self._sessions.get(session_id)
-                if entry is not None:
-                    await entry.runner.close(cause="closed")
-                    if entry.agent is not None:
-                        agent, entry.agent = entry.agent, None
-                        with contextlib.suppress(Exception):
-                            await agent.close()
-                    self._sessions.pop(session_id, None)
-                try:
-                    deleted = await self._store.delete_session(session_id)
-                except SessionBusyError as exc:
-                    self._sessions.pop(session_id, None)
-                    raise ApiError(409, "session_busy", str(exc)) from exc
-                if not deleted:
-                    raise ApiError(404, "not_found", "Session not found.")
-                removed = True
-        finally:
-            # Only a row that is really gone may lose its lock: a 409/503
-            # leaves the row, and the same lock must still serialize it.
-            if removed:
-                self._locks.pop(session_id, None)
+        async with self.lock(session_id):
+            entry = self._sessions.get(session_id)
+            if entry is not None:
+                await entry.runner.close(cause="closed")
+                if entry.agent is not None:
+                    agent, entry.agent = entry.agent, None
+                    with contextlib.suppress(Exception):
+                        await agent.close()
+                self._sessions.pop(session_id, None)
+            try:
+                deleted = await self._store.delete_session(session_id)
+            except SessionBusyError as exc:
+                self._sessions.pop(session_id, None)
+                raise ApiError(409, "session_busy", str(exc)) from exc
+            if not deleted:
+                raise ApiError(404, "not_found", "Session not found.")
+        # The lock stays: a turn that queued on it before the delete holds
+        # this object, and ``open`` checks that the lock it is under is the
+        # session's. The dict keeps one small lock per session this process
+        # has opened; a session id is never reused.
 
     async def close_all(self) -> None:
         """Stop every turn and close every Agent within the shutdown budget."""

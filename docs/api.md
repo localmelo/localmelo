@@ -7,9 +7,13 @@ gateway. See [Gateway and HTTP API](gateway.md#keep-the-gateway-private).
 
 The API only grows: endpoints, optional request fields and response keys
 are added, never renamed or removed. A client may ignore keys it does not
-know. This page documents the reads that exist now; creating, running,
-stopping and approving turns, settings and model listing come in later
-changes.
+know. This page documents the routes that exist now: the reads, and the
+writes that create a session and start, retry, stop and approve its
+turns. Settings and model listing come in a later change.
+
+A console turn does not pass the scheduler gate yet: it calls the model at
+once, where a workspace chat waits for its slot. The gate arrives in the
+next change. Until then, do not benchmark slot sharing through API v2.
 
 Requests and responses are JSON in UTF-8. A successful read carries
 `Cache-Control: no-store`. A refused request carries one error shape:
@@ -133,8 +137,9 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 - `mcp_error` is why this session runs without MCP tools, or `""`. It is
   always `""` today: MCP in the console is not built yet.
 - `agent` is `open`, `paused` (closed, its conversation kept) or
-  `not_loaded`. This PR does not open a session by itself, so a console
-  that has not run a turn reads `not_loaded`.
+  `not_loaded`. The read routes never open a session; a turn or a retry
+  does. So a session reads `not_loaded` until its first turn since the
+  gateway started, and `paused` after its Agent is closed.
 - `tokens` sums the `completion_tokens` of the session's finished turns,
   the same field the answers report.
 - A `pending_approvals` entry's `target` is set for a `file_write`: the
@@ -254,12 +259,344 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/submissions/8d2f6c1e-5b7a-4
   turn, so a client that lost the response to the create request can ask
   either route.
 
+## Writes
+
+The routes below change something. Most take a JSON body; `POST
+/api/turns/{turn_id}/cancel` and `DELETE /api/sessions/{id}` take none and
+ignore one. From a browser, a write must be same-origin: a state-changing
+request from another origin is 403 `foreign_origin`. A body is strict — an
+unknown field is 400 `invalid_request` with the field named
+(`body.model: Extra inputs are not permitted`).
+
+These codes answer on the write routes besides the shared ones above:
+
+| Status | `code` | When |
+|---|---|---|
+| 400 | `invalid_workspace` | the folder is not absolute or `~/`, is no longer a directory, or the default workspace cannot be created |
+| 400 | `text_rejected` | the checker refused the message text, as it does for a `/v1/agent/run` request |
+| 409 | `session_busy` | a turn is already running in the session |
+| 409 | `not_latest_turn` | retry named a turn that is not the newest finished one |
+| 409 | `submission_conflict` | the `client_request_id` was used for a different message |
+| 409 | `submission_withdrawn` | the `client_request_id` was cancelled before it started |
+| 409 | `turn_not_running` | cancel named a turn that is not running |
+| 409 | `already_answered` | the approval was answered already |
+| 502 | `agent_start_failed` | the session's Agent could not start; the message is the builder's error |
+
+### What a turn answers with
+
+A create with a first turn and both turn routes answer with the turn's row
+and three resume keys:
+
+```json
+{"turn_id": "9a840f8444e1452a9a25e5b6b804b20b", "turn": {"id": "9a840f8444e1452a9a25e5b6b804b20b", "turn": 1, "run_id": "", "user_text": "list the folder", "status": "running", "cause": "", "answer": "", "result": null, "undone": false, "started_at": 1793163770.17, "finished_at": null, "client_request_id": "curl-turn-1", "running_here": true}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
+```
+
+- The turn starts at once and runs in the background: the answer is 202 as
+  soon as its row exists, 201 when a create started it. Follow it on the
+  event stream — `turn.started`, the run's events, `turn.finished` with
+  `status` and `cause` — and read the answer from the turn row.
+- `resumed_turns` is how many earlier turns the Agent loaded from the
+  session file when this request opened the session; `resume_mode` is the
+  arm that loaded them (`pairs` or `window`) and
+  `resumed_checkpoint_turns` how many came from the window checkpoint. All
+  three are `null` when the session was already open, when it was reopened
+  from the conversation this gateway kept in memory (nothing is read from
+  the file then), and when it had no earlier turn.
+
+## POST /api/sessions
+
+Create a session, usually with its first turn.
+
+```bash
+curl -X POST http://127.0.0.1:8401/api/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{"workspace": "~/demo-project", "turn": {"text": "list the folder", "client_request_id": "8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07"}}'
+```
+
+```json
+{"session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "list the folder", "created_at": 1793163786.21, "updated_at": 1793163786.21, "model": "qwen3:8b", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": true, "running_here": true, "pending_approvals": 0}, "turn_id": "9a840f8444e1452a9a25e5b6b804b20b", "turn": {"id": "9a840f8444e1452a9a25e5b6b804b20b", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
+```
+
+- `workspace` is optional. Absent or `null`, it is `~/localmelo-workspace`,
+  created with mode `0700` when missing. Another value must be absolute or
+  start with `~/` and be an existing directory; anything else is 400
+  `invalid_workspace` and costs no Agent.
+- `turn` is optional. Without it the answer is 201 with `session` alone,
+  and the session waits for `POST /api/sessions/{id}/turns`.
+- `session.model` is the settings' chat model of this request. The first
+  message's text becomes the title: whitespace collapsed, at most 60
+  characters with `…` when longer.
+- `client_request_id` makes the create safe to repeat. The same key with
+  the same text answers 200 with the session and turn it made and
+  `"repeated": true`, building nothing; another text is 409
+  `submission_conflict`; a key withdrawn before it started is 409
+  `submission_withdrawn`. Two creates racing on one key make one session.
+- `attachments` must be empty for now: an entry is 400 `invalid_request`,
+  `attachments: files are not supported yet; send the text alone`. The
+  text is checked by the gateway ingress checker; a refusal is 400
+  `text_rejected`.
+
+## POST /api/sessions/{id}/turns
+
+Start a turn in an existing session. The body is a create's `turn`; there
+is no `workspace` here — the session's own folder is the Agent's.
+
+```bash
+curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/turns \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "list the folder", "client_request_id": "curl-turn-1"}'
+```
+
+- 202 with the turn and the resume keys. The resume keys are filled when
+  this call had to rebuild the Agent from the session file: the first turn
+  on a session no route of this gateway had opened, such as the first turn
+  after a restart. A session this gateway closed and keeps in memory
+  reopens from that conversation and reports `null`.
+- 409 `session_busy` while a turn runs. One turn runs per session; a second
+  is refused before anything is queued.
+- A repeated `client_request_id` answers 200 with that key's stored turn
+  and `"repeated": true`, whether the turn still runs or not.
+- The session's folder must still exist: a deleted folder is 400
+  `invalid_workspace`, and the turn does not start.
+
+## POST /api/sessions/{id}/retry
+
+Run the newest finished turn's text again.
+
+```bash
+curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/retry \
+  -H 'Content-Type: application/json' -d '{"turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e"}'
+```
+
+- The turn is marked undone — an event `turn.undone` — and its text starts
+  a new turn with no `client_request_id`. The answer is 202 with the new
+  turn and the resume keys of the open that replayed what the undo left.
+- 409 `not_latest_turn` unless the id is the newest finished, not undone
+  turn: a client that lost a turn's end retries the id it holds. 409
+  `session_busy` while a turn runs.
+
+## POST /api/turns/{turn_id}/cancel
+
+Stop a running turn, from the id the events gave.
+
+```bash
+curl -X POST http://127.0.0.1:8401/api/turns/9c1f0e2d4b6a48c1a3e5f7091b2d4c6e/cancel
+```
+
+```json
+{"turn_id": "9c1f0e2d4b6a48c1a3e5f7091b2d4c6e", "cancelling": true}
+```
+
+- 202 when this gateway runs the turn; 409 `turn_not_running` for a turn
+  that finished, or one this gateway does not run.
+- The turn stops at its next boundary and finishes `cancelled` with cause
+  `user_stop`; `turn.finished` says so, and its stored `answer` is
+  `[interrupt: no assistant output for this turn]` when it said nothing.
+- Cancelling while an approval waits withdraws the card: the request is
+  answered `withdrawn` and leaves `pending_approvals`.
+
+## POST /api/sessions/{id}/submissions/{client_request_id}/cancel
+
+Cancel a message by the key it was sent with.
+`POST /api/submissions/{client_request_id}/cancel` is the same without a
+session, for a create whose answer was lost.
+
+```bash
+curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/submissions/8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07/cancel \
+  -H 'Content-Type: application/json' -d '{"text": "list the folder"}'
+```
+
+```json
+{"submission": {"client_request_id": "8d2f6c1e-5b7a-4e0c-9a41-2f3b6d8e1c07", "state": "withdrawn", "session_id": "3f9c2a7b1d4e", "turn_id": null, "status": null, "cause": null, "turn": null, "error": "Request cancelled before acceptance.", "created_at": 1793163793.49}, "cancelling": false}
+```
+
+- The body's `text` is the message's text. Another text on a stored key is
+  409 `submission_conflict`.
+- A withdrawal stored without a session — the route without an id — has
+  `"session_id": null`.
+- 202 with `"cancelling": true` when the key's turn was accepted and still
+  runs: the turn is stopped as above. `submission` is the key as this call
+  read it, so the turn is still `running` there: it ends after the answer.
+  Follow its `turn.finished` (cause `user_stop`), or ask again, for the end.
+- 200 otherwise. An accepted turn that already finished comes back as it
+  is. A key with no submission is recorded as withdrawn, so a later create
+  or turn with it is 409 `submission_withdrawn`; repeating the call
+  returns the same withdrawal.
+- A key is judged in its scope: a session reads its own keys and the
+  create-scope key that created it. A withdrawal stored without a session
+  blocks a create with that key, not a turn in some session.
+
+## POST /api/approvals/{request_id}
+
+Answer an approval card. The id comes from `approval.requested` on the
+event stream, or from `pending_approvals`.
+
+```bash
+curl -X POST http://127.0.0.1:8401/api/approvals/386183e1811b4ba68c3768bfb96ac8e6 \
+  -H 'Content-Type: application/json' -d '{"choice": "session"}'
+```
+
+```json
+{"request_id": "386183e1811b4ba68c3768bfb96ac8e6", "outcome": "allowed", "remember": true}
+```
+
+- `choice` is `once` (this call), `session` (this call and every later one
+  of that tool in this session) or `deny`.
+- `reason` belongs to a `deny` only, at most 500 characters; a reason with
+  another choice is 400 `invalid_request`.
+- 404 `not_found` for an unknown or expired request; 409 `already_answered`
+  for one answered already, so two clients racing one card get one answer.
+- Approvals live in the gateway's memory. A turn waiting on one when the
+  gateway stops is finished `cancelled` with cause `shutdown`, and its card
+  is stored as withdrawn.
+
+## PATCH /api/sessions/{id}
+
+Rename the session, move it to another folder, or both.
+
+```bash
+curl -X PATCH http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e \
+  -H 'Content-Type: application/json' -d '{"title": "Release notes"}'
+```
+
+```json
+{"session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "...": "..."}}
+```
+
+- `title` is stripped and must be 1 to 200 characters; another length is
+  400 `invalid_request`. A rename is never replaced by the automatic title.
+- `workspace` moves the session: a new Agent is built in the new folder
+  with the session's conversation, and the session's tool grants are
+  forgotten. The rules are a create's: absolute or `~/`, an existing
+  directory, else 400 `invalid_workspace`. 409 `session_busy` while a turn
+  runs; a refused move leaves the row as it was.
+- The answer is 200 with the session after both changes.
+
+## DELETE /api/sessions/{id}
+
+```bash
+curl -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
+```
+
+- 204 with no body: the session's row, turns, events and blobs are gone.
+- A running turn is stopped first, finished `cancelled` with cause
+  `closed`; its card is withdrawn.
+- 404 `not_found` for an unknown session. 409 `session_busy` when a turn
+  is still running after this gateway stopped it — rare: the row, its
+  turns and its events stay as they were, and the call can be repeated.
+
+## A script: create, run, approve, read
+
+One Python file, standard library only. It creates a session with a first
+turn, follows the event stream to the end, answers the approval the turn
+asks for, and reads the answer back. Point it at a gateway whose model is
+a scripted or local model that wants a `shell_exec` approval for a plain
+sentence; the workspace must exist and hold a few files.
+
+```python
+"""Create a session, run a turn, answer its approval, read the result."""
+
+import json
+import sys
+import urllib.request
+import uuid
+
+BASE = sys.argv[1]
+WORKSPACE = sys.argv[2]
+
+
+def post(path, body):
+    request = urllib.request.Request(
+        BASE + path,
+        data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(request) as response:
+        return response.status, json.load(response)
+
+
+def get(path):
+    with urllib.request.urlopen(BASE + path) as response:
+        return json.load(response)
+
+
+def stream(session_id):
+    """Every event of the session, from id 0, as the stream sends it."""
+    url = f"{BASE}/api/sessions/{session_id}/events?after=0"
+    with urllib.request.urlopen(url) as response:
+        for raw in response:
+            line = raw.decode("utf-8").rstrip("\n")
+            if line.startswith("data:"):
+                yield json.loads(line[5:].strip())
+
+
+status, created = post(
+    "/api/sessions",
+    {
+        "workspace": WORKSPACE,
+        "turn": {
+            "text": "list the folder",
+            "client_request_id": str(uuid.uuid4()),
+        },
+    },
+)
+session_id = created["session"]["id"]
+print(f"created {status} session {session_id} turn {created['turn_id']}")
+
+for event in stream(session_id):
+    print("event", event["type"])
+    if event["type"] == "approval.requested":
+        request_id = event["data"]["request_id"]
+        print(f"  asks to run {event['data']['tool_name']}: {event['data']['preview']}")
+        status, answered = post(f"/api/approvals/{request_id}", {"choice": "once"})
+        print(f"  answered {status} {answered['outcome']}")
+    if event["type"] == "turn.finished":
+        print(f"turn {event['data']['status']} cause {event['data']['cause']!r}")
+        break
+
+turn = get(f"/api/sessions/{session_id}/turns?limit=1")["turns"][0]
+print(f"answer: {turn['answer']}")
+print(f"tokens: {turn['result']['usage'].get('completion_tokens', 0)}")
+```
+
+Run as `python demo.py http://127.0.0.1:8401 ~/demo-project`, against a
+gateway whose model answered the message with a `shell_exec` call:
+
+```text
+created 201 session edb425a382be turn 2e2b132e1dcc49e283c52782858ee051
+event turn.started
+event session.title
+event run.started
+event step.started
+event assistant.message
+event tool.started
+event approval.requested
+  asks to run shell_exec: ls -1
+  answered 200 allowed
+event approval.resolved
+event tool.finished
+event step.started
+event assistant.message
+event run.finished
+event turn.finished
+turn completed cause 'run'
+answer: The folder holds what `ls -1` printed.
+tokens: 24
+```
+
+Two details the script relies on. `urllib` reads an event stream line by
+line, so a frame is complete when its `data:` line arrives; a client that
+answers an approval mid-stream keeps reading the same response. And a
+turn's outcome and its `turn.finished` are written in one transaction, so
+the `turns` read after the stream ends sees the answer.
+
 ## Not in this version
 
-Turns cannot be started, stopped or retried through API v2 yet, approvals
-cannot be answered, and there are no settings, model-list or tools routes.
-They arrive in later changes; the shapes above are the ones those changes
-extend.
+There are no settings, model-list or tools routes, no `DELETE` of a tool
+grant, and no reads of memory or runs yet. Turn events carry no progress
+updates. They arrive in later changes; the shapes above are the ones those
+changes extend.
 
 FastAPI's `/docs`, `/redoc` and `/openapi.json` are off: this page is the
 reference. Run the API only on the loopback address. A gateway on `0.0.0.0`

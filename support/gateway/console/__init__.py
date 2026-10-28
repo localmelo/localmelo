@@ -39,7 +39,7 @@ from localmelo.support.sessions.store import (
     StoreOwnedError,
 )
 
-from . import errors, routes_sessions, routes_settings
+from . import errors, routes_sessions, routes_settings, routes_turns
 from .errors import ApiError
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
@@ -127,6 +127,7 @@ class Console:
         errors.install(app)
         routes_settings.add_routes(app, self)
         routes_sessions.add_routes(app, self)
+        routes_turns.add_routes(app, self)
         _add_not_found(app)
 
     # ── Lifecycle ──

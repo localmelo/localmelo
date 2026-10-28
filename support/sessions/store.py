@@ -412,6 +412,18 @@ def title_from_text(text: str) -> str:
     return collapsed[: _TITLE_CHARS - 1] + "…"
 
 
+def check_title(title: object) -> str:
+    """*title* stripped, or ``ValueError`` unless it is 1 to 200 characters.
+
+    A surface checks a title with this before it writes anything else, so a
+    refused rename changes nothing.
+    """
+    stripped = title.strip() if isinstance(title, str) else ""
+    if not 1 <= len(stripped) <= _MAX_TITLE_CHARS:
+        raise ValueError(f"title must be 1 to {_MAX_TITLE_CHARS} characters")
+    return stripped
+
+
 def default_path(writer: Writer) -> str:
     """The default file of *writer*, with ``~`` expanded."""
     if writer not in _OWNERS:
@@ -1482,9 +1494,7 @@ class SessionStore:
         writes ``session.title`` and is never replaced by the automatic
         title (T-12).
         """
-        title = title.strip() if isinstance(title, str) else ""
-        if not 1 <= len(title) <= _MAX_TITLE_CHARS:
-            raise ValueError("title must be 1 to 200 characters")
+        title = check_title(title)
         async with self._lock:
             conn = await self._ready()
             self._check_writable()

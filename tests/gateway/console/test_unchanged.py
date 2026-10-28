@@ -1,4 +1,4 @@
-"""The legacy surface stays as it was: ``/``, ``/v1/health`` and ``/v1/sessions``."""
+"""The legacy surface stays as it was: ``/`` and the ``/v1`` routes."""
 
 from __future__ import annotations
 
@@ -59,6 +59,25 @@ def test_v1_sessions_is_byte_identical(tmp_path: Path) -> None:
     server = build(tmp_path)
     client = TestClient(server.app, base_url="http://127.0.0.1:8401")
     assert client.get("/v1/sessions").content == b'{"sessions":[]}'
+
+
+def test_v1_write_rejections_keep_the_legacy_bodies(tmp_path: Path) -> None:
+    server = build(tmp_path)
+    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    # FastAPI's own 422 body, not API v2's envelope.
+    refused = client.post(
+        "/v1/agent/run",
+        content="not json",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert refused.status_code == 422
+    assert refused.content == (
+        b'{"detail":[{"type":"dict_type","loc":["body"],"msg":"Input should be '
+        b'a valid dictionary","input":"not json"}]}'
+    )
+    assert client.delete("/v1/sessions/nope").content == (
+        b'{"error":"session not found"}'
+    )
 
 
 def test_the_api_description_pages_are_off(tmp_path: Path) -> None:
