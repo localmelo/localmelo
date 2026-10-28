@@ -140,9 +140,12 @@ those tools. `--tool-exposure` chooses the list:
 - **`retrieve`** (the default): every registered built-in tool, sorted by
   name, then the extra tools for the step, also sorted by name. The extra
   tools are chosen among the other tools, such as MCP tools:
-  - the tools that the conversation has already named or called, and
+  - the tools the model has already called in this conversation, and
   - the 3 best matches for the task, by a keyword search (Okapi BM25 with
     IDF) over each tool's name, description and tags.
+
+  Only the model's tool calls are hints: a tool name in the task, in a tool
+  result or in recalled memory adds nothing.
 - **`all`**: every registered tool, sorted by name, on every step. The list
   never changes, which helps servers that cache prompt prefixes.
 

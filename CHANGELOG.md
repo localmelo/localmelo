@@ -240,6 +240,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Tool hints come from the model's tool calls only. A tool named in the
+  task, in a tool result, in recalled memory or in a reflection no longer
+  offers that tool, so text in a run cannot put a tool the model never
+  called back in front of it; the built-ins, the BM25 matches and the
+  re-offer after a refused call are unchanged ([#NN]).
 - The README is short, and the website carries the documentation. Its header
   is two badge rows: one that goes to the website's pages (Website,
   Quickstart, Docs, Developers, 简体中文) and a quieter row of facts

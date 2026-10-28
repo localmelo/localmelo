@@ -74,8 +74,8 @@ More about reflections:
 
 Each step offers the model a list of tools, and only those tools can run in
 that step. By default the list holds every built-in tool plus the few other
-tools that match the task or the conversation. See
-[How tools are offered](tools.md#how-tools-are-offered).
+tools that match the task or that the model has already called in this
+conversation. See [How tools are offered](tools.md#how-tools-are-offered).
 
 ## Memory in the loop
 
