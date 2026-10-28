@@ -35,6 +35,15 @@ tab is visible, for changes from another browser. **Reconnect now** checks the
 chat before reopening its stream. Independent banners show store, model and
 connection problems without replacing other notices.
 
+**Workers** opens read-only worker history from the CLI sessions file. Filter
+by status, source or exact parent run, load more with the server's cursor, and
+open a run to inspect its recorded brief, metadata, work and answer. An
+unfinished run is a snapshot: **Refresh** reads it again, without a live
+stream. The view cannot send messages, approve calls or change grants; chat
+close and level controls are disabled while Workers is open. Connection
+settings remain available separately. **Chats** returns to the open chat.
+Records are redacted by patterns, not guaranteed secret-free; review before sharing.
+
 **Details** opens a session drawer with its tools and session grants, working
 and long-term memory status, and finished runs with paging when a page supplies
 a turn cursor. Granted tools can be
