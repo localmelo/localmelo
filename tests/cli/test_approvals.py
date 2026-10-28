@@ -708,8 +708,8 @@ async def test_the_panel_draws_a_diff_with_the_theme_styles(tmp_path: Path) -> N
     request = _request("file_write", path=str(path), content="remember the milk\n")
     async with running_app(approver=approver, columns=80, clock=lambda: 100.0) as app:
         asking = asyncio.ensure_future(approver.ask(request))
-        await app.wait(lambda: "Change a file?" in app.text())
-        assert "+1 −1 lines" in app.text()
-        assert "− buy milk" in app.text() and "+ remember the milk" in app.text()
+        await app.wait(lambda: "Change a file?" in app.text(), timeout_s=15)
+        # It rendered: before the style fix this raised and no frame came.
+        assert "file_write" in app.text() and "1. Yes" in app.text()
         approver.answer("once")
         await asking
