@@ -269,7 +269,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   state no longer carries from one call to the next, and writes to file
   descriptor 1 or 2, from a subprocess too, are the call's output instead of
   melo's. The `tool.finished` event's `exit_code` now carries the child's
-  status without a root too ([#NN]).
+  status without a root too ([#79]).
 - The README is short, and the website carries the documentation. Its header
   is two badge rows: one that goes to the website's pages (Website,
   Quickstart, Docs, Developers, 简体中文) and a quieter row of facts
@@ -484,3 +484,4 @@ earlier milestones.
 [#75]: https://github.com/localmelo/localmelo/pull/75
 [#76]: https://github.com/localmelo/localmelo/pull/76
 [#78]: https://github.com/localmelo/localmelo/pull/78
+[#79]: https://github.com/localmelo/localmelo/pull/79
