@@ -310,6 +310,27 @@ def _build_candidate(
     return before, candidate
 
 
+def _check_probe_url(field: str, url: str) -> None:
+    if not url_label(url):
+        raise ApiError(
+            400, "invalid_request", f"{field}: Expected an absolute http(s) URL."
+        )
+
+
+def _check_candidate_probe_urls(candidate: config.Config) -> None:
+    backend = candidate.chat_backend
+    section = getattr(candidate, backend)
+    if backend in config._LOCAL_SECTIONS:
+        _check_probe_url(f"{backend}.chat_url", section.chat_url)
+    elif backend in config._CLOUD_SECTIONS and section.base_url:
+        _check_probe_url(f"{backend}.base_url", section.base_url)
+    backend = candidate.embedding_backend
+    if backend in config._LOCAL_SECTIONS:
+        _check_probe_url(
+            f"{backend}.embedding_url", getattr(candidate, backend).embedding_url
+        )
+
+
 def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
     changed: list[str] = []
     if before.chat_backend != after.chat_backend:
@@ -392,6 +413,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.post("/api/settings/test")
     async def api_test_settings(body: SettingsTestBody) -> JSONResponse:
         _, candidate = _build_candidate(body)
+        _check_candidate_probe_urls(candidate)
         try:
             async with asyncio.timeout(SETTINGS_TEST_TIMEOUT_S):
                 await _call_probe_all(candidate)
@@ -442,7 +464,8 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "url: No chat URL is configured.",
             )
 
-        shown_url = url_label(resolved_url) or redact_userinfo(resolved_url)
+        _check_probe_url("url", resolved_url)
+        shown_url = url_label(resolved_url)
         try:
             models = await _call_list_models(resolved_backend, resolved_url)
         except DiscoveryError as exc:

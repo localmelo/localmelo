@@ -64,6 +64,7 @@ STATUS_LINE_ERROR_CHARS = 500
 # interactive UI also takes --workspace.
 _DIRECT_FLAGS = {
     "workspace": "--workspace",
+    "fixed_prefix": "--fixed-prefix",
     "context_window": "--context-window",
     "output_reserve": "--output-reserve",
     "safety_margin": "--safety-margin",
@@ -1044,6 +1045,10 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             "--reconfigure sets up the config file, which --base-url does not use; "
             "give one of them"
         )
+    if getattr(args, "enable_playground", False) and (
+        not args.serve or args.daemon or args.query
+    ):
+        parser.error("--enable-playground is only for --serve")
     if getattr(args, "allow_unconfigured", False):
         if not args.serve:
             parser.error("--allow-unconfigured is only for --serve")
@@ -1134,6 +1139,8 @@ def _direct_options(
         fields["memory_dir"] = args.memory_dir
     if args.timeout is not None:
         fields["timeout_s"] = args.timeout
+    if getattr(args, "fixed_prefix", None) is not None:
+        fields["fixed_prefix"] = args.fixed_prefix == "on"
     reasoning = getattr(args, "reasoning", None)
     if reasoning is not None:
         fields["reasoning"] = reasoning
@@ -1213,6 +1220,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--parent-run",
             "--import-session",
             "--title",
+            "--fixed-prefix",
             "--context-window",
             "--output-reserve",
             "--safety-margin",
@@ -1300,6 +1308,11 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         help="After a reflection, start the next attempt when it chooses continue "
         "and its three checks hold (flags, default), or also require its utility "
         "score to reach 0.1 (utility, the behavior before this option)",
+    )
+    direct.add_argument(
+        "--fixed-prefix",
+        choices=["on", "off"],
+        help="Use a versioned run-frozen system prefix and local date (default off)",
     )
     direct.add_argument(
         "--tool-exposure",
@@ -1509,6 +1522,12 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
             action="store_true",
             default=argparse.SUPPRESS,
             help="Rotate the local gateway access token",
+        )
+        parser.add_argument(
+            "--enable-playground",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Enable authenticated development playground routes",
         )
     # gateway mode
     parser.add_argument("--serve", action="store_true", help="Run as gateway server")
@@ -1765,6 +1784,8 @@ def main() -> None:
             raise SystemExit(1) from e
 
     # start gateway
+    if getattr(args, "enable_playground", False):
+        cfg._enable_playground = True
     _start_gateway(cfg)
 
 
@@ -1901,6 +1922,10 @@ def _build_direct_mode_agent(
         )
     except ValueError as exc:
         parser.error(str(exc))
+    if not isinstance(budget_cfg.agent.fixed_prefix, bool):
+        parser.error("[agent] fixed_prefix must be a boolean")
+    if getattr(args, "fixed_prefix", None) is None and budget_cfg.agent.fixed_prefix:
+        options = dataclasses.replace(options, fixed_prefix=True)
 
     if base_url:
         # Generic OpenAI-compatible endpoint

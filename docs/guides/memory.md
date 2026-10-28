@@ -128,8 +128,9 @@ do the in-memory `History` and `LongTerm`.
   history tables.
 - **What it does not touch.** Working memory (the current conversation),
   procedural memory (`melo-procedures forget` clears that), and the session
-  store (`sessions.db`; the web workspace's chats are in
-  `~/.cache/localmelo/playground/`).
+  stores (the console's chats are in
+  `~/.cache/localmelo/gateway/sessions.db`), or the legacy playground's
+  memory in `~/.cache/localmelo/playground/` when enabled.
 - **How.** One `BEGIN IMMEDIATE` transaction under the store's write lock.
   The deletes overwrite what they free (`PRAGMA secure_delete=ON`), and a
   checkpoint then truncates the WAL, so the forgotten text is not left in
@@ -159,7 +160,10 @@ localmelo process and remove the files:
    # Only procedural memory
    rm ~/.cache/localmelo/memory/procedures.db*
 
-   # The web workspace's memory
+   # The console's session store (including chats)
+   rm -f ~/.cache/localmelo/gateway/sessions.db*
+
+   # The legacy playground's memory, if it was enabled
    rm -rf ~/.cache/localmelo/playground
    ```
 
@@ -216,6 +220,8 @@ that directory instead.
   [Reset memory](#reset-memory). The Python API's `forget` overwrites the
   cells it deletes and truncates the WAL, so the text does not stay in the
   database file's free pages or in `history.db-wal`/`long_term.db-wal`.
-- The gateway's web workspace always saves the history and procedural
-  memory of its chats, and their long-term memory when an embedding model
-  is selected, in `~/.cache/localmelo/playground/`.
+- The console stores its session rows and turns in
+  `~/.cache/localmelo/gateway/sessions.db`. The legacy playground is disabled
+  by default; when enabled with `melo --serve --enable-playground`, it saves
+  its chats' history and procedural memory, and their long-term memory when
+  an embedding model is selected, in `~/.cache/localmelo/playground/`.

@@ -30,6 +30,8 @@ from localmelo.melo.agent._chat import (
     BUDGET_ACCOUNTING,
     BUDGET_HOOK,
     CALL_RECORDER,
+    PREFIX_RUN,
+    PREFIX_VERSION,
     RETRY_HOOK,
     Chat,
     RequestStats,
@@ -965,6 +967,7 @@ class _RunState:
     steps: int = 0
     attempts: int = 0
     n_tool: int = 0
+    fixed_tools: list[ToolDef] | None = None
     # The latest non-blank text of a planning reply in this run: the
     # answer of a reflection's "done" that gives none, and the result of a
     # final boundary whose reflection is unreadable (reflection_gate="flags").
@@ -1564,6 +1567,7 @@ class Agent:
             note_instruction=instruction,
             empty_prefix=self.options.reasoning != "legacy",
             context_budget=budget,
+            fixed_prefix=self.options.fixed_prefix,
         )
 
         names = (
@@ -3287,7 +3291,14 @@ class Agent:
         if self.options.tool_exposure == "all":
             # The same list on every step, so the tools part of the request
             # stays byte-stable for prefix caching.
-            tools = sorted(self.hippo.list_tools(), key=lambda t: t.name)
+            if self.options.fixed_prefix and run is not None:
+                if run.fixed_tools is None:
+                    run.fixed_tools = copy.deepcopy(
+                        sorted(self.hippo.list_tools(), key=lambda t: t.name)
+                    )
+                tools = copy.deepcopy(run.fixed_tools)
+            else:
+                tools = sorted(self.hippo.list_tools(), key=lambda t: t.name)
         else:
             # Every registered built-in, sorted by name, on every step. Hints
             # and BM25 choose among the other tools only, which follow,
@@ -4676,6 +4687,7 @@ class Agent:
             place=place,
             limits=self._limits() if progress else None,
         )
+        prefix_run = self.chat.begin_prefix()
         stats = self.chat.reset_stats()
         budget_accounting = BUDGET_ACCOUNTING.set((self.chat, self.chat._accounting))
         budget_hook = BUDGET_HOOK.set(
@@ -4841,6 +4853,7 @@ class Agent:
             await self._learn(run, query, outcome)
             return outcome
         finally:
+            PREFIX_RUN.reset(prefix_run)
             BUDGET_HOOK.reset(budget_hook)
             BUDGET_ACCOUNTING.reset(budget_accounting)
             if run.finalizer is None:
@@ -5489,6 +5502,19 @@ class Agent:
             config=self._run_config(),
             memory_stats=memory_stats,
             context_budget=stats.context_budget,
+            prefix_cache=(
+                {
+                    "version": PREFIX_VERSION,
+                    "schema_changes": stats.schema_changes,
+                    **(
+                        {"reported_cached_tokens": stats.prefix_cached_tokens}
+                        if stats.prefix_cached_tokens is not None
+                        else {}
+                    ),
+                }
+                if self.options.fixed_prefix
+                else None
+            ),
         )
 
     def _run_config(self) -> dict[str, Any]:

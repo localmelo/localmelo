@@ -14,6 +14,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from localmelo.melo.contracts.providers import ProviderError  # noqa: E402
+from localmelo.support.config import Config, LocalBackendConfig  # noqa: E402
 from localmelo.support.gateway.webapp import mount  # noqa: E402
 
 
@@ -37,10 +38,12 @@ class _SeedingFailsPlayground:
 def test_a_provider_error_while_creating_a_session_is_a_502() -> None:
     app = FastAPI()
     app.state.smoke_playground = _SeedingFailsPlayground()
-    mount(app)
-    response = TestClient(app).post(
-        "/v1/playground/session",
-        json={"chat_url": "http://llm.test/v1", "chat_model": "m"},
+    cfg = Config(
+        chat_backend="mlc",
+        embedding_backend="none",
+        mlc=LocalBackendConfig(chat_url="http://llm.test/v1", chat_model="m"),
     )
+    mount(app, cfg, enable_playground=True)
+    response = TestClient(app).post("/v1/playground/session", json={})
     assert response.status_code == 502
     assert response.json() == {"error": "POST /embeddings failed with HTTP 503: busy"}
