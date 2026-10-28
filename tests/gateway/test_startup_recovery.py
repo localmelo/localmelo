@@ -12,7 +12,7 @@ from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_policy import TaskSpec
-from localmelo.support.gateway.task_store import TaskStore, TaskStoreError
+from localmelo.support.gateway.task_store import TaskConflictError, TaskStore, TaskStoreError
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
@@ -293,6 +293,73 @@ async def test_proven_queued_task_fences_launch_before_agent_build(
         assert (
             await RecoveryStore(store).provenance(task.task_id)
         ).first_start == "started"
+    finally:
+        release.set()
+        await workers.aclose()
+        await hub.aclose()
+        await gate.close()
+        await store.aclose()
+
+
+@pytest.mark.parametrize("conflict", [False, True])
+async def test_live_proof_row_uses_start_fence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, conflict: bool
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    gate, hub = ChatGate(policy="off"), SessionHub(store)
+    config = Config()
+    config.gateway.workspace = str(workspace)
+    workers = TaskWorkers(store, gate, lambda: config, hub)
+    entered, release = asyncio.Event(), asyncio.Event()
+    original_start = RecoveryStore.start
+    calls = 0
+
+    async def start(self: RecoveryStore, *args: Any, **kwargs: Any) -> Any:
+        nonlocal calls
+        calls += 1
+        if conflict:
+            raise TaskConflictError("stale task identity")
+        return await original_start(self, *args, **kwargs)
+
+    async def build(**kwargs: Any) -> Any:
+        assert not conflict
+        provenance = await RecoveryStore(store).provenance(task.task_id)
+        assert provenance.first_start == "started"
+        entered.set()
+        await release.wait()
+        raise RuntimeError("test agent stops here")
+
+    monkeypatch.setattr(RecoveryStore, "start", start)
+    monkeypatch.setattr("localmelo.support.gateway.workers.build_session_agent", build)
+    try:
+        await workers.open()
+        task, _ = await workers.tasks.create_task(
+            TaskSpec.from_payload({"objective": "work"}),
+            origin="user",
+            workspace=str(workspace),
+            _recovery_proof=True,
+        )
+        async with workers._lock:
+            workers._register(task)
+            workers._eligible.add(task.task_id)
+            await workers._schedule()
+        if conflict:
+            async with asyncio.timeout(3):
+                while (
+                    task.task_id not in workers._unavailable
+                    or task.task_id in workers._runs
+                ):
+                    await asyncio.sleep(0.001)
+            assert (await workers.tasks.get_task(task.task_id)).state == "queued"
+            assert not workers.is_active(task.task_id)
+        else:
+            await asyncio.wait_for(entered.wait(), 3)
+            assert (await workers.tasks.get_task(task.task_id)).state == "running"
+        assert calls == 1
     finally:
         release.set()
         await workers.aclose()

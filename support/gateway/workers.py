@@ -1004,7 +1004,14 @@ class TaskWorkers:
                     deferred = True
                     return
             workspace = await self._workspace(task_id)
-            if task_id in self._restart_first:
+            try:
+                provenance = await RecoveryStore(self.store).provenance(task_id)
+            except BaseException:
+                launch_uncertain = True
+                self._eligible.discard(task_id)
+                self._store_unavailable(task_id)
+                raise
+            if task_id in self._restart_first or provenance.first_start == "never_started":
                 async with self._lock:
                     current = await self.tasks.get_task(task_id)
                     if (
