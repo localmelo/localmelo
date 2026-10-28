@@ -12,6 +12,7 @@ import logging
 import sqlite3
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import pytest
 
@@ -57,14 +58,27 @@ SECRET = "sk-" + "f00dfeed12" * 3
 class Setup:
     """A store, an Agent on a scripted model, and a runner of one new session."""
 
-    def __init__(self, path: Path, store: SessionStore, llm: ScriptedLLM, agent: Agent):
+    def __init__(
+        self,
+        path: Path,
+        store: SessionStore,
+        llm: ScriptedLLM,
+        agent: Agent,
+        *,
+        progress: bool = False,
+    ):
         self.path = path
         self.store = store
         self.llm = llm
         self.agent = agent
         self.events: list[StoredEvent] = []
         self.runner = SessionRunner(
-            agent, store, None, new_session=NewSession(), on_event=self.events.append
+            agent,
+            store,
+            None,
+            new_session=NewSession(),
+            on_event=self.events.append,
+            progress=progress,
         )
 
     async def aclose(self) -> None:
@@ -79,12 +93,13 @@ async def setup(
     *,
     writer: str = "gateway",
     clock: Clock | None = None,
+    progress: bool = False,
 ) -> Setup:
     path = tmp_path / "sessions.db"
     store = SessionStore(path, writer=writer, clock=clock or Clock())  # type: ignore[arg-type]
     llm = ScriptedLLM(replies or [])
     agent = await started_agent(tmp_path / "ws", llm)
-    return Setup(path, store, llm, agent)
+    return Setup(path, store, llm, agent, progress=progress)
 
 
 def types_of(events: list[StoredEvent]) -> list[str]:
@@ -238,6 +253,88 @@ async def test_a_secret_is_redacted_in_every_stored_copy_but_kept_in_the_result(
     assert window is not None and SECRET not in window.data
     assert decode_window(window.data)[-1].content == redacted  # type: ignore[index]
     assert SECRET not in Path(s.path).read_bytes().decode("utf-8", "replace")
+    await s.aclose()
+
+
+# ── Progress (UR-N) ─────────────────────────────────────────────────────────
+
+
+async def test_a_runner_built_with_progress_stores_and_forwards_run_progress(
+    tmp_path: Path,
+) -> None:
+    s = await setup(tmp_path, [answer("done")], progress=True)
+    result = await s.runner.run_turn("hello")
+    assert result.status == "completed"
+    stored = types_of(await stored_events(s))
+    # The first run.progress follows run.started (melo/agent/agent.py).
+    assert stored[stored.index("run.started") + 1] == "run.progress"
+    assert stored.count("run.progress") >= 2
+    # on_event got every run.progress of the turn, once committed.
+    assert types_of(s.events).count("run.progress") == stored.count("run.progress")
+    check_invariants(s.path, "gateway")
+    await s.aclose()
+
+
+async def test_a_runner_without_progress_reports_none(tmp_path: Path) -> None:
+    s = await setup(tmp_path, [answer("done")])
+    result = await s.runner.run_turn("hello")
+    assert result.status == "completed"
+    assert "run.progress" not in types_of(await stored_events(s))
+    assert "run.progress" not in types_of(s.events)
+    await s.aclose()
+
+
+@pytest.mark.parametrize("progress", [True, False])
+async def test_the_progress_flag_survives_replace_agent(
+    tmp_path: Path, progress: bool
+) -> None:
+    s = await setup(tmp_path, progress=progress)
+    other_llm = ScriptedLLM([answer("from the new agent")])
+    other = await started_agent(tmp_path / "ws2", other_llm)
+    s.runner.replace_agent(other)
+    result = await s.runner.run_turn("hello")
+    assert result.result == "from the new agent"
+    stored = types_of(await stored_events(s))
+    assert ("run.progress" in stored) is progress
+    await other.close()
+    await s.aclose()
+
+
+async def test_run_turn_passes_routine_only_when_given(tmp_path: Path) -> None:
+    s = await setup(tmp_path, [answer("one"), answer("two")])
+    original = s.agent.run_task
+    with mock.patch.object(
+        s.agent, "run_task", autospec=True, wraps=original
+    ) as run_task:
+        await s.runner.run_turn("hello")
+        call = run_task.call_args
+        assert call.args == ("hello",)
+        assert "routine" not in call.kwargs
+        assert call.kwargs["progress"] is False
+
+        await s.runner.run_turn("hello again", routine="daily mail")
+        call = run_task.call_args
+        assert call.kwargs["routine"] == "daily mail"
+    await s.aclose()
+
+
+async def test_start_turn_passes_routine_only_when_given(tmp_path: Path) -> None:
+    s = await setup(tmp_path, [answer("one"), answer("two")], progress=True)
+    original = s.agent.run_task
+    with mock.patch.object(
+        s.agent, "run_task", autospec=True, wraps=original
+    ) as run_task:
+        await s.runner.start_turn("hello")
+        await s.runner.wait()
+        call = run_task.call_args
+        assert call.args == ("hello",)
+        assert "routine" not in call.kwargs
+        assert call.kwargs["progress"] is True
+
+        await s.runner.start_turn("hello again", routine="daily mail")
+        await s.runner.wait()
+        call = run_task.call_args
+        assert call.kwargs["routine"] == "daily mail"
     await s.aclose()
 
 

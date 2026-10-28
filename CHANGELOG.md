@@ -9,6 +9,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A session runner can ask its turns for progress events, and the progress
+  line's past facts are available alone. `SessionRunner(..., progress=True)`
+  asks each turn's run for `run.progress` and stores it with the turn; the
+  flag stays on the runner, `replace_agent` included. `run_turn` and
+  `start_turn` take `routine="NAME"` and pass it to the run only when
+  given. `localmelo.support.progress_line.format_past(payload, width)`
+  gives exactly the direct-mode line's past-facts-and-items segment, with
+  the same wording and width rules. A session turn emits `run.progress`
+  only when its runner was built with `progress=True`; the interactive UI
+  does not ask yet (its render commit does) ([#60]).
 - An interactive UI in the terminal: `melo` without a task opens a chat
   that shows its work as it happens. A banner names the model, the
   workspace and the tools; each tool call prints as a block with the first
@@ -318,3 +328,4 @@ earlier milestones.
 [#57]: https://github.com/localmelo/localmelo/pull/57
 [#58]: https://github.com/localmelo/localmelo/pull/58
 [#59]: https://github.com/localmelo/localmelo/pull/59
+[#60]: https://github.com/localmelo/localmelo/pull/60

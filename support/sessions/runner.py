@@ -129,6 +129,8 @@ class _Turn:
     agent: Agent
     text: str
     approval: ApprovalPolicy | None
+    # The run's routine name, run_task's ``routine=`` (UR-N).
+    routine: str | None = None
     queue: asyncio.Queue[tuple[Any, ...]] = field(default_factory=asyncio.Queue)
     # The task that runs the turn: the runner's own (start_turn) or the
     # caller's (run_turn).
@@ -199,7 +201,10 @@ class SessionRunner:
     after it is committed; an awaitable result is awaited for at most
     :data:`SINK_TIMEOUT_S`. *holder* names this process in leases
     (:func:`~localmelo.support.sessions.store.process_holder` by default).
-    *resume_mode* picks the arm :meth:`resume` loads.
+    *resume_mode* picks the arm :meth:`resume` loads. *progress* asks each
+    turn's run for ``run.progress`` events (``Agent.run_task``'s
+    ``progress=``); the flag stays on the runner, :meth:`replace_agent`
+    included.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
     ``workspace_root``, and the caller awaits ``agent.start()`` before it
@@ -216,6 +221,7 @@ class SessionRunner:
         on_event: EventCallback | None = None,
         holder: str | None = None,
         resume_mode: ResumeMode = DEFAULT_RESUME_MODE,
+        progress: bool = False,
     ) -> None:
         _check_agent(agent)
         if resume_mode not in _RESUME_MODES:
@@ -235,6 +241,9 @@ class SessionRunner:
         self._on_event = on_event
         self._holder = holder or process_holder(store.writer)
         self._resume_mode: ResumeMode = resume_mode
+        # Whether each turn's run is asked for run.progress (UR-N); kept
+        # for every turn, replace_agent's included.
+        self._progress = progress
         self._active: _Turn | None = None
         self._last: _Turn | None = None
         # A begin_turn under way, before its turn exists.
@@ -316,20 +325,22 @@ class SessionRunner:
         *,
         approval: ApprovalPolicy | None = None,
         title: str | None = None,
+        routine: str | None = None,
     ) -> RunResult:
         """Run a turn of *text* in this task and return its RunResult.
 
-        *title* is the typed text, for the session's first title. A turn
-        that this runner stopped (:meth:`cancel`, :meth:`close`, a takeover)
-        returns the ``cancelled`` RunResult of its ``run.finished``, or, when
-        it was stopped before its run began, a ``cancelled`` RunResult with
-        the stop's reason and no counters. The runner takes back the
-        cancellations it caused, so the task is no longer cancelling. A
-        cancellation from outside the runner propagates once the turn has
-        ended, or at once when it comes while the turn ends, which then
-        ends on its own.
+        *title* is the typed text, for the session's first title. *routine*
+        names the run's routine (``Agent.run_task``'s ``routine=``), passed
+        only when given. A turn that this runner stopped (:meth:`cancel`,
+        :meth:`close`, a takeover) returns the ``cancelled`` RunResult of
+        its ``run.finished``, or, when it was stopped before its run
+        began, a ``cancelled`` RunResult with the stop's reason and no
+        counters. The runner takes back the cancellations it caused, so the
+        task is no longer cancelling. A cancellation from outside the runner
+        propagates once the turn has ended, or at once when it comes while
+        the turn ends, which then ends on its own.
         """
-        turn = await self._start(text, approval, title, None, own_task=False)
+        turn = await self._start(text, approval, title, None, routine, own_task=False)
         if turn.finish is not None:  # stopped before its run began
             task = asyncio.current_task()
             assert task is not None
@@ -343,17 +354,19 @@ class SessionRunner:
         approval: ApprovalPolicy | None = None,
         title: str | None = None,
         client_request_id: str | None = None,
+        routine: str | None = None,
     ) -> TurnInfo:
         """Begin a turn of *text* and return it once its row exists.
 
         The turn runs on in a task the runner owns; :meth:`wait` returns its
-        RunResult. With *client_request_id*, a key already accepted raises
-        ``SubmissionRepeated`` with the stored turn and starts nothing, a
-        withdrawn one ``SubmissionWithdrawn``, and one used for another text
-        ``SubmissionConflict``.
+        RunResult. *routine* names the run's routine (``Agent.run_task``'s
+        ``routine=``), passed only when given. With *client_request_id*, a
+        key already accepted raises ``SubmissionRepeated`` with the stored
+        turn and starts nothing, a withdrawn one ``SubmissionWithdrawn``,
+        and one used for another text ``SubmissionConflict``.
         """
         turn = await self._start(
-            text, approval, title, client_request_id, own_task=True
+            text, approval, title, client_request_id, routine, own_task=True
         )
         return turn.turn
 
@@ -376,6 +389,7 @@ class SessionRunner:
         approval: ApprovalPolicy | None,
         title: str | None,
         client_request_id: str | None,
+        routine: str | None,
         *,
         own_task: bool,
     ) -> _Turn:
@@ -414,7 +428,7 @@ class SessionRunner:
         assert task is not None
         caller = None if own_task else task
         begin = asyncio.ensure_future(
-            self._begin_turn(text, approval, title, client_request_id, caller)
+            self._begin_turn(text, approval, title, client_request_id, routine, caller)
         )
         self._begin = begin
         try:
@@ -444,6 +458,7 @@ class SessionRunner:
         approval: ApprovalPolicy | None,
         title: str | None,
         client_request_id: str | None,
+        routine: str | None,
         caller: asyncio.Task[Any] | None,
     ) -> _Turn:
         try:
@@ -464,7 +479,13 @@ class SessionRunner:
         # submission accepted finds its turn.
         self._session_id = info.session_id
         self._new_session = None
-        turn = _Turn(turn=info, agent=self._agent, text=text, approval=approval)
+        turn = _Turn(
+            turn=info,
+            agent=self._agent,
+            text=text,
+            approval=approval,
+            routine=routine,
+        )
         turn.writer = asyncio.create_task(self._write_events(turn))
         turn.lease = asyncio.create_task(self._keep_lease(turn))
         self._active = turn
@@ -514,9 +535,14 @@ class SessionRunner:
         run_exc: BaseException | None = None
         returned: RunResult | None = None
         try:
-            returned = await turn.agent.run_task(
-                turn.text, on_event=self._sink(turn), approval=turn.approval
-            )
+            kwargs: dict[str, Any] = {
+                "on_event": self._sink(turn),
+                "approval": turn.approval,
+                "progress": self._progress,
+            }
+            if turn.routine is not None:
+                kwargs["routine"] = turn.routine
+            returned = await turn.agent.run_task(turn.text, **kwargs)
         except BaseException as exc:
             run_exc = exc
         cancelled = (
