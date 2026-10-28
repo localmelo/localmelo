@@ -265,7 +265,7 @@ makes larger requests: leave out `session_id` for an unrelated task.
   options (three built-in tools, `file_read`, `file_write` and
   `python_exec`, and no MCP tools), except that it keeps its answers
   (`AgentOptions(record_answers=True, mode="gateway")`). A session does not
-  offer `shell_exec`: the gateway has no approval policy, so there is no one
+  offer `shell_exec`: legacy `/v1` has no approval policy, so there is no one
   to ask.
 - When `LOCALMELO_PERSIST_MEMORY` is set for the gateway, all sessions save
   to the same SQLite files; see [Memory](memory.md#keep-memory-between-runs).
@@ -276,8 +276,11 @@ Open `http://127.0.0.1:8401/` in a browser for the web workspace. It is the
 console's page and talks only to `/api` ([API v2](api.md)), so the gateway
 must be running to serve it: `melo --serve`, then open the address it prints.
 
-1. The page uses the gateway's configured model; `melo --reconfigure` sets it.
-   Connection settings inside the page arrive in a later update.
+1. Use **Connection settings** to choose the chat backend, model and workspace;
+   local model discovery lists models without starting one. A cloud backend
+   names an API-key environment variable and shows only whether it is set,
+   never the key. Saving uses the loaded settings revision; if the file changed,
+   reload the dialog and retry. You can also use `melo --reconfigure`.
 2. Type a message and send. The first message creates the chat: the page
    answers your draft with the chat's first turn, and never creates a chat on
    its own. Answers are rendered as Markdown, with code blocks.
@@ -291,7 +294,8 @@ The sidebar lists chats newest first, with search and switching, and closes a
 chat. Drafts stay with each chat in the current browser tab. The open chat's
 turns arrive on its event stream (SSE); after a page reload the page restores
 the chat, reads its last ten turns, and replays the stored events from there,
-so nothing is lost or drawn twice. A stream the browser gives up on reopens
+so nothing is lost or drawn twice. **Show earlier turns** loads older turns
+without moving the current view. A stream the browser gives up on reopens
 after 1, 2, 4, 8, 16 and then 30 seconds from the page's own cursor, and only
 after the chat is read again: one that is gone leaves the page on a new chat
 rather than retrying for ever. The list is re-read every 4 seconds while the
@@ -300,9 +304,11 @@ tab is visible, for changes from another browser.
 A send is named by a `client_request_id`. If its answer is lost the page asks
 the store whether the message was accepted, and offers `Retry` only when it
 was not; a retry repeats the same key, so one message makes one turn. A
-message that was never accepted goes back to that chat's draft, so a reload
-keeps it: the outbox says `Not sent` (or `Outcome unknown` when the store
-could not be asked), with `Retry` and `Cancel and keep draft`.
+message that was never accepted goes back to that chat's draft. The outbox is
+also kept in the tab's session storage, including its key, and a send that
+was in flight at reload is checked against the store before a retry. It says
+`Not sent` (or `Outcome unknown` when the store could not be asked), with
+`Retry` and `Cancel and keep draft`.
 
 A chat's header has a level chip (P1 to P4, P2 by default) that sets how the
 scheduler orders the chat's calls in front of other chats; it is kept in
@@ -328,11 +334,20 @@ with the status `cancelled`, and the chat takes the next message once that
 save is done. Each message sees the earlier answers of its chat, as in a
 [session](#sessions).
 
-A tool call that needs approval shows as a card in its tool's `Needs approval`
-state and the turn waits there. The approval cards themselves (`Allow once`,
-`Allow every …`, `Deny…`) arrive in a later update; until then, answer a
-waiting request with `POST /api/approvals/{request_id}` (see
-[API v2](api.md#post-apiapprovalsrequest_id)).
+A tool call that needs approval shows a card below its `Needs approval` tool.
+Console sessions use `RememberingPolicy` and ask before `file_write` and
+`python_exec`; legacy `/v1` has no approval policy. Approvals are not a
+security boundary: any local process that reaches the unauthenticated API
+can answer them. When a request is present, choose
+`Allow once`, `Allow every …` for the session, or `Deny…` with an
+optional reason. The controls wait 500 ms before they can be used; arrival
+does not move focus and no single-key shortcut answers a request. When the
+card is outside the view, **Go to approval** opens its group and moves to it.
+If approval details cannot be loaded, or arguments were truncated or converted,
+allow is disabled; you can reload the details, deny, or stop the run.
+A failed turn shows its error and details; the newest finished turn can offer
+**Try again**, and **Continue** when it has run tools and its status permits
+continuation. Stopped or interrupted turns use a neutral line instead.
 
 The page's chats are sessions in the gateway's own session file,
 `~/.cache/localmelo/gateway/sessions.db`; the terminal keeps its own in

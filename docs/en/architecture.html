@@ -211,30 +211,23 @@
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2</a>.
         </p>
         <p>
-          At <code>/</code> it serves the web workspace, the console's live
-          page, which talks only to <code>/api</code> and uses the gateway's
-          configured model (<code>melo --reconfigure</code> sets it;
-          connection settings in the page arrive in a later update). It lists
-          the console's sessions newest first, with search and each chat's
-          draft, and draws one chat's turns as the terminal does: the user's
-          message, a work card for each tool call, folded reasoning and
-          reflections, notices, the live progress row and the answer with its
-          facts and <code>Copy response</code>. Its event stream reopens from
-          the last stored event, a send carries a key the store is asked about
-          before <code>Retry</code> is offered, and Stop ends the turn as
-          <code>cancelled</code>. Each chat has its own agent, in the
-          <code>gateway</code> tool mode (<code>file_read</code>,
-          <code>file_write</code> and <code>python_exec</code>, no
-          <code>shell_exec</code>) and with its own working memory; its model
-          calls pass the scheduler gate, and the header shows the GPU lock and
-          the battery. The chats are sessions in
-          <code>~/.cache/localmelo/gateway/sessions.db</code>: they survive a
-          restart and reopen from their transcript, while an agent is opened
-          on demand (at most 8 at once, an idle one closed after 15 minutes,
-          its conversation kept). Approval cards, the failure block's
-          <code>Continue</code>/<code>Try again</code> and the settings dialog
-          follow in a later update; until then a waiting approval shows as
-          <code>Needs approval</code> and is answered over API v2.
+          At <code>/</code> the web workspace uses the console's API v2 and
+          persistent session store. It shows the turn's work and answer,
+          connection settings, earlier turns, stopped or failed runs and
+          approval cards when requests are present. Console sessions use
+          <code>RememberingPolicy</code> to ask before <code>file_write</code>
+          and <code>python_exec</code>; legacy <code>/v1</code> has no approval
+          policy. Each chat uses the configured model and the
+          built-in <code>file_read</code>, <code>file_write</code> and
+          <code>python_exec</code> tools (no <code>shell_exec</code>). Model
+          calls share the scheduler gate, and the header shows its GPU lock
+          and battery readings.
+          The page lists sessions newest first with search and per-chat drafts,
+          displays tool work, folded reasoning, notices, progress and answers,
+          and reopens its event stream from the last stored event. Sessions in
+          <code>~/.cache/localmelo/gateway/sessions.db</code> survive restart;
+          agents open on demand (at most eight, closed after 15 minutes idle
+          while their conversations are kept).
         </p>
         <p>
           The gateway has no authentication. When it listens on
@@ -310,10 +303,9 @@
           <code>AgentOptions(record_answers=True)</code>, working memory keeps
           each run's answer, and <code>conversation()</code> and
           <code>load_conversation()</code> carry a conversation to another
-          agent. Direct mode and the HTTP API pass no event sink and no
-          policy. A console turn passes both: its Stop ends the run as
-          <code>cancelled</code>, and a call of a tool whose tier is not
-          <code>read</code> waits for the answer given over API v2.
+          agent. Direct mode and legacy <code>/v1</code> pass no event sink and no
+          policy. The web workspace passes an event sink and an approval policy, so its Stop ends a
+          run as <code>cancelled</code>.
         </p>
         <p>
           Key files: <code>melo/agent/agent.py</code>,
@@ -374,7 +366,7 @@
           <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, every
           <code>LC_*</code> variable and <code>TMPDIR</code>, plus
           <code>AgentOptions(tool_env=…)</code>: an API key in melo's
-          environment reaches no tool, and <code>VIRTUAL_ENV</code>,
+          environment reaches no tool unless explicitly named in <code>tool_env</code>, and <code>VIRTUAL_ENV</code>,
           <code>PYTHONPATH</code>, <code>SSH_AUTH_SOCK</code> and the proxy
           variables pass only through <code>tool_env</code>. A refusal, a
           denial, a time-out or an error comes back as the
@@ -603,7 +595,7 @@
               </tr>
               <tr>
                 <td>Agent and memory</td>
-                <td>Memory writes pass the checker's size limits. Long-term memory is written only when an embedding backend is configured and memory is on.</td>
+                <td>Memory writes pass the checker's size limits. With memory on, legacy long-term writes need an embedding backend; explicit reasoning modes can also admit text-only entries without one.</td>
                 <td>The prompt and the stores stay bounded.</td>
               </tr>
               <tr>
@@ -620,7 +612,7 @@
         <h2>What exists today</h2>
         <ul>
           <li>Direct mode with run options, including <code>--workspace DIR</code> for the folder a task works in and how a reply's reasoning is sent back or kept (<code>legacy</code>, <code>drop</code>, <code>replay</code>, <code>compress</code> or <code>compress+replay</code>), nine run statuses, text or JSON output, and fixed exit codes.</li>
-          <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals with the diff a file write will make, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>, <code>/approvals</code>, <code>/status</code>, <code>/mcp</code> and <code>/retry</code>, an MCP servers file (<code>--mcp-config</code> or the config's <code>mcp_config</code>), saved chats that <code>melo -c</code>, <code>melo -r</code>, <code>/sessions</code> and <code>/resume</code> resume, <code>/title</code>, <code>/undo</code>, <code>/usage</code>, <code>/memory</code> and <code>/copy</code> to name, undo, inspect and copy a conversation, a reasoning and recall mode for the whole chat (<code>--reasoning</code>, <code>--reasoning-field</code>, <code>--replay-turns</code>, <code>--note-writer</code>, <code>--retriever</code>, <code>--recall-*</code> and <code>--retrieval-extra-body</code>, from flags or saved defaults), and the plain conversation loop (<code>melo ""</code>).</li>
+          <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals with the diff a file write will make, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>, <code>/approvals</code>, <code>/status</code>, <code>/mcp</code> and <code>/retry</code>, an MCP servers file (<code>--mcp-config</code> or the config's <code>mcp_config</code>), saved chats that <code>melo -c</code>, <code>melo -r</code>, <code>/sessions</code> and <code>/resume</code> resume, <code>/title</code>, <code>/undo</code>, <code>/usage</code>, <code>/memory</code> and <code>/copy</code> to name, undo, inspect and copy a conversation, a reasoning and recall mode for the whole chat (<code>--reasoning</code>, <code>--reasoning-field</code>, <code>--replay-turns</code>, <code>--note-writer</code>, <code>--retriever</code>, and <code>--recall-*</code>, from flags or saved defaults; <code>--retrieval-extra-body</code> is flag-only), and the plain conversation loop (<code>melo ""</code>).</li>
           <li>Four built-in tools, with <code>python_exec</code> in a child process in every mode; a direct run, the Python API's default <code>python</code> mode, gateway sessions and console sessions get three, without <code>shell_exec</code>; and tools from local MCP servers in direct mode, the Python API and the interactive UI.</li>
           <li>Tool children and MCP servers run with a minimal environment (<code>PATH</code>, <code>HOME</code>, <code>USER</code>, <code>LOGNAME</code>, <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, <code>LC_*</code>, <code>TMPDIR</code>), plus <code>AgentOptions(tool_env)</code> or the server's <code>env</code>; config-backed direct runs, the UI and console sessions also resolve the names in <code>[agent] tool_env</code>, and nothing else is inherited.</li>
           <li>A step offers the built-in tools, the tools the model has already called in the conversation and the three closest matches for the task (the default <code>retrieve</code> mode); <code>all</code> offers every tool on every step.</li>
@@ -633,7 +625,7 @@
           <li><code>melo-retrieve</code>, which compares the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers offline, exports a typed store or its decisions, and scores candidate files for the bench. The compress modes use the same retrievers in the loop; <code>legacy</code> runs do not.</li>
           <li>Procedural memory: each run records its steps, and a completed run updates the step template of its task, in <code>procedures.db</code> with persistence on. Python callers get <code>run.progress</code> events with <code>progress=True</code>, without a percent bar for now. On a terminal, <code>melo &quot;&lt;task&gt;&quot;</code> draws them as a progress line on stderr (<code>support/progress_line.py</code>). <code>melo-procedures</code> replays the progress rules offline.</li>
           <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>), and the gateway's shared gate, GPU-lock reader and battery reader (<code>support/gateway/chat_gate.py</code>, <code>machine_monitor.py</code>). The page's chats and a console session's turns go through it; direct runs, <code>melo ""</code> and the <code>/v1</code> HTTP API do not.</li>
-          <li>The scheduler's task store (component version 1 in the gateway's <code>sessions.db</code>): tasks with P0-P5, dependencies, priority events, questions, rules, the log and idle windows, created in one transaction together with a task's <code>kind="task"</code> session, idempotent on <code>(origin, request_key)</code>, with workspaces resolved under the user's home or <code>[gateway] workspace</code>; <code>ChatGate.register_task()</code> gives a worker its lifecycle. No <code>/api/tasks</code> route or worker run is on main yet.</li>
+          <li>The scheduler's task store (component version 1 in the gateway's <code>sessions.db</code>): tasks with P0-P5, dependencies, priority events, questions, rules, the log and idle windows, created in one transaction together with a task's <code>kind="task"</code> session, idempotent on <code>(origin, request_key)</code>, with workspaces resolved under the user's home or <code>[gateway] workspace</code>; <code>ChatGate.register_task()</code> gives a worker its lifecycle. <code>/api/tasks</code> provides task creation, inspection and control, with in-process workers; full recovery, deadlines and worker accounting follow later.</li>
         </ul>
         <p>What comes next is on the <a href="./updates.html#roadmap">roadmap</a>.</p>
       </section>

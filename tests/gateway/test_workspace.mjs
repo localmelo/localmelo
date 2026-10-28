@@ -360,6 +360,7 @@ test('a tool card that was cancelled shows how it ended', () => {
 const source = readFileSync(new URL('../../support/gateway/static/workspace.js', import.meta.url), 'utf8')
   .replace(/^import \{[^}]*\} from "\.\/turns\.mjs";\n/m, '')
   .replace(/^import \{ renderMarkdown \} from "\.\/markdown\.mjs";\n/m, '')
+  .replace(/^import \{ setupSettings \} from "\.\/settings\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -377,8 +378,8 @@ let documentDouble = null;
 function makeElement(tag, id = '') {
   const classes = new Set();
   const element = {
-    tag, id, value: '', textContent: '', innerHTML: '', title: '', type: '', src: '', alt: '',
-    style: {}, dataset: {}, attributes: {}, children: [], listeners: {},
+    tag, tagName: tag.toUpperCase(), id, value: '', textContent: '', innerHTML: '', title: '', type: '', src: '', alt: '',
+    style: {}, dataset: {}, attributes: {}, children: [], listeners: {}, parentElement: null,
     hidden: false, disabled: false, open: false, inert: false, tabIndex: 0,
     scrollHeight: 50, scrollTop: 0, clientHeight: 40,
     classList: {
@@ -394,19 +395,34 @@ function makeElement(tag, id = '') {
     },
     setAttribute(name, value) { element.attributes[name] = String(value); },
     getAttribute(name) { return element.attributes[name] ?? null; },
-    append(...items) { element.children.push(...items); },
-    prepend(...items) { element.children.unshift(...items); },
-    replaceChildren(...items) { element.children = items; },
+    append(...items) { for (const item of items) { item.parentElement = element; element.children.push(item); } },
+    prepend(...items) { for (const item of items) item.parentElement = element; element.children.unshift(...items); },
+    replaceChildren(...items) { element.children = []; element.append(...items); },
+    contains(node) { return node === element || element.children.some((child) => child.contains?.(node)); },
     addEventListener(type, handler) { (element.listeners[type] ||= []).push(handler); },
     removeEventListener() {},
     closest(selector) {
       if (selector === '.sidebar' && element.id === 'sidebar') return element;
+      if (selector === '.work-group') {
+        let parent = element.parentElement;
+        while (parent && !parent.classList.contains('work-group')) parent = parent.parentElement;
+        return parent;
+      }
       return null;
     },
     focus() { documentDouble.activeElement = element; },
+    setSelectionRange(start, end, direction) { element.selectionStart = start; element.selectionEnd = end; element.selectionDirection = direction; },
+    click() { if (!element.disabled) return element.listeners.click?.[0]?.({target: element}); },
     close() { element.open = false; },
     showModal() { element.open = true; },
-    querySelector() { return null; },
+    querySelector(selector) {
+      if (selector === '[data-approval-once]') return findNode(element, (node) => 'approvalOnce' in node.dataset);
+      if (selector === '[data-approval-deny]') return findNode(element, (node) => 'approvalDeny' in node.dataset);
+      const focus = selector.match(/^\[data-approval-focus="(\w+)"\]$/);
+      if (focus) return findNode(element, (node) => node.dataset.approvalFocus === focus[1]);
+      return null;
+    },
+    scrollIntoView() {},
   };
   Object.defineProperty(element, 'className', {
     get() { return [...classes].join(' '); },
@@ -424,6 +440,15 @@ function flatten(node) {
   if (node.innerHTML) parts.push(String(node.innerHTML));
   for (const child of node.children ?? []) parts.push(flatten(child));
   return parts.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function findNode(node, predicate) {
+  if (predicate(node)) return node;
+  for (const child of node.children ?? []) {
+    const found = findNode(child, predicate);
+    if (found) return found;
+  }
+  return null;
 }
 
 class FakeEventSource {
@@ -489,16 +514,25 @@ function harness(routes, {mobile = false} = {}) {
     if (!elements.has(id)) elements.set(id, makeElement(id, id));
     return elements.get(id);
   }
-  document.getElementById = element;
+  document.getElementById = (id) => {
+    if (elements.has(id)) return elements.get(id);
+    for (const node of elements.values()) {
+      const found = findNode(node, (candidate) => candidate.id === id);
+      if (found) return found;
+    }
+    return id.startsWith('approval-') && id !== 'approval-bar' && id !== 'approval-go' ? null : element(id);
+  };
   documentDouble = document;
   const net = gateway(routes);
   const context = vm.createContext({
     ...turns,
     renderMarkdown,
+    setupSettings: () => async () => {},
     document,
     location: {hash: ''},
     localStorage: storage(),
     sessionStorage: storage(),
+    navigator: {clipboard: {writeText: async (text) => { context.copied = text; }}},
     matchMedia: () => ({matches: mobile, addEventListener() {}}),
     addEventListener(type, handler) {
       (windowListeners[type] ||= []).push(handler);
@@ -572,6 +606,440 @@ function baseRoutes(extra = {}) {
     ...extra,
   };
 }
+
+test('approval guard, denial keyboard and focus never allow by accident', async () => {
+  const h = harness(baseRoutes({'POST /approvals/req1': {outcome: 'denied'}}));
+  await h.run('init()');
+  h.element('input').focus();
+  h.context.request = {request_id: 'req1', tool_name: 'shell_exec', arguments: {command: 'make test'}, workspace_label: '~/w'};
+  h.run('S.view.pending.set("req1", request)');
+  const card = h.run('approvalCard(request)');
+  const once = findNode(card, (node) => node.textContent === 'Allow once');
+  const deny = findNode(card, (node) => node.textContent === 'Deny…');
+  assert.equal(h.context.document.activeElement, h.element('input'));
+  assert.equal(card.attributes.role, 'region');
+  assert.equal(once.disabled, true);
+  once.click();
+  assert.equal(h.net.callsTo('/approvals/req1').length, 0);
+  h.run('approvalStates.get("req1").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  assert.equal(deny.disabled, false);
+  deny.click();
+  const reason = findNode(card, (node) => node.className === 'deny-reason');
+  assert.equal(h.context.document.activeElement, reason);
+  reason.value = 'Needs review';
+  reason.listeners.input[0]();
+  const event = {key: 'Enter', isComposing: true, keyCode: 229, preventDefault() {}, stopPropagation() {}};
+  reason.listeners.keydown[0](event);
+  assert.equal(h.net.callsTo('/approvals/req1').length, 0);
+  event.isComposing = false; event.keyCode = 13;
+  reason.listeners.keydown[0](event);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(h.net.callsTo('/approvals/req1')[0].body, {choice: 'deny', reason: 'Needs review'});
+});
+
+test('approval buttons post only their explicit choices and Escape closes denial', async () => {
+  for (const [choice, label] of [['once', 'Allow once'], ['session', 'Allow every shell_exec call in this session']]) {
+    const h = harness(baseRoutes({'POST /approvals/req': {outcome: 'allowed'}}));
+    await h.run('init()');
+    h.context.request = {request_id: 'req', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true};
+    h.run('S.view.pending.set("req", request)');
+    const card = h.run('approvalCard(request)');
+    const target = findNode(card, (node) => node.textContent === label);
+    h.run('approvalStates.get("req").mountedAt -= 1000');
+    h.timers.findLast((timer) => timer.ms <= 500).handler();
+    await target.click();
+    assert.deepEqual(h.net.callsTo('/approvals/req')[0].body, {choice});
+  }
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.context.request = {request_id: 'deny', tool_name: 'python_exec', arguments: {code: 'print(1)'}};
+  h.run('S.view.pending.set("deny", request)');
+  const card = h.run('approvalCard(request)');
+  h.run('approvalStates.get("deny").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  const deny = findNode(card, (node) => node.textContent === 'Deny…');
+  deny.click();
+  const reason = findNode(card, (node) => node.className === 'deny-reason');
+  let stopped = false;
+  reason.listeners.keydown[0]({key: 'Escape', isComposing: true, keyCode: 229, preventDefault() {}, stopPropagation() { stopped = true; }});
+  assert.equal(h.context.document.activeElement, reason);
+  assert.equal(stopped, false);
+  reason.listeners.keydown[0]({key: 'Escape', isComposing: false, keyCode: 27, preventDefault() {}, stopPropagation() { stopped = true; }});
+  assert.equal(stopped, true);
+  assert.equal(h.context.document.activeElement, deny);
+  assert.equal(h.net.callsTo('/approvals/deny').length, 0);
+});
+
+test('approval bar navigates to the card only on request', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'two', user_text: 'Run', client_request_id: 'k'}});
+  h.stream().emit({id: 21, turn: 2, ts: 51, type: 'tool.started', data: {call_id: 'c', name: 'shell_exec', arguments: {command: 'pwd'}}});
+  h.element('input').focus();
+  h.stream().emit({id: 22, turn: 2, ts: 52, type: 'approval.requested', data: {request_id: 'go', call_id: 'c', tool_name: 'shell_exec', arguments: {command: 'pwd'}}});
+  assert.equal(h.context.document.activeElement, h.element('input'));
+  assert.equal(h.element('approval-bar').hidden, false);
+  h.run('S.view.pending.get("go").arguments_complete = true; approvalStates.get("go").mountedAt -= 1000; messageSnapshot = ""; renderMessages(false)');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  h.element('approval-go').click();
+  assert.equal(h.context.document.activeElement.textContent, 'Allow once');
+});
+
+test('approval guard survives redraw but resets on navigation', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.context.request = {request_id: 'guard', tool_name: 'shell_exec', arguments: {command: 'pwd'}, arguments_complete: true};
+  h.run('S.view.pending.set("guard", request); approvalCard(request); approvalStates.get("guard").mountedAt -= 1000');
+  const same = h.run('approvalCard(request)');
+  assert.equal(findNode(same, (node) => node.textContent === 'Allow once').disabled, false);
+  h.run('newChat(); approvalCard(request)');
+  const fresh = h.run('approvalCard(request)');
+  assert.equal(findNode(fresh, (node) => node.textContent === 'Allow once').disabled, true);
+});
+
+test('denial input keeps selection and defers redraw while composing', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'two', user_text: 'Run'}});
+  h.stream().emit({id: 21, turn: 2, ts: 51, type: 'tool.started', data: {call_id: 'c', name: 'shell_exec', arguments: {command: 'pwd'}}});
+  h.stream().emit({id: 22, turn: 2, ts: 52, type: 'approval.requested', data: {request_id: 'ime', call_id: 'c', tool_name: 'shell_exec', arguments: {command: 'pwd'}}});
+  h.run('approvalStates.get("ime").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  let card = h.context.document.getElementById('approval-card-ime');
+  findNode(card, (node) => node.textContent === 'Deny…').click();
+  let reason = findNode(card, (node) => node.className === 'deny-reason');
+  reason.value = 'abcdef'; reason.listeners.input[0](); reason.setSelectionRange(2, 4, 'forward');
+  h.stream().emit({id: 23, type: 'session.updated', data: {model: 'changed'}});
+  card = h.context.document.getElementById('approval-card-ime');
+  reason = findNode(card, (node) => node.className === 'deny-reason');
+  assert.equal(h.context.document.activeElement, reason);
+  assert.deepEqual([reason.value, reason.selectionStart, reason.selectionEnd], ['abcdef', 2, 4]);
+  reason.listeners.compositionstart[0]();
+  reason.value = 'abc語def';
+  h.stream().emit({id: 24, type: 'session.updated', data: {model: 'again'}});
+  assert.equal(h.context.document.activeElement, reason);
+  assert.equal(h.context.document.getElementById('approval-card-ime'), card);
+  reason.listeners.compositionend[0]();
+  const replacement = findNode(h.context.document.getElementById('approval-card-ime'), (node) => node.className === 'deny-reason');
+  assert.equal(h.context.document.activeElement, replacement);
+  assert.equal(replacement.value, 'abc語def');
+});
+
+test('workspace labels follow new events and old events keep their label', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.stream().emit({id: 20, type: 'session.updated', data: {model: 'm2', workspace: '/home/me/project', workspace_label: '~/project'}});
+  assert.equal(h.state().view.session.workspace_label, '~/project');
+  assert.equal(h.state().sessions[0].workspace_label, '~/project');
+  h.stream().emit({id: 21, type: 'session.updated', data: {model: 'm3', workspace: '/old'}});
+  assert.equal(h.state().view.session.workspace_label, '~/project');
+});
+
+test('approval shows complete multi-line shell commands and generic arguments', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.context.request = {request_id: 'long', tool_name: 'shell_exec', arguments: {command: Array.from({length: 25}, (_, i) => `line-${i}`).join('\n')}};
+  const shell = h.run('approvalCard(request)');
+  assert.match(flatten(shell), /line-24/);
+  assert.equal(findNode(shell, (node) => String(node.textContent).startsWith('Show all')), null);
+  h.context.request = {request_id: 'custom-long', tool_name: 'custom', arguments: {values: Array.from({length: 25}, (_, i) => `value-${i}`)}};
+  const other = h.run('approvalCard(request)');
+  assert.match(flatten(other), /value-24/);
+});
+
+test('incomplete or unconfirmed arguments cannot be allowed, but can be denied', async () => {
+  for (const complete of [false, undefined]) {
+    const h = harness(baseRoutes({'POST /approvals/unsafe': {outcome: 'denied'}}));
+    await h.run('init()');
+    h.context.request = {request_id: 'unsafe', tool_name: 'shell_exec', arguments: {command: 'truncated…'}, arguments_complete: complete};
+    h.run('S.view.pending.set("unsafe", request)');
+    const card = h.run('approvalCard(request)');
+    h.run('approvalStates.get("unsafe").mountedAt -= 1000');
+    h.timers.findLast((timer) => timer.ms <= 500).handler();
+    assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
+    assert.equal(findNode(card, (node) => node.textContent === 'Allow every shell_exec call in this session').disabled, true);
+    await h.run('answerApproval(request, approvalStates.get("unsafe"), "once")');
+    assert.equal(h.net.callsTo('/approvals/unsafe').length, 0);
+    assert.match(flatten(card), /cannot safely be allowed|allow is disabled/);
+    findNode(card, (node) => node.textContent === 'Deny…').click();
+    await findNode(card, (node) => node.textContent === 'Deny').click();
+    assert.equal(h.net.callsTo('/approvals/unsafe')[0].body.choice, 'deny');
+  }
+});
+
+test('file approval can be denied while target details are unavailable', async () => {
+  const h = harness(baseRoutes({'POST /approvals/missing': {outcome: 'denied'}}));
+  await h.run('init()');
+  h.context.request = {request_id: 'missing', tool_name: 'file_write', arguments: {path: 'x', content: 'y'}, target: null};
+  h.run('S.view.pending.set("missing", request)');
+  const card = h.run('approvalCard(request)');
+  h.run('approvalStates.get("missing").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
+  const deny = findNode(card, (node) => node.textContent === 'Deny…');
+  assert.equal(deny.disabled, false);
+  deny.click();
+  await findNode(card, (node) => node.textContent === 'Deny').click();
+  assert.equal(h.net.callsTo('/approvals/missing')[0].body.choice, 'deny');
+});
+
+for (const succeeds of [true, false]) {
+  test(`approval detail refresh ${succeeds ? 'enables verified details' : 'fails closed'}`, async () => {
+    let detail = {session: session('a'), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0};
+    const h = harness(baseRoutes({'GET /sessions/a': () => detail}));
+    await h.run('init()');
+    h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'two', user_text: 'Run'}});
+    h.stream().emit({id: 21, turn: 2, ts: 51, type: 'tool.started', data: {call_id: 'c', name: 'file_write', arguments: {path: 'a', content: 'x'}}});
+    h.stream().emit({id: 22, turn: 2, ts: 52, type: 'approval.requested', data: {request_id: 'refresh', call_id: 'c', tool_name: 'file_write', arguments: {path: 'a', content: 'x'}}});
+    await new Promise((resolve) => setImmediate(resolve));
+    h.run('approvalStates.get("refresh").mountedAt -= 1000');
+    h.timers.findLast((timer) => timer.ms <= 500).handler();
+    let card = h.context.document.getElementById('approval-card-refresh');
+    assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
+    assert.equal(findNode(card, (node) => node.textContent === 'Deny…').disabled, false);
+    detail = succeeds
+      ? {pending_approvals: [{request_id: 'refresh', arguments_complete: true, target: {path_label: 'a', exists: true, size_bytes: 7}}]}
+      : new Error('details unavailable');
+    await findNode(card, (node) => node.textContent === 'Reload approval details').click();
+    card = h.context.document.getElementById('approval-card-refresh');
+    assert.equal(h.net.callsTo('/sessions/a').length, 3);
+    assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, !succeeds);
+    assert.equal(h.net.callsTo('/approvals/refresh').length, 0);
+    if (succeeds) {
+      assert.match(flatten(card), /overwrite a \(7 bytes\)/);
+      assert.equal(findNode(card, (node) => node.textContent === 'Reload approval details'), null);
+    } else {
+      assert.match(h.element('notice').textContent, /Could not load approval details: details unavailable/);
+      assert.equal(findNode(card, (node) => node.textContent === 'Deny…').disabled, false);
+    }
+  });
+}
+
+test('earlier paging preserves the scroll position on a short page', async () => {
+  const earlier = turnRow({id: 'old', turn: 1, user_text: 'Earlier'});
+  earlier.events = [];
+  const h = harness(baseRoutes({
+    'GET /sessions/a/turns?limit=10': {turns: [turnRow({id: 'new', turn: 2})], has_earlier: true, replay_from: 10},
+    'GET /sessions/a/turns?before=2&limit=10&events=true': {turns: [earlier], has_earlier: false},
+  }));
+  await h.run('init()');
+  h.element('scroll').scrollTop = 0;
+  await h.run('loadEarlier()');
+  assert.equal(h.element('scroll').scrollTop, 0);
+});
+
+test('earlier paging adjusts scroll height and restores keyboard focus', async () => {
+  for (const hasEarlier of [false, true]) {
+    const older = turnRow({id: 'old', turn: 1});
+    older.events = [];
+    let resolvePage;
+    const page = new Promise((resolve) => { resolvePage = resolve; });
+    const h = harness(baseRoutes({
+      'GET /sessions/a/turns?limit=10': {turns: [turnRow({id: 'new', turn: 2})], has_earlier: true, replay_from: 10},
+      'GET /sessions/a/turns?before=2&limit=10&events=true': () => page,
+    }));
+    await h.run('init()');
+    const messages = h.element('messages');
+    const scroller = h.element('scroll');
+    // Model actual layout: a turn adds 220px; the paging control adds 30px.
+    Object.defineProperty(scroller, 'scrollHeight', {get: () => 300 + messages.children.reduce((n, child) => n + (child.classList.contains('turn') ? 220 : child.classList.contains('earlier-turns') ? 30 : 0), 0)});
+    const replace = messages.replaceChildren;
+    messages.replaceChildren = (...items) => {
+      if (messages.contains(h.context.document.activeElement)) h.context.document.activeElement = null;
+      replace(...items);
+    };
+    scroller.scrollTop = 130;
+    const oldHeight = scroller.scrollHeight;
+    const earlier = findNode(messages, (node) => node.classList.contains('earlier-turns'));
+    earlier.focus();
+    const pending = earlier.click();
+    assert.equal(h.context.document.activeElement, scroller);
+    resolvePage({turns: [older], has_earlier: hasEarlier});
+    await pending;
+    assert.equal(scroller.scrollTop, 130 + scroller.scrollHeight - oldHeight);
+    const focus = h.context.document.activeElement;
+    assert.equal(focus.classList.contains(hasEarlier ? 'earlier-turns' : 'turn'), true);
+    if (!hasEarlier) assert.equal(focus.dataset.turnId, 'old');
+  }
+});
+
+test('failed earlier paging restores the paging button focus', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions/a/turns?limit=10': {turns: [turnRow({id: 'new', turn: 2})], has_earlier: true, replay_from: 10},
+    'GET /sessions/a/turns?before=2&limit=10&events=true': new Error('network down'),
+  }));
+  await h.run('init()');
+  const earlier = findNode(h.element('messages'), (node) => node.classList.contains('earlier-turns'));
+  earlier.focus();
+  await earlier.click();
+  assert.equal(h.context.document.activeElement.classList.contains('earlier-turns'), true);
+  assert.equal(h.context.document.activeElement.disabled, false);
+  assert.match(h.element('notice').textContent, /network down/);
+});
+
+test('approval cards display each tool and confirm file target before enabling', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  for (const [name, args, target, expected] of [
+    ['shell_exec', {command: 'echo hello'}, null, /command in ~\/w/],
+    ['python_exec', {code: 'print(1)'}, null, /Python in ~\/w/],
+    ['file_write', {path: 'a.txt', content: 'abc'}, {path_label: 'a.txt', exists: true, size_bytes: 7}, /overwrite a\.txt \(7 bytes\) with 3 chars/],
+    ['file_write', {path: 'b.txt', content: 'abc'}, {path_label: 'b.txt', exists: false, size_bytes: 0}, /create b\.txt \(3 chars\)/],
+    ['custom', {value: 1}, null, /custom wants to run/],
+  ]) {
+    h.context.request = {request_id: `req-${name}-${target?.exists}`, tool_name: name, arguments: args, workspace_label: '~/w', target};
+    const card = h.run('approvalCard(request)');
+    assert.match(flatten(card), expected);
+  }
+  h.context.request = {request_id: 'file-unchecked', tool_name: 'file_write', arguments: {path: 'x'}, target: null};
+  const card = h.run('approvalCard(request)');
+  h.run('approvalStates.get("file-unchecked").mountedAt -= 1000');
+  h.timers.findLast((timer) => timer.ms <= 500).handler();
+  assert.equal(findNode(card, (node) => node.textContent === 'Allow once').disabled, true);
+});
+
+test('API errors retain validation details', async () => {
+  const h = harness(baseRoutes({'PUT /settings': {status: 400, body: {error: {code: 'invalid_settings', message: 'first', details: {errors: ['first', 'second']}}}}}));
+  await h.run('init()');
+  await assert.rejects(h.run('api("/settings", {method: "PUT", body: {}})'), (error) => {
+    assert.equal(error.code, 'invalid_settings');
+    assert.deepEqual(Array.from(error.details.errors), ['first', 'second']);
+    return true;
+  });
+});
+
+test('setup failure keeps its hint without a premature tools action', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const turn = turns.newTurn(turnRow({status: 'setup_error', result: {error: 'MCP failed'}}));
+  h.context.turn = turn;
+  const node = h.run('statusNode(turn)');
+  assert.match(flatten(node), /MCP server failed to start/);
+  assert.equal(findNode(node, (item) => item.textContent === 'Show tools'), null);
+});
+
+test('failure actions are limited to the newest eligible turn', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  const old = turns.newTurn(turnRow({turn: 1, status: 'timeout', result: {n_tool: 2}}));
+  const latest = turns.newTurn(turnRow({id: 'two', turn: 2, status: 'budget_exhausted', result: {n_tool: 2, error: 'ran out'}}));
+  h.state().view.turns = [old, latest];
+  h.context.old = old; h.context.latest = latest;
+  const oldText = flatten(h.run('statusNode(old)'));
+  const latestText = flatten(h.run('statusNode(latest)'));
+  assert.doesNotMatch(oldText, /Continue|Try again/);
+  assert.match(latestText, /Continue/);
+  assert.match(latestText, /Try again/);
+  assert.match(latestText, /Copy error/);
+  latest.result.n_tool = 0;
+  assert.equal(findNode(h.run('statusNode(latest)'), (node) => node.tag === 'button' && node.textContent === 'Continue'), null);
+  assert.equal(turns.statusLine('timeout', 'a\n b'), 'melo: run ended with status timeout: a b');
+});
+
+test('failure controls copy bounded errors, continue without losing drafts and retry by turn', async () => {
+  const failed = turnRow({status: 'timeout', result: {n_tool: 1, error: 'line one\nline two'}});
+  const routes = baseRoutes({
+    'GET /sessions/a/turns?limit=10': {turns: [failed], has_earlier: false, replay_from: 7},
+    'POST /sessions/a/turns': {status: 202, body: {repeated: false}},
+    'POST /sessions/a/retry': {status: 202, body: {}},
+  });
+  const h = harness(routes);
+  await h.run('init()');
+  h.element('input').value = 'My unsent draft';
+  h.run('saveDraft()');
+  const card = h.run('statusNode(S.view.turns[0])');
+  await findNode(card, (node) => node.textContent === 'Copy error').click();
+  assert.equal(h.context.copied, 'melo: run ended with status timeout: line one line two\nrun run-1');
+  await findNode(card, (node) => node.textContent === 'Continue').click();
+  assert.equal(h.net.callsTo('/sessions/a/turns')[0].body.text, 'Continue the task from where you stopped.');
+  assert.equal(h.element('input').value, 'My unsent draft');
+  delete h.state().outbox.a;
+  await findNode(card, (node) => node.textContent === 'Try again').click();
+  assert.deepEqual(h.net.callsTo('/sessions/a/retry')[0].body, {turn_id: 'turn-1'});
+  failed.status = 'cancelled'; failed.cause = 'user_stop';
+  const stopped = turns.newTurn(failed);
+  h.context.stopped = stopped;
+  assert.match(flatten(h.run('statusNode(stopped)')), /Stopped by you/);
+  assert.doesNotMatch(flatten(h.run('statusNode(stopped)')), /Copy error|Details/);
+});
+
+test('earlier turns replay separately without disturbing current cursor or approvals', async () => {
+  const earlier = turnRow({id: 'old', turn: 1, user_text: 'Earlier', answer: 'Old answer'});
+  earlier.events = [{id: 2, turn: 1, ts: 11, type: 'assistant.message', data: {content: 'old work', tool_calls: [{id: 'old-call', name: 'read'}]}}];
+  const h = harness(baseRoutes({
+    'GET /sessions/a/turns?limit=10': {turns: [turnRow({id: 'new', turn: 2})], has_earlier: true, replay_from: 10},
+    'GET /sessions/a/turns?before=2&limit=10&events=true': {turns: [earlier], has_earlier: false},
+  }));
+  await h.run('init()');
+  h.state().view.pending.set('current', {request_id: 'current'});
+  const before = h.state().view.lastEventId;
+  await h.run('loadEarlier()');
+  assert.deepEqual(Array.from(h.state().view.turns, (turn) => turn.turn), [1, 2]);
+  assert.equal(h.state().view.lastEventId, before);
+  assert.equal(h.state().view.pending.has('current'), true);
+  assert.match(h.text('messages'), /Earlier/);
+  assert.equal(h.state().view.hasEarlier, false);
+});
+
+test('accepted retry clears only the matching restored draft when SSE wins', async () => {
+  for (const draft of ['Retry me', 'New unsent text']) {
+    let release;
+    const waiting = new Promise((resolve) => { release = resolve; });
+    const h = harness(baseRoutes({'POST /sessions/a/turns': () => waiting}));
+    await h.run('init()');
+    h.state().outbox.a = {clientRequestId: 'retry-key', text: 'Retry me', state: 'failed'};
+    h.state().drafts.a = draft;
+    h.element('input').value = draft;
+    const card = h.run('outboxNode(S.outbox.a, "a")');
+    findNode(card, (node) => node.textContent === 'Retry').click();
+    h.stream().emit({id: 20, turn: 2, ts: 50, type: 'turn.started', data: {turn: 2, turn_id: 'two', user_text: 'Retry me', client_request_id: 'retry-key'}});
+    release({turn: {id: 'two'}});
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(h.state().outbox.a, undefined);
+    assert.equal(h.state().drafts.a || '', draft === 'Retry me' ? '' : draft);
+    assert.equal(h.element('input').value, draft === 'Retry me' ? '' : draft);
+  }
+});
+
+test('a late outbox check cannot replace a newer message', async () => {
+  let release;
+  const waiting = new Promise((resolve) => { release = resolve; });
+  const h = harness(baseRoutes({'GET /sessions/a/submissions/old-key': () => waiting}));
+  await h.run('init()');
+  h.state().outbox.a = {clientRequestId: 'old-key', text: 'Old', state: 'checking'};
+  const check = h.run('checkSubmission("a", "old-key")');
+  h.state().outbox.a = {clientRequestId: 'new-key', text: 'New', state: 'sending'};
+  release({submission: {state: 'unknown'}});
+  await check;
+  assert.equal(h.state().outbox.a.clientRequestId, 'new-key');
+  assert.equal(h.state().outbox.a.state, 'sending');
+});
+
+test('a late cancellation restores its own chat draft', async () => {
+  let release;
+  const waiting = new Promise((resolve) => { release = resolve; });
+  const h = harness(baseRoutes({'POST /sessions/a/submissions/key/cancel': () => waiting}));
+  await h.run('init()');
+  h.state().outbox.a = {clientRequestId: 'key', text: 'Original', state: 'failed'};
+  const cancel = h.run('cancelSend("a", S.outbox.a)');
+  h.run('newChat()');
+  h.element('input').value = 'Other chat';
+  release({});
+  await cancel;
+  assert.equal(h.element('input').value, 'Other chat');
+  assert.equal(h.state().drafts.a, 'Original');
+});
+
+test('a persisted in-flight outbox is reconciled with its original key', async () => {
+  const h = harness(baseRoutes({'GET /sessions/a/submissions/key-keep': {submission: {state: 'unknown'}}}));
+  h.session.setItem('localmelo-console-outbox', JSON.stringify({a: {clientRequestId: 'key-keep', text: 'Wait for me', state: 'sending', error: ''}}));
+  await h.run('init()');
+  assert.equal(h.net.callsTo('/sessions/a/submissions/key-keep').length, 1);
+  assert.equal(h.state().outbox.a.clientRequestId, 'key-keep');
+  assert.equal(h.state().outbox.a.state, 'failed');
+  assert.equal(JSON.parse(h.session.getItem('localmelo-console-outbox')).a.clientRequestId, 'key-keep');
+});
 
 test('the page boots from /api and renders a session\'s turns', async () => {
   const h = harness(baseRoutes());

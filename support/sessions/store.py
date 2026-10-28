@@ -75,6 +75,7 @@ from localmelo.melo.schema import (
     decode_base64,
     split_thinking,
 )
+from localmelo.support.sessions.display import home_label
 from localmelo.support.sessions.submissions import (
     WITHDRAWN_ERROR,
     SubmissionConflict,
@@ -150,7 +151,7 @@ SESSION_EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
         "turn.finished": frozenset({"turn", "turn_id", "status", "error", "cause"}),
         "turn.undone": frozenset({"turn", "turn_id"}),
         "session.title": frozenset({"title"}),
-        "session.updated": frozenset({"model", "workspace", "meta"}),
+        "session.updated": frozenset({"model", "workspace", "workspace_label", "meta"}),
         "approval.requested": frozenset(
             {
                 "request_id",
@@ -1688,6 +1689,11 @@ class SessionStore:
                         {
                             "model": info.model,
                             "workspace": info.workspace,
+                            "workspace_label": (
+                                ""
+                                if info.workspace is None
+                                else home_label(info.workspace)
+                            ),
                             "meta": info.meta,
                         },
                         now,

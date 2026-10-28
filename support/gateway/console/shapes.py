@@ -98,6 +98,28 @@ def turn_json(
     return data
 
 
+def _arguments_complete(original: dict[str, Any], safe: dict[str, Any]) -> bool:
+    """Whether sanitizing preserved every JSON argument without conversion."""
+    pairs: list[tuple[Any, Any]] = [(original, safe)]
+    while pairs:
+        left, right = pairs.pop()
+        if type(left) is not type(right):
+            return False
+        if type(left) is dict:
+            if len(left) != len(right) or any(
+                type(key) is not str or key not in right for key in left
+            ):
+                return False
+            pairs.extend((value, right[key]) for key, value in left.items())
+        elif type(left) is list:
+            if len(left) != len(right):
+                return False
+            pairs.extend(zip(left, right, strict=True))
+        elif type(left) not in (str, int, float, bool, type(None)) or left != right:
+            return False
+    return True
+
+
 def approval_json(request: ApprovalRequest) -> dict[str, Any]:
     """One pending approval, as the console's card reads it.
 
@@ -105,11 +127,14 @@ def approval_json(request: ApprovalRequest) -> dict[str, Any]:
     request, read per response, and ``None`` for every other tool.
     """
     root = request.workspace_root
+    arguments = dict(request.arguments)
+    safe_arguments = json_safe_payload(arguments)
     return {
         "request_id": request.request_id,
         "call_id": request.call_id,
         "tool_name": request.tool_name,
-        "arguments": json_safe_payload(dict(request.arguments)),
+        "arguments": safe_arguments,
+        "arguments_complete": _arguments_complete(arguments, safe_arguments),
         "preview": request.preview,
         "workspace_root": root,
         "workspace_label": "" if root is None else display.home_label(root),
