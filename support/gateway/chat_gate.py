@@ -1232,6 +1232,22 @@ class ChatGate:
             ),
         )
 
+    def discard_task(self, task_id: str) -> bool:
+        """Drop a terminal identity only after it has no live calls.
+
+        The caller must confirm its durable row is gone or past retention.
+        """
+        task = self._task_registry.get(task_id)
+        if (
+            task is None
+            or not is_terminal(task.phase)
+            or any(call.meta.session_id == task_id for call in self._calls.values())
+        ):
+            return False
+        self._task_registry.pop(task_id)
+        self.forget(task_id)
+        return True
+
     @property
     def closed(self) -> bool:
         """Whether this gate was closed; a closed gate admits without a hold."""
