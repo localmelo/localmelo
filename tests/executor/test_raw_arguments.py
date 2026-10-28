@@ -25,8 +25,8 @@ from localmelo.melo.schema import RAW_ARGUMENTS_KEY, CheckResult, ToolCall, Tool
 
 def _with_builtins(checker: Checker | None = None) -> Executor:
     hippo = Hippo()
-    executor = Executor(hippo, checker or Checker())
-    register_builtins(executor, hippo)
+    executor = Executor(hippo, checker or Checker(mode="interactive"))
+    register_builtins(executor, hippo, mode="interactive")
     return executor
 
 

@@ -97,7 +97,7 @@ pip install -e ".[gateway]"</code></pre>
         <h2>以 JSON 格式获取结果</h2>
         <pre><code>melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b --output-format json "What is 6*7?"</code></pre>
         <p>示例输出（具体数值会不同）：</p>
-        <pre><code>{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "reflection_gate": "flags", "tool_exposure": "retrieve", "builtins": ["file_read", "file_write", "python_exec", "shell_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec", "shell_exec"]}, "localmelo_version": "603f40d"}</code></pre>
+        <pre><code>{"task_id": "f52e785a84a144ff8c3b8e70e0451eb1", "status": "completed", "result": "42", "error": "", "steps": 1, "attempts": 1, "n_llm": 1, "n_main": 1, "n_aux": 0, "n_tool": 0, "llm_errors": 0, "usage": {"prompt_tokens": 120, "completion_tokens": 12, "total_tokens": 132}, "duration_s": 1.9, "config": {"max_steps": 30, "attempt_policy": "reflect", "steps_per_attempt": 10, "max_attempts": 5, "reflection_gate": "flags", "tool_exposure": "retrieve", "mode": "direct", "builtins": ["file_read", "file_write", "python_exec"], "memory": true, "memory_dir": null, "timeout_s": null, "tools": ["file_read", "file_write", "python_exec"]}, "localmelo_version": "603f40d"}</code></pre>
         <p>stdout 上只有这一行。只有当 <code>status</code> 为 <code>completed</code> 时，退出码才是 0。</p>
 
         <h3 id="run-results">运行结果</h3>

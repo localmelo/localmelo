@@ -203,15 +203,15 @@ class TestToolCallLoop:
 
 
 class TestBlockedToolCall:
-    """Checker blocks a dangerous tool call — agent must fail cleanly."""
+    """A dangerous call the run cannot make must fail cleanly."""
 
     @pytest.mark.asyncio
     async def test_blocked_shell_command(self) -> None:
-        """The default Agent (python mode, no approval) refuses rm -rf /.
+        """The default Agent (python mode, no approval) does not offer shell_exec.
 
-        P13a leaves the blocklist in place for ``python`` as well as
-        ``direct``: a Python caller that passes no ``approval=`` has no
-        policy, so the library default must not be weaker than direct mode.
+        P13b gives ``python`` the same default set as direct: a caller that
+        passes no ``approval=`` has no policy, so the destructive call has
+        no tool to reach. The call is refused before it runs.
         """
         llm = FakeLLM()
         llm.enqueue(
@@ -231,13 +231,56 @@ class TestBlockedToolCall:
         assert agent.options.mode == "python"
         result = await agent.run("delete everything with shell_exec")
 
-        # The built-in shell_exec is registered, but rm -rf / is blocked.
-        # The agent should still produce a result (the second LLM turn).
+        # shell_exec is not registered, so the destructive call never runs.
+        # The agent still produces a result (the second LLM turn).
         assert result == "aborted"
         tasks = list(agent.hippo.history._tasks.values())
         steps = await agent.hippo.history.get_steps(tasks[0].task_id)
         assert steps[0].tool_result is not None
-        assert steps[0].tool_result.error == "Blocked: Blocked command: rm -rf /"
+        # The error names the tools the run does offer (P13b review fix 5).
+        assert steps[0].tool_result.error == (
+            "shell_exec is not available in this run. "
+            "Available tools: file_read, file_write, python_exec."
+        )
+
+    @pytest.mark.asyncio
+    async def test_a_registered_shell_is_blocked_in_gateway_mode(
+        self, tmp_path: Any
+    ) -> None:
+        """A named shell in gateway mode is registered, offered, and refused."""
+        marker = tmp_path / "keep.txt"
+        marker.write_text("keep", encoding="utf-8")
+        llm = FakeLLM()
+        llm.enqueue(
+            Message(
+                role="assistant",
+                content="deleting",
+                tool_call=ToolCall(
+                    tool_name="shell_exec",
+                    arguments={"command": f"rm -f {marker}"},
+                ),
+            )
+        )
+        llm.enqueue(Message(role="assistant", content="aborted"))
+
+        agent = Agent(
+            llm=llm,
+            embedding=FakeEmbedding(),
+            options=AgentOptions(
+                mode="gateway",
+                builtins=frozenset({"shell_exec"}),
+                tool_exposure="all",
+            ),
+        )
+        result = await agent.run("delete the marker")
+
+        assert result == "aborted"
+        tasks = list(agent.hippo.history._tasks.values())
+        steps = await agent.hippo.history.get_steps(tasks[0].task_id)
+        assert steps[0].tool_result is not None
+        assert steps[0].tool_result.error.startswith("Blocked:")
+        assert "gateway" in steps[0].tool_result.error
+        assert marker.exists()
 
     @pytest.mark.asyncio
     async def test_unknown_tool_returns_error(self) -> None:

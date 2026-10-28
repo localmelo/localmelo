@@ -704,6 +704,11 @@ class TestStructuredExecutorInAgentLoop:
         agent = Agent(llm=llm, embedding=FakeEmbedding())
         result = await agent.run("delete everything with shell_exec")
         assert result == "aborted"
+        tasks = list(agent.hippo.history._tasks.values())
+        steps = await agent.hippo.history.get_steps(tasks[0].task_id)
+        assert steps[0].tool_result is not None
+        assert "shell_exec" in steps[0].tool_result.error
+        assert "not available in this run" in steps[0].tool_result.error
         await agent.close()
 
     @pytest.mark.asyncio
@@ -1175,8 +1180,8 @@ class TestThreeWayBoundary:
 
     @pytest.mark.asyncio
     async def test_blocked_command_produces_error_in_step_record(self) -> None:
-        """A blocked shell command flows through Agent -> Executor -> Checker
-        and the step record must contain the 'Blocked' error."""
+        """An unoffered shell command flows through Agent -> Executor and the
+        step record must contain the refusal, so the destructive call cannot run."""
         llm = FakeLLM()
         llm.responses.append(
             Message(
@@ -1198,7 +1203,8 @@ class TestThreeWayBoundary:
         steps = await agent.hippo.history.get_steps(tasks[0].task_id)
         assert len(steps) == 1
         assert steps[0].tool_result is not None
-        assert "Blocked" in steps[0].tool_result.error
+        assert "shell_exec" in steps[0].tool_result.error
+        assert "not available in this run" in steps[0].tool_result.error
 
         await agent.close()
 

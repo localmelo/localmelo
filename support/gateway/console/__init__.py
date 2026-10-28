@@ -36,6 +36,7 @@ from localmelo.support.sessions.store import (
     FAILED_ERROR,
     GATEWAY_SESSIONS_DB,
     RETENTION_SWEEP_S,
+    SessionInfo,
     SessionStore,
     SessionStoreError,
     StoreOwnedError,
@@ -44,6 +45,7 @@ from localmelo.support.sessions.store import (
 from . import (
     errors,
     routes_details,
+    routes_page,
     routes_sessions,
     routes_settings,
     routes_turns,
@@ -51,6 +53,7 @@ from . import (
 from .errors import ApiError
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
+from .shapes import session_json
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -135,6 +138,17 @@ class Console:
         self._streams = 0
         self.app: FastAPI | None = None
 
+    # ── Shapes ──
+
+    def session_body(self, info: SessionInfo) -> dict[str, Any]:
+        """One session as API v2 gives it, with this console's live fields."""
+        return session_json(
+            info,
+            pending_approvals=len(self.broker.pending(info.id)),
+            level=self.gate.level(info.id),
+            held=self.gate.held(info.id),
+        )
+
     # ── The gate ──
 
     def _build_gate(self) -> ChatGate:
@@ -181,6 +195,7 @@ class Console:
         routes_sessions.add_routes(app, self)
         routes_turns.add_routes(app, self)
         routes_details.add_routes(app, self)
+        routes_page.add_routes(app, self)
         _add_not_found(app)
 
     # ── Lifecycle ──

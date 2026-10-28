@@ -13,12 +13,12 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.checker import DEFAULT_BUILTINS
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
     ProviderError,
 )
-from localmelo.melo.executor import builtin_names
 from localmelo.melo.memory.history import History
 from localmelo.melo.memory.history.sqlite import SqliteHistory
 from localmelo.melo.schema import (
@@ -724,6 +724,7 @@ CONFIG_KEYS = [
     "max_attempts",
     "reflection_gate",
     "tool_exposure",
+    "mode",
     "builtins",
     "memory",
     "memory_dir",
@@ -745,11 +746,12 @@ class TestConfig:
             "max_attempts": MAX_ATTEMPTS,
             "reflection_gate": "flags",
             "tool_exposure": "retrieve",
-            "builtins": sorted(builtin_names()),
+            "mode": "python",
+            "builtins": sorted(DEFAULT_BUILTINS["python"]),
             "memory": True,
             "memory_dir": None,
             "timeout_s": None,
-            "tools": sorted(builtin_names()),
+            "tools": sorted(DEFAULT_BUILTINS["python"]),
         }
 
     @pytest.mark.asyncio
@@ -779,6 +781,7 @@ class TestConfig:
             "max_attempts": 1,
             "reflection_gate": "utility",
             "tool_exposure": "all",
+            "mode": "python",
             "builtins": ["file_read", "python_exec"],
             "memory": False,
             # The resolved directory, not the option as given.

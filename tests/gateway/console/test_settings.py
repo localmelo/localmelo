@@ -303,6 +303,8 @@ def test_put_settings_conflict_on_stale_revision(
     ("patch", "expected_code"),
     [
         ({"workspace": "relative/path"}, "invalid_request"),
+        ({"workspace": "/"}, "invalid_request"),
+        ({"workspace": "~/"}, "invalid_request"),
         ({"workspace": ""}, "invalid_request"),
         ({"workspace": "~/bad\nline"}, "invalid_request"),
         ({"chat_backend": "mlc\x00"}, "invalid_request"),

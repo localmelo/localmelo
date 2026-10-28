@@ -9,9 +9,11 @@ import cycle.
 
 The surfaces set the mode where they are known (the CLI's two branches,
 the gateway's sessions), and :class:`~melo.agent.options.AgentOptions`
-defaults to ``python`` for the library. Direct and ``python`` modes keep
-their old behaviour in this release, including the six-pattern command
-blocklist; the gateway and the console do not offer ``shell_exec`` at all.
+defaults to ``python`` for the library. A mode with an approver (the
+interactive UI) keeps ``shell_exec``; the modes without one (direct, the
+gateway and the library's ``python`` default) do not offer it. An explicit
+``builtins`` set always wins, except in gateway mode, so a caller that names
+``shell_exec`` gets it in direct and ``python`` mode.
 """
 
 from __future__ import annotations
@@ -24,29 +26,34 @@ from localmelo.melo.schema import ToolTier
 ToolMode = Literal["direct", "interactive", "gateway", "python"]
 
 # The built-ins a mode offers when the caller does not name a set.
-# `shell_exec` stays in `direct` until P13b flips it, after the bench arm
-# (`--builtins all` against the new default); P13a leaves direct mode
-# byte-identical. The gateway has no approver, so it does not offer the
-# tool at all; `python_exec` stays everywhere because it is a child process
-# and the bench's Python tasks keep working.
+# `shell_exec` is offered only by `interactive`, whose panel answers before
+# an `exec` call runs. Direct mode has no panel; the gateway has no
+# authenticated one (P12 is not on main); and the library's default
+# `python` mode passes no approval policy, so a Python caller must name
+# `shell_exec` in `builtins` to get it. `python_exec`, `file_read` and
+# `file_write` stay everywhere: `python_exec` is a child process and the
+# bench's Python tasks keep working.
 DEFAULT_BUILTINS: Mapping[ToolMode, frozenset[str]] = {
-    "direct": frozenset({"file_read", "file_write", "python_exec", "shell_exec"}),
+    "direct": frozenset({"file_read", "file_write", "python_exec"}),
     "interactive": frozenset({"file_read", "file_write", "python_exec", "shell_exec"}),
     "gateway": frozenset({"file_read", "file_write", "python_exec"}),
-    "python": frozenset({"file_read", "file_write", "python_exec", "shell_exec"}),
+    "python": frozenset({"file_read", "file_write", "python_exec"}),
 }
 
-# The modes in which a run can have an approver: the interactive UI always
-# builds a policy, and a Python caller passes `approval=...` to run_task.
-# Direct mode has no panel and the gateway no authenticated one (P12 is not
-# on main), so neither can ask. A `python` run without `approval` has none
-# either, and that is why the checker keeps the six-pattern blocklist for
-# both `python` and `direct` until P13b decides the direct flip.
-APPROVING_MODES: frozenset[ToolMode] = frozenset({"interactive", "python"})
+# The modes in which every run has an approver: the interactive UI always
+# builds a policy. A Python caller can pass `approval=...` to `run_task`,
+# but the library's default has none, so `python`'s default set matches
+# direct's; a caller that names `shell_exec` in `builtins` opts in.
+APPROVING_MODES: frozenset[ToolMode] = frozenset({"interactive"})
 
 
 def mode_requires_approval(mode: ToolMode) -> bool:
-    """Whether *mode* can have a policy that answers before a call runs."""
+    """Whether every run of *mode* has a policy that answers first.
+
+    The interactive UI does. A Python caller can pass ``approval=`` to
+    ``run_task``, but the library's default run has none, which is why
+    ``python``'s default set matches direct's.
+    """
     return mode in APPROVING_MODES
 
 
@@ -61,26 +68,46 @@ def builtin_set_for(mode: ToolMode, names: Collection[str] | None) -> frozenset[
     return DEFAULT_BUILTINS[mode]
 
 
-def exec_refusal(tool_name: str, tier: ToolTier, mode: ToolMode) -> str | None:
+def exec_refusal(
+    tool_name: str,
+    tier: ToolTier,
+    mode: ToolMode,
+    named_builtins: Collection[str] | None = None,
+) -> str | None:
     """Why *mode* refuses a call of *tool_name* of *tier*, or ``None``.
 
-    This is the backstop for a tool that was registered explicitly even
-    though the mode does not offer it: the default set keeps the tool out
-    of the model's hands, and this refusal keeps it out of a run that named
+    This is the backstop for a tool that was registered even though the
+    mode does not offer it: the default set keeps the tool out of the
+    model's hands, and this refusal keeps it out of a run that registered
     it anyway. An ``exec`` tool that the mode's default set omits is
-    refused when the mode has no approver.
+    refused when the mode has no approver, unless a direct or ``python``
+    caller named it in *named_builtins*: an explicit set is the caller's
+    opt-in there, so ``--builtins shell_exec`` and
+    ``AgentOptions(builtins={"shell_exec"})`` both run. The gateway refuses
+    it even when named: no local process can approve its own request (P12
+    is not on main).
 
     `python_exec` stays allowed because it is in every default set and runs
-    in a child process. This release applies this to the gateway only; direct
-    and ``python`` mode still run their six-pattern blocklist.
+    in a child process.
     """
     if tier != "exec" or mode_requires_approval(mode):
         return None
+    if (
+        mode in ("direct", "python")
+        and named_builtins is not None
+        and tool_name in named_builtins
+    ):
+        return None
     if tool_name in DEFAULT_BUILTINS[mode]:
         return None
+    remedy = {
+        "direct": "Use --builtins all to enable it.",
+        "python": "Name it in AgentOptions(builtins=...) to enable it.",
+        "gateway": "The gateway does not offer it.",
+    }[mode]
     return (
         f"{tool_name} is not available in this mode ({mode} mode has no "
-        "approval policy). Use --builtins all in a direct run to enable it."
+        f"approval policy). {remedy}"
     )
 
 

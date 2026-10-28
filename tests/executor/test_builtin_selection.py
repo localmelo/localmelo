@@ -38,26 +38,23 @@ def test_builtin_names_lists_every_builtin() -> None:
     assert {"file_read", "file_write", "python_exec", "shell_exec"} <= ALL_NAMES
 
 
-def test_existing_signature_registers_all() -> None:
+def test_existing_signature_registers_the_python_default() -> None:
     hippo = Hippo()
     executor = Executor(hippo, Checker())
     register_builtins(executor, hippo)
-    assert {t.name for t in hippo.list_tools()} == ALL_NAMES
-    assert set(executor._callables) == ALL_NAMES
-
-
-def test_none_registers_the_python_mode_defaults() -> None:
-    assert _registered(None) == (ALL_NAMES, ALL_NAMES)
-
-
-def test_the_gateway_default_leaves_shell_exec_out() -> None:
     expected = ALL_NAMES - {"shell_exec"}
-    assert _registered(None, mode="gateway") == (expected, expected)
+    assert {t.name for t in hippo.list_tools()} == expected
+    assert set(executor._callables) == expected
 
 
-@pytest.mark.parametrize("mode", ["direct", "interactive"])
-def test_the_other_modes_keep_shell_exec_in_p13a(mode: str) -> None:
-    assert _registered(None, mode=mode) == (ALL_NAMES, ALL_NAMES)
+@pytest.mark.parametrize("mode", ["direct", "gateway", "python"])
+def test_a_mode_without_an_approver_leaves_shell_exec_out(mode: str) -> None:
+    expected = ALL_NAMES - {"shell_exec"}
+    assert _registered(None, mode=mode) == (expected, expected)
+
+
+def test_the_interactive_default_keeps_shell_exec() -> None:
+    assert _registered(None, mode="interactive") == (ALL_NAMES, ALL_NAMES)
 
 
 def test_an_explicit_set_wins_over_the_mode() -> None:

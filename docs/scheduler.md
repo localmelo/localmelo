@@ -85,8 +85,10 @@ The `[scheduler]` table of `config.toml` sets the policy:
 | `lock_self` | `""` | the exact `holder:` (or `holder:run`) that is this bench's own lock |
 | `lock_gate` | `"record"` | `record` only shows the lock; `wait` holds every workspace call while a foreign lock is present |
 
-The lane is the chat being typed in: `POST /v1/playground/presence` sets it
-while you type, and every run sets it too. Its next call is admitted before
+The lane is the chat being typed in: `POST /api/presence` sets it while you
+type (the legacy `POST /v1/playground/presence` still does), and every run
+sets it too — a turn through the turn routes, a retry, and a create with a
+first turn. Its next call is admitted before
 the background calls and bypasses their limit, but never the server's
 `n_srv`. The non-lane limit is `max(1, n_srv - 1 - r_f)`; embedding,
 `retrieve` and `estimate` calls are never held by the policy and never
@@ -227,6 +229,82 @@ poll: a foreign lock shows `GPU lock: <holder> · <purpose> (recorded)` or
 no lock shows nothing. A seeding create under a foreign lock in `wait` fails
 fast with HTTP 409 naming the holder, because the seed embeddings would
 otherwise send a model call before the chat exists.
+
+## Tasks, workers and the scheduler store (S3a.1)
+
+The gateway's `sessions.db` gains a `scheduler` component beside the session
+tables. `support/gateway/task_store.py` creates version 1 of it — `tasks`,
+`task_deps`, `priority_events`, `questions`, `sched_rules`, `sched_log` and
+`idle_windows`, with indexes on `tasks(state, level_eff)`,
+`priority_events(task_id, ts)` and `sched_log(ts)` — in one
+`BEGIN IMMEDIATE` transaction, then records `('scheduler', 1)` in
+`schema_components`. `PRAGMA user_version` stays the session schema's, and a
+terminal `melo` never creates the component or reads its tables; a component
+newer than 1 is refused like a newer `user_version`. `TaskStore.open()` is
+the entry point S3a.2's console calls after it opens the store; this PR adds
+no route, worker or console wiring. A gateway takes the session file's owner
+lock: a second gateway process is refused rather than concurrently migrating
+or writing the same file.
+
+A task row's id is its `kind="task"` session's id. `create_task()` writes the
+session, the task, its first `priority_events` row and a `sched_log` row in
+the same transaction, so a crash leaves none of them. Pass the already
+validated real `workspace` to `create_task()`; it is saved on the session,
+while the original request stays in `tasks.spec`. The current priority is in
+`tasks.level`, not the create-time value in `tasks.spec`. `UNIQUE(origin,
+request_key)` makes a repeated create idempotent: the same payload returns
+the stored row with `repeated=True`, a different payload raises
+`TaskConflictError`, which S3a.2 maps to 409. `set_level()` records actual
+level changes in `priority_events` and writes `sched_log`; unchanged levels
+do not add priority labels. The user's P0 is single, so a
+second user P0 returns the prior one to P1 with no `user_rank` in the same
+transaction, regardless of task origin. Finished tasks cannot be reprioritized.
+`set_priority()` also takes `auto` (P2, computed) and `first`
+(keeps the level, sets a rank that sorts earlier first choices first).
+`apply_retention()` clears `sched_log` and
+`idle_windows` older than the session store's thinking retention — 30 days
+by default. The task store registers it as a hook of the session store's
+sweep, so the gateway's daily `apply_retention()` prunes both, and
+`TaskStore.open()` prunes them too after downtime. Tasks,
+`priority_events`, `questions` and rules are not pruned.
+
+`support/gateway/task_policy.py` is the code-side boundary, never a model's
+JSON:
+
+- `TaskSpec.from_payload()` normalizes an untrusted request (accepting `prompt`
+  as an alias for `objective`) at computed P2, ignoring an untrusted `level`
+  and rejecting a payload-supplied `level_source`. Deferred optional fields,
+  including `inputs`, `deadline`, and `budget_s`, are rejected rather than
+  silently discarded; they are planned for S3a.2. After authorizing the actor,
+  `TaskSpec.from_user_payload()` pins an explicit user-selected P0–P5; without
+  an explicit level it uses computed P2. The adapter does not itself
+  authenticate or authorize a caller.
+- `validate_task_workspace()` resolves the real folder. The configured root
+  must be absolute or `~/` and cannot resolve to `/` or the home folder. A
+  user's task may use any existing folder strictly inside `~` with no dot
+  component and nothing under `~/Library`. For other origins an explicit
+  folder must be strictly inside the configured root; when omitted, pass a
+  trusted `task_id` to create a non-symlink child of that root. The root
+  defaults to `~/localmelo-workspace` when not configured.
+- `worker_tool_allowlist()` returns the gateway built-ins
+  (`file_read`, `file_write`, `python_exec`; never `shell_exec`) and, for
+  `user` and `user_rule` only, remembered approvals, unmarked MCP tools and
+  session grants. `front`, `harness`, `agent`, `channel` and `sleep` get
+  none of those, so every marked call needs a fresh approval.
+
+`ChatGate.register_task()` gives a worker its task lifecycle. Its calls are
+submitted with `task_id` and `session_kind="task"`, never take the lane, and
+a call ending does not finish the worker. The runner calls `finish_task()`
+with `done`, `failed`, `cancelled` or `expired`.
+It cancels parked calls but retains admitted calls until their providers end;
+new calls for a terminal task are refused and logged. Ending a live task must
+go through `finish_task()`; a repeat does not change its terminal phase.
+`update_task()` carries caller-owned fields such as nonterminal phase and wait
+reason, but not level or source. Re-registering an existing task preserves its
+current priority, and forgetting it preserves its identity while its row exists;
+`set_task_level()` handles the chip's `P0`-`P5`, `auto` and `first`, and
+`held(task_id)` reports the gate's reason as it does for a chat. Gate levels
+remain in memory; S3a.2 writes them through the store.
 
 ## Run one simulation
 

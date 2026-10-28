@@ -35,6 +35,8 @@ button:disabled {
   --accent: #516847;
   --tint: #edf1e8;
   --error: #a1342b;
+  --ok: #2e7d32;
+  --warn: #8a5a00;
   --shadow: 0 16px 64px #20251b20;
 }
 body {
@@ -869,6 +871,8 @@ dialog::backdrop {
     --accent: #a9c294;
     --tint: #303a29;
     --error: #f49b8e;
+    --ok: #6cc070;
+    --warn: #e3b341;
     --shadow: 0 16px 64px #0005;
   }
   .composer {
@@ -1058,4 +1062,219 @@ dialog::backdrop {
 }
 .align-right {
   text-align: right;
+}
+
+/* ── Turns, work groups, tool cards and the live row (API v2) ── */
+.turn + .turn {
+  margin-top: 8px;
+}
+.turn.undone {
+  opacity: 0.55;
+}
+.turn-caption {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  text-align: right;
+}
+.work-group {
+  margin: 0 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.work-group > summary.work-summary {
+  cursor: pointer;
+  padding: 9px 13px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.work-group[open] > summary.work-summary {
+  border-bottom: 1px solid var(--line);
+}
+.work-group > *:not(summary) {
+  border-top: 1px solid var(--line);
+}
+.work-group > *:first-of-type:not(summary) {
+  border-top: 0;
+}
+.tool-card > summary.tool-summary {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 7px 13px;
+  cursor: pointer;
+  font:
+    12px/1.6 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.tool-mark {
+  flex: none;
+  color: var(--muted);
+}
+.tool-card[data-state="success"] .tool-mark {
+  color: var(--ok);
+}
+.tool-card[data-state="error"] .tool-mark,
+.tool-card[data-state="timeout"] .tool-mark,
+.tool-card[data-state="crashed"] .tool-mark {
+  color: var(--error);
+}
+.tool-card[data-state="blocked"] .tool-mark,
+.tool-card[data-state="interrupted"] .tool-mark,
+.tool-card[data-state="held"] .tool-mark,
+.tool-card[data-state="waiting_approval"] .tool-mark,
+.tool-card[data-state="cancelled"] .tool-mark {
+  color: var(--warn);
+}
+.tool-name {
+  flex: none;
+  font-weight: 600;
+}
+.tool-preview {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tool-meta {
+  margin-left: auto;
+  flex: none;
+  color: var(--muted);
+}
+.tool-body {
+  padding: 4px 13px 13px;
+  font-size: 12px;
+}
+.tool-section h4,
+.tool-section > h4 {
+  margin: 10px 0 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.tool-arguments,
+.tool-output {
+  margin: 0;
+  padding: 10px;
+  background: var(--sidebar);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  max-height: 260px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font:
+    11px/1.6 ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace;
+}
+.tool-error {
+  margin: 8px 0 0;
+  color: var(--error);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tool-approval {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+.tool-image {
+  display: block;
+  max-width: 100%;
+  margin: 8px 0;
+  border-radius: 8px;
+}
+.link-button {
+  background: none;
+  border: 0;
+  padding: 4px 8px 4px 0;
+  color: var(--accent);
+  font-size: 11px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.work-group .thinking,
+.work-group .reflection {
+  padding: 7px 13px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.work-group .thinking summary,
+.work-group .reflection summary {
+  cursor: pointer;
+  font-size: 11px;
+}
+.work-group .thinking-body,
+.work-group .reflection-body {
+  padding: 8px 0 2px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.reflection-body .muted {
+  color: var(--muted);
+}
+.assistant-text {
+  padding: 9px 13px;
+  font-size: 13px;
+}
+.assistant-text p {
+  margin: 0 0 8px;
+}
+.notice-item {
+  padding: 7px 13px;
+  font-size: 11px;
+  color: var(--warn);
+}
+.notice-item[data-kind="retry"] {
+  color: var(--muted);
+}
+.live-row {
+  padding: 8px 13px;
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.live-line {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.live-line .status-dot {
+  animation: pulse 1.4s infinite;
+}
+.live-past {
+  padding-left: 18px;
+  overflow-wrap: anywhere;
+}
+.outbox-state {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.turn-status {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--warn);
+}
+.turn-status[data-severity="error"] {
+  color: var(--error);
+}
+.turn-status[data-severity="stopped"] {
+  color: var(--muted);
 }
