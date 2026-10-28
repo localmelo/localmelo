@@ -22,6 +22,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Read-only worker history in the web workspace, with server-side filters,
+  paging, recorded transcripts and explicit refresh for unfinished runs. ([#130])
+
 - Opt-in context-window request accounting reports estimated and measured planning/reflection
   tokens in events and run results; it does not prune or enforce an output cap ([#126]).
 
@@ -931,3 +934,4 @@ earlier milestones.
 [#126]: https://github.com/localmelo/localmelo/pull/126
 [#128]: https://github.com/localmelo/localmelo/pull/128
 [#129]: https://github.com/localmelo/localmelo/pull/129
+[#130]: https://github.com/localmelo/localmelo/pull/130

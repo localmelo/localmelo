@@ -49,8 +49,9 @@ printed single-use link within 60 seconds. For a nondefault port, add
 `--port PORT`. Do not share the link. The page exchanges its fragment for an
 HttpOnly, SameSite=Strict cookie valid for up to 30 days and removes the
 fragment. Run `melo --gateway-rotate-token` to replace the private token file.
-All gateways using that file reject old credentials; open event streams are
-closed when they observe the change (normally within 250 ms).
+All gateways using that file reject old credentials; revocation of open event
+streams takes effect within about 250 ms. One event already being sent may
+still complete.
 
 The bearer is generated on first use and stored at
 `~/.cache/localmelo/gateway/auth/token` (directory 0700, file 0600). For
