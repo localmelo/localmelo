@@ -109,6 +109,26 @@ async def test_presence_for_an_unknown_session_is_not_found(tmp_path: Path) -> N
         assert response.json()["error"]["code"] == "not_found"
 
 
+async def test_a_create_with_a_first_turn_sets_the_gates_turn_facts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with console_with(tmp_path, answer("hello")) as (console, client, _):
+        started: list[tuple[str, str]] = []
+        monkeypatch.setattr(
+            console.gate, "turn_start", lambda sid: started.append(("start", sid))
+        )
+        monkeypatch.setattr(
+            console.gate, "focus", lambda sid: started.append(("focus", sid))
+        )
+
+        body = await _create(client, tmp_path, "Hi there")
+
+        session_id = body["session"]["id"]
+        await _wait_turn(client, session_id)
+        # A create's first turn is a turn like any other (S2).
+        assert started == [("start", session_id), ("focus", session_id)]
+
+
 async def test_a_turn_resets_the_gates_turn_facts(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

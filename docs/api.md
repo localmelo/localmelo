@@ -331,7 +331,7 @@ curl -X POST http://127.0.0.1:8401/api/sessions \
 ```
 
 ```json
-{"session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "list the folder", "created_at": 1793163786.21, "updated_at": 1793163786.21, "model": "qwen3:8b", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": true, "running_here": true, "pending_approvals": 0}, "turn_id": "9a840f8444e1452a9a25e5b6b804b20b", "turn": {"id": "9a840f8444e1452a9a25e5b6b804b20b", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
+{"session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "list the folder", "created_at": 1793163786.21, "updated_at": 1793163786.21, "model": "qwen3:8b", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": true, "running_here": true, "pending_approvals": 0, "level": 2, "held": ""}, "turn_id": "9a840f8444e1452a9a25e5b6b804b20b", "turn": {"id": "9a840f8444e1452a9a25e5b6b804b20b", "...": "..."}, "resumed_turns": null, "resume_mode": null, "resumed_checkpoint_turns": null}
 ```
 
 - `workspace` is optional. Absent or `null`, it is `~/localmelo-workspace`,
@@ -516,10 +516,11 @@ curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/level \
 ```
 
 - `level` is a JSON integer from 1 to 4. A string or a boolean is 400
-  `invalid_request` (`level: Input should be a valid integer`); `0` and `5`
-  are 400 with `level: Input should be greater than or equal to 1` and
-  `level: Input should be less than or equal to 4`. P1 is the urgent lane, P4
-  the background one; see [Scheduler](scheduler.md#the-gate-on-chats-s2).
+  `invalid_request` (`body.level: Input should be a valid integer`); `0` and
+  `5` are 400 with `body.level: Input should be greater than or equal to 1`
+  and `body.level: Input should be less than or equal to 4`. P1 is the urgent
+  lane, P4 the background one; see
+  [Scheduler](scheduler.md#the-gate-on-chats-s2).
 - The route never opens the session: a level is a scheduler fact, not an
   Agent's. An unknown session is 404 `not_found`, as on every read below
   `/api/sessions/{id}`.
@@ -542,8 +543,9 @@ curl -X POST http://127.0.0.1:8401/api/presence \
 - 404 `not_found` for an unknown session. The call is a scheduler event for
   the focused chat (the lane keeps its typing window); it does not open the
   session and changes nothing else.
-- A turn started through the turn routes also resets the chat's hold clock
-  and focuses it, as a chat's own message does.
+- A turn started through the turn routes, and a create with a first turn,
+  also resets the chat's hold clock and focuses it, as a chat's own message
+  does.
 
 ## GET /api/sessions/{id}/tools
 

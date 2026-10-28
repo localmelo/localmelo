@@ -736,7 +736,8 @@ export function applyEvent(view, frame, {ignoreCursor = false} = {}) {
         message: String(data.message ?? ""),
       });
       break;
-    }    case "reflection.started": {
+    }
+    case "reflection.started": {
       turn.items.push({
         kind: "reflection",
         attempt: int(data.attempt) ?? turn.attempt,
@@ -1003,6 +1004,14 @@ export function toolState(item, {held = "", now = 0} = {}) {
   }
 }
 
+/** `_first_line`: the first non-blank line of *text*, cleaned and collapsed. */
+function firstLine(text) {
+  for (const line of cleanOutput(String(text ?? "")).split("\n")) {
+    if (line.trim()) return line.trim().split(/\s+/).join(" ");
+  }
+  return "";
+}
+
 /** A reflection's summary line, as `support/cli/render.py` words it. */
 export function reflectionLine(item) {
   const attempt = item.attempt;
@@ -1012,9 +1021,11 @@ export function reflectionLine(item) {
       ? `Reflection after attempt ${attempt} could not be read; the run continues.`
       : `Reflection after attempt ${attempt} could not be read, and the run's budget is used up.`;
   }
-  const first = printable(item.summary || item.rationale || "").split(/[.;]/)[0] ?? "";
-  const parts = [`Reflected after attempt ${attempt}: ${String(item.action ?? "")}`];
-  if (first) parts.push(first);
-  if (item.durationS !== null) parts.push(`(${formatDuration(item.durationS)})`);
-  return parts.filter(Boolean).join(SEPARATOR);
+  // The terminal shows the rationale's first line after the action and the
+  // duration in parentheses with a space, not another ` · ` part.
+  let line = `Reflected after attempt ${attempt}: ${String(item.action ?? "")}`;
+  const first = firstLine(item.rationale);
+  if (first) line += `${SEPARATOR}${first}`;
+  if (item.durationS !== null) line += ` (${formatDuration(item.durationS)})`;
+  return line;
 }

@@ -690,6 +690,10 @@ class ConsoleSessions:
         )
         turn: TurnInfo | None = None
         if has_turn:
+            # The first turn is a turn of this chat, so the gate hears it as
+            # the page's later sends make it heard: the hold clock restarts
+            # and this chat becomes the lane's focus before its first call.
+            self._note_turn_start(info.id)
             try:
                 turn = await runner.start_turn(
                     composed or "",

@@ -184,6 +184,35 @@ function moveDraft(from, to) {
   persist(KEY + "-drafts", S.drafts, "sessionStorage");
 }
 
+/**
+ * Keep a message the store may not have as *slot*'s draft.
+ *
+ * A refused or unknown send has no turn to reload: the outbox lives in
+ * memory, so without the draft a reload lost the text. The oldest unsent
+ * text wins, as the old page kept the first draft, and the composer shows it
+ * again when it is empty.
+ */
+function keepDraft(slot, text) {
+  if (!S.drafts[slot]) S.drafts[slot] = text;
+  persist(KEY + "-drafts", S.drafts, "sessionStorage");
+  if ((S.activeId ?? "new") === slot && !input.value) {
+    input.value = S.drafts[slot];
+    resizeInput();
+  }
+}
+
+/** Drop the draft a failed send restored, once the store accepted *text*. */
+function forgetDraft(slot, text) {
+  if (S.drafts[slot] === text) {
+    delete S.drafts[slot];
+    persist(KEY + "-drafts", S.drafts, "sessionStorage");
+  }
+  if ((S.activeId ?? "new") === slot && input.value === text) {
+    input.value = "";
+    resizeInput();
+  }
+}
+
 function resizeInput() {
   input.style.height = "auto";
   input.style.height = Math.min(input.scrollHeight, 190) + "px";
@@ -380,24 +409,30 @@ async function refreshList() {
     S.online = true;
     S.machine = body.machine ?? null;
     S.sessions = body.sessions ?? [];
-    adoptSummary();
+    const heldChanged = adoptSummary();
     renderSessions();
     syncUI();
+    // The work group's summary carries the hold (`Waiting: <held>`); the
+    // header and the live row move every second, so redraw the messages
+    // when the 4 s poll is the first to learn a hold began or ended.
+    if (heldChanged) renderMessages(false);
   } catch {
     S.online = false;
     syncUI();
   }
 }
 
-/** Copy the list's live facts onto the open session's copy. */
+/** Copy the list's live facts onto the open session's copy; held changed. */
 function adoptSummary() {
   const session = S.view?.session;
-  if (!session) return;
+  if (!session) return false;
   const summary = S.sessions.find((item) => item.id === session.id);
-  if (!summary) return;
+  if (!summary) return false;
+  const held = session.held;
   for (const key of ["title", "model", "workspace", "workspace_label", "busy", "held", "pending_approvals", "level", "updated_at"]) {
     if (summary[key] !== undefined) session[key] = summary[key];
   }
+  return session.held !== held;
 }
 
 // ── Loading one session ──
@@ -487,8 +522,10 @@ function forgetSession(id) {
   syncUI();
 }
 
-function newChat() {
-  saveDraft();
+function newChat({ saveCurrent = true } = {}) {
+  // Closing the last chat has already deleted its draft: saving the composer
+  // then would write that chat's text over a waiting new-chat draft.
+  if (saveCurrent) saveDraft();
   closeStream();
   S.activeId = null;
   S.view = null;
@@ -599,7 +636,13 @@ function scheduleReconnect() {
 function applyOutcome(outcome) {
   if (outcome.clientRequestId) {
     for (const [slot, entry] of Object.entries(S.outbox)) {
-      if (entry.clientRequestId === outcome.clientRequestId) delete S.outbox[slot];
+      if (entry.clientRequestId !== outcome.clientRequestId) continue;
+      // A text this page restored to the draft on a failed or unknown send
+      // is now a real turn, so it is not a draft any more.
+      if (entry.state === "failed" || entry.state === "checking") {
+        forgetDraft(slot, entry.text);
+      }
+      delete S.outbox[slot];
     }
   }
   if (outcome.title !== undefined) {
@@ -607,6 +650,8 @@ function applyOutcome(outcome) {
     const session = S.sessions.find((item) => item.id === S.activeId);
     if (session) session.title = outcome.title;
     sessionListSnapshot = "";
+    // The sidebar's row carries the title; the next 4 s poll is too late.
+    renderSessions();
   }
   if (outcome.model !== undefined || outcome.workspace !== undefined) {
     const session = S.sessions.find((item) => item.id === S.activeId);
@@ -615,6 +660,7 @@ function applyOutcome(outcome) {
       if (outcome.workspace !== undefined) session.workspace = outcome.workspace;
     }
     sessionListSnapshot = "";
+    renderSessions();
   }
 }
 
@@ -922,10 +968,11 @@ function outputBlock(item) {
       ? text
       : lines.slice(0, 40).join("\n").slice(0, 2000);
   section.append(el("pre", "tool-output", shown));
+  // The count is the design's raw character count, not the house's 2.0k.
   const hidden = item.outputChars || text.length;
   if (shown !== text) {
     section.append(
-      button("link-button", `Show all ${formatTokens(hidden)} characters`, () => {
+      button("link-button", `Show all ${hidden} characters`, () => {
         item.showAll = true;
         renderMessages(false);
       }),
@@ -999,7 +1046,8 @@ function outboxNode(entry, slot) {
   if (entry.state === "sending") status.textContent = "Sending…";
   else if (entry.state === "checking") status.textContent = "Checking…";
   else {
-    status.append(el("span", "", entry.error ? `Not sent: ${entry.error} · ` : "Not sent · "));
+    const label = entry.unknown ? "Outcome unknown" : "Not sent";
+    status.append(el("span", "", entry.error ? `${label}: ${entry.error} · ` : `${label} · `));
     status.append(
       button("link-button", "Retry", () => {
         entry.state = "sending";
@@ -1052,6 +1100,7 @@ async function submit(slot, key, text) {
         },
       });
       const created = body.session;
+      forgetDraft("new", text);
       delete S.outbox.new;
       delete S.outbox[created.id];
       if (S.activeId === null) {
@@ -1074,6 +1123,8 @@ async function submit(slot, key, text) {
     const body = await api(`/sessions/${encodeURIComponent(sessionId)}/turns`, {
       body: { text, client_request_id: key },
     });
+    // A repeat is accepted too, so either way the text is not a draft now.
+    forgetDraft(sessionId, text);
     if (body.repeated === true) {
       // The key was accepted already: this is the turn it started, not a
       // second one, and no new event will say so.
@@ -1095,6 +1146,9 @@ async function submit(slot, key, text) {
     if (refused) {
       entry.state = "failed";
       entry.error = error.message;
+      // The outbox is memory only: the chat's saved draft is what survives
+      // a reload, and the composer shows it again.
+      keepDraft(slot, text);
       renderMessages(false);
       syncUI();
       return;
@@ -1118,6 +1172,7 @@ async function checkSubmission(slot, key) {
       : await api(`/submissions/${encodeURIComponent(key)}`);
     const submission = body.submission ?? {};
     if (submission.state === "accepted") {
+      forgetDraft(slot, entry.text);
       delete S.outbox[slot];
       if (sessionId === null && submission.session_id) {
         await refreshList();
@@ -1137,9 +1192,14 @@ async function checkSubmission(slot, key) {
     }
     entry.state = "failed";
     entry.error = "";
+    entry.unknown = true;
+    // Nothing in the outbox survives a reload; the draft does.
+    keepDraft(slot, entry.text);
   } catch (error) {
     entry.state = "failed";
     entry.error = error.message;
+    entry.unknown = true;
+    keepDraft(slot, entry.text);
   }
   renderMessages(false);
   syncUI();
@@ -1211,7 +1271,7 @@ async function deleteSession(id) {
       S.activeId = null;
       S.view = null;
       if (S.sessions.length > 0) await openSession(S.sessions[0].id, { saveCurrent: false });
-      else newChat();
+      else newChat({ saveCurrent: false });
     }
     renderSessions();
     syncUI();
@@ -1374,12 +1434,14 @@ async function init() {
     notify(S.health.sessions.store_error || "Chats are unavailable.", { sticky: true });
   }
   // The hash wins: `#/s/<id>` opens that chat, `#/new` a new one. Without
-  // one, the last chat this tab opened, else the newest.
+  // one, the last chat this tab opened, else the newest. The hash id is
+  // authoritative even when it is outside the list's first page: its 404
+  // sends the page back to a new chat, as a gone chat does.
   const fromHash = hashId();
   const wantsNew = (globalThis.location?.hash || "") === "#/new";
   let wanted = "";
   if (fromHash) {
-    wanted = S.sessions.some((session) => session.id === fromHash) ? fromHash : "";
+    wanted = fromHash;
   } else if (!wantsNew) {
     const saved = stored(KEY + "-view").id;
     wanted = S.sessions.some((session) => session.id === saved)
@@ -1444,6 +1506,15 @@ $("sidebar-toggle").addEventListener("click", () =>
 );
 $("sidebar-backdrop").addEventListener("click", () => sidebar(false));
 matchMedia("(max-width: 700px)").addEventListener?.("change", () => sidebar(false));
+// Back and Forward move the hash; the chat follows it, as a reload would.
+globalThis.addEventListener?.("hashchange", async () => {
+  const id = hashId();
+  if (id) {
+    if (S.activeId !== id) await openSession(id);
+    return;
+  }
+  if ((globalThis.location?.hash || "") === "#/new" && S.activeId !== null) newChat();
+});
 document.querySelectorAll("[data-prompt]").forEach((node) =>
   node.addEventListener("click", () => {
     input.value = node.dataset.prompt;

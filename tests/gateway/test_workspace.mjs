@@ -181,7 +181,7 @@ test('the live row words the run as the terminal does', () => {
   assert.equal(activity(turn, {now: 200}), 'Reflecting');
   assert.match(reflectionLine(turn.items[turn.items.length - 1]), /^Reflecting after attempt 1/);
   push('reflection', {attempt: 1, action: 'continue', continue_run: true, rationale: 'keep going', summary: 'keep going', best_effort_result: null, requests: 1, readable: true, usage: {completion_tokens: 5}, duration_s: 2});
-  assert.match(reflectionLine(turn.items[turn.items.length - 1]), /^Reflected after attempt 1: continue/);
+  assert.equal(reflectionLine(turn.items[turn.items.length - 1]), 'Reflected after attempt 1: continue · keep going (2.0s)');
   push('tool.started', {step: 4, call_id: 'call-1', name: 'pytest', arguments: {}, preview: 'pytest'});
   assert.equal(activity(turn, {now: 200}), 'Running pytest');
   assert.equal(activity(turn, {held: 'Resources', now: 200}), 'Waiting: Resources');
@@ -190,6 +190,13 @@ test('the live row words the run as the terminal does', () => {
   turn.retryUntil = 210;
   turn.items = turn.items.filter((item) => item.kind !== 'tool');
   assert.equal(activity(turn, {now: 200}), 'Retrying in 10s');
+});
+
+test('a reflection line reads as render.py writes it', () => {
+  const item = {attempt: 1, status: 'done', action: 'continue', summary: 'a summary', rationale: 'First line.\nSecond line.', durationS: 2};
+  assert.equal(reflectionLine(item), 'Reflected after attempt 1: continue · First line. (2.0s)');
+  const onlyOne = {attempt: 2, status: 'done', action: 'done', summary: 'the summary', rationale: '', durationS: 12};
+  assert.equal(reflectionLine(onlyOne), 'Reflected after attempt 2: done (12s)');
 });
 
 test('before the first run.progress the step is the turn\'s own', () => {
@@ -364,6 +371,9 @@ function storage() {
   };
 }
 
+// The harness's document, for the element double made outside its closure.
+let documentDouble = null;
+
 function makeElement(tag, id = '') {
   const classes = new Set();
   const element = {
@@ -393,7 +403,7 @@ function makeElement(tag, id = '') {
       if (selector === '.sidebar' && element.id === 'sidebar') return element;
       return null;
     },
-    focus() { document.activeElement = element; },
+    focus() { documentDouble.activeElement = element; },
     close() { element.open = false; },
     showModal() { element.open = true; },
     querySelector() { return null; },
@@ -459,6 +469,7 @@ function harness(routes, {mobile = false} = {}) {
   const elements = new Map();
   const timers = [];
   const documentListeners = {};
+  const windowListeners = {};
   const root = makeElement('html');
   const document = {
     hidden: false,
@@ -479,6 +490,7 @@ function harness(routes, {mobile = false} = {}) {
     return elements.get(id);
   }
   document.getElementById = element;
+  documentDouble = document;
   const net = gateway(routes);
   const context = vm.createContext({
     ...turns,
@@ -488,6 +500,9 @@ function harness(routes, {mobile = false} = {}) {
     localStorage: storage(),
     sessionStorage: storage(),
     matchMedia: () => ({matches: mobile, addEventListener() {}}),
+    addEventListener(type, handler) {
+      (windowListeners[type] ||= []).push(handler);
+    },
     Option: class { constructor(label, value) { this.label = label; this.value = value; } },
     setTimeout: (handler, ms) => {
       timers.push({handler, ms, cleared: false});
@@ -515,6 +530,7 @@ function harness(routes, {mobile = false} = {}) {
     text: (id) => flatten(element(id)),
     stream: () => FakeEventSource.instances[FakeEventSource.instances.length - 1],
     documentListeners,
+    windowListeners,
     local: context.localStorage,
     session: context.sessionStorage,
   };
@@ -589,6 +605,65 @@ test('the #/new route opens a new chat even when chats are saved', async () => {
   assert.equal(h.state().activeId, 'a', 'A session hash opens that chat');
 });
 
+test('a hash chat outside the loaded list is opened anyway', async () => {
+  const h = harness(baseRoutes({'GET /sessions': {sessions: [], machine: null, has_more: false}}));
+  h.context.location.hash = '#/s/a';
+  await h.run('init()');
+  assert.equal(h.state().activeId, 'a');
+  assert.equal(h.net.callsTo('/sessions/a').length, 1, 'The hash names a chat, not a list row');
+});
+
+test('a hash chat the store does not have falls back to a new chat', async () => {
+  const missing = new Error('Session not found.');
+  missing.status = 404;
+  const h = harness(baseRoutes({
+    'GET /sessions': {sessions: [], machine: null, has_more: false},
+    'GET /sessions/a': () => missing,
+  }));
+  h.context.location.hash = '#/s/a';
+  await h.run('init()');
+  assert.equal(h.state().activeId, null);
+  assert.equal(h.context.location.hash, '#/new');
+  assert.match(h.element('notice').textContent, /expired or the gateway restarted/);
+});
+
+test('Back and Forward move the chat with the hash', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions': {sessions: [session('a'), session('b')], machine: null, has_more: false},
+    'GET /sessions/b': {session: session('b'), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0},
+    'GET /sessions/b/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0},
+  }));
+  await h.run('init()');
+  assert.equal(h.state().activeId, 'a');
+  const hashchange = h.windowListeners.hashchange[0];
+  assert.ok(hashchange, 'The page listens for the hash');
+  h.context.location.hash = '#/s/b';
+  await hashchange();
+  assert.equal(h.state().activeId, 'b');
+  assert.equal(h.context.location.hash, '#/s/b');
+  h.context.location.hash = '#/new';
+  await hashchange();
+  assert.equal(h.state().activeId, null);
+  assert.equal(h.element('welcome').hidden, false);
+});
+
+test('the sidebar escapes a server title and model', async () => {
+  const title = '<img src=x onerror=alert(1)>';
+  const model = 'a&"b';
+  const h = harness(baseRoutes({
+    'GET /sessions': {sessions: [session('a', {title, model})], machine: null, has_more: false},
+    'GET /sessions/a': {
+      session: session('a', {title, model}), pending_approvals: [], grants: [], granted_at: {},
+      mcp_error: '', agent: 'not_loaded', tokens: 0,
+    },
+  }));
+  await h.run('init()');
+  const info = h.element('session-list').children[0].children[0];
+  assert.match(info.innerHTML, /&lt;img src=x onerror=alert\(1\)&gt;/);
+  assert.match(info.innerHTML, /a&amp;&quot;b/);
+  assert.doesNotMatch(info.innerHTML, /<img/);
+});
+
 test('a send in an open chat posts a keyed turn and waits for its event', async () => {
   const h = harness(baseRoutes({
     'POST /sessions/a/turns': {status: 202, body: {turn_id: 'turn-2', turn: turnRow({id: 'turn-2', turn: 2, status: 'running', answer: null, finished_at: 0})}},
@@ -649,12 +724,20 @@ test('a refused send stays as an unsent draft and is retried under the same key'
   await h.run('send()');
   assert.equal(h.state().outbox.a.state, 'failed');
   assert.match(h.text('messages'), /Not sent: text: the message must not be blank/);
+  assert.equal(h.element('input').value, 'Try me', 'The refused text comes back to the composer');
+  assert.equal(
+    JSON.parse(h.session.getItem('localmelo-console-drafts')).a,
+    'Try me',
+    'The chat draft survives a reload, where the in-memory outbox does not',
+  );
   const retry = flatten(h.element('messages')).includes('Retry');
   assert.equal(retry, true);
   const first = h.net.callsTo('/sessions/a/turns')[0].body.client_request_id;
   await h.run('submit("a", S.outbox.a.clientRequestId, S.outbox.a.text)');
   const second = h.net.callsTo('/sessions/a/turns')[1].body.client_request_id;
   assert.equal(second, first, 'A retry repeats the key, so one message makes one turn');
+  assert.equal(h.element('input').value, '', 'An accepted retry is not a draft any more');
+  assert.equal(h.state().drafts.a, undefined);
 });
 
 test('a send the store already accepted is not sent twice', async () => {
@@ -742,10 +825,11 @@ test('cancel and keep draft puts the message back in the composer', async () => 
   h.context.crypto = {randomUUID: () => key};
   h.element('input').value = 'Keep me';
   await h.run('send()');
-  assert.equal(h.element('input').value, '');
+  assert.equal(h.element('input').value, 'Keep me', 'An unknown send keeps the text');
+  h.element('input').value = '';
   await h.run('cancelSend("a", S.outbox.a)');
   assert.equal(h.state().outbox.a, undefined);
-  assert.equal(h.element('input').value, 'Keep me');
+  assert.equal(h.element('input').value, 'Keep me', 'Cancel puts it back when the composer is empty');
 });
 
 test('a withdrawal the store made on its own keeps the message', async () => {
@@ -828,13 +912,21 @@ test('a level change that fails goes back', async () => {
   assert.match(h.element('notice').textContent, /Could not change the chat level: the gate is down/);
 });
 
-test('closing the last chat opens a new one', async () => {
+test('closing the last chat opens a new one and keeps its waiting draft', async () => {
   const h = harness(baseRoutes({'DELETE /sessions/a': {status: 204, body: {}}}));
   await h.run('init()');
+  h.run('S.drafts.new = "precious new"');
+  h.element('input').value = 'chat draft';
   await h.run('deleteSession("a")');
   assert.equal(h.state().activeId, null);
   assert.equal(h.element('welcome').hidden, false);
-  assert.equal(h.element('input').value, '');
+  // The deleted chat's text is not a new-chat draft; the waiting one is.
+  assert.equal(h.state().drafts.new, 'precious new');
+  assert.equal(h.element('input').value, 'precious new');
+  assert.equal(
+    JSON.parse(h.session.getItem('localmelo-console-drafts')).new,
+    'precious new',
+  );
 });
 
 test('a busy chat is not closed from the sidebar', async () => {
@@ -867,7 +959,22 @@ test('a running tool card keeps its clock and its limit on the page', async () =
   assert.match(h.text('messages'), /Running · [\d:]+ of 10:00/);
 });
 
-test('a message the store does not know stays unsent', async () => {
+test('Show all names the raw character count', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.stream().emit({
+    id: 20, turn: 1, ts: 50, type: 'tool.started',
+    data: {step: 1, call_id: 'call-1', name: 'shell_exec', arguments: {}, preview: 'cat big'},
+  });
+  h.stream().emit({
+    id: 21, turn: 1, ts: 51, type: 'tool.finished',
+    data: {call_id: 'call-1', name: 'shell_exec', status: 'success', error_category: 'none', output: 'x'.repeat(3000), output_chars: 3000, error: '', duration_s: 1, images: [], approval: null, exit_code: 0},
+  });
+  assert.match(h.text('messages'), /Show all 3000 characters/);
+  assert.doesNotMatch(h.text('messages'), /Show all 3\.0k/);
+});
+
+test('a message the store does not know says its outcome is unknown', async () => {
   const key = '22222222-2222-2222-2222-222222222222';
   const h = harness(baseRoutes({
     'POST /sessions/a/turns': () => new Error('The connection dropped'),
@@ -878,7 +985,18 @@ test('a message the store does not know stays unsent', async () => {
   h.context.crypto = {randomUUID: () => key};
   await h.run('send()');
   assert.equal(h.state().outbox.a.state, 'failed');
-  assert.match(h.text('messages'), /Not sent/);
+  assert.match(h.text('messages'), /Outcome unknown/);
+  assert.doesNotMatch(h.text('messages'), /Not sent/);
+  assert.equal(h.element('input').value, 'Lost one');
+  assert.equal(JSON.parse(h.session.getItem('localmelo-console-drafts')).a, 'Lost one');
+  // The message did land after all: its turn clears the draft the page kept.
+  h.stream().emit({
+    id: 30, turn: 2, ts: 100, type: 'turn.started',
+    data: {turn: 2, turn_id: 'turn-2', user_text: 'Lost one', client_request_id: key},
+  });
+  assert.equal(h.state().outbox.a, undefined);
+  assert.equal(h.element('input').value, '');
+  assert.equal(h.state().drafts.a, undefined);
 });
 
 test('stop posts the running turn\'s id', async () => {
@@ -1058,6 +1176,24 @@ test('the header pill and the composer follow a session hold', async () => {
   assert.equal(h.element('run-status').textContent, 'Running on your backend');
 });
 
+test('the 4 s poll redraws the work group when the hold changes', async () => {
+  const running = turnRow({status: 'running', answer: null, finished_at: 0, running_here: true});
+  const routes = baseRoutes({
+    'GET /sessions': {sessions: [session('a', {busy: true, held: ''})], machine: null, has_more: false},
+    'GET /sessions/a': {
+      session: session('a', {busy: true, held: ''}),
+      pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'open', tokens: 0,
+    },
+    'GET /sessions/a/turns?limit=10': {turns: [running], has_earlier: false, replay_from: 0},
+  });
+  const h = harness(routes);
+  await h.run('init()');
+  assert.match(h.text('messages'), /Working/);
+  routes['GET /sessions'] = {sessions: [session('a', {busy: true, held: 'Resources'})], machine: null, has_more: false};
+  await h.run('refreshList()');
+  assert.match(h.text('messages'), /Waiting: Resources/);
+});
+
 test('Escape closes the level menu before it stops the turn', async () => {
   const h = harness(baseRoutes({
     'POST /turns/turn-2/cancel': {status: 202, body: {turn_id: 'turn-2', cancelling: true}},
@@ -1104,6 +1240,15 @@ test('the open chat\'s row follows the frames the page sees', async () => {
   assert.equal(row().pending_approvals, 0);
   h.stream().emit({id: 23, turn: 2, ts: 53, type: 'turn.finished', data: {turn: 2, turn_id: 'turn-2', status: 'completed', error: '', cause: 'run'}});
   assert.equal(row().busy, false, 'The row stops saying Working when the turn ends');
+});
+
+test('a renamed session reaches its sidebar row without the poll', async () => {
+  const h = harness(baseRoutes());
+  await h.run('init()');
+  h.stream().emit({id: 30, turn: 1, ts: 50, type: 'session.title', data: {title: 'A better title'}});
+  const info = h.element('session-list').children[0].children[0];
+  assert.match(info.innerHTML, /A better title/);
+  assert.equal(h.element('header-title').textContent, 'A better title');
 });
 
 test('the paused-stream banner does not overwrite an error', async () => {

@@ -204,10 +204,6 @@ def _turn_body(turn: TurnInfo, resumed: ResumeInfo | None) -> dict[str, Any]:
     return {"turn_id": turn.id, "turn": turn_json(turn), **_resume_json(resumed)}
 
 
-def _pending(console: Console, session_id: str) -> int:
-    return len(console.broker.pending(session_id))
-
-
 # ── Routes ──
 
 

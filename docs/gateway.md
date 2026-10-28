@@ -272,8 +272,9 @@ tab is visible, for changes from another browser.
 A send is named by a `client_request_id`. If its answer is lost the page asks
 the store whether the message was accepted, and offers `Retry` only when it
 was not; a retry repeats the same key, so one message makes one turn. A
-message that was never accepted stays on screen as a draft: `Not sent`, with
-`Retry` and `Cancel and keep draft`.
+message that was never accepted goes back to that chat's draft, so a reload
+keeps it: the outbox says `Not sent` (or `Outcome unknown` when the store
+could not be asked), with `Retry` and `Cancel and keep draft`.
 
 A chat's header has a level chip (P1 to P4, P2 by default) that sets how the
 scheduler orders the chat's calls in front of other chats; it is kept in

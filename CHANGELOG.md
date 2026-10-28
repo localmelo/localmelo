@@ -13,7 +13,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `/api`: the session list with its machine snapshot, one chat's turns, its
   event stream (SSE, reopened from the last applied event id), keyed sends
   that the store is asked about before `Retry` is offered, stop, close, the
-  level chip and the typing heartbeat. A turn reads as the terminal's: the
+  level chip and the typing heartbeat. A refused or unknown send goes back
+  to the chat's draft, so a reload keeps it, and `#/s/<id>` opens its chat
+  even when the list's first page does not hold it. A turn reads as the
+  terminal's: the
   user's message, a work group with one card per tool call (`Running`,
   `Waiting: <held>`, `Needs approval`, `[ok]` with a non-zero `exit`,
   `blocked` with the approval tag, `not run`, `Interrupted: may have partly
