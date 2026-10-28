@@ -182,13 +182,16 @@ function presence(force = false) {
 function syncUI() {
   const s = active();
   const busy = !!s && (s.is_busy || S.pending.has(s.session_id));
+  const held = busy && s?.held ? s.held : "";
   $("header-title").textContent = s ? title(s) : "New chat";
   $("header-model").textContent = s ? s.chat_model : "Connect your model to get started";
   $("connection-label").textContent = !S.online
     ? "Gateway offline"
     : s
       ? busy
-        ? "Working"
+        ? held
+          ? `Waiting: ${held}`
+          : "Working"
         : "Ready"
       : "Set up model";
   $("connection-dot").classList.toggle("offline", !s || !S.online);
@@ -199,7 +202,6 @@ function syncUI() {
   $("stop-btn").querySelector("span").textContent =
     s && S.cancelling.has(s.session_id) ? "Stopping…" : "Stop";
   $("send-btn").disabled = S.working || busy || !S.online || !input.value.trim();
-  const held = busy && s?.held ? s.held : "";
   $("run-status").textContent = busy
     ? held
       ? `Waiting: ${held}`
@@ -608,17 +610,28 @@ async function poll() {
     const old = new Map(S.sessions.map((s) => [s.session_id, s]));
     S.sessions = data.sessions.map((s) => ({ ...old.get(s.session_id), ...s }));
     renderSessions();
-    if (S.activeId && !S.pending.has(S.activeId)) {
+    if (S.activeId) {
       const summary = active();
       const previous = old.get(S.activeId);
-      if (
+      if (S.pending.has(S.activeId)) {
+        // The send is still awaiting its run, so the detail is not refreshed;
+        // the summary's hold moves the header pill and the message area as the
+        // scheduler reports it (R30).
+        if (
+          summary &&
+          (summary.held !== previous?.held ||
+            summary.is_busy !== previous?.is_busy)
+        )
+          renderMessages();
+      } else if (
         !summary ||
         summary.is_busy ||
         previous?.is_busy ||
         summary.last_active !== S.detailVersions.get(S.activeId) ||
         !summary.messages
-      )
+      ) {
         await refreshSession(S.activeId);
+      }
     }
     syncUI();
   } catch {
