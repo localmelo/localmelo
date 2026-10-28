@@ -222,11 +222,11 @@ shows a foreign GPU lock (`GPU lock: <holder> · <purpose>`, with
 `(recorded)` or `(chats wait)`), `GPU lock: yours`, `GPU lock unreadable`,
 `· ETA passed`, and the battery (`Battery 55% · discharging`). AC power with
 no lock shows nothing. While a call waits (for a slot, the background cap or
-a foreign lock), the status label says `Waiting: <reason>`, the sidebar says
-`● Waiting` and the chat's bubble says the same; the reason is the
-scheduler's own code (`Resources`, `Priority`, `Reservation`, …). A lock hold
-uses `Reservation` and, in `wait` mode, does not count against the 600-second
-active-time bound.
+a foreign lock), the header's status pill and the status label say
+`Waiting: <reason>`, the sidebar says `● Waiting` and the chat's bubble says
+the same; the reason is the scheduler's own code (`Resources`, `Priority`,
+`Reservation`, …). A lock hold uses `Reservation` and, in `wait` mode, does
+not count against the 600-second active-time bound.
 
 Stop cancels the run. A model request in flight is abandoned, although the
 model server may finish computing it, and a running `shell_exec` command is

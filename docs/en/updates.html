@@ -89,6 +89,19 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-27-held-labels">
+          <h3>A held chat reads Waiting everywhere</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/71">#71</a>
+          </p>
+          <ul>
+            <li>While a chat's model call waits for the scheduler, the header's status pill says <code>Waiting: Resources</code> too (or the policy's other reason), next to the sidebar, the composer and the message area; all of them return to Working when the hold ends.</li>
+            <li>A chat that has just sent no longer keeps <code>Working on your request…</code> for the whole hold: while the send is pending, the message area follows the hold the page polls.</li>
+            <li>The web workspace only; direct runs, the CLI and the requests localmelo sends are unchanged.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-27-scheduler-gate">
           <h3>The web workspace's chats go through the scheduler</h3>
           <p class="update-date">
@@ -124,6 +137,32 @@
             <li>The interactive UI now draws every event of a turn: the model's thinking as <code>Thought for 1.2s</code> and an excerpt, intermediate text, the last message when it differs from the answer, retries that count down, empty-reply, stuck and budget notices, and reflections, including the ones melo could not read.</li>
             <li>The live area shows the run's progress facts (step, attempt, phase and cycle, tests, time), the running tool's clock and limit, and on a session's first turn a dim row of what the past runs did, worded exactly as the direct-mode progress line.</li>
             <li>New commands: <code>/verbose</code> for longer excerpts, the tool arguments and 20 output lines; <code>/thinking</code> to turn the excerpt off; <code>/expand</code> for one tool call's whole output; <code>/progress</code> for the facts the live area rests on.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-short-readme">
+          <h3>A short README and a developer guide</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/67">#67</a>
+          </p>
+          <ul>
+            <li>The README is a short front door now: two badge rows (one to the website's pages, one of facts), what localmelo is, install, a few commands, a Learn more list and the security warning. The Chinese README mirrors it, and <code>CONTRIBUTING.md</code> is the short version.</li>
+            <li>A new <a href="./developers.html">developer guide</a>, in English and Chinese, is linked from every page's navigation: the repository layout, setup, the tests and checks, adding a backend, a built-in tool or a check, commits and pull requests, and the docs and website layout.</li>
+            <li>The reference documentation stays in <code>docs/</code> and is linked from the README's Learn more list.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-permission-tiers">
+          <h3>Approvals ask by permission tier</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/66">#66</a>
+          </p>
+          <ul>
+            <li>Every tool now has a permission tier: <code>read</code>, <code>write</code>, <code>exec</code> or <code>network</code>. The built-ins keep theirs (<code>file_read</code> read, <code>file_write</code> write, <code>shell_exec</code> and <code>python_exec</code> exec); an MCP tool's tier comes from its annotations, cautiously: <code>openWorldHint</code> gives network, <code>readOnlyHint</code> read unless <code>destructiveHint</code> contradicts it, and anything else write.</li>
+            <li>A run with an approval policy asks before every call whose tier is not <code>read</code>, so an unannotated MCP tool asks now; <code>require_approval</code> only adds a mark, which can make a read tool ask too. The terminal's approval panel names the tier, and <code>ToolInfo.tier</code> and <code>ApprovalRequest.tier</code> report it.</li>
+            <li>Direct mode, the plain conversation loop and the gateway pass no policy and are unchanged; <code>--yolo</code> still means no policy, not read-only.</li>
           </ul>
         </article>
 

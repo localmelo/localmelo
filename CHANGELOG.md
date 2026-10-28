@@ -9,6 +9,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The terminal and the web console share one set of words for a session.
+  `support/sessions/display.py` re-exports `split_thinking` and adds the
+  status table `STATUS_TEXT`, keyed by status and by `(status, cause)` and
+  read through `status_text` (each with its word, severity and title), and
+  `approval_tag`, which gives the short tag and long text of how a call's
+  approval ended. `build_session_agent` takes optional `wrap_llm` and
+  `wrap_embedding` callables, called with the providers it builds before
+  the Agent's `Chat` is made, so a surface can put its scheduler gate in
+  front of every model call; with neither, the builder is unchanged. The
+  terminal reads its status severities from `STATUS_TEXT`, and its rendered
+  lines and goldens are unchanged ([#72]).
 - The web workspace's chats go through the scheduler: each chat call is
   admitted at once or held according to `[scheduler] policy` (`off`
   by default, which only records), each embedding call is recorded and counts
@@ -281,6 +292,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A held chat's header still said `● Working` while the sidebar, status
+  label and message area said it was waiting, and a chat that had just sent
+  kept `Working on your request…` in the message area for the whole hold
+  (the poll skipped the detail refresh while the send was pending). The
+  header's status pill now says `Waiting: <reason>`, and while the send is
+  pending the message area follows the polled hold as it changes; both
+  return to Working when the hold ends ([#71]).
 - The scheduler simulator's importer reads a chat call's kind from the
   `X-Localmelo-Call-Kind` header that localmelo sends, in the headers side
   file a proxy record names with `bodies.headers`. Retrieval and
@@ -412,3 +430,5 @@ earlier milestones.
 [#67]: https://github.com/localmelo/localmelo/pull/67
 [#68]: https://github.com/localmelo/localmelo/pull/68
 [#69]: https://github.com/localmelo/localmelo/pull/69
+[#71]: https://github.com/localmelo/localmelo/pull/71
+[#72]: https://github.com/localmelo/localmelo/pull/72

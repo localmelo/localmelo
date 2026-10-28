@@ -121,6 +121,62 @@ resumed 1 turn(s)
 | `resume_mode` | `"pairs"` | How [`resume()`](#resume) loads a conversation: `"pairs"` or `"window"`. |
 | `progress` | `False` | Ask each turn's run for [`run.progress`](events.md#runprogress) events; kept on the runner, `replace_agent` included. |
 
+## The Agent a session runs on
+
+`build_session_agent(...)` makes and starts the Agent a surface runs its
+turns on, and closes it when the start fails. It sets the session's rules on
+the options: the workspace, `record_answers=True`, `tool_exposure="all"` and
+the 600 s tool limit. It takes a URL with `base_url` (and `model`, with
+`default` when None; an embedding only from `embedding_base_url` and
+`embedding_model`), or the backends of `cfg`, on a copy whose chat model is
+`model` and whose `request_timeout_s` is the one given; `cfg` itself is not
+changed.
+
+`wrap_llm` and `wrap_embedding` are called with the provider the builder
+made, before the Agent is built; the Agent is made with what they return, so
+the provider its `Chat` holds is the wrapped one, and every model call goes
+through the wrapper. With neither (the default), the builder is unchanged,
+including the `Agent(config=cfg)` path. An embedding that was not built is
+not wrapped.
+
+```python
+import asyncio
+import tempfile
+
+from localmelo import AgentOptions
+from localmelo.support.sessions.agents import build_session_agent
+
+
+def show_wrapped(llm):
+    print("wrapped", type(llm).__name__)
+    return llm
+
+
+async def main() -> None:
+    agent = await build_session_agent(
+        cfg=None,
+        base_url="http://127.0.0.1:11434/v1",
+        model="qwen3:8b",
+        workspace=tempfile.mkdtemp(),
+        options=AgentOptions(memory=False),
+        wrap_llm=show_wrapped,
+    )
+    try:
+        print(agent.options.tool_timeout_s)
+    finally:
+        await agent.close()
+
+
+asyncio.run(main())
+```
+
+It prints:
+
+```text
+wrapped OpenAICompatLLM
+600.0
+```
+
 ## The two files
 
 One store implementation serves two files. Each surface opens only its own:
