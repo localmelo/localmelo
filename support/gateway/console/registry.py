@@ -223,6 +223,8 @@ class ConsoleSessions:
             )
 
         await self._make_room(session_id)
+        if self._closed:
+            raise RuntimeError("The console's sessions are closed")
         is_new = entry is None
         settings = self._settings()
         mcp_config = getattr(settings, "mcp_config", "") or None
@@ -237,6 +239,10 @@ class ConsoleSessions:
                 str(exc) or type(exc).__name__,
             ) from exc
 
+        if self._closed:
+            with contextlib.suppress(Exception):
+                await agent.close()
+            raise RuntimeError("The console's sessions are closed")
         if entry is None:
             runner = SessionRunner(
                 agent,
