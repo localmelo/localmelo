@@ -39,13 +39,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - Startup recovery classifies task rows without replay, retains pending pause
   and reconciles execution-linked terminal results. Recovered tasks with
   uncertain history remain fenced until controlled recovery is wired; Stop is
-  available. Proven never-started queued tasks can run after a start fence. [#NN]
+  available. Ordinary task creation does not yet establish first-start proof. [#NN]
 
 - Scheduler component v3 adds dormant recovery provenance, guarded durable
   intents and receipts, and process identity records. Interrupted recovery
   retains pending pause intent; explicit legacy adoption records orphan-risk
-  acceptance. Startup behavior remains unchanged; process capture completeness
-  and runtime recovery are deferred. [#NN]
+  acceptance. Process capture completeness and controlled Resume are deferred. [#NN]
 - Experimental opt-in provider streaming and OpenAI-compatible SSE assembly;
   display filtering buffers complete replies, and no CLI or agent uses it yet ([#145]).
 - Direct workers can read a brief file and emit a versioned JSON result or an

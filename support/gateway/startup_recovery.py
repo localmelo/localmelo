@@ -25,14 +25,12 @@ class StartupRecovery:
 
     async def run(self) -> None:
         for task in await self.tasks.list_tasks():
-            if task.state in TERMINAL_PHASES:
-                continue
             intent = await self.recovery.active_intent(task.task_id)
             if intent is not None:
                 receipt = await self.recovery.receipt(task.task_id, intent[0])
                 if receipt is None:
                     raise RuntimeError("prepared recovery receipt is missing")
-                if receipt[1]:
+                if receipt[1] and task.state not in TERMINAL_PHASES:
                     await self.recovery.commit(task.task_id, operation_id=intent[0])
                 else:
                     generation, previous = await self.tasks.park_identity(task.task_id)
@@ -43,8 +41,8 @@ class StartupRecovery:
                         expected_operation_id=previous,
                     )
                 task = await self.tasks.get_task(task.task_id)
-                if task.state in TERMINAL_PHASES:
-                    continue
+            if task.state in TERMINAL_PHASES:
+                continue
             await self._classify(task)
 
     async def _classify(self, task: TaskRecord) -> None:
@@ -73,7 +71,6 @@ class StartupRecovery:
                     "sched.parked",
                     "sched.resumed",
                     "sched.held",
-                    "sched.priority_changed",
                     "sched.state_changed",
                     "turn.started",
                 }
@@ -91,10 +88,7 @@ class StartupRecovery:
                 if event.turn == turn.turn and event.event.get("type") == "run.finished"
             ]
             if (
-                (
-                    turn.client_request_id == provenance.execution_id
-                    or turn.run_id == provenance.execution_id
-                )
+                turn.client_request_id == provenance.execution_id
                 and bool(turn.run_id)
                 and not turn.undone
                 and turn.status in RUN_STATUSES
@@ -147,16 +141,24 @@ class StartupRecovery:
         )
         generation, previous = await self.tasks.park_identity(task.task_id)
         operation_id = uuid.uuid4().hex
+        # A legacy launch lacks provenance; the durable turn identifies it even
+        # when no run.started event was recorded before the restart.
+        abandoned_turn = (
+            turns[0] if turns and task.state in {"running", "held"} else None
+        )
+        execution_id = provenance.execution_id or (
+            f"turn:{abandoned_turn.id}" if abandoned_turn else f"unknown:{task.task_id}"
+        )
         await self.recovery.prepare(
             task.task_id,
             operation_id=operation_id,
-            execution_id=provenance.execution_id or f"unknown:{task.task_id}",
+            execution_id=execution_id,
             expected_generation=generation,
             expected_operation_id=previous,
             outcome="interrupted",
             card=card,
             reason="gateway restarted; earlier effects or processes may still be active",
-            crash=provenance.first_start == "started",
+            crash=provenance.first_start == "started" or abandoned_turn is not None,
             unsafe_resume=True,
         )
         await self.recovery.commit(task.task_id, operation_id=operation_id)

@@ -39,6 +39,7 @@ from localmelo.support.gateway.task_policy import (
     worker_tool_allowlist,
 )
 from localmelo.support.gateway.task_store import (
+    TaskConflictError,
     TaskNotFoundError,
     TaskNotPausedError,
     TaskRecord,
@@ -184,6 +185,8 @@ class TaskWorkers:
             try:
                 await StartupRecovery(self.store, self.tasks).run()
                 self._restart_fenced = set()
+                self._eligible.difference_update(self._restart_first)
+                self._restart_first.clear()
                 for record in await self.tasks.list_tasks():
                     if record.state in TERMINAL_PHASES:
                         continue
@@ -203,10 +206,10 @@ class TaskWorkers:
                         self._restart_fenced.add(record.task_id)
             except Exception as exc:
                 raise SessionStoreError("startup recovery unavailable") from exc
-            self.store.add_retention_hook(self._reconcile)
-            self._opened = True
             async with self._lock:
                 await self._schedule()
+                self.store.add_retention_hook(self._reconcile)
+                self._opened = True
 
     async def create(self, payload: dict) -> tuple[dict, bool]:
         if not isinstance(payload, dict):
@@ -295,7 +298,7 @@ class TaskWorkers:
             isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 5
         ):
             raise ValueError("level must be P0-P5 or auto")
-        if task_id in self._unavailable:
+        if task_id in self._unavailable and state != "stop":
             raise SessionStoreError("store unavailable")
         if task_id in self._quarantined and state != "stop":
             raise TaskStoreError("worker cleanup failed; slot held until restart")
@@ -335,7 +338,7 @@ class TaskWorkers:
                 ):
                     raise SessionStoreError("store unavailable")
         async with self._lock:
-            if task_id in self._unavailable:
+            if task_id in self._unavailable and state != "stop":
                 raise SessionStoreError("store unavailable")
             if task_id in self._quarantined and state != "stop":
                 raise TaskStoreError("worker cleanup failed; slot held until restart")
@@ -997,6 +1000,9 @@ class TaskWorkers:
         deferred = False
         launch_uncertain = False
         execution_id: str | None = self._pending_execution.get(task_id)
+        launch_committed = execution_id is not None
+        turn_started = False
+        post_fence_failure = False
         try:
             async with self._lock:
                 record = await self.tasks.get_task(task_id)
@@ -1011,7 +1017,10 @@ class TaskWorkers:
                 self._eligible.discard(task_id)
                 self._store_unavailable(task_id)
                 raise
-            if task_id in self._restart_first or provenance.first_start == "never_started":
+            if (
+                task_id in self._restart_first
+                or provenance.first_start == "never_started"
+            ):
                 async with self._lock:
                     current = await self.tasks.get_task(task_id)
                     if (
@@ -1037,11 +1046,18 @@ class TaskWorkers:
                             raise TaskStoreError(
                                 "recovery launch did not acquire a permit"
                             )
+                    except TaskConflictError:
+                        launch_uncertain = True
+                        self._eligible.discard(task_id)
+                        self._restart_first.discard(task_id)
+                        self._restart_fenced.add(task_id)
+                        raise
                     except BaseException:
                         launch_uncertain = True
                         self._eligible.discard(task_id)
                         self._store_unavailable(task_id)
                         raise
+                    launch_committed = True
                     self._pending_execution[task_id] = execution_id
                     self._restart_first.discard(task_id)
                     if (
@@ -1114,9 +1130,10 @@ class TaskWorkers:
                     if current.state == "parked":
                         deferred = True
                     else:
-                        await self.tasks.change(
-                            task_id, state="running", actor="scheduler"
-                        )
+                        if not launch_committed or current.state != "running":
+                            await self.tasks.change(
+                                task_id, state="running", actor="scheduler"
+                            )
                         self.gate.update_task(task_id, phase="running")
                         self.gate.turn_start(task_id)
                         if record.card:
@@ -1130,6 +1147,7 @@ class TaskWorkers:
                                 else {}
                             ),
                         )
+                        turn_started = True
                         self._pending_execution.pop(task_id, None)
             if phase != "cancelled" and not deferred:
                 result = await runner.wait()
@@ -1145,13 +1163,21 @@ class TaskWorkers:
                     )
                 )
         except WorkspaceError:
-            async with self._lock:
-                current = await self.tasks.get_task(task_id)
-                deferred = current.state == "parked"
-            if not deferred:
-                failure_reason = "invalid_workspace"
-                log.warning("Worker %s has an invalid workspace", task_id)
+            if launch_committed and not turn_started:
+                post_fence_failure = True
+                log.exception("Worker %s failed after its launch fence", task_id)
+            else:
+                async with self._lock:
+                    current = await self.tasks.get_task(task_id)
+                    deferred = current.state == "parked"
+                if not deferred:
+                    failure_reason = "invalid_workspace"
+                    log.warning("Worker %s has an invalid workspace", task_id)
+        except asyncio.CancelledError:
+            post_fence_failure = launch_committed and not turn_started
+            raise
         except Exception:
+            post_fence_failure = launch_committed and not turn_started
             log.exception("Worker %s failed", task_id)
         finally:
             park = task_id in self._park_winners and not (
@@ -1197,6 +1223,47 @@ class TaskWorkers:
                 if park:
                     self._park_winners.discard(task_id)
                     self._points.pop(task_id, None)
+                if post_fence_failure and not (
+                    self._closed or task_id in self._stopping
+                ):
+                    # A fenced execution cannot be retried without a new safety
+                    # decision, even when no turn was observed to start.
+                    launch_uncertain = True
+                    self._eligible.discard(task_id)
+                    self._restart_first.discard(task_id)
+                    self._restart_fenced.add(task_id)
+                    try:
+                        current = await self.tasks.get_task(task_id)
+                        if current.state not in TERMINAL_PHASES:
+                            card = current.card or await self._park_card(task_id)
+                            generation, previous = await self.tasks.park_identity(
+                                task_id
+                            )
+                            operation_id = uuid.uuid4().hex
+                            assert execution_id is not None
+                            recovery = RecoveryStore(self.store)
+                            await recovery.prepare(
+                                task_id,
+                                operation_id=operation_id,
+                                execution_id=execution_id,
+                                expected_generation=generation,
+                                expected_operation_id=previous,
+                                outcome="interrupted",
+                                card=card,
+                                reason="launch failed before the turn; safety review required",
+                                crash=True,
+                                unsafe_resume=True,
+                            )
+                            await recovery.commit(task_id, operation_id=operation_id)
+                            self.gate.update_task(
+                                task_id, phase="interrupted", paused=True
+                            )
+                            self._pending_execution.pop(task_id, None)
+                    except (Exception, asyncio.CancelledError):
+                        self._store_unavailable(task_id)
+                        log.exception(
+                            "Could not reconcile launch failure for %s", task_id
+                        )
                 preserve = launch_uncertain or (
                     (deferred or park)
                     and not (

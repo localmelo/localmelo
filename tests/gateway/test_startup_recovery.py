@@ -12,7 +12,11 @@ from localmelo.support.gateway.park_store import ParkStore
 from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_policy import TaskSpec
-from localmelo.support.gateway.task_store import TaskConflictError, TaskStore, TaskStoreError
+from localmelo.support.gateway.task_store import (
+    TaskConflictError,
+    TaskStore,
+    TaskStoreError,
+)
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
@@ -349,13 +353,13 @@ async def test_live_proof_row_uses_start_fence(
             await workers._schedule()
         if conflict:
             async with asyncio.timeout(3):
-                while (
-                    task.task_id not in workers._unavailable
-                    or task.task_id in workers._runs
-                ):
+                while task.task_id in workers._runs:
                     await asyncio.sleep(0.001)
             assert (await workers.tasks.get_task(task.task_id)).state == "queued"
             assert not workers.is_active(task.task_id)
+            assert (await workers.update(task.task_id, state="stop"))[
+                "state"
+            ] == "cancelled"
         else:
             await asyncio.wait_for(entered.wait(), 3)
             assert (await workers.tasks.get_task(task.task_id)).state == "running"
@@ -455,6 +459,7 @@ async def test_first_launch_binds_actual_turn_to_execution(
             assert (await workers.get(task.task_id))["state"] == "parked"
             await workers.update(task.task_id, state="resume")
         await asyncio.wait_for(entered.wait(), 3)
+        assert (await workers.tasks.get_task(task.task_id)).state == "running"
         provenance = await RecoveryStore(store).provenance(task.task_id)
         (turn,) = await store.list_turns(task.task_id)
         assert turn.client_request_id == provenance.execution_id
@@ -576,6 +581,9 @@ async def test_uncertain_first_start_never_builds_or_requeues(
         assert (
             await RecoveryStore(store).provenance(task.task_id)
         ).first_start == "started"
+        assert (await workers.update(task.task_id, state="stop"))[
+            "state"
+        ] == "cancelled"
     finally:
         await workers.aclose()
         await hub.aclose()
@@ -640,7 +648,9 @@ async def test_completed_outcome_requires_matching_execution(
         expected_generation=generation,
         expected_operation_id=previous,
     )
-    turn = await store.begin_turn(task.task_id, "do work", holder="worker")
+    turn = await store.begin_turn(
+        task.task_id, "do work", holder="worker", client_request_id="run-1"
+    )
     await store.append_events(
         task.task_id,
         turn.turn,
