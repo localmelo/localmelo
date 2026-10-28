@@ -10,6 +10,7 @@ import ast
 import asyncio
 import re
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -51,11 +52,13 @@ def _server_is_not_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
 class FakeFactory(AgentFactory):
     """Builds Agents on scripted models; lists and saves without a server."""
 
-    def __init__(self, root: Path, scripts: dict[str, list[Message]]) -> None:
+    def __init__(
+        self, root: Path, scripts: dict[str, list[Message]], *, memory: bool = True
+    ) -> None:
         super().__init__(
             backend=url_backend(URL, "m1", source="saved"),
             cfg=None,
-            options=AgentOptions(),
+            options=AgentOptions(memory=memory),
             workspace=str(root),
         )
         self.root = root
@@ -571,6 +574,47 @@ async def test_a_late_check_of_the_old_server_does_not_replace_the_new_list(
     assert session.models == ["new-a"]
 
 
+async def test_check_server_suggests_a_listed_embedding_model(setup: Setup) -> None:
+    setup.factory.backend = replace(setup.factory.backend, key="vllm", label="vLLM")
+    setup.factory.listed = ["m1", "Qwen3-Embedding-0.6B"]
+    await setup.session.check_server()
+    out = " ".join(setup.out.text().split())
+    assert (
+        "This server lists Qwen3-Embedding-0.6B; melo --reconfigure adds it "
+        "for long-term memory."
+    ) in out
+
+
+async def test_check_server_does_not_suggest_without_a_listed_candidate(
+    setup: Setup,
+) -> None:
+    setup.factory.backend = replace(setup.factory.backend, key="vllm", label="vLLM")
+    setup.factory.listed = ["m1", "m2"]
+    await setup.session.check_server()
+    assert "This server lists" not in setup.out.text()
+
+
+@pytest.mark.parametrize(
+    ("embedding", "memory", "key"),
+    [
+        ("vllm · E", True, "vllm"),
+        ("", False, "vllm"),
+        ("", True, "openai-compatible"),
+    ],
+    ids=["already-configured", "memory-off", "base-url"],
+)
+async def test_check_server_does_not_suggest_an_embedding_where_it_cannot_act(
+    setup: Setup, embedding: str, memory: bool, key: str
+) -> None:
+    setup.factory.backend = replace(
+        setup.factory.backend, key=key, label=key, embedding=embedding
+    )
+    setup.factory._options = replace(setup.factory._options, memory=memory)
+    setup.factory.listed = ["m1", "Qwen3-Embedding-0.6B"]
+    await setup.session.check_server()
+    assert "melo --reconfigure adds it" not in setup.out.text()
+
+
 async def test_esc_after_the_run_ended_does_not_stop_the_turn(
     setup: Setup, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -774,7 +818,7 @@ async def test_a_new_server_keeps_the_configs_embedding_and_timeout(
     assert saved.embedding_backend == "sglang" and saved.request_timeout_s == 2
     assert cfg.chat_backend == "sglang"  # the startup config is not changed
     assert factory.backend.base_url == new_url and factory.backend.model == "m2"
-    assert factory.backend.embedding == "sglang"
+    assert factory.backend.embedding == "SGLang · embed-x"
     # A later /model on the new server saves its model only.
     built.clear()
     await factory.build("m3")

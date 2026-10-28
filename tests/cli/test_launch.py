@@ -475,6 +475,40 @@ def test_a_base_url_with_an_embedding_server_shows_long_term_memory() -> None:
     )
     plain = _choice(Faked(cfg=_configured(), listed=["chat-a"]).choose(base_url=URL))
     assert plain.backend.embedding == ""
+    assert (
+        memory_text(plain.backend, memory=True)
+        == "no long-term memory · --embedding-base-url adds one"
+    )
+
+
+def test_memory_text_names_a_configured_embedding_backend_and_model() -> None:
+    from localmelo.support.cli.agents import config_backend
+    from localmelo.support.cli.views import memory_text
+
+    cfg = _configured()
+    cfg.embedding_backend = "vllm"
+    cfg.vllm.embedding_url = URL
+    cfg.vllm.embedding_model = "Qwen3-Embedding-0.6B"
+    backend = config_backend(cfg, None)
+    assert backend.embedding == "vLLM · Qwen3-Embedding-0.6B"
+    assert (
+        memory_text(backend, memory=True)
+        == "long-term memory · vLLM · Qwen3-Embedding-0.6B"
+    )
+
+
+def test_the_embedding_name_uses_the_backends_display_name() -> None:
+    from localmelo.support.cli.agents import _embedding_name
+
+    cfg = _configured()
+    cfg.embedding_backend = "vllm"
+    cfg.vllm.embedding_url = URL
+    cfg.vllm.embedding_model = "Qwen3-Embedding-0.6B"
+    assert _embedding_name(cfg) == "vLLM · Qwen3-Embedding-0.6B"
+    cfg.embedding_backend = "ollama"
+    cfg.ollama.embedding_url = URL
+    cfg.ollama.embedding_model = "bge-m3"
+    assert _embedding_name(cfg) == "Ollama · bge-m3"
 
 
 async def test_a_new_server_keeps_the_sessions_embedding_server() -> None:

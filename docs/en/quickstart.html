@@ -179,13 +179,14 @@ pip install -e ".[gateway]"</code></pre>
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 Model server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
+No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo --reconfigure.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
 │ model      qwen3:8b · Ollama · http://127.0.0.1:11434/v1                 │
 │            saved as the default                                          │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory (no embedding backend)                    │
+│ memory     no long-term memory · melo --reconfigure adds one             │
 │ session    new                                                           │
 ╰──────────────────────────────────────────────────────────────────────────╯
   / commands · esc stop · ctrl+d quit</code></pre>
@@ -195,8 +196,12 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
           <code>melo "&lt;task&gt;"</code> uses the saved server. The server
           here is Ollama, so it is saved as the <code>ollama</code> backend;
           any other OpenAI-compatible server is saved as
-          <code>vllm</code>, the key for those, without embeddings; see
-          <a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#first-run">First run</a>.
+          <code>vllm</code>, the key for those. When the server lists an
+          embedding model, the first run asks one more question,
+          <code>Use &lt;model&gt; for long-term memory? [Y/n]:</code>. See
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#first-run">First run</a>
+          and
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">Set up an embedding model</a>.
         </p>
         <h3 id="with-the-setup-wizard">With the setup wizard</h3>
         <p>
@@ -218,8 +223,8 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
               <tr><td><code>Base URL</code></td><td>Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one.</td></tr>
               <tr><td><code>Chat model name</code></td><td>The model, such as <code>qwen3:8b</code>.</td></tr>
               <tr><td><code>Start?</code></td><td>Press Enter (yes) to continue.</td></tr>
-              <tr><td><code>Embedding backend</code></td><td><code>5</code>, the default without a saved one, for <code>None (no long-term memory)</code> if you have no embedding server.</td></tr>
-              <tr><td><code>Embedding endpoint URL</code>, <code>Embedding model name</code></td><td>Only asked when you chose an embedding backend.</td></tr>
+              <tr><td><code>Embedding backend</code></td><td><code>5</code> for <code>None (no long-term memory)</code>. Without a saved embedding, the chat server's own embedding models are appended as <code>6</code>, <code>7</code>, … with the first as the default; choosing one is enough.</td></tr>
+              <tr><td><code>Embedding endpoint URL</code>, <code>Embedding model name</code></td><td>Only asked when you chose one of the fixed embedding backends <code>1</code>–<code>4</code>, not a detected model.</td></tr>
             </tbody>
           </table>
         </div>
@@ -247,6 +252,44 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
           <code>http://127.0.0.1:8401</code>. The gateway keeps running in this
           terminal. Without <code>--serve</code>,
           <code>melo --reconfigure</code> opens the interactive UI instead.
+        </p>
+      </section>
+
+      <section class="section" id="set-up-an-embedding-model">
+        <h2>Set up an embedding model</h2>
+        <p>
+          Long-term memory needs an embedding model. localmelo never downloads
+          or starts one: point it at a model your server already serves. The
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">guide</a>
+          covers Ollama, oMLX, vLLM, SGLang and MLC.
+        </p>
+        <p>With Ollama:</p>
+        <pre><code>ollama pull qwen3-embedding:0.6b
+curl -sS http://127.0.0.1:11434/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "qwen3-embedding:0.6b", "input": "ping"}'
+melo --reconfigure    # Embedding backend: 2 (Ollama); URL http://localhost:11434; model qwen3-embedding:0.6b</code></pre>
+        <p>
+          The reply must hold a non-empty <code>data[0].embedding</code>.
+          <code>nomic-embed-text</code> is a smaller English-only alternative.
+        </p>
+        <p>With oMLX the chat server also serves the model:</p>
+        <pre><code>curl -sS http://127.0.0.1:8000/v1/models
+curl -sS http://127.0.0.1:8000/v1/embeddings \
+  -H 'Content-Type: application/json' \
+  -d '{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'</code></pre>
+        <p>
+          <code>GET /v1/models</code> gives ids but no type, so the embeddings
+          request is the check. Keep the chat server and set
+          <code>embedding_backend = "vllm"</code> with that table's
+          <code>embedding_url</code> and <code>embedding_model</code>; see
+          <a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#omlx">oMLX</a>.
+        </p>
+        <p>
+          Changing the model changes the vector space: stored vectors of
+          another dimension are skipped, so old entries stop ranking. To
+          reclaim the space, stop localmelo and remove
+          <code>~/.cache/localmelo/memory/long_term.db*</code>.
         </p>
       </section>
 

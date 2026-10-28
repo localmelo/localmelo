@@ -998,6 +998,22 @@ class CliSession:
                     style="warn",
                 )
             )
+        if (
+            models
+            and not backend.embedding
+            and self.factory.memory
+            and backend.key != discovery.OPENAI_COMPATIBLE
+        ):
+            candidate = discovery.recommend_embedding(
+                discovery.embedding_models(models)
+            )
+            if candidate:
+                self.out.print(
+                    self._text(
+                        f"This server lists {candidate}; melo --reconfigure adds it for long-term memory.",
+                        style="muted",
+                    )
+                )
 
     # ── Shutdown ──
 
