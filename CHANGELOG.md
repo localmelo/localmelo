@@ -32,7 +32,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   gains `--export-store`, `--export-decisions` and `--route` for the
   bench. Legacy requests, JSON line, window, `tasks`/`steps` and search
   order are unchanged; an existing `long_term.db` migrates with its rows
-  intact. ([#NN])
+  intact. ([#97])
 - Resume saved terminal chats with `melo -c`, `melo -r [ID|TITLE]`,
   `/sessions [filter]` or `/resume [ID|TITLE]`. The inline picker filters
   eligible chats by folder or across folders before the startup banner,
@@ -671,4 +671,4 @@ earlier milestones.
 [#95]: https://github.com/localmelo/localmelo/pull/95
 [#96]: https://github.com/localmelo/localmelo/pull/96
 [#90]: https://github.com/localmelo/localmelo/pull/90
-[#NN]: https://github.com/localmelo/localmelo/pull/NN
+[#97]: https://github.com/localmelo/localmelo/pull/97
