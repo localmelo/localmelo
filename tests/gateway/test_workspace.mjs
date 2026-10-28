@@ -10,6 +10,7 @@ import vm from 'node:vm';
 
 import * as turns from '../../support/gateway/static/turns.mjs';
 import {renderMarkdown} from '../../support/gateway/static/markdown.mjs';
+import {workerHistory} from '../../support/gateway/static/worker-history.mjs';
 
 const {
   applyEvent, activity, approvalTag, cleanOutput, deniedCount, failedCount,
@@ -362,6 +363,7 @@ const source = readFileSync(new URL('../../support/gateway/static/workspace.js',
   .replace(/^import \{ renderMarkdown \} from "\.\/markdown\.mjs";\n/m, '')
   .replace(/^import \{ setupSettings \} from "\.\/settings\.mjs";\n/m, '')
   .replace(/^import \{ setupDrawer \} from "\.\/drawer\.mjs";\n/m, '')
+  .replace(/^import \{ workerHistory \} from "\.\/worker-history\.mjs";\n/m, '')
   .replace(/\ninit\(\);\s*$/, '\n');
 
 function storage() {
@@ -396,6 +398,7 @@ function makeElement(tag, id = '') {
     },
     setAttribute(name, value) { element.attributes[name] = String(value); },
     getAttribute(name) { return element.attributes[name] ?? null; },
+    removeAttribute(name) { delete element.attributes[name]; },
     append(...items) { for (const item of items) { item.parentElement = element; element.children.push(item); } },
     prepend(...items) { for (const item of items) item.parentElement = element; element.children.unshift(...items); },
     replaceChildren(...items) { element.children = []; element.append(...items); },
@@ -417,6 +420,7 @@ function makeElement(tag, id = '') {
     close() { element.open = false; },
     showModal() { element.open = true; },
     querySelector(selector) {
+      if (selector === 'h1') return findNode(element, (node) => node.tag === 'h1');
       if (selector === '[data-approval-once]') return findNode(element, (node) => 'approvalOnce' in node.dataset);
       if (selector === '[data-approval-deny]') return findNode(element, (node) => 'approvalDeny' in node.dataset);
       const focus = selector.match(/^\[data-approval-focus="(\w+)"\]$/);
@@ -505,8 +509,8 @@ function harness(routes, {mobile = false} = {}) {
       (documentListeners[type] ||= []).push(handler);
     },
     querySelector: (selector) => {
-      assert.equal(selector, '.chat', 'The DOM double only supports the selectors the page uses');
-      return element('chat');
+      assert.ok(['.chat', '.composer-area'].includes(selector), 'The DOM double only supports the selectors the page uses');
+      return element(selector === '.chat' ? 'chat' : 'composer-area');
     },
     querySelectorAll: () => [],
     createElement: (tag) => makeElement(tag),
@@ -534,6 +538,7 @@ function harness(routes, {mobile = false} = {}) {
   const context = vm.createContext({
     ...turns,
     renderMarkdown,
+    workerHistory,
     setupSettings: () => async () => {},
     setupDrawer: () => drawer,
     document,
@@ -1810,4 +1815,50 @@ test('a stream paused on a deleted chat starts a new one instead of reopening', 
   assert.equal(h.state().activeId, null);
   assert.match(h.element('notice').textContent, /This chat expired or the gateway restarted/);
   assert.equal(h.element('welcome').hidden, false);
+});
+
+test('worker detail is read-only and isolates the chat draft and stream', async () => {
+  const h = harness(baseRoutes({
+    'GET /sessions/w': {session: session('w', {kind: 'worker', title: 'Worker', source: 'dsh', status: 'running', steps: 0, tokens: null})},
+    'GET /sessions/w/turns?limit=50&events=true': {turns: [turnRow({user_text: 'Worker brief', answer: 'Worker answer', events: []})], has_earlier: false},
+  }));
+  await h.run('init()');
+  const stream = h.stream();
+  h.element('input').value = 'Chat draft';
+  h.run('showWorkers("w")');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(stream.closed, true);
+  assert.equal(h.state().activeId, 'a');
+  assert.equal(h.state().drafts.a, 'Chat draft');
+  assert.equal(h.element('composer-area').hidden, true);
+  assert.equal(h.element('details-trigger').hidden, true);
+  assert.match(h.text('worker-panel'), /Worker brief/);
+  assert.match(h.text('worker-panel'), /Not recorded/);
+  assert.match(h.text('worker-panel'), /does not update live/);
+  await h.run('send()');
+  await h.run('stop()');
+  h.run('presence(true)');
+  h.element('details-trigger').click();
+  assert.equal(h.drawer.calls.length, 0);
+  assert.equal(h.net.calls.filter((call) => call.method !== 'GET' && call.path !== '/presence').length, 0);
+  assert.equal(FakeEventSource.instances.length, 1);
+});
+
+test('worker images use the worker session id, never the chat id', () => {
+  const h = harness(baseRoutes());
+  h.context.imageItem = {name: 'image', arguments: {}, images: [{sha256: 'abc', mime_type: 'image/png', size_bytes: 1}]};
+  const body = h.run('toolBody(imageItem, {readOnly: true, sessionId: "worker-1"})');
+  const image = findNode(body, (node) => node.tag === 'img');
+  assert.equal(image.src, '/api/sessions/worker-1/blobs/abc');
+});
+
+test('worker list uses server filters without opening worker streams', async () => {
+  const h = harness(baseRoutes({'GET /sessions?kind=worker&limit=50': {sessions: [session('w', {kind: 'worker', source: 'dsh', status: 'completed'})], next_cursor: null}}));
+  await h.run('init()');
+  h.run('showWorkers("")');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(h.text('worker-panel'), /Workers/);
+  assert.match(h.text('worker-panel'), /dsh/);
+  assert.equal(h.net.callsTo('/sessions?kind=worker&limit=50').length, 1);
+  assert.equal(FakeEventSource.instances.length, 1);
 });

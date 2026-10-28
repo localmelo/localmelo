@@ -65,12 +65,11 @@
         <p>网站同步已在 <a href="https://github.com/localmelo/localmelo/pull/118">#118</a> 落地；任务调度器-2：任务 API 和 workers（S3a.2）已在 <a href="https://github.com/localmelo/localmelo/pull/119">#119</a> 落地。</p>
         <p>进行中，按顺序落地：</p>
         <ul>
-          <li>网页控制台-3：设置和详情抽屉（U3 PR 6）；审批、错误、历史和设置已在 <a href="https://github.com/localmelo/localmelo/pull/122">#122</a> 落地；worker 会话保存和导入已在 <a href="https://github.com/localmelo/localmelo/pull/123">#123</a> 落地。</li>
+          <li>无头工作进程支持-3：网页上的只读 worker 历史（<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>）；详情抽屉已在 <a href="https://github.com/localmelo/localmelo/pull/124">#124</a> 落地。</li>
         </ul>
         <p>接下来，按顺序：</p>
         <ul>
           <li>无头工作进程支持-2：内部试用（dogfood，#107 W1）；</li>
-          <li>无头工作进程支持-3：网页上的 worker 历史（<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>）；</li>
           <li>网页控制台-4：API 和控制台文档（U3 PR 7）；</li>
           <li>macOS 应用-1：桌面应用（A1）；</li>
           <li>任务调度器-3：暂停、停放和重启恢复（S3b）；</li>
@@ -90,9 +89,15 @@
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
 
+        <article class="update-entry" id="u-worker-view">
+          <h3>工作区中的 worker 历史</h3>
+          <p class="update-date">尚未发布</p>
+          <p>Workers 可筛选和分页查看保存或导入的运行记录。每次运行以只读快照打开；未完成的运行需手动刷新。脱敏记录分享前仍需检查。</p>
+        </article>
+
         <article class="update-entry" id="u-console-drawer">
           <h3>会话详情和外观</h3>
-          <p class="update-date">尚未发布</p>
+          <p class="update-date">2026-10-28 · #124</p>
           <p>工作区新增工具、授权、记忆和运行记录的详情抽屉，以及连接测试和保存的主题偏好。存储、模型和重连提示可与其他通知同时显示。</p>
         </article>
 

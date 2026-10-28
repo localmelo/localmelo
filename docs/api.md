@@ -315,7 +315,9 @@ curl 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
   affect subsequent pages.
 - Worker list and detail session objects include nullable `source`,
   `parent_run`, `git_branch`, `git_head`, `exit_code`, `status`, `steps`, and
-  `tokens`. `tokens` is the integer total token count, and `meta.usage` holds
+  `tokens`, `started_at`, and `duration_s`. Start time is the first turn's
+  timestamp; duration is its recorded result duration when present.
+  `tokens` is the integer total token count, and `meta.usage` holds
   the full usage map. Status falls back to the first turn's status; steps and
   tokens fall back to its stored result. Missing values are `null`, not zero.
   The detail response's top-level `tokens` separately counts completion tokens.

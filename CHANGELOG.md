@@ -9,6 +9,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Read-only worker history in the web workspace, with server-side filters,
+  paging, recorded transcripts and explicit refresh for unfinished runs. ([#NN])
+
 - Workspace settings gain connection testing and an immediately applied theme;
   a session details drawer shows tools, grant revocation, memory and runs.
   Store, model and stream banners no longer replace other notices. ([#124])
