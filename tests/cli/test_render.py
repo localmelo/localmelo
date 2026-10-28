@@ -382,7 +382,12 @@ def test_a_blank_answer_says_so() -> None:
             "✗",
             "if it says the model does not support tools",
         ),
-        ("budget_exhausted", "Max steps reached", "⚠", "/retry tries again."),
+        (
+            "budget_exhausted",
+            "Max steps reached",
+            "⚠",
+            "/retry tries again, or quit and run melo -c --max-steps 60 for more steps.",
+        ),
         (
             "stuck",
             "repeated",

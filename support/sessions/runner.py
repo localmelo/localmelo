@@ -67,6 +67,7 @@ from localmelo.support.sessions.store import (
     SessionStoreError,
     StoredEvent,
     TurnInfo,
+    UnknownSessionError,
     process_holder,
     redacted_event,
 )
@@ -77,6 +78,8 @@ logger = logging.getLogger(__name__)
 
 EventCallback = Callable[[StoredEvent], Awaitable[None] | None]
 ResumeMode = Literal["pairs", "window"]
+ResumeLoader = Callable[[], Awaitable[int]]
+BeforeTurn = Callable[[ResumeLoader], Awaitable[None]]
 
 # Seconds an awaitable on_event result may take; a slower one is cut off.
 SINK_TIMEOUT_S: Final = 5.0
@@ -204,7 +207,9 @@ class SessionRunner:
     *resume_mode* picks the arm :meth:`resume` loads. *progress* asks each
     turn's run for ``run.progress`` events (``Agent.run_task``'s
     ``progress=``); the flag stays on the runner, :meth:`replace_agent`
-    included.
+    included. *before_turn*, when set, is awaited after acquiring the turn's
+    lease and before calling the model. It receives a reload coroutine
+    factory for synchronizing conversation under that lease; do not retain it.
 
     The Agent needs ``AgentOptions(record_answers=True)`` and a
     ``workspace_root``, and the caller awaits ``agent.start()`` before it
@@ -222,6 +227,7 @@ class SessionRunner:
         holder: str | None = None,
         resume_mode: ResumeMode = DEFAULT_RESUME_MODE,
         progress: bool = False,
+        before_turn: BeforeTurn | None = None,
     ) -> None:
         _check_agent(agent)
         if resume_mode not in _RESUME_MODES:
@@ -244,6 +250,7 @@ class SessionRunner:
         # Whether each turn's run is asked for run.progress (UR-N); kept
         # for every turn, replace_agent's included.
         self._progress = progress
+        self._before_turn = before_turn
         self._active: _Turn | None = None
         self._last: _Turn | None = None
         # A begin_turn under way, before its turn exists.
@@ -535,6 +542,14 @@ class SessionRunner:
         run_exc: BaseException | None = None
         returned: RunResult | None = None
         try:
+            if self._before_turn is not None:
+                await self._before_turn(
+                    functools.partial(
+                        self._resume,
+                        RESUME_MAX_TURNS,
+                        reserved=True,
+                    )
+                )
             kwargs: dict[str, Any] = {
                 "on_event": self._sink(turn),
                 "approval": turn.approval,
@@ -1083,9 +1098,10 @@ class SessionRunner:
         async with self._loading:
             return await self._resume(max_turns)
 
-    async def _resume(self, max_turns: int) -> int:
-        """:meth:`resume`'s load, under ``_loading``."""
-        self._check_idle()
+    async def _resume(self, max_turns: int, *, reserved: bool = False) -> int:
+        """:meth:`resume`'s load, or the before-turn load under this runner's lease."""
+        if not reserved:
+            self._check_idle()
         checkpoint: list[Message] = []
         tail: list[Message] = []
         fell_back = False
@@ -1099,7 +1115,10 @@ class SessionRunner:
                 tail = await self._pairs(session_id, max_turns)
             else:
                 checkpoint, tail = loaded
-        self._check_idle()
+        if session_id is not None and await self._store.get_session(session_id) is None:
+            raise UnknownSessionError(f"Unknown session: {session_id}")
+        if not reserved:
+            self._check_idle()
         try:
             kept = self._agent.load_conversation(checkpoint + tail)
         except RuntimeError:

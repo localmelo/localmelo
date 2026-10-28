@@ -59,6 +59,8 @@ def test_slash_lists_every_command_with_its_line() -> None:
         "/help",
         "/new",
         "/clear",
+        "/sessions",
+        "/resume",
         "/verbose",
         "/thinking",
         "/expand",

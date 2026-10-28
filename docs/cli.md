@@ -8,7 +8,7 @@ see [Offline retrieval](retrieval.md).
 ## Synopsis
 
 ```text
-melo [options] "<task>"                      # run one task (direct mode)
+melo [options] -- "<task>"                   # run one task (direct mode)
 melo [options]                               # the interactive UI (in a terminal)
 melo --base-url URL [--chat-model NAME]      # the interactive UI on this server
 melo [--base-url URL] [--chat-model NAME] "" # the plain conversation loop
@@ -18,13 +18,15 @@ melo --serve --reconfigure                   # run setup, then start the gateway
 melo --daemon install|uninstall|status       # macOS background service
 ```
 
-Quote the task. Several words without quotes are joined with spaces.
+Quote the task and put it after `--` so option-like text is unambiguous.
+Several words without quotes are joined with spaces. Existing task command
+lines, abbreviations and the `melo ""` loop keep their previous parsing.
 
 ## Modes
 
 | Command | What it does |
 |---|---|
-| `melo "<task>"` | Direct mode: runs one task, prints the result and exits. |
+| `melo -- "<task>"` | Direct mode: runs one task, prints the result and exits. |
 | `melo` (no task) | Opens the [interactive UI](#the-interactive-ui) in a terminal, on the saved backend. With no saved backend it first asks for a model server and a model, and saves them; see [First run](#first-run). Without a terminal it exits with code 2 and says what to run instead. |
 | `melo --base-url URL` (no task) | Opens the interactive UI on that server, with `--chat-model` or the first chat model the server lists. |
 | `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI. Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
@@ -156,14 +158,16 @@ type more letters to narrow them, Tab or Enter to take one.
 |---|---|
 | `/help [command]` | The commands and keys, or one command's details. |
 | `/new` (also `/clear`) | Start a new session: the model forgets the conversation, and session grants end. |
+| `/sessions [filter]` | Pick a saved chat in this folder; type to filter, Tab for all folders, ↑ ↓ to select, Enter to resume, Esc to close. |
+| `/resume [id\|title]` | Resume by ID, ID prefix (at least four characters) or exact title; no argument opens the picker. |
 | `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's summary and whole rationale; without an argument, flips it. |
 | `/thinking [on\|off]` | The thinking excerpt on (the default) or off, leaving only `Thought for 1.2s`; without an argument, flips it. |
-| `/expand [turn.call]` | A tool call's whole output or error: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
+| `/expand [turn.call]` | A tool call's whole output or error, including stored calls after resuming: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
 | `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
 | `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). Under `--yolo`, says how to turn prompts on. |
 | `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, files and version. |
 | `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp-config` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
-| `/retry` | Undo the newest turn and run it again. |
+| `/retry` | Undo the newest turn and run its stored message again, keeping its typed text even after a resume. Files already changed by tools are not rolled back. |
 | `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
 | `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default (as `ollama` when the server answers like Ollama, else `vllm`). |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
@@ -171,7 +175,7 @@ type more letters to narrow them, Tab or Enter to take one.
 - A command that runs is echoed in the scrollback as a message is
   (`› /model 2`), followed by its output. A refused one is not, and
   `/exit` prints nothing.
-- `/new`, `/model` and `/backend` are refused while a turn runs: the
+- `/new`, `/sessions`, `/resume`, `/retry`, `/model` and `/backend` are refused while a turn runs: the
   draft stays and the hint says
   `/model is not available while a turn runs (esc stops it).`; press Enter
   again once the turn ends.
@@ -319,11 +323,40 @@ wrapped message leaves no blank rows. Known limits:
 
 ### Sessions and files
 
-Each `melo` starts a new session; the first message creates it. Sessions
-are kept in `~/.cache/localmelo/cli/sessions.db` (resuming them comes in a
-later release): every turn, with your message, the answer and each tool
-call with its output. `~/.cache/localmelo/cli_history` keeps your
-messages. Both are plain text (mode 0600), not encrypted. The UI writes
+Bare `melo` starts a new session; only the first message creates its row.
+Use `melo -c` (`--continue`) to resume the newest chat with a finished turn
+in the current workspace, or `melo -r` (`--resume`) to pick one. With none,
+either starts a new session and says so; Esc in the startup picker also
+starts new, without creating an empty row. `melo -r REF` resolves an ID,
+a prefix of at least four characters, or an exact case-insensitive title;
+multiple matches, or a title/message search fallback, open the picker.
+An unknown reference exits 2. `-c` and `-r` cannot be combined, or used
+with a task, `--serve` or `--daemon`.
+
+The picker lists at most 50 chats with finished, non-undone turns, newest
+first. The filter updates after 150 ms; Tab toggles this folder/all folders.
+Enter resumes, Esc or Ctrl+D closes it, and the ordinary draft stays intact.
+`/sessions FILTER` and `/resume REF` use the same picker and resolution.
+Web and scheduler sessions are never offered. A resume keeps the current
+model and workspace, records them on the session and clears approval grants;
+a note says when the session previously worked in another folder.
+
+After the banner, the recap shows the last three eligible turns from stored
+redacted copies. The line below its title says what reached model memory:
+`[sessions] resume_mode = "pairs"` (the default) restores recent user/answer
+pairs, without tool steps; `"window"` restores a saved working-memory
+checkpoint plus later pairs, falling back to pairs if no checkpoint is usable.
+Set this in `config.toml`; an invalid value warns in the UI and uses pairs,
+without adding warnings to direct-mode output. The recap's counts reflect
+the restored window after eviction, not the total number of stored turns.
+
+Two terminals may take turns on one CLI session. Before sending, melo reloads
+changes from the other window; a busy or deleted session keeps the draft.
+On exit, a session with turns prints its `melo -r ID` resume command.
+
+Sessions are kept in `~/.cache/localmelo/cli/sessions.db`: every turn,
+with your message, the answer and each tool call with its output.
+`~/.cache/localmelo/cli_history` keeps your messages. Both are plain text (mode 0600), not encrypted. The UI writes
 its log to `~/.cache/localmelo/logs/cli.log`
 (folder 0700, files 0600, 1 MB, two backups) and never prints a traceback
 on the screen; a problem shows as one dim line naming the log. A config
@@ -509,6 +542,8 @@ These options apply to `melo` without a task.
 
 | Option | Default | Description |
 |---|---|---|
+| `-c`, `--continue` | off | Resume the newest eligible chat in this workspace; with none, start new. |
+| `-r`, `--resume [ID\|TITLE]` | off | Resume the named chat; without a value open the session picker. |
 | `--workspace DIR` | the current folder | The folder melo works in; see [The workspace](#the-workspace). |
 | `--yolo` | off | Run every tool without asking for approval. |
 
@@ -571,7 +606,8 @@ These are usage errors:
   `only for direct mode (a query without --serve): --max-steps`; without a
   task, only those the interactive UI cannot use (`--tool-exposure`,
   `--timeout`, `--output-format`, `--progress`, `--routine`);
-- `--workspace` or `--yolo` with a task, `--serve` or `--daemon`, reported as
+- `-c` with `-r`, reported as `-c and -r cannot be combined`;
+- `--workspace`, `--yolo`, `-c` or `-r` with a task, `--serve` or `--daemon`, reported as
   `only for the interactive UI (melo without a query, --serve or --daemon): --yolo`;
 - `--base-url` or `--chat-model` with `--serve` or `--daemon`, reported as
   `--base-url and --chat-model are for a task or the interactive UI; --serve uses the config file (melo --reconfigure)`;
@@ -639,7 +675,7 @@ These are usage errors:
 
 ## Progress line
 
-With text output on a terminal, `melo "<task>"` shows where the task stands
+With text output on a terminal, `melo -- "<task>"` shows where the task stands
 in one line on stderr. The line is redrawn on each step and tool call and
 every second, and erased before the result and the status line are
 printed, so it never remains in the scrollback:
@@ -764,7 +800,7 @@ and end `melo` by the signal. Ctrl+C there is a key (see [Keys](#keys)).
 Read the JSON line for details, and the exit code for the outcome:
 
 ```bash
-line=$(melo --output-format json --timeout 600 "List the files in this directory")
+line=$(melo --output-format json --timeout 600 -- "List the files in this directory")
 code=$?
 if [ -n "$line" ]; then
   status=$(printf '%s\n' "$line" | python3 -c 'import json, sys; print(json.load(sys.stdin)["status"])')

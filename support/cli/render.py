@@ -240,7 +240,9 @@ def status_hint(
             "Rephrase the request, or /retry."
         )
     if status == "budget_exhausted":
-        return "/retry tries again."
+        return (
+            "/retry tries again, or quit and run melo -c --max-steps 60 for more steps."
+        )
     if status == "stuck":
         return "The model repeated itself; rephrase the request, or /retry."
     if status == "crashed":
@@ -355,6 +357,8 @@ class TurnRenderer:
     def on_event(self, stored: StoredEvent) -> None:
         """One stored event of the turn (the runner's ``on_event``)."""
         event = stored.event
+        if stored.turn is not None:
+            self._turn = stored.turn
         kind = event.get("type")
         data = event.get("data")
         if not isinstance(kind, str) or not isinstance(data, Mapping):

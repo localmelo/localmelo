@@ -99,8 +99,8 @@ resumed 1 turn(s)
   for [`run.progress`](events.md#runprogress) events: they are stored with
   the turn and reach `on_event` like the rest. The flag stays on the
   runner, `replace_agent` included, so every later turn asks too. Without
-  it a session turn reports none, as before; the interactive UI does not
-  ask yet.
+  it a session turn reports none, as before; the interactive UI always
+  requests progress events.
 - **Listeners.** `turn.started` and `turn.finished` are the store's own
   events, not the run's, and so is an `approval.resolved` that a turn's end
   writes for a request whose answer was not stored: `store.add_listener(fn)`
@@ -119,6 +119,7 @@ resumed 1 turn(s)
 | `on_event` | `None` | Called with each event of a turn's run, and with its `approval.*` events, once it is committed, as a `StoredEvent` with its id (`None` for an event the store could not record). It may return an awaitable, which is awaited for at most 5 seconds. |
 | `holder` | this process | The lease holder, `"<host>:<pid>:<suffix>"`. |
 | `resume_mode` | `"pairs"` | How [`resume()`](#resume) loads a conversation: `"pairs"` or `"window"`. |
+| `before_turn` | `None` | Async hook after the turn's lease is acquired, before the model runs. It receives a zero-argument async reload function; await that function if another terminal changed the conversation, and do not retain it. The CLI uses this boundary to avoid a finish-between-check-and-lease race. |
 | `progress` | `False` | Ask each turn's run for [`run.progress`](events.md#runprogress) events; kept on the runner, `replace_agent` included. |
 
 ## The Agent a session runs on
@@ -362,7 +363,13 @@ accepted completed run
 
 `await runner.resume(max_turns=10)` loads the stored conversation into the
 runner's agent and returns the number of turns it loaded. It raises
-`SessionBusyError` during a turn. `resume_mode` chooses how:
+`SessionBusyError` during a turn, or `UnknownSessionError` (a
+`SessionStoreError` subclass) if the session was deleted. Store operations
+that require an existing session raise the same typed error; `list_turns`
+keeps returning an empty list for an unknown ID. `TurnInfo.typed_text`
+exposes the original typed text passed as `title=`, separately from the
+composed `user_text`; `/retry` keeps both after a restart.
+`resume_mode` chooses how:
 
 - **`pairs`**, the default: the newest finished turns that are not undone,
   each as the user's text and the stored answer, at most 10 turns and 32,000

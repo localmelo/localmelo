@@ -76,8 +76,17 @@ BASE_OPTIONS = [
 
 # Options added after R1, each by a stage whose spec calls for it: P3's
 # progress line (progress_spec.md section 11, "New flags only") and U2a.1's
-# interactive UI (u2_spec.md section 1, "Flags").
-LATER_OPTIONS = ["--progress", "--routine", "--workspace", "--yolo"]
+# interactive UI and U2b's session selection (u2_spec.md section 1, "Flags").
+LATER_OPTIONS = [
+    "--progress",
+    "--routine",
+    "--workspace",
+    "--yolo",
+    "-c",
+    "--continue",
+    "-r",
+    "--resume",
+]
 
 
 def _openai_reply(content: str = "", call: bool = False) -> dict[str, Any]:
@@ -301,5 +310,18 @@ def test_no_new_flag_and_the_same_exit_codes() -> None:
     """R1 adds no flag: the options are R1's base and those of later stages."""
     assert sorted(cli._build_parser()._option_string_actions) == sorted(
         BASE_OPTIONS + LATER_OPTIONS
+    )
+    ui_or_help = {
+        "--workspace",
+        "--yolo",
+        "-c",
+        "--continue",
+        "-r",
+        "--resume",
+        "--help",
+        "-h",
+    }
+    assert set(cli._build_parser(direct_only=True)._option_string_actions) == (
+        set(BASE_OPTIONS + LATER_OPTIONS) - ui_or_help
     )
     assert (cli.EXIT_COMPLETED, cli.EXIT_CRASHED, cli.EXIT_NOT_COMPLETED) == (0, 1, 2)

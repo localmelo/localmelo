@@ -282,6 +282,10 @@ class SessionStoreError(Exception):
     """The session store cannot do what was asked: a file it cannot open, and so on."""
 
 
+class UnknownSessionError(SessionStoreError):
+    """The session was deleted or does not exist."""
+
+
 class StoreOwnedError(SessionStoreError):
     """The gateway's file has another owner."""
 
@@ -338,6 +342,7 @@ class TurnInfo:
     started_at: float
     finished_at: float | None
     client_request_id: str | None
+    typed_text: str
 
 
 @dataclass(frozen=True)
@@ -624,7 +629,7 @@ _TURN_COLUMNS: Final = (
     "t.id, t.session_id, t.turn, t.run_id, t.user_text, t.status, t.cause, "
     "t.answer, t.result, t.holder, t.undone, t.started_at, t.finished_at, "
     "(SELECT a.client_request_id FROM submissions a WHERE a.session_id = t.session_id "
-    "AND a.turn = t.turn AND a.state = 'accepted')"
+    "AND a.turn = t.turn AND a.state = 'accepted'), t.typed_text"
 )
 _SUBMISSION_COLUMNS: Final = (
     "u.client_request_id, u.scope, u.state, u.session_id, u.text_sha256, u.error, "
@@ -648,6 +653,7 @@ def _turn_info(row: Sequence[Any]) -> TurnInfo:
         started_at=row[11],
         finished_at=row[12],
         client_request_id=row[13],
+        typed_text=row[14],
     )
 
 
@@ -1231,7 +1237,7 @@ class SessionStore:
             (session_id,),
         )
         if not rows:
-            raise SessionStoreError(f"Unknown session: {session_id}")
+            raise UnknownSessionError(f"Unknown session: {session_id}")
         return rows[0][0], rows[0][1]
 
     async def _get_turn(
@@ -1248,6 +1254,20 @@ class SessionStore:
         async with self._lock:
             conn = await self._ready()
             return await self._get_session(conn, session_id)
+
+    async def change_counters(self, session_id: str, *, holder: str) -> tuple[int, int]:
+        """Foreign newest finished turn and undo count, without decoding turn payloads."""
+        async with self._lock:
+            conn = await self._ready()
+            rows = await _rows(
+                conn,
+                "SELECT COALESCE(MAX(CASE WHEN holder != ? AND status != 'running' "
+                "THEN turn ELSE 0 END), 0), COALESCE(SUM(undone), 0) "
+                "FROM turns WHERE session_id = ?",
+                (holder, session_id),
+            )
+            await self._require_session(conn, session_id)
+            return int(rows[0][0]), int(rows[0][1])
 
     async def find_sessions(
         self, ref: str, *, kinds: Collection[str] | None = ("chat",)

@@ -75,6 +75,13 @@ class GatewayConfig:
 
 
 @dataclass
+class SessionsConfig:
+    """How an interactive surface restores a saved conversation."""
+
+    resume_mode: str = "pairs"
+
+
+@dataclass
 class AgentConfig:
     """The ``[agent]`` table: how a direct run or a session reasons."""
 
@@ -136,6 +143,7 @@ class Config:
 
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
+    sessions: SessionsConfig = field(default_factory=SessionsConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
     @property
@@ -434,6 +442,9 @@ def load() -> Config:
                 setattr(cfg.scheduler, k, v)
 
     # A bad value is left for Config.validate to report.
+    if isinstance(data.get("sessions"), dict):
+        cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
+
     cfg.request_timeout_s = data.get("request_timeout_s")
     cfg.mcp_config = str(data.get("mcp_config") or "")
 
@@ -544,6 +555,9 @@ def _migrate_legacy(data: dict) -> Config:
             if hasattr(cfg.agent, k):
                 setattr(cfg.agent, k, v)
 
+    if isinstance(data.get("sessions"), dict):
+        cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
+
     cfg.request_timeout_s = data.get("request_timeout_s")
 
     return cfg
@@ -643,6 +657,15 @@ def save(cfg: Config) -> None:
         if cfg.agent.replay_turns is not None:
             lines.append(f"replay_turns = {cfg.agent.replay_turns}")
         lines.append("")
+
+    if cfg.sessions.resume_mode != "pairs":
+        lines.extend(
+            [
+                "[sessions]",
+                f"resume_mode = {_toml_value(cfg.sessions.resume_mode)}",
+                "",
+            ]
+        )
 
     # Only a settings section that differs from the defaults is written, so
     # an existing config is saved exactly as before and a reconfigure keeps

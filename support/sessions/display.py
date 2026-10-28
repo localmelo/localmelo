@@ -48,6 +48,33 @@ _CONTROLS: Final = re.compile(
 )
 
 
+def session_age(updated_at: float, now: float) -> str:
+    """A session's age, in whole minutes, hours or days."""
+    seconds = max(0, int(now - updated_at))
+    for unit, size in (("day", 86400), ("hour", 3600), ("minute", 60)):
+        count = seconds // size
+        if count:
+            return f"{count} {unit}{'' if count == 1 else 's'} ago"
+    return "just now"
+
+
+def resume_note(mode: str, turns: int, checkpoint_turns: int) -> str:
+    """Use the runner's post-eviction counts, not the number of stored turns."""
+
+    def count(n: int) -> str:
+        return f"{n} turn{' is' if n == 1 else 's are'} back in the model's memory"
+
+    if mode != "window":
+        return count(turns) + (
+            "; its tool calls are not." if turns == 1 else "; their tool calls are not."
+        )
+    note = count(checkpoint_turns) + ", with their tool steps"
+    tail = turns - checkpoint_turns
+    return note + (
+        f"; {tail} later turn{'s' if tail != 1 else ''} without them." if tail else "."
+    )
+
+
 def format_duration(seconds: float) -> str:
     """``0.4s`` and ``6.4s`` below 10 s (tenths, cut); from 10 s ``12s``, ``2m03s``.
 

@@ -308,6 +308,8 @@ async def main_async(
 
     Returns the exit code and the signal that ended the session, if one did.
     """
+    from typing import cast
+
     from prompt_toolkit.history import History, InMemoryHistory
     from prompt_toolkit.output.vt100 import Vt100_Output
     from prompt_toolkit.patch_stdout import patch_stdout
@@ -324,6 +326,7 @@ async def main_async(
     from localmelo.support.cli.theme import in_symbols, symbols_for, wants_no_color
     from localmelo.support.cli.views import banner
     from localmelo.support.sessions.display import home_label, localmelo_version
+    from localmelo.support.sessions.runner import ResumeMode
     from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
     log_label = home_label(log_path)
@@ -390,6 +393,12 @@ async def main_async(
             backend=lambda: factory.backend,
             snapshots=approver.snapshots,
         )
+        raw_mode = config.load().sessions.resume_mode
+        invalid_mode = raw_mode not in ("pairs", "window")
+        if invalid_mode:
+            logging.getLogger(__name__).warning(
+                "Invalid [sessions] resume_mode %r; using pairs", raw_mode
+            )
         session = CliSession(
             store=store,
             factory=factory,
@@ -397,6 +406,7 @@ async def main_async(
             renderer=renderer,
             approver=approver,
             mode="yolo" if args.yolo else "ask",
+            resume_mode=cast(ResumeMode, "pairs" if invalid_mode else raw_mode),
             out=out,
         )
         out.print(
@@ -411,6 +421,13 @@ async def main_async(
                 symbols=symbols,
             )
         )
+        if invalid_mode:
+            out.print(
+                Text(
+                    f"{symbols.warn} Invalid [sessions] resume_mode; using pairs.",
+                    style="warn",
+                )
+            )
         if choice.warning:
             out.print(Text(f"{symbols.warn} {choice.warning}", style="warn"))
         if factory.mcp_error:
@@ -444,7 +461,9 @@ async def main_async(
             renderer,
             symbols=symbols,
             history=history,
-            completer=SlashCompleter(lambda: session.models),
+            completer=SlashCompleter(
+                lambda: session.models, lambda: session.navigation.refs
+            ),
             input=terminal_input(sys.stdin, on_close=terminal_closed),
             output=output,
             approver=approver,
@@ -465,6 +484,18 @@ async def main_async(
         if not choice.checked and factory.listable():
             session.spawn(session.check_server())
         app = asyncio.ensure_future(ui.run())
+        session.spawn(session.navigation.refresh_refs())
+        if (
+            getattr(args, "continue_session", False)
+            or getattr(args, "resume", None) is not None
+        ):
+            session._state = "switching"
+            session._work = session.spawn(
+                session.navigation.startup(
+                    getattr(args, "continue_session", False),
+                    getattr(args, "resume", None),
+                )
+            )
         arrived = asyncio.ensure_future(signals.arrived.wait())
         try:
             with patch_stdout(raw=True):
@@ -513,7 +544,9 @@ async def main_async(
             signals.uninstall()
             with contextlib.suppress(NotImplementedError, RuntimeError):
                 loop.remove_signal_handler(signal.SIGINT)
-        return 0, signals.received
+        if session.saved_resume_hint:
+            out.print(session._text(session.saved_resume_hint))
+        return session.exit_code, signals.received
     finally:
         # Whatever ended the session (a signal, a closed terminal, Ctrl+C
         # while the Agent starts), nothing stays open: the store's thread
