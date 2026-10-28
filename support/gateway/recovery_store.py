@@ -105,6 +105,46 @@ class RecoveryStore:
             )
             return (row[0], json.loads(row[1])) if row else None
 
+    async def supersede(
+        self,
+        task_id: str,
+        operation_id: str,
+        *,
+        expected_generation: int | None,
+        expected_operation_id: str | None,
+    ) -> None:
+        """Retire an intent only after its writer settles and identity changes."""
+        _text(operation_id, "operation_id")
+        _guard(expected_generation, expected_operation_id)
+        async with self.store.component_transaction("recovery_supersede") as conn:
+            found = await self._receipt(conn, task_id, operation_id)
+            if found is None or found[0]["kind"] != "recovery":
+                raise TaskConflictError("unknown recovery operation")
+            if found[0]["phase"] == "superseded":
+                return
+            if found[0]["phase"] != "prepared":
+                raise TaskConflictError("committed recovery cannot be superseded")
+            row = await _one(
+                conn,
+                "SELECT generation, operation_id FROM park_priority WHERE task_id = ?",
+                (task_id,),
+            )
+            identity = tuple(row) if row else (None, None)
+            task = await _one(
+                conn, "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+            )
+            request = found[0]["request"]
+            if identity != (expected_generation, expected_operation_id) or (
+                identity == (request["generation"], request["previous"])
+                and task
+                and task[0] not in TERMINAL_PHASES
+            ):
+                raise TaskConflictError("recovery intent is still current")
+            await conn.execute(
+                "UPDATE recovery_operations SET phase = 'superseded' WHERE task_id = ? AND operation_id = ?",
+                (task_id, operation_id),
+            )
+
     @staticmethod
     async def _receipt(
         conn: Any, task_id: str, operation_id: str
@@ -197,9 +237,15 @@ class RecoveryStore:
                     "SELECT pause_pending FROM park_priority WHERE task_id = ?",
                     (task_id,),
                 )
+                pending_recovery = await _one(
+                    conn,
+                    "SELECT 1 FROM recovery_operations WHERE task_id = ? AND kind = 'recovery' AND phase = 'prepared'",
+                    (task_id,),
+                )
                 first = expected_execution_id is None
                 if (
-                    task[0] != "queued"
+                    pending_recovery
+                    or task[0] != "queued"
                     or task[1] >= 5
                     or not provenance
                     or (first and provenance[0] != "never_started")
@@ -308,7 +354,9 @@ class RecoveryStore:
             if existing:
                 if existing[0]["kind"] != "recovery" or existing[0]["request"] != data:
                     raise TaskConflictError("recovery operation ID reused")
-                if existing[0]["phase"] == "committed" and not existing[1]:
+                if existing[0]["phase"] == "superseded" or (
+                    existing[0]["phase"] == "committed" and not existing[1]
+                ):
                     raise TaskConflictError("recovery operation superseded")
                 return False
             pending = await _one(
@@ -337,6 +385,12 @@ class RecoveryStore:
                 and provenance[1] != execution_id
             ):
                 raise TaskConflictError("recovery execution is stale")
+            if (
+                outcome not in TERMINAL_PHASES
+                and not unsafe_resume
+                and (not provenance or provenance[0] != "never_started")
+            ):
+                raise TaskConflictError("unverified execution requires safety review")
             if outcome == "queued" and (
                 not provenance
                 or provenance[0] != "never_started"
@@ -375,6 +429,8 @@ class RecoveryStore:
                 if not current:
                     raise TaskConflictError("recovery operation superseded")
                 return
+            if receipt["phase"] != "prepared":
+                raise TaskConflictError("recovery operation superseded")
             data = receipt["request"]
             task = await _one(
                 conn, "SELECT state FROM tasks WHERE task_id = ?", (task_id,)

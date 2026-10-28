@@ -286,6 +286,66 @@ async def test_process_identity_is_execution_bound_and_retained(stores: tuple) -
     ]
 
 
+async def test_prepared_recovery_cannot_overwrite_later_park(stores: tuple) -> None:
+    sessions, tasks, recovery, _ = stores
+    task_id = await mark_created(sessions, tasks)
+    await recovery.prepare(
+        task_id,
+        operation_id="recovery",
+        execution_id="unstarted",
+        outcome="queued",
+        card="",
+        reason="",
+        crash=False,
+        unsafe_resume=False,
+        **await identity(tasks, task_id),
+    )
+    await tasks.change(task_id, state="parked")
+    with pytest.raises(TaskStoreError):
+        await recovery.commit(task_id, operation_id="recovery")
+    assert (await tasks.get_task(task_id)).state == "parked"
+
+
+async def test_prepared_recovery_fences_first_launch(stores: tuple) -> None:
+    sessions, tasks, recovery, _ = stores
+    task_id = await mark_created(sessions, tasks)
+    guard = await identity(tasks, task_id)
+    assert await recovery.prepare(
+        task_id,
+        operation_id="recover",
+        execution_id="unstarted",
+        outcome="queued",
+        card="",
+        reason="",
+        crash=False,
+        unsafe_resume=False,
+        **guard,
+    )
+    with pytest.raises(TaskStoreError):
+        await recovery.start(
+            task_id, operation_id="launch", execution_id="launch-id", **guard
+        )
+    assert (await tasks.get_task(task_id)).state == "queued"
+
+
+async def test_started_recovery_cannot_claim_unverified_safety(stores: tuple) -> None:
+    sessions, tasks, recovery, _ = stores
+    task_id = await mark_created(sessions, tasks)
+    await start(tasks, recovery, task_id)
+    with pytest.raises(TaskStoreError):
+        await recovery.prepare(
+            task_id,
+            operation_id="recover",
+            execution_id="execution-1",
+            outcome="interrupted",
+            card="card",
+            reason="unknown",
+            crash=False,
+            unsafe_resume=False,
+            **await identity(tasks, task_id),
+        )
+
+
 async def test_prepared_intent_is_discoverable_and_exclusive(stores: tuple) -> None:
     sessions, tasks, recovery, task_id = stores
     task_id = await mark_created(sessions, tasks)
@@ -359,7 +419,11 @@ async def test_stale_cas_and_stop_supersede_prepared_recovery(stores: tuple) -> 
         )
     await prepare(tasks, recovery, task_id, "recover-1")
     guard = await identity(tasks, task_id)
+    with pytest.raises(TaskStoreError):
+        await recovery.supersede(task_id, "recover-1", **guard)
     await tasks.change(task_id, state="cancelled", operation_id="stop-1", **guard)
+    await recovery.supersede(task_id, "recover-1", **await identity(tasks, task_id))
+    assert await recovery.active_intent(task_id) is None
     with pytest.raises(TaskStoreError):
         await recovery.commit(task_id, operation_id="recover-1")
     with pytest.raises(TaskStoreError):
