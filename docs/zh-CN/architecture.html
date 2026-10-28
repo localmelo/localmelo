@@ -137,7 +137,7 @@
         <p>关键文件：<code>support/gateway/__init__.py</code>、<code>session.py</code>、<code>guard.py</code>（<code>Host</code> 和 <code>Origin</code> 检查）、<code>webapp.py</code> 和 <code>playground.py</code>（网页工作区的路由和对话）、<code>static/</code>（网页工作区的页面），以及用于 macOS 后台服务的 <code>daemon.py</code>。</p>
 
         <h3 id="c-mcp">MCP 服务器</h3>
-        <p>通过 stdio 使用 Model Context Protocol 通信的本地服务器，列在 <code>--mcp-config</code> 指定的 JSON 文件中。第一次运行开始时，<code>support/mcp</code> 会启动每个服务器，列出它的工具，并以 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> 的名称把这些工具注册到工具注册表和执行器中。MCP 工具可以在直接模式和 Python API 中使用，网关会话和交互式界面中不能使用。服务器的 <code>require_approval</code> 可以让它的全部工具（或其中列出的工具）在调用前先询问运行的审批策略；没有审批策略的运行（例如直接模式的运行）会直接运行这些工具，不经询问。</p>
+        <p>通过 stdio 使用 Model Context Protocol 通信的本地服务器，列在 <code>--mcp-config</code> 指定的 JSON 文件中。第一次运行开始时，<code>support/mcp</code> 会启动每个服务器，列出它的工具，并以 <code>mcp__&lt;server&gt;__&lt;tool&gt;</code> 的名称把这些工具注册到工具注册表和执行器中。MCP 工具可以在直接模式、Python API 和交互式界面中使用（<code>--mcp-config</code>，或配置文件顶层的 <code>mcp_config</code> 键）；网关会话暂时还不能使用。服务器的 <code>require_approval</code> 可以让它的全部工具（或其中列出的工具）在调用前先询问运行的审批策略；没有审批策略的运行（例如直接模式的运行）会直接运行这些工具，不经询问。</p>
         <p>关键文件：<code>support/mcp/config.py</code>、<code>client.py</code>、<code>provider.py</code>，以及 <code>melo/contracts/tools.py</code> 中的工具提供方接口。</p>
 
         <h3 id="c-agent">智能体</h3>
@@ -224,7 +224,7 @@
         <ul>
           <li>直接模式：运行选项、九种运行状态、文本或 JSON 输出，以及固定的退出码。</li>
           <li>终端中的交互式界面（单独的 <code>melo</code>，<code>support/cli/</code>）：实时的工具块和旋转指示、审批、带补全的 <code>/</code> 命令、<code>/model</code> 和 <code>/backend</code>；以及简单的对话循环（<code>melo ""</code>）。</li>
-          <li>四个内置工具，以及本地 MCP 服务器提供的工具（在直接模式和 Python API 中）。</li>
+          <li>四个内置工具，以及本地 MCP 服务器提供的工具（在直接模式、Python API 和交互式界面中）。</li>
           <li>Python API（实验性）：运行事件、停止运行、工具调用的审批策略、限制文件工具的工作区根目录，以及可以在多次运行之间延续的对话。</li>
           <li>会话（实验性）：保存在 SQLite 中的对话，每一轮只结束一次，重启后仍在，并能在新的智能体上恢复（<code>support/sessions/</code>）；runner 可以让每一轮报告进度事件。交互式界面把它的每一轮保存在会话中；网关目前还没有使用会话。</li>
           <li>网关：HTTP API、只在空闲时响应关闭请求的会话、网页工作区、监听回环地址时拒绝其他网站请求的检查，以及 macOS 后台服务。</li>

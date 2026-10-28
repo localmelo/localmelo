@@ -379,6 +379,12 @@ enable_thinking = false
 - `--base-url` does not read the config file, so `extra_body` does not apply
   there.
 
+## MCP servers
+
+`mcp_config = "~/mcp.json"` at the top of `config.toml` names the MCP servers JSON file the
+interactive UI loads (the gateway will read the same key); `--mcp-config FILE` overrides it for
+one run. Direct mode never reads it.
+
 ## Chat request timeout
 
 A chat request waits up to 120 seconds for the server (300 seconds with the

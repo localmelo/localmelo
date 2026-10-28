@@ -22,9 +22,11 @@ directory and runs `shell_exec` and `python_exec` there (see
 [With a workspace root](#with-a-workspace-root)). The interactive UI (bare
 `melo`) runs with its workspace as the root and asks before each
 `shell_exec`, `python_exec` and `file_write` call, unless `--yolo` (see
-[Permission tiers](#permission-tiers)). The interactive UI does not load MCP
-servers yet; a Python run with an approval policy asks its own policy about
-an MCP tool by the same tiers.
+[Permission tiers](#permission-tiers)). The interactive UI loads the MCP
+servers of `--mcp-config`, else of the top-level `mcp_config` key; a server
+that fails to start turns MCP off for that session (`/mcp` says why). A
+Python run with an approval policy asks its own policy about an MCP tool by
+the same tiers.
 
 ## Choose the built-in tools
 

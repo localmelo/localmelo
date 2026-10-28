@@ -94,6 +94,9 @@ class Config:
     )
     embedding_backend: str = ""  # mlc | ollama | vllm | sglang | none
 
+    # A path to an MCP servers JSON file the CLI and the gateway both read.
+    mcp_config: str = ""
+
     # HTTP timeout of each chat request, in seconds, for every chat backend.
     # None keeps each chat provider's own default (120 s; 300 s for the
     # ollama backend). Embedding requests keep their own timeout.
@@ -367,6 +370,7 @@ def load() -> Config:
 
     # A bad value is left for Config.validate to report.
     cfg.request_timeout_s = data.get("request_timeout_s")
+    cfg.mcp_config = str(data.get("mcp_config") or "")
 
     return cfg
 
@@ -523,6 +527,8 @@ def save(cfg: Config) -> None:
     # is written, so a config without one is saved as it was before.
     if cfg.request_timeout_s is not None:
         lines.append(f"request_timeout_s = {_toml_value(cfg.request_timeout_s)}")
+    if cfg.mcp_config:
+        lines.append(f"mcp_config = {_toml_string(cfg.mcp_config)}")
     lines.append("")
 
     # Local backend sections

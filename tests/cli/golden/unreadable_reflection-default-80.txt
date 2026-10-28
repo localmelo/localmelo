@@ -16,5 +16,6 @@
 ✻ Could not read the reflection after attempt 3; the budget is used up (0.2s)
 ● Best effort: Probably the check passes.
 ⚠ melo: run ended with status budget_exhausted: Max attempts reached
+  /retry tries again.
 ✻ Worked for 0.2s · 3 tool calls · ↓ 114 tokens
 

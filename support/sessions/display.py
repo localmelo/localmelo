@@ -120,6 +120,46 @@ def display_path(path: str, root: str | None) -> str:
     return home_label(path)
 
 
+def approval_target(request: Mapping[str, Any]) -> dict[str, Any] | None:
+    """A ``file_write`` request's target, or None for any other tool.
+
+    ``{"path_label": display_path(...), "exists": bool, "size_bytes": int}``.
+    The facts come from ``os.open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)``
+    and ``fstat``, as the CLI panel's diff reads them: a final symlink is not
+    followed and a FIFO never blocks. ``exists`` is false only for a missing
+    path; any other failure to open counts as existing, with size 0.
+    """
+    if request.get("tool_name") != "file_write":
+        return None
+    arguments = request.get("arguments")
+    if not isinstance(arguments, Mapping):
+        return None
+    path = str(arguments.get("path") or "")
+    root = request.get("workspace_root")
+    label = display_path(path, root if isinstance(root, str) else None)
+    exists, size = file_facts(path)
+    return {"path_label": label, "exists": exists, "size_bytes": size}
+
+
+def file_facts(path: str) -> tuple[bool, int]:
+    """(exists, size) for *path*, without following a final symlink or blocking.
+
+    The one rule for a ``file_write`` target's facts, shared by
+    :func:`approval_target` and the CLI panel's diff.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return False, 0
+    except OSError:
+        return True, 0
+    try:
+        info = os.fstat(fd)
+    finally:
+        os.close(fd)
+    return True, info.st_size
+
+
 def status_line(status: str, error: str) -> str:
     """``melo: run ended with status <status>: <reason>``, as direct mode prints it.
 

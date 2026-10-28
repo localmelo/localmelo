@@ -41,7 +41,11 @@ class Turn:
     """A renderer on a recording, fed events by type and data."""
 
     def __init__(
-        self, width: int = 80, symbols: Symbols = UNICODE, **backend: Any
+        self,
+        width: int = 80,
+        symbols: Symbols = UNICODE,
+        snapshots: Any = None,
+        **backend: Any,
     ) -> None:
         self.out = RecordingOut(width)
         self.now = [100.0]
@@ -49,6 +53,7 @@ class Turn:
             self.out,
             symbols=symbols,
             backend=lambda: _backend(**backend),
+            snapshots=snapshots,
             clock=lambda: self.now[0],
         )
         self.renderer.begin_turn("What is in this folder?")
@@ -377,13 +382,18 @@ def test_a_blank_answer_says_so() -> None:
             "✗",
             "if it says the model does not support tools",
         ),
-        ("budget_exhausted", "Max steps reached", "⚠", None),
-        ("stuck", "repeated", "⚠", "The model repeated itself; rephrase the request."),
+        ("budget_exhausted", "Max steps reached", "⚠", "/retry tries again."),
+        (
+            "stuck",
+            "repeated",
+            "⚠",
+            "The model repeated itself; rephrase the request, or /retry.",
+        ),
         (
             "failed",
             "empty replies",
             "⚠",
-            "The model returned only empty replies; try another model.",
+            "The model returned only empty replies; /retry, or try another model.",
         ),
         (
             "gate_stopped",
@@ -1500,3 +1510,163 @@ def test_a_retry_ends_at_the_next_event() -> None:
         turn, content="", tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}]
     )
     assert turn.renderer.live.activity == "Thinking"
+
+
+# ── U2a.3: a file write's change from its snapshot ──
+
+
+def _snapshots(
+    request_id: str, *, old: str | None, new: str, added: int = 1, removed: int = 0
+) -> Any:
+    from localmelo.support.cli import edits
+    from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+
+    snapshots = EditSnapshots()
+    target = (
+        edits.Target(path="todo.md", exists=False)
+        if old is None
+        else edits.Target(path="todo.md", exists=True, text=old)
+    )
+    snapshots._snapshots[request_id] = Snapshot(request_id, target, new, added, removed)
+    return snapshots
+
+
+def test_a_file_write_block_shows_the_counts_from_the_snapshot() -> None:
+    snapshots = _snapshots("r1", old="a\n", new="b\n", added=1, removed=1)
+    text = (
+        Turn(snapshots=snapshots)
+        .tool(
+            "file_write",
+            "todo.md (2 chars)",
+            request_id="r1",
+            status="success",
+            output="Written 2 bytes to todo.md",
+            approval={
+                "request_id": "r1",
+                "allowed": True,
+                "origin": "user",
+                "remember": False,
+            },
+            duration_s=0.1,
+        )
+        .text()
+    )
+    assert "  └ +1 −1 lines" in text
+    assert "Written 2 bytes" not in text
+
+
+def test_a_new_file_block_shows_its_line_count() -> None:
+    snapshots = _snapshots("r1", old=None, new="a\nb\n", added=2, removed=0)
+    text = (
+        Turn(snapshots=snapshots)
+        .tool(
+            "file_write",
+            "new.md",
+            request_id="r1",
+            status="success",
+            output="Written 4 bytes",
+            approval={"request_id": "r1", "allowed": True, "origin": "user"},
+        )
+        .text()
+    )
+    assert "  └ new file, 2 lines" in text
+
+
+def test_verbose_shows_the_change_hunks() -> None:
+    snapshots = _snapshots("r1", old="a\n", new="b\n", added=1, removed=1)
+    turn = Turn(snapshots=snapshots)
+    turn.renderer.verbose = True
+    text = turn.tool(
+        "file_write",
+        "todo.md (2 chars)",
+        request_id="r1",
+        status="success",
+        output="Written 2 bytes",
+        approval={"request_id": "r1", "allowed": True, "origin": "user"},
+    ).text()
+    assert "     1 − a" in text and "     1 + b" in text
+
+
+def test_a_write_without_a_snapshot_shows_its_output() -> None:
+    text = (
+        Turn()
+        .tool(
+            "file_write",
+            "todo.md (2 chars)",
+            request_id="r1",
+            status="success",
+            output="Written 2 bytes to todo.md",
+            approval={"request_id": "r1", "allowed": True, "origin": "user"},
+        )
+        .text()
+    )
+    assert "  └ Written 2 bytes to todo.md" in text
+
+
+# ── T22R review fixes ──
+
+
+def test_a_file_write_block_uses_the_snapshots_counts() -> None:
+    from localmelo.support.cli import edits
+    from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+
+    snapshots = EditSnapshots()
+    target = edits.Target(path="todo.md", exists=True, text="a\n")
+    snapshots._snapshots["r1"] = Snapshot("r1", target, "b\n", 7, 9)
+    text = (
+        Turn(snapshots=snapshots)
+        .tool(
+            "file_write",
+            "todo.md",
+            request_id="r1",
+            status="success",
+            output="Written",
+            approval={"request_id": "r1", "allowed": True, "origin": "user"},
+        )
+        .text()
+    )
+    assert "  └ +7 −9 lines" in text
+
+
+def test_a_write_with_no_diff_shows_that() -> None:
+    from localmelo.support.cli import edits
+    from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+
+    snapshots = EditSnapshots()
+    target = edits.Target(
+        path="big.bin", exists=True, problem="overwrites a 1.2 MB file"
+    )
+    snapshots._snapshots["r1"] = Snapshot("r1", target, "x\ny\n", 2, 0)
+    text = (
+        Turn(snapshots=snapshots)
+        .tool(
+            "file_write",
+            "big.bin",
+            request_id="r1",
+            status="success",
+            output="Written",
+            approval={"request_id": "r1", "allowed": True, "origin": "user"},
+        )
+        .text()
+    )
+    assert "  └ changed; no diff shown" in text
+
+
+def test_verbose_hunks_cannot_act_on_the_terminal() -> None:
+    from localmelo.support.cli import edits
+    from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+
+    snapshots = EditSnapshots()
+    target = edits.Target(path="todo.md", exists=True, text="old\x1b[2J\n")
+    snapshots._snapshots["r1"] = Snapshot("r1", target, "new\x1b]0;PWNED\x07\n", 1, 1)
+    turn = Turn(snapshots=snapshots)
+    turn.renderer.verbose = True
+    text = turn.tool(
+        "file_write",
+        "todo.md",
+        request_id="r1",
+        status="success",
+        output="Written",
+        approval={"request_id": "r1", "allowed": True, "origin": "user"},
+    ).text()
+    assert "\x1b" not in text and "\x07" not in text

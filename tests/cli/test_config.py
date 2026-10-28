@@ -1051,6 +1051,23 @@ class TestRequestTimeoutConfig:
         assert config_path.read_bytes() == before
 
 
+def test_the_mcp_config_key_round_trips(tmp_path: Path) -> None:
+    from localmelo.support import config
+
+    path = tmp_path / "config.toml"
+    with (
+        mock.patch.object(config, "CONFIG_PATH", str(path)),
+        mock.patch.object(config, "CONFIG_DIR", str(tmp_path)),
+    ):
+        cfg = config.Config(chat_backend="vllm", embedding_backend="none")
+        cfg.mcp_config = "~/mcp.json"
+        config.save(cfg)
+        assert config.load().mcp_config == "~/mcp.json"
+        cfg.mcp_config = ""
+        config.save(cfg)
+        assert "mcp_config" not in path.read_text(encoding="utf-8")
+
+
 # -- The scheduler's settings (S2) --
 
 

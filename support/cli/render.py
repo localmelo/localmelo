@@ -31,6 +31,8 @@ from rich.table import Table
 from rich.text import Text
 
 from localmelo.melo.schema import RunResult, split_thinking
+from localmelo.support.cli import edits
+from localmelo.support.cli.approvals import EditSnapshots, Snapshot
 from localmelo.support.cli.output import Out
 from localmelo.support.cli.text import (
     cells,
@@ -193,11 +195,11 @@ def status_hint(
         failed = _FAILED_WITH.search(error)
         name = failed.group(1) if failed and not http else ""
         if name in ("ConnectError", "ConnectTimeout"):
-            return f"Is the model server running at {url}?"
+            return f"Is the model server running at {url}? /status checks again."
         if name in ("ReadTimeout", "WriteTimeout", "PoolTimeout"):
             return (
                 "The model server did not answer in time; it may still be "
-                "loading the model."
+                "loading the model. /retry tries again."
             )
         if code == 404:
             hint = (
@@ -223,22 +225,29 @@ def status_hint(
                 f"The server refused the key in {backend.key_env or 'its key variable'}; "
                 "melo --reconfigure changes the backend."
             )
-        return None
+        return f"/status checks the model server at {url}; /retry tries again."
     if status == "setup_error":
-        return "A tool server failed to start."
+        return "A tool server failed to start; /mcp shows why."
     if status == "failed":
         if error == "empty replies":
-            return "The model returned only empty replies; try another model."
-        return "A check stopped the run (the reason is above); try another model."
+            return (
+                "The model returned only empty replies; /retry, or try another model."
+            )
+        return "A check stopped the run (the reason is above); /retry, or try another model."
     if status == "gate_stopped":
-        return "melo judged that another attempt would not help. Rephrase the request."
+        return (
+            "melo judged that another attempt would not help. "
+            "Rephrase the request, or /retry."
+        )
+    if status == "budget_exhausted":
+        return "/retry tries again."
     if status == "stuck":
-        return "The model repeated itself; rephrase the request."
+        return "The model repeated itself; rephrase the request, or /retry."
     if status == "crashed":
         if cause == "crash":
             return (
                 "melo stopped before this turn finished (the process was killed "
-                "or the computer lost power)."
+                "or the computer lost power). /retry runs it again."
             )
         return f"This is a bug in localmelo; the log is {LOG_PATH}."
     return None
@@ -250,7 +259,7 @@ def stopped_line(cause: str, symbols: Symbols) -> Text:
     elif cause in ("shutdown", "crash"):
         text = "Interrupted"
     else:
-        text = "Stopped"
+        text = f"Stopped {symbols.dot} /retry runs it again"
     return Text(f"{symbols.stopped} {text}", style="warn")
 
 
@@ -265,10 +274,13 @@ class TurnRenderer:
         backend: Callable[[], BackendInfo],
         verbose: bool = False,
         thinking: bool = True,
+        snapshots: EditSnapshots | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.out = out
         self.symbols = symbols
+        # The session's file_write snapshots, for a block's change.
+        self._snapshots = snapshots
         # Per session, not saved: /verbose and /thinking flip them.
         self.verbose = verbose
         self.thinking = thinking
@@ -781,6 +793,13 @@ class TurnRenderer:
             body = error + ("\n" + output if output.strip() else "")
         meta.append(tag)
         parts: list[RenderableType] = [self._header(symbol, style, name, preview, meta)]
+        snapshot = self._take_snapshot(data)
+        if status == "success" and snapshot is not None:
+            parts.append(self._change_body(snapshot))
+            images = _image_lines(data.get("images"), self.symbols)
+            if images is not None:
+                parts.append(images)
+            return Group(*parts)
         if self.verbose:
             arguments = _argument_lines(self._arguments_of(data), self.out.width)
             if arguments is not None:
@@ -790,6 +809,63 @@ class TurnRenderer:
         if images is not None:
             parts.append(images)
         return Group(*parts)
+
+    def _take_snapshot(self, data: Mapping[str, Any]) -> Snapshot | None:
+        """The file_write snapshot of this call, removed (only a write has one)."""
+        if self._snapshots is None:
+            return None
+        approval = data.get("approval")
+        if not isinstance(approval, Mapping):
+            return None
+        request_id = approval.get("request_id")
+        if not isinstance(request_id, str):
+            return None
+        return self._snapshots.take(request_id)
+
+    def _change_body(self, snapshot: Snapshot) -> Text:
+        """A file write's change: ``+1 −1 lines``, or ``new file, 12 lines``.
+
+        With /verbose the diff's hunks follow, dim, removed lines in the
+        error style and added lines in the ok style.
+        """
+        target = snapshot.target
+        if not target.exists:
+            count = len(snapshot.new.splitlines())
+            return Text(
+                f"  {self.symbols.connector} new file, {count} line"
+                + ("" if count == 1 else "s"),
+                no_wrap=True,
+                overflow="ellipsis",
+            )
+        if not target.diffable:
+            # No text was read (too large, binary, not regular): no counts
+            # are known, and the panel said why.
+            return Text(
+                f"  {self.symbols.connector} changed; no diff shown",
+                style="muted",
+                no_wrap=True,
+                overflow="ellipsis",
+            )
+        rows, _, _ = edits.diff(target.text or "", snapshot.new)
+        body = Text(no_wrap=True, overflow="ellipsis")
+        body.append(
+            f"  {self.symbols.connector} +{snapshot.added} "
+            f"{self.symbols.minus}{snapshot.removed} lines",
+            style="muted",
+        )
+        if self.verbose:
+            width = max(1, self.out.width - 6)
+            for row in rows:
+                if row.kind == "…":
+                    body.append("\n      " + self.symbols.ellipsis, style="muted")
+                    continue
+                sign = {"+": "+", "-": self.symbols.minus, " ": " "}[row.kind]
+                style = {"+": "ok", "-": "error", " ": "muted"}[row.kind]
+                number = row.old if row.kind == "-" else row.new
+                text = clean_output(row.text)
+                line = cut_cells(f"{number:4} {sign} {text}", width)
+                body.append("\n      " + line, style=style)
+        return body
 
     def _arguments_of(self, data: Mapping[str, Any]) -> object:
         """The arguments a finished call was started with (tool.started's)."""

@@ -13,11 +13,13 @@ from __future__ import annotations
 
 import copy
 import dataclasses
+import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
+from localmelo.melo.contracts.tools import BaseToolProvider
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -44,6 +46,17 @@ def session_options(options: AgentOptions, workspace: str) -> AgentOptions:
     )
 
 
+def load_mcp_providers(path: str) -> list[BaseToolProvider]:
+    """Fresh MCP tool providers for the config file at *path*.
+
+    ``~`` is expanded; a file that cannot be read or is not a valid MCP
+    config raises :class:`~localmelo.support.mcp.McpConfigError`.
+    """
+    from localmelo.support.mcp import McpToolProvider, load_mcp_config
+
+    return [McpToolProvider(load_mcp_config(os.path.expanduser(path)))]
+
+
 async def build_session_agent(
     *,
     cfg: Config | None,
@@ -54,6 +67,7 @@ async def build_session_agent(
     embedding_base_url: str | None = None,
     embedding_model: str | None = None,
     request_timeout_s: float | None = None,
+    mcp_config: str | None = None,
     wrap_llm: LLMWrapper | None = None,
     wrap_embedding: EmbeddingWrapper | None = None,
 ) -> Agent:
@@ -74,6 +88,7 @@ async def build_session_agent(
     not wrapped.
     """
     agent_options = session_options(options, workspace)
+    providers = load_mcp_providers(mcp_config) if mcp_config else []
     llm: BaseLLMProvider | None = None
     embedding: BaseEmbeddingProvider | None = None
     from_config = False
@@ -120,10 +135,15 @@ async def build_session_agent(
             llm = wrap_llm(llm)
         if wrap_embedding is not None and embedding is not None:
             embedding = wrap_embedding(embedding)
-        agent = Agent(llm=llm, embedding=embedding, options=agent_options)
+        agent = Agent(
+            llm=llm,
+            embedding=embedding,
+            options=agent_options,
+            tool_providers=providers,
+        )
     else:
         assert cfg is not None
-        agent = Agent(config=cfg, options=agent_options)
+        agent = Agent(config=cfg, options=agent_options, tool_providers=providers)
     try:
         await agent.start()
     except BaseException:
