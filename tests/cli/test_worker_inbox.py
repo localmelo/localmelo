@@ -307,8 +307,12 @@ async def test_saved_worker_records_redacted_inbox_event(
         await store.aclose()
 
 
+@pytest.mark.parametrize("save", [False, True])
 def test_cli_brief_inbox_stream(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    save: bool,
 ) -> None:
     import json
     import sys
@@ -339,19 +343,18 @@ def test_cli_brief_inbox_stream(
             options=AgentOptions(memory=False),
         ),
     )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "melo",
-            "--brief",
-            "brief",
-            "--inbox",
-            "inbox",
-            "--output-format",
-            "stream-json",
-        ],
-    )
+    args = [
+        "melo",
+        "--brief",
+        "brief",
+        "--inbox",
+        "inbox",
+        "--output-format",
+        "stream-json",
+    ]
+    if save:
+        args.append("--save-session")
+    monkeypatch.setattr(sys, "argv", args)
     cli.main()
     frames = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     acknowledgements = [
