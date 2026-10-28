@@ -18,7 +18,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   write. So an unannotated MCP tool now asks in a run with a policy, while
   `require_approval` only adds caution. The terminal approval panel names
   the tier in its header, `ToolInfo.tier` and `ApprovalRequest.tier` report
-  it, and `--yolo` still means no policy, not read-only ([#NN]).
+  it, and `--yolo` still means no policy, not read-only ([#66]).
 - Memory can be forgotten from the Python API. `await hippo.forget(task_id)`
   deletes that task's `tasks`, `steps` and `llm_calls` rows and the
   long-term entries whose metadata names it (its reflections), and
@@ -365,3 +365,4 @@ earlier milestones.
 [#62]: https://github.com/localmelo/localmelo/pull/62
 [#63]: https://github.com/localmelo/localmelo/pull/63
 [#64]: https://github.com/localmelo/localmelo/pull/64
+[#66]: https://github.com/localmelo/localmelo/pull/66
