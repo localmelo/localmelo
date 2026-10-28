@@ -649,6 +649,21 @@ class Chat:
         token = LLM_REQUEST_ATTEMPT.set(attempt)
         kind_token = LLM_REQUEST_KIND.set(kind)
         try:
+            if self.fixed_prefix and kind in ("plan", "reflect"):
+                # Fit individual recall units first; merge adjacent user turns only
+                # on the outgoing copy for templates that require alternating roles.
+                merged: list[Message] = []
+                for message in messages:
+                    if merged and merged[-1].role == message.role == "user":
+                        previous = merged[-1]
+                        merged[-1] = dataclasses.replace(
+                            previous,
+                            content=previous.content + "\n\n" + message.content,
+                            images=[*previous.images, *message.images],
+                        )
+                    else:
+                        merged.append(message)
+                messages = merged
             return await self.llm.chat(messages, tools=tools or None)
         finally:
             LLM_REQUEST_KIND.reset(kind_token)

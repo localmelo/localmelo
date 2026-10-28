@@ -210,6 +210,17 @@ retry policy. Events and JSON results report the estimate, actual prompt count i
 pruning counts without storing prompt text. The output reserve is not a provider generation cap;
 the independent character guard still applies.
 
+`[agent] fixed_prefix = true` opts direct, interactive and API v2 console runs into
+`fixed-prefix-v1`; `--fixed-prefix on|off` overrides it for a direct or interactive
+run. It snapshots the local date and UTC offset at each run's start, including across
+midnight, and places changing recall and reflections in labelled user-side data.
+`all` freezes sorted tool definitions for that run; `retrieve` keeps selecting tools
+as before. The JSON result's `prefix_cache.schema_changes` counts changes to the
+offered planning schemas within the run, not actual cache misses; an optional
+`reported_cached_tokens` is the server-reported total across responses. Providers
+may not report caching, and byte-stable prefixes do not guarantee a cache hit.
+The legacy `/v1` API and the default-off request bytes remain unchanged.
+
 ## Embedding and long-term memory
 
 Long-term memory needs an embedding backend; see

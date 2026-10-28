@@ -31,6 +31,7 @@ from localmelo.melo.agent._chat import (
     BUDGET_HOOK,
     CALL_RECORDER,
     PREFIX_RUN,
+    PREFIX_VERSION,
     RETRY_HOOK,
     Chat,
     RequestStats,
@@ -5502,7 +5503,15 @@ class Agent:
             memory_stats=memory_stats,
             context_budget=stats.context_budget,
             prefix_cache=(
-                {"version": "fixed-prefix-v1", "schema_changes": stats.schema_changes}
+                {
+                    "version": PREFIX_VERSION,
+                    "schema_changes": stats.schema_changes,
+                    **(
+                        {"reported_cached_tokens": stats.details["cached_tokens"]}
+                        if "cached_tokens" in stats.details
+                        else {}
+                    ),
+                }
                 if self.options.fixed_prefix
                 else None
             ),

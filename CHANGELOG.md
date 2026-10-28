@@ -18,6 +18,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Opt-in fixed system prefix with a local-date snapshot and schema-change telemetry;
+  dynamic recall and reflection remain labelled data ([#NN]).
+
 - Opt-in context fitting shortens request copies and retries one classified overflow without rerunning tools; impossible requests end with a specific status ([#131]).
 - Read-only worker history in the web workspace, with server-side filters,
   paging, recorded transcripts and explicit refresh for unfinished runs. ([#130])

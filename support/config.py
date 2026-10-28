@@ -113,6 +113,7 @@ class AgentConfig:
     replay_turns: int | None = None  # None: every turn in scope
     note_writer: str = "auto"  # auto | heuristic (compress modes)
     tool_env: list[str] = field(default_factory=list)  # extra inherited variable names
+    fixed_prefix: bool = False  # opt-in stable prompt prefix
     context_window: int | None = None
     output_reserve: int | None = None
     safety_margin: int | None = None
@@ -340,6 +341,8 @@ class Config:
     def _validate_agent(self) -> list[str]:
         """``[agent]`` holds known values for its mode and note writer."""
         errors: list[str] = []
+        if not isinstance(self.agent.fixed_prefix, bool):
+            errors.append("[agent] fixed_prefix must be a boolean")
         if self.agent.reasoning not in REASONING_MODES:
             errors.append(
                 f"[agent] reasoning {self.agent.reasoning!r} is not recognised. "
@@ -868,6 +871,7 @@ def save(cfg: Config) -> None:
         or cfg.agent.replay_turns is not None
         or cfg.agent.note_writer != "auto"
         or cfg.agent.tool_env
+        or cfg.agent.fixed_prefix
         or cfg.agent.context_window is not None
         or cfg.agent.output_reserve is not None
         or cfg.agent.safety_margin is not None
@@ -878,6 +882,8 @@ def save(cfg: Config) -> None:
             lines.append(f"replay_turns = {cfg.agent.replay_turns}")
         if cfg.agent.note_writer != "auto":
             lines.append(f"note_writer = {_toml_string(cfg.agent.note_writer)}")
+        if cfg.agent.fixed_prefix:
+            lines.append("fixed_prefix = true")
         if cfg.agent.tool_env:
             lines.append(f"tool_env = {_toml_value(cfg.agent.tool_env)}")
         for name in ("context_window", "output_reserve", "safety_margin"):
