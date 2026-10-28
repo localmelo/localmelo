@@ -13,10 +13,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   snapshot and atomic v1 migration; durable generation and operation IDs guard
   transitions and identify committed receipts. The internal synchronous gate
   `try_park` fences an eligible pending call and cancels only its bound turn.
-  An atomic component event transaction supports `ParkStore` hold/resume/park records,
-  and an evidence-only card builder derives bounded, redacted cards from the
-  task spec and persisted events. Worker API pause behavior remains as in
-  #119; there is no worker hold/park integration or new API in this slice.
+  An atomic component event transaction supports `ParkStore` hold/resume/park
+  records, including the current pending-pause flag. Guarded terminal retries
+  return their matching committed record. An evidence-only card builder derives
+  bounded, redacted cards from the task spec and persisted events. Worker API
+  pause behavior remains as in #119; there is no worker hold/park integration or
+  new API in this slice.
   S3b.1b follows ([#NN]).
 
 - S3a.2 adds `/api/tasks` creation, inspection and control and in-process

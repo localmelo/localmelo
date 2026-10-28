@@ -883,6 +883,19 @@ class TaskStore:
                 )
         elif expected_generation is not None or expected_operation_id is not None:
             raise ValueError("an expected identity requires an operation_id")
+        request = (
+            {
+                "kind": "stop",
+                "state": state,
+                "priority": choice,
+                "actor": actor,
+                "failure_reason": failure_reason,
+                "generation": expected_generation,
+                "previous": expected_operation_id,
+            }
+            if operation_id
+            else None
+        )
         now = self._clock()
         async with self._store.component_event_transaction("task_change") as (
             conn,
@@ -891,14 +904,35 @@ class TaskStore:
             current = await self._get(conn, task_id)
             if current is None:
                 raise TaskNotFoundError(f"No task has id {task_id}")
-            if operation_id and await read_operation_receipt(
-                conn, task_id, operation_id
-            ):
-                raise TaskConflictError(
-                    "operation ID already recorded; reconcile its receipt"
+            receipt = (
+                await read_operation_receipt(conn, task_id, operation_id)
+                if operation_id
+                else None
+            )
+            if receipt:
+                data, _ = receipt
+                identity = await _first(
+                    conn,
+                    "SELECT generation, operation_id FROM park_priority WHERE task_id = ?",
+                    (task_id,),
                 )
+                if (
+                    data.get("task_request") == request
+                    and current.state in _TERMINAL_STATES
+                    and current.state == data.get("state")
+                    and (tuple(identity) if identity else (None, None))
+                    == (data.get("generation"), data.get("pending_operation_id"))
+                ):
+                    return current
+                raise TaskConflictError("operation ID reused or superseded")
             if current.state in _TERMINAL_STATES:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
+            if state == "parked" and await _first(
+                conn,
+                "SELECT 1 FROM park_priority WHERE task_id = ? AND pause_pending = 1",
+                (task_id,),
+            ):
+                raise TaskConflictError("task has a pending pause")
             if state in _TERMINAL_STATES:
                 await self._identity_transition(
                     conn,
@@ -911,19 +945,7 @@ class TaskStore:
                     expected_generation=expected_generation,
                     expected_operation_id=expected_operation_id,
                     operation_id=operation_id,
-                    request=(
-                        {
-                            "kind": "stop",
-                            "state": state,
-                            "priority": choice,
-                            "actor": actor,
-                            "failure_reason": failure_reason,
-                            "generation": expected_generation,
-                            "previous": expected_operation_id,
-                        }
-                        if operation_id
-                        else None
-                    ),
+                    request=request,
                 )
             elif (
                 choice is not None or (state is not None and state != "parked")

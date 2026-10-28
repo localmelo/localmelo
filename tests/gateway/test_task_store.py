@@ -555,6 +555,210 @@ async def test_snapshot_identity_fenced_on_patch_and_restart(tasks: TaskStore) -
     assert (await tasks.get_task(record.task_id)).state == "failed"
 
 
+@pytest.mark.parametrize("operation", ["pause", "cancel", "stop"])
+async def test_t82r2_committed_then_cancelled_retry(
+    store: SessionStore,
+    tasks: TaskStore,
+    monkeypatch: pytest.MonkeyPatch,
+    operation: str,
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    if operation != "pause":
+        await tasks.request_pending_pause(
+            record.task_id,
+            expected_generation=None,
+            expected_operation_id=None,
+            operation_id="pause",
+        )
+    original = store._commit
+    label = {"pause": "task_pause", "cancel": "task_resume", "stop": "task_change"}[
+        operation
+    ]
+
+    async def committed_then_cancelled(conn: Any, stored: Any, actual: str) -> None:
+        await original(conn, stored, actual)
+        if actual == label:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(store, "_commit", committed_then_cancelled)
+
+    async def execute() -> TaskRecord:
+        if operation == "pause":
+            return await tasks.request_pending_pause(
+                record.task_id,
+                expected_generation=None,
+                expected_operation_id=None,
+                operation_id="pause",
+            )
+        if operation == "cancel":
+            return await tasks.cancel_pending_pause(
+                record.task_id,
+                expected_generation=1,
+                expected_operation_id="pause",
+                operation_id="cancel",
+            )
+        return await tasks.change(
+            record.task_id,
+            state="cancelled",
+            expected_generation=1,
+            expected_operation_id="pause",
+            operation_id="stop",
+        )
+
+    with pytest.raises(asyncio.CancelledError):
+        await execute()
+    monkeypatch.undo()
+    committed = await tasks.get_task(record.task_id)
+    receipt = await tasks.reconcile_pause_operation(record.task_id, operation)
+    assert receipt is not None
+    assert receipt[1] is (operation != "stop")
+    assert await execute() == committed
+    if operation == "stop":
+        with pytest.raises(TaskConflictError):
+            await tasks.change(
+                record.task_id,
+                state="cancelled",
+                expected_generation=1,
+                expected_operation_id="pause",
+                operation_id="stop",
+                actor="other",
+            )
+        with pytest.raises(TaskConflictError):
+            await tasks.change(
+                record.task_id,
+                state="cancelled",
+                expected_generation=2,
+                expected_operation_id="pause",
+                operation_id="stop",
+            )
+    event_count = await one(
+        store,
+        "SELECT COUNT(*) FROM events WHERE session_id = ? AND json_extract(event, '$.data.operation_id') = ?",
+        (record.task_id, operation),
+    )
+    assert event_count == (1,)
+
+
+@pytest.mark.parametrize("changed", ["identity", "state"])
+async def test_t82r2_terminal_retry_rejects_superseded_result(
+    store: SessionStore, tasks: TaskStore, changed: str
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.pause(record.task_id)
+    args: dict[str, Any] = {
+        "state": "cancelled",
+        "expected_generation": 1,
+        "expected_operation_id": None,
+        "operation_id": "stop",
+    }
+    await tasks.change(record.task_id, **args)
+    async with store.component_transaction("supersede_receipt") as conn:
+        if changed == "identity":
+            await conn.execute(
+                "UPDATE park_priority SET generation = generation + 1 WHERE task_id = ?",
+                (record.task_id,),
+            )
+        else:
+            await conn.execute(
+                "UPDATE tasks SET state = 'done' WHERE task_id = ?", (record.task_id,)
+            )
+    with pytest.raises(TaskConflictError):
+        await tasks.change(record.task_id, **args)
+    assert await one(
+        store,
+        "SELECT COUNT(*) FROM events WHERE session_id = ? AND json_extract(event, '$.data.operation_id') = ?",
+        (record.task_id, "stop"),
+    ) == (1,)
+
+
+async def test_t82r2_parked_and_set_level_reject_pending(
+    store: SessionStore, tasks: TaskStore
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    pending = await tasks.request_pending_pause(
+        record.task_id,
+        expected_generation=None,
+        expected_operation_id=None,
+        operation_id="p",
+    )
+    snapshot = await one(
+        store, "SELECT * FROM park_priority WHERE task_id = ?", (record.task_id,)
+    )
+    events = await rows(
+        store,
+        "SELECT id, type, event FROM events WHERE session_id = ? ORDER BY id",
+        (record.task_id,),
+    )
+    for action in (
+        lambda: tasks.change(record.task_id, state="parked"),
+        lambda: tasks.set_level(record.task_id, 2),
+    ):
+        with pytest.raises(TaskConflictError):
+            await action()
+        assert await tasks.get_task(record.task_id) == pending
+        assert (
+            await one(
+                store,
+                "SELECT * FROM park_priority WHERE task_id = ?",
+                (record.task_id,),
+            )
+            == snapshot
+        )
+        assert (
+            await rows(
+                store,
+                "SELECT id, type, event FROM events WHERE session_id = ? ORDER BY id",
+                (record.task_id,),
+            )
+            == events
+        )
+
+
+async def test_t82r2_receipt_current_checks_state_and_terminal(
+    store: SessionStore, tasks: TaskStore
+) -> None:
+    record, _ = await create_task(
+        tasks, spec(level=1, level_source="user"), origin="user"
+    )
+    await tasks.change(record.task_id, state="running")
+    await tasks.request_pending_pause(
+        record.task_id,
+        expected_generation=None,
+        expected_operation_id=None,
+        operation_id="p",
+    )
+    receipt = await tasks.reconcile_pause_operation(record.task_id, "p")
+    assert receipt is not None and receipt[1] is True
+    async with store.component_transaction("test_state_without_bump") as conn:
+        await conn.execute(
+            "UPDATE tasks SET state = 'held' WHERE task_id = ?", (record.task_id,)
+        )
+    assert await tasks.park_identity(record.task_id) == (1, "p")
+    receipt = await tasks.reconcile_pause_operation(record.task_id, "p")
+    assert receipt is not None and receipt[1] is False
+    await tasks.change(
+        record.task_id,
+        state="cancelled",
+        expected_generation=1,
+        expected_operation_id="p",
+        operation_id="stop",
+    )
+    receipt = await tasks.reconcile_pause_operation(record.task_id, "stop")
+    assert (
+        receipt is not None
+        and receipt[0]["state"] == "cancelled"
+        and receipt[1] is False
+    )
+
+
 async def test_v1_migration_preserves_later_override_and_missing_log_fallback(
     store: SessionStore, tasks: TaskStore, clock: Clock
 ) -> None:

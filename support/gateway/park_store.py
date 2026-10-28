@@ -33,6 +33,7 @@ class ParkRecord:
     attempt: int
     reason: str
     card: str
+    pause_pending: bool = False
 
 
 class ParkStore:
@@ -57,7 +58,9 @@ class ParkStore:
         async with self._store.component_transaction("park_get") as conn:
             row = await (
                 await conn.execute(
-                    "SELECT state, hold_site, wait_reason, card, level, reason FROM tasks WHERE task_id = ?",
+                    "SELECT state, hold_site, wait_reason, card, level, reason, "
+                    "COALESCE((SELECT pause_pending FROM park_priority WHERE task_id = tasks.task_id), 0) "
+                    "FROM tasks WHERE task_id = ?",
                     (task_id,),
                 )
             ).fetchone()
@@ -67,7 +70,7 @@ class ParkStore:
 
     @staticmethod
     def _record(task_id: str, row: Row) -> ParkRecord | None:
-        state, raw, reason, card, level, priority_reason = row
+        state, raw, reason, card, level, priority_reason, pause_pending = row
         try:
             data = json.loads(raw)
             if not isinstance(data, dict):
@@ -90,6 +93,7 @@ class ParkStore:
                 data["attempt"],
                 data.get("reason", reason),
                 card,
+                bool(pause_pending),
             )
         except (ValueError, TypeError, KeyError):
             return None
@@ -247,7 +251,9 @@ class ParkStore:
         ):
             row = await (
                 await conn.execute(
-                    "SELECT state, hold_site, wait_reason, card, level, reason FROM tasks WHERE task_id = ?",
+                    "SELECT state, hold_site, wait_reason, card, level, reason, "
+                    "COALESCE((SELECT pause_pending FROM park_priority WHERE task_id = tasks.task_id), 0) "
+                    "FROM tasks WHERE task_id = ?",
                     (task_id,),
                 )
             ).fetchone()
@@ -306,7 +312,15 @@ class ParkStore:
                     card = old.card
             task_state = "parked" if paused_hold else target
             record = ParkRecord(
-                task_id, task_state, site, step, agent, attempt, reason, card
+                task_id,
+                task_state,
+                site,
+                step,
+                agent,
+                attempt,
+                reason,
+                card,
+                bool(snapshot and snapshot[2] and target != "parked"),
             )
             metadata = json.dumps(
                 {

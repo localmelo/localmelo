@@ -358,7 +358,8 @@ atomically. Task-store pause emits `sched.pause_requested`; resume and terminal
 transitions also emit committed events with their identity. `ParkStore` uses the
 same transaction seam for internal hold, resume and park transitions,
 recording hold coordinates supplied by the caller and emitting `sched.held`,
-`sched.resumed` or `sched.parked`; it does not change priority. Its card builder
+`sched.resumed` or `sched.parked`; its returned record includes the current
+`pause_pending` marker. It does not change priority. Its card builder
 uses the task spec and persisted events only, bounds and redacts text, omits
 tool outputs and arguments other than file paths, and treats completion as
 unverified. These primitives do not implement worker hold/park integration or
