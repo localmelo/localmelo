@@ -9,9 +9,9 @@ import cycle.
 
 The surfaces set the mode where they are known (the CLI's two branches,
 the gateway's sessions), and :class:`~melo.agent.options.AgentOptions`
-defaults to ``python`` for the library. Direct mode keeps its old
-behaviour in this release, including the six-pattern command blocklist; the
-gateway and the console do not offer ``shell_exec`` at all.
+defaults to ``python`` for the library. Direct and ``python`` modes keep
+their old behaviour in this release, including the six-pattern command
+blocklist; the gateway and the console do not offer ``shell_exec`` at all.
 """
 
 from __future__ import annotations
@@ -39,7 +39,9 @@ DEFAULT_BUILTINS: Mapping[ToolMode, frozenset[str]] = {
 # The modes in which a run can have an approver: the interactive UI always
 # builds a policy, and a Python caller passes `approval=...` to run_task.
 # Direct mode has no panel and the gateway no authenticated one (P12 is not
-# on main), so neither can ask.
+# on main), so neither can ask. A `python` run without `approval` has none
+# either, and that is why the checker keeps the six-pattern blocklist for
+# both `python` and `direct` until P13b decides the direct flip.
 APPROVING_MODES: frozenset[ToolMode] = frozenset({"interactive", "python"})
 
 
@@ -70,7 +72,7 @@ def exec_refusal(tool_name: str, tier: ToolTier, mode: ToolMode) -> str | None:
 
     `python_exec` stays allowed because it is in every default set and runs
     in a child process. This release applies this to the gateway only; direct
-    mode still runs its six-pattern blocklist.
+    and ``python`` mode still run their six-pattern blocklist.
     """
     if tier != "exec" or mode_requires_approval(mode):
         return None

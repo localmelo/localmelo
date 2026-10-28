@@ -51,10 +51,11 @@ class Checker:
 
         The default keeps the pre-P13 behaviour for a checker built on its
         own, which is direct mode's; :class:`Agent` always passes its
-        ``AgentOptions.mode``. Direct mode still applies the six-pattern
-        blocklist in this release; every other mode lets the tier policy
-        decide, and the executor still asks the run's approval policy before
-        an ``exec`` call when there is one.
+        ``AgentOptions.mode``. Direct and ``python`` mode still apply the
+        six-pattern blocklist in this release, also when a Python caller
+        passes no ``approval=``; the interactive and gateway modes let the
+        tier policy decide, and the executor still asks the run's approval
+        policy before an ``exec`` call when there is one.
         """
         self._mode = validated_mode(mode)
         self._blocked = _BLOCKED_RE
@@ -101,12 +102,13 @@ class Checker:
             )
 
         tier = self.tier(tool_def)
-        if self._mode == "direct":
-            # P13a keeps direct mode byte-identical: the six-pattern
-            # blocklist still decides, and P13b replaces it with the tier
-            # policy below. Of the exec built-ins only shell_exec takes a
-            # command line, so the tier scopes the patterns to the same
-            # inputs as before.
+        if self._mode in ("direct", "python"):
+            # P13a keeps direct mode and the library's default `python` mode
+            # byte-identical: the six-pattern blocklist still decides, also
+            # when a Python caller passes no approval policy, and P13b
+            # replaces it with the tier policy below for both. Of the exec
+            # built-ins only shell_exec takes a command line, so the tier
+            # scopes the patterns to the same inputs as before.
             if tier == "exec" and tool_call.tool_name == "shell_exec":
                 cmd = tool_call.arguments.get("command", "")
                 if not isinstance(cmd, str):

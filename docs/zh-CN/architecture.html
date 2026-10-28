@@ -151,7 +151,7 @@
         <ul>
           <li>规划请求之前：提示词最多 100,000 个字符，本步提供的工具列表必须有效；</li>
           <li>规划请求之后：回复中的每个工具调用都要有名称和唯一的 ID；</li>
-          <li>工具运行之前：直接模式下 <code>shell_exec</code> 会拒绝六种破坏性的命令模式；其他模式由工具的权限级别和模式的策略决定；</li>
+          <li>工具运行之前：<code>direct</code> 和 <code>python</code> 模式下 <code>shell_exec</code> 会拒绝六种破坏性的命令模式；<code>interactive</code> 和 <code>gateway</code> 模式由工具的权限级别和模式的策略决定；</li>
           <li>工具运行之后：超过 50,000 个字符的输出会被截断；</li>
           <li>写入记忆之前：限制写入的大小；</li>
           <li>事件交给 Python 代码之前：模型回复文本中常见格式的 API 密钥、bearer 令牌和一次性验证码会被替换为 <code>[redacted]</code>；</li>

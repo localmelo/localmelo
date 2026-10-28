@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent import Agent
 from localmelo.melo.agent._chat import STEP_ESTIMATE_PROMPT
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.memory.coordinator import Hippo
@@ -701,11 +701,7 @@ class TestStructuredExecutorInAgentLoop:
         )
         llm.responses.append(Message(role="assistant", content="aborted"))
 
-        agent = Agent(
-            llm=llm,
-            embedding=FakeEmbedding(),
-            options=AgentOptions(mode="direct"),
-        )
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
         result = await agent.run("delete everything with shell_exec")
         assert result == "aborted"
         await agent.close()
@@ -1194,11 +1190,7 @@ class TestThreeWayBoundary:
         )
         llm.responses.append(Message(role="assistant", content="aborted"))
 
-        agent = Agent(
-            llm=llm,
-            embedding=FakeEmbedding(),
-            options=AgentOptions(mode="direct"),
-        )
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
         result = await agent.run("delete everything with shell_exec")
         assert result == "aborted"
 

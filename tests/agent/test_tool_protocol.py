@@ -330,7 +330,7 @@ class TestMultiCallExecution:
             ]
         )
         executed: list[str] = []
-        agent = _agent(llm, executed, options=AgentOptions(mode="direct"))
+        agent = _agent(llm, executed)
         await agent.run("mixed batch of shell_exec and echo")
         assert executed == ["still runs"]
         second = _planning_calls(llm)[1]["messages"]

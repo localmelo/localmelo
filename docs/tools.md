@@ -7,7 +7,7 @@ from MCP servers, which tools each step offers, and what the checks do.
 
 | Tool | What it does | Limits |
 |---|---|---|
-| `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. A gateway or console session does not offer it. In direct mode, six destructive command patterns are refused. |
+| `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. A gateway or console session does not offer it. In `direct` and `python` mode, six destructive command patterns are refused. |
 | `python_exec` | Runs Python code in a child process and returns what it prints. | Killed with every process it started after 60 seconds. `sys.exit()` ends only the child. |
 | `file_read` | Reads a text file. | Any file your account can read. |
 | `file_write` | Writes text to a file, creating or replacing it. | Any file your account can write. |
@@ -188,12 +188,13 @@ Before a tool runs, localmelo checks the call:
   also have the type the tool declares; a call such as `shell_exec` with a
   list for `command` is refused with
   `Arguments for shell_exec: 'command' must be of type string, not array`.
-- In direct mode, `shell_exec` refuses commands that match one of six
-  patterns: `rm -rf /`, `mkfs`, `dd if=`, a fork bomb, `shutdown` and
-  `reboot`. The other modes use the tier and the mode instead: the gateway
-  does not offer the tool, and the interactive UI and a Python run with a
-  policy ask about every `exec` call (see
-  [Permission tiers](#permission-tiers)).
+- In `direct` and `python` mode, `shell_exec` refuses commands that match one
+  of six patterns: `rm -rf /`, `mkfs`, `dd if=`, a fork bomb, `shutdown` and
+  `reboot`. The `python` mode keeps the blocklist whether or not the run has
+  an approval policy, because a caller that passes none would otherwise have
+  no check at all. The `interactive` and `gateway` modes use the tier and the
+  mode instead: the gateway does not offer the tool, and the interactive UI
+  asks about every `exec` call (see [Permission tiers](#permission-tiers)).
 - With a workspace root, the path of `file_read` and `file_write` must be
   inside it (see [With a workspace root](#with-a-workspace-root)).
 - With an approval policy, a tool whose tier is not `read`, or that is
@@ -224,9 +225,10 @@ The checks are guardrails, not a sandbox:
 - Approvals apply only to a run with an approval policy, and in the
   interactive UI (unless `--yolo`). Direct mode, `melo ""` and the gateway
   have none.
-- In direct mode, the command blocklist is easy to get around. A gateway
-  or console session offers no shell at all; the interactive UI and a
-  Python policy ask rather than match.
+- In `direct` and `python` mode, the command blocklist is easy to get
+  around, and a `python` run with an approval policy also asks before an
+  `exec` call. A gateway or console session offers no shell at all; the
+  interactive UI asks rather than matches.
 
 To limit what a task can do, use `--builtins none` or a subset of tools,
 `--mcp-only`, a container or virtual machine, or a separate user account.
@@ -255,9 +257,12 @@ session runs in `gateway` mode and gets `file_read`, `file_write` and
 `python_exec`; `shell_exec` is not registered, so the model never sees it.
 The interactive UI and the Python API keep all four (`interactive` and
 `python` mode; the UI always asks before an `exec` call, and a Python run
-asks when it has a policy). Direct mode is `direct` and, in this release,
-still keeps all four and its six-pattern blocklist. `AgentOptions(builtins=…)`
-or `--builtins` always wins over the mode's default set.
+asks when it has a policy). The `python` mode keeps the six-pattern
+blocklist in this release, with or without a policy, so a run that passes no
+approval is not weaker than direct mode. Direct mode is `direct` and, in
+this release, still keeps all four and its six-pattern blocklist.
+`AgentOptions(builtins=…)` or `--builtins` always wins over the mode's
+default set.
 
 Every other tool's tier comes from the MCP `annotations` object that the
 server lists with it, read cautiously:

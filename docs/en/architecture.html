@@ -317,7 +317,7 @@
         <ul>
           <li>before a planning request: the prompt may hold at most 100,000 characters, and the list of offered tools must be valid;</li>
           <li>after it: each tool call in the reply needs a name and an id of its own;</li>
-          <li>before a tool runs: in direct mode, <code>shell_exec</code> refuses six destructive command patterns; every other mode uses the tool's tier and the mode's policy;</li>
+          <li>before a tool runs: in <code>direct</code> and <code>python</code> mode, <code>shell_exec</code> refuses six destructive command patterns; the <code>interactive</code> and <code>gateway</code> modes use the tool's tier and the mode's policy;</li>
           <li>after a tool runs: output longer than 50,000 characters is cut;</li>
           <li>before a memory write: its size is limited;</li>
           <li>before an event reaches Python code: API keys of well-known shapes, bearer tokens and one-time codes in a model reply's text are replaced with <code>[redacted]</code>;</li>

@@ -560,7 +560,7 @@ class TestAsyncBoundaryChecks:
 
 
 class TestPreExecuteByMode:
-    """P13a: the gateway asks the tier policy; direct mode keeps the blocklist."""
+    """P13a: the gateway asks the tier policy; direct and python keep the blocklist."""
 
     @pytest.mark.asyncio
     async def test_a_gateway_refuses_shell_exec_by_name_and_flag(self) -> None:
@@ -581,14 +581,43 @@ class TestPreExecuteByMode:
         assert (await checker.pre_execute(tc, td)).allowed
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("mode", ["interactive", "python"])
-    async def test_an_approving_mode_lets_an_exec_tool_run(self, mode: str) -> None:
-        # The executor asks before it runs when the run has a policy; the
-        # six-pattern blocklist is no longer a second, hidden policy.
-        checker = Checker(mode=mode)  # type: ignore[arg-type]
+    async def test_the_interactive_mode_lets_the_panel_decide(self) -> None:
+        # The UI always has an approval policy (unless --yolo), so the
+        # six-pattern blocklist is not a second, hidden policy there.
+        checker = Checker(mode="interactive")
         td = ToolDef(name="shell_exec", description="", parameters={})
         tc = ToolCall(tool_name="shell_exec", arguments={"command": "rm -rf /"})
         assert (await checker.pre_execute(tc, td)).allowed
+
+    @pytest.mark.asyncio
+    async def test_python_mode_keeps_the_six_patterns(self) -> None:
+        # A Python caller may pass no approval policy at all, so the library
+        # default must not be weaker than direct mode.
+        checker = Checker(mode="python")
+        td = ToolDef(name="shell_exec", description="", parameters={})
+        tc = ToolCall(tool_name="shell_exec", arguments={"command": "rm -rf /"})
+        result = await checker.pre_execute(tc, td)
+        assert not result.allowed
+        assert result.reason == "Blocked command: rm -rf /"
+
+    @pytest.mark.asyncio
+    async def test_python_mode_allows_a_safe_shell_command(self) -> None:
+        checker = Checker(mode="python")
+        td = ToolDef(name="shell_exec", description="", parameters={})
+        tc = ToolCall(tool_name="shell_exec", arguments={"command": "ls -la"})
+        assert (await checker.pre_execute(tc, td)).allowed
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", ["direct", "python"])
+    async def test_the_blocklist_modes_refuse_a_command_that_is_not_text(
+        self, mode: str
+    ) -> None:
+        checker = Checker(mode=mode)  # type: ignore[arg-type]
+        td = ToolDef(name="shell_exec", description="", parameters={})
+        tc = ToolCall(tool_name="shell_exec", arguments={"command": ["rm", "-rf", "/"]})
+        result = await checker.pre_execute(tc, td)
+        assert not result.allowed
+        assert result.reason == "shell_exec command must be a string"
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("mode", ["direct", "interactive", "gateway", "python"])
@@ -714,18 +743,18 @@ class TestAllBlockedCommandsPreExecute:
     ]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("mode", ["direct", "python"])
     @pytest.mark.parametrize(
         "cmd,label",
         DANGEROUS,
         ids=[d[1] for d in DANGEROUS],
     )
-    async def test_pre_execute_blocks(
-        self, checker: Checker, cmd: str, label: str
-    ) -> None:
+    async def test_pre_execute_blocks(self, mode: str, cmd: str, label: str) -> None:
+        checker = Checker(mode=mode)  # type: ignore[arg-type]
         td = ToolDef(name="shell_exec", description="", parameters={})
         tc = ToolCall(tool_name="shell_exec", arguments={"command": cmd})
         result = await checker.pre_execute(tc, td)
-        assert not result.allowed, f"{label!r} should be blocked"
+        assert not result.allowed, f"{label!r} should be blocked in {mode} mode"
         assert "Blocked" in result.reason
 
 

@@ -72,7 +72,7 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `memory` | `True` | `False` turns long-term memory off. |
 | `memory_dir` | `None` | A directory for SQLite memory, with `~` expanded. `None` follows the environment variables; see [Memory](memory.md#keep-memory-between-runs). |
 | `timeout_s` | `None` | A time limit for each run, in seconds. `None` means no limit. It also interrupts a `python_exec` call, whose child process it kills. |
-| `mode` | `"python"` | The surface the run belongs to: `"direct"`, `"interactive"`, `"gateway"` or `"python"`. It decides what `builtins=None` registers; `"gateway"` does not offer `shell_exec`, and the checker refuses an explicitly named one there. An explicit `builtins` wins over the default registration. |
+| `mode` | `"python"` | The surface the run belongs to: `"direct"`, `"interactive"`, `"gateway"` or `"python"`. It decides what `builtins=None` registers; `"gateway"` does not offer `shell_exec`, and the checker refuses an explicitly named one there. `"python"` keeps the six-pattern command blocklist, as `"direct"` does, whether or not the run has an approval policy. An explicit `builtins` wins over the default registration. |
 | `workspace_root` | `None` | The directory the built-in tools work in, and the only one the file tools reach; see [Work in a directory](#work-in-a-directory). |
 | `tool_timeout_s` | `None` | The time limit of `shell_exec` and `python_exec`, in seconds. Needs a `workspace_root`. `None` keeps 30 seconds for a shell command and 60 seconds for Python. |
 | `tool_env` | `None` | Extra variables for the `shell_exec` and `python_exec` children, on top of the minimal environment; see [Work in a directory](#work-in-a-directory). |
@@ -234,15 +234,17 @@ about when its permission tier is not `read` (see
 - the tools of an MCP server whose entry sets `require_approval`; see
   [MCP config file](tools.md#mcp-config-file).
 
-The interactive UI always has a policy (unless `--yolo`); direct mode and
-the gateway have none, which is why a gateway run does not offer
-`shell_exec` at all. `file_read` is `read` and does not ask: a
+The interactive UI always has a policy (unless `--yolo`); direct mode, the
+gateway and a Python run without `approval=` have none, which is why a
+gateway run does not offer `shell_exec` at all and `python` mode keeps the
+six-pattern blocklist. `file_read` is `read` and does not ask: a
 [workspace root](#work-in-a-directory) limits it instead. A read-only MCP
 tool (`readOnlyHint: true`) does not ask either, unless `require_approval`
 names it. A tool registered directly with `agent.executor.register` keeps
 its explicit `requires_approval`; its tier is a label only. Without a
 policy, a tool that would ask runs like any other, as in direct mode, which
-never sets a policy.
+never sets a policy; the one exception is `shell_exec` in `python` mode,
+which still passes the blocklist.
 
 A policy is any object with an `async def decide(request)` method that
 returns an `ApprovalDecision`. This one asks in the terminal:
@@ -289,9 +291,9 @@ it can take down, such as a dialog, must take it down.
 When the policy is asked:
 
 - After every check that refuses a call by itself: the step must have
-  offered the tool, the arguments must be valid, in direct mode a shell
-  command must pass the blocklist, and a file path must be inside the
-  workspace root. So the
+  offered the tool, the arguments must be valid, in `direct` and `python`
+  mode a shell command must pass the blocklist, and a file path must be
+  inside the workspace root. So the
   policy is asked only about a call that would otherwise run.
 - Only when the arguments match the tool's parameters. A missing argument,
   or one the tool does not take, is refused with
@@ -520,9 +522,10 @@ To keep a conversation in a file, across processes and restarts, see
   cancellation while the tool providers start fails their setup for the
   agent's life, and later runs end as `setup_error`.
 - **`run_tool`** passes the call through the same checks as a model's call,
-  except that any registered tool may run: the arguments, direct mode's
-  blocklist, the workspace root, the approval policy, the tool's time limit and the
-  output limit. A refused or failed call returns its reason as `error`. The
+  except that any registered tool may run: the arguments, the blocklist of
+  `direct` and `python` mode, the workspace root, the approval policy, the
+  tool's time limit and the output limit. A refused or failed call returns
+  its reason as `error`. The
   call writes nothing to working memory or history and emits no event. For
   the policy, `run_id` is `""`.
 - **`load_conversation`** clears working memory and its reflection, then

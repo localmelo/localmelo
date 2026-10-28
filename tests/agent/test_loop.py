@@ -207,12 +207,11 @@ class TestBlockedToolCall:
 
     @pytest.mark.asyncio
     async def test_blocked_shell_command(self) -> None:
-        """In direct mode, rm -rf / must be blocked by the checker.
+        """The default Agent (python mode, no approval) refuses rm -rf /.
 
-        P13a leaves direct mode's blocklist in place, so this is still the
-        refusal it was before the tool mode existed. The Python API's
-        default mode is ``python``, whose exec policy is the tier, not a
-        spelling rule; a run there must not be given a destructive command.
+        P13a leaves the blocklist in place for ``python`` as well as
+        ``direct``: a Python caller that passes no ``approval=`` has no
+        policy, so the library default must not be weaker than direct mode.
         """
         llm = FakeLLM()
         llm.enqueue(
@@ -228,11 +227,8 @@ class TestBlockedToolCall:
         # After blocked result, LLM provides final answer
         llm.enqueue(Message(role="assistant", content="aborted"))
 
-        agent = Agent(
-            llm=llm,
-            embedding=FakeEmbedding(),
-            options=AgentOptions(mode="direct"),
-        )
+        agent = Agent(llm=llm, embedding=FakeEmbedding())
+        assert agent.options.mode == "python"
         result = await agent.run("delete everything with shell_exec")
 
         # The built-in shell_exec is registered, but rm -rf / is blocked.
