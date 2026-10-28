@@ -9,6 +9,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- `--workspace DIR` in direct mode: a task run keeps its file tools inside
+  the folder and starts `shell_exec` and `python_exec` there. Without the
+  flag a run keeps the current folder, exactly as before; `~` is expanded
+  and the path is resolved like the interactive UI's. `melo ""` and
+  `--serve` refuse it, and a path that is not a folder exits 2 with one
+  line ([#98]).
 - Resume saved terminal chats with `melo -c`, `melo -r [ID|TITLE]`,
   `/sessions [filter]` or `/resume [ID|TITLE]`. The inline picker filters
   eligible chats by folder or across folders before the startup banner,

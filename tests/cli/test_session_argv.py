@@ -36,7 +36,7 @@ CASES = [
     for source, record in SOURCES.items()
     for case in record["cases"]
 ]
-UI_FIELDS = {"workspace", "yolo", "continue_session", "resume"}
+UI_FIELDS = {"yolo", "continue_session", "resume"}
 R2A_DEFAULTS = {
     key: SOURCES[GOLDEN["reasoning_baseline"]]["namespace_defaults"][key]
     for key in ("reasoning", "reasoning_field", "replay_turns")
@@ -54,6 +54,8 @@ R5_DEFAULTS = dict.fromkeys(
         "retrieval_extra_body",
     )
 )
+# P5 moved --workspace into direct mode: the direct parser carries it now.
+P5_DEFAULTS = {"workspace": None}
 
 
 @pytest.fixture
@@ -118,6 +120,7 @@ def test_historical_dispatch(
         **R2A_DEFAULTS,
         **R4_DEFAULTS,
         **R5_DEFAULTS,
+        **P5_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:
@@ -187,12 +190,13 @@ def test_session_flags_without_a_query_reach_only_the_ui(
         (["--continue", ""], "UI: -c"),
         (["-r", "title", "--", "task"], "UI: -r"),
         (["-r", "title", ""], "UI: -r"),
-        (["--workspace", "/tmp", "task"], "UI: --workspace"),
         (["--yolo", "task"], "UI: --yolo"),
         (
             ["--serve", "--workspace", "/tmp", "--yolo", "-c", "-r"],
-            "UI: --workspace, --yolo, -c, -r",
+            "UI: --yolo, -c, -r",
         ),
+        (["--serve", "--workspace", "/tmp"], "direct: --workspace"),
+        (["--workspace", "/tmp", ""], "direct: --workspace"),
     ],
 )
 def test_invalid_session_flags_fail_before_dispatch(
@@ -206,6 +210,11 @@ def test_invalid_session_flags_fail_before_dispatch(
         message = (
             "only for the interactive UI (melo without a query, --serve or --daemon): "
             + message.removeprefix("UI: ")
+        )
+    elif message.startswith("direct: "):
+        message = (
+            "only for direct mode (a query without --serve): "
+            + message.removeprefix("direct: ")
         )
     monkeypatch.setattr(sys, "argv", ["melo", *argv])
     with pytest.raises(SystemExit) as exc:

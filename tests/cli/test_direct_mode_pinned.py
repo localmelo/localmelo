@@ -11,6 +11,8 @@ functions again; R5's seven retrieval flags change them a third time. R5's
 review fixes moved the effective-recall check in ``_build_direct_mode_agent``
 after a replay-requiring backend converts ``compress`` to
 ``compress+replay``, so that combination is a usage error, not a traceback.
+P5 moved ``--workspace`` into direct mode, so ``_direct_options`` resolves
+and checks the folder and sets ``workspace_root``; it has a new hash.
 The other pinned functions are unchanged. ``_check_args``,
 which carries the refusals, is not pinned.
 """
@@ -39,7 +41,7 @@ PINNED = {
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
-    "_direct_options": "5c4d1deeeed6e7a2dec118527ce2325ca39ca1fc0fa94b7ebaf999d60ae026d9",
+    "_direct_options": "73cd3e6bd61f9059803953abe52c68153ba5dcd88cc3f04031f2d06fad0d62ff",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",
     "_enable_line_editing": "dbabe09864704ee4e435380ce32e19234ce0a3cafb072a7cc39cf053a9904b07",

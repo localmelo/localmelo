@@ -466,6 +466,7 @@ These options apply to a task run without `--serve`.
 
 | Option | Default | Description |
 |---|---|---|
+| `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](tools.md#with-a-workspace-root). |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
 | `--reflection-gate flags\|utility` | `flags` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option). |
@@ -494,6 +495,13 @@ These options apply to a task run without `--serve`.
 | `--recall-min-score F` | `0.35` | The cosine floor for the long-term leg and for embedding task hits, from 0 to 1. It is inert only for the task-local `bm25` and `llm` ranking. |
 | `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. It is a provider setting, not a `config` key. The interactive UI refuses it for now, like `--reasoning-field`: use it with a task. |
 
+- `--workspace`: without it a task runs in the current folder, exactly as
+  before. With it, `~` is expanded and the path is resolved like the
+  interactive UI's, and the run works in that folder: the file tools stay
+  inside it and `shell_exec` and `python_exec` start there. It adds no
+  approvals (see [With a workspace root](tools.md#with-a-workspace-root)).
+  A path that is not a folder is a usage error (exit 2, one line); see
+  [Usage errors](#usage-errors). `melo ""` and `--serve` refuse the flag.
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
   [How localmelo works](how-it-works.md#the-run-loop).
@@ -593,21 +601,21 @@ These options apply to `melo` without a task.
 |---|---|---|
 | `-c`, `--continue` | off | Resume the newest eligible chat in this workspace; with none, start new. |
 | `-r`, `--resume [ID\|TITLE]` | off | Resume the named chat; without a value open the session picker. |
-| `--workspace DIR` | the current folder | The folder melo works in; see [The workspace](#the-workspace). |
 | `--yolo` | off | Run every tool without asking for approval. |
 
-- The UI also takes `--max-steps`, `--attempt-policy`, `--reflection-gate`,
-  `--builtins`, `--memory`, `--memory-dir`, `--request-timeout`,
-  `--reasoning`, `--replay-turns`, `--note-writer`, `--retriever`,
-  `--recall-*`, `--retrieval-extra-body` and the `--embedding-*` options,
-  for every turn of the session. It accepts
-  `compress` and `compress+replay` but draws nothing for the notes yet.
-  The UI does not yet apply `[agent]`; use direct mode for that.
-  `--tool-exposure` (the UI offers every tool), `--timeout`,
-  `--output-format`, `--progress`, `--routine` and `--reasoning-field` are
-  usage errors there; `--mcp-config` and `--mcp-only` are accepted.
-- `--workspace` that is not a folder exits with code 2:
-  `melo: --workspace: not a directory: DIR`.
+- The UI also takes `--workspace`, `--max-steps`, `--attempt-policy`,
+  `--reflection-gate`, `--builtins`, `--memory`, `--memory-dir`,
+  `--request-timeout`, `--reasoning`, `--replay-turns`, `--note-writer`,
+  `--retriever`, `--recall-*` and the `--embedding-*` options, for every
+  turn of the session. It accepts `compress` and `compress+replay` but
+  draws nothing for the notes yet. The UI does not yet apply `[agent]`;
+  use direct mode for that. `--tool-exposure` (the UI offers every tool),
+  `--timeout`, `--output-format`, `--progress`, `--routine`,
+  `--reasoning-field` and `--retrieval-extra-body` are usage errors there;
+  `--mcp-config` and `--mcp-only` are accepted.
+- `--workspace` is expanded and resolved here too, and a path that is not a
+  folder gives the same one-line usage error as with a task; see
+  [Usage errors](#usage-errors).
 
 ### Gateway and setup
 
@@ -649,16 +657,20 @@ These are usage errors:
 - a value that is not valid, such as `--max-steps 0`, `--timeout 0`, an
   unknown built-in tool name, a blank `--routine`, or a `--memory-dir` that
   is a file;
+- a `--workspace` that is not an existing folder, in either mode, reported
+  with one line and no usage summary:
+  `melo: --workspace: not a directory: DIR`;
 - options that cannot be combined: `--mcp-only` without `--mcp-config`,
   `--mcp-only` with `--builtins` or `--tool-exposure`, `--embedding-model`
   without `--embedding-base-url`, `--embedding-base-url` without
   `--base-url`;
-- a direct-mode option with `--serve` or with `melo ""`, reported as
+- a direct-mode option, `--workspace` included, with `--serve`, `--daemon`
+  or with `melo ""`, reported as
   `only for direct mode (a query without --serve): --max-steps`; without a
   task, only those the interactive UI cannot use (`--tool-exposure`,
   `--timeout`, `--output-format`, `--progress`, `--routine`);
 - `-c` with `-r`, reported as `-c and -r cannot be combined`;
-- `--workspace`, `--yolo`, `-c` or `-r` with a task, `--serve` or `--daemon`, reported as
+- `--yolo`, `-c` or `-r` with a task, `--serve` or `--daemon`, reported as
   `only for the interactive UI (melo without a query, --serve or --daemon): --yolo`;
 - `--base-url` or `--chat-model` with `--serve` or `--daemon`, reported as
   `--base-url and --chat-model are for a task or the interactive UI; --serve uses the config file (melo --reconfigure)`;
@@ -818,7 +830,7 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
 |---|---|
 | 0 | The run ended with status `completed`. |
 | 1 | The run ended as `crashed`; or `melo` stopped before the run because no backend is configured or the config file is not valid; or the setup wizard needed a terminal and had none; or the interactive UI could not open its session file or start its agent. |
-| 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal, or `--workspace` is not a folder. |
+| 2 | The run ended with any other status; or a usage error; or the interactive UI had no terminal; or `--workspace` is not a folder, in either mode. |
 | 3 | The gateway could not start, for example because its port is in use. |
 | 129 | SIGHUP ended the run. |
 | 130 | Ctrl+C (SIGINT) ended the run. |
