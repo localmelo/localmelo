@@ -12,11 +12,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A reasoning mode for direct runs: `--reasoning legacy|drop|replay`
   (default `legacy`), `--reasoning-field auto|reasoning_content|reasoning`
   and `--replay-turns N`, or the same `[agent]` keys in `config.toml`.
-  `legacy` is byte-identical to before; `drop` never sends reasoning, and
-  `replay` sends it on the assistant turns in scope under one key, with a
-  40,000-character per-turn cap and strip-first eviction. The JSON line
-  reports the mode, `usage.reasoning_chars`, and the `memory_stats` replay
-  counters outside `legacy` ([#NN]).
+  `legacy` is byte-identical to before everywhere, including a provider
+  built from the config by the gateway, a session or the Python API; `drop`
+  never sends reasoning, and `replay` sends it on the assistant turns in
+  scope (by default only the current task's) under one key, with a
+  40,000-character per-turn cap and strip-first eviction. A backend whose
+  `requires_reasoning_replay` is true gets every assistant turn in the
+  window and keeps the final answer's thinking with `record_answers`. The
+  JSON line reports the mode, `usage.reasoning_chars`, and the
+  `memory_stats` replay counters outside `legacy`. The interactive UI
+  refuses `--reasoning-field` until R2b wires it ([#NN]).
 - Tools have a permission tier, and an approval policy asks by tier rather
   than by a fixed list of names. The built-ins keep their tiers (`file_read`
   read, `file_write` write, `shell_exec` and `python_exec` exec), and a

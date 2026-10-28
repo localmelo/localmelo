@@ -209,8 +209,10 @@ planning and reflection requests alike. The history in RAM keeps none.
   records it as received (R1's `thinking` and `reasoning_key`). In
   `legacy` the provider decides whether it is sent again: OpenAI-compatible
   no, Ollama native yes. `drop` strips it at send. `replay` sends it on the
-  assistant turns in scope, under one request key (`reasoning_content`,
-  `reasoning`, or Ollama's `thinking`), at most 40,000 characters per turn.
+  assistant turns in scope (by default the current task's; a provider that
+  requires replay gets every turn in the window), under one request key
+  (`reasoning_content`, `reasoning`, or Ollama's `thinking`), at most
+  40,000 characters per turn (no cap on a provider that requires replay).
   Both explicit modes skip `[RECALL]` when they build the prompt, so an
   embedding provider's long-term memory is written but not read back;
   `legacy` reads it as before.
