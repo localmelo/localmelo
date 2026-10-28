@@ -196,7 +196,7 @@ uv run melo --serve</code></pre>
             <tbody>
               <tr><td><code>tests/agent</code></td><td>The run loop, run options, results, reflection, tool exposure, events, cancellation and approvals</td><td><code>dev</code></td></tr>
               <tr><td><code>tests/backends</code></td><td>Backends, model providers, request timeouts, <code>extra_body</code></td><td><code>dev</code></td></tr>
-              <tr><td><code>tests/checker</code></td><td>The checks, secret redaction and the sanitizer</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/checker</code></td><td>The checks, permission tiers, secret redaction and the sanitizer</td><td><code>dev</code></td></tr>
               <tr><td><code>tests/cli</code></td><td>The <code>melo</code> command, the <code>melo ""</code> loop and <code>melo-retrieve</code></td><td><code>dev</code></td></tr>
               <tr><td><code>tests/contracts</code></td><td>The event and approval contracts</td><td><code>dev</code></td></tr>
               <tr><td><code>tests/executor</code></td><td>The executor, the built-in tools, approvals and the workspace root</td><td><code>dev</code></td></tr>
@@ -311,7 +311,8 @@ uv run mypy .</code></pre>
           <code>_builtin()</code> decorator adds the pair to
           <code>BUILTINS</code>. <code>register_builtins()</code> in
           <code>melo/executor/__init__.py</code> registers every one with the
-          executor and the memory's tool registry.
+          executor and the memory's tool registry, and marks the tools whose
+          permission tier is not <code>read</code> as requiring approval.
         </p>
         <ol>
           <li>
@@ -322,9 +323,14 @@ uv run mypy .</code></pre>
             offers it by relevance.
           </li>
           <li>
-            If it runs code or changes files, add its name to
-            <code>APPROVAL_BUILTINS</code>: a call of it then asks the run's
-            approval policy, when it has one, before it runs.
+            Give it a permission tier: add its name to
+            <code>BUILTIN_TIERS</code> in <code>melo/checker/tiers.py</code>
+            (<code>read</code>, <code>write</code>, <code>exec</code> or
+            <code>network</code>). A test keeps that table equal to the
+            built-in names, so a new built-in cannot be added without one. A
+            run with an approval policy asks before every call whose tier is
+            not <code>read</code>; <code>APPROVAL_BUILTINS</code> is derived
+            from the table.
           </li>
           <li>
             If it needs a workspace root, add its rooted variant to

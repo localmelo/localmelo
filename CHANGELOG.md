@@ -9,6 +9,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Tools have a permission tier, and an approval policy asks by tier rather
+  than by a fixed list of names. The built-ins keep their tiers (`file_read`
+  read, `file_write` write, `shell_exec` and `python_exec` exec), and a
+  provided tool's raw MCP `annotations` are kept on `ToolDef.annotations`
+  and read cautiously: `openWorldHint` gives network, `readOnlyHint` gives
+  read unless `destructiveHint` contradicts it, and anything else gives
+  write. So an unannotated MCP tool now asks in a run with a policy, while
+  `require_approval` only adds caution. The terminal approval panel names
+  the tier in its header, `ToolInfo.tier` and `ApprovalRequest.tier` report
+  it, and `--yolo` still means no policy, not read-only ([#66]).
 - Memory can be forgotten from the Python API. `await hippo.forget(task_id)`
   deletes that task's `tasks`, `steps` and `llm_calls` rows and the
   long-term entries whose metadata names it (its reflections), and
@@ -368,4 +378,5 @@ earlier milestones.
 [#62]: https://github.com/localmelo/localmelo/pull/62
 [#63]: https://github.com/localmelo/localmelo/pull/63
 [#64]: https://github.com/localmelo/localmelo/pull/64
+[#66]: https://github.com/localmelo/localmelo/pull/66
 [#NN]: https://github.com/localmelo/localmelo/pull/NN

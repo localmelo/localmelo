@@ -269,6 +269,31 @@ async def test_without_a_gate_a_marked_tool_runs(tmp_path: Path) -> None:
     assert target.read_text() == "hi"
 
 
+async def test_an_explicit_mark_forces_a_read_tool_to_ask(tmp_path: Path) -> None:
+    # The tier only adds caution: an explicit requires_approval marks a read
+    # tool too, and the policy can then deny it.
+    executor, _ = _executor()
+    notes = tmp_path / "notes.txt"
+    notes.write_text("hello")
+    ran: list[str] = []
+
+    async def file_read(path: str) -> str:
+        ran.append(path)
+        return "hello"
+
+    executor.register("file_read", file_read)
+    assert not executor.requires_approval("file_read")
+    executor.register("file_read", file_read, requires_approval=True)
+    gate = Gate(ApprovalDecision(False, "not this file"))
+
+    outcome = await _run(executor, "file_read", {"path": str(notes)}, gate)
+
+    assert outcome.status == ExecutionStatus.BLOCKED
+    assert outcome.error_category == ErrorCategory.APPROVAL_DENIED
+    assert len(gate.requests) == 1
+    assert ran == []
+
+
 async def test_without_a_gate_arguments_are_not_matched_to_parameters() -> None:
     # The parameter check belongs to the approval step, so without a gate a
     # parameter the tool does not take fails as the call itself, as before.
