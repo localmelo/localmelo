@@ -327,3 +327,72 @@ def test_replace_text_keeps_the_caps() -> None:
     assert store.replace_text(first.alias, "d" * 40) is False
     assert store.entries()[0].text == "c" * 25
     assert second.alias not in [entry.alias for entry in store.entries()]
+
+
+def test_an_entry_keeps_its_task_and_title() -> None:
+    store = NoteStore(clock=Clock())
+    entry = _add(
+        store, "note", "plan: read a.py", note=_note(), task_id="t1", title="plan line"
+    )
+    assert (entry.task_id, entry.title) == ("t1", "plan line")
+    [copy] = store.entries()
+    assert (copy.task_id, copy.title) == ("t1", "plan line")
+    other = NoteStore(clock=Clock())
+    assert other.load([copy]) == 1
+    [loaded] = other.entries()
+    assert (loaded.task_id, loaded.title) == ("t1", "plan line")
+
+
+def test_a_loaded_entry_can_still_be_read_by_alias() -> None:
+    store = NoteStore(clock=Clock())
+    entry = _add(store, "thought", "a thought", task_id="t1", title="a thought")
+    other = NoteStore(clock=Clock())
+    assert other.load([entry]) == 1
+    loaded = other.get(entry.alias)
+    assert loaded is not None
+    assert loaded.kind == "thought"
+
+
+def test_working_memory_shows_and_forgets_aliases() -> None:
+    from localmelo.melo.memory.short import WorkingMemory
+
+    memory = WorkingMemory(max_len=4)
+    first = Message(role="user", content="q")
+    assistant = Message(role="assistant", content="x")
+    result = Message(role="tool", content="r")
+    memory.append(first, aliases=("n1",))
+    memory.append_turn(assistant, [result], aliases=("d1",))
+    assert memory.shown_aliases() == frozenset({"n1", "d1"})
+    memory.drop_oldest_units(1)
+    assert memory.shown_aliases() == frozenset({"d1"})
+    memory.clear()
+    assert memory.shown_aliases() == frozenset()
+
+
+def test_a_message_placement_recall_joins_its_tool_unit() -> None:
+    from localmelo.melo.memory.notes import RECALL_END, RECALL_START
+    from localmelo.melo.memory.short import group_turns, tail_turns
+
+    assistant = Message(
+        role="assistant",
+        content="",
+        tool_calls=[],
+    )
+    # An assistant with no calls is not a tool unit; use a call-shaped one.
+    from localmelo.melo.schema import ToolCall
+
+    assistant = Message(
+        role="assistant",
+        content="",
+        tool_calls=[ToolCall(tool_name="echo", arguments={}, id="c1")],
+    )
+    result = Message(role="tool", content="r", tool_call_id="c1")
+    recall = Message(role="user", content=f"{RECALL_START} x]\n{RECALL_END}")
+    turns = group_turns([assistant, result, recall], empty_prefix=True)
+    assert len(turns) == 1
+    assert turns[0] == [assistant, result, recall]
+    assert tail_turns([assistant, result, recall], 3) == [assistant, result, recall]
+    assert (
+        tail_turns([Message(role="user", content="q"), *turns[0]], 3, empty_prefix=True)
+        == turns[0]
+    )

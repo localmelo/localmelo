@@ -56,6 +56,7 @@ class TestCatalogue:
             "notice",
             "reflection.started",
             "reflection",
+            "recall",
             "run.progress",
             "run.finished",
         } == EVENT_TYPES

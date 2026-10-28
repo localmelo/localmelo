@@ -398,6 +398,9 @@ class LLMCallRecord:
     usage: dict[str, int] | None
     duration_s: float
     timestamp: float
+    # The recall records the request carried for the first time (R5), or
+    # None when it carried no new block. Serialized as ``recall_json``.
+    recall: Any | None = None
 
 
 @dataclass

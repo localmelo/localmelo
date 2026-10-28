@@ -26,6 +26,10 @@ class LongTerm:
         vec = np.asarray(embedding, dtype=np.float32)
         self._entries.append(Entry(text=text, vector=vec, metadata=metadata or {}))
 
+    async def count_entries(self) -> int:
+        """The number of entries held (see SqliteLongTerm.count_entries)."""
+        return len(self._entries)
+
     async def search(
         self, query_embedding: list[float], top_k: int = 5
     ) -> list[tuple[str, float, dict[str, Any]]]:

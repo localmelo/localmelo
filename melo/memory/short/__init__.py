@@ -6,6 +6,7 @@ from collections import deque
 from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING
 
+from localmelo.melo.memory.notes import RECALL_START
 from localmelo.melo.memory.short.note_store import NoteStore
 from localmelo.melo.schema import EMPTY_REPLY_LABEL, EMPTY_REPLY_NUDGE, Message
 
@@ -34,12 +35,21 @@ def _is_empty_reply_label(msg: Message, empty_prefix: bool = False) -> bool:
 def _joins(unit: Sequence[Message], msg: Message, empty_prefix: bool = False) -> bool:
     """Whether *msg*, directly after *unit*, belongs to that unit."""
     if _opens_tool_turn(unit[0]):
-        return msg.role == "tool"
+        # R5's message placement puts the recall block in its own user
+        # message after the turn's tool results; it belongs to that unit so
+        # eviction never leaves it after the re-inserted task query.
+        return msg.role == "tool" or (
+            empty_prefix and msg.role == "user" and msg.content.startswith(RECALL_START)
+        )
     return (
         len(unit) == 1
         and _is_empty_reply_label(unit[0], empty_prefix)
         and msg.role == "user"
-        and msg.content == EMPTY_REPLY_NUDGE
+        # R5 appends a recall block to the nudge; the unit still holds.
+        and (
+            msg.content == EMPTY_REPLY_NUDGE
+            or msg.content.startswith(EMPTY_REPLY_NUDGE + "\n")
+        )
     )
 
 
@@ -113,6 +123,10 @@ class WorkingMemory:
         self._reflection: ReflectionEntry | None = None
         # The run's reasoning notes and drafts (R4), RAM only, bounded.
         self.notes = NoteStore()
+        # The recall aliases each message's block shows (R5), keyed by the
+        # message's id(); eviction, dropping and replacement keep it in step
+        # with the buffer.
+        self._aliases: dict[int, frozenset[str]] = {}
 
     @property
     def empty_prefix(self) -> bool:
@@ -121,19 +135,44 @@ class WorkingMemory:
 
     # ── Conversation buffer ──
 
-    def append(self, msg: Message) -> None:
+    def append(self, msg: Message, *, aliases: Iterable[str] = ()) -> None:
+        """Append *msg*; *aliases* are the recall aliases its block shows."""
         self._buf.append(msg)
+        self._remember_aliases(msg, aliases)
         self._evict()
 
-    def append_turn(self, assistant: Message, results: Sequence[Message]) -> None:
+    def append_turn(
+        self,
+        assistant: Message,
+        results: Sequence[Message],
+        *,
+        aliases: Iterable[str] = (),
+    ) -> None:
         """Append an assistant message and what answers it as one unit.
 
         That is a tool-call message and its results, or an empty reply's
-        label and its nudge (see :func:`group_turns`).
+        label and its nudge (see :func:`group_turns`). *aliases* are the
+        recall aliases the unit's block shows; they leave with the unit.
         """
         self._buf.append(assistant)
         self._buf.extend(results)
+        self._remember_aliases(assistant, aliases)
         self._evict()
+
+    def shown_aliases(self) -> frozenset[str]:
+        """The recall aliases the window still shows."""
+        shown: set[str] = set()
+        for msg in self._buf:
+            shown.update(self._aliases.get(id(msg), ()))
+        return frozenset(shown)
+
+    def _remember_aliases(self, msg: Message, aliases: Iterable[str]) -> None:
+        names = frozenset(alias for alias in aliases if alias)
+        if names:
+            self._aliases[id(msg)] = names
+
+    def _forget_aliases(self, msg: Message) -> None:
+        self._aliases.pop(id(msg), None)
 
     def get_window(self) -> list[Message]:
         return list(self._buf)
@@ -141,6 +180,7 @@ class WorkingMemory:
     def clear(self) -> None:
         """Clear conversation buffer only. The latest reflection survives."""
         self._buf.clear()
+        self._aliases.clear()
 
     def drop_oldest_units(self, count: int) -> int:
         """Drop the *count* oldest units of the buffer (see :func:`group_turns`).
@@ -156,7 +196,7 @@ class WorkingMemory:
             if size >= len(self._buf):
                 break  # only the newest unit is left
             for _ in range(size):
-                self._buf.popleft()
+                self._forget_aliases(self._buf.popleft())
             dropped += size
         return dropped
 
@@ -185,7 +225,11 @@ class WorkingMemory:
                     continue
                 if only is not None and id(msg) not in only:
                     continue
-                self._buf[offset] = dataclasses.replace(msg, thinking="")
+                replaced = dataclasses.replace(msg, thinking="")
+                names = self._aliases.pop(id(msg), None)
+                if names:
+                    self._aliases[id(replaced)] = names
+                self._buf[offset] = replaced
                 changed += 1
             index += size
         return changed
@@ -205,7 +249,7 @@ class WorkingMemory:
             if size >= len(self._buf):
                 return  # only the newest unit is left
             for _ in range(size):
-                self._buf.popleft()
+                self._forget_aliases(self._buf.popleft())
 
     def _leading_unit_size(self) -> int:
         """Messages in the oldest unit of the buffer (see :func:`group_turns`)."""
@@ -236,6 +280,7 @@ class WorkingMemory:
     def clear_all(self) -> None:
         """Clear both conversation buffer and the latest reflection."""
         self._buf.clear()
+        self._aliases.clear()
         self._reflection = None
 
 

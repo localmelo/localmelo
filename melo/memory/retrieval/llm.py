@@ -229,10 +229,17 @@ def _catalog(docs: Sequence[Doc]) -> list[tuple[str, Doc, str]]:
     are appended the cut point moves only when m does.
     """
     counts: dict[str, int] = {}
+    used: set[str] = set()
     entries: list[tuple[str, Doc, str]] = []
     for doc in docs:
-        counts[doc.kind] = counts.get(doc.kind, 0) + 1
-        alias = f"{_KIND_LETTERS[doc.kind]}{counts[doc.kind]}"
+        alias = _declared_alias(doc, used)
+        if alias is None:
+            counts[doc.kind] = counts.get(doc.kind, 0) + 1
+            alias = f"{_KIND_LETTERS[doc.kind]}{counts[doc.kind]}"
+            while alias in used:
+                counts[doc.kind] += 1
+                alias = f"{_KIND_LETTERS[doc.kind]}{counts[doc.kind]}"
+        used.add(alias)
         entries.append((alias, doc, _entry_line(alias, doc) + "\n"))
     total = sum(len(line) for _alias, _doc, line in entries)
     if total <= CATALOG_CHARS:
@@ -245,6 +252,14 @@ def _catalog(docs: Sequence[Doc]) -> list[tuple[str, Doc, str]]:
         dropped += len(entries[first][2])
         first += 1
     return entries[first:]
+
+
+def _declared_alias(doc: Doc, used: set[str]) -> str | None:
+    """``doc.meta["alias"]`` when it is a unique non-empty string, else ``None``."""
+    alias = doc.meta.get("alias")
+    if isinstance(alias, str) and alias and alias not in used:
+        return alias
+    return None
 
 
 def _entry_line(alias: str, doc: Doc) -> str:
