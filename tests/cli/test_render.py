@@ -625,6 +625,32 @@ def test_the_banner_names_the_configured_embedding_model() -> None:
     assert "│ memory     long-term memory · vllm · Qwen3-Embedding-0.6B" in text
 
 
+def test_the_banner_without_an_embedding_names_the_wizard() -> None:
+    text = _banner(key="vllm", label="vLLM")
+    assert "│ memory     no long-term memory · melo --reconfigure adds one" in text
+
+
+def test_the_banner_cleans_an_embedding_model_id() -> None:
+    text = _banner(key="vllm", label="vLLM", embedding="vllm · bad\x1b[31m")
+    assert "\x1b" not in text and "31m" not in text and "bad" in text
+
+
+def test_a_boxed_banner_wraps_the_memory_text_inside_the_box() -> None:
+    text = _banner(
+        width=60,
+        key="vllm",
+        label="vLLM",
+        embedding="vllm · Qwen3-Embedding-0.6B",
+    )
+    lines = text.split("\n")
+    assert lines[0].startswith("╭")
+    boxed = [line for line in lines if line.startswith("│")]
+    assert boxed and all(cells(line) == 60 for line in boxed)
+    box_text = "\n".join(boxed)
+    assert "long-term memory · vllm ·" in box_text
+    assert "Qwen3-Embedding-0.6B" in box_text
+
+
 @pytest.mark.parametrize(
     "backend",
     [

@@ -77,7 +77,8 @@ def memory_text(backend: BackendInfo, *, memory: bool) -> str:
         if backend.key == "openai-compatible":
             return "no long-term memory · --embedding-base-url adds one"
         return "no long-term memory · melo --reconfigure adds one"
-    return f"long-term memory · {backend.embedding}"
+    # The model id can come from a server's listing; never draw its escapes.
+    return f"long-term memory · {clean_output(backend.embedding)}"
 
 
 def model_rows(backend: BackendInfo) -> list[str]:
