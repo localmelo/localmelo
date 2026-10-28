@@ -23,6 +23,7 @@ EVENT_SCHEMA_VERSION: Final = 1
 EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
     {
         "run.started": frozenset({"query", "max_steps", "workspace_root", "approval"}),
+        "inbox.accepted": frozenset({"offset", "text", "step", "attempt"}),
         "step.started": frozenset({"step", "attempt"}),
         "assistant.message": frozenset(
             {"step", "content", "thinking", "tool_calls", "usage", "duration_s"}

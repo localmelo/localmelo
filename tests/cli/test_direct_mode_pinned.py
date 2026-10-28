@@ -23,8 +23,8 @@ the notice, so ``_run`` has a new hash again. Worker history adds opt-in
 ``--save-session`` and import dispatch to ``_run_direct`` and ``_run``.
 Context accounting resolves its opt-in budget before Agent construction, so
 ``_build_direct_mode_agent`` has a new hash. The opt-in worker brief routes
-through ``_run_direct`` and ``_run``, giving those two functions new hashes;
-the ordinary direct path remains unchanged. ``_check_args`` is not pinned.
+through ``_run_direct`` and ``_run``; inbox routing updates both hashes again.
+The ordinary direct path remains unchanged. ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -38,8 +38,8 @@ import pytest
 MAIN = Path(__file__).resolve().parents[2] / "__main__.py"
 
 PINNED = {
-    "_run_direct": "0ef8cec47e547022f5343b7126fa97814993f75700bc5ed53ce637ec786c1ac6",
-    "_run": "634122524cec011fa1fbfbe42306c07aee69e63ded84d8bcecb71916b8a5f455",
+    "_run_direct": "9ba435157f2376162920df31cccadf0a06c0602e4a3aeccc9c925d86f2e69584",
+    "_run": "8a99388d143f68b8db3d16c3b4f5c50b6bde05c0519a3f9e2768ab136b376725",
     "_run_one": "0c323f5d879739c205efe3ac0c71d651be2496721b68437ac30c93c6b6f70f31",
     "_report": "5ce2d43919e8bea8c5cfdb9689acd104e4bf65d2a8c377d9913f25b2cd909ecf",
     "_status_line": "51cf6b34fa09e121214b0a06e29e74d3d7d38d68b8e19ba5c68b0809abc1821b",

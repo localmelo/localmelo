@@ -14,8 +14,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Direct workers can read an explicit append-only inbox at planning boundaries,
+  with per-line acceptance events and redacted saved history. ([#NN])
 - Direct workers can read a brief file and emit a versioned JSON result or an
-  NDJSON event stream; inbox steering remains future work. ([#NN])
+  NDJSON event stream. ([#NN])
 
 - Read-only worker history in the web workspace, with server-side filters,
   paging, recorded transcripts and explicit refresh for unfinished runs. ([#130])

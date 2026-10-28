@@ -40,6 +40,7 @@ from localmelo.melo.contracts.events import (
     AgentEvent,
     json_safe_payload,
 )
+from localmelo.melo.contracts.inbox import InboxSource
 from localmelo.melo.schema import (
     EMPTY_REPLY_NUDGE,
     ImagePart,
@@ -233,6 +234,7 @@ class SessionRunner:
         before_turn: BeforeTurn | None = None,
         create_scope_key: bool = False,
         observe: Callable[[AgentEvent], object] | None = None,
+        inbox: InboxSource | None = None,
     ) -> None:
         self._worker = new_session is not None and new_session.kind == "worker"
         if not self._worker:
@@ -253,6 +255,7 @@ class SessionRunner:
         self._new_session = new_session
         self._on_event = on_event
         self._observe = observe
+        self._inbox = inbox
         self._sensitive_reads: dict[str, str] = {}
         self._holder = holder or process_holder(store.writer)
         self._resume_mode: ResumeMode = resume_mode
@@ -617,6 +620,8 @@ class SessionRunner:
             }
             if turn.routine is not None:
                 kwargs["routine"] = turn.routine
+            if self._inbox is not None:
+                kwargs["inbox"] = self._inbox
             returned = await turn.agent.run_task(turn.text, **kwargs)
         except BaseException as exc:
             run_exc = exc

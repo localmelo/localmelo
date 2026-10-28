@@ -33,6 +33,7 @@ from localmelo.melo.agent._chat import (
     RETRY_HOOK,
     Chat,
     RequestStats,
+    coalesce_user_messages,
     lacks_task_query,
 )
 from localmelo.melo.agent._events import _Emitter, check_sink
@@ -60,6 +61,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalRequest,
 )
 from localmelo.melo.contracts.events import EventSink
+from localmelo.melo.contracts.inbox import InboxSource
 from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
@@ -980,6 +982,8 @@ class _RunState:
     task_id: str = ""
     # The query Message this run appended to the window, for replay scope.
     task_query_msg: Message | None = None
+    # An opt-in source of parent instructions at planning boundaries.
+    inbox: InboxSource | None = None
     # Replay counters (see memory_stats on RunResult).
     replayed_chars: int = 0
     replay_skipped: int = 0
@@ -3168,8 +3172,11 @@ class Agent:
                 task_query=task_query,
                 requires_replay=self._requires_replay,
             )
+            planned = _as_planned(sent, query, query_block)
+            if run is not None and run.inbox is not None:
+                planned = coalesce_user_messages(planned)
             check = await self.checker.pre_plan(
-                others + _as_planned(sent, query, query_block),
+                others + planned,
                 count_thinking=self._counts_thinking,
             )
             return check.allowed
@@ -3332,11 +3339,10 @@ class Agent:
             task_query=task_query,
             requires_replay=self._requires_replay,
         )
-        all_msgs = (
-            long_context
-            + _as_planned(sent, query, "" if run is None else run.boundary_block)
-            + reflection_msgs
-        )
+        planned = _as_planned(sent, query, "" if run is None else run.boundary_block)
+        if run is not None and run.inbox is not None:
+            planned = coalesce_user_messages(planned)
+        all_msgs = long_context + planned + reflection_msgs
         check = await self.checker.pre_plan(
             all_msgs, count_thinking=self._counts_thinking
         )
@@ -3400,6 +3406,7 @@ class Agent:
             reflections=reflections,
             query_block=query_block,
             recalls=recalls,
+            **({"coalesce_users": True} if run is not None and run.inbox else {}),
         )
         if run is not None and recall_records:
             self._commit_recalls(recall_records, run)
@@ -4301,6 +4308,13 @@ class Agent:
         run.attempt_calls.clear()
 
         for step in range(budget):
+            pending = run.inbox.poll() if run.inbox is not None else []
+            inserted = None
+            if pending:
+                inserted = Message(
+                    role="user", content="\n\n".join(text for _, text in pending)
+                )
+                self.hippo.working.append(inserted)
             # Retrieval + tool resolution + boundary checks
             long_context, short_window, tools, fail = await self._do_retrieval(
                 query, task_query=run.task_query_msg, run=run
@@ -4308,6 +4322,14 @@ class Agent:
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""
+            if inserted is not None:
+                if not any(message is inserted for message in short_window):
+                    run.end("failed", error="inbox instructions do not fit the prompt")
+                    return step + 1, ""
+                assert run.inbox is not None
+                for offset, text in pending:
+                    run.inbox.accept(offset)
+                    run.events.inbox_accepted(offset, text, run.steps + 1, run.attempts)
 
             # LLM planning step (with reflection context). The step counts
             # once the planning call is made, even if it then raises.
@@ -4469,6 +4491,7 @@ class Agent:
         observe: EventSink | None = None,
         progress: bool = False,
         routine: str | None = None,
+        inbox: InboxSource | None = None,
     ) -> RunResult:
         """Run one task and report how it ended.
 
@@ -4670,6 +4693,7 @@ class Agent:
             ),
             approval=approval,
             routine=routine,
+            inbox=inbox,
             place=place,
             limits=self._limits() if progress else None,
         )

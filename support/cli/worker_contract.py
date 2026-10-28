@@ -158,6 +158,8 @@ class WorkerObserver:
         if not self.stream:
             return
         payload = redact_worker(event.to_dict())
+        if event.type == "inbox.accepted":
+            payload["data"].pop("text", None)
         if event.type == "run.finished" and isinstance(
             payload.get("data", {}).get("result"), dict
         ):

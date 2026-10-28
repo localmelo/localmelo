@@ -159,6 +159,7 @@ asyncio.run(main())
 | Type | When | `data` keys |
 |---|---|---|
 | `run.started` | First, once the arguments of `run_task` are checked. | `query`, `max_steps`, `workspace_root`, `approval` |
+| `inbox.accepted` | When an inbox instruction enters the live context, before its planning step. | `offset`, `text`, `step`, `attempt` |
 | `step.started` | At the start of each planning step. | `step`, `attempt` |
 | `assistant.message` | When the step's planning reply arrives. | `step`, `content`, `thinking`, `tool_calls`, `usage`, `duration_s` |
 | `note` | In the compress modes, when a note, a reflection's note or an attempt digest enters the RAM-only note store. | `step`, `attempt`, `note_id`, `kind`, `source`, `text`, `chars`, `drafts`, `remember`, `stage` |
@@ -179,6 +180,14 @@ asyncio.run(main())
 - `workspace_root`: the agent's workspace root, or `null`; see
   [Work in a directory](../guides/python.md#work-in-a-directory).
 - `approval`: `true` when the run has an approval policy.
+
+### inbox.accepted
+
+- `offset`: byte offset immediately after the accepted newline in this run's inbox.
+- `text`: the instruction after pattern-based secret redaction. Worker
+  `stream-json` omits this field; a saved worker event includes it.
+- `step`, `attempt`: the upcoming planning step and its attempt. Acceptance
+  means context insertion, not model receipt or execution.
 
 ### step.started
 

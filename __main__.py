@@ -459,9 +459,11 @@ async def _run_worker_brief(
     save_session: str | None,
     parent_run: str | None,
     routine: str | None,
+    inbox_path: str | None = None,
 ) -> int:
     """Run one opt-in worker and write its versioned report."""
     from localmelo.support.cli.worker_contract import WorkerObserver, result_record
+    from localmelo.support.cli.worker_inbox import Inbox
 
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
@@ -473,9 +475,14 @@ async def _run_worker_brief(
         stream=output_format == "stream-json",
         on_failure=lambda: loop.call_soon_threadsafe(task.cancel),
     )
+    inbox_args: dict[str, Any] = (
+        {"inbox": Inbox(inbox_path)} if inbox_path is not None else {}
+    )
     try:
         if save_session is None:
-            outcome = await agent.run_task(query, observe=observer, routine=routine)
+            outcome = await agent.run_task(
+                query, observe=observer, routine=routine, **inbox_args
+            )
         else:
             from localmelo.support.sessions.worker import run_worker
 
@@ -486,6 +493,7 @@ async def _run_worker_brief(
                 parent_run=parent_run,
                 observe=observer,
                 routine=routine,
+                **inbox_args,
             )
         code = _exit_code(outcome.status)
         record = await asyncio.to_thread(
@@ -533,6 +541,7 @@ async def _run(
     save_session: str | None = None,
     parent_run: str | None = None,
     worker_brief: bool = False,
+    inbox_path: str | None = None,
 ) -> int:
     """Run *query*, or with no query the interactive loop; return the exit code.
 
@@ -558,6 +567,7 @@ async def _run(
                     save_session,
                     parent_run,
                     routine,
+                    inbox_path,
                 )
             if save_session is None:
                 outcome = await _run_one(
@@ -669,6 +679,7 @@ def _run_direct(
     save_session: str | None = None,
     parent_run: str | None = None,
     worker_brief: bool = False,
+    inbox_path: str | None = None,
 ) -> int:
     """Run *query*, or for an empty one the interactive loop; return the exit code.
 
@@ -695,6 +706,11 @@ def _run_direct(
             _stdout_for_the_report() if query else contextlib.nullcontext(sys.stdout)
         )
         with output as out:
+            worker_args: dict[str, Any] = {}
+            if worker_brief:
+                worker_args["worker_brief"] = True
+            if inbox_path is not None:
+                worker_args["inbox_path"] = inbox_path
             code = asyncio.run(
                 _run(
                     agent,
@@ -707,7 +723,7 @@ def _run_direct(
                     routine=routine,
                     save_session=save_session,
                     parent_run=parent_run,
-                    **({"worker_brief": True} if worker_brief else {}),
+                    **worker_args,
                 )
             )
     except BaseException as exc:
@@ -1193,6 +1209,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
         full_name_only = {
             "--save-session",
             "--brief",
+            "--inbox",
             "--parent-run",
             "--import-session",
             "--title",
@@ -1248,6 +1265,9 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         direct.add_argument(
             f"--{name}", type=_positive_int, metavar="TOKENS", default=argparse.SUPPRESS
         )
+    direct.add_argument(
+        "--inbox", metavar="FILE", help="Read appended worker instructions from FILE"
+    )
     direct.add_argument(
         "--brief", metavar="FILE", help="Read a direct worker task from a UTF-8 file"
     )
@@ -1524,6 +1544,8 @@ def main() -> None:
         parser.validation_error = legacy.validation_error
     if args is None or unknown or not args.query or args.serve or args.daemon:
         args = parser.parse_args()
+    if args.inbox is not None and args.brief is None:
+        parser.error("--inbox requires --brief")
     if args.brief is not None:
         if (
             args.query
@@ -1611,6 +1633,8 @@ def main() -> None:
         worker_args: dict[str, Any] = (
             {"worker_brief": True} if args.brief is not None else {}
         )
+        if args.inbox is not None:
+            worker_args["inbox_path"] = args.inbox
         code = _run_direct(
             agent,
             query,

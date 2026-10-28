@@ -49,6 +49,19 @@ BUDGET_HOOK: contextvars.ContextVar[
 ] = contextvars.ContextVar("BUDGET_HOOK", default=None)
 
 
+def coalesce_user_messages(messages: list[Message]) -> list[Message]:
+    """Join adjacent user instructions in a request copy, preserving order."""
+    result: list[Message] = []
+    for message in messages:
+        if result and result[-1].role == message.role == "user":
+            result[-1] = dataclasses.replace(
+                result[-1], content=result[-1].content + "\n\n" + message.content
+            )
+        else:
+            result.append(message)
+    return result
+
+
 class CallRecorder(Protocol):
     """Keeps the model calls of a run (see :data:`CALL_RECORDER`)."""
 
@@ -562,6 +575,7 @@ class Chat:
         *,
         query_block: str = "",
         recalls: Sequence[Any] = (),
+        coalesce_users: bool = False,
     ) -> Message:
         system_prompt, other_msgs = _build_system_prompt(
             context, short, reflections, self.system_notes, self.note_instruction
@@ -582,6 +596,8 @@ class Chat:
             else other_msgs
         )
 
+        if coalesce_users:
+            messages = coalesce_user_messages(messages)
         return await self._request(messages, tools=tools, kind="plan", recall=recalls)
 
     async def retrieve(self, messages: list[Message]) -> Message:

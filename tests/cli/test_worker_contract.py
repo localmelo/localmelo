@@ -232,6 +232,8 @@ def test_brief_main_with_fake_provider(
         ["--brief", "brief.md", "--output-format", "text"],
         ["--output-format", "stream-json", "task"],
         ["--br", "brief.md"],
+        ["--inbox", "inbox.md", "task"],
+        ["--brief", "brief.md", "--inb", "inbox.md"],
     ],
 )
 def test_invalid_modes_fail_before_agent(

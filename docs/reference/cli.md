@@ -101,6 +101,7 @@ accepts the options named in [Interactive UI](#interactive-ui).
 | Option | Default | Description |
 |---|---|---|
 | `--brief FILE` | not set | Read a direct task from a nonempty UTF-8 file, at most 1 MiB, relative to the invocation directory. Requires no positional task and defaults to worker JSON output. |
+| `--inbox FILE` | not set | With `--brief`, accept complete appended instruction lines at planning boundaries. The path is explicit and relative to the invocation directory. |
 | `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](../guides/tools-mcp.md#with-a-workspace-root). |
 | `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |
@@ -419,8 +420,26 @@ finishes normally. A broken or undrained output pipe is a failure; signals,
 process death or a broken pipe can leave no result. Drain stdout and check
 both the final record and the exit code. Worker output uses pattern-based
 redaction and omits recognizable sensitive-file reads; arbitrary printed or
-model-echoed secrets may remain. Review before sharing. `--inbox` is not yet
-available. `--save-session` can record the same run.
+model-echoed secrets may remain. Review before sharing. `--save-session` can
+record the same run.
+
+With an explicit `--inbox FILE`, a worker reads complete LF-terminated,
+nonempty UTF-8 lines at the start of each planning step. An incomplete last
+line waits for its newline. The file may initially be absent, but must otherwise
+be an append-only regular file (not a symlink), at most 1 MiB total and 16 KiB
+per line. Serialize writers, append each full line in one write and use a fresh
+inbox per run. Replacement, truncation, invalid input and oversized messages
+fail the run. There is no default inbox.
+
+In `stream-json`, `inbox.accepted` reports each inserted line's ending byte
+`offset`, step and attempt, without its text. An acknowledgement means the
+instruction entered the live run's context, not that the model received or
+followed it. Messages appended after the final planning boundary may never be
+accepted. Offsets are committed once per live run, not across crashes or
+restarts; reconcile acknowledgements and use a fresh file for a new run. A
+saved worker records the redacted text in its event history. Redaction can
+change that text, and session resume does not reconstruct inbox events as
+conversation messages; do not treat saved history as an exact replay.
 
 **In both formats:**
 
