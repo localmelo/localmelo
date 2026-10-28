@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import stat
+from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +25,7 @@ from localmelo.support.gateway.chat_gate import (
     _trace_source,
 )
 from localmelo.support.gateway.playground import SmokePlayground
-from localmelo.support.scheduler import REASONS, Clock
+from localmelo.support.scheduler import REASONS, Clock, Params
 from localmelo.support.scheduler.sim.trace import SCHEMA, read_trace
 
 # ── Fakes ──
@@ -374,18 +377,73 @@ async def test_an_embedding_does_not_open_a_chat_task() -> None:
     await gate.close()
 
 
-async def test_a_focused_embedding_is_never_held() -> None:
-    gate = ChatGate(policy="fcfs", n_srv=1)
+async def test_a_focused_embedding_is_never_held_and_logs_front(
+    tmp_path: Path,
+) -> None:
+    gate = ChatGate(policy="fcfs", n_srv=1, call_log_dir=tmp_path)
     gate.focus("focused")
     holder = gate.submit("focused", kind="plan")
     assert admitted(holder)
     embedding = gate.submit("focused", kind="embed")
     # A full server holds a planning call, never an embedding (R14). The
-    # lane path would hold it, so it is submitted as a chat call.
-    assert embedding.meta.session_kind == "chat"
+    # lane path would hold it, so it is submitted as a chat call; the log
+    # still names the focused chat's calls "front" (4.7, decision 1b).
+    assert embedding.meta.session_kind == "front"
+    state_call = next(
+        c for c in gate._state.calls if c.call_id == embedding.meta.call_id
+    )
+    assert state_call.session_kind == "chat"
     assert admitted(embedding)
     assert not any(a.startswith(("orphan_call", "lane_answer")) for a in gate.alarms)
+    finish(gate, embedding)
+    finish(gate, holder)
+    path = gate.call_log_path
     await gate.close()
+    assert path is not None
+    traces = read_trace(path)
+    line = next(c for c in traces[0].calls if c.call_index == embedding.meta.call_index)
+    assert line.session_kind == "front"
+    assert line.kind == "embed"
+
+
+async def test_an_empty_kind_is_a_plan_and_is_held_under_class(
+    tmp_path: Path,
+) -> None:
+    gate = ChatGate(policy="class", n_srv=1, r_f=0, call_log_dir=tmp_path)
+    holder = gate.submit("holder")
+    assert admitted(holder)
+    # R14: an unknown or empty kind reads as a plan, so it is holdable.
+    empty = gate.submit("empty", kind="")
+    assert empty.meta.kind == "plan"
+    assert not admitted(empty)
+    finish(gate, holder)
+    assert admitted(empty)
+    finish(gate, empty)
+    path = gate.call_log_path
+    await gate.close()
+    assert path is not None
+    by_key = {trace.task_key: trace for trace in read_trace(path)}
+    assert by_key["empty"].calls[0].kind == "plan"
+    assert by_key["empty"].calls[0].status == "ok"
+
+
+async def test_the_log_records_the_level_at_admission(tmp_path: Path) -> None:
+    gate = ChatGate(policy="class", n_srv=1, r_f=0, call_log_dir=tmp_path)
+    holder = gate.submit("holder")
+    assert admitted(holder)
+    low = gate.submit("low")
+    assert not admitted(low)
+    # Raise the held call while a full server holds it (F4's reproduction).
+    gate.set_level("low", 1)
+    finish(gate, holder)
+    assert admitted(low)
+    finish(gate, low)
+    path = gate.call_log_path
+    await gate.close()
+    assert path is not None
+    by_key = {trace.task_key: trace for trace in read_trace(path)}
+    assert by_key["low"].calls[0].level == 1
+    assert by_key["holder"].calls[0].level == 2
 
 
 async def test_an_embedding_after_the_last_chat_call_is_admitted_and_not_an_orphan() -> (
@@ -492,8 +550,10 @@ async def test_a_refused_call_is_logged_with_no_admit_time(tmp_path: Path) -> No
     assert gate.held("b") == ""
     assert gate._log.path is not None
     await gate.close()
-    call = read_trace(gate._log.path)[0].calls[0]  # type: ignore[arg-type]
-    assert call.status == "refused"
+    calls = [c for trace in read_trace(gate._log.path) for c in trace.calls]  # type: ignore[arg-type]
+    # The admitted holder now also gets its shutdown line (F2); select the
+    # refused one this test is about.
+    call = next(c for c in calls if c.status == "refused")
     assert call.admit_s is None
     assert call.start_s == call.submit_s
     finish(gate, holder)
@@ -528,7 +588,11 @@ async def test_a_log_write_failure_warns_once_and_does_not_fail_the_call(
     read_only.chmod(0o500)
     try:
         with caplog.at_level("WARNING"):
-            gate = ChatGate(policy="fcfs", n_srv=2, call_log_dir=read_only)
+            # The log's own dir is chmod 0700 (F9), so make its parent the
+            # one that refuses the mkdir.
+            gate = ChatGate(
+                policy="fcfs", n_srv=2, call_log_dir=read_only / "scheduler"
+            )
             call = gate.submit("a")
             finish(gate, call)
             assert gate._log.path is None
@@ -557,6 +621,139 @@ async def test_a_write_failure_after_startup_warns_once_and_keeps_the_chat(
     warnings = [r for r in caplog.records if "Call log write failed" in r.message]
     assert len(warnings) == 1
     await gate.close()
+
+
+async def test_a_short_write_is_completed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = ChatGate(policy="off", call_log_dir=tmp_path)
+    real = chat_gate.os.write
+    state = {"first": True}
+
+    def short(fd: int, data: bytes) -> int:
+        # Write all but the last byte of the first line, as a file-size
+        # limit or an interrupted write can (F1's reproduction).
+        if state["first"]:
+            state["first"] = False
+            return real(fd, data[:-1])
+        return real(fd, data)
+
+    monkeypatch.setattr(chat_gate.os, "write", short)
+    gate.finish(gate.submit("a"))
+    gate.finish(gate.submit("b"))
+    path = gate.call_log_path
+    await gate.close()
+    assert path is not None
+    assert [task.task_key for task in read_trace(path)] == ["a", "b"]
+
+
+async def test_a_partial_write_is_truncated_and_disables_the_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gate = ChatGate(policy="off", call_log_dir=tmp_path)
+    gate.finish(gate.submit("a"))
+    real = chat_gate.os.write
+    state = {"first": True}
+
+    def failing(fd: int, data: bytes) -> int:
+        if state["first"]:
+            state["first"] = False
+            real(fd, data[:-1])
+            raise OSError("disk full")
+        return real(fd, data)
+
+    path = gate.call_log_path
+    monkeypatch.setattr(chat_gate.os, "write", failing)
+    gate.finish(gate.submit("b"))
+    assert gate.call_log_path is None
+    await gate.close()
+    assert path is not None
+    # The partial line is gone, so the earlier complete line still reads.
+    assert [task.task_key for task in read_trace(path)] == ["a"]
+
+
+async def test_the_reader_ignores_a_truncated_final_line(tmp_path: Path) -> None:
+    gate = ChatGate(policy="off", call_log_dir=tmp_path)
+    gate.finish(gate.submit("a"))
+    path = gate.call_log_path
+    await gate.close()
+    assert path is not None
+    complete = path.read_text(encoding="utf-8")
+    # A crash mid-write leaves a prefix of the next canonical line.
+    path.write_text(complete + '{"admit_s":0.0,"attempt":1,"call_ind', encoding="utf-8")
+    traces = read_trace(path)
+    assert [task.task_key for task in traces] == ["a"]
+
+
+async def test_pruning_uses_the_injected_clock(tmp_path: Path) -> None:
+    clock = ClockBox()
+    wall_s = clock.wall_us / 1_000_000
+    runs = tmp_path / "runs"
+    old = runs / "20200101T000000"
+    old.mkdir(parents=True)
+    os.utime(old, (wall_s - 31 * 86400, wall_s - 31 * 86400))
+    keep = runs / "20200102T000000"
+    keep.mkdir()
+    os.utime(keep, (wall_s - 1 * 86400, wall_s - 1 * 86400))
+    gate = ChatGate(policy="off", call_log_dir=tmp_path, retention_days=30, clock=clock)
+    try:
+        assert not old.exists()
+        assert keep.exists(), "the fake clock, not the real one, sets the cutoff"
+        path = gate.call_log_path
+        assert path is not None
+        assert path.parent.parent == runs
+    finally:
+        await gate.close()
+
+
+async def test_two_gates_in_the_same_second_do_not_share_a_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> Any:
+            return datetime(2026, 10, 28, 12, 0, 0, tzinfo=UTC)
+
+    monkeypatch.setattr(chat_gate, "datetime", FixedDatetime)
+    first = ChatGate(policy="off", call_log_dir=tmp_path)
+    second = ChatGate(policy="off", call_log_dir=tmp_path)
+    try:
+        first.finish(first.submit("a"))
+        second.finish(second.submit("b"))
+        assert first.call_log_path is not None
+        assert second.call_log_path is not None
+        assert first.call_log_path != second.call_log_path
+        assert first.call_log_path.exists() and second.call_log_path.exists()
+    finally:
+        await first.close()
+        await second.close()
+
+
+async def test_the_call_log_parent_runs_and_run_dirs_are_0700(tmp_path: Path) -> None:
+    base = tmp_path / "scheduler"
+    gate = ChatGate(policy="off", call_log_dir=base)
+    try:
+        assert stat.S_IMODE(base.stat().st_mode) == 0o700
+        assert stat.S_IMODE((base / "runs").stat().st_mode) == 0o700
+        assert gate.call_log_path is not None
+        assert stat.S_IMODE(gate.call_log_path.parent.stat().st_mode) == 0o700
+        assert stat.S_IMODE(gate.call_log_path.stat().st_mode) == 0o600
+    finally:
+        await gate.close()
+
+
+async def test_an_admitted_call_gets_a_failed_line_at_shutdown(tmp_path: Path) -> None:
+    gate = ChatGate(policy="fcfs", n_srv=2, call_log_dir=tmp_path)
+    call = gate.submit("a")
+    assert admitted(call)
+    path = gate.call_log_path
+    await gate.close()
+    assert path is not None and path.is_file()
+    traces = read_trace(path)
+    assert len(traces) == 1
+    line = traces[0].calls[0]
+    assert line.status == "failed"
+    assert line.admit_s is not None
 
 
 async def test_an_apply_failure_admits_the_call_and_keeps_the_gate_usable(
@@ -752,6 +949,48 @@ async def test_a_gate_transition_never_yields_to_the_loop(
         with pytest.raises(asyncio.CancelledError):
             await task
         await gate.close()
+
+
+async def test_the_hold_wake_is_the_focus_window() -> None:
+    gate = ChatGate(policy="fcfs")
+    try:
+        assert gate.hold_wake_s == Params().tau_focus_s
+        assert gate._params is not None
+        gate._params = replace(gate._params, tau_focus_s=1.5)
+        assert gate.hold_wake_s == 1.5
+    finally:
+        await gate.close()
+
+
+async def test_a_lane_answer_alarms_admits_and_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = chat_gate.dispatch
+
+    def answered(state: Any, now: Any, params: Any, **kwargs: Any) -> Any:
+        # S2 has no code answer for the lane: dispatch's answer is an alarm
+        # and an admit (R10). Force one for a lane call to drive the path.
+        result = real(state, now, params, **kwargs)
+        lane = [c for c in state.calls if c.session_kind == "front"]
+        if not lane:
+            return result
+        return replace(
+            result, lane_admit=(), lane_answer=((lane[0].call_id, "reservation"),)
+        )
+
+    monkeypatch.setattr(chat_gate, "dispatch", answered)
+    gate = ChatGate(policy="fcfs", n_srv=2, call_log_dir=tmp_path)
+    gate.focus("focused")
+    call = gate.submit("focused")
+    assert admitted(call)
+    assert "lane_answer:reservation" in gate.alarms
+    finish(gate, call)
+    path = gate.call_log_path
+    await gate.close()
+    assert path is not None
+    line = read_trace(path)[0].calls[0]
+    assert line.status == "ok"
+    assert line.session_kind == "front"
 
 
 async def test_close_cancels_pending_futures_and_closes_the_log(tmp_path: Path) -> None:

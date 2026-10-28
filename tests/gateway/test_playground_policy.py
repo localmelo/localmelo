@@ -276,6 +276,16 @@ async def test_a_hold_wakes_when_the_focus_window_expires(
         await manager.close_all()
 
 
+async def test_the_playground_wakes_on_the_gates_focus_window(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager, _ = make_manager(tmp_path, monkeypatch, policy="fcfs")
+    try:
+        assert manager._hold_wake_s == manager._gate.hold_wake_s
+    finally:
+        await manager.close_all()
+
+
 async def test_the_timeout_still_fires_when_nothing_holds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -100,8 +100,8 @@ def _trace_source(source: str) -> str:
 # The default directory of the per-run call logs.
 DEFAULT_CALL_LOG_DIR = Path("~/.cache/localmelo/scheduler").expanduser()
 
-# A run directory's name: UTC yyyymmddThhmmss.
-_RUN_DIR = re.compile(r"^\d{8}T\d{6}$")
+# A run directory's name: UTC yyyymmddThhmmss, with "-N" on a same-second clash.
+_RUN_DIR = re.compile(r"^\d{8}T\d{6}(?:-\d+)?$")
 
 # Trace constants (the log is S1's format, written by S2; decision D38).
 _TRACE_SOURCE = "gateway"
@@ -171,6 +171,7 @@ class CallLog:
         directory: Path | str | None,
         *,
         retention_days: float,
+        wall_s: float | None = None,
     ) -> None:
         self._fd: int | None = None
         self._path: Path | None = None
@@ -178,14 +179,17 @@ class CallLog:
         if directory is None:
             return
         try:
-            runs = Path(directory).expanduser() / "runs"
-            runs.mkdir(parents=True, exist_ok=True)
+            base = Path(directory).expanduser()
+            base.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with contextlib.suppress(OSError):
+                os.chmod(base, 0o700)
+            runs = base / "runs"
+            runs.mkdir(mode=0o700, parents=True, exist_ok=True)
             with contextlib.suppress(OSError):
                 os.chmod(runs, 0o700)
-            self._prune(runs, retention_days)
+            self._prune(runs, retention_days, wall_s)
             name = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-            run = runs / name
-            run.mkdir(mode=0o700, exist_ok=True)
+            run = self._run_dir(runs, name)
             with contextlib.suppress(OSError):
                 os.chmod(run, 0o700)
             path = run / "calls.jsonl"
@@ -202,9 +206,23 @@ class CallLog:
         """The file this log writes, or ``None`` when it is disabled."""
         return self._path
 
-    def _prune(self, runs: Path, retention_days: float) -> None:
+    @staticmethod
+    def _run_dir(runs: Path, name: str) -> Path:
+        """Create this gateway's own run directory, never appending to another."""
+        for candidate in (name, *(f"{name}-{n}" for n in range(1, 1000))):
+            run = runs / candidate
+            try:
+                run.mkdir(mode=0o700)
+            except FileExistsError:
+                continue
+            return run
+        raise OSError(f"no free run directory under {runs}")
+
+    def _prune(
+        self, runs: Path, retention_days: float, wall_s: float | None = None
+    ) -> None:
         """Remove run directories older than *retention_days*, and nothing else."""
-        cutoff = time.time() - retention_days * 86400.0
+        cutoff = (time.time() if wall_s is None else wall_s) - retention_days * 86400.0
         try:
             children = list(runs.iterdir())
         except OSError:
@@ -219,13 +237,31 @@ class CallLog:
                 continue
 
     def write(self, values: dict[str, Any]) -> None:
-        """Append one canonical schema-1 line; a failure warns once and disables."""
+        """Append one canonical schema-1 line; a failure warns once and disables.
+
+        A short ``os.write`` is retried from where it stopped, so a limit or
+        an interrupted write cannot splice the next line onto a fragment. If
+        a write fails after some bytes reached the file, the file is
+        truncated back to the line's start, so the crash leaves a readable
+        prefix (F1, decision 3a).
+        """
         if self._fd is None:
             return
+        offset: int | None = None
         try:
             line = dumps({**values, "schema": SCHEMA, "version": VERSION})
-            os.write(self._fd, line.encode("utf-8") + b"\n")
+            payload = line.encode("utf-8") + b"\n"
+            offset = os.lseek(self._fd, 0, os.SEEK_END)
+            view = memoryview(payload)
+            while view:
+                written = os.write(self._fd, view)
+                if written <= 0:
+                    raise OSError("short write to the call log")
+                view = view[written:]
         except (OSError, TypeError, ValueError) as exc:
+            if offset is not None and self._fd is not None:
+                with contextlib.suppress(OSError):
+                    os.ftruncate(self._fd, offset)
             if not self._warned:
                 logger.warning("Call log write failed, disabling it: %s", exc)
                 self._warned = True
@@ -267,6 +303,10 @@ class CallMeta:
     first_submit_mono_us: int
     inflight_at_submit: int
     prev_end_mono_us: int | None
+    # Whether this is a lane call to the policy (R11); ``session_kind`` is
+    # the log's wider 4.7 value, which also says "front" for a focused
+    # embedding while that call is not a lane call (decision 1b).
+    lane: bool = False
     admitted_mono_us: int | None = None
 
 
@@ -332,13 +372,17 @@ class ChatGate:
                 battery_gate_enforce=False,
                 p0_meaning="conversation",
             )
+        self._clock = clock if clock is not None else _default_clock
         days = (
             thinking_retention_days()
             if retention_days is None and call_log_dir is not None
             else (retention_days or 0.0)
         )
-        self._log = CallLog(call_log_dir, retention_days=days)
-        self._clock = clock if clock is not None else _default_clock
+        self._log = CallLog(
+            call_log_dir,
+            retention_days=days,
+            wall_s=self._clock().wall_us / 1_000_000,
+        )
         self._decide_fn = decide_fn if decide_fn is not None else decide
         self._rates = (
             Rates(self._params.prefill_tok_s, self._params.decode_tok_s)
@@ -381,6 +425,15 @@ class ChatGate:
     def call_log_path(self) -> Path | None:
         """This run's call log, or ``None`` when the file is disabled."""
         return self._log.path
+
+    @property
+    def hold_wake_s(self) -> float:
+        """The focus window, which bounds the run's wake while a call is held."""
+        return (
+            self._params.tau_focus_s
+            if self._params is not None
+            else Params().tau_focus_s
+        )
 
     def client(self, session_id: str) -> SessionClient:
         """A handle that tags this chat's calls with its session id."""
@@ -441,7 +494,11 @@ class ChatGate:
         planning = call_kind in _CHAT_KINDS
         # Only a planning call can be a lane call: an embedding or a
         # retrieval is never held (R14), and S1's lane path would hold it.
-        session_kind = "front" if planning and session_id == self._focus else "chat"
+        # The trace still logs every call of the focused chat as "front"
+        # (4.7), so the logged kind and the policy's kind are separate
+        # (decision 1b).
+        lane = planning and session_id == self._focus
+        session_kind = "front" if session_id == self._focus else "chat"
         meta = CallMeta(
             session_id=session_id,
             call_id=f"{session_id}:{index}",
@@ -455,6 +512,7 @@ class ChatGate:
             first_submit_mono_us=first,
             inflight_at_submit=self._inflight(),
             prev_end_mono_us=self._last_end.get(session_id),
+            lane=lane,
         )
         call = GateCall(meta)
         self._calls[meta.call_id] = call
@@ -493,10 +551,8 @@ class ChatGate:
                     call_id=meta.call_id,
                     # R11: a lane call is taskless; only a background plan or
                     # reflect call belongs to the chat's task.
-                    task_id=(
-                        session_id if planning and session_kind != "front" else None
-                    ),
-                    session_kind=cast(SessionKind, session_kind),
+                    task_id=(session_id if planning and not lane else None),
+                    session_kind=cast(SessionKind, "front" if lane else "chat"),
                     kind=call_kind,
                     attempt=meta.attempt,
                     submit_mono_us=now.mono_us,
@@ -663,12 +719,29 @@ class ChatGate:
         self._closed = True
         now = self._clock()
         for call in list(self._calls.values()):
-            if not call.done and call.meta.admitted_mono_us is None:
-                # A call still waiting at shutdown never left the gate; it
-                # still gets its one line (R19), as a refused call.
+            if not call.done:
+                # Every live call leaves its one line (R19). A call that was
+                # already admitted to the server is a failure at shutdown; a
+                # call still waiting never left the gate and is refused (F2).
+                outcome = (
+                    "failed" if call.meta.admitted_mono_us is not None else "refused"
+                )
+                try:
+                    charge, source = self._charge(
+                        call.meta, outcome, None, None, None, now
+                    )
+                except Exception:
+                    charge, source = 0.0, "unknown"
                 try:
                     self._write_line(
-                        call.meta, "refused", now, 0.0, "unknown", None, None, None
+                        call.meta,
+                        outcome,
+                        now,
+                        charge,
+                        source,
+                        None,
+                        None,
+                        None,
                     )
                 except Exception:
                     logger.warning("Call log line could not be written", exc_info=True)
@@ -724,10 +797,21 @@ class ChatGate:
     def _apply(self, result: Dispatch, now: Clock) -> None:
         """Resolve admitted futures, record alarms and book the holds."""
         decided = result.decision
+        # apply_dispatch records the class a call was admitted at (S1's
+        # level_at_admit); the trace keeps that, not the submit-time level,
+        # so a held call raised before release replays correctly (F4).
+        admitted_levels = {
+            c.call_id: c.level_at_admit
+            for c in self._state.calls
+            if c.level_at_admit is not None
+        }
         for call_id in (*result.lane_admit, *decided.admit, *decided.admit_unheld):
             call = self._calls.get(call_id)
             if call is None or call.done:
                 continue
+            level = admitted_levels.get(call_id)
+            if level is not None:
+                call.meta.level = level
             if call.meta.admitted_mono_us is None:
                 call.meta.admitted_mono_us = now.mono_us
             if call.future is not None and not call.future.done():
@@ -751,7 +835,7 @@ class ChatGate:
         self, session_id: str, waiting: list[CallMeta], decided: Decision | None
     ) -> str:
         """The reason code of the chat's pending call (R16)."""
-        if any(meta.session_kind == "front" for meta in waiting):
+        if any(meta.lane for meta in waiting):
             return "Resources" if self._inflight() >= self.n_srv else "Priority"
         if decided is not None:
             return self._reason_by_task.get(session_id, "Priority")

@@ -33,13 +33,6 @@ from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
 _DEFAULT_MEMORY_DIR = Path("~/.cache/localmelo/playground").expanduser()
 
-# While a call is held, the run's wait re-evaluates at least this often (the
-# focus window): a hold caused only by the typing heartbeat has no event to
-# end it once the user stops typing, so a bounded wake keeps it from waiting
-# forever (R10). The wake never raises the run's TimeoutError; it only runs a
-# no-event transition and waits again.
-HOLD_WAKE_S = 30.0
-
 _SCENARIOS_PATH = (
     Path(__file__).resolve().parents[2] / "tests" / "smoke" / "data" / "scenarios.json"
 )
@@ -194,7 +187,6 @@ class SmokePlayground:
         self._thinking_retention_days = thinking_retention_days()
         self._long_term_path = mem_dir / "long_term.db"
         self._procedures_path = mem_dir / "procedures.db"
-        self._hold_wake_s = HOLD_WAKE_S
         # One gate for every chat; call_log_dir=None writes no call log.
         self._gate = ChatGate(
             policy=policy,
@@ -204,6 +196,12 @@ class SmokePlayground:
             call_log_dir=call_log_dir,
             retention_days=self._thinking_retention_days,
         )
+        # While a call is held the run wakes at least this often (the focus
+        # window, from the policy's Params): a hold caused only by the typing
+        # heartbeat has no event to end it once the user stops typing, so the
+        # bounded wake keeps it from waiting forever (R10). It never raises
+        # the run's TimeoutError; it runs a no-event transition and waits.
+        self._hold_wake_s = self._gate.hold_wake_s
 
     def scenarios_payload(self) -> list[dict[str, Any]]:
         payload: list[dict[str, Any]] = []
@@ -487,11 +485,14 @@ class SmokePlayground:
     ) -> RunResult:
         """The run's wait while the gate may hold: *timeout* counts active time.
 
-        While the chat is held the wait carries no timeout at all (a hold is
-        a wait, section 4.6); the event the gate sets on every hold change
-        wakes the loop to recompute the remaining time. Both the clock read
-        and the event clear happen in one synchronous segment, so a hold
-        cannot start between them unnoticed.
+        While the chat is held the wait is bounded by a wake of at most the
+        focus window (``ChatGate.hold_wake_s``, section 4.6 as amended): the hold
+        itself carries no timeout, and the wake only re-runs a gate
+        transition and waits again, so it never fires the run's TimeoutError.
+        The event the gate sets on every hold change wakes the loop earlier
+        to recompute the remaining time. Both the clock read and the event
+        clear happen in one synchronous segment, so a hold cannot start
+        between them unnoticed.
         """
         gate = self._gate
         while True:
