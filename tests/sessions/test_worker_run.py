@@ -81,6 +81,29 @@ if (view.turns.length !== 1 || view.turns[0].status !== 'completed') process.exi
             check=True,
             capture_output=True,
         )
+        worker_view = (
+            Path(__file__).parents[2] / "support/gateway/static/worker-history.mjs"
+        )
+        script = """
+const {foldWorkerTurns} = await import(process.argv[1]);
+let input = ''; for await (const chunk of process.stdin) input += chunk;
+const turn = foldWorkerTurns('test', [JSON.parse(input)]).turns[0];
+if (turn.status !== 'completed' || !turn.answer.includes('[redacted]')) process.exit(1);
+"""
+        subprocess.run(
+            ["node", "--input-type=module", "-e", script, worker_view.as_uri()],
+            input=json.dumps(
+                {
+                    "turn": turns[0].turn,
+                    "status": turns[0].status,
+                    "answer": turns[0].answer,
+                    "events": frames,
+                }
+            ),
+            text=True,
+            check=True,
+            capture_output=True,
+        )
     await store.aclose()
 
 

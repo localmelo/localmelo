@@ -122,7 +122,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">
             <strong>Worker history</strong>
-            <span>Optionally save direct runs or import dsh logs, then read and filter their history through the local gateway API.</span>
+            <span>Optionally save direct runs or import dsh logs, then filter and inspect their read-only history in the web workspace or through the local gateway API.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">
             <strong>API v2</strong>
@@ -158,12 +158,11 @@ source .venv/bin/activate</code></pre>
         <p>Context accounting is available as an opt-in measurement; fitting requests to the budget is a later stage.</p>
         <p>In flight, landing in this order:</p>
         <ul>
-          <li>Web console-3: settings and details drawer (U3 PR 6); approvals, errors, history and settings landed in <a href="https://github.com/localmelo/localmelo/pull/122">#122</a>; worker session recording and import landed in <a href="https://github.com/localmelo/localmelo/pull/123">#123</a>.</li>
+          <li>Headless worker support-3: read-only worker history on the web (<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>); the details drawer landed in <a href="https://github.com/localmelo/localmelo/pull/124">#124</a>.</li>
         </ul>
         <p>Next, in order:</p>
         <ul>
           <li>Headless worker support-2: dogfood trial (#107 W1);</li>
-          <li>Headless worker support-3: worker history on the web (<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>);</li>
         </ul>
         <p>The phases, their issues, the full queue and dated changes are on the <a href="./updates.html#roadmap">roadmap and updates</a> page.</p>
       </section>
