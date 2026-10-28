@@ -109,12 +109,22 @@ def call_text(tool_name: str, arguments: Any) -> str:
 
     ``command`` for ``shell_exec``, ``code`` for ``python_exec``, the JSON
     of the arguments for any other tool (or when that field is missing).
+    A ``shell_exec`` command given as an argv array, a list of strings
+    (which the tool refuses), is joined into one command text with
+    :func:`shlex.join`, so the call is classified and labelled by its
+    words; any other list stays JSON.
     """
     if isinstance(arguments, Mapping):
         field = {"shell_exec": "command", "python_exec": "code"}.get(tool_name)
         value = arguments.get(field) if field else None
         if isinstance(value, str):
             return value
+        if (
+            tool_name == "shell_exec"
+            and isinstance(value, list)
+            and all(isinstance(word, str) for word in value)
+        ):
+            return shlex.join(value)
     try:
         return json.dumps(arguments, default=str)
     except (TypeError, ValueError):

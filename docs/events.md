@@ -344,7 +344,7 @@ options:
 | `fraction`, `expected_steps` | Always `null` in this release. |
 | `past` | Level 1: `{runs, steps_lo, steps_median, steps_hi, wall_lo_s, wall_hi_s, last_steps, last_wall_s}`, facts about the past completed runs. |
 | `off_reason` | Always `null` in this release. |
-| `basis` | Level 1: `{routine_id, template_id, version, match, model}`, the memory the display rests on; `match` is `exact`, `routine` (a named routine) or `similar` (a similar task's steps, a hint). |
+| `basis` | Level 1: `{routine_id, template_id, version, match, model, title}`, the memory the display rests on; `match` is `exact`, `routine` (a named routine) or `similar` (a similar task's steps, a hint); `title` names the routine a `similar` match borrowed from, `null` otherwise. |
 
 A first run has no past to rest on: its events are facts only. This sink
 prints the level, state, step and phase of each:

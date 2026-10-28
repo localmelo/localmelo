@@ -72,9 +72,9 @@ ITEM_MARKS: Final[Mapping[str, str]] = {
 # What is left out, in this order, while the line is too wide (section 7).
 DROP_ORDER: Final = ("past_times", "tests", "items", "attempt")
 
-# What a similar match's past facts and steps follow: they are another
-# routine's, a hint (spec section 5.4), so the line never says
-# "last time" for a task that has not run.
+# What a similar match's past facts and steps follow when the event names
+# no routine: they are another routine's, a hint (spec section 5.4), so the
+# line never says "last time" for a task that has not run.
 SIMILAR_HINT: Final = "like a similar task:"
 
 
@@ -274,13 +274,24 @@ def _items_text(items: Any, level: int) -> str | None:
     return SEPARATOR.join(shown) or None
 
 
+def _similar_hint(title: Any) -> str:
+    """``like <routine title>:``, or :data:`SIMILAR_HINT` without a title.
+
+    The title names the routine a similar match's steps are from (spec
+    section 5.4); it is printed as a label is (:func:`printable`), since a
+    query may hold escape sequences.
+    """
+    text = printable(title).strip() if isinstance(title, str) else ""
+    return f"like {text}:" if text else SIMILAR_HINT
+
+
 def _past_facts(
-    past: Any, level: int, *, similar: bool = False
+    past: Any, level: int, *, hint: str | None = None
 ) -> tuple[str | None, str | None, bool]:
     """(steps text, times text, a single past run) from the payload's ``past``.
 
-    *similar*: the facts are a similar task's, shown after
-    :data:`SIMILAR_HINT`.
+    *hint*: the facts are a similar task's, shown after it (see
+    :func:`_similar_hint`) instead of ``last time`` or ``past``.
     """
     if not isinstance(past, Mapping):
         return None, None, False
@@ -299,7 +310,7 @@ def _past_facts(
         if steps is None:
             return None, None, False
         return (
-            f"{SIMILAR_HINT if similar else 'last time'} {_steps(steps)}",
+            f"{hint or 'last time'} {_steps(steps)}",
             None if wall is None else run_elapsed(wall),
             True,
         )
@@ -307,10 +318,7 @@ def _past_facts(
     if lo_steps is None or hi_steps is None:
         return None, None, False
     lo, hi = _number(past.get("wall_lo_s")), _number(past.get("wall_hi_s"))
-    steps_text = (
-        f"{SIMILAR_HINT if similar else 'past'} "
-        f"{_step_range(lo_steps, hi_steps)} steps"
-    )
+    steps_text = f"{hint or 'past'} {_step_range(lo_steps, hi_steps)} steps"
     times = None if lo is None or hi is None else wall_range(lo, hi)
     return steps_text, times, False
 
@@ -388,9 +396,11 @@ def _parts(
             tests_text = f"tests {passed}/{total}"
 
     basis = payload.get("basis")
+    title = basis.get("title") if isinstance(basis, Mapping) else None
     similar = isinstance(basis, Mapping) and basis.get("match") == "similar"
+    hint = _similar_hint(title) if similar else None
     past_steps, past_times, single = (
-        _past_facts(payload.get("past"), level, similar=similar)
+        _past_facts(payload.get("past"), level, hint=hint)
         if level >= 1
         else (None, None, False)
     )
@@ -401,7 +411,7 @@ def _parts(
         if not similar:
             items_title = "last time:"
         else:
-            items_title = "its steps:" if past_steps else SIMILAR_HINT
+            items_title = "its steps:" if past_steps else hint
     return _Parts(
         head=head,
         attempt=f"attempt {attempt}" if attempt >= 2 else None,

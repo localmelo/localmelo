@@ -204,6 +204,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   vLLM. A server that answers `GET /api/version` like Ollama is saved as the
   `ollama` backend now; any other OpenAI-compatible server is still saved as
   `vllm` ([#55]).
+- A similar task's past steps on the progress line said `like a similar
+  task:`; they name the task they are from, `like <routine title>:` (the
+  routine's name, else the start of its query) ([#56]).
+- A `shell_exec` call whose `command` arrived as an argv array (a list of
+  strings, which the tool refuses) was labelled `{command:` on the
+  progress line, and procedural memory stored that label; the call is now
+  classified and labelled by the command's words, joined with
+  `shlex.join`, so a read command such as `["ls", "-la"]` is R rather
+  than X ([#56]).
 - `melo --serve` with no config file and no terminal, as under launchd,
   ended in an `EOFError` traceback, again every few seconds; it prints one
   line and exits with code 1. Ctrl-D or Ctrl+C in the setup wizard prints
@@ -282,3 +291,4 @@ earlier milestones.
 [#52]: https://github.com/localmelo/localmelo/pull/52
 [#53]: https://github.com/localmelo/localmelo/pull/53
 [#55]: https://github.com/localmelo/localmelo/pull/55
+[#56]: https://github.com/localmelo/localmelo/pull/56

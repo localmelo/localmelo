@@ -585,10 +585,12 @@ step 4 · Verify (cycle 1) · pytest 0:41 · tests 3/8 · 1m03s
   limit, not a plan.
 
   A similar task's runs are a hint, so the line never says `last time` for
-  them; they follow `like a similar task:`, and its steps `its steps:`:
+  them; they follow `like <routine title>:`, naming the task they are from
+  (the routine's name, else the start of its query), and its steps
+  `its steps:`:
 
   ```text
-  step 4 · Write (cycle 1) · 1m03s · like a similar task: 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
+  step 4 · Write (cycle 1) · 1m03s · like Fix the parser tests: 6 steps, 2m10s: Read test_parser.py ✓ · Edit parser.py ◐ · git commit
   ```
 - **Past runs need persistence.** Each `melo` is a new process, and
   procedural memory stays in RAM unless memory is kept between runs. Run

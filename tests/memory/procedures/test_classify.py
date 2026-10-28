@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import pytest
@@ -157,6 +158,51 @@ def test_odd_arguments_never_raise() -> None:
     assert classify_call("python_exec", ["code"]) == "X"
     assert call_text("x", {"a": object()}).startswith('{"a": "<object')
     assert classify_call("", {}) == "X"
+
+
+# ── a command sent as an argv array ─────────────────────────────────────────
+
+
+def test_an_argv_array_command_is_joined_with_shlex() -> None:
+    """The tool refuses an argv array, but the line and the store still name
+    it: the words joined as a shell command (P3 follow-up)."""
+    arguments = {"command": ["git", "commit", "-m", "fix x"]}
+    assert call_text("shell_exec", arguments) == "git commit -m 'fix x'"
+    assert label_for("shell_exec", arguments) == "git commit"
+    assert target_for("shell_exec", arguments, "git commit") == "git commit"
+    assert shell_label("git commit -m 'fix x'") == "git commit"
+
+
+def test_an_argv_array_read_command_is_a_read() -> None:
+    # The JSON began with "{" so READ_RE (anchored) never matched it.
+    assert classify_call("shell_exec", {"command": ["ls", "-la"]}) == "R"
+    assert classify_call("shell_exec", {"command": ["pytest", "-q"]}) == "T"
+    assert classify_call("shell_exec", {"command": ["rm", "-rf", "build"]}) == "W"
+
+
+def test_an_empty_argv_array_is_an_empty_command() -> None:
+    assert call_text("shell_exec", {"command": []}) == ""
+    assert label_for("shell_exec", {"command": []}) == "shell"
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {"command": ["echo", 3]},  # not all strings
+        {"command": {"argv": ["ls"]}},
+        {},
+        ["ls"],  # not a mapping
+        "ls",
+    ],
+)
+def test_other_argument_shapes_keep_the_json(arguments: Any) -> None:
+    assert call_text("shell_exec", arguments) == json.dumps(arguments, default=str)
+
+
+def test_python_code_is_never_joined_as_an_argv() -> None:
+    assert call_text("python_exec", {"code": ["print(1)"]}) == (
+        '{"code": ["print(1)"]}'
+    )
 
 
 # ── test summaries and passes ───────────────────────────────────────────────
