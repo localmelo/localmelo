@@ -68,25 +68,25 @@ def validate_gateway_ingress(payload: GatewayIngressPayload) -> ValidationResult
             allowed=False, reason="Query must be a non-empty string"
         )
 
-    if len(payload.query) > MAX_QUERY_LEN:
+    # The limit applies to the task the agent receives, after the trim.
+    query = payload.query.strip()
+    if len(query) > MAX_QUERY_LEN:
         return ValidationResult(
             allowed=False,
-            reason=f"Query too large: {len(payload.query)} chars (max {MAX_QUERY_LEN})",
+            reason=f"Query too large: {len(query)} chars (max {MAX_QUERY_LEN})",
         )
 
-    if payload.session_id is not None and not SESSION_ID_PATTERN.match(
-        payload.session_id
+    session_id = payload.session_id
+    if session_id is not None and (
+        not isinstance(session_id, str) or not SESSION_ID_PATTERN.match(session_id)
     ):
         return ValidationResult(
             allowed=False,
-            reason=f"Invalid session_id format: {payload.session_id!r}",
+            reason=f"Invalid session_id format: {session_id!r}",
         )
 
-    # Sanitize: strip leading/trailing whitespace from query
-    sanitized = GatewayIngressPayload(
-        query=payload.query.strip(),
-        session_id=payload.session_id,
-    )
+    # Sanitize: the query keeps its trimmed form, which the agent runs.
+    sanitized = GatewayIngressPayload(query=query, session_id=session_id)
     return ValidationResult(allowed=True, sanitized_payload=sanitized)
 
 

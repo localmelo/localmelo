@@ -10,11 +10,12 @@ wrapper.
 
 from __future__ import annotations
 
+import contextlib
 from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload
 from localmelo.melo.contracts.approvals import ApprovalDecision
@@ -48,52 +49,84 @@ _checker = Checker()
 # ── Request bodies ──
 
 
-class _Attachment(BaseModel):
+def _utf8_problem(value: Any, path: str) -> str | None:
+    """``field: problem`` for the first string that is not UTF-8, else ``None``.
+
+    Walks the raw body, so a nested or listed string names its own path
+    (``turn.text``, ``attachments.0.text``).
+    """
+    if isinstance(value, str):
+        try:
+            value.encode("utf-8")
+        except UnicodeEncodeError:
+            return f"{path or 'request'}: the text must be valid UTF-8"
+        return None
+    if isinstance(value, dict):
+        for key, inner in value.items():
+            found = _utf8_problem(inner, f"{path}.{key}" if path else str(key))
+            if found is not None:
+                return found
+        return None
+    if isinstance(value, (list, tuple)):
+        for index, inner in enumerate(value):
+            found = _utf8_problem(inner, f"{path}.{index}" if path else str(index))
+            if found is not None:
+                return found
+    return None
+
+
+class _Body(BaseModel):
+    """A request body: unknown keys refused, every string UTF-8.
+
+    SQLite stores text, and a lone surrogate (``"\\ud800"``, which a JSON
+    body can carry and Python accepts) encodes to nothing: written, it fails
+    the turn after the route answered. The walk runs on the raw input,
+    before any field validates and before any write.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
+    @model_validator(mode="before")
+    @classmethod
+    def _utf8(cls, data: Any) -> Any:
+        problem = _utf8_problem(data, "")
+        if problem is not None:
+            raise ApiError(400, "invalid_request", problem)
+        return data
+
+
+class _Attachment(_Body):
     name: str
     text: str
     chars: int
 
 
-class TurnRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class TurnRequest(_Body):
     text: str
     attachments: list[_Attachment] = []
     client_request_id: str | None = None
 
 
-class CreateRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class CreateRequest(_Body):
     workspace: str | None = None
     turn: TurnRequest | None = None
 
 
-class RetryRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class RetryRequest(_Body):
     turn_id: str
 
 
-class PatchRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class PatchRequest(_Body):
     title: str | None = None
     workspace: str | None = None
 
 
-class CancelRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class CancelRequest(_Body):
     text: str
     attachments: list[_Attachment] = []
 
 
-class ApprovalAnswer(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
+class ApprovalAnswer(_Body):
     choice: Literal["once", "session", "deny"]
     reason: str = ""
 
@@ -112,8 +145,13 @@ def _key(value: str | None) -> str | None:
 
 
 def _compose(request: TurnRequest | CancelRequest) -> str:
-    """The user text of a turn: the typed text, with no file blocks yet."""
-    if not request.text.strip():
+    """The user text of a turn: the typed text, trimmed as the checker trims it.
+
+    The trim happens here, so the text the store judges by length, keeps in
+    a submission and gives the Agent is the one the checker approved.
+    """
+    text = request.text.strip()
+    if not text:
         raise ApiError(400, "invalid_request", "text: the message must not be blank")
     if request.attachments:
         raise ApiError(
@@ -121,16 +159,27 @@ def _compose(request: TurnRequest | CancelRequest) -> str:
             "invalid_request",
             "attachments: files are not supported yet; send the text alone",
         )
-    return request.text
+    return text
 
 
-def _check_text(console: Console, text: str, session_id: str | None) -> None:
-    """``check_gateway_ingress``, as every gateway entry point runs it."""
+def _check_text(console: Console, text: str, session_id: str | None) -> str:
+    """``check_gateway_ingress``, as every gateway entry point runs it.
+
+    Returns the sanitized text, which is what the turn runs.
+    """
     check = _checker.check_gateway_ingress(
         GatewayIngressPayload(query=text, session_id=session_id)
     )
     if not check.allowed:
         raise ApiError(400, "text_rejected", check.reason)
+    sanitized = check.sanitized_payload
+    assert sanitized is not None
+    return str(sanitized.query)
+
+
+def _turn_text(console: Console, request: TurnRequest, session_id: str | None) -> str:
+    """The composed text of a turn: checked, and trimmed by the checker."""
+    return _check_text(console, _compose(request), session_id)
 
 
 async def _store_call(
@@ -215,8 +264,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         console.require_store()
         first: tuple[str, str] | None = None
         if body.turn is not None:
-            composed = _compose(body.turn)
-            _check_text(console, composed, None)
+            composed = _turn_text(console, body.turn, None)
             first = (body.turn.text, composed)
         # The key is judged after the text, as 2.4 orders the checks.
         key = None if body.turn is None else _key(body.turn.client_request_id)
@@ -252,11 +300,12 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.post("/api/sessions/{session_id}/turns")
     async def start_turn(session_id: str, body: TurnRequest) -> JSONResponse:
         console.require_store()
-        composed = _compose(body)
-        _check_text(console, composed, session_id)
+        # The session is judged first: a malformed id is 404, as it is on
+        # every read of the same path, not the checker's 400.
+        await _require_session(console, session_id)
+        composed = _turn_text(console, body, session_id)
         # The key is judged after the text, as 2.4 orders the checks.
         key = _key(body.client_request_id)
-        await _require_session(console, session_id)
         try:
             turn, resumed = await _sessions_call(
                 console,
@@ -409,11 +458,19 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 session_id,
             )
         if title is not None:
-            renamed = await _store_call(
-                console,
-                console.store.rename_session(session_id, title),
-                session_id,
+            # 2.10 lists PATCH among the lock holders; the workspace change
+            # takes the lock itself, so a title alone takes it here.
+            locked = (
+                console.sessions.lock(session_id)
+                if body.workspace is None
+                else contextlib.nullcontext()
             )
+            async with locked:
+                renamed = await _store_call(
+                    console,
+                    console.store.rename_session(session_id, title),
+                    session_id,
+                )
             if not renamed:
                 raise ApiError(404, "not_found", "Session not found.")
         info = await _require_session(console, session_id)

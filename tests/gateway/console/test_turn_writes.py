@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import shutil
 import time
 from collections.abc import AsyncIterator
@@ -22,8 +23,8 @@ import pytest
 from fastapi import FastAPI
 
 from localmelo.melo.schema import Message
-from localmelo.support.gateway.chat_gate import ChatGate
 from localmelo.support.gateway.console import Console, ConsoleOptions
+from localmelo.support.sessions.store import SessionBusyError
 from localmelo.tests.sessions.helpers import (
     ScriptedLLM,
     answer,
@@ -38,9 +39,13 @@ TIMEOUT_S = 10.0
 
 @contextlib.asynccontextmanager
 async def console_with(
-    tmp_path: Path, *replies: Message, gate: ChatGate | None = None
+    tmp_path: Path, *replies: Message, scripts: list[list[Message]] | None = None
 ) -> AsyncIterator[tuple[Console, httpx.AsyncClient, list[ScriptedLLM]]]:
-    """A started console whose builder scripts every Agent with *replies*."""
+    """A started console whose builder scripts every Agent with *replies*.
+
+    With *scripts*, the Agent of the Nth build gets the Nth list instead,
+    for a test whose sessions need their own replies.
+    """
     llms: list[ScriptedLLM] = []
 
     async def build(
@@ -48,7 +53,12 @@ async def console_with(
     ) -> Any:
         # A rebuilt Agent takes the replies its predecessors did not use:
         # every Agent here answers with one reply per turn.
-        llm = ScriptedLLM(list(replies[len(llms) :]))
+        script = (
+            list(scripts[len(llms)])
+            if scripts is not None
+            else list(replies[len(llms) :])
+        )
+        llm = ScriptedLLM(script)
         llms.append(llm)
         return await started_agent(Path(workspace), llm)
 
@@ -905,3 +915,412 @@ async def test_a_stop_for_an_unregistered_turn_lands_when_it_registers(
         turn = await _wait_turn(client, session_id)
         assert (turn["status"], turn["cause"]) == ("cancelled", "user_stop")
         assert pending["request_id"]  # the card was withdrawn by the stop
+
+
+# ── Workspaces ──
+
+
+async def test_a_symlinked_workspace_is_stored_as_its_real_path(
+    tmp_path: Path,
+) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    async with console_with(
+        tmp_path, answer("hello"), answer("again"), answer("third")
+    ) as (console, client, _):
+        created = await client.post("/api/sessions", json={"workspace": str(link)})
+        session_id = created.json()["session"]["id"]
+
+        # The row keeps the folder the Agent works in, not the link.
+        assert created.json()["session"]["workspace"] == os.path.realpath(real)
+        moved = await client.patch(
+            f"/api/sessions/{session_id}", json={"workspace": str(link)}
+        )
+        assert moved.json()["session"]["workspace"] == os.path.realpath(real)
+
+        # A closed session reopens at that folder even once the link is gone.
+        await console.sessions.keep(session_id)
+        link.unlink()
+        started = await _post_turn(client, session_id, "Hi there")
+        assert started.status_code == 202
+        await _wait_turn(client, session_id)
+
+
+async def test_a_create_cancelled_after_its_row_is_committed_leaves_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with console_with(tmp_path, answer("hello")) as (console, _client, _):
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        ids: list[str] = []
+        begin = console.store.begin_turn
+
+        async def slow_begin(*args: Any, **kwargs: Any) -> Any:
+            turn = await begin(*args, **kwargs)
+            ids.append(turn.session_id)
+            entered.set()
+            await release.wait()
+            return turn
+
+        monkeypatch.setattr(console.store, "begin_turn", slow_begin)
+        workspace = _workspace(tmp_path)["workspace"]
+        task = asyncio.create_task(console.sessions.create(workspace, ("Hi", "Hi")))
+        await asyncio.wait_for(entered.wait(), TIMEOUT_S)
+        # The row is committed; the client that asked never gets its id.
+        task.cancel()
+        release.set()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        [session_id] = ids
+        deadline = time.monotonic() + TIMEOUT_S
+        while await console.store.get_session(session_id) is not None:
+            assert time.monotonic() < deadline, "the row the create made stayed"
+            await asyncio.sleep(0.01)
+        assert console.sessions.get(session_id) is None
+
+
+# ── Approvals: the allow answers ──
+
+
+async def test_an_allow_once_lets_the_tool_run_and_asks_again(
+    tmp_path: Path,
+) -> None:
+    first = tmp_path / "ws" / "one.md"
+    second = tmp_path / "ws" / "two.md"
+    async with console_with(
+        tmp_path,
+        tool_call("file_write", {"path": str(first), "content": "1"}),
+        answer("done"),
+        tool_call("file_write", {"path": str(second), "content": "2"}),
+        answer("done"),
+    ) as (_console, client, _):
+        body = await _create(client, tmp_path, "Write one")
+        session_id = body["session"]["id"]
+        [pending] = await _wait_pending(client, session_id)
+
+        allowed = await client.post(
+            f"/api/approvals/{pending['request_id']}", json={"choice": "once"}
+        )
+
+        assert allowed.json() == {
+            "request_id": pending["request_id"],
+            "outcome": "allowed",
+            "remember": False,
+        }
+        await _wait_turn(client, session_id)
+        assert first.read_text() == "1"
+        # "once" grants nothing: the next write of the tool asks again.
+        detail = (await client.get(f"/api/sessions/{session_id}")).json()
+        assert detail["grants"] == [] and detail["granted_at"] == {}
+
+        await _post_turn(client, session_id, "Write two")
+        [again] = await _wait_pending(client, session_id)
+        assert again["tool_name"] == "file_write"
+        await client.post(
+            f"/api/approvals/{again['request_id']}", json={"choice": "deny"}
+        )
+        await _wait_turn(client, session_id)
+        assert not second.exists()
+
+
+async def test_a_session_grant_covers_its_session_only(tmp_path: Path) -> None:
+    one = tmp_path / "ws" / "one.md"
+    two = tmp_path / "ws" / "two.md"
+    other = tmp_path / "ws" / "other.md"
+    scripts = [
+        # The session that is granted: a card, then a write with none.
+        [
+            tool_call("file_write", {"path": str(one), "content": "1"}),
+            answer("one"),
+            tool_call("file_write", {"path": str(two), "content": "2"}),
+            answer("two"),
+        ],
+        # The other session: its own write must ask.
+        [
+            tool_call("file_write", {"path": str(other), "content": "3"}),
+            answer("three"),
+        ],
+    ]
+    async with console_with(tmp_path, scripts=scripts) as (_console, client, _):
+        granted = await _create(client, tmp_path, "Write one")
+        granted_id = granted["session"]["id"]
+        [pending] = await _wait_pending(client, granted_id)
+
+        answered = await client.post(
+            f"/api/approvals/{pending['request_id']}", json={"choice": "session"}
+        )
+
+        assert answered.json()["outcome"] == "allowed"
+        assert answered.json()["remember"] is True
+        await _wait_turn(client, granted_id)
+        assert one.read_text() == "1"
+        detail = (await client.get(f"/api/sessions/{granted_id}")).json()
+        assert detail["grants"] == ["file_write"]
+        assert set(detail["granted_at"]) == {"file_write"}
+
+        # The grant covers this session's next turn, with no card.
+        started = await _post_turn(client, granted_id, "Write two")
+        turn = await _wait_turn(client, granted_id)
+        assert turn["id"] == started.json()["turn_id"]
+        assert two.read_text() == "2"
+        assert (await client.get(f"/api/sessions/{granted_id}")).json()[
+            "pending_approvals"
+        ] == []
+
+        # Another session of the same gateway still asks.
+        other_body = await client.post(
+            "/api/sessions", json={"workspace": str(tmp_path / "ws")}
+        )
+        other_id = other_body.json()["session"]["id"]
+        await _post_turn(client, other_id, "Write three")
+        [asked] = await _wait_pending(client, other_id)
+        assert asked["tool_name"] == "file_write"
+        assert not other.exists()
+
+
+async def test_a_workspace_change_forgets_the_grants(tmp_path: Path) -> None:
+    one = tmp_path / "ws" / "one.md"
+    other = tmp_path / "other"
+    other.mkdir()
+    two = other / "two.md"
+    scripts = [
+        [tool_call("file_write", {"path": str(one), "content": "1"}), answer("one")],
+        [tool_call("file_write", {"path": str(two), "content": "2"}), answer("two")],
+    ]
+    async with console_with(tmp_path, scripts=scripts) as (_console, client, _):
+        granted = await _create(client, tmp_path, "Write one")
+        session_id = granted["session"]["id"]
+        [pending] = await _wait_pending(client, session_id)
+        await client.post(
+            f"/api/approvals/{pending['request_id']}", json={"choice": "session"}
+        )
+        await _wait_turn(client, session_id)
+        assert (await client.get(f"/api/sessions/{session_id}")).json()["grants"] == (
+            ["file_write"]
+        )
+
+        moved = await client.patch(
+            f"/api/sessions/{session_id}", json={"workspace": str(other)}
+        )
+
+        assert moved.status_code == 200
+        # The move forgets the grant: the session's tools all ask again.
+        detail = (await client.get(f"/api/sessions/{session_id}")).json()
+        assert detail["grants"] == [] and detail["granted_at"] == {}
+        await _post_turn(client, session_id, "Write two")
+        [again] = await _wait_pending(client, session_id)
+        assert again["tool_name"] == "file_write"
+        await client.post(
+            f"/api/approvals/{again['request_id']}", json={"choice": "deny"}
+        )
+        await _wait_turn(client, session_id)
+
+
+# ── Shutdown and delete while a card waits ──
+
+
+def _write_card(tmp_path: Path) -> tuple[Path, Message, Message]:
+    target = tmp_path / "ws" / "todo.md"
+    return (
+        target,
+        tool_call("file_write", {"path": str(target), "content": "# TODO"}),
+        answer("done"),
+    )
+
+
+async def test_a_shutdown_during_an_approval_wait_withdraws_the_card(
+    tmp_path: Path,
+) -> None:
+    _target, card, said = _write_card(tmp_path)
+    async with console_with(tmp_path, card, said) as (console, client, _):
+        body = await _create(client, tmp_path, "Write the todo file")
+        session_id = body["session"]["id"]
+        [pending] = await _wait_pending(client, session_id)
+
+        await console.sessions.close_all()
+
+        turns = await console.store.list_turns(session_id)
+        assert [(turn.status, turn.cause) for turn in turns] == [
+            ("cancelled", "shutdown")
+        ]
+        detail = (await client.get(f"/api/sessions/{session_id}")).json()
+        assert detail["pending_approvals"] == []
+        stored = await client.get(
+            f"/api/sessions/{session_id}/turns?limit=1&events=true"
+        )
+        [resolved] = [
+            event
+            for event in stored.json()["turns"][0]["events"]
+            if event["type"] == "approval.resolved"
+        ]
+        assert resolved["data"]["outcome"] == "withdrawn"
+        late = await client.post(
+            f"/api/approvals/{pending['request_id']}", json={"choice": "once"}
+        )
+        assert late.status_code == 409
+        assert late.json()["error"]["code"] == "already_answered"
+
+
+async def test_a_delete_during_an_approval_wait_ends_the_turn(
+    tmp_path: Path,
+) -> None:
+    _target, card, said = _write_card(tmp_path)
+    async with console_with(tmp_path, card, said) as (console, client, _):
+        body = await _create(client, tmp_path, "Write the todo file")
+        session_id = body["session"]["id"]
+        [pending] = await _wait_pending(client, session_id)
+
+        deleted = await client.delete(f"/api/sessions/{session_id}")
+
+        assert deleted.status_code == 204
+        assert await console.store.get_session(session_id) is None
+        assert console.sessions.get(session_id) is None
+        late = await client.post(
+            f"/api/approvals/{pending['request_id']}", json={"choice": "once"}
+        )
+        # The card was withdrawn by the close; it cannot be answered.
+        assert late.status_code == 409
+        assert late.json()["error"]["code"] == "already_answered"
+
+
+# ── Locks, retries and deletes ──
+
+
+async def test_a_rename_takes_the_sessions_lock(tmp_path: Path) -> None:
+    async with console_with(tmp_path) as (console, client, _):
+        created = await client.post("/api/sessions", json=_workspace(tmp_path))
+        session_id = created.json()["session"]["id"]
+
+        async with console.sessions.lock(session_id):
+            task = asyncio.create_task(
+                client.patch(f"/api/sessions/{session_id}", json={"title": "Later"})
+            )
+            await asyncio.sleep(0.05)
+            assert not task.done()
+
+        renamed = await task
+        assert renamed.status_code == 200
+        assert renamed.json()["session"]["title"] == "Later"
+
+
+async def test_a_retry_reports_the_resume_it_undid_into(tmp_path: Path) -> None:
+    async with console_with(
+        tmp_path, answer("first"), answer("second"), answer("again")
+    ) as (_console, client, _):
+        body = await _create(client, tmp_path, "Hi there")
+        session_id = body["session"]["id"]
+        await _wait_turn(client, session_id)
+        second = (await _post_turn(client, session_id, "and again")).json()["turn_id"]
+        await _wait_turn(client, session_id)
+
+        retried = await client.post(
+            f"/api/sessions/{session_id}/retry", json={"turn_id": second}
+        )
+
+        assert retried.status_code == 202
+        # The undo's resume loaded the one turn that is left.
+        assert retried.json()["resumed_turns"] == 1
+        assert retried.json()["resume_mode"] == "pairs"
+        assert retried.json()["resumed_checkpoint_turns"] == 0
+
+
+async def test_a_retry_records_a_changed_model(tmp_path: Path) -> None:
+    async with console_with(tmp_path, answer("first"), answer("again")) as (
+        console,
+        client,
+        _,
+    ):
+        body = await _create(client, tmp_path, "Hi there")
+        session_id = body["session"]["id"]
+        first = await _wait_turn(client, session_id)
+        console.cfg.mlc.chat_model = "other-model"
+
+        retried = await client.post(
+            f"/api/sessions/{session_id}/retry", json={"turn_id": first["id"]}
+        )
+
+        assert retried.status_code == 202
+        info = await console.store.get_session(session_id)
+        assert info is not None and info.model == "other-model"
+        await _wait_turn(client, session_id)
+
+
+async def test_a_delete_the_store_refuses_is_the_standard_busy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async with console_with(tmp_path) as (console, client, _):
+        created = await client.post("/api/sessions", json=_workspace(tmp_path))
+        session_id = created.json()["session"]["id"]
+
+        async def busy(id_: str) -> bool:
+            raise SessionBusyError(f"Session {id_} is running a turn")
+
+        monkeypatch.setattr(console.store, "delete_session", busy)
+        refused = await client.delete(f"/api/sessions/{session_id}")
+
+        assert refused.status_code == 409
+        assert refused.json()["error"] == {
+            "code": "session_busy",
+            "message": "A turn is already running in this session.",
+            "details": {},
+        }
+
+
+# ── Text at the limit ──
+
+
+async def test_a_text_at_the_limit_still_starts_a_turn(tmp_path: Path) -> None:
+    async with console_with(tmp_path, answer("ok")) as (console, client, _):
+        created = await client.post("/api/sessions", json=_workspace(tmp_path))
+        session_id = created.json()["session"]["id"]
+
+        # The limit applies to the text the Agent gets, after the trim.
+        started = await _post_turn(client, session_id, " " + "x" * 100_000)
+
+        assert started.status_code == 202
+        turns = await console.store.list_turns(session_id)
+        assert len(turns[-1].user_text) == 100_000
+
+
+async def test_a_text_over_the_limit_after_the_trim_is_rejected(
+    tmp_path: Path,
+) -> None:
+    async with console_with(tmp_path) as (console, client, _):
+        created = await client.post("/api/sessions", json=_workspace(tmp_path))
+        session_id = created.json()["session"]["id"]
+
+        refused = await _post_turn(client, session_id, " " + "x" * 100_001)
+
+        assert refused.status_code == 400
+        assert refused.json()["error"]["code"] == "text_rejected"
+        assert await console.store.list_turns(session_id) == []
+
+
+async def test_a_cancel_by_key_matches_a_padded_text(tmp_path: Path) -> None:
+    async with console_with(tmp_path) as (_console, client, _):
+        created = await _create(
+            client, tmp_path, "  Hi there  ", client_request_id="8d2f6c1e"
+        )
+        session_id = created["session"]["id"]
+
+        # Both texts are compared trimmed, as the checker trims them.
+        response = await client.post(
+            "/api/submissions/8d2f6c1e/cancel", json={"text": "Hi there"}
+        )
+
+        assert response.status_code == 202
+        assert response.json()["cancelling"] is True
+        turn = await _wait_turn(client, session_id)
+        assert (turn["status"], turn["cause"]) == ("cancelled", "user_stop")
+
+
+async def test_a_malformed_session_id_is_not_found(tmp_path: Path) -> None:
+    async with console_with(tmp_path) as (_console, client, _):
+        # The same 404 a read of that path gives, not the checker's 400.
+        response = await _post_turn(client, "a" * 65, "Hi there")
+
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "not_found"

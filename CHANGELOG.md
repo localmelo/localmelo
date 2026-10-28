@@ -23,9 +23,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   a turn while a foreign GPU lock is present. A create now makes its
   session row before it builds the Agent, because the gate needs the id;
   its key still lands in the create scope, so a client without the id finds
-  it, and a create whose Agent or first turn never came up deletes the row
-  it made. Console runners ask each turn for `run.progress`. `/`, the
-  workspace page and every `/v1/*` route are unchanged ([#NN]).
+  it, and a create whose Agent or first turn never came up, or was
+  cancelled, deletes the row it made. Console runners ask each turn for
+  `run.progress`. `/`, the workspace page and every `/v1/*` route are
+  unchanged ([#NN]).
 - Console turns over API v2: `POST /api/sessions` (with an optional first
   turn), `POST /api/sessions/{id}/turns`, `/retry` and `/turns/{id}/cancel`,
   the two cancel-by-key routes, `POST /api/approvals/{request_id}`, and
@@ -40,8 +41,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   does not pass the scheduler gate yet; that arrives with the tools and
   grants change. `docs/api.md` gains the routes and a tested Python script
   that creates a session, follows the stream, answers an approval and reads
-  the answer; `/`, the workspace page and every `/v1/*` route are unchanged
-  ([#88]).
+  the answer; every request string must be valid UTF-8 (a lone surrogate
+  is 400 `invalid_request`), a session's workspace is stored as its real
+  path, and `/`, the workspace page and every `/v1/*` route are unchanged
+  ([#NN]).
 - Reasoning notes for the compress modes: `--reasoning compress` and
   `compress+replay`, `--note-writer auto|heuristic`, and the `[agent]`
   `note_writer` key. `compress` sends no reasoning; instead each reply is
@@ -421,6 +424,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- `POST /v1/agent/run` answers a non-string `session_id` (a number, a list)
+  with the route's own 400 `Invalid session_id format` instead of FastAPI's
+  plain-text 500, and its 100,000-character limit counts the query after the
+  surrounding whitespace is removed, which is the text the agent runs: a
+  whitespace-padded query whose trimmed text fits is accepted ([#89]).
 - A held chat's header still said `● Working` while the sidebar, status
   label and message area said it was waiting, and a chat that had just sent
   kept `Working on your request…` in the message area for the whole hold
@@ -580,5 +588,5 @@ earlier milestones.
 [#83]: https://github.com/localmelo/localmelo/pull/83
 [#84]: https://github.com/localmelo/localmelo/pull/84
 [#85]: https://github.com/localmelo/localmelo/pull/85
-[#88]: https://github.com/localmelo/localmelo/pull/88
 [#NN]: https://github.com/localmelo/localmelo/pull/NN
+[#89]: https://github.com/localmelo/localmelo/pull/89

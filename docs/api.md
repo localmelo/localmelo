@@ -27,7 +27,7 @@ every route below:
 
 | Status | `code` | When |
 |---|---|---|
-| 400 | `invalid_request` | a malformed query parameter, or a malformed `client_request_id` |
+| 400 | `invalid_request` | a malformed query parameter, a malformed `client_request_id`, or a string that is not UTF-8 (a lone surrogate) |
 | 403 | `foreign_origin` | a request under `/api/` from another site (`Sec-Fetch-Site` is neither `same-origin` nor `none`), or a state-changing request from another origin |
 | 404 | `not_found` | an unknown session, blob or route |
 | 405 | `method_not_allowed` | a known path with a method it does not serve; the `Allow` header names the methods it does |
@@ -61,7 +61,7 @@ curl http://127.0.0.1:8401/api/health
   "config_errors": [],
   "model": {"backend": "ollama", "backend_label": "Ollama", "name": "qwen3:8b", "embedding": "none"},
   "model_server": {"url_label": "http://127.0.0.1:11434/v1", "reachable": true, "error": "", "checked_s_ago": 4},
-  "limits": {"text_chars": 100000, "attachment_budget_chars": 8000, "body_bytes": 1048576},
+  "limits": {"text_chars": 100000, "attachment_budget_chars": 8000},
   "sessions": {"open": 0, "running": 0, "pending_approvals": 0, "store": "ok", "store_error": "", "resume_mode": "pairs"},
   "uptime_s": 132.4
 }
@@ -81,8 +81,7 @@ curl http://127.0.0.1:8401/api/health
   `url_label` is empty and `reachable` is `false` when `chat_url` is not an
   absolute `http` or `https` URL; such a value is never probed and its text,
   user info included, is not echoed.
-- `limits` are the ingress text limit, the session text budget and the API
-  body limit in bytes.
+- `limits` are the ingress text limit and the session text budget.
 - `sessions.store` is `ok`, `unavailable` (the store could not open and the
   gateway retries every 5 s) or `failed` (a write failed; restart the
   gateway). `store_error` says why, with the home folder written as `~`.
@@ -140,9 +139,10 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 - `mcp_error` is why this session runs without MCP tools, or `""`. It is
   always `""` today: MCP in the console is not built yet.
 - `agent` is `open`, `paused` (closed, its conversation kept) or
-  `not_loaded`. The read routes never open a session; a turn or a retry
-  does. So a session reads `not_loaded` until its first turn since the
-  gateway started, and `paused` after its Agent is closed.
+  `not_loaded` (a session this gateway has not opened, as after a restart).
+  A create opens the session even without a turn; the read routes never
+  open one, while a turn or a retry does. So `not_loaded` lasts until the
+  first open since the gateway started, and a closed Agent reads `paused`.
 - `tokens` sums the `completion_tokens` of the session's finished turns,
   the same field the answers report.
 - A `pending_approvals` entry's `target` is set for a `file_write`: the

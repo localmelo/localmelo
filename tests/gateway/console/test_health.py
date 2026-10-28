@@ -11,7 +11,6 @@ from fastapi.testclient import TestClient
 from localmelo.melo.checker.validators import MAX_QUERY_LEN
 from localmelo.melo.schema import SESSION_TEXT_CHARS
 from localmelo.support.gateway.console import Console, ConsoleOptions
-from localmelo.support.gateway.console.routes_settings import BODY_BYTES_LIMIT
 
 from .conftest import FakeBuilder, FakeProbe, make_cfg, open_session, seed_turn
 
@@ -43,7 +42,6 @@ async def test_health_shape(client: TestClient) -> None:
     assert body["limits"] == {
         "text_chars": MAX_QUERY_LEN,
         "attachment_budget_chars": SESSION_TEXT_CHARS,
-        "body_bytes": BODY_BYTES_LIMIT,
     }
     assert body["sessions"] == {
         "open": 0,
