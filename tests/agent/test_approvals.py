@@ -169,6 +169,7 @@ class ReleaseTools(BaseToolProvider):
                     name="changelog",
                     description="Show the changelog",
                     parameters={"type": "object", "properties": {}},
+                    annotations={"readOnlyHint": True},
                 ),
                 function=self._changelog,
             ),
@@ -181,6 +182,45 @@ class ReleaseTools(BaseToolProvider):
     async def _changelog(self) -> str:
         self.ran.append("changelog")
         return "- fixes"
+
+    async def close(self) -> None:
+        pass
+
+
+class TieredTools(BaseToolProvider):
+    """Provides an unannotated write tool and a read-only one, neither marked."""
+
+    def __init__(self) -> None:
+        self.ran: list[str] = []
+
+    async def start(self) -> list[ProvidedTool]:
+        return [
+            ProvidedTool(
+                definition=ToolDef(
+                    name="lookup",
+                    description="Look a fact up",
+                    parameters={"type": "object", "properties": {}},
+                    annotations={"readOnlyHint": True},
+                ),
+                function=self._lookup,
+            ),
+            ProvidedTool(
+                definition=ToolDef(
+                    name="remember",
+                    description="Remember a fact",
+                    parameters={"type": "object", "properties": {}},
+                ),
+                function=self._remember,
+            ),
+        ]
+
+    async def _lookup(self) -> str:
+        self.ran.append("lookup")
+        return "a fact"
+
+    async def _remember(self) -> str:
+        self.ran.append("remember")
+        return "remembered"
 
     async def close(self) -> None:
         pass
@@ -380,10 +420,37 @@ class TestWhoIsAsked:
         assert result.status == "completed"
         assert agent.executor.requires_approval("release")
         assert not agent.executor.requires_approval("changelog")
-        assert [(r.tool_name, dict(r.arguments)) for r in policy.requests] == [
-            ("release", {"version": "1.2"})
+        assert [(r.tool_name, dict(r.arguments), r.tier) for r in policy.requests] == [
+            ("release", {"version": "1.2"}, "write")
         ]
         assert provider.ran == ["changelog", "release 1.2"]
+
+    @pytest.mark.asyncio
+    async def test_a_provided_tool_is_marked_by_its_tier(self) -> None:
+        # Neither tool sets requires_approval: the readOnlyHint makes one
+        # read and the other write, so only the write one asks.
+        provider = TieredTools()
+        llm = ScriptedLLM(
+            [
+                _calls(("lookup", {}, "c1"), ("remember", {}, "c2")),
+                _answer("done"),
+            ]
+        )
+        policy = Policy(ApprovalDecision(True))
+        agent, _ = _agent(llm, providers=[provider])
+
+        result = await agent.run_task("look and remember", approval=policy)
+
+        assert result.status == "completed"
+        assert agent.executor.requires_approval("remember")
+        assert not agent.executor.requires_approval("lookup")
+        assert {
+            tool.name: tool.tier
+            for tool in agent.list_tools()
+            if tool.name in {"lookup", "remember"}
+        } == {"lookup": "read", "remember": "write"}
+        assert [request.tool_name for request in policy.requests] == ["remember"]
+        assert provider.ran == ["lookup", "remember"]
 
     @pytest.mark.asyncio
     async def test_retrieve_mode_asks_about_builtins_and_offered_tools_only(
@@ -462,6 +529,7 @@ class TestRequest:
             arguments=write,
             preview=f"{target} (5 chars)",
             workspace_root=None,
+            tier="write",
         )
         assert deploy_request == ApprovalRequest(
             request_id=deploy_request.request_id,
@@ -471,6 +539,7 @@ class TestRequest:
             arguments={"target": "prod"},
             preview='{"target":"prod"}',
             workspace_root=None,
+            tier="write",
         )
         assert (again.run_id, again.call_id) == (second.task_id, "call_d")
         ids = [request.request_id for request in policy.requests]
@@ -510,11 +579,29 @@ class TestRequest:
             arguments={"path": resolved, "content": "hi"},
             preview=f"{resolved} (2 chars)",
             workspace_root=agent.workspace_root,
+            tier="write",
         )
         assert agent.workspace_root == os.path.realpath(root)
         [started] = recorder.of("run.started")
         assert started.data["workspace_root"] == agent.workspace_root
         assert Path(resolved).read_text() == "hi"
+
+    @pytest.mark.asyncio
+    async def test_a_shell_exec_request_is_exec(self) -> None:
+        llm = ScriptedLLM(
+            [
+                _calls(("shell_exec", {"command": "printf hi"}, "call_s")),
+                _answer("done"),
+            ]
+        )
+        policy = Policy(ApprovalDecision(True))
+        agent, _ = _agent(llm, builtins=frozenset({"shell_exec"}))
+
+        result = await agent.run_task("say hi", approval=policy)
+
+        assert result.status == "completed"
+        [request] = policy.requests
+        assert (request.tool_name, request.tier) == ("shell_exec", "exec")
 
     @pytest.mark.asyncio
     async def test_the_arguments_are_a_copy(self, tmp_path: Path) -> None:

@@ -17,8 +17,9 @@ Rules for a policy's :meth:`ApprovalPolicy.decide`:
   exception, raises a ``CancelledError`` while the run is not being
   cancelled, or returns something other than an :class:`ApprovalDecision`.
 
-This module imports only the standard library, so the executor can use it
-without an import cycle.
+This module imports only the standard library and :mod:`localmelo.melo.schema`,
+which imports no other localmelo module, so the executor can use it without
+an import cycle.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Final, Literal, Protocol, get_args, runtime_checkable
+
+from localmelo.melo.schema import ToolTier
 
 # Who decided: the person asked ("user"), a grant for the rest of the
 # session ("session"), a fixed policy ("policy"), or no answer in time
@@ -57,7 +60,8 @@ class ApprovalRequest:
     call outside a run), and ``call_id`` the tool call's id. ``arguments``
     is a deep copy of exactly what will run, file paths resolved;
     ``preview`` is its one-line summary; ``workspace_root`` the agent's
-    root, or ``None``.
+    root, or ``None``; ``tier`` the tool's permission tier, or ``None``
+    when a caller built the request itself. An agent always fills it.
     """
 
     request_id: str
@@ -67,6 +71,7 @@ class ApprovalRequest:
     arguments: Mapping[str, Any]
     preview: str
     workspace_root: str | None
+    tier: ToolTier | None = None
 
 
 @dataclass(frozen=True)
