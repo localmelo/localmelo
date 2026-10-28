@@ -216,6 +216,102 @@ async def test_unknown_and_new_task_provenance(stores: tuple) -> None:
     assert new.first_start == "never_started" and new.execution_id is None
 
 
+async def test_state_only_park_emits_state_change_event(stores: tuple) -> None:
+    sessions, tasks, recovery, task_id = stores
+    generation, previous = await tasks.park_identity(task_id)
+    await recovery.prepare(
+        task_id,
+        operation_id="prepare",
+        execution_id="unknown",
+        outcome="interrupted",
+        card="",
+        reason="restart",
+        crash=False,
+        unsafe_resume=True,
+        expected_generation=generation,
+        expected_operation_id=previous,
+    )
+    await tasks.change(task_id, state="parked")
+    events = await sessions.list_events(task_id)
+    last = events[-1].event
+    assert last["type"] == "sched.state_changed" and last["data"]["state"] == "parked"
+
+
+async def test_first_start_proof_rejects_unguarded_running_transition(
+    stores: tuple,
+) -> None:
+    sessions, tasks, recovery, _ = stores
+    task_id = await mark_created(sessions, tasks)
+    with pytest.raises(TaskStoreError):
+        await tasks.change(task_id, state="running")
+    assert (await tasks.get_task(task_id)).state == "queued"
+    assert (await recovery.provenance(task_id)).first_start == "never_started"
+
+
+async def test_queued_recovery_requires_queued_state(stores: tuple) -> None:
+    sessions, tasks, recovery, _ = stores
+    task_id = await mark_created(sessions, tasks)
+    await tasks.change(task_id, state="parked")
+    with pytest.raises(TaskStoreError):
+        await recovery.prepare(
+            task_id,
+            operation_id="recover",
+            execution_id="unstarted",
+            outcome="queued",
+            card="",
+            reason="",
+            crash=False,
+            unsafe_resume=False,
+            **await identity(tasks, task_id),
+        )
+    assert (await tasks.get_task(task_id)).state == "parked"
+
+
+async def test_unknown_recorded_execution_cannot_be_replaced(stores: tuple) -> None:
+    sessions, tasks, recovery, task_id = stores
+    await recovery.prepare(
+        task_id,
+        operation_id="one",
+        execution_id="old",
+        outcome="interrupted",
+        card="card",
+        reason="unknown",
+        crash=False,
+        unsafe_resume=True,
+        **await identity(tasks, task_id),
+    )
+    await recovery.commit(task_id, operation_id="one")
+    with pytest.raises(TaskStoreError):
+        await recovery.prepare(
+            task_id,
+            operation_id="two",
+            execution_id="other",
+            outcome="interrupted",
+            card="card",
+            reason="unknown",
+            crash=False,
+            unsafe_resume=True,
+            **await identity(tasks, task_id),
+        )
+    assert (await recovery.provenance(task_id)).execution_id == "old"
+
+
+async def test_unknown_recovery_cannot_claim_safety(stores: tuple) -> None:
+    _, tasks, recovery, task_id = stores
+    with pytest.raises(TaskStoreError):
+        await recovery.prepare(
+            task_id,
+            operation_id="unsafe",
+            execution_id="unknown",
+            outcome="interrupted",
+            card="card",
+            reason="unknown",
+            crash=False,
+            unsafe_resume=False,
+            **await identity(tasks, task_id),
+        )
+
+
 async def test_same_launch_operation_grants_only_one_permit(stores: tuple) -> None:
     sessions, tasks, recovery, _ = stores
     task_id = await mark_created(sessions, tasks)

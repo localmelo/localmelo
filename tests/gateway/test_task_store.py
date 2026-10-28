@@ -11,6 +11,7 @@ from typing import Any
 
 import pytest
 
+from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.task_policy import TaskSpec
 from localmelo.support.gateway.task_store import (
     COMPONENT,
@@ -357,6 +358,9 @@ async def test_v1_migration_preserves_rows_and_pause_before_retention(
     clock.advance(31 * 86_400)
     migrated = TaskStore(store, clock=clock)
     assert await migrated.open() == SCHEDULER_VERSION
+    assert (
+        await RecoveryStore(store).provenance(record.task_id)
+    ).first_start == "unknown"
     assert await migrated.get_task(record.task_id) == paused
     assert await one(
         store,

@@ -481,7 +481,7 @@ class RecoveryStore:
             )
             if (
                 provenance
-                and provenance[0] == "started"
+                and provenance[1] is not None
                 and provenance[1] != execution_id
             ):
                 raise TaskConflictError("recovery execution is stale")
@@ -492,7 +492,8 @@ class RecoveryStore:
             ):
                 raise TaskConflictError("unverified execution requires safety review")
             if outcome == "queued" and (
-                not provenance
+                task[0] != "queued"
+                or not provenance
                 or provenance[0] != "never_started"
                 or crash
                 or unsafe_resume
