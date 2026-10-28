@@ -9,6 +9,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The gateway opens its console session store and serves API v2 reads under
+  `/api`: health with the versions, limits, store state and a cached
+  model-server check; the sessions list and one session, a pending
+  `file_write` approval's `target` and each session grant's `granted_at`;
+  a session's turns with their events; a Server-Sent Events stream with
+  `Last-Event-ID` and one-shot catch-up; image blobs whose CSP merges into
+  the gateway's framing rule; and submission lookups by `client_request_id`.
+  The console holds each session's Agent, keeps its conversation when an
+  idle MCP session or the open cap closes it, and resumes it on reopen.
+  When the store cannot open, health still serves and the reads answer 503
+  `store_unavailable` while the gateway retries the open every 5 s. `/api`
+  is loopback-only, carries the one error envelope and `Cache-Control:
+  no-store`, and is additive-only and documented in
+  [docs/api.md](docs/api.md); `/` and every `/v1/*` route are unchanged, and
+  no turn starts yet ([#84]).
 - A reasoning mode for direct runs: `--reasoning legacy|drop|replay`
   (default `legacy`), `--reasoning-field auto|reasoning_content|reasoning`
   and `--replay-turns N`, or the same `[agent]` keys in `config.toml`.
@@ -510,3 +525,4 @@ earlier milestones.
 [#80]: https://github.com/localmelo/localmelo/pull/80
 [#81]: https://github.com/localmelo/localmelo/pull/81
 [#83]: https://github.com/localmelo/localmelo/pull/83
+[#84]: https://github.com/localmelo/localmelo/pull/84

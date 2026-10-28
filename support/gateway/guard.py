@@ -34,13 +34,16 @@ _OWN_FETCH_SITES = frozenset({"same-origin", "none"})
 # Close code of a refused websocket handshake: policy violation.
 _WS_POLICY_VIOLATION = 1008
 
+# The headers of an API v2 refusal: the console's middleware never sees it,
+# because the guard is outermost, so it sets no-store itself.
+_API_REFUSAL_HEADERS = {"cache-control": "no-store"}
+
 # Headers of every HTTP response: no page may show the gateway's pages in
 # a frame, where a page on another site could trick the user into
-# clicking them.
-_NO_FRAMING_HEADERS = (
-    (b"x-frame-options", b"DENY"),
-    (b"content-security-policy", b"frame-ancestors 'none'"),
-)
+# clicking them. The CSP rule is added to a response's own policy when it
+# has one, so a blob's ``default-src 'none'; sandbox`` stays one header.
+_NO_FRAMING_HEADERS = ((b"x-frame-options", b"DENY"),)
+_FRAMING_CSP = b"frame-ancestors 'none'"
 
 
 def is_loopback(host: str) -> bool:
@@ -83,11 +86,34 @@ def _forbid_framing(send: Send) -> Send:
 
     async def send_forbidding_framing(message: Message) -> None:
         if message["type"] == "http.response.start":
-            headers = [*message.get("headers", ()), *_NO_FRAMING_HEADERS]
+            headers = list(message.get("headers", ()))
+            # A response may set its own CSP, as a blob does. Appending a
+            # second policy would make the browser intersect two headers;
+            # one header with both directives says the same and keeps the
+            # documented "every response has one CSP" contract.
+            policies = [
+                value
+                for name, value in headers
+                if name.lower() == b"content-security-policy"
+            ]
+            headers = [
+                (name, value)
+                for name, value in headers
+                if name.lower() != b"content-security-policy"
+            ]
+            value = b"; ".join([*policies, _FRAMING_CSP]) if policies else _FRAMING_CSP
+            headers.append((b"content-security-policy", value))
+            headers.extend(_NO_FRAMING_HEADERS)
             message = {**message, "headers": headers}
         await send(message)
 
     return send_forbidding_framing
+
+
+def _is_api_path(scope: Scope) -> bool:
+    """Whether the request is ``/api`` or below it, also with leading slashes."""
+    path = "/" + str(scope.get("path", "")).lstrip("/")
+    return path == "/api" or path.startswith("/api/")
 
 
 def _one_of(values: list[str], allowed: frozenset[str]) -> bool:
@@ -110,14 +136,17 @@ class LoopbackGuard:
        ``http://[::1]:<port>``; otherwise it gets 403 with the code
        ``foreign_origin`` (``Origin: null`` included). A request without
        Origin, such as one from curl or a script, passes.
-    3. A request under ``/v1/`` whose Sec-Fetch-Site header is present and
-       is neither ``same-origin`` nor ``none`` gets 403 ``foreign_origin``.
-       A link from another site to the web UI at ``/`` still opens it.
+    3. A request under ``/v1/`` or ``/api/`` whose Sec-Fetch-Site header is
+       present and is neither ``same-origin`` nor ``none`` gets 403
+       ``foreign_origin``. A link from another site to the web UI at ``/``
+       still opens it, and so does a navigation to ``/api/health`` typed into
+       the address bar, whose ``Sec-Fetch-Site`` is ``none``.
 
-    Host names compare ignoring case. A refused request gets the gateway's
-    error shape plus its code, ``{"error": "...", "code": "..."}``; a
-    refused websocket handshake is closed. Other scopes, such as lifespan,
-    pass through.
+    Host names compare ignoring case. A refused legacy request gets the
+    gateway's error shape plus its code, ``{"error": "...", "code": "..."}``;
+    a request under ``/api`` gets API v2's nested envelope instead, with
+    ``Cache-Control: no-store``. A refused websocket handshake is closed.
+    Other scopes, such as lifespan, pass through.
 
     Every HTTP response, a refusal or not, carries ``X-Frame-Options:
     DENY`` and ``Content-Security-Policy: frame-ancestors 'none'``, so no
@@ -164,9 +193,20 @@ class LoopbackGuard:
                 }
             )
             return
-        response = JSONResponse(
-            status_code=status_code, content={"error": error, "code": code}
-        )
+        if _is_api_path(scope):
+            # API v2 has one error shape; the legacy routes keep theirs.
+            content: dict[str, object] = {
+                "error": {"code": code, "message": error, "details": {}}
+            }
+            response = JSONResponse(
+                status_code=status_code,
+                content=content,
+                headers=_API_REFUSAL_HEADERS,
+            )
+        else:
+            response = JSONResponse(
+                status_code=status_code, content={"error": error, "code": code}
+            )
         await response(scope, receive, send)
 
     def _refusal(self, scope: Scope) -> tuple[int, str, str] | None:
@@ -193,7 +233,7 @@ class LoopbackGuard:
 
         # A path may start with several slashes, as in //v1/health.
         path = "/" + str(scope.get("path", "")).lstrip("/")
-        if path.startswith("/v1/"):
+        if path.startswith("/v1/") or path == "/api" or path.startswith("/api/"):
             for site in headers.get(b"sec-fetch-site", []):
                 if site.lower() not in _OWN_FETCH_SITES:
                     return 403, "foreign_origin", self._origin_error
