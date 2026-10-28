@@ -143,6 +143,12 @@
           <p>The English and Chinese API client examples read the bearer token from its private file and send it on every request, the event stream included; they accept only loopback HTTP, ignore proxies and refuse redirects. The internal playground routes moved to the HTTP v1 reference.</p>
         </article>
 
+        <article class="update-entry" id="u-task-cli">
+          <h3>Task command</h3>
+          <p class="update-date">Unreleased</p>
+          <p><code>melo-task</code> creates, inspects and controls gateway tasks, and follows their events as one readable line each; <code>list</code> prints a header. The terminal snapshot adds the event-completeness caveat only when follow reconnected or skipped events with <code>--after</code>.</p>
+        </article>
+
         <article class="update-entry" id="u-python-check-labels">
           <h3>Clearer Python check labels</h3>
           <p class="update-date">

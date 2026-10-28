@@ -133,6 +133,7 @@
         <p>关键文件：<code>__main__.py</code>；交互式界面在 <code>support/cli/</code> 中：<code>launch.py</code>（终端检查、工作区和模型服务器）、<code>app.py</code>（输入框和按键）、<code>session.py</code>（每一轮和命令）、<code>render.py</code>（思考、通知、反思、工具块、实时区域和答案）和 <code>approvals.py</code>；以及 <code>support/sessions/agents.py</code>。</p>
 
         <h3 id="c-gateway">网关</h3>
+        <p><code>melo-task</code> 是独立的认证回环客户端，可管理网关任务及查看事件流；它不改变直接运行。</p>
         <p><code>melo --serve</code> 启动的 HTTP 服务器。它提供 HTTP API（<code>/v1/health</code>、<code>/v1/agent/run</code>、<code>/v1/sessions</code>），最多保留 50 个会话，每个会话都有一个根据配置文件创建的智能体。会话的智能体会保留自己的回答，所以每个请求都能看到之前的回答。每个请求在运行前都要通过检查：任务的长度和会话 ID。</p>
         <p>在 <code>/api/</code> 上，它提供 API v2，也就是网页控制台的 API：health、会话列表和单个会话、会话的轮次及其事件、Server-Sent Events 流、图片 blob、提交查询，以及会话的工具、授权、记忆和运行记录；还有运行会话的写入接口——创建会话（可带或不带第一轮）、开始、重试和停止轮次、按 key 取消消息、回答审批、重命名或移动会话，以及删除会话。控制台轮次在网关进程中运行，每个会话同一时间只运行一个；它的模型调用和工作区聊天一样经过同一个调度器门。控制台按需打开会话的智能体，并在空闲清扫、打开数量上限或网关重启关闭它之后恢复对话。API v2 只在回环地址上提供，错误响应使用统一格式，所有响应带 <code>Cache-Control: no-store</code>，并且只增不改。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">API v2（英文）</a>。</p>
         <p>在 <code>/</code> 上，网页工作区使用控制台的 API v2 和持久会话库。它显示每轮的工作和答案、连接设置、较早的轮次、停止或失败状态，并在收到审批请求时显示审批卡片；详情抽屉显示工具、会话授权、记忆和运行记录，设置包括连接测试和浏览器本地主题；控制台会话使用 <code>RememberingPolicy</code>，在 <code>file_write</code> 和 <code>python_exec</code> 前请求审批；旧版 <code>/v1</code> 没有审批策略。每个对话使用配置中的模型和三个内置工具 <code>file_read</code>、<code>file_write</code>、<code>python_exec</code>（没有 <code>shell_exec</code>）。模型调用共享调度器的门，标题栏显示 GPU 锁和电池状态。</p>
