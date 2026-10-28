@@ -9,6 +9,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Opt-in context fitting shortens request copies and retries one classified overflow without rerunning tools; impossible requests end with a specific status ([#NN]).
+
 - Opt-in context-window request accounting reports estimated and measured planning/reflection
   tokens in events and run results; it does not prune or enforce an output cap ([#126]).
 

@@ -12,6 +12,7 @@ retried.
 | `failed` | 2 | A check refused the run, or the model gave two empty replies in a row. |
 | `gate_stopped` | 2 | After an attempt, the reflection decided not to continue. |
 | `budget_exhausted` | 2 | The run used all its steps or attempts without a final answer. |
+| `context_budget_exceeded` | 2 | The pinned request cannot fit the configured input budget, or a smaller retry still overflowed. |
 | `stuck` | 2 | The same tool calls, or the same errors, repeated three steps in a row. |
 | `provider_error` | 2 | A request to the model server failed. |
 | `setup_error` | 2 | The tool providers, such as MCP servers, could not be set up. |

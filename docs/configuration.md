@@ -321,13 +321,21 @@ must be greater than their sum. Direct and interactive flags override individual
 console sessions use the config. Legacy `/v1` is unchanged. When unset, no accounting is recorded.
 
 For each planning or reflection attempt, `utf8-bytes-v1` estimates the assembled message and tool
-schema representation at UTF-8 bytes divided by three, rounded up, plus 16,384 tokens for each
-attached image. The last positive prompt-token count for the same model and request kind calibrates
-the proxy upward; missing or zero usage resets that calibration. This is an estimate, not an exact
-provider wire count or a bound: templates and vision models differ. Events and JSON results record
-the estimate, source, measured count, input limit and over-limit flag without storing prompt text.
-This release neither prunes nor refuses over-limit requests and does not enforce the output reserve
-as a provider generation cap. The existing independent character guard still applies.
+schema representation at UTF-8 bytes divided by three, rounded up. Each attached image adds
+`ceil(width / 28) * ceil(height / 28)` tokens when its dimensions are known, capped at 16,384;
+unknown dimensions use the cap. The last positive prompt-token count for the same model and request
+kind calibrates the proxy upward; missing or zero usage resets that calibration. The proxy is an
+estimate, not a bound: templates and vision models differ.
+
+When the estimate exceeds the input limit, the agent fits a request copy: it previews eligible old
+tool outputs, removes optional old thinking and then evicts old complete units, while keeping the
+task, tool schemas, matching call/result pairs, images and failing evidence. It leaves history and
+the retained conversation unchanged. If the pinned context cannot fit, the run ends with
+`context_budget_exceeded` and a remediation message. A classified context-overflow response gets at
+most one smaller request retry without re-running tools; other provider errors keep their existing
+retry policy. Events and JSON results report the estimate, actual prompt count if available, and
+pruning counts without storing prompt text. The output reserve is not a provider generation cap;
+the independent character guard still applies.
 
 ## Backends
 
