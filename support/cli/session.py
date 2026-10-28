@@ -542,6 +542,7 @@ class CliSession:
         self.approvals.reset()
         self.title = ""
         self.renderer.context_tokens = 0
+        self.renderer.new_session()
         label = " New session "
         side = max(2, (self.out.width - len(label)) // 2)
         rule = self.renderer.symbols.rule

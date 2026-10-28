@@ -1069,3 +1069,18 @@ async def test_progress_prints_the_latest_facts(setup: Setup) -> None:
     assert "past 2 runs · 6-8 steps · last 8 steps" in text
     assert "items\n  Read a · done\n  Edit b (×2) · current" in text
     assert "basis routine-1 · v3 · match routine · model stub-model" in text
+
+
+async def test_new_forgets_this_process_calls_and_progress(setup: Setup) -> None:
+    await _tool_turn(setup)
+    session = setup.session
+    assert session.renderer.tool_outputs
+    assert session.renderer.progress is not None
+    session.enter("/new")
+    await _until(lambda: session.runner is None)
+    assert session.renderer.tool_outputs == []
+    assert session.renderer.progress is None
+    session.enter("/expand")
+    await _until(lambda: "✗ No tool calls yet." in setup.out.text())
+    session.enter("/progress")
+    await _until(lambda: "No progress facts for this turn yet." in setup.out.text())

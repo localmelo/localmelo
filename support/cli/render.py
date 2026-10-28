@@ -650,6 +650,20 @@ class TurnRenderer:
             if hint:
                 self.out.print(Padding(Text(hint, style="muted"), (0, 0, 0, 2)))
 
+    def new_session(self) -> None:
+        """Forget this process's calls, progress facts and turn numbers (/new)."""
+        self.tool_outputs = []
+        self.progress = None
+        self._turn = 0
+        self._call_number = 0
+        self._held = ""
+        self._calls = {}
+        self._previews = {}
+        self._arguments = {}
+        self._finished = False
+        self._tool_count = 0
+        self._stop_cause = ""
+
     def stopped_by(self, cause: str) -> None:
         """Note that the turn is being stopped for *cause* (its stopped line)."""
         self._stop_cause = cause
