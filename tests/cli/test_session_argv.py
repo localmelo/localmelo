@@ -71,6 +71,9 @@ P5_DEFAULTS = {"workspace": None}
 R6_DEFAULTS = {"admit_on_outcome": None, "keep_decision_text": False}
 # U3 PR 4 added --allow-unconfigured for --serve.
 U3_PR4_DEFAULTS = {"allow_unconfigured": False}
+WORKER_DEFAULTS = dict.fromkeys(
+    ("save_session", "parent_run", "import_session", "title")
+)
 
 
 @pytest.fixture
@@ -133,6 +136,7 @@ def test_historical_dispatch(
             **P5_DEFAULTS,
             **R6_DEFAULTS,
             **U3_PR4_DEFAULTS,
+            **WORKER_DEFAULTS,
             "continue_session": False,
             "resume": None,
             **case["namespace"],
@@ -158,6 +162,7 @@ def test_historical_dispatch(
         **P5_DEFAULTS,
         **R6_DEFAULTS,
         **U3_PR4_DEFAULTS,
+        **WORKER_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:

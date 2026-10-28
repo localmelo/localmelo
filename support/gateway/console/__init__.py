@@ -56,6 +56,7 @@ from .errors import ApiError
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
 from .shapes import session_json
+from .worker_reader import WorkerReader
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -86,12 +87,14 @@ class ConsoleOptions:
     """What a test may replace; production reads every default.
 
     *store_path* is ``~/.cache/localmelo/gateway/sessions.db`` when None,
-    *builder* is :func:`~.registry.default_builder`, and *probe* is the
+    *worker_store_path* defaults to the CLI sessions file, *builder* is
+    :func:`~.registry.default_builder`, and *probe* is the
     real cached model-server probe. *dev_reload* is read by the static
     bundle of PR 5.
     """
 
     store_path: str | None = None
+    worker_store_path: str | None = None
     builder: AgentBuilder | None = None
     probe: Probe | None = None
     # None builds the console's gate from the ``[scheduler]`` table; a test
@@ -114,6 +117,7 @@ class Console:
         self.port = port
         self.options = options or ConsoleOptions()
         self.store = SessionStore(self.options.store_path, writer="gateway")
+        self.worker_history = WorkerReader(self.options.worker_store_path)
         self.hub = SessionHub(self.store)
         self.broker = ApprovalBroker(timeout_s=None)
         self.gate = self.options.gate or self._build_gate()
@@ -309,6 +313,8 @@ class Console:
                     await self.store.aclose()
                 except Exception:  # never opened, or already closed
                     logger.debug("Closing the session store failed", exc_info=True)
+                with contextlib.suppress(Exception):
+                    await self.worker_history.aclose()
                 with contextlib.suppress(Exception):
                     await self.probe.aclose()
 

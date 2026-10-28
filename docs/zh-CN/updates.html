@@ -62,17 +62,15 @@
             </tbody>
           </table>
         </div>
+        <p>网站同步已在 <a href="https://github.com/localmelo/localmelo/pull/118">#118</a> 落地；任务调度器-2：任务 API 和 workers（S3a.2）已在 <a href="https://github.com/localmelo/localmelo/pull/119">#119</a> 落地。</p>
         <p>进行中，按顺序落地：</p>
         <ul>
-          <li>网页控制台-2：审批、错误、历史和设置（U3 PR 5b）。</li>
+          <li>网页控制台-3：设置和详情抽屉（U3 PR 6）；审批、错误、历史和设置已在 <a href="https://github.com/localmelo/localmelo/pull/122">#122</a> 落地；worker 会话保存和导入已在 <a href="https://github.com/localmelo/localmelo/pull/123">#123</a> 落地。</li>
         </ul>
         <p>接下来，按顺序：</p>
         <ul>
-          <li>无头工作进程支持-1：把 worker 运行保存为会话（<a href="https://github.com/localmelo/localmelo/issues/108">#108</a>）；</li>
           <li>无头工作进程支持-2：内部试用（dogfood，#107 W1）；</li>
-          <li>网页控制台-3：设置面板和详情抽屉（U3 PR 6）；</li>
           <li>无头工作进程支持-3：网页上的 worker 历史（<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>）；</li>
-          <li>任务调度器-2：任务 API 和 workers（S3a.2）；</li>
           <li>网页控制台-4：API 和控制台文档（U3 PR 7）；</li>
           <li>macOS 应用-1：桌面应用（A1）；</li>
           <li>任务调度器-3：暂停、停放和重启恢复（S3b）；</li>
@@ -91,6 +89,24 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-console-drawer">
+          <h3>会话详情和外观</h3>
+          <p class="update-date">尚未发布</p>
+          <p>工作区新增工具、授权、记忆和运行记录的详情抽屉，以及连接测试和保存的主题偏好。存储、模型和重连提示可与其他通知同时显示。</p>
+        </article>
+
+        <article class="update-entry" id="u-worker-history">
+          <h3>Worker 历史</h3>
+          <p class="update-date">2026-10-28 · #123</p>
+          <p>直接运行可以选择保存为 worker 会话，也可以导入 dsh JSONL 日志，并通过本地网关 API 筛选和只读查看历史。脱敏基于模式，分享前请检查记录。</p>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-console-controls">
+          <h3>工作区控件和恢复</h3>
+          <p class="update-date"><time datetime="2026-10-28">2026-10-28</time> · <a href="https://github.com/localmelo/localmelo/pull/122">#122</a></p>
+          <p>工作区新增连接设置、较早回合分页、失败和停止时的操作，以及浏览器标签页的待发送消息恢复。收到审批请求时会显示带 500 毫秒保护的卡片；控制台会话调用 <code>file_write</code> 和 <code>python_exec</code> 前会请求审批；旧版 <code>/v1</code> 没有审批策略。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#web-workspace">网页工作区指南（英文）</a>。</p>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-attempt-digest">
           <h3>一次尝试的摘要说明这次尝试做了什么</h3>
@@ -174,7 +190,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/104">#104</a>
           </p>
           <ul>
-            <li>网关和控制台会话现在运行在新的 <code>gateway</code> 工具模式中，只注册 <code>file_read</code>、<code>file_write</code> 和 <code>python_exec</code>：<code>shell_exec</code> 完全不注册，模型根本看不到它。控制台会询问，通过同一个未认证的回环 API（所以本地进程可以回答自己的请求）；<code>/v1</code> 不询问。Python 代码仍然可以启动进程。网关或控制台会话不能通过默认组合拿到 <code>shell_exec</code>，显式写出它的 <code>AgentOptions(builtins=…)</code> 会被检查器在 <code>gateway</code> 模式下拒绝，并在原因里写明模式和 <code>--builtins all</code>。</li>
+            <li>网关和控制台会话现在运行在新的 <code>gateway</code> 工具模式中，只注册 <code>file_read</code>、<code>file_write</code> 和 <code>python_exec</code>：<code>shell_exec</code> 完全不注册，模型根本看不到它。旧版 <code>/v1</code> 没有审批策略；控制台会话调用 <code>file_write</code> 和 <code>python_exec</code> 前会请求审批。控制台的审批会通过同一个未认证的回环 API 到达，所以任何本地进程都能批准自己的请求；Python 代码仍然可以启动进程。网关或控制台会话不能通过默认组合拿到 <code>shell_exec</code>，显式写出它的 <code>AgentOptions(builtins=…)</code> 会被检查器在 <code>gateway</code> 模式下拒绝，并在原因里写明模式和 <code>--builtins all</code>。</li>
             <li><code>AgentOptions</code> 新增 <code>mode</code>：<code>direct</code>、<code>interactive</code>、<code>gateway</code> 或 <code>python</code>（Python API 的默认值），命令行会设置各自界面的模式。交互式界面仍把 <code>shell_exec</code> 放在审批面板之后（<code>--yolo</code> 不询问）。直接模式和 Python API 的默认行为见上面的工具默认值更新。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#permission-tiers">权限级别（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md#agentoptions">Python API（英文）</a>。</li>
           </ul>
         </article>
@@ -494,7 +510,7 @@
           <ul>
             <li>每个工具现在都有一个权限级别：<code>read</code>、<code>write</code>、<code>exec</code> 或 <code>network</code>。内置工具沿用固定的级别（<code>file_read</code> 为 read，<code>file_write</code> 为 write，<code>shell_exec</code> 和 <code>python_exec</code> 为 exec）；MCP 工具的级别来自它的 <code>annotations</code>，并谨慎解读：<code>openWorldHint</code> 给出 network，<code>readOnlyHint</code> 给出 read（除非 <code>destructiveHint</code> 与之矛盾），其余情况为 write。</li>
             <li>带审批策略的运行会在每次权限级别不是 <code>read</code> 的调用前询问，所以没有标注的 MCP 工具现在也会询问；<code>require_approval</code> 只是额外加一个标记，也可以让 read 工具询问。终端的审批面板会显示权限级别，<code>ToolInfo.tier</code> 和 <code>ApprovalRequest.tier</code> 也会报告它。</li>
-            <li>直接模式、简单对话循环和网关不传入审批策略，行为不变；<code>--yolo</code> 仍然表示不审批，而不是只读。</li>
+            <li>直接模式、简单对话循环和旧版 <code>/v1</code> 不传入审批策略；控制台会话有审批策略；<code>--yolo</code> 仍然表示不审批，而不是只读。</li>
           </ul>
         </article>
 

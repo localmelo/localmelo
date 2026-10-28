@@ -73,6 +73,7 @@ from localmelo.support.sessions.store import (
 )
 from localmelo.support.sessions.submissions import check_submission
 from localmelo.support.sessions.window import WINDOW_CODEC_VERSION, decode_window
+from localmelo.support.sessions.worker import redact_worker, sensitive_read
 
 logger = logging.getLogger(__name__)
 
@@ -231,8 +232,11 @@ class SessionRunner:
         progress: bool = False,
         before_turn: BeforeTurn | None = None,
         create_scope_key: bool = False,
+        observe: Callable[[AgentEvent], object] | None = None,
     ) -> None:
-        _check_agent(agent)
+        self._worker = new_session is not None and new_session.kind == "worker"
+        if not self._worker:
+            _check_agent(agent)
         if resume_mode not in _RESUME_MODES:
             raise ValueError(
                 f"resume_mode must be 'pairs' or 'window', got {resume_mode!r}"
@@ -248,6 +252,8 @@ class SessionRunner:
         self._session_id = session_id
         self._new_session = new_session
         self._on_event = on_event
+        self._observe = observe
+        self._sensitive_reads: dict[str, str] = {}
         self._holder = holder or process_holder(store.writer)
         self._resume_mode: ResumeMode = resume_mode
         # Whether each turn's run is asked for run.progress (UR-N); kept
@@ -409,6 +415,8 @@ class SessionRunner:
         own_task: bool,
     ) -> _Turn:
         self._check_open()
+        if self._worker and self._last is not None:
+            raise ValueError("worker sessions have only one turn")
         # 0. The key decides before the busy check, so a repeat of the
         # running turn gets that turn.
         if client_request_id is not None:
@@ -482,9 +490,9 @@ class SessionRunner:
             await self._record_lost_end()
             info = await self._store.begin_turn(
                 self._session_id,
-                text,
+                redact_worker(text) if self._worker else text,
                 holder=self._holder,
-                title=title,
+                title=redact_worker(title) if self._worker else title,
                 client_request_id=client_request_id,
                 new_session=self._new_session if self._session_id is None else None,
                 create_scope=self._create_scope_key,
@@ -528,6 +536,11 @@ class SessionRunner:
         """The run's synchronous sink: it queues each event for the writer."""
 
         def sink(event: AgentEvent) -> None:
+            if self._observe is not None:
+                try:
+                    self._observe(event)
+                except Exception:
+                    logger.exception("Worker observer failed on a %s event", event.type)
             try:
                 if event.type == "run.started":
                     turn.saw_started = True
@@ -544,7 +557,38 @@ class SessionRunner:
                     ):
                         turn.last_note = data["text"]
                 if turn.accepting:
-                    turn.queue.put_nowait(("event", event.to_dict(), event.images))
+                    payload = event.to_dict()
+                    images = event.images
+                    if self._worker:
+                        payload = redact_worker(payload)
+                        data = payload.get("data", {})
+                        if event.type == "tool.started":
+                            path = sensitive_read(
+                                str(event.data.get("name", "")),
+                                event.data.get("arguments"),
+                                turn.agent.workspace_root,
+                            )
+                            if path:
+                                self._sensitive_reads[str(data.get("call_id", ""))] = (
+                                    path
+                                )
+                        elif event.type == "tool.finished":
+                            path = self._sensitive_reads.pop(
+                                str(data.get("call_id", "")), None
+                            )
+                            if path:
+                                data["output"] = (
+                                    f"[Sensitive file content omitted: {path}]"
+                                )
+                                data["output_chars"] = len(data["output"])
+                                data["error"] = ""
+                                data["images"] = []
+                                images = ()
+                        elif event.type == "run.finished" and isinstance(
+                            data.get("result"), dict
+                        ):
+                            data["result"].pop("config", None)
+                    turn.queue.put_nowait(("event", payload, images))
             except Exception:
                 logger.exception("Could not queue a %s event", event.type)
 
@@ -567,7 +611,7 @@ class SessionRunner:
                     )
                 )
             kwargs: dict[str, Any] = {
-                "on_event": self._sink(turn),
+                "observe" if self._worker else "on_event": self._sink(turn),
                 "approval": turn.approval,
                 "progress": self._progress,
             }
@@ -675,7 +719,7 @@ class SessionRunner:
         if outcome is not None:
             # _record_answer ran before the finalizer or the final save, so
             # the window ends with this turn's answer or INTERRUPT_LABEL.
-            window = turn.agent.conversation()
+            window = None if self._worker else turn.agent.conversation()
             status = outcome.status
             result = outcome.to_dict()
             answer = answer_text(status, outcome.result)
@@ -710,6 +754,11 @@ class SessionRunner:
             "error": error,
             "note": turn.last_note,
         }
+        if self._worker:
+            for key in ("result", "answer", "error", "note"):
+                end[key] = redact_worker(end[key])
+            if isinstance(end["result"], dict):
+                end["result"].pop("config", None)
         delays: Sequence[float] = GATEWAY_FINISH_RETRY_DELAYS_S
         if self._store.writer == "cli":
             closing = turn.closing or cause == "shutdown"

@@ -365,24 +365,29 @@ melo "What is 6*7?"
   session store's `sessions.db` alike (see [Sessions](#sessions)). A value
   that is not a number above 0 stops `melo` before it runs anything; see
   [Usage errors](cli.md#usage-errors).
-- Recalling long-term memory in a later run needs both persistence and an
-  embedding backend.
+- Recalling long-term memory in a later process needs persistence, memory on
+  and an earlier stored entry. In `legacy`, the persistent long-term store
+  also needs an embedding backend. Explicit reasoning modes can persist
+  text-only entries without one and find them with BM25. In explicit modes,
+  recall must be enabled and include the `long` kind; `drop` and `replay`
+  leave `auto` recall off by default.
 
 ## Turn long-term memory off
 
 `--memory off`, or `AgentOptions(memory=False)` in Python, turns long-term
 memory off for a run: nothing is recalled from it or written to it, and
 reflections are not promoted. Working memory and history work as usual.
-`embedding_backend = "none"` in the config file has the same effect for every
-run; to set an embedding model instead, see
-[Set up an embedding model](embedding.md).
+`embedding_backend = "none"` disables the embedding backend, not memory
+itself; explicit reasoning modes can still store and recall text-only entries.
+To set an embedding model, see [Set up an embedding model](embedding.md).
 
 ## Files on disk
 
 ```text
 ~/.cache/localmelo/memory/
   history.db      tasks, steps and model calls
-  long_term.db    long-term memory, with an embedding backend and memory on
+  long_term.db    long-term memory, when memory is on and either an embedding
+                  backend is configured or the reasoning mode is not legacy
   procedures.db   procedural memory, written at the end of every run
 ```
 

@@ -248,7 +248,8 @@ notices, the live progress row and the answer with its facts and
 `Copy response`. Stop cancels the turn, a waiting approval shows as
 `Needs approval`, and the chats are saved in the gateway's `sessions.db`, so
 a restart keeps them. Other browser tabs on the same gateway see the same
-chats. The approval cards and the settings dialog arrive in a later update.
+chats. Approval cards, connection settings and the session details drawer are
+available in the workspace; see [Web workspace](gateway.md#web-workspace).
 
 ## Serve a model with oMLX
 

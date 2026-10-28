@@ -554,7 +554,7 @@ def test_the_session_event_keys_are_pinned() -> None:
         "turn.finished": {"turn", "turn_id", "status", "error", "cause"},
         "turn.undone": {"turn", "turn_id"},
         "session.title": {"title"},
-        "session.updated": {"model", "workspace", "meta"},
+        "session.updated": {"model", "workspace", "workspace_label", "meta"},
         "approval.requested": {
             "request_id",
             "call_id",
@@ -911,11 +911,56 @@ async def test_update_session_changes_only_the_given_fields(tmp_path: Path) -> N
     assert events[-1].event["data"] == {
         "model": "m2",
         "workspace": "/w",
+        "workspace_label": "/w",
         "meta": {"level": 3},
     }
     assert events[-1].turn is None
     with pytest.raises(SessionStoreError, match="Unknown session: nope"):
         await store.update_session("nope", model="x")
+    await store.aclose()
+
+
+async def test_session_updated_workspace_labels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    store = cli(tmp_path / "s.db")
+    info = await store.create_session()
+    await store.update_session(info.id, model="model")
+    await store.update_session(info.id, workspace=str(home / "project"))
+    await store.update_session(info.id, workspace=str(home))
+    events = await store.list_events(info.id)
+    assert [event.event["data"]["workspace_label"] for event in events] == [
+        "",
+        "~/project",
+        "~",
+    ]
+    await store.aclose()
+
+
+async def test_older_session_updated_events_remain_readable(tmp_path: Path) -> None:
+    path = tmp_path / "s.db"
+    store = cli(path)
+    info = await store.create_session(workspace="/old")
+    await store.update_session(info.id, model="old-model")
+    [original] = await store.list_events(info.id)
+    legacy_event = original.event.copy()
+    legacy_event["data"] = dict(legacy_event["data"])
+    del legacy_event["data"]["workspace_label"]
+    await store.aclose()
+
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "UPDATE events SET event = ? WHERE id = ?",
+            (json.dumps(legacy_event), original.id),
+        )
+
+    store = cli(path)
+    await store.update_session(info.id, workspace="/new")
+    older, newer = await store.list_events(info.id)
+    assert older.event == legacy_event
+    assert newer.event["data"]["workspace_label"] == "/new"
     await store.aclose()
 
 

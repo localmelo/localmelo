@@ -68,17 +68,15 @@
             </tbody>
           </table>
         </div>
+        <p>Website sync landed in <a href="https://github.com/localmelo/localmelo/pull/118">#118</a>; Task scheduler-2: task API and workers (S3a.2) landed in <a href="https://github.com/localmelo/localmelo/pull/119">#119</a>.</p>
         <p>In flight, landing in this order:</p>
         <ul>
-          <li>Web console-2: approvals, errors, history, settings (U3 PR 5b).</li>
+          <li>Web console-3: settings and details drawer (U3 PR 6); approvals, errors, history and settings landed in <a href="https://github.com/localmelo/localmelo/pull/122">#122</a>; worker session recording and import landed in <a href="https://github.com/localmelo/localmelo/pull/123">#123</a>.</li>
         </ul>
         <p>Next, in order:</p>
         <ul>
-          <li>Headless worker support-1: save worker runs as sessions (<a href="https://github.com/localmelo/localmelo/issues/108">#108</a>);</li>
           <li>Headless worker support-2: dogfood trial (#107 W1);</li>
-          <li>Web console-3: settings panel and details drawer (U3 PR 6);</li>
           <li>Headless worker support-3: worker history on the web (<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>);</li>
-          <li>Task scheduler-2: task API and workers (S3a.2);</li>
           <li>Web console-4: API and console docs (U3 PR 7);</li>
           <li>macOS app-1: desktop app (A1);</li>
           <li>Task scheduler-3: pause, park and restart recovery (S3b);</li>
@@ -103,6 +101,24 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-console-drawer">
+          <h3>Session details and appearance</h3>
+          <p class="update-date">Unreleased</p>
+          <p>The workspace adds a details drawer for tools, grants, memory and runs, plus connection testing and a saved theme preference. Store, model and reconnect banners remain visible alongside other notices.</p>
+        </article>
+
+        <article class="update-entry" id="u-worker-history">
+          <h3>Worker history</h3>
+          <p class="update-date">2026-10-28 · #123</p>
+          <p>Direct runs can be saved as worker sessions, dsh JSONL logs imported, and the history filtered and read through the local gateway API. Redaction is pattern-based; review records before sharing.</p>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-console-controls">
+          <h3>Workspace controls and recovery</h3>
+          <p class="update-date"><time datetime="2026-10-28">2026-10-28</time> · <a href="https://github.com/localmelo/localmelo/pull/122">#122</a></p>
+          <p>The workspace adds connection settings, earlier-turn paging, failure and stopped controls, and per-tab outbox recovery. Approval cards render pending requests with a 500 ms guard; console sessions ask before <code>file_write</code> and <code>python_exec</code>, while legacy <code>/v1</code> has no approval policy. See the <a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#web-workspace">web workspace guide</a>.</p>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-attempt-digest">
           <h3>An attempt's digest says what the attempt did</h3>
@@ -186,7 +202,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/104">#104</a>
           </p>
           <ul>
-            <li>Gateway and console sessions now run in a new <code>gateway</code> tool mode and register only <code>file_read</code>, <code>file_write</code> and <code>python_exec</code>: <code>shell_exec</code> is not registered at all, so the model never sees it. The console asks, over the same unauthenticated loopback API (so a local process can answer its own request); <code>/v1</code> does not. Python code can still start a process. A gateway or console session cannot be given <code>shell_exec</code> by its default set, and an explicit <code>AgentOptions(builtins=…)</code> that names it is refused by the checker in <code>gateway</code> mode, with the mode and <code>--builtins all</code> in the reason.</li>
+            <li>Gateway and console sessions now run in a new <code>gateway</code> tool mode and register only <code>file_read</code>, <code>file_write</code> and <code>python_exec</code>: <code>shell_exec</code> is not registered at all, so the model never sees it. Legacy <code>/v1</code> has no approval policy; console sessions ask before <code>file_write</code> and <code>python_exec</code>. The console's approvals arrive over the same unauthenticated loopback API, so any local process could approve its own request; Python code can still start a process. A gateway or console session cannot be given <code>shell_exec</code> by its default set, and an explicit <code>AgentOptions(builtins=…)</code> that names it is refused by the checker in <code>gateway</code> mode, with the mode and <code>--builtins all</code> in the reason.</li>
             <li><code>AgentOptions</code> gains <code>mode</code>: <code>direct</code>, <code>interactive</code>, <code>gateway</code> or <code>python</code>, the Python API's default, and the command line sets its surface's mode. The interactive UI keeps <code>shell_exec</code> behind its approval panel (<code>--yolo</code> asks nothing). Direct mode and the Python API's default follow in the tool-defaults update above. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#permission-tiers">permission tiers</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md#agentoptions">the Python API</a>.</li>
           </ul>
         </article>
@@ -506,7 +522,7 @@
           <ul>
             <li>Every tool now has a permission tier: <code>read</code>, <code>write</code>, <code>exec</code> or <code>network</code>. The built-ins keep theirs (<code>file_read</code> read, <code>file_write</code> write, <code>shell_exec</code> and <code>python_exec</code> exec); an MCP tool's tier comes from its annotations, cautiously: <code>openWorldHint</code> gives network, <code>readOnlyHint</code> read unless <code>destructiveHint</code> contradicts it, and anything else write.</li>
             <li>A run with an approval policy asks before every call whose tier is not <code>read</code>, so an unannotated MCP tool asks now; <code>require_approval</code> only adds a mark, which can make a read tool ask too. The terminal's approval panel names the tier, and <code>ToolInfo.tier</code> and <code>ApprovalRequest.tier</code> report it.</li>
-            <li>Direct mode, the plain conversation loop and the gateway pass no policy and are unchanged; <code>--yolo</code> still means no policy, not read-only.</li>
+            <li>Direct mode, the plain conversation loop and legacy <code>/v1</code> pass no policy; console sessions have one; <code>--yolo</code> still means no policy, not read-only.</li>
           </ul>
         </article>
 
