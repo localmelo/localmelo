@@ -18,8 +18,9 @@ unchanged. P13b's loop notice (`shell_exec` is off; `--builtins all` turns
 it on) moved ``_run`` again, so it has a new hash, and ``_parse_builtins``
 is pinned here for the first time: it now returns every built-in explicitly
 for ``--builtins all``, which is what keeps the old direct-mode tool set
-available. The other pinned functions are unchanged. ``_check_args``, which
-carries the refusals, is not pinned.
+available. T65b's review fixes name ``melo "" --builtins all`` in the notice,
+so ``_run`` has a new hash again. The other pinned functions are unchanged.
+``_check_args``, which carries the refusals, is not pinned.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ MAIN = Path(__file__).resolve().parents[2] / "__main__.py"
 
 PINNED = {
     "_run_direct": "945c0b4e897fac4b5005cef2758eb30587477c13f0adee6b456647d11a334551",
-    "_run": "8d01991dd8007fd32332bcb5b4f857f17a88e2cae079e8330eac1e2c2e84d031",
+    "_run": "dd9090b183a95ce694a5dc1cea414b70f088705e2d63de911cdc2320d483b626",
     "_run_one": "0c323f5d879739c205efe3ac0c71d651be2496721b68437ac30c93c6b6f70f31",
     "_report": "5ce2d43919e8bea8c5cfdb9689acd104e4bf65d2a8c377d9913f25b2cd909ecf",
     "_status_line": "51cf6b34fa09e121214b0a06e29e74d3d7d38d68b8e19ba5c68b0809abc1821b",

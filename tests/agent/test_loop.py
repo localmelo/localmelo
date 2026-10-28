@@ -237,7 +237,11 @@ class TestBlockedToolCall:
         tasks = list(agent.hippo.history._tasks.values())
         steps = await agent.hippo.history.get_steps(tasks[0].task_id)
         assert steps[0].tool_result is not None
-        assert steps[0].tool_result.error == ("Tool not found in registry: shell_exec")
+        # The error names the tools the run does offer (P13b review fix 5).
+        assert steps[0].tool_result.error == (
+            "shell_exec is not available in this run. "
+            "Available tools: file_read, file_write, python_exec."
+        )
 
     @pytest.mark.asyncio
     async def test_a_registered_shell_is_blocked_in_gateway_mode(

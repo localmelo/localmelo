@@ -40,9 +40,10 @@ complete prints its status line on stderr, and the loop asks for the next task.
 `/exit`, `/quit`, `exit` or `quit` (in any letter case), or Ctrl-D, ends the
 loop with exit code 0; Ctrl+C ends it at once (a shell shows 130). At start
 it prints one line saying that `shell_exec` is off in direct mode and that
-restarting with `--builtins all` turns it on (the line is absent when the tool
-is already on). The loop takes `--base-url`, `--chat-model` and `--builtins`;
-the other direct-mode options are usage errors with it. Its conversation is separate from the web workspace's chats.
+`melo "" --builtins all` reopens the loop with it on (the line is absent when
+the tool is already on). The loop takes `--base-url`, `--chat-model` and
+`--builtins`; the other direct-mode options are usage errors with it. Its
+conversation is separate from the web workspace's chats.
 On a terminal the prompt is edited with readline: Backspace deletes a whole
 character, Chinese and other wide characters included, and the Up arrow
 recalls earlier lines of this loop. A line that is not valid UTF-8 prints
@@ -725,7 +726,8 @@ These are usage errors:
   without `--embedding-base-url`, `--embedding-base-url` without
   `--base-url`;
 - a direct-mode option, `--workspace` included, with `--serve`, `--daemon`
-  or with `melo ""`, reported as
+  or with `melo ""` (except `--builtins`, which the loop takes for its
+  turns), reported as
   `only for direct mode (a query without --serve): --max-steps`; without a
   task, only those the interactive UI cannot use (`--tool-exposure`,
   `--timeout`, `--output-format`, `--progress`, `--routine`);

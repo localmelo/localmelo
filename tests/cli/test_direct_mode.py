@@ -444,6 +444,20 @@ class TestUsageErrors:
                 ["--workspace", "/tmp", ""],
                 "only for direct mode (a query without --serve): --workspace",
             ),
+            # --builtins is the loop's one direct-mode flag; --serve and
+            # --daemon are not the loop, so it stays a usage error there.
+            (
+                ["--serve", "--builtins", "all", "q"],
+                "only for direct mode (a query without --serve): --builtins",
+            ),
+            (
+                ["--serve", "--builtins", "all", ""],
+                "only for direct mode (a query without --serve): --builtins",
+            ),
+            (
+                ["--daemon", "status", "", "--builtins", "all"],
+                "only for direct mode (a query without --serve): --builtins",
+            ),
         ],
     )
     def test_rejected_before_the_run(
@@ -890,8 +904,8 @@ class TestInteractive:
         assert out == (
             "localmelo · local agent\n"
             "Enter a task to begin. Type /help for commands or /exit to quit.\n"
-            "shell_exec is off in this loop (direct mode); restart melo "
-            "with --builtins all to turn it on.\n"
+            'shell_exec is off in this loop (direct mode); run melo "" '
+            "--builtins all to turn it on.\n"
             "\nsecond answer\n"
         )
         assert err == "melo: run ended with status provider_error: HTTP 500\n"

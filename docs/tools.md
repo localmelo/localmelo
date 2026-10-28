@@ -265,11 +265,14 @@ unless it runs with `--yolo`. A direct run, a gateway or console session and
 the Python API's default `python` mode get `file_read`, `file_write` and
 `python_exec`: `shell_exec` is not registered, so the model never sees it,
 and the checker refuses one that was registered anyway unless the caller
-named it in `builtins`. A named `shell_exec` (`--builtins all`,
+named it in `builtins`. A model that calls it anyway gets
+`shell_exec is not available in this run. Available tools: …`, naming the
+run's tools (an unknown non-built-in name keeps the `Tool not found in
+registry` message). A named `shell_exec` (`--builtins all`,
 `--builtins shell_exec`, `AgentOptions(builtins={"shell_exec"})`) is the
 caller's opt-in in `direct` and `python` mode and runs; `gateway` refuses it
 even when named. `AgentOptions(builtins=…)` or `--builtins` always wins over
-the mode's default set.
+the mode's default set, except in gateway mode.
 
 Every other tool's tier comes from the MCP `annotations` object that the
 server lists with it, read cautiously:

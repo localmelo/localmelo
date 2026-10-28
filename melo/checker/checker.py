@@ -54,9 +54,10 @@ class Checker:
         The default is direct mode, which is what a checker built on its
         own has; :class:`Agent` always passes its ``AgentOptions.mode``.
         *builtins* is the explicit set the run's caller named, if any: an
-        ``exec`` tool in it is opt-in and runs, while one that only the
-        mode's default set would offer is refused in a mode with no
-        approver (see :func:`~melo.checker.policy.exec_refusal`).
+        ``exec`` tool in it is opt-in and runs in direct and ``python``
+        mode (gateway still refuses it), while one that only the mode's
+        default set would offer is refused in a mode with no approver (see
+        :func:`~melo.checker.policy.exec_refusal`).
         """
         self._mode = validated_mode(mode)
         self._named_builtins = None if builtins is None else frozenset(builtins)

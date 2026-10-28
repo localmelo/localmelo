@@ -1,7 +1,7 @@
 """Executor tests.
 
-Covers: builtin execution, unknown tool, blocked command, timeout,
-file path policy, structured result/artifacts.
+Covers: builtin execution, unknown tool, timeout, file path policy,
+structured result/artifacts.
 """
 
 from __future__ import annotations
@@ -581,6 +581,44 @@ class TestUnknownToolErrorMessages(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(outcome.status, ExecutionStatus.ERROR)
         self.assertEqual(outcome.error_category, ErrorCategory.TOOL_NOT_FOUND)
         self.assertIn("not found in registry", outcome.error.lower())
+
+    async def test_a_builtin_the_run_does_not_offer_names_the_available_tools(
+        self,
+    ) -> None:
+        """shell_exec is a built-in; this run registered only file_read."""
+        hippo = Hippo()
+        executor = Executor(hippo, Checker(mode="direct"))
+        register_builtins(executor, hippo, names={"file_read"})
+
+        outcome = await executor.execute_structured(
+            ExecutionRequest(tool_name="shell_exec")
+        )
+
+        self.assertEqual(outcome.error_category, ErrorCategory.TOOL_NOT_FOUND)
+        self.assertEqual(
+            outcome.error,
+            "shell_exec is not available in this run. Available tools: file_read.",
+        )
+
+    async def test_a_builtin_with_no_tools_available_says_none(self) -> None:
+        hippo = Hippo()
+        executor = Executor(hippo, Checker(mode="direct"))
+        register_builtins(executor, hippo, names=set())
+
+        outcome = await executor.execute_structured(
+            ExecutionRequest(tool_name="shell_exec")
+        )
+
+        self.assertEqual(
+            outcome.error,
+            "shell_exec is not available in this run. Available tools: none.",
+        )
+
+    async def test_a_non_builtin_name_keeps_the_registry_message(self) -> None:
+        outcome = await self.executor.execute_structured(
+            ExecutionRequest(tool_name="totally_unknown")
+        )
+        self.assertEqual(outcome.error, "Tool not found in registry: totally_unknown")
 
     async def test_callable_not_registered_error_message(self) -> None:
         """ToolDef exists but no callable registered."""

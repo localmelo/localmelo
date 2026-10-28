@@ -490,8 +490,8 @@ async def _run(
             agent.options.mode, agent.options.builtins
         ):
             print(
-                "shell_exec is off in this loop (direct mode); restart melo "
-                "with --builtins all to turn it on."
+                'shell_exec is off in this loop (direct mode); run melo "" '
+                "--builtins all to turn it on."
             )
         while True:
             try:
@@ -923,16 +923,19 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         )
     # main() joins the words into the query, and an empty one (`melo ""`)
     # runs no task, so the direct-mode flags would have nothing to apply to.
-    direct = bool(" ".join(args.query)) and not args.serve
+    query = " ".join(args.query)
+    direct = bool(query) and not args.serve
+    # `melo ""` is the loop: it runs turns, so --builtins applies to them
+    # even though the other direct-mode flags have no task. --serve and
+    # --daemon are not the loop and keep refusing it, as on main.
+    loop = bool(args.query) and not args.serve and not args.daemon and not query
     if not direct:
         given = [
             flag
             for dest, flag in _DIRECT_FLAGS.items()
             if getattr(args, dest) not in (None, False)
             and (not interactive or dest in _UI_REFUSED)
-            # `melo ""` runs turns in the loop, so --builtins applies to
-            # them even though the other direct-mode flags have no task.
-            and not (dest == "builtins" and args.query)
+            and not (dest == "builtins" and loop)
         ]
         if given:
             parser.error(

@@ -318,7 +318,8 @@ class TestRetrieveExposure:
             ["file_read", "shell_exec"]
         ] * 2
         assert _results(llm.calls[1]) == [
-            "Error: Tool not found in registry: file_write"
+            "Error: file_write is not available in this run. "
+            "Available tools: file_read, shell_exec."
         ]
         # Both planning calls offered tools, so both count as main requests,
         # none as auxiliary ones.

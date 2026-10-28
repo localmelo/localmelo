@@ -12,7 +12,8 @@ the gateway's sessions), and :class:`~melo.agent.options.AgentOptions`
 defaults to ``python`` for the library. A mode with an approver (the
 interactive UI) keeps ``shell_exec``; the modes without one (direct, the
 gateway and the library's ``python`` default) do not offer it. An explicit
-``builtins`` set always wins, so a caller that names ``shell_exec`` gets it.
+``builtins`` set always wins, except in gateway mode, so a caller that names
+``shell_exec`` gets it in direct and ``python`` mode.
 """
 
 from __future__ import annotations

@@ -708,7 +708,7 @@ class TestStructuredExecutorInAgentLoop:
         steps = await agent.hippo.history.get_steps(tasks[0].task_id)
         assert steps[0].tool_result is not None
         assert "shell_exec" in steps[0].tool_result.error
-        assert "not found in registry" in steps[0].tool_result.error
+        assert "not available in this run" in steps[0].tool_result.error
         await agent.close()
 
     @pytest.mark.asyncio
@@ -1204,7 +1204,7 @@ class TestThreeWayBoundary:
         assert len(steps) == 1
         assert steps[0].tool_result is not None
         assert "shell_exec" in steps[0].tool_result.error
-        assert "not found in registry" in steps[0].tool_result.error
+        assert "not available in this run" in steps[0].tool_result.error
 
         await agent.close()
 
