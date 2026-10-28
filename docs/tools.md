@@ -270,8 +270,9 @@ Direct mode and the gateway never set a workspace root.
 - **Commands.** `shell_exec` and `python_exec` always run in a child process
   with a process group of its own, which a timeout or a cancellation kills
   with every process it started; a root only sets the directory they start
-  in. Both have `/dev/null` as standard input, so neither reads the terminal
-  melo runs in, and `python_exec` code gets EOF from `input()`. These two
+  in. A shell command's standard input is `/dev/null`; `python_exec` gets its
+  code on a pipe (never in argv) and then points fd 0 at `/dev/null`, so
+  `input()` gets EOF and neither reads the terminal melo runs in. These two
   tools are not fenced: they can reach any path.
 - **Exit status.** A `shell_exec` command that exits with a non-zero status
   starts its text with the line `[exit code <n>]` (`-<signal>` for a command
