@@ -494,6 +494,7 @@ class TestFields:
     def test_event_fields_are_pinned(self) -> None:
         assert {
             "run.started": {"query", "max_steps", "workspace_root", "approval"},
+            "inbox.accepted": {"offset", "text", "step", "attempt"},
             "step.started": {"step", "attempt"},
             "assistant.message": {
                 "step",
@@ -687,7 +688,31 @@ class TestFields:
         assert recalled.of("recall")
         await agent.close()
 
-        events = reflect.events + stuck.events + compress.events + recalled.events
+        class OneInstruction:
+            def validate(self, workspace: str | None = None) -> None:
+                pass
+
+            def poll(self) -> list[tuple[int, str]]:
+                return [(6, "hello")]
+
+            def accept(self, offset: int) -> None:
+                assert offset == 6
+
+        inbox_events = Recorder()
+        agent = _agent(ScriptedLLM([_answer("done")]))
+        result = await agent.run_task(
+            "task", observe=inbox_events, inbox=OneInstruction()
+        )
+        assert result.status == "completed"
+        assert inbox_events.of("inbox.accepted")
+        await agent.close()
+        events = (
+            reflect.events
+            + stuck.events
+            + compress.events
+            + recalled.events
+            + inbox_events.events
+        )
         seen = {event.type for event in events}
         # The memory event is emitted only by a store-backed admission;
         # test_memory_admission.py emits and pins it.

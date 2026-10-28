@@ -104,6 +104,7 @@ LATER_OPTIONS = [
     "--allow-unconfigured",
     "--save-session",
     "--brief",
+    "--inbox",
     "--parent-run",
     "--import-session",
     "--title",
