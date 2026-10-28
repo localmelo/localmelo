@@ -1,0 +1,12 @@
+› Compare these two files.
+
+  <attachment name="notes.txt" chars="9">
+  buy milk
+
+  </attachment>
+  … +330 lines
+
+  No approvals for this turn (--yolo).
+● Both files say the same thing.
+✻ Worked for 0.1s · 0 tool calls · ↓ 12 tokens
+

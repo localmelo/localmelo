@@ -55,6 +55,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (↑↓, Ctrl+R) and makes a new line with Alt+Enter or Ctrl+J; Esc stops a
   turn. Sessions are kept in `~/.cache/localmelo/cli/sessions.db`;
   resuming them comes later ([#53]).
+- A turn's work in the interactive UI, as it happens: the model's
+  thinking (`✻ Thought for 1.2s` and 3 rows; 40 with `/verbose`, none with
+  `/thinking off`), intermediate text and one held message printed only
+  when it differs from the answer, `↻` retries, `·` empty replies, `⚠`
+  stuck and budget notices, and reflections (including the unreadable
+  ones). Tool blocks take the call's arguments and 20 output lines under
+  `/verbose` and print images as `▪ image/png · 312 KB · not shown`. The
+  live area now draws the run's `run.progress` facts, the running tool's
+  clock and limit, and on a session's first turn a dim row of the past
+  runs (the direct-mode line's wording). `/expand [turn.call]` prints a
+  call's whole output, `/progress` the latest facts with the memory they
+  rest on ([#68]).
 - A first run in a terminal: `melo` with no config file looks for a model
   server on this computer, asks for its URL and for a model from the
   server's list, saves them and opens the chat. It looks with
@@ -380,3 +392,4 @@ earlier milestones.
 [#64]: https://github.com/localmelo/localmelo/pull/64
 [#66]: https://github.com/localmelo/localmelo/pull/66
 [#67]: https://github.com/localmelo/localmelo/pull/NN
+[#68]: https://github.com/localmelo/localmelo/pull/68

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 from pathlib import Path
@@ -19,6 +20,7 @@ from localmelo.support.cli.render import LiveState, TurnRenderer, live_rows
 from localmelo.support.cli.text import cells
 from localmelo.support.cli.theme import ASCII, UNICODE, Symbols
 from localmelo.support.cli.views import BackendInfo, banner
+from localmelo.support.sessions.agents import SESSION_TOOL_TIMEOUT_S
 from localmelo.support.sessions.store import StoredEvent
 
 URL = "http://127.0.0.1:18431/v1"
@@ -51,10 +53,10 @@ class Turn:
         )
         self.renderer.begin_turn("What is in this folder?")
 
-    def event(self, kind: str, **data: Any) -> Turn:
+    def event(self, type_: str, **data: Any) -> Turn:
         self.renderer.on_event(
             StoredEvent(
-                id=1, session_id="s", turn=1, event={"type": kind, "data": data}
+                id=1, session_id="s", turn=1, event={"type": type_, "data": data}
             )
         )
         return self
@@ -131,7 +133,9 @@ def test_a_tool_block_shows_three_lines_then_the_rest_count() -> None:
         .text()
     )
     assert "✓ shell_exec  ls -1 · 0.1s · allowed for the session\n" in text
-    assert "  └ app.py\n    notes.txt\n    tests\n    … +2 lines\n" in text
+    assert (
+        "  └ app.py\n    notes.txt\n    tests\n    … +2 lines (/expand 1.1)\n" in text
+    )
 
 
 def test_a_single_line_left_prints_instead_of_the_marker() -> None:
@@ -280,6 +284,14 @@ def test_calls_a_reply_listed_that_never_started_print_as_not_run() -> None:
     )
     turn.tool("shell_exec", "ls", status="cancelled", duration_s=0.5)
     turn.finish("cancelled", error="Stopped by the user")
+    turn.event(
+        "turn.finished",
+        turn=1,
+        turn_id="t",
+        status="cancelled",
+        error="Stopped by the user",
+        cause="user_stop",
+    )
     text = turn.text()
     assert (
         text.index("◌ shell_exec  ls · stopped after 0.5s")
@@ -425,6 +437,15 @@ def test_a_stopped_turn(cause: str, line: str) -> None:
     turn.renderer.stopped_by(cause)
     assert turn.renderer.live is not None and turn.renderer.live.activity == "Stopping"
     turn.finish("cancelled", error="Stopped by the user")
+    # The cause is turn.finished's, which the runner forwards after the run.
+    turn.event(
+        "turn.finished",
+        turn=1,
+        turn_id="t",
+        status="cancelled",
+        error="Stopped by the user",
+        cause=cause,
+    )
     assert line in turn.text() and "Worked for" not in turn.text()
 
 
@@ -723,14 +744,15 @@ def test_a_best_effort_keeps_its_code_block() -> None:
 @pytest.mark.parametrize(
     ("width", "row"),
     [
-        (20, "✳ Thinking… · step 3"),
+        # Whole parts go first; below that the facts themselves are cut.
+        (20, "✳ Thinking… · step …"),
         (30, "✳ Thinking… · step 3 · 1h22m"),
         (41, "✳ Thinking… · step 3 · 1h22m"),
         (50, "✳ Thinking… · step 3 · 1h22m · ↓ 1.2k tokens"),
         (60, "✳ Thinking… · step 3 · 1h22m · ↓ 1.2k tokens · esc to stop"),
     ],
 )
-def test_the_spinner_row_drops_whole_facts_rather_than_cut_them(
+def test_the_spinner_row_drops_whole_parts_then_cuts_the_facts(
     width: int, row: str
 ) -> None:
     live = LiveState(activity="Thinking", started=0.0, step=3, output_tokens=1200)
@@ -786,3 +808,640 @@ def test_a_long_denial_reason_is_still_cut_at_the_end() -> None:
     text = Turn(width=100).tool("shell_exec", "rm -rf build", approval=approval).text()
     [header] = [line for line in text.split("\n") if "shell_exec" in line]
     assert "rm -rf build" in header and header.endswith("…") and cells(header) == 100
+
+
+# ── The turn's work as it happens (U2a.2) ──
+
+FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "events"
+GOLDEN = Path(__file__).resolve().parent / "golden"
+
+STREAMS = sorted(path.stem for path in FIXTURES.glob("*.jsonl"))
+VERBOSE_STREAMS = (
+    "tools",
+    "thinking",
+    "budget_reflect",
+    "long_output",
+    "file_write_overwrite",
+    "history",
+)
+NARROW_STREAMS = ("tools", "allowed", "provider_errors", "history")
+ASCII_THINKING_OFF_STREAMS = ("tools", "history")
+
+GOLDEN_CASES = (
+    [(name, "default", 80, UNICODE, False, True) for name in STREAMS]
+    + [(name, "verbose", 80, UNICODE, True, True) for name in VERBOSE_STREAMS]
+    + [(name, "narrow", 40, UNICODE, False, True) for name in NARROW_STREAMS]
+    + [(name, "ascii", 80, ASCII, False, False) for name in ASCII_THINKING_OFF_STREAMS]
+)
+
+
+def _record(name: str) -> list[dict[str, Any]]:
+    lines = (FIXTURES / f"{name}.jsonl").read_text(encoding="utf-8").splitlines()
+    return [json.loads(line) for line in lines]
+
+
+def render_stream(
+    name: str,
+    *,
+    width: int = 80,
+    symbols: Symbols = UNICODE,
+    verbose: bool = False,
+    thinking: bool = True,
+) -> str:
+    """*name*'s recorded events through a renderer, as a session would feed them."""
+    out = RecordingOut(width)
+    renderer = TurnRenderer(
+        out,
+        symbols=symbols,
+        backend=_backend,
+        verbose=verbose,
+        thinking=thinking,
+    )
+    turn = 0
+    for record in _record(name):
+        event = record["event"]
+        kind = event["type"]
+        data = event["data"]
+        if kind == "turn.started":
+            turn += 1
+            renderer.begin_turn(str(data.get("user_text") or ""), first_turn=turn == 1)
+        renderer.on_event(
+            StoredEvent(
+                id=record["turn"], session_id="s", turn=record["turn"], event=event
+            )
+        )
+        if kind == "turn.finished":
+            renderer.end_turn(None, None, cause=str(data.get("cause") or ""))
+    return out.text()
+
+
+@pytest.mark.parametrize(
+    ("name", "mode", "width", "symbols", "verbose", "thinking"),
+    GOLDEN_CASES,
+    ids=[f"{name}-{mode}-{width}" for name, mode, width, _, _, _ in GOLDEN_CASES],
+)
+def test_a_recorded_stream_renders_its_golden(
+    name: str,
+    mode: str,
+    width: int,
+    symbols: Symbols,
+    verbose: bool,
+    thinking: bool,
+) -> None:
+    text = render_stream(
+        name, width=width, symbols=symbols, verbose=verbose, thinking=thinking
+    )
+    for line in text.split("\n"):
+        assert cells(line) <= width, (name, mode, cells(line), line)
+    path = GOLDEN / f"{name}-{mode}-{width}.txt"
+    if os.environ.get("LOCALMELO_UPDATE_GOLDEN") == "1":
+        GOLDEN.mkdir(exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        return
+    assert path.exists(), f"missing {path.name}; run with LOCALMELO_UPDATE_GOLDEN=1"
+    assert text == path.read_text(encoding="utf-8")
+
+
+# ── LiveState, event by event ──
+
+
+def test_live_state_follows_a_turn() -> None:
+    turn = Turn()
+    renderer = turn.renderer
+    assert renderer.live is not None
+    assert (renderer.live.activity, renderer.live.step, renderer.live.attempt) == (
+        "Starting",
+        0,
+        1,
+    )
+    turn.event("step.started", step=2, attempt=1)
+    assert renderer.live.activity == "Thinking" and renderer.live.step == 2
+    turn.event(
+        "tool.started",
+        step=2,
+        call_id="c1",
+        name="shell_exec",
+        arguments={"command": "ls"},
+        preview="ls",
+    )
+    assert (renderer.live.activity, renderer.live.tool, renderer.live.preview) == (
+        "Running",
+        "shell_exec",
+        "ls",
+    )
+    assert renderer.live.tool_limit_s == SESSION_TOOL_TIMEOUT_S
+    turn.event(
+        "tool.finished",
+        step=2,
+        call_id="c1",
+        name="shell_exec",
+        status="success",
+        output="x",
+        approval={"allowed": True, "origin": "user", "remember": False},
+        duration_s=0.1,
+    )
+    assert renderer.live.activity == "Thinking" and renderer.live.tool == ""
+    turn.event("run.progress", level=1, state="running", step=2, attempt=1)
+    assert renderer.live.progress is not None
+    assert renderer.live.progress["level"] == 1
+    turn.event("approval.requested", request_id="r", tool_name="shell_exec")
+    assert (
+        renderer.live.waiting and renderer.live.activity == "Waiting for your approval"
+    )
+    turn.event("approval.resolved", request_id="r", outcome="allowed")
+    assert not renderer.live.waiting
+    turn.finish("completed", result="done", n_tool=1)
+    assert renderer.live.finished and renderer.live.activity == "Wrapping up"
+    assert live_rows(renderer.live, 100.0, 80, UNICODE)[0][0][1] == "Wrapping up…"
+
+
+def test_a_retry_counts_down_in_the_live_area() -> None:
+    turn = Turn()
+    turn.event(
+        "notice",
+        kind="retry",
+        message="Model request failed; retrying in 4 s: HTTP 503 busy",
+        detail={"request_attempt": 1, "delay_s": 4.0, "status_code": 503},
+        step=1,
+        attempt=1,
+    )
+    assert "↻ Model request failed; retrying in 4 s: HTTP 503 busy" in turn.text()
+    assert turn.renderer.live is not None
+    assert turn.renderer.live.activity == "Retrying"
+    rows = live_rows(turn.renderer.live, turn.now[0] + 2.5, 80, UNICODE, frame=0)
+    assert "Retrying in 2s" in rows[0][0][1]
+    rows = live_rows(turn.renderer.live, turn.now[0] + 9.0, 80, UNICODE, frame=0)
+    assert "Retrying in" not in rows[0][0][1] and "Retrying…" in rows[0][0][1]
+
+
+def test_an_empty_reply_is_a_dim_notice() -> None:
+    turn = Turn()
+    turn.event(
+        "notice",
+        kind="empty_reply",
+        message="The model returned an empty reply; asking it to continue.",
+        detail={"count": 1},
+        step=1,
+        attempt=1,
+    )
+    assert "· The model returned an empty reply; asking it to continue." in turn.text()
+
+
+def test_a_budget_and_a_stuck_notice_are_warnings() -> None:
+    text = (
+        Turn()
+        .event(
+            "notice",
+            kind="budget",
+            message="The attempt used its step budget.",
+            detail={},
+            step=1,
+            attempt=1,
+        )
+        .event(
+            "notice",
+            kind="stuck",
+            message="The same tool calls or errors repeated; the attempt ends.",
+            detail={},
+            step=2,
+            attempt=1,
+        )
+        .text()
+    )
+    assert "⚠ The attempt used its step budget." in text
+    assert "⚠ The same tool calls or errors repeated; the attempt ends." in text
+
+
+# ── Thinking, intermediate and held text ──
+
+
+def _message(turn: Turn, content: str = "", **data: Any) -> Turn:
+    fields: dict[str, Any] = {
+        "step": 1,
+        "content": content,
+        "thinking": "",
+        "tool_calls": [],
+        "usage": {},
+        "duration_s": 0.1,
+    }
+    fields.update(data)
+    return turn.event("assistant.message", **fields)
+
+
+def test_the_thinking_excerpt_is_three_rows_then_the_marker() -> None:
+    # Single line breaks inside a paragraph are joined, then the rows wrap.
+    thinking = " ".join(f"word{number}" for number in range(1, 400))
+    text = _message(
+        Turn(),
+        thinking=thinking,
+        tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}],
+    ).text()
+    assert "✻ Thought for 0.1s" in text
+    body = [row for row in text.split("\n") if row.startswith("  ")]
+    assert len(body) == 4  # three rows and the marker row
+    assert body[3].strip().startswith("… +") and " lines" in body[3]
+
+
+def test_verbose_shows_forty_thinking_rows_and_thinking_off_none() -> None:
+    thinking = " ".join(f"w{number}" for number in range(1, 2500))
+    verbose = Turn()
+    verbose.renderer.verbose = True
+    text = _message(verbose, thinking=thinking).text()
+    body = [row for row in text.split("\n") if row.startswith("  ")]
+    assert len(body) == 41  # 40 rows and the marker row
+    assert body[40].strip().startswith("… +")
+    off = Turn()
+    off.renderer.thinking = False
+    text = _message(off, thinking=thinking).text()
+    assert "✻ Thought for 0.1s" in text
+    assert not any(row.startswith("  w") for row in text.split("\n"))
+
+
+def test_an_ollama_thinking_block_is_split_once() -> None:
+    content = "<think>\nweighing the options\n</think>\n\nI will read the file."
+    text = _message(
+        Turn(),
+        content=content,
+        tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}],
+    ).text()
+    assert "weighing the options" in text
+    assert "I will read the file." in text
+    assert "<think>" not in text and "</think>" not in text
+
+
+def test_intermediate_text_follows_its_tool_calls() -> None:
+    text = _message(
+        Turn(),
+        content="Looking first.",
+        tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}],
+    ).text()
+    assert "● Looking first." in text
+
+
+def test_held_text_prints_at_the_next_step() -> None:
+    text = (
+        _message(Turn(), content="An intermediate thought.")
+        .event("step.started", step=2, attempt=1)
+        .text()
+    )
+    assert "● An intermediate thought." in text
+
+
+def test_a_held_message_that_is_the_answer_prints_once() -> None:
+    text = _message(Turn(), content="The answer.").finish(result="The answer.").text()
+    assert text.count("The answer.") == 1
+
+
+def test_a_held_message_that_differs_prints_before_the_status() -> None:
+    text = (
+        _message(Turn(), content="My plan was to read it.")
+        .finish("failed", error="post_plan refused", result="")
+        .text()
+    )
+    assert text.index("● My plan was to read it.") < text.index("melo: run ended")
+
+
+# ── Reflections ──
+
+
+def test_a_readable_reflection_names_its_action_and_rationale() -> None:
+    text = (
+        Turn()
+        .event(
+            "reflection",
+            attempt=1,
+            action="continue",
+            continue_run=True,
+            rationale="Read the test before editing.",
+            summary="s",
+            best_effort_result=None,
+            requests=1,
+            readable=True,
+            usage={},
+            duration_s=2.3,
+        )
+        .text()
+    )
+    assert (
+        "✻ Reflected after attempt 1: continue · Read the test before editing. (2.3s)"
+        in text
+    )
+
+
+def test_verbose_reflection_adds_the_summary_and_asked_twice() -> None:
+    turn = Turn()
+    turn.renderer.verbose = True
+    text = turn.event(
+        "reflection",
+        attempt=1,
+        action="continue",
+        continue_run=True,
+        rationale="The full rationale, in one line.",
+        summary="The summary.",
+        best_effort_result=None,
+        requests=2,
+        readable=True,
+        usage={},
+        duration_s=0.5,
+    ).text()
+    assert "· asked twice" in text
+    assert "The summary." in text and "The full rationale, in one line." in text
+
+
+def test_an_unreadable_reflection_says_whether_the_run_goes_on() -> None:
+    text = (
+        Turn()
+        .event(
+            "reflection",
+            attempt=2,
+            action=None,
+            continue_run=True,
+            rationale=None,
+            summary=None,
+            best_effort_result=None,
+            requests=2,
+            readable=False,
+            usage={},
+            duration_s=0.2,
+        )
+        .event(
+            "reflection",
+            attempt=3,
+            action=None,
+            continue_run=False,
+            rationale=None,
+            summary=None,
+            best_effort_result=None,
+            requests=2,
+            readable=False,
+            usage={},
+            duration_s=0.2,
+        )
+        .text()
+    )
+    assert "Could not read the reflection after attempt 2; the run continues" in text
+    assert (
+        "Could not read the reflection after attempt 3; the budget is used up" in text
+    )
+
+
+# ── /verbose's blocks ──
+
+
+def test_verbose_blocks_add_arguments_and_twenty_lines() -> None:
+    output = "\n".join(f"line {number}" for number in range(1, 31))
+    turn = Turn()
+    turn.renderer.verbose = True
+    turn.event(
+        "tool.started",
+        step=1,
+        call_id="c1",
+        name="shell_exec",
+        arguments={"command": "grep -n x notes.txt"},
+        preview="grep -n x notes.txt",
+    )
+    text = turn.event(
+        "tool.finished",
+        step=1,
+        call_id="c1",
+        name="shell_exec",
+        status="success",
+        output=output,
+        approval={"allowed": True, "origin": "user", "remember": False},
+        duration_s=0.1,
+    ).text()
+    assert '"command": "grep -n x notes.txt"' in text
+    assert "line 20" in text and "line 21" not in text
+    assert "… +10 lines" in text
+
+
+def test_images_are_named_not_drawn() -> None:
+    text = (
+        Turn()
+        .tool(
+            "screenshot",
+            "{}",
+            images=[{"mime_type": "image/png", "size_bytes": 312_000}],
+        )
+        .text()
+    )
+    assert "    ▪ image/png · 312 KB · not shown" in text
+
+
+# ── The live area's third row ──
+
+
+def _past_progress(**basis: Any) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "routine_id": "r",
+        "template_id": "r:t",
+        "version": 1,
+        "match": "routine",
+        "model": "stub-model",
+        "title": None,
+    }
+    fields.update(basis)
+    return {
+        "level": 1,
+        "state": "running",
+        "step": 1,
+        "attempt": 1,
+        "limits": {},
+        "phase": None,
+        "cycle": 0,
+        "tests": None,
+        "items": [{"label": "ls", "state": "done", "repeat": None}],
+        "fraction": None,
+        "expected_steps": None,
+        "past": {
+            "runs": 1,
+            "steps_lo": 4,
+            "steps_median": 4.0,
+            "steps_hi": 4,
+            "wall_lo_s": 10.0,
+            "wall_hi_s": 10.0,
+            "last_steps": 4,
+            "last_wall_s": 10.0,
+        },
+        "off_reason": None,
+        "basis": fields,
+    }
+
+
+def test_the_past_row_shows_on_a_first_turn_with_past_runs() -> None:
+    live = LiveState(
+        activity="Thinking",
+        started=0.0,
+        step=1,
+        attempt=1,
+        first_turn=True,
+        progress=_past_progress(),
+    )
+    rows = live_rows(live, 5.0, 80, UNICODE, frame=0)
+    assert len(rows) == 2
+    assert rows[1][0][0] == "class:muted"
+    assert rows[1][0][1] == "last time 4 steps, 10s: ls ✓"
+
+
+def test_the_past_row_hides_on_a_later_turn_or_a_new_match() -> None:
+    live = LiveState(
+        activity="Thinking",
+        started=0.0,
+        step=1,
+        attempt=1,
+        first_turn=False,
+        progress=_past_progress(),
+    )
+    assert len(live_rows(live, 5.0, 80, UNICODE, frame=0)) == 1
+    live.first_turn = True
+    live.progress = _past_progress(match="new")
+    assert len(live_rows(live, 5.0, 80, UNICODE, frame=0)) == 1
+
+
+def test_a_stale_turn_takes_its_status_from_turn_finished() -> None:
+    text = (
+        Turn()
+        .event(
+            "turn.finished",
+            turn=1,
+            turn_id="t",
+            status="crashed",
+            error="The process running this turn stopped",
+            cause="crash",
+        )
+        .text()
+    )
+    assert "melo: run ended with status crashed" in text
+    assert "melo stopped before this turn finished" in text
+    # A crash cause is a warning, not a bug: yellow, not the red failed mark.
+    assert "⚠ melo: run ended with status crashed" in text
+    assert "✗ melo: run ended" not in text
+
+
+def test_a_wrapped_thinking_row_never_starts_with_a_space() -> None:
+    # The reply's line breaks are joined into one paragraph; at this width
+    # the wrap boundary falls on a space, which must not lead the next row.
+    thinking = (
+        "app.py is the single script. Reading it shows what the project does\n"
+        "and whether it needs data.\nThe tests will say which behaviour matters."
+    )
+    text = _message(
+        Turn(width=100),
+        thinking=thinking,
+        tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}],
+    ).text()
+    rows = [row for row in text.split("\n") if row.startswith("  ")]
+    assert len(rows) >= 2, text
+    assert not any(row.startswith("   ") for row in rows), rows
+
+
+# ── Review fixes (T4R) ──
+
+
+def test_intermediate_and_held_text_cannot_act_on_the_terminal() -> None:
+    for content in ("A\x1b[2JB", "A\x1b]0;PWNED\x1b\\B", "A\x1b]52;c;aGk=\x07B"):
+        with_calls = _message(
+            Turn(),
+            content=content,
+            tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}],
+        ).text()
+        held = _message(Turn(), content=content).text()
+        assert "\x1b" not in with_calls and "\x1b" not in held, content
+        assert "PWNED" not in held.split("›", 1)[-1] or "\x1b" not in held
+
+
+def test_an_image_mime_type_cannot_act_on_the_terminal() -> None:
+    text = (
+        Turn()
+        .tool(
+            "screenshot",
+            "{}",
+            images=[{"mime_type": "image/png\x1b]0;PWNED\x07", "size_bytes": 3}],
+        )
+        .text()
+    )
+    assert "\x1b" not in text and "\x07" not in text
+
+
+def test_a_cancelled_run_waits_for_the_turn_finished_cause() -> None:
+    turn = Turn()
+    turn.finish("cancelled", error="Another window took over")
+    assert "Stopped" not in turn.text()  # deferred until the cause arrives
+    turn.event(
+        "turn.finished",
+        turn=1,
+        turn_id="t",
+        status="cancelled",
+        error="Another window took over",
+        cause="takeover",
+    )
+    assert "■ Stopped: another melo window took over this session" in turn.text()
+
+
+def test_a_long_reflection_and_a_footer_are_one_line_each() -> None:
+    rationale = "Run it once more, then report the result to the user."
+    text = (
+        Turn(width=40)
+        .event(
+            "reflection",
+            attempt=1,
+            action="continue",
+            continue_run=True,
+            rationale=rationale,
+            summary=None,
+            best_effort_result=None,
+            requests=1,
+            readable=True,
+            usage={"completion_tokens": 76},
+            duration_s=0.4,
+        )
+        .finish("completed", result="done", n_tool=3, duration_s=0.5)
+        .text()
+    )
+    lines = text.split("\n")
+    [reflection] = [
+        index for index, line in enumerate(lines) if "Reflected after" in line
+    ]
+    assert lines[reflection].endswith("…") and "(0.4s)" not in lines[reflection]
+    [footer] = [index for index, line in enumerate(lines) if "Worked for" in line]
+    assert "tokens" not in lines[footer] and len(lines[footer]) <= 40
+    assert lines[footer + 1] == ""
+
+
+def test_an_empty_rationale_has_one_separator() -> None:
+    text = (
+        Turn()
+        .event(
+            "reflection",
+            attempt=1,
+            action="continue",
+            continue_run=True,
+            rationale="",
+            summary=None,
+            best_effort_result=None,
+            requests=1,
+            readable=True,
+            usage={},
+            duration_s=0.1,
+        )
+        .text()
+    )
+    assert "Reflected after attempt 1: continue (0.1s)" in text
+
+
+def test_a_retry_ends_at_the_next_event() -> None:
+    turn = Turn()
+    turn.event(
+        "notice",
+        kind="retry",
+        message="Model request failed; retrying in 4 s",
+        detail={"delay_s": 4.0},
+        step=1,
+        attempt=1,
+    )
+    assert turn.renderer.live is not None
+    assert turn.renderer.live.activity == "Retrying"
+    _message(
+        turn, content="", tool_calls=[{"id": "c1", "name": "file_read", "preview": "a"}]
+    )
+    assert turn.renderer.live.activity == "Thinking"

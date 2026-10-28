@@ -143,8 +143,12 @@
           one JSON line, and exits with a code that tells how the run ended.
           Without a task, in a terminal, it opens the interactive UI: an
           input box and a status bar stay at the bottom, and each turn prints
-          into the scrollback as it runs, with a block for each tool call, a
-          spinner with the step and the time, and the answer as Markdown. The
+          into the scrollback as it runs: the model's thinking, a block for
+          each tool call, retries, notices and reflections, with the answer
+          as Markdown. A live area above the input box shows the step, the
+          phase, the running tool and the run's progress facts, and on a
+          session's first turn the past runs the progress line would show.
+          The
           UI runs its turns on a session (stored in
           <code>~/.cache/localmelo/cli/sessions.db</code>), asks in a panel
           before <code>shell_exec</code>, <code>python_exec</code> and
@@ -168,7 +172,7 @@
           <code>support/cli/</code>: <code>launch.py</code> (the terminal
           check, the workspace and the model server), <code>app.py</code> (the
           input box and the keys), <code>session.py</code> (turns and
-          commands), <code>render.py</code> (tool blocks, the spinner and
+          commands), <code>render.py</code> (thinking, notices, reflections, tool blocks, the live rows and
           answers) and <code>approvals.py</code>; and
           <code>support/sessions/agents.py</code>.
         </p>

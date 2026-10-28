@@ -281,9 +281,11 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
       <section class="section" id="interactive-conversations">
         <h2>Interactive conversations</h2>
         <p>
-          Run <code>melo</code> without a task to chat in the terminal. Each
-          tool call shows as it finishes, a spinner shows the step and the
-          time while the model works, and the answer prints as Markdown:
+          Run <code>melo</code> without a task to chat in the terminal. A turn
+          shows its work as it happens: the model's thinking, each tool call
+          as it finishes, retries, notices and reflections, and a live area
+          with the step, the phase, the running tool and the run's progress
+          facts. The answer prints as Markdown:
         </p>
         <pre><code>melo
 # Or talk to an OpenAI-compatible server that is not saved, with its first
@@ -294,6 +296,9 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
           <li>Type <code>/</code> for the commands: <code>/model</code> lists
             the server's models and switches to one, <code>/backend</code>
             switches to another server (both saved as the default),
+            <code>/verbose</code> and <code>/thinking</code> add or leave out
+            detail, <code>/expand</code> prints a tool call's whole output,
+            <code>/progress</code> the facts the live area rests on,
             <code>/new</code> starts over, <code>/exit</code> or Ctrl+D
             leaves.</li>
           <li>melo asks before it runs a shell command, Python code or a file

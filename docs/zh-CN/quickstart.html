@@ -165,14 +165,14 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 
       <section class="section" id="interactive-conversations">
         <h2>交互式对话</h2>
-        <p>不带任务运行 <code>melo</code>，即可在终端里对话。每个工具调用完成时都会显示出来，模型工作时有一个旋转指示显示当前步数和用时，答案按 Markdown 输出：</p>
+        <p>不带任务运行 <code>melo</code>，即可在终端里对话。回合运行时会实时显示它的工作：模型的思考、每个工具调用完成时的命令或文件、重试、通知和反思，实时区域显示步数、阶段、正在运行的工具和本回合的进度事实。答案按 Markdown 输出：</p>
         <pre><code>melo
 # Or talk to an OpenAI-compatible server that is not saved, with its first
 # model or the one you name:
 melo --base-url http://127.0.0.1:8000/v1
 melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
         <ul>
-          <li>输入 <code>/</code> 查看命令：<code>/model</code> 列出服务器上的模型并切换到其中一个，<code>/backend</code> 切换到另一个服务器（两者都会保存为默认值），<code>/new</code> 重新开始，<code>/exit</code> 或 Ctrl+D 退出。</li>
+          <li>输入 <code>/</code> 查看命令：<code>/model</code> 列出服务器上的模型并切换到其中一个，<code>/backend</code> 切换到另一个服务器（两者都会保存为默认值），<code>/verbose</code> 和 <code>/thinking</code> 增减细节，<code>/expand</code> 打印某个工具调用的完整输出，<code>/progress</code> 显示实时区域依据的进度事实，<code>/new</code> 重新开始，<code>/exit</code> 或 Ctrl+D 退出。</li>
           <li>melo 在运行 shell 命令、Python 代码或写文件之前会先询问：按 <code>1</code> 允许这一次，按 <code>2</code> 在本次会话中允许这个工具，按 <code>3</code> 拒绝并告诉 melo 原因。按 Esc 停止当前回合。</li>
           <li>melo 在当前文件夹中工作（<code>--workspace DIR</code> 可以换一个）：文件工具只能在其中操作；命令和 Python 可以访问其他文件，所以 melo 会先询问。</li>
         </ul>

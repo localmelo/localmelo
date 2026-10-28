@@ -1,0 +1,18 @@
+› Run the check once.
+
+✓ shell_exec  echo one · 0.1s · allowed
+  └ one
+✓ shell_exec  echo two · 0.1s · allowed for the session
+  └ two
+✓ shell_exec  echo three · 0.2s · allowed by a session grant
+  └ three
+● All three commands ran.
+✻ Worked for 0.2s · 3 tool calls · ↓ 42 tokens
+
+› Run it again in auto mode.
+
+✓ shell_exec  echo four · 0.2s · auto-allowed
+  └ four
+● The command ran without asking: approvals are set to auto.
+✻ Worked for 0.3s · 1 tool call · ↓ 22 tokens
+

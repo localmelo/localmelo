@@ -34,8 +34,10 @@ from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import Approvals, Mode, TerminalApprover
 from localmelo.support.cli.output import Out
-from localmelo.support.cli.render import TurnRenderer
-from localmelo.support.cli.theme import in_symbols
+from localmelo.support.cli.render import EXPAND_LINES, ToolOutput, TurnRenderer
+from localmelo.support.cli.text import expand_tabs, wrap_cells
+from localmelo.support.cli.theme import ASCII, in_symbols
+from localmelo.support.progress_line import run_elapsed, wall_range
 from localmelo.support.sessions.display import (
     clean_output,
     format_tokens,
@@ -58,6 +60,91 @@ def _line(text: str = "", style: str | None = None) -> Text:
 
 
 STOP_REASON: Final = "Stopped by the user"
+
+
+def _toggle(arguments: str, current: bool) -> bool | None:
+    """``/verbose``'s or ``/thinking``'s new state, or None for a bad argument."""
+    value = arguments.strip().lower()
+    if not value:
+        return not current
+    if value == "on":
+        return True
+    if value == "off":
+        return False
+    return None
+
+
+def _progress_lines(payload: dict[str, Any], symbols: Any) -> list[str]:
+    """A run.progress payload as /progress prints it, one fact per line."""
+    dot = f" {symbols.dot} "
+    level = payload.get("level") or 0
+    step = payload.get("step") or 0
+    attempt = payload.get("attempt") or 1
+    head = [f"level {level}", f"step {step}"]
+    if attempt >= 2:
+        head.append(f"attempt {attempt}")
+    lines = [dot.join(head)]
+    second: list[str] = []
+    phase = payload.get("phase")
+    if isinstance(phase, str) and phase:
+        cycle = payload.get("cycle") or 0
+        second.append(f"phase {phase}" + (f" (cycle {cycle})" if cycle else ""))
+    tests = payload.get("tests")
+    if isinstance(tests, dict):
+        passed, total = tests.get("passed"), tests.get("total")
+        if isinstance(passed, int) and isinstance(total, int):
+            second.append(f"tests {passed}/{total}")
+    if second:
+        lines.append(dot.join(second))
+    past = payload.get("past")
+    if isinstance(past, dict):
+        runs = past.get("runs") or 0
+        lo, hi = past.get("steps_lo"), past.get("steps_hi")
+        last = past.get("last_steps")
+        facts = [f"past {runs} run{'' if runs == 1 else 's'}"]
+        if isinstance(lo, int) and isinstance(hi, int):
+            facts.append(f"{lo}-{hi} steps" if lo != hi else f"{lo} steps")
+        wall_lo, wall_hi = past.get("wall_lo_s"), past.get("wall_hi_s")
+        if isinstance(wall_lo, int | float) and isinstance(wall_hi, int | float):
+            facts.append(wall_range(float(wall_lo), float(wall_hi)))
+        if isinstance(last, int):
+            last_fact = f"last {last} steps"
+            last_wall = past.get("last_wall_s")
+            if isinstance(last_wall, int | float):
+                last_fact += f", {run_elapsed(float(last_wall))}"
+            facts.append(last_fact)
+        lines.append(dot.join(facts))
+    items = payload.get("items")
+    if isinstance(items, list) and items:
+        lines.append("items")
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            label = " ".join(str(item.get("label") or "").split())
+            if not label:
+                continue
+            state = str(item.get("state") or "pending")
+            repeat = item.get("repeat")
+            if isinstance(repeat, int) and repeat > 1:
+                times = "x" if symbols is ASCII else "×"
+                label += f" ({times}{repeat})"
+            lines.append(f"  {label}{dot}{state}")
+    basis = payload.get("basis")
+    if isinstance(basis, dict):
+        facts = []
+        if basis.get("routine_id"):
+            facts.append(str(basis["routine_id"]))
+        if basis.get("version") is not None:
+            facts.append(f"v{basis['version']}")
+        if basis.get("match"):
+            facts.append(f"match {basis['match']}")
+        if basis.get("model"):
+            facts.append(f"model {basis['model']}")
+        if facts:
+            lines.append("basis " + dot.join(facts))
+    return lines
+
+
 # A turn that ran this long rings the bell when it ends.
 BELL_AFTER_S: Final = 30.0
 
@@ -208,7 +295,8 @@ class CliSession:
         self._stop_wanted = self._stop_landed = False
         if self.runner is None or self.runner.session_id is None:
             self.title = title_from_text(text)  # no session row yet
-        self.renderer.begin_turn(text)
+        first_turn = self.runner is None or self.runner.session_id is None
+        self.renderer.begin_turn(text, first_turn=first_turn)
         self._work = self.spawn(self._turn(text))
 
     async def _ask(self, request: ApprovalRequest) -> ApprovalDecision:
@@ -229,6 +317,7 @@ class CliSession:
                     workspace=self.agent.workspace_root,
                 ),
                 on_event=self.renderer.on_event,
+                progress=True,
             )
         runner = self.runner
         result: RunResult | None = None
@@ -351,6 +440,117 @@ class CliSession:
             await self.model(arguments)
         elif name == "backend":
             await self.backend(arguments)
+        elif name == "verbose":
+            self.toggle_verbose(arguments)
+        elif name == "thinking":
+            self.toggle_thinking(arguments)
+        elif name == "expand":
+            self.expand(arguments)
+        elif name == "progress":
+            self.progress()
+
+    def toggle_verbose(self, arguments: str) -> None:
+        """``/verbose [on|off]``: verbose rendering, or the other way."""
+        state = _toggle(arguments, self.renderer.verbose)
+        if state is None:
+            self.out.print(
+                self._text("✗ Use /verbose on or /verbose off.", style="error")
+            )
+            return
+        self.renderer.verbose = state
+        self.out.print(
+            self._text(f"Verbose rendering {'on' if state else 'off'}.", "muted")
+        )
+
+    def toggle_thinking(self, arguments: str) -> None:
+        """``/thinking [on|off]``: thinking excerpts, or the other way."""
+        state = _toggle(arguments, self.renderer.thinking)
+        if state is None:
+            self.out.print(
+                self._text("✗ Use /thinking on or /thinking off.", style="error")
+            )
+            return
+        self.renderer.thinking = state
+        self.out.print(
+            self._text(f"Thinking excerpts {'on' if state else 'off'}.", "muted")
+        )
+
+    def expand(self, arguments: str) -> None:
+        """``/expand [turn.call]``: a tool call's whole output or error."""
+        calls = self.renderer.tool_outputs
+        if not calls:
+            self.out.print(self._text("✗ No tool calls yet.", style="error"))
+            return
+        latest_turn = calls[-1].ref.split(".", 1)[0]
+        call: ToolOutput | None
+        argument = arguments.strip()
+        if not argument:
+            call = calls[-1]
+        elif argument.startswith("!"):
+            self.out.print(self._text("✗ No tool calls yet.", style="error"))
+            return
+        elif "." in argument:
+            turn, _, number = argument.partition(".")
+            if not (turn.isdigit() and number.isdigit()):
+                self.out.print(self._text("✗ Use /expand [turn.call].", style="error"))
+                return
+            call = self.renderer.tool_output(f"{int(turn)}.{int(number)}")
+            if call is None:
+                self._expand_missing(int(turn))
+                return
+        elif argument.isdigit():
+            call = self.renderer.tool_output(f"{latest_turn}.{int(argument)}")
+            if call is None:
+                self._expand_missing(int(latest_turn))
+                return
+        else:
+            self.out.print(self._text("✗ Use /expand [turn.call].", style="error"))
+            return
+        self._print_expanded(call.text)
+
+    def _expand_missing(self, turn: int) -> None:
+        count = sum(
+            1 for call in self.renderer.tool_outputs if call.ref.startswith(f"{turn}.")
+        )
+        if count:
+            self.out.print(
+                self._text(
+                    f"✗ Turn {turn} has {count} tool call{'' if count == 1 else 's'}.",
+                    style="error",
+                )
+            )
+        else:
+            self.out.print(self._text("✗ No tool calls yet.", style="error"))
+
+    def _print_expanded(self, text: str) -> None:
+        lines = [
+            expand_tabs(line) for line in clean_output(text).rstrip("\n").split("\n")
+        ]
+        if not "".join(lines).strip():
+            lines = ["(no output)"]
+        rows: list[str] = []
+        for line in lines:
+            rows.extend(wrap_cells(line, max(1, self.out.width)) or [""])
+        for row in rows[:EXPAND_LINES]:
+            self.out.print(Text(row))
+        if len(rows) > EXPAND_LINES:
+            ellipsis = self.renderer.symbols.ellipsis
+            self.out.print(
+                Text(
+                    f"{ellipsis} +{len(rows) - EXPAND_LINES} lines not shown "
+                    f"({len(text)} chars in all)",
+                    style="muted",
+                )
+            )
+
+    def progress(self) -> None:
+        """``/progress``: the latest run.progress of this session, in full."""
+        payload = self.renderer.progress
+        if not isinstance(payload, dict):
+            self.out.print(self._text("No progress facts for this turn yet.", "muted"))
+            return
+        for line in _progress_lines(payload, self.renderer.symbols):
+            self.out.print(self._text(line))
 
     async def new(self) -> None:
         """``/new``: the next message starts a new session, with no grants."""
@@ -361,6 +561,7 @@ class CliSession:
         self.approvals.reset()
         self.title = ""
         self.renderer.context_tokens = 0
+        self.renderer.new_session()
         label = " New session "
         side = max(2, (self.out.width - len(label)) // 2)
         rule = self.renderer.symbols.rule
