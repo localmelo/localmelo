@@ -476,6 +476,9 @@ class TaskStore:
             )
             expected_generation, expected_operation_id = row if row else (None, None)
         op = operation_id or uuid.uuid4().hex
+        current = await _first(
+            conn, "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
+        )
         generation = await compare_park_identity(
             conn,
             task_id,
@@ -484,6 +487,35 @@ class TaskStore:
             operation_id=op if pending else None,
             create=create,
         )
+        if (
+            kind
+            in {
+                "sched.priority_changed",
+                "sched.state_changed",
+                "sched.pause_requested",
+                "sched.resumed",
+            }
+            and current
+            and current[0] in {"running", "held"}
+            and (state or current[0]) in {"running", "held"}
+        ):
+            await conn.execute(
+                "UPDATE recovery_operations SET generation = ?, pending_operation_id = ?, task_state = ? "
+                "WHERE task_id = ? AND kind = 'start' AND phase = 'committed' "
+                "AND generation IS ? AND pending_operation_id IS ? AND task_state = ? "
+                "AND json_extract(request, '$.execution_id') IN "
+                "(SELECT execution_id FROM recovery_capture WHERE task_id = ? AND active = 1)",
+                (
+                    generation,
+                    op if pending else None,
+                    state or current[0],
+                    task_id,
+                    expected_generation,
+                    expected_operation_id,
+                    current[0],
+                    task_id,
+                ),
+            )
         await self._store.append_component_event(
             conn,
             events,
@@ -886,7 +918,7 @@ class TaskStore:
             not isinstance(_capture_execution, str)
             or not _capture_execution.strip()
             or state != "running"
-            or actor != "scheduler"
+            or (actor != "scheduler" and not _capture_existing)
         ):
             raise ValueError("capture execution requires a scheduler start")
         choice = priority.strip().lower() if isinstance(priority, str) else priority
@@ -989,8 +1021,14 @@ class TaskStore:
                 )
             if state == "running":
                 if _capture_execution is not None and (
-                    current.state != "queued"
-                    or current.level >= 5
+                    (
+                        not _capture_existing
+                        and (current.state != "queued" or current.level >= 5)
+                    )
+                    or (
+                        _capture_existing
+                        and current.state not in {"queued", "running", "held", "parked"}
+                    )
                     or await _first(
                         conn,
                         "SELECT 1 FROM recovery_operations WHERE task_id = ? AND kind = 'recovery' AND phase = 'prepared'",

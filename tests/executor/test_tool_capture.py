@@ -2,7 +2,9 @@
 
 import asyncio
 import contextlib
+import functools
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -10,8 +12,9 @@ from localmelo.melo.checker import Checker
 from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.executor import Executor, register_builtins
+from localmelo.melo.executor.builtins import _run_python
 from localmelo.melo.executor.models import ExecutionRequest, ExecutionStatus
-from localmelo.melo.executor.process_gate import PROCESS_RECORD
+from localmelo.melo.executor.process_gate import PROCESS_RECORD, UnsupportedProcessGate
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import ToolDef
 
@@ -108,6 +111,105 @@ async def test_custom_tool_entry_after_validation_and_approval() -> None:
         assert events == ["approval", "entry", "tool"]
     finally:
         TOOL_ENTRY.reset(token)
+
+
+async def test_wrapped_callable_mismatch_cannot_run_without_entry() -> None:
+    hippo = Hippo()
+    executor = Executor(hippo, Checker(mode="interactive"))
+    hippo.register_tool(ToolDef(name="wrapped", description="Wrapped", parameters={}))
+    calls: list[str] = []
+
+    async def original(required: str) -> str:
+        return required
+
+    @functools.wraps(original)
+    async def wrapper(**kwargs: Any) -> str:
+        calls.append("wrapper")
+        return "executed"
+
+    async def capture() -> None:
+        calls.append("entry")
+
+    executor.register("wrapped", wrapper)
+    token = TOOL_ENTRY.set(capture)
+    try:
+        outcome = await executor.execute_structured(
+            ExecutionRequest(tool_name="wrapped", arguments={})
+        )
+        assert outcome.status == ExecutionStatus.ERROR
+        assert "required" in outcome.error
+        assert calls == []
+        outcome = await executor.execute_structured(
+            ExecutionRequest(tool_name="wrapped", arguments={"required": "ok"})
+        )
+        assert outcome.status == ExecutionStatus.SUCCESS
+        assert calls == ["entry", "wrapper"]
+    finally:
+        TOOL_ENTRY.reset(token)
+
+
+@pytest.mark.parametrize("entry_fails", [False, True])
+async def test_unsupported_gate_falls_back_only_after_marker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry_fails: bool
+) -> None:
+    hippo = Hippo()
+    executor = Executor(
+        hippo, Checker(mode="interactive"), workspace_root=str(tmp_path)
+    )
+    register_builtins(
+        executor, hippo, names={"python_exec"}, workspace_root=str(tmp_path)
+    )
+    events: list[str] = []
+    marker = tmp_path / "marker"
+
+    async def capture() -> None:
+        events.append("entry")
+        if entry_fails:
+            raise RuntimeError("store unavailable")
+
+    async def record(pid: int) -> None:
+        events.append("record")
+
+    async def unsupported(*args: Any, **kwargs: Any) -> Any:
+        events.append("spawn")
+        raise UnsupportedProcessGate("subprocess gate unsupported")
+
+    monkeypatch.setattr("localmelo.melo.executor.builtins.gated_exec", unsupported)
+    entry_token = TOOL_ENTRY.set(capture)
+    process_token = PROCESS_RECORD.set(record)
+    try:
+        outcome = await executor.execute_structured(
+            ExecutionRequest(
+                tool_name="python_exec", arguments={"code": "open('marker', 'w').close()"}
+            )
+        )
+        assert outcome.status == (
+            ExecutionStatus.ERROR if entry_fails else ExecutionStatus.SUCCESS
+        )
+        assert events == (["entry"] if entry_fails else ["entry", "spawn"])
+        assert marker.exists() is not entry_fails
+    finally:
+        PROCESS_RECORD.reset(process_token)
+        TOOL_ENTRY.reset(entry_token)
+
+
+async def test_direct_builtin_cannot_fallback_without_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def unsupported(*args: Any, **kwargs: Any) -> Any:
+        raise UnsupportedProcessGate("unsupported")
+
+    async def record(pid: int) -> None:
+        raise AssertionError("must not record")
+
+    monkeypatch.setattr("localmelo.melo.executor.builtins.gated_exec", unsupported)
+    token = PROCESS_RECORD.set(record)
+    try:
+        with pytest.raises(UnsupportedProcessGate):
+            await _run_python("open('marker', 'w').close()", cwd=str(tmp_path))
+        assert not (tmp_path / "marker").exists()
+    finally:
+        PROCESS_RECORD.reset(token)
 
 
 @pytest.mark.parametrize("name", ["python_exec", "shell_exec"])

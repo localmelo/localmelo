@@ -2,8 +2,10 @@
 
 import asyncio
 import sys
+from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -20,9 +22,11 @@ from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.sessions.hub import SessionHub
 from localmelo.support.sessions.store import SessionStore
 
+CaptureSetup = tuple[SessionStore, TaskStore, TaskWorkers]
+
 
 @pytest.fixture
-async def setup(tmp_path: Path):
+async def setup(tmp_path: Path) -> AsyncIterator[CaptureSetup]:
     store = SessionStore(tmp_path / "sessions.db", writer="gateway")
     await store.open()
     tasks = TaskStore(store)
@@ -39,7 +43,7 @@ async def setup(tmp_path: Path):
         await store.aclose()
 
 
-async def create(tasks, tmp_path, *, proof):
+async def create(tasks: TaskStore, tmp_path: Path, *, proof: bool) -> str:
     task, _ = await tasks.create_task(
         TaskSpec.from_payload({"objective": "work"}),
         origin="user",
@@ -49,12 +53,14 @@ async def create(tasks, tmp_path, *, proof):
     return task.task_id
 
 
-async def test_ordinary_start_is_atomically_untrusted(setup, tmp_path, monkeypatch):
+async def test_ordinary_start_is_atomically_untrusted(
+    setup: CaptureSetup, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store, tasks, worker = setup
     task = await create(tasks, tmp_path, proof=False)
     original = store._before_commit
 
-    def fail(label):
+    def fail(label: str) -> None:
         original(label)
         if label == "task_change":
             raise RuntimeError("rollback")
@@ -75,13 +81,13 @@ async def test_ordinary_start_is_atomically_untrusted(setup, tmp_path, monkeypat
 
 
 async def test_first_fence_receipt_survives_capture_and_hold_but_not_stop(
-    setup, tmp_path
-):
+    setup: CaptureSetup, tmp_path: Path
+) -> None:
     store, tasks, worker = setup
     task = await create(tasks, tmp_path, proof=True)
     recovery = RecoveryStore(store)
     generation, previous = await tasks.park_identity(task)
-    args = dict(
+    args: dict[str, Any] = dict(
         operation_id="start",
         execution_id="run",
         expected_generation=generation,
@@ -127,7 +133,9 @@ async def test_first_fence_receipt_survives_capture_and_hold_but_not_stop(
         await worker._capture_incomplete(task, "run")
 
 
-async def test_marker_retries_then_succeeds(setup, tmp_path, monkeypatch):
+async def test_marker_retries_then_succeeds(
+    setup: CaptureSetup, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store, tasks, worker = setup
     task = await create(tasks, tmp_path, proof=True)
     generation, previous = await tasks.park_identity(task)
@@ -142,7 +150,7 @@ async def test_marker_retries_then_succeeds(setup, tmp_path, monkeypatch):
     original = RecoveryStore.mark_capture_incomplete
     calls = 0
 
-    async def flaky(self, *args, **kwargs):
+    async def flaky(self: RecoveryStore, *args: Any, **kwargs: Any) -> None:
         nonlocal calls
         calls += 1
         if calls < 3:
@@ -156,8 +164,8 @@ async def test_marker_retries_then_succeeds(setup, tmp_path, monkeypatch):
 
 
 async def test_marker_persistent_failure_never_admits_call(
-    setup, tmp_path, monkeypatch
-):
+    setup: CaptureSetup, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store, tasks, worker = setup
     task = await create(tasks, tmp_path, proof=True)
     generation, previous = await tasks.park_identity(task)
@@ -170,7 +178,7 @@ async def test_marker_persistent_failure_never_admits_call(
         _capture=True,
     )
 
-    async def fail(*args, **kwargs):
+    async def fail(*args: Any, **kwargs: Any) -> None:
         raise OSError("store unavailable")
 
     monkeypatch.setattr(worker_module, "_CAPTURE_RETRY_SECONDS", 0.12)
@@ -184,8 +192,8 @@ async def test_marker_persistent_failure_never_admits_call(
 
 
 async def test_identity_failure_requires_durable_incomplete(
-    setup, tmp_path, monkeypatch
-):
+    setup: CaptureSetup, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store, tasks, worker = setup
     task = await create(tasks, tmp_path, proof=True)
     generation, previous = await tasks.park_identity(task)
@@ -198,7 +206,7 @@ async def test_identity_failure_requires_durable_incomplete(
         _capture=True,
     )
 
-    def fail(pid):
+    def fail(pid: int) -> None:
         raise OSError("unsupported")
 
     monkeypatch.setattr(worker_module, "process_identity", fail)
@@ -208,8 +216,11 @@ async def test_identity_failure_requires_durable_incomplete(
 
 @pytest.mark.parametrize("record_fails", [False, True])
 async def test_child_is_released_only_after_record_or_durable_fallback(
-    setup, tmp_path, monkeypatch, record_fails
-):
+    setup: CaptureSetup,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    record_fails: bool,
+) -> None:
     store, tasks, worker = setup
     task = await create(tasks, tmp_path, proof=True)
     recovery = RecoveryStore(store)
@@ -228,12 +239,12 @@ async def test_child_is_released_only_after_record_or_durable_fallback(
     )
     if record_fails:
 
-        async def fail(*args, **kwargs):
+        async def fail(*args: Any, **kwargs: Any) -> None:
             raise OSError("record failed")
 
         monkeypatch.setattr(RecoveryStore, "record_captured_process", fail)
 
-    async def record(pid):
+    async def record(pid: int) -> None:
         assert not path.exists()
         await worker._capture_process(task, "run", pid)
         assert not path.exists()
@@ -257,7 +268,9 @@ async def test_child_is_released_only_after_record_or_durable_fallback(
     assert path.exists()
 
 
-async def test_failed_fallback_never_releases_child(setup, tmp_path, monkeypatch):
+async def test_failed_fallback_never_releases_child(
+    setup: CaptureSetup, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store, tasks, worker = setup
     task = await create(tasks, tmp_path, proof=True)
     generation, previous = await tasks.park_identity(task)
@@ -271,10 +284,10 @@ async def test_failed_fallback_never_releases_child(setup, tmp_path, monkeypatch
     )
     path = tmp_path / "child-ran"
 
-    def fail_identity(pid):
+    def fail_identity(pid: int) -> None:
         raise OSError("unsupported")
 
-    async def fail_marker(*args, **kwargs):
+    async def fail_marker(*args: Any, **kwargs: Any) -> None:
         raise OSError("store unavailable")
 
     monkeypatch.setattr(worker_module, "process_identity", fail_identity)
@@ -294,7 +307,9 @@ async def test_failed_fallback_never_releases_child(setup, tmp_path, monkeypatch
 
 
 @pytest.mark.parametrize("proof", [False, True])
-async def test_worker_context_hooks_bind_execution(tmp_path, monkeypatch, proof):
+async def test_worker_context_hooks_bind_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, proof: bool
+) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -306,25 +321,27 @@ async def test_worker_context_hooks_bind_execution(tmp_path, monkeypatch, proof)
     config.gateway.workspace = str(workspace)
     workers = TaskWorkers(store, gate, lambda: config, hub)
     checked = asyncio.Event()
-    observations = []
+    observations: list[str | None] = []
 
     class Agent:
-        async def close(self):
+        async def close(self) -> None:
             pass
 
     class Runner:
         busy = False
 
-        def __init__(self, agent, store, session_id, **kwargs):
+        def __init__(
+            self, agent: Any, store: SessionStore, session_id: str, **kwargs: Any
+        ) -> None:
             self.session_id = session_id
 
-        def observe(self, ask):
+        def observe(self, ask: Any) -> Any:
             return ask
 
-        async def start_turn(self, text, **kwargs):
+        async def start_turn(self, text: str, **kwargs: Any) -> None:
             observations.append(kwargs.get("client_request_id"))
 
-        async def wait(self):
+        async def wait(self) -> SimpleNamespace:
             async with store.component_transaction("capture_test") as conn:
                 row = await (
                     await conn.execute(
@@ -332,6 +349,7 @@ async def test_worker_context_hooks_bind_execution(tmp_path, monkeypatch, proof)
                         (self.session_id,),
                     )
                 ).fetchone()
+            assert row is not None
             execution = row[0]
             assert observations[0] == (execution if proof else None)
             entry = TOOL_ENTRY.get()
@@ -353,10 +371,10 @@ async def test_worker_context_hooks_bind_execution(tmp_path, monkeypatch, proof)
             checked.set()
             return SimpleNamespace(status="completed")
 
-        async def close(self, **kwargs):
+        async def close(self, **kwargs: Any) -> None:
             pass
 
-    async def build(**kwargs):
+    async def build(**kwargs: Any) -> Agent:
         return Agent()
 
     monkeypatch.setattr(worker_module, "SessionRunner", Runner)

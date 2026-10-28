@@ -13,7 +13,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     denial_text,
 )
-from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
+from localmelo.melo.contracts.tool_capture import TOOL_ENTRY, _ENTRY_MARKED
 from localmelo.melo.executor.builtins import builtin_names
 from localmelo.melo.executor.models import (
     ArtifactMeta,
@@ -340,17 +340,22 @@ class Executor:
         deadline = asyncio.timeout(timeout_s)
         try:
             async with deadline:
+                mismatch = _parameter_mismatch(fn, request.arguments)
+                if mismatch:
+                    raise TypeError(mismatch)
                 capture = TOOL_ENTRY.get()
-                if (
-                    capture is not None
-                    and request.tool_name not in self._process_free
-                    and not _parameter_mismatch(fn, request.arguments)
-                ):
+                marked = False
+                if capture is not None and request.tool_name not in self._process_free:
                     await capture()
                     task = asyncio.current_task()
                     if task is not None and task.cancelling():
                         raise asyncio.CancelledError()
-                output = await fn(**request.arguments)
+                    marked = True
+                token = _ENTRY_MARKED.set(marked)
+                try:
+                    output = await fn(**request.arguments)
+                finally:
+                    _ENTRY_MARKED.reset(token)
         except TimeoutError as exc:
             duration = (time.perf_counter() - start) * 1000
             if deadline.expired():

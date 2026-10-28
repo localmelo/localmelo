@@ -16,8 +16,13 @@ from typing import Any
 
 from localmelo.melo.checker.tiers import BUILTIN_TIERS, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_OUTPUT_LEN
+from localmelo.melo.contracts.tool_capture import _ENTRY_MARKED
 from localmelo.melo.executor.env import child_env
-from localmelo.melo.executor.process_gate import PROCESS_RECORD, gated_exec
+from localmelo.melo.executor.process_gate import (
+    PROCESS_RECORD,
+    UnsupportedProcessGate,
+    gated_exec,
+)
 from localmelo.melo.schema import ToolDef
 
 # A built-in tool's callable.
@@ -120,6 +125,20 @@ async def _shell_exec(command: str) -> str:
     return text
 
 
+async def _gated_or_fallback(
+    argv: list[str], *, record: Any, **kwargs: Any
+) -> asyncio.subprocess.Process:
+    try:
+        return await gated_exec(argv, record=record, **kwargs)
+    except UnsupportedProcessGate:
+        # Only Executor can establish that the incomplete marker committed.
+        if not _ENTRY_MARKED.get():
+            raise
+        return await asyncio.create_subprocess_exec(
+            *argv, start_new_session=True, **kwargs
+        )
+
+
 async def _run_shell(
     command: str,
     *,
@@ -155,7 +174,7 @@ async def _run_shell(
             start_new_session=True,
         )
     else:
-        proc = await gated_exec(
+        proc = await _gated_or_fallback(
             ["/bin/sh", "-c", command],
             record=record,
             stdin=stdin,
@@ -414,7 +433,7 @@ async def _run_python(
             start_new_session=True,
         )
     else:
-        proc = await gated_exec(
+        proc = await _gated_or_fallback(
             [sys.executable, "-c", _python_wrapper()],
             record=record,
             stdin=subprocess.PIPE,

@@ -15,6 +15,10 @@ PROCESS_RECORD: contextvars.ContextVar[Callable[[int], Awaitable[None]] | None] 
     contextvars.ContextVar("PROCESS_RECORD", default=None)
 )
 
+class UnsupportedProcessGate(RuntimeError):
+    """The platform cannot spawn the gated bootstrap."""
+
+
 # This trusted bootstrap performs no task action before the parent releases it.
 _BOOTSTRAP = """import json,os,sys
 f = int(sys.argv[1])
@@ -107,6 +111,8 @@ async def gated_exec(
     try:
         try:
             proc = await asyncio.shield(spawn)
+        except NotImplementedError as exc:
+            raise UnsupportedProcessGate("gated subprocess spawn is unsupported") from exc
         except asyncio.CancelledError:
             os.close(write_fd)
             write_fd = -1
@@ -118,7 +124,10 @@ async def gated_exec(
         try:
             await _write_all(write_fd, payload)
             await _writable(write_fd)
-            await record(proc.pid)
+            try:
+                await record(proc.pid)
+            except UnsupportedProcessGate as exc:
+                raise RuntimeError("process recording failed") from exc
             current = asyncio.current_task()
             if current is not None and current.cancelling():
                 raise asyncio.CancelledError()
