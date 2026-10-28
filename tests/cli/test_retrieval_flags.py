@@ -49,6 +49,7 @@ def test_the_seven_flags_parse_into_agent_options() -> None:
             "0.5",
             "--retrieval-extra-body",
             '{"chat_template_kwargs": {"enable_thinking": false}}',
+            "q",
         ]
     )
     assert options.retriever == "llm"
@@ -429,3 +430,97 @@ def test_a_config_retriever_off_refuses_a_recall_flag(
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
     assert _main(["--recall-k", "4", "q"], monkeypatch) == 2
     assert "do not give the --recall-* flags" in _error_line(capsys)
+
+
+def test_empty_recall_lists_are_usage_errors(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = cli._build_parser()
+    for argv, needle in (
+        (["--recall-at", "", "q"], "give at least one recall trigger"),
+        (["--recall-kinds", ",", "q"], "give at least one recall kind"),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args(argv)
+        assert exc.value.code == 2
+        assert needle in capsys.readouterr().err
+
+
+def test_a_reserved_extra_body_field_is_a_usage_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = cli._build_parser()
+    for body, needle in (
+        ('{"model": "x"}', "must not set 'model'"),
+        ("[]", "must be a JSON object"),
+        ("not json", "not JSON"),
+    ):
+        with pytest.raises(SystemExit) as exc:
+            parser.parse_args(["--retrieval-extra-body", body, "q"])
+        assert exc.value.code == 2
+        assert needle in capsys.readouterr().err
+
+
+def test_the_interactive_ui_refuses_the_extra_body(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = cli._build_parser()
+    with pytest.raises(SystemExit) as exc:
+        cli._check_args(
+            parser,
+            parser.parse_args(
+                [
+                    "--reasoning",
+                    "compress",
+                    "--retriever",
+                    "llm",
+                    "--retrieval-extra-body",
+                    '{"chat_template_kwargs": {"enable_thinking": false}}',
+                ]
+            ),
+        )
+    assert exc.value.code == 2
+    assert _error_line(capsys) == (
+        "melo: error: --retrieval-extra-body is not in the interactive UI yet; "
+        'give it with a task (melo -- "<task>")'
+    )
+
+
+def test_builtins_recall_without_the_tool_trigger_is_a_usage_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser, args = _parse(
+        [
+            "--base-url",
+            "http://127.0.0.1:1/v1",
+            "--reasoning",
+            "compress",
+            "--builtins",
+            "recall",
+            "q",
+        ]
+    )
+    options = cli._direct_options(parser, args)
+    with pytest.raises(SystemExit) as exc:
+        cli._build_direct_mode_agent(args, options=options)
+    assert exc.value.code == 2
+    assert "recall needs --recall-at tool" in _error_line(capsys)
+
+
+def test_a_replay_required_backend_refuses_message_placement_as_a_usage_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from .test_reasoning_flags import _write_config
+
+    path = tmp_path / "config.toml"
+    _write_config(
+        path,
+        extra='reasoning_field = "auto"\nrequires_reasoning_replay = true\n',
+        agent=(
+            '\n[agent]\nreasoning = "compress"\n'
+            '\n[retrieval]\nplacement = "message"\n'
+        ),
+    )
+    monkeypatch.setattr(config, "CONFIG_PATH", str(path))
+    assert _main(["q"], monkeypatch) == 2
+    assert "message is not available in replay modes" in _error_line(capsys)
