@@ -461,7 +461,11 @@ async def _run_worker_brief(
     routine: str | None,
 ) -> int:
     """Run one opt-in worker and write its versioned report."""
-    from localmelo.support.cli.worker_contract import WorkerObserver, result_record
+    from localmelo.support.cli.worker_contract import (
+        WorkerObserver,
+        failure_record,
+        result_record,
+    )
 
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
@@ -487,6 +491,17 @@ async def _run_worker_brief(
                 observe=observer,
                 routine=routine,
             )
+        if observer.error is not None:
+            record = await asyncio.to_thread(
+                failure_record,
+                "transport_error",
+                workspace,
+                "Worker event output failed",
+            )
+            await asyncio.to_thread(observer.transport_result, record)
+            await asyncio.to_thread(observer.close)
+            print("melo: worker event output failed", file=sys.stderr)
+            return EXIT_CRASHED
         code = _exit_code(outcome.status)
         record = await asyncio.to_thread(
             result_record, outcome, observer, workspace, code
@@ -510,6 +525,10 @@ async def _run_worker_brief(
     except asyncio.CancelledError:
         if observer.error is None:
             raise
+        record = await asyncio.to_thread(
+            failure_record, "transport_error", workspace, "Worker event output failed"
+        )
+        await asyncio.to_thread(observer.transport_result, record)
         print(
             f"melo: worker output failed: {_one_line(str(observer.error))}",
             file=sys.stderr,
@@ -1607,18 +1626,46 @@ def main() -> None:
     # direct mode (no gateway): exit code 0 completed, 1 crashed, 2 otherwise
     if args.query and not args.serve:
         query = " ".join(args.query)
-        options = _direct_options(parser, args)
-        # The surface is known here: direct mode has no approver, so its
-        # default set leaves shell_exec out (--builtins all names it).
-        options = dataclasses.replace(options, mode="direct")
-        if not query:
-            # The loop keeps its answers, so each turn sees the earlier ones; a
-            # single task's options stay as they were.
-            options = dataclasses.replace(options, record_answers=True)
-        tool_providers = _direct_tool_providers(parser, args)
-        agent = _build_direct_mode_agent(
-            args, options=options, tool_providers=tool_providers
-        )
+        try:
+            options = _direct_options(parser, args)
+            # The surface is known here: direct mode has no approver, so its
+            # default set leaves shell_exec out (--builtins all names it).
+            options = dataclasses.replace(options, mode="direct")
+            if not query:
+                # The loop keeps its answers, so each turn sees the earlier ones; a
+                # single task's options stay as they were.
+                options = dataclasses.replace(options, record_answers=True)
+            tool_providers = _direct_tool_providers(parser, args)
+            agent = _build_direct_mode_agent(
+                args, options=options, tool_providers=tool_providers
+            )
+        except (Exception, SystemExit) as exc:
+            if args.brief is None or (isinstance(exc, SystemExit) and exc.code != 1):
+                raise
+            from localmelo.support.cli.worker_contract import failure_record
+
+            error = (
+                "Worker startup failed"
+                if isinstance(exc, SystemExit)
+                else _one_line(str(exc))
+            )
+            workspace = os.path.realpath(
+                os.path.expanduser(args.workspace or os.getcwd())
+            )
+            record = failure_record("startup_error", workspace, error)
+            if not isinstance(exc, SystemExit):
+                print(
+                    f"melo: worker startup failed: {record['error']}", file=sys.stderr
+                )
+            if args.output_format == "stream-json":
+                record = {"v": 1, "type": "result", "result": record}
+            try:
+                print(
+                    json.dumps(record, ensure_ascii=True, allow_nan=False), flush=True
+                )
+            except BrokenPipeError:
+                print("melo: worker output failed: broken pipe", file=sys.stderr)
+            raise SystemExit(EXIT_CRASHED) from None
         worker_args: dict[str, Any] = (
             {"worker_brief": True} if args.brief is not None else {}
         )

@@ -418,9 +418,11 @@ is wrapped as `{ "v": 1, "type": "event", "event": ... }`, followed by a
 `{ "v": 1, "type": "result", "result": ... }` worker result when the run
 finishes normally. A broken or undrained output pipe is a failure; signals,
 process death or a broken pipe can leave no result. Drain stdout and check
-both the final record and the exit code. Startup and transport errors may
-exit without a worker result; explicit error records are deferred. Worker
-output uses pattern-based
+both the final record and the exit code. Agent construction failures after a
+valid brief produce `startup_error` with `run: null` and exit 1. For event
+output failures the worker attempts a `transport_error` result with `run: null`
+and exits 1; a failed or blocked output may prevent that record from arriving.
+Usage errors remain resultless. Worker output uses pattern-based
 redaction and omits some recognizable sensitive-file reads, including simple
 shell and Python reads. Arbitrary commands, code and model output can still
 expose secrets: the stream is not a secret boundary. Review before sharing. `--inbox` is not yet
