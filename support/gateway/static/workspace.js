@@ -354,7 +354,7 @@ function syncUI() {
   if (!session && S.levelsOpen) showLevelMenu(false);
   $("new-btn").disabled = false;
   if (workerMode) {
-    const heading = workers.state.session?.title || "Workers";
+    const heading = workers.state.mode === "detail" ? workers.state.session?.title || "Worker run" : "Workers";
     $("header-title").textContent = heading;
     $("header-model").textContent = "Read-only history";
     document.title = `localmelo · ${heading}`;
@@ -375,6 +375,7 @@ function renderSessions() {
   const snapshot = JSON.stringify([
     query,
     active,
+    workerMode,
     S.sessions.map((session) => [
       session.id,
       session.title,
@@ -422,7 +423,7 @@ function renderSessions() {
     close.type = "button";
     close.setAttribute("aria-label", `Close chat: ${title(session)}`);
     close.title = "Close chat";
-    close.disabled = !!session.busy || (session.pending_approvals || 0) > 0;
+    close.disabled = workerMode || !!session.busy || (session.pending_approvals || 0) > 0;
     close.addEventListener("click", () => {
       deleteSession(session.id);
     });
@@ -1638,6 +1639,7 @@ async function stop() {
 }
 
 async function deleteSession(id) {
+  if (workerMode) return;
   const session = S.sessions.find((item) => item.id === id);
   if (!session || session.busy || (session.pending_approvals || 0) > 0) return;
   try {
@@ -1685,6 +1687,7 @@ function showLevelMenu(open) {
 }
 
 async function setLevel(level) {
+  if (workerMode) return;
   const id = S.activeId;
   showLevelMenu(false);
   if (!id) return;
@@ -1756,11 +1759,14 @@ function showWorkers(id) {
   document.querySelector(".composer-area").hidden = true;
   $("details-trigger").hidden = true;
   $("level-btn").hidden = true;
+  $("connection-btn").hidden = true;
+  $("chats-link").href = S.activeId ? `#/s/${S.activeId}` : "#/new";
+  renderSessions();
   $("workers-link").setAttribute("aria-current", "page");
   $("chats-link").removeAttribute("aria-current");
   sidebar(false);
   if (id) workers.detail(id);
-  else if (workers.state.loaded) { workers.state.epoch++; workers.state.mode = "list"; workers.state.loading = false; workers.state.error = ""; renderWorkers(); }
+  else if (workers.state.loaded && !workers.state.error) { workers.state.epoch++; workers.state.mode = "list"; workers.state.session = null; workers.state.view = null; workers.state.loading = false; renderWorkers(); }
   else workers.list();
   const previousRow = !id && previousWorker && Array.from($("worker-panel").children).find((node) => node.dataset?.workerId === previousWorker);
   (previousRow || $("worker-panel").querySelector("h1"))?.focus();
@@ -1775,6 +1781,8 @@ function leaveWorkers() {
   document.querySelector(".composer-area").hidden = false;
   $("details-trigger").hidden = false;
   $("level-btn").hidden = false;
+  $("connection-btn").hidden = false;
+  renderSessions();
   $("workers-link").removeAttribute("aria-current");
   $("chats-link").setAttribute("aria-current", "page");
   for (const [slot, entry] of Object.entries(S.outbox)) {
@@ -1809,14 +1817,14 @@ function renderWorkers() {
     const source = select("Source", "source", [["", "All sources"], ["localmelo", "localmelo"], ["dsh", "dsh"]], state.filters.source);
     const label = el("label", "", "Parent run");
     const parent = document.createElement("input"); parent.value = state.filters.parent; label.append(parent); filters.append(label);
-    const apply = document.createElement("button"); apply.type = "submit"; apply.textContent = "Apply"; filters.append(apply);
+    const apply = document.createElement("button"); apply.type = "submit"; apply.className = "primary-button"; apply.textContent = "Apply"; filters.append(apply);
     filters.append(button("secondary-button", "Clear filters", () => { state.filters = {status: "", source: "", parent: ""}; workers.list(); }));
     filters.addEventListener("submit", (event) => { event.preventDefault(); state.filters = {status: status.value, source: source.value, parent: parent.value.trim()}; workers.list(); });
     nodes.push(filters);
     for (const row of state.rows) {
       const link = document.createElement("a");
       link.className = "worker-row"; link.dataset.workerId = row.id; link.href = `#/workers/${encodeURIComponent(row.id)}`;
-      link.append(el("strong", "", row.title || "Not recorded"), el("span", "muted", [row.source, row.model, row.status].map((v) => v ?? "Not recorded").join(" · ")));
+      link.append(el("strong", "", row.title || "Not recorded"), el("span", "muted", [row.source, row.model, row.status].map((v) => v == null || v === "" ? "Not recorded" : String(v)).join(" · ")));
       const started = row.started_at == null ? "Not recorded" : new Date(row.started_at * 1000).toLocaleString();
       const duration = row.duration_s == null ? "Not recorded" : `${row.duration_s} s`;
       link.append(el("span", "muted", `Started: ${started} · Duration: ${duration}${row.parent_run ? ` · Parent: ${row.parent_run}` : ""}`));
@@ -1836,7 +1844,7 @@ function renderWorkers() {
     const meta = el("dl", "worker-meta");
     const firstTurn = state.view.turns[0];
     const started = session.started_at == null ? null : new Date(session.started_at * 1000).toLocaleString();
-    const duration = firstTurn?.result?.duration_s ?? (firstTurn?.finishedAt && firstTurn?.startedAt ? firstTurn.finishedAt - firstTurn.startedAt : null);
+    const duration = session.duration_s ?? firstTurn?.result?.duration_s ?? (firstTurn?.finishedAt && firstTurn?.startedAt ? firstTurn.finishedAt - firstTurn.startedAt : null);
     for (const [label, value] of [["Source", session.source], ["Model", session.model], ["Workspace", session.workspace], ["Git branch", session.git_branch], ["Git head", session.git_head], ["Started", started], ["Duration", duration == null ? null : `${duration} s`], ["Steps", session.steps], ["Tokens", session.tokens], ["Status", session.status], ["Exit code", session.exit_code], ["Parent run", session.parent_run]]) {
       meta.append(el("dt", "", label), el("dd", "", value == null || value === "" ? "Not recorded" : String(value)));
     }
@@ -1856,7 +1864,11 @@ function renderWorkers() {
         nodes.push(group);
       }
       if (turn.answer) nodes.push(answerNode(turn.answer));
-      if (turn.status) nodes.push(el("p", "turn-status", statusText(turn.status, turn.cause).title));
+      if (turn.status) {
+        nodes.push(el("p", "turn-status", statusText(turn.status, turn.cause).title));
+        const error = turn.status !== "completed" ? cleanOutput(String(turn.result?.error || turn.error || "")).split("\n")[0] : "";
+        if (error) nodes.push(el("p", "failure-error", error));
+      }
     }
   }
   root.replaceChildren(...nodes);

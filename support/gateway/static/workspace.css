@@ -1402,6 +1402,18 @@ dialog::backdrop {
 .worker-filters label {
   display: grid;
   gap: 6px;
+  margin: 0;
+}
+.worker-filters button,
+.worker-filters input,
+.worker-filters select {
+  height: 40px;
+}
+.worker-panel a:not(.worker-row) {
+  color: var(--accent);
+}
+.worker-panel a:not(.worker-row):visited {
+  color: var(--accent);
 }
 .worker-filters input,
 .worker-filters select {

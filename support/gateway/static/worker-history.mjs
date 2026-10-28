@@ -32,8 +32,8 @@ export function workerHistory(api, changed) {
   };
   async function list({more = false} = {}) {
     const epoch = ++state.epoch;
-    state.mode = 'list'; state.selectedId = null; state.loading = true; state.error = '';
-    if (!more) { state.rows = []; state.nextCursor = null; }
+    state.mode = 'list'; state.selectedId = null; state.view = null; state.session = null; state.loading = true; state.error = '';
+    if (!more) { state.rows = []; state.nextCursor = null; state.loaded = false; }
     const params = new URLSearchParams({kind: 'worker', limit: '50'});
     for (const [key, value] of Object.entries(state.filters)) {
       if (value) params.set(key === 'parent' ? 'parent_run' : key, value);

@@ -3,13 +3,15 @@ import test from 'node:test';
 import {foldWorkerTurns, workerHistory} from '../../support/gateway/static/worker-history.mjs';
 
 test('folds stored events exactly once and keeps a stored answer', () => {
-  const view = foldWorkerTurns('worker', [{turn: 1, user_text: 'Brief', answer: 'Saved', status: 'completed', finished_at: 2, events: [
-    {id: 2, turn: 1, type: 'assistant.message', data: {content: 'Working', thinking: 'Consider'}},
+  const view = foldWorkerTurns('worker', [{turn: 1, user_text: '', answer: 'Saved', status: 'completed', finished_at: 2, events: [
+    {id: 3, turn: 1, type: 'assistant.message', data: {thinking: 'Second'}},
+    {id: 2, turn: 1, type: 'assistant.message', data: {thinking: 'First'}},
     {id: 1, turn: 1, type: 'turn.started', data: {turn: 1, user_text: 'Brief'}},
   ]}]);
   assert.equal(view.turns.length, 1);
+  assert.equal(view.turns[0].userText, 'Brief');
   assert.equal(view.turns[0].answer, 'Saved');
-  assert.equal(view.turns[0].items.filter((item) => item.kind === 'thinking').length, 1);
+  assert.deepEqual(view.turns[0].items.map((item) => item.text), ['First', 'Second']);
 });
 
 test('filters and cursor are sent server-side, duplicate rows are suppressed', async () => {
