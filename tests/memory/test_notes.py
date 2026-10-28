@@ -1421,6 +1421,21 @@ def test_digest_names_the_files_written_and_the_last_check(tmp_path: Path) -> No
     )
 
 
+def test_a_program_run_gives_its_last_line_or_exit_code_as_the_check() -> None:
+    run = ToolCall("shell_exec", {"command": "python transpose.py"})
+    output = ToolResult("shell_exec", "loading\nall rows transposed")
+    digest = digest_note(
+        "q",
+        "completed",
+        [],
+        calls=[(run, output)],
+    )
+    assert digest.verified == "python transpose.py -> all rows transposed"
+    exited = ToolResult("shell_exec", "[exit code 1]\nTraceback: boom")
+    digest = digest_note("q", "completed", [], calls=[(run, exited)])
+    assert digest.verified == "python transpose.py -> exit 1"
+
+
 def test_digest_has_no_verified_without_a_check() -> None:
     write = ToolCall("file_write", {"path": "a.py", "content": "x"})
     digest = digest_note(
