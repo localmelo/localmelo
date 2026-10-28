@@ -76,6 +76,88 @@
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
 
+        <article class="update-entry" id="u-2026-10-27-forget">
+          <h3>在 Python 中忘掉一个任务的记忆</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/64">#64</a>
+          </p>
+          <ul>
+            <li>Python 代码可以忘掉一个任务的记忆，也可以清空全部记忆：<code>await hippo.forget(task_id)</code> 会删除该任务在 <code>tasks</code>、<code>steps</code> 和 <code>llm_calls</code> 表中的行，以及元数据中指明该任务的长期记忆条目（即该任务的反思）；<code>await hippo.forget_all()</code> 会清空历史记录和长期记忆，包括步骤摘要。工作记忆、程序记忆和会话不受影响。</li>
+            <li>遗忘时，被删除的内容会被覆写，WAL 会被截断，所以文本不会留在数据库或其 <code>-wal</code> 文件里。目前还没有对应的命令或页面。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reset-memory">重置记忆（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-session-close">
+          <h3>运行任务中的会话不会被关闭</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/63">#63</a>
+          </p>
+          <ul>
+            <li><code>DELETE /v1/sessions/&lt;id&gt;</code> 在会话的任务还在运行时不会关闭它，而是返回 HTTP 409 和网关的错误响应体（<code>error</code> 和 <code>session_id</code>），并让任务和会话继续运行；空闲的会话仍和以前一样关闭。任务结束后可以再关闭会话。</li>
+            <li>停止网关时仍会关闭所有会话，包括正在运行的会话；仍在运行的任务随后以 <code>crashed</code> 结束。<code>/v1/agent</code> API 仍然没有停止运行的路由。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-memory-files">
+          <h3>新建的记忆文件仅自己可读</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/62">#62</a>
+          </p>
+          <ul>
+            <li>新建的 <code>long_term.db</code> 及其 <code>-wal</code> 和 <code>-shm</code> 文件使用 0600 权限，和 <code>history.db</code>、<code>procedures.db</code> 一样。以前它通常是 0644，同一台电脑上的其他用户可以读到其中的步骤摘要和反思。已有文件会保留原来的权限；localmelo 创建的记忆目录仍然是 0700。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-session-progress">
+          <h3>会话的每一轮可以报告进度</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/60">#60</a>
+          </p>
+          <ul>
+            <li><code>SessionRunner(..., progress=True)</code> 会让每一轮运行报告 <code>run.progress</code> 事件，并把这些事件和该轮一起保存；这个开关保留在 <code>SessionRunner</code> 上，<code>replace_agent</code> 之后仍然有效。<code>run_turn</code> 和 <code>start_turn</code> 接受 <code>routine=NAME</code>，只在给出时传给运行。</li>
+            <li><code>localmelo.support.progress_line.format_past(payload, width)</code> 单独给出进度行中的“过去的运行”和步骤部分，措辞和宽度规则与直接模式相同。交互式界面目前还不会请求进度事件，进度行本身没有变化。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-shell-stdin">
+          <h3>Shell 命令不再接管终端</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/59">#59</a>
+          </p>
+          <ul>
+            <li><code>shell_exec</code> 现在在每种模式下都把 <code>/dev/null</code> 作为命令的标准输入。如果命令的标准输入是一个不是 melo 控制终端的 pty，它可能在启动时把这个 pty 当作自己的控制终端，并在退出时挂断它，导致已经完成的 <code>melo</code> 运行以退出码 120 而不是 0 结束。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-progress-names">
+          <h3>进度行会说明借用了哪个任务</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/56">#56</a>
+          </p>
+          <ul>
+            <li>相似任务的历史步骤现在显示为 <code>like &lt;routine title&gt;:</code>，而不是 <code>like a similar task:</code>，并写明是哪个任务（<code>--routine</code> 的名字，否则是该任务查询的开头）。</li>
+            <li>如果 <code>shell_exec</code> 的命令以字符串数组的形式传入（工具会拒绝这种形式），现在会按命令的单词来标记和分类，因此 <code>["ls", "-la"]</code> 会被当作读取命令，而不是 <code>{command:</code>。程序记忆也保存同样的标签。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-ollama-save">
+          <h3>选中的 Ollama 服务器会保存为 Ollama</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/55">#55</a>
+          </p>
+          <ul>
+            <li>首次运行、<code>--base-url</code> 之后出现的 <code>Save URL · MODEL as the default backend?</code> 问题，以及 <code>/backend</code>，以前都会把服务器保存为 <code>vllm</code>。现在保存时会向该服务器请求一次 <code>GET /api/version</code>：像 Ollama 一样应答的服务器会保存为 <code>ollama</code> 后端，使用 Ollama 自己的 API 和 300 秒的对话超时；其他兼容 OpenAI 接口的服务器仍然保存为 <code>vllm</code>。</li>
+            <li>以前，这样保存的 Ollama 服务器会使用 vLLM 的 120 秒对话超时，横幅也显示 vLLM。</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-27-interactive-ui">
           <h3>终端里的交互式界面</h3>
           <p class="update-date">
