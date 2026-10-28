@@ -133,9 +133,9 @@ class RecoveryStore:
             task = await _one(
                 conn, "SELECT state FROM tasks WHERE task_id = ?", (task_id,)
             )
-            request = found[0]["request"]
+            receipt = found[0]
             if identity != (expected_generation, expected_operation_id) or (
-                identity == (request["generation"], request["previous"])
+                identity == (receipt["generation"], receipt["pending_operation_id"])
                 and task
                 and task[0] not in TERMINAL_PHASES
             ):
@@ -164,7 +164,7 @@ class RecoveryStore:
             (task_id,),
         )
         current = bool(
-            row[2] == "committed"
+            row[2] in {"prepared", "committed"}
             and task
             and task[0] == row[5]
             and (tuple(identity) if identity else (None, None)) == (row[3], row[4])
@@ -252,7 +252,7 @@ class RecoveryStore:
                     or (
                         not first
                         and (
-                            provenance[0] != "started"
+                            provenance[0] not in {"started", "unknown"}
                             or provenance[1] != expected_execution_id
                             or provenance[2]
                             or not task[2].strip()
@@ -313,6 +313,108 @@ class RecoveryStore:
             result = RecoveryProvenance(task_id, row[0], row[1], bool(row[2]), row[3])
         return RecoveryLaunch(result, acquired)
 
+    async def adopt_legacy(
+        self,
+        task_id: str,
+        *,
+        operation_id: str,
+        execution_id: str,
+        expected_generation: int | None,
+        expected_operation_id: str | None,
+        confirmed: bool,
+    ) -> None:
+        """Record explicit orphan-risk acceptance, not proof that processes died.
+
+        The caller must first show the user the warning and obtain confirmation.
+        This dormant seam neither queues nor launches the task.
+        """
+        _text(operation_id, "operation_id")
+        _text(execution_id, "execution_id")
+        _guard(expected_generation, expected_operation_id)
+        if confirmed is not True:
+            raise ValueError("explicit confirmation is required")
+        data = {
+            "execution_id": execution_id,
+            "generation": expected_generation,
+            "previous": expected_operation_id,
+            "confirmed": True,
+        }
+        async with self.store.component_event_transaction("recovery_adopt") as (
+            conn,
+            events,
+        ):
+            existing = await self._receipt(conn, task_id, operation_id)
+            if existing:
+                if (
+                    existing[0]["kind"] != "adopt"
+                    or existing[0]["request"] != data
+                    or not existing[1]
+                ):
+                    raise TaskConflictError("adoption operation reused or superseded")
+                return
+            task = await _one(
+                conn, "SELECT state, card FROM tasks WHERE task_id = ?", (task_id,)
+            )
+            if task is None:
+                raise TaskNotFoundError(f"No task with id {task_id}")
+            provenance = await _one(
+                conn,
+                "SELECT first_start, execution_id FROM recovery_provenance WHERE task_id = ?",
+                (task_id,),
+            )
+            pending = await _one(
+                conn,
+                "SELECT 1 FROM recovery_operations WHERE task_id = ? AND kind = 'recovery' AND phase = 'prepared'",
+                (task_id,),
+            )
+            if (
+                task[0] not in {"interrupted", "parked"}
+                or not task[1].strip()
+                or pending
+                or (
+                    provenance
+                    and (
+                        provenance[0] != "unknown"
+                        or provenance[1] not in (None, execution_id)
+                    )
+                )
+            ):
+                raise TaskConflictError("task is not eligible for legacy adoption")
+            generation = await compare_park_identity(
+                conn,
+                task_id,
+                expected_generation=expected_generation,
+                expected_operation_id=expected_operation_id,
+                operation_id=expected_operation_id,
+                create=True,
+            )
+            await conn.execute(
+                "INSERT INTO recovery_provenance (task_id, first_start, execution_id, unsafe_resume, reason) VALUES (?, 'unknown', ?, 0, 'user accepted orphan risk') ON CONFLICT(task_id) DO UPDATE SET execution_id = excluded.execution_id, unsafe_resume = 0, reason = excluded.reason",
+                (task_id, execution_id),
+            )
+            await conn.execute(
+                "INSERT INTO recovery_operations VALUES (?, ?, 'adopt', ?, 'committed', ?, ?, ?)",
+                (
+                    task_id,
+                    operation_id,
+                    _request(data),
+                    generation,
+                    expected_operation_id,
+                    task[0],
+                ),
+            )
+            await self.store.append_component_event(
+                conn,
+                events,
+                task_id,
+                "sched.recovery_risk_accepted",
+                {
+                    "operation_id": operation_id,
+                    "execution_id": execution_id,
+                    "generation": generation,
+                },
+            )
+
     async def prepare(
         self,
         task_id: str,
@@ -354,9 +456,7 @@ class RecoveryStore:
             if existing:
                 if existing[0]["kind"] != "recovery" or existing[0]["request"] != data:
                     raise TaskConflictError("recovery operation ID reused")
-                if existing[0]["phase"] == "superseded" or (
-                    existing[0]["phase"] == "committed" and not existing[1]
-                ):
+                if existing[0]["phase"] == "superseded" or not existing[1]:
                     raise TaskConflictError("recovery operation superseded")
                 return False
             pending = await _one(
@@ -398,19 +498,24 @@ class RecoveryStore:
                 or unsafe_resume
             ):
                 raise TaskConflictError("only proved unstarted tasks can be queued")
-            identity = await _one(
+            generation = await compare_park_identity(
                 conn,
-                "SELECT generation, operation_id FROM park_priority WHERE task_id = ?",
-                (task_id,),
+                task_id,
+                expected_generation=expected_generation,
+                expected_operation_id=expected_operation_id,
+                operation_id=expected_operation_id,
+                create=True,
             )
-            if (tuple(identity) if identity else (None, None)) != (
-                expected_generation,
-                expected_operation_id,
-            ):
-                raise TaskConflictError("stale task identity")
             await conn.execute(
-                "INSERT INTO recovery_operations VALUES (?, ?, 'recovery', ?, 'prepared', NULL, NULL, NULL)",
-                (task_id, operation_id, _request(data)),
+                "INSERT INTO recovery_operations VALUES (?, ?, 'recovery', ?, 'prepared', ?, ?, ?)",
+                (
+                    task_id,
+                    operation_id,
+                    _request(data),
+                    generation,
+                    expected_operation_id,
+                    task[0],
+                ),
             )
         return True
 
@@ -440,20 +545,19 @@ class RecoveryStore:
             if task[0] in TERMINAL_PHASES:
                 raise TaskStoreError("task is terminal")
             terminal = data["outcome"] in TERMINAL_PHASES
-            clear_pending = terminal or data["outcome"] == "interrupted"
-            pending_id = None if clear_pending else data["previous"]
+            pending_id = None if terminal else receipt["pending_operation_id"]
             generation = await compare_park_identity(
                 conn,
                 task_id,
-                expected_generation=data["generation"],
-                expected_operation_id=data["previous"],
+                expected_generation=receipt["generation"],
+                expected_operation_id=receipt["pending_operation_id"],
                 operation_id=pending_id,
                 create=True,
             )
-            if clear_pending:
+            if terminal:
                 await conn.execute(
-                    "UPDATE park_priority SET pause_pending = 0, snapshot_active = CASE WHEN ? THEN 0 ELSE snapshot_active END WHERE task_id = ?",
-                    (int(terminal), task_id),
+                    "UPDATE park_priority SET pause_pending = 0, snapshot_active = 0 WHERE task_id = ?",
+                    (task_id,),
                 )
             if data["crash"]:
                 inserted = await conn.execute(

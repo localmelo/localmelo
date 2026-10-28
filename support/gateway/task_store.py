@@ -983,9 +983,7 @@ class TaskStore:
                     operation_id=operation_id,
                     request=request,
                 )
-            elif (
-                choice is not None or (state is not None and state != "parked")
-            ) and await _first(
+            elif (choice is not None or state is not None) and await _first(
                 conn, "SELECT 1 FROM park_priority WHERE task_id = ?", (task_id,)
             ):
                 if await _first(
@@ -1273,7 +1271,6 @@ class TaskStore:
                     or current.state != "interrupted"
                     or not current.card.strip()
                     or not active
-                    or pending
                     or current.level != 5
                     or current.reason != "pause"
                 ):

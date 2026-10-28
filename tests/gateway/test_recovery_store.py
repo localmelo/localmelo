@@ -3,6 +3,7 @@
 import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -106,6 +107,38 @@ async def test_recovery_terminal_clears_pending_snapshot_and_finishes(
     assert row is not None and tuple(row) == (0, 0, None)
 
 
+async def test_interrupted_recovery_preserves_pending_pause(stores: tuple) -> None:
+    sessions, tasks, recovery, _ = stores
+    task_id = await mark_created(sessions, tasks)
+    await start(tasks, recovery, task_id)
+    await tasks.request_pending_pause(
+        task_id, operation_id="pause", **await identity(tasks, task_id)
+    )
+    await prepare(tasks, recovery, task_id, "recover")
+    await recovery.commit(task_id, operation_id="recover")
+    async with sessions.component_transaction("check_pending") as conn:
+        row = await (
+            await conn.execute(
+                "SELECT pause_pending, snapshot_active, operation_id FROM park_priority WHERE task_id = ?",
+                (task_id,),
+            )
+        ).fetchone()
+    assert row is not None and tuple(row) == (1, 1, "pause")
+    assert (await tasks.get_task(task_id)).state == "interrupted"
+    resumed = await tasks.resume_interrupted(
+        task_id, operation_id="resume", **await identity(tasks, task_id)
+    )
+    assert resumed.state == "queued" and resumed.level == 2
+    async with sessions.component_transaction("check_resumed") as conn:
+        row = await (
+            await conn.execute(
+                "SELECT pause_pending, snapshot_active FROM park_priority WHERE task_id = ?",
+                (task_id,),
+            )
+        ).fetchone()
+    assert row is not None and tuple(row) == (0, 0)
+
+
 async def test_repeated_create_cannot_upgrade_unknown_provenance(stores: tuple) -> None:
     sessions, tasks, recovery, _ = stores
     spec = TaskSpec.from_payload({"objective": "Old task"})
@@ -118,6 +151,52 @@ async def test_repeated_create_cannot_upgrade_unknown_provenance(stores: tuple) 
     )
     assert was_repeated and repeated.task_id == old.task_id
     assert (await recovery.provenance(old.task_id)).first_start == "unknown"
+
+
+async def test_legacy_adoption_requires_confirmation_and_card(stores: tuple) -> None:
+    sessions, tasks, recovery, task_id = stores
+    args = dict(
+        operation_id="adopt", execution_id="legacy", **await identity(tasks, task_id)
+    )
+    with pytest.raises(ValueError):
+        await recovery.adopt_legacy(task_id, confirmed=False, **args)
+    with pytest.raises(TaskStoreError):
+        await recovery.adopt_legacy(task_id, confirmed=True, **args)
+    await recovery.prepare(
+        task_id,
+        operation_id="recover",
+        execution_id="legacy",
+        outcome="interrupted",
+        card="Review before resuming",
+        reason="unknown execution",
+        crash=False,
+        unsafe_resume=True,
+        **await identity(tasks, task_id),
+    )
+    await recovery.commit(task_id, operation_id="recover")
+    args = dict(
+        operation_id="adopt", execution_id="legacy", **await identity(tasks, task_id)
+    )
+    await recovery.adopt_legacy(task_id, confirmed=True, **args)
+    await recovery.adopt_legacy(task_id, confirmed=True, **args)
+    assert (await tasks.get_task(task_id)).state == "interrupted"
+    provenance = await recovery.provenance(task_id)
+    assert provenance.first_start == "unknown" and not provenance.unsafe_resume
+    assert (await recovery.receipt(task_id, "adopt"))[1]
+    assert [e.event["type"] for e in await sessions.list_events(task_id)].count(
+        "sched.recovery_risk_accepted"
+    ) == 1
+    await tasks.change(task_id, state="queued")
+    launch = await recovery.start(
+        task_id,
+        operation_id="resume",
+        execution_id="new",
+        expected_execution_id="legacy",
+        **await identity(tasks, task_id),
+    )
+    assert launch.acquired
+    with pytest.raises(TaskStoreError):
+        await recovery.adopt_legacy(task_id, confirmed=True, **args)
 
 
 async def test_unknown_and_new_task_provenance(stores: tuple) -> None:
@@ -368,7 +447,15 @@ async def test_prepare_is_inert_and_commit_retry_after_cancel(stores: tuple) -> 
     before_identity = await identity(tasks, task_id)
     args = await prepare(tasks, recovery, task_id, "recover-1")
     assert await tasks.get_task(task_id) == before
-    assert await identity(tasks, task_id) == before_identity
+    after_identity = await identity(tasks, task_id)
+    assert (
+        after_identity["expected_generation"]
+        == before_identity["expected_generation"] + 1
+    )
+    assert (
+        after_identity["expected_operation_id"]
+        == before_identity["expected_operation_id"]
+    )
     assert await recovery.prepare(task_id, **args) is False
     with pytest.raises(TaskStoreError):
         await recovery.prepare(task_id, **{**args, "card": "different"})
@@ -398,6 +485,50 @@ async def test_prepare_is_inert_and_commit_retry_after_cancel(stores: tuple) -> 
         "expected_generation"
     ]
     assert len(events) == 1
+
+
+@pytest.mark.parametrize("after_commit", [False, True])
+async def test_prepare_commit_failure_is_reconciled(
+    stores: tuple, monkeypatch: pytest.MonkeyPatch, after_commit: bool
+) -> None:
+    sessions, tasks, recovery, _ = stores
+    task_id = await mark_created(sessions, tasks)
+    args = dict(
+        operation_id="recover",
+        execution_id="unstarted",
+        outcome="queued",
+        card="",
+        reason="",
+        crash=False,
+        unsafe_resume=False,
+        **await identity(tasks, task_id),
+    )
+    original = sessions._commit
+    fired = False
+
+    def before(label: str) -> None:
+        nonlocal fired
+        if label == "recovery_prepare" and not after_commit and not fired:
+            fired = True
+            raise RuntimeError("injected before commit")
+
+    async def fail(conn: Any, events: Any, label: str) -> None:
+        nonlocal fired
+        await original(conn, events, label)
+        if label == "recovery_prepare" and after_commit and not fired:
+            fired = True
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(sessions, "_before_commit", before)
+    monkeypatch.setattr(sessions, "_commit", fail)
+    with pytest.raises(asyncio.CancelledError if after_commit else RuntimeError):
+        await recovery.prepare(task_id, **args)
+    assert fired
+    receipt = await recovery.receipt(task_id, "recover")
+    assert (receipt is not None) == after_commit
+    assert await recovery.prepare(task_id, **args) is not after_commit
+    await recovery.commit(task_id, operation_id="recover")
+    assert (await recovery.receipt(task_id, "recover"))[1]
 
 
 async def test_stale_cas_and_stop_supersede_prepared_recovery(stores: tuple) -> None:

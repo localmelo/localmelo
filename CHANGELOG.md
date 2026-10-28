@@ -14,6 +14,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Scheduler component v3 adds dormant recovery provenance, guarded durable
+  intents and receipts, and process identity records. Interrupted recovery
+  retains pending pause intent; explicit legacy adoption records orphan-risk
+  acceptance. Startup behavior remains unchanged; process capture completeness
+  and runtime recovery are deferred. [#NN]
+
 - Worker park integration fences held provider and approval delivery, persists
   pause intent and evidence-based cards, releases cleanly parked worker slots,
   and re-asks withdrawn approvals on resume. Failed park writes retry and can
