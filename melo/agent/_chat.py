@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol
 
+from localmelo.melo.agent._request_accounting import ContextBudget, RequestAccounting
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
     LLM_REQUEST_KIND,
@@ -306,6 +307,7 @@ class RequestStats:
     usage: dict[str, int] = field(default_factory=dict)
     reasoning_chars: int = 0
     details: dict[str, int] = field(default_factory=dict)
+    context_budget: list[dict[str, Any]] | None = None
 
     def add_usage(self, usage: Mapping[str, object] | None) -> None:
         """Add the integer fields of one response's usage to the totals."""
@@ -351,6 +353,7 @@ class Chat:
         empty_prefix: bool = False,
         retry_delays: Sequence[float] = RETRY_DELAYS_S,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        context_budget: ContextBudget | None = None,
     ) -> None:
         self.llm = llm
         self.system_notes = tuple(system_notes)
@@ -358,7 +361,10 @@ class Chat:
         self.empty_prefix = empty_prefix
         self.retry_delays = tuple(retry_delays)
         self.sleep = sleep
-        self.stats = RequestStats()
+        self.context_budget = context_budget
+        self.on_context_budget: Callable[[dict[str, Any]], None] | None = None
+        self._accounting: RequestAccounting | None = None
+        self.reset_stats()
 
     def reset_stats(self) -> RequestStats:
         """Count from zero again; returns the new :attr:`stats`.
@@ -367,7 +373,22 @@ class Chat:
         cover one run.
         """
         self.stats = RequestStats()
+        self._accounting = (
+            RequestAccounting(self.context_budget)
+            if self.context_budget is not None
+            else None
+        )
+        if self._accounting is not None:
+            self.stats.context_budget = self._accounting.records
         return self.stats
+
+    def _emit_context_budget(self, record: dict[str, Any] | None) -> None:
+        """Notify the run sink once per attempted request, without exposing state."""
+        if record is not None and self.on_context_budget is not None:
+            try:
+                self.on_context_budget(dict(record))
+            except (Exception, asyncio.CancelledError):
+                logger.warning("Context budget callback failed", exc_info=True)
 
     async def _request(
         self,
@@ -402,12 +423,25 @@ class Chat:
         """
         attempt = 1
         while True:
+            accounting = self._accounting if kind in ("plan", "reflect") else None
+            record = None
+            proxy = 0
+            if accounting is not None:
+                record, proxy = accounting.start(
+                    self.llm.model,
+                    kind,
+                    messages,
+                    tools,
+                    replay=bool(self.llm.reasoning_field),
+                    attempt=attempt,
+                )
             sent = time.monotonic()
             try:
                 response = await self._send(messages, tools, attempt, kind)
                 break
             except ProviderError as exc:
                 self.stats.llm_errors += 1
+                self._emit_context_budget(record)
                 if not retry or not exc.retryable or attempt > len(self.retry_delays):
                     raise
                 delay = self.retry_delays[attempt - 1]
@@ -423,6 +457,7 @@ class Chat:
                     hook(attempt, delay, exc)
             except BaseException:
                 self.stats.llm_errors += 1
+                self._emit_context_budget(record)
                 raise
             await self.sleep(delay)
             attempt += 1
@@ -436,6 +471,10 @@ class Chat:
         full_usage = getattr(self.llm, "last_usage", None)
         if not isinstance(full_usage, dict):
             full_usage = None
+        if accounting is not None and record is not None:
+            accounting.finish(
+                record, proxy, full_usage if full_usage is not None else response.usage
+            )
         self.stats.n_llm += 1
         if tools:
             self.stats.n_main += 1
@@ -444,6 +483,7 @@ class Chat:
         self.stats.add_usage(response.usage)
         self.stats.reasoning_chars += len(response.thinking)
         self.stats.add_details(full_usage)
+        self._emit_context_budget(record)
         recorder = CALL_RECORDER.get()
         if recorder is not None:
             await recorder.record(

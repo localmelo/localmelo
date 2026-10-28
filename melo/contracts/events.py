@@ -109,6 +109,7 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "basis",
             }
         ),
+        "context_budget": frozenset({"kind", "model", "attempt", "proxy_version", "source", "estimate", "measured_prompt_tokens", "input_limit", "over_limit", "image_allowance"}),
         "run.finished": frozenset({"result"}),
     }
 )

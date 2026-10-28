@@ -270,7 +270,12 @@ def run_interactive(
         if getattr(args, name, None) is not None
     }
     try:
-        options = configured_session_options(choice.cfg, options, explicit=explicit)
+        options = configured_session_options(
+            choice.cfg, options, explicit=explicit,
+            budget_overrides={name: getattr(args, name, None) for name in (
+                "context_window", "output_reserve", "safety_margin"
+            )},
+        )
     except (ValueError, config.ConfigError) as exc:
         parser.error(str(exc))
     if (

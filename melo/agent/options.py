@@ -171,6 +171,9 @@ class AgentOptions:
       modes.
     """
 
+    context_window: int | None = None
+    output_reserve: int | None = None
+    safety_margin: int | None = None
     max_steps: int = MAX_AGENT_STEPS
     attempt_policy: AttemptPolicy = "reflect"
     steps_per_attempt: int = STEPS_PER_ATTEMPT
@@ -206,6 +209,15 @@ class AgentOptions:
     mode: ToolMode = "python"
 
     def __post_init__(self) -> None:
+        budget = (self.context_window, self.output_reserve, self.safety_margin)
+        if any(value is not None for value in budget):
+            if not all(_is_positive_int(value) for value in budget):
+                raise ValueError("context_window, output_reserve and safety_margin must all be positive integers")
+            assert self.context_window is not None
+            assert self.output_reserve is not None
+            assert self.safety_margin is not None
+            if self.context_window <= self.output_reserve + self.safety_margin:
+                raise ValueError("context_window must exceed output_reserve plus safety_margin")
         for name in ("max_steps", "steps_per_attempt", "max_attempts"):
             value = getattr(self, name)
             if not _is_positive_int(value):

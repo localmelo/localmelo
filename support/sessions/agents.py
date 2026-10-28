@@ -36,14 +36,30 @@ LLMWrapper = Callable[[BaseLLMProvider], BaseLLMProvider]
 EmbeddingWrapper = Callable[[BaseEmbeddingProvider], BaseEmbeddingProvider]
 
 
+def configured_context_options(
+    cfg: Config | None, options: AgentOptions, overrides: Mapping[str, int | None]
+) -> AgentOptions:
+    """Resolve context settings together so flags may override individual keys."""
+    names = ("context_window", "output_reserve", "safety_margin")
+    fields = {
+        name: overrides.get(name)
+        if overrides.get(name) is not None
+        else getattr(cfg.agent, name, None) if cfg is not None else getattr(options, name)
+        for name in names
+    }
+    return dataclasses.replace(options, **fields)
+
+
 def configured_session_options(
     cfg: Config | None,
     options: AgentOptions | None = None,
     *,
     explicit: Collection[str] = (),
+    budget_overrides: Mapping[str, int | None] | None = None,
 ) -> AgentOptions:
     """Config defaults for a session; names in *explicit* retain the caller's values."""
     options = options or AgentOptions()
+    options = configured_context_options(cfg, options, budget_overrides or {})
     if cfg is None:
         return options
     fields: dict[str, Any] = {

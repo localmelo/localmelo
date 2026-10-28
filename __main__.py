@@ -64,6 +64,9 @@ STATUS_LINE_ERROR_CHARS = 500
 # interactive UI also takes --workspace.
 _DIRECT_FLAGS = {
     "workspace": "--workspace",
+    "context_window": "--context-window",
+    "output_reserve": "--output-reserve",
+    "safety_margin": "--safety-margin",
     "max_steps": "--max-steps",
     "attempt_policy": "--attempt-policy",
     "reflection_gate": "--reflection-gate",
@@ -1081,6 +1084,8 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     direct = parser.add_argument_group(
         "direct mode", "Options for a query run without --serve."
     )
+    for name in ("context-window", "output-reserve", "safety-margin"):
+        direct.add_argument(f"--{name}", type=_positive_int, metavar="TOKENS")
     direct.add_argument(
         "--workspace",
         metavar="DIR",
@@ -1576,6 +1581,19 @@ def _build_direct_mode_agent(
         parser = _build_parser()
     base_url = args.base_url
     request_timeout = getattr(args, "request_timeout", None)
+    from localmelo.support import config
+    from localmelo.support.sessions.agents import configured_context_options
+
+    budget_cfg = config.load()
+    try:
+        options = configured_context_options(
+            budget_cfg, options or AgentOptions(),
+            {name: getattr(args, name, None) for name in (
+                "context_window", "output_reserve", "safety_margin"
+            )},
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
 
     if base_url:
         # Generic OpenAI-compatible endpoint

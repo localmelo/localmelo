@@ -1544,11 +1544,22 @@ class Agent:
                 else:
                     sentence = "Your thinking is kept for every step of this task."
                 instruction = instruction.replace(NOTE_REPLAY_SENTENCE, sentence)
+        from localmelo.melo.agent._request_accounting import ContextBudget
+
+        budget = None
+        if self.options.context_window is not None:
+            assert self.options.output_reserve is not None
+            assert self.options.safety_margin is not None
+            budget = ContextBudget(
+                self.options.context_window, self.options.output_reserve,
+                self.options.safety_margin,
+            )
         self.chat = Chat(
             self._llm,
             system_notes=notes,
             note_instruction=instruction,
             empty_prefix=self.options.reasoning != "legacy",
+            context_budget=budget,
         )
 
         names = (
@@ -4660,6 +4671,8 @@ class Agent:
             limits=self._limits() if progress else None,
         )
         stats = self.chat.reset_stats()
+        if self.options.context_window is not None:
+            self.chat.on_context_budget = run.events.context_budget
         timeout_s = self.options.timeout_s
         deadline = asyncio.timeout(timeout_s)  # never expires when None
         # The retry notices of this run's model requests; only with a sink.
@@ -4816,6 +4829,7 @@ class Agent:
             await self._learn(run, query, outcome)
             return outcome
         finally:
+            self.chat.on_context_budget = None
             if run.finalizer is None:
                 # Else the finalizer counts the run out when it ends.
                 self._active_runs -= 1
@@ -5461,6 +5475,7 @@ class Agent:
             duration_s=duration_s,
             config=self._run_config(),
             memory_stats=memory_stats,
+            context_budget=stats.context_budget,
         )
 
     def _run_config(self) -> dict[str, Any]:
