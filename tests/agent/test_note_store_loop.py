@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.schema import Message, ToolCall, ToolResult
+from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
 
 from .test_compress import FakeLLM, _agent, _answer, _options
 
@@ -82,6 +82,89 @@ async def test_a_restatement_compacts_into_the_older_note() -> None:
     digests = [entry for entry in agent.notes() if entry.kind == "digest"]
     assert len(digests) == 1
     assert "the bug is in list_ops.py" in digests[0].text
+
+
+@pytest.mark.asyncio
+async def test_a_restatement_merges_the_new_ids_and_drops_its_candidate(
+    tmp_path: Path,
+) -> None:
+    # T53R finding 8: the merged note keeps the new note's records, and the
+    # superseded note's candidate cannot be admitted on its own.
+    first = Message(
+        role="assistant",
+        content="<note>found: the bug is in list_ops.py</note>",
+        tool_calls=[
+            ToolCall(
+                tool_name="raw",
+                arguments={"text": '{"id": "r1", "name": "Alice"}'},
+                id="call_1",
+            )
+        ],
+    )
+    second = Message(
+        role="assistant",
+        content=(
+            "<note>found: THE BUG IS IN list_ops.py\n"
+            "decided: the team should use the fix after the review</note>"
+        ),
+        tool_calls=[
+            ToolCall(
+                tool_name="raw",
+                arguments={"text": '{"id": "r2", "name": "Bob"}'},
+                id="call_1",
+            )
+        ],
+    )
+    server = FakeLLM(first, second, _answer("The test passed because the fix works."))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            max_steps=3,
+        ),
+    )
+
+    async def _raw(text: str) -> str:
+        return text
+
+    agent.hippo.register_tool(
+        ToolDef(
+            name="raw",
+            description="return text unchanged",
+            parameters={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+        )
+    )
+    agent.executor.register("raw", _raw)
+    try:
+        await agent.run_task("q")
+        entries = [
+            entry
+            for entry in agent.notes()
+            if entry.kind == "note" and entry.alias in ("n1", "n2")
+        ]
+        older, newer = entries
+        assert older.note is not None and newer.note is not None
+        assert older.note.source_ids == ["r1", "r2"]
+        assert {record_id for record_id, _text in older.note.source_records} == {
+            "r1",
+            "r2",
+        }
+        staged = {candidate.candidate_id for candidate in agent.hippo.staged.all()}
+        assert older.note.note_id in staged
+        assert newer.note.note_id not in staged
+        # Both merged items are distinct traces; neither supersedes the other.
+        active = await agent.hippo.long.active_entries("episodic")
+        assert {entry.text for entry in active} == {
+            "the bug is in list_ops.py",
+            "the team should use the fix after the review",
+        }
+    finally:
+        await agent.close()
 
 
 @pytest.mark.asyncio

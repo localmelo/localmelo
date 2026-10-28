@@ -294,6 +294,22 @@ The number of `tool.started` events is `RunResult.n_tool`.
 The CLI ignores the event until its plan line lands; the session runner
 stores it, and a turn's last `digest` note goes to the turn's `note` column.
 
+### memory
+
+One event per admission decision, after its store transaction commits.
+
+- `candidate_id`: the note id, or the fresh id of a user fact.
+- `action`: `NEW`, `UPDATE`, `RELATED`, `CONFLICT` or `IGNORE`.
+- `kind`: the entry's kind (`semantic`, `episodic`, `profile`, `reflection`).
+- `admitted_by`: `rehearsal`, `user_request`, `user_statement`, `outcome` or
+  `sleep`.
+- `entry_id`: the new entry's id, or `null` for `IGNORE`.
+
+It carries no text and no ids beyond the entry id; the decision log is the
+audit surface. A boundary refusal emits nothing and counts
+`candidates_refused`. No `memory` event is emitted in `legacy`. The CLI
+ignores it.
+
 ### notice
 
 | `kind` | When | `message` | `detail` |

@@ -90,6 +90,8 @@ _DIRECT_FLAGS = {
     "recall_placement": "--recall-placement",
     "recall_min_score": "--recall-min-score",
     "retrieval_extra_body": "--retrieval-extra-body",
+    "admit_on_outcome": "--admit-on-outcome",
+    "keep_decision_text": "--keep-decision-text",
 }
 
 # Flags of the interactive UI (bare melo), by dest.
@@ -103,7 +105,8 @@ _UI_FLAGS = {
 # an approval's wait would count toward a timeout, it has no machine output,
 # it draws its own progress, and it does not wire the reasoning field or the
 # retrieval extra body yet (each has its own message below; R2b wires the
-# first, a later change the second).
+# first, a later change the second). `--keep-decision-text` is an evaluation
+# switch, so the UI never accepts it.
 _UI_REFUSED = (
     "tool_exposure",
     "timeout",
@@ -112,6 +115,7 @@ _UI_REFUSED = (
     "routine",
     "reasoning_field",
     "retrieval_extra_body",
+    "keep_decision_text",
 )
 
 
@@ -984,6 +988,11 @@ def _direct_options(
     recall_min_score = getattr(args, "recall_min_score", None)
     if recall_min_score is not None:
         fields["recall_min_score"] = recall_min_score
+    admit_on_outcome = getattr(args, "admit_on_outcome", None)
+    if admit_on_outcome is not None:
+        fields["admit_on_outcome"] = admit_on_outcome == "on"
+    if getattr(args, "keep_decision_text", False):
+        fields["keep_decision_text"] = True
     try:
         return AgentOptions(**fields)
     except ValueError as exc:  # the flag types should have caught it
@@ -1219,6 +1228,19 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         metavar="F",
         help="Cosine floor for the long-term leg and embedding hits, 0-1 "
         "(default 0.35; inert only for the task-local bm25/llm ranking)",
+    )
+    direct.add_argument(
+        "--admit-on-outcome",
+        choices=["on", "off"],
+        help="R6-lite: with a reasoning mode other than legacy, admit the final "
+        "attempt digest to long-term memory at the end of the run (default off); "
+        "inert in legacy",
+    )
+    direct.add_argument(
+        "--keep-decision-text",
+        action="store_true",
+        help="R6-lite: also store the checked text of each admission decision "
+        "(the hash is always kept); an evaluation switch, refused in the UI",
     )
     direct.add_argument(
         "--retrieval-extra-body",
@@ -1602,6 +1624,8 @@ def _build_direct_mode_agent(
         options = dataclasses.replace(
             options, note_writer=cast(NoteWriter, cfg.agent.note_writer)
         )
+    if getattr(args, "admit_on_outcome", None) is None and cfg.memory.admit_on_outcome:
+        options = dataclasses.replace(options, admit_on_outcome=True)
 
     # R5's [retrieval]: a value applies only when its flag is absent, and
     # the table is inert in legacy (decision 10).

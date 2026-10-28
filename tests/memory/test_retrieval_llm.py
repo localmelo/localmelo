@@ -213,6 +213,25 @@ async def test_a_long_entry_line_is_shortened() -> None:
     assert line.endswith("foldr…")
 
 
+async def test_a_long_entry_line_carries_its_text_beside_the_date() -> None:
+    # T53R finding 1: a long doc's title is only its date, so without the
+    # text the catalog names nothing the retriever can select.
+    docs = [
+        Doc(
+            "long:1",
+            "long",
+            "the Bluebird launch code is NECTAR-42",
+            title="2026-10-28",
+            meta={"alias": "m1", "entry_id": 1},
+        )
+    ]
+    send = ScriptedSend('{"ids": ["m1"]}')
+    await LLMRetriever(send).search(QUERY, docs, k=1)
+    line = send.user_text.splitlines()[1]
+    assert line.startswith("[m1] memory · 2026-10-28 · the Bluebird launch code")
+    assert "NECTAR-42" in line
+
+
 # ── The catalog cap ─────────────────────────────────────────────────────────
 
 

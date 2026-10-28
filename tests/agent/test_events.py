@@ -518,6 +518,13 @@ class TestFields:
                 "approval",
                 "exit_code",
             },
+            "memory": {
+                "candidate_id",
+                "action",
+                "kind",
+                "admitted_by",
+                "entry_id",
+            },
             "note": {
                 "step",
                 "attempt",
@@ -669,7 +676,9 @@ class TestFields:
 
         events = reflect.events + stuck.events + compress.events + recalled.events
         seen = {event.type for event in events}
-        assert seen == set(EVENT_FIELDS)
+        # The memory event is emitted only by a store-backed admission;
+        # test_memory_admission.py emits and pins it.
+        assert seen == set(EVENT_FIELDS) - {"memory"}
         for event in events:
             assert set(event.data) == EVENT_FIELDS[event.type]
         details = {

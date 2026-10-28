@@ -27,7 +27,12 @@ from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from localmelo.melo.schema import ToolCall, ToolResult
+from localmelo.melo.schema import (
+    CandidateItem,
+    ReflectionEntry,
+    ToolCall,
+    ToolResult,
+)
 
 # ── Caps ──
 #
@@ -154,6 +159,8 @@ class ReasoningNote:
     reasoning_chars: int = 0
     # record ids from this turn's JSON tool results (section 5)
     source_ids: list[str] = field(default_factory=list)
+    # (record id, up to 500 chars of its text), for an item's source ids
+    source_records: list[tuple[str, str]] = field(default_factory=list)
     remember: bool = False  # the agent-side bool (section 5): this note is a candidate
     remember_by: str = ""  # model | heuristic | rule: who set it
     # fresh | rehearsed | superseded; the one stage field Hippo reads
@@ -772,8 +779,17 @@ def _outcome(pairs: Sequence[tuple[ToolCall, ToolResult]]) -> str:
     return _shorten(summary or "ok", NOTE_OBSERVED_CHARS)
 
 
-def _source_ids(pairs: Sequence[tuple[ToolCall, ToolResult]]) -> list[str]:
-    ids: list[str] = []
+def _source_records(
+    pairs: Sequence[tuple[ToolCall, ToolResult]],
+) -> list[tuple[str, str]]:
+    """``(id, text)`` for the records of this turn's JSON tool results.
+
+    The text is the record object as JSON, cut to 500 characters. It is
+    what :func:`candidate_items` compares an item with; the ids are the
+    same ones :func:`_source_ids` returns.
+    """
+    records: list[tuple[str, str]] = []
+    seen: set[str] = set()
     for call, result in pairs:
         if call.tool_name in _BUILTIN_TOOLS or _error(result):
             continue
@@ -784,9 +800,19 @@ def _source_ids(pairs: Sequence[tuple[ToolCall, ToolResult]]) -> list[str]:
             if isinstance(value, bool) or not isinstance(value, int | str):
                 continue
             text = str(value)
-            if text and text not in ids:
-                ids.append(text)
-    return ids
+            if not text or text in seen:
+                continue
+            seen.add(text)
+            try:
+                body = json.dumps(obj, ensure_ascii=False)
+            except (TypeError, ValueError):
+                body = ""
+            records.append((text, body[:500]))
+    return records
+
+
+def _source_ids(pairs: Sequence[tuple[ToolCall, ToolResult]]) -> list[str]:
+    return [record_id for record_id, _text in _source_records(pairs)]
 
 
 # ── The note ──
@@ -885,6 +911,7 @@ def note_from_reply(
     ]
     note.outcome = _outcome(pairs)
     note.source_ids = _source_ids(pairs)
+    note.source_records = _source_records(pairs)
     note.reasoning_chars = len(thinking)
     if kind:
         note.kind = kind
@@ -1170,6 +1197,141 @@ def render_digest(note: ReasoningNote, *, limit: int = DIGEST_CHARS) -> str:
         plan = _shorten(plan, room)
         text = render()
     return text[:limit]
+
+
+# ── Long-term candidates (R6-lite) ──
+
+CANDIDATE_TEXT_CHARS = 600  # a note's candidate text
+REFLECTION_CANDIDATE_CHARS = 2_000  # a reflection's
+RECORD_TEXT_CHARS = 500  # a source record's text in ReasoningNote.source_records
+
+_ITEM_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
+_ITEM_DATE_RE = re.compile(r"\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b")
+_ITEM_NAME_RE = re.compile(r"\b[A-Z][a-z]{2,}\b")
+_ITEM_WORD_RE = re.compile(r"[A-Za-z0-9_]{4,}")
+
+
+def _item_keys(item: str) -> set[str]:
+    """The distinctive strings an item shares with a record's text."""
+    keys: set[str] = set()
+    keys.update(_ITEM_NUMBER_RE.findall(item))
+    keys.update(_ITEM_DATE_RE.findall(item))
+    keys.update(name.lower() for name in _ITEM_NAME_RE.findall(item))
+    keys.update(
+        word.lower()
+        for word in _ITEM_WORD_RE.findall(item)
+        if word.lower() not in _ITEM_STOPWORDS
+    )
+    keys.update(
+        run for run in re.findall(r"[\u4e00-\u9fff]{2,}", item) if len(run) >= 2
+    )
+    return keys
+
+
+_ITEM_STOPWORDS = frozenset(
+    {
+        "about",
+        "after",
+        "again",
+        "because",
+        "before",
+        "being",
+        "could",
+        "every",
+        "first",
+        "found",
+        "from",
+        "have",
+        "into",
+        "just",
+        "like",
+        "made",
+        "make",
+        "more",
+        "only",
+        "other",
+        "over",
+        "same",
+        "should",
+        "some",
+        "than",
+        "that",
+        "their",
+        "them",
+        "then",
+        "there",
+        "these",
+        "they",
+        "this",
+        "those",
+        "through",
+        "under",
+        "very",
+        "what",
+        "when",
+        "where",
+        "which",
+        "while",
+        "will",
+        "with",
+        "would",
+    }
+)
+
+
+def _item_source_ids(item: str, records: Sequence[tuple[str, str]]) -> list[str]:
+    """The record ids whose text shares a number, date, name or word with *item*."""
+    keys = _item_keys(item)
+    if not keys:
+        return []
+    ids: list[str] = []
+    for record_id, text in records:
+        folded = text.lower()
+        if any(key in folded for key in keys) and record_id not in ids:
+            ids.append(record_id)
+    return ids
+
+
+def candidate_items(note: ReasoningNote) -> tuple[CandidateItem, ...]:
+    """A note's found and decided items, each with the records behind it.
+
+    An item keeps the ids of the records whose text shares a number, a
+    date, a capitalised name or a distinctive word with it; when none
+    matches, the note's whole ``source_ids`` are used.
+    """
+    items: list[CandidateItem] = []
+    default = tuple(note.source_ids)
+    for item in (*note.found, *note.decided):
+        matched = _item_source_ids(item, note.source_records)
+        items.append(CandidateItem(item, tuple(matched) if matched else default))
+    return tuple(items)
+
+
+def candidate_text(note: ReasoningNote) -> str:
+    """A note's candidate text: its found and decided items, cut to 600."""
+    items = [*note.found, *note.decided]
+    return _shorten(" | ".join(items), CANDIDATE_TEXT_CHARS)
+
+
+def reflection_candidate_text(entry: ReflectionEntry) -> str:
+    """The explicit reflection candidate's text, cut to 2,000 characters.
+
+    ``Attempt <n>: <summary>``, then the failed hypotheses, evidence,
+    avoids, next directions and unresolved questions. This is the plan's
+    fix for ``promote_reflections``; the legacy form stays frozen.
+    """
+    parts = [f"Attempt {entry.attempt_id}: {entry.summary}"]
+    if entry.failed_hypotheses:
+        parts.append(f"Failed: {'; '.join(entry.failed_hypotheses)}")
+    if entry.useful_evidence:
+        parts.append(f"Evidence: {'; '.join(entry.useful_evidence)}")
+    if entry.recommended_avoids:
+        parts.append(f"Avoid: {'; '.join(entry.recommended_avoids)}")
+    if entry.next_promising_directions:
+        parts.append(f"Try: {'; '.join(entry.next_promising_directions)}")
+    if entry.unresolved_questions:
+        parts.append(f"Open: {'; '.join(entry.unresolved_questions)}")
+    return _shorten(" | ".join(parts), REFLECTION_CANDIDATE_CHARS)
 
 
 # ── Blocks the harness inserts into a turn ──

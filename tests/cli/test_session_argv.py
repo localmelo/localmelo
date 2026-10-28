@@ -56,6 +56,8 @@ R5_DEFAULTS = dict.fromkeys(
 )
 # P5 moved --workspace into direct mode: the direct parser carries it now.
 P5_DEFAULTS = {"workspace": None}
+# R6-lite added two direct-mode options.
+R6_DEFAULTS = {"admit_on_outcome": None, "keep_decision_text": False}
 
 
 @pytest.fixture
@@ -121,6 +123,7 @@ def test_historical_dispatch(
         **R4_DEFAULTS,
         **R5_DEFAULTS,
         **P5_DEFAULTS,
+        **R6_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:
