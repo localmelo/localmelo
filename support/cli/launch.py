@@ -245,7 +245,8 @@ def run_interactive(
         print("\nSetup cancelled.")
         return 130
     except (OSError, tomllib.TOMLDecodeError) as exc:
-        print(f"melo: cannot read {config.CONFIG_PATH}: {exc}", file=sys.stderr)
+        path = os.path.expanduser(config.CONFIG_PATH)
+        print(f"melo: cannot read {path}: {exc}", file=sys.stderr)
         return 1
     if isinstance(choice, int):
         return choice
