@@ -10,9 +10,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Added
 
 - S3b.1a foundations: scheduler component v2 adds a durable pause priority
-  snapshot and atomic v1 migration; the internal synchronous gate `try_park`
-  fences an eligible pending call while cancellation is requested. An atomic
-  component event transaction supports `ParkStore` hold/resume/park records,
+  snapshot and atomic v1 migration; durable generation and operation IDs guard
+  transitions and identify committed receipts. The internal synchronous gate
+  `try_park` fences an eligible pending call and cancels only its bound turn.
+  An atomic component event transaction supports `ParkStore` hold/resume/park records,
   and an evidence-only card builder derives bounded, redacted cards from the
   task spec and persisted events. Worker API pause behavior remains as in
   #119; there is no worker hold/park integration or new API in this slice.

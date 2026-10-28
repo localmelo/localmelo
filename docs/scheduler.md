@@ -335,21 +335,28 @@ Pause saves the prior level, source, reason and rank in `park_priority` in the
 same transaction as the P5 transition. This snapshot survives `sched_log`
 retention and is consumed on resume. Migration reconstructs snapshots for v1
 paused P5 rows when the retained audit trail supports it; without a usable
-pause record there is no snapshot and resume falls back to P2. A later recorded
-priority or rank change after the pause is respected by the migration. Explicit
-priority changes can update or clear the snapshot. Its `pause_pending` column
-is reserved for S3b.1b and remains zero in S3b.1a.
+pause record there is no snapshot and resume falls back to P2. Migration checks
+for later `task.level`, `task.first` and `task.resume` audit entries; a later
+runnable priority may instead leave the task no longer paused. Explicit
+priority changes can update or invalidate the snapshot. The row also carries a
+monotonic `generation` and an `operation_id` for guarded transitions; it remains
+across resume and is removed with the task. `pause_pending` is reserved for
+S3b.1b and is not set by worker code in S3b.1a. Before a task's first pause or
+park creates its identity row, preventing stale worker safe-point callbacks relies
+on the S3b.1b worker coordinator; these foundations do not provide that fence.
 
 `ChatGate.try_park()` is an internal, synchronous primitive for a single
-pending, unadmitted task plan or reflection call. On the same event loop it
-fences the call from admission and invokes a caller-supplied cancellation
-callback, which must request cause `park`. If cancellation is refused or raises,
-the fence is rolled back unless the call has ended. It does not itself integrate
-parking with a worker.
+pending, unadmitted task plan or reflection call bound to a turn. On the same
+event loop it fences the call from admission and asks the runner to cancel that
+exact turn with cause `park`. A stale or already-stopping turn cannot win. If
+cancellation is refused or raises, the fence is rolled back unless the call has
+ended. The primitive does not itself integrate parking with a worker.
 
 `SessionStore.component_event_transaction()` and `append_component_event()`
 allow gateway component rows and reserved out-of-turn session events to commit
-atomically. `ParkStore` uses them for internal hold, resume and park transitions,
+atomically. Task-store pause emits `sched.pause_requested`; resume and terminal
+transitions also emit committed events with their identity. `ParkStore` uses the
+same transaction seam for internal hold, resume and park transitions,
 recording hold coordinates supplied by the caller and emitting `sched.held`,
 `sched.resumed` or `sched.parked`; it does not change priority. Its card builder
 uses the task spec and persisted events only, bounds and redacts text, omits

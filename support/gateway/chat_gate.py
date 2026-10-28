@@ -29,7 +29,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast, get_args
+from typing import Any, Literal, Protocol, cast, get_args
 
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
@@ -425,6 +425,13 @@ class GateCall:
     # under a foreign lock, section 6.2).
     lock_waiting: bool = False
     park_fenced: bool = False
+    turn_id: str | None = None
+
+
+class ParkCanceller(Protocol):
+    """Synchronously cancel only an unstopped turn with cause park."""
+
+    def cancel_for_park(self, turn_id: str) -> bool: ...
 
 
 @dataclass(frozen=True)
@@ -685,6 +692,7 @@ class ChatGate:
         kind: str = "plan",
         attempt: int = 1,
         prompt_tokens: int | None = None,
+        turn_id: str | None = None,
     ) -> GateCall:
         """Record a call and, under an enforcing arm, submit it to the policy.
 
@@ -725,7 +733,7 @@ class ChatGate:
             lane=lane,
             prompt_tokens=prompt_tokens,
         )
-        call = GateCall(meta)
+        call = GateCall(meta, turn_id=turn_id)
         self._calls[meta.call_id] = call
         registered = self._task_registry.get(session_id)
         if registered is not None and is_terminal(registered.phase):
@@ -832,12 +840,14 @@ class ChatGate:
         )
         return events
 
-    def try_park(self, task_id: str, cancel: Callable[[], bool]) -> GateCall | None:
-        """Fence one pending worker plan/reflect and synchronously cancel its run.
+    def try_park(
+        self, task_id: str, turn_id: str, runner: ParkCanceller
+    ) -> GateCall | None:
+        """Fence a pending call and cancel only its bound, unstopped turn.
 
-        The callback must request cancellation with cause ``park``. A false
-        result or exception rolls the fence back, unless the call has ended.
-        All gate operations and the callback must run on the same event loop.
+        The runner must implement the synchronous ``cancel_for_park`` contract.
+        A false result or exception rolls the fence back unless the call ended.
+        All operations must run on the same event loop without yielding.
         """
         task = self._task_registry.get(task_id)
         calls = [c for c in self._calls.values() if c.meta.session_id == task_id]
@@ -846,6 +856,8 @@ class ChatGate:
         call = calls[0]
         if (
             call.done
+            or not turn_id
+            or call.turn_id != turn_id
             or call.park_fenced
             or call.meta.session_kind != "task"
             or call.meta.kind not in _CHAT_KINDS
@@ -861,7 +873,7 @@ class ChatGate:
         )
         accepted = False
         try:
-            accepted = cancel()
+            accepted = runner.cancel_for_park(turn_id)
         finally:
             if not accepted:
                 call.park_fenced = False

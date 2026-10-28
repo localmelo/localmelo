@@ -1402,6 +1402,37 @@ async def test_component_event_and_row_commit_together(
     await store.aclose()
 
 
+async def test_component_event_committed_before_cancel_is_observable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = gateway(tmp_path / "s.db")
+    session = await store.create_session()
+    heard: list[StoredEvent] = []
+    store.add_listener(heard.append)
+    original = store._commit
+
+    async def uncertain(conn: Any, events: list[StoredEvent], label: str) -> None:
+        await original(conn, events, label)
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(store, "_commit", uncertain)
+    with pytest.raises(asyncio.CancelledError):
+        async with store.component_event_transaction("scheduler_test") as (
+            conn,
+            stored,
+        ):
+            await conn.execute(
+                "UPDATE sessions SET title = ? WHERE id = ?", ("saved", session.id)
+            )
+            await store.append_component_event(
+                conn, stored, session.id, "sched.held", {"site": "plan"}
+            )
+    info = await store.get_session(session.id)
+    assert info is not None and info.title == "saved"
+    assert len(heard) == 1 and heard == await store.list_events(session.id)
+    await store.aclose()
+
+
 # ── Leases (CLI file) ───────────────────────────────────────────────────────
 
 

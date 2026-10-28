@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -14,6 +16,7 @@ from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.gateway.chat_gate import ChatGate, GatedLLM
 from localmelo.support.scheduler import Clock, Machine, Task
+from localmelo.support.sessions.runner import SessionRunner
 
 
 class ClockBox:
@@ -585,12 +588,25 @@ async def test_terminal_refusals_are_logged_once(
     assert lines[0]["call_index"] == call.meta.call_index
 
 
+class _ParkCanceller:
+    def __init__(self, cancel: Callable[[], bool]) -> None:
+        self.cancel = cancel
+
+    def cancel_for_park(self, turn_id: str) -> bool:
+        assert turn_id == "turn"
+        return self.cancel()
+
+
+def _try_park(gate: ChatGate, task_id: str, cancel: Any) -> Any:
+    return gate.try_park(task_id, "turn", _ParkCanceller(cancel))
+
+
 @pytest.mark.parametrize("kind", ["plan", "reflect"])
 async def test_park_wins_before_admission(kind: str) -> None:
     gate = ChatGate(policy="class", n_srv=1, r_f=0)
     gate.register_task(task(phase="running"))
     busy = gate.submit("busy")
-    call = gate.submit("worker", kind=kind)
+    call = gate.submit("worker", turn_id="turn", kind=kind)
     assert call.future is not None and not call.future.done()
 
     def cancel() -> bool:
@@ -601,7 +617,7 @@ async def test_park_wins_before_admission(kind: str) -> None:
         assert call.meta.admitted_mono_us is None and not call.future.done()
         return True
 
-    assert gate.try_park("worker", cancel) is call
+    assert _try_park(gate, "worker", cancel) is call
     gate.wake()
     assert call.meta.admitted_mono_us is None and not call.future.done()
     gate.finish(call, "refused")
@@ -613,7 +629,7 @@ async def test_park_fences_foreign_lock_release_and_failure(policy: str) -> None
     gate = ChatGate(policy=policy, lock_gate="wait")
     gate.register_task(task(phase="running"))
     gate.set_machine(Machine(lock="foreign"))
-    call = gate.submit("worker")
+    call = gate.submit("worker", turn_id="turn")
 
     def cancel() -> bool:
         gate.set_machine(Machine(lock="none"))
@@ -622,7 +638,7 @@ async def test_park_fences_foreign_lock_release_and_failure(policy: str) -> None
         assert call.future is not None and not call.future.done()
         return True
 
-    assert gate.try_park("worker", cancel) is call
+    assert _try_park(gate, "worker", cancel) is call
     gate.finish(call, "refused")
     await gate.close()
 
@@ -633,7 +649,7 @@ async def test_park_rollback_releases_lock_waiter(policy: str, error: bool) -> N
     gate = ChatGate(policy=policy, lock_gate="wait")
     gate.register_task(task(phase="running"))
     gate.set_machine(Machine(lock="foreign"))
-    call = gate.submit("worker")
+    call = gate.submit("worker", turn_id="turn")
 
     def cancel() -> bool:
         gate.set_machine(Machine(lock="none"))
@@ -643,9 +659,9 @@ async def test_park_rollback_releases_lock_waiter(policy: str, error: bool) -> N
 
     if error:
         with pytest.raises(RuntimeError, match="cancel failed"):
-            gate.try_park("worker", cancel)
+            _try_park(gate, "worker", cancel)
     else:
-        assert gate.try_park("worker", cancel) is None
+        assert _try_park(gate, "worker", cancel) is None
     await gate.acquire(call)
     assert call.meta.admitted_mono_us is not None
     gate.finish(call)
@@ -656,13 +672,13 @@ async def test_park_rollback_after_stop_does_not_resurrect_call() -> None:
     gate = ChatGate(policy="class", n_srv=1, r_f=0)
     gate.register_task(task(phase="running"))
     busy = gate.submit("busy")
-    call = gate.submit("worker")
+    call = gate.submit("worker", turn_id="turn")
 
     def cancel() -> bool:
         gate.finish_task("worker", "cancelled")
         return False
 
-    assert gate.try_park("worker", cancel) is None
+    assert _try_park(gate, "worker", cancel) is None
     assert call.done and call.future is not None and call.future.cancelled()
     assert all(c.call_id != call.meta.call_id for c in gate._state.calls)
     gate.finish(busy)
@@ -673,14 +689,14 @@ async def test_park_rollback_redispatches_policy_call() -> None:
     gate = ChatGate(policy="class", n_srv=1, r_f=0)
     gate.register_task(task(phase="running"))
     busy = gate.submit("busy")
-    call = gate.submit("worker")
+    call = gate.submit("worker", turn_id="turn")
 
     def cancel() -> bool:
         gate.finish(busy)
         assert call.meta.admitted_mono_us is None
         return False
 
-    assert gate.try_park("worker", cancel) is None
+    assert _try_park(gate, "worker", cancel) is None
     await gate.acquire(call)
     assert call.meta.admitted_mono_us is not None
     gate.finish(call)
@@ -691,16 +707,19 @@ async def test_park_rollback_redispatches_policy_call() -> None:
 async def test_park_refuses_unsafe_or_admitted_calls(kind: str) -> None:
     gate = ChatGate(policy="off", lock_gate="wait")
     gate.register_task(task(phase="running"))
-    admitted = gate.submit("worker", kind=kind)
-    assert gate.try_park("worker", lambda: pytest.fail("cancel called")) is None
+    admitted = gate.submit("worker", turn_id="turn", kind=kind)
+    assert _try_park(gate, "worker", lambda: pytest.fail("cancel called")) is None
     gate.finish(admitted)
     gate.set_machine(Machine(lock="foreign"))
-    call = gate.submit("worker", kind=kind)
+    call = gate.submit("worker", turn_id="turn", kind=kind)
     if kind not in ("plan", "reflect"):
-        assert gate.try_park("worker", lambda: pytest.fail("cancel called")) is None
+        assert _try_park(gate, "worker", lambda: pytest.fail("cancel called")) is None
+    else:
+        assert _try_park(gate, "worker", lambda: True) is call
+        assert call.park_fenced and call.meta.admitted_mono_us is None
     gate.finish(call, "refused")
     chat = gate.submit("chat")
-    assert gate.try_park("chat", lambda: pytest.fail("cancel called")) is None
+    assert _try_park(gate, "chat", lambda: pytest.fail("cancel called")) is None
     gate.finish(chat, "refused")
     await gate.close()
 
@@ -714,7 +733,7 @@ async def test_park_cancels_runner_at_real_acquire_barrier() -> None:
 
     async def run() -> None:
         nonlocal sent
-        call = gate.submit("worker")
+        call = gate.submit("worker", turn_id="turn")
         reached.set()
         try:
             await gate.acquire(call)
@@ -724,7 +743,7 @@ async def test_park_cancels_runner_at_real_acquire_barrier() -> None:
 
     runner = asyncio.create_task(run())
     await reached.wait()
-    parked = gate.try_park("worker", lambda: runner.cancel("park"))
+    parked = _try_park(gate, "worker", lambda: runner.cancel("park"))
     assert parked is not None
     gate.finish(busy)
     with pytest.raises(asyncio.CancelledError, match="park"):
@@ -737,15 +756,117 @@ async def test_admission_wins_and_multiple_calls_are_not_safe() -> None:
     gate = ChatGate(policy="class", n_srv=1, r_f=0)
     gate.register_task(task(phase="running"))
     busy = gate.submit("busy")
-    call = gate.submit("worker")
+    call = gate.submit("worker", turn_id="turn")
     gate.finish(busy)
-    assert gate.try_park("worker", lambda: pytest.fail("cancel called")) is None
-    second = gate.submit("worker")
-    assert gate.try_park("worker", lambda: pytest.fail("cancel called")) is None
+    assert _try_park(gate, "worker", lambda: pytest.fail("cancel called")) is None
+    second = gate.submit("worker", turn_id="turn")
+    assert _try_park(gate, "worker", lambda: pytest.fail("cancel called")) is None
     gate.finish(second, "refused")
     gate.finish(call)
-    assert gate.try_park("worker", lambda: pytest.fail("cancel called")) is None
+    assert _try_park(gate, "worker", lambda: pytest.fail("cancel called")) is None
     await gate.close()
+
+
+@pytest.mark.parametrize("call_turn", [None, "other"])
+async def test_park_rejects_unbound_or_mismatched_call(call_turn: str | None) -> None:
+    gate = ChatGate(policy="off", lock_gate="wait")
+    gate.register_task(task(phase="running"))
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("worker", turn_id=call_turn)
+    assert (
+        gate.try_park(
+            "worker", "turn", _ParkCanceller(lambda: pytest.fail("cancel called"))
+        )
+        is None
+    )
+    assert not call.park_fenced
+    gate.finish(call, "refused")
+    await gate.close()
+
+
+async def test_park_cancels_exact_runner_turn_with_park_cause() -> None:
+    gate = ChatGate(policy="off", lock_gate="wait")
+    gate.register_task(task(phase="running"))
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("worker", turn_id="turn")
+    runner = SessionRunner.__new__(SessionRunner)
+    running = asyncio.create_task(asyncio.Event().wait())
+    turn = SimpleNamespace(
+        turn=SimpleNamespace(id="turn"),
+        task=running,
+        finish=None,
+        cause=None,
+        reason="",
+        runner_cancels=0,
+    )
+    runner._active = cast(Any, turn)
+    try:
+        assert gate.try_park("worker", "turn", runner) is call
+        assert turn.cause == "park" and turn.runner_cancels == 1
+        assert call.park_fenced and call.meta.admitted_mono_us is None
+    finally:
+        running.cancel()
+        await asyncio.gather(running, return_exceptions=True)
+        gate.finish(call, "refused")
+        await gate.close()
+
+
+async def test_park_rejects_externally_cancelling_turn() -> None:
+    gate = ChatGate(policy="off", lock_gate="wait")
+    gate.register_task(task(phase="running"))
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("worker", turn_id="turn")
+    runner = SessionRunner.__new__(SessionRunner)
+    running = asyncio.create_task(asyncio.Event().wait())
+    turn = SimpleNamespace(
+        turn=SimpleNamespace(id="turn"),
+        task=running,
+        finish=None,
+        cause=None,
+        reason="",
+        runner_cancels=0,
+    )
+    runner._active = cast(Any, turn)
+    running.cancel()
+    try:
+        assert gate.try_park("worker", "turn", runner) is None
+        assert turn.cause is None and turn.runner_cancels == 0
+        assert not call.park_fenced
+    finally:
+        await asyncio.gather(running, return_exceptions=True)
+        gate.finish(call, "refused")
+        await gate.close()
+
+
+@pytest.mark.parametrize("stale", [False, True])
+async def test_park_rejects_stopping_or_stale_runner_turn(stale: bool) -> None:
+    gate = ChatGate(policy="off", lock_gate="wait")
+    gate.register_task(task(phase="running"))
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("worker", turn_id="old")
+    runner = SessionRunner.__new__(SessionRunner)
+    running = asyncio.create_task(asyncio.Event().wait())
+    turn = SimpleNamespace(
+        turn=SimpleNamespace(id="new" if stale else "old"),
+        task=running,
+        finish=None,
+        cause=None,
+        reason="",
+        runner_cancels=0,
+    )
+    runner._active = cast(Any, turn)
+    if not stale:
+        assert runner.cancel(cause="user_stop", turn_id="old")
+    try:
+        assert gate.try_park("worker", "old", runner) is None
+        assert not call.park_fenced
+        assert turn.cause == (None if stale else "user_stop")
+        assert turn.runner_cancels == (0 if stale else 1)
+    finally:
+        running.cancel()
+        await asyncio.gather(running, return_exceptions=True)
+        gate.finish(call, "refused")
+        await gate.close()
 
 
 def test_the_gate_s_p0_is_the_user_s_task_p0() -> None:

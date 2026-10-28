@@ -917,6 +917,24 @@ class SessionRunner:
             return False
         return self._cancel_turn(turn, reason, cause)
 
+    def cancel_for_park(self, turn_id: str) -> bool:
+        """Cancel exactly this turn for park only if it is not already stopping.
+
+        The check and cancel are synchronous so a park fence can arbitrate
+        against Stop without yielding to the event loop.
+        """
+        turn = self._active
+        if (
+            not turn_id
+            or turn is None
+            or turn.turn.id != turn_id
+            or turn.cause is not None
+            or turn.task is None
+            or turn.task.cancelling()
+        ):
+            return False
+        return self._cancel_turn(turn, "Parked by scheduler", "park")
+
     def _cancel_turn(self, turn: _Turn, reason: str, cause: Cause) -> bool:
         if turn.finish is not None:
             return False  # the run has ended: its status and cause stand
