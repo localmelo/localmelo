@@ -36,8 +36,9 @@ uv run mypy .
 ```
 
 The first command runs the whole offline suite in parallel; it needs no model
-server and opens no socket. While you work, run only the tests a change
-affects with `uv run pytest --testmon -q`.
+server and sends no request to one (a few CLI tests serve a fake API on
+loopback). While you work, run only the tests a change affects with
+`uv run pytest --testmon -q`.
 
 ## Pull request checklist
 

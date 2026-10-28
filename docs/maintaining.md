@@ -106,6 +106,7 @@ page, a term may carry the English in parentheses, as in 嵌入（embedding）.
 | MCP server | MCP 服务器 |
 | tool exposure | 工具暴露方式 |
 | retrieve mode | 检索模式 |
+| permission tier | 权限级别 |
 | offered tools (of a step) | 本步提供的工具 |
 | checker, check | 检查器，检查 |
 | executor | 执行器 |
@@ -199,6 +200,7 @@ Google Gemini (`gemini`), NVIDIA (`nvidia`).
 | Quickstart | 快速开始 |
 | Architecture | 架构 |
 | Roadmap | 路线图 |
+| Developers | 开发者 |
 | Reference ↗ | 参考文档（英文）↗ |
 | GitHub ↗ | GitHub ↗ |
 | On this page | 本页内容 |

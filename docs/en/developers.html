@@ -77,8 +77,9 @@
           <pre><code>localmelo/
   __main__.py     the melo command
   melo/           the agent: run loop, checks, executor, memory, contracts
-  support/        backends, providers, gateway, terminal UI, MCP, config,
-                  setup wizard, melo-retrieve, melo-procedures, scheduler
+  support/        backends, providers, gateway, terminal UI, sessions, MCP,
+                  config, setup wizard, melo-retrieve, melo-procedures,
+                  scheduler
   tests/          tests, mirroring melo/ and support/
   docs/           the documentation and the website
   tests_result/   archived results of real-backend runs</code></pre>
@@ -105,7 +106,11 @@
           <code>tests/test_layering.py</code> reads the AST of every module
           under <code>melo/</code> and fails on an import of
           <code>support/</code> in any form: plain, relative or through
-          <code>importlib.import_module</code>. It also holds a table of other
+          <code>importlib.import_module</code>. The test records two allowed
+          imports: <code>Config</code>, imported only for type checking, and
+          <code>get_backend</code>, imported inside
+          <code>_providers_from_config</code> when an <code>Agent</code> is
+          built from a <code>Config</code>. It also holds a table of other
           rules: the terminal UI's libraries (<code>prompt_toolkit</code> and
           <code>rich</code>) stay out of the core and the backends, and the
           sessions and the terminal UI stay clear of the gateway. If you need
@@ -185,8 +190,10 @@ uv run melo --serve</code></pre>
           <pre><code>uv run pytest -n auto -q</code></pre>
         </figure>
         <p>
-          It needs no model server and opens no socket. To run one directory
-          directly, name it: <code>uv run pytest tests/agent -q</code>.
+          It needs no model server and sends no request to one. A few CLI tests
+          serve a fake API on loopback to exercise timeouts and cancellation.
+          To run one directory directly, name it:
+          <code>uv run pytest tests/agent -q</code>.
         </p>
         <div class="table-wrap">
           <table>
@@ -203,6 +210,7 @@ uv run melo --serve</code></pre>
               <tr><td><code>tests/memory</code></td><td>Memory, SQLite persistence, BM25, memory notes and the retrievers</td><td><code>dev</code></td></tr>
               <tr><td><code>tests/mcp</code></td><td>The MCP client and tool provider</td><td><code>dev</code></td></tr>
               <tr><td><code>tests/scheduler</code></td><td>The scheduling policy, the simulator and the trace importer</td><td><code>dev</code></td></tr>
+              <tr><td><code>tests/sessions</code></td><td>Conversations in SQLite: the store, the runner, resume, restarts, approvals and the event window</td><td><code>dev</code></td></tr>
               <tr><td><code>tests/gateway</code></td><td>Sessions, the HTTP API, the <code>Host</code> and <code>Origin</code> checks and the web workspace; the <code>.mjs</code> files test the workspace's JavaScript</td><td><code>dev</code> and <code>gateway</code>; Node for the <code>.mjs</code> files</td></tr>
               <tr><td><code>tests/integration</code></td><td>Several parts together</td><td><code>dev</code> and <code>gateway</code></td></tr>
               <tr><td><code>tests/smoke</code></td><td>Offline tests of the smoke tools (parsing, metrics, logging), plus the opt-in <code>test_backend_smoke.py</code></td><td><code>dev</code>; a model server for that file</td></tr>
@@ -246,8 +254,9 @@ uv run mypy .</code></pre>
           Black formats at 88 columns. Ruff selects <code>E</code>,
           <code>W</code>, <code>F</code>, <code>I</code>, <code>N</code>,
           <code>UP</code>, <code>B</code> and <code>SIM</code>; <code>E501</code>
-          is left to black. Mypy is strict, so every function has annotations,
-          except in <code>__main__.py</code>. The same three run from
+          is left to black. Mypy requires an annotation on every function
+          (<code>disallow_untyped_defs</code>), checks untyped function bodies,
+          and exempts <code>__main__.py</code>. The same three run from
           pre-commit.
         </p>
       </section>
@@ -319,8 +328,9 @@ uv run mypy .</code></pre>
             Add the <code>ToolDef</code> and the function in
             <code>melo/executor/builtins.py</code>, decorated with
             <code>@_builtin(...)</code>. The semantic tags are the words a task
-            may use to name the tool, and <code>tool_exposure="retrieve"</code>
-            offers it by relevance.
+            may use to name the tool. Every registered built-in is offered in
+            every step; the task's hints and the BM25 search rank the other,
+            provided tools.
           </li>
           <li>
             Give it a permission tier: add its name to
@@ -375,13 +385,13 @@ uv run mypy .</code></pre>
           </li>
         </ol>
         <p>
-          The agent's own checkpoints, <code>pre_plan</code>,
+          The Checker's own checkpoints, <code>pre_plan</code>,
           <code>post_plan</code> and <code>pre_execute</code>, return a
           <code>CheckResult</code> instead. The existing boundaries are the
           gateway ingress, session transitions, tool resolution, executor
-          requests and results, memory writes, the planning prompt and the
-          tool-call shape. Add tests in <code>tests/checker/</code>, naming the
-          refused input and the reason.
+          results, memory writes, the planning prompt and the tool-call shape.
+          Add tests in <code>tests/checker/</code>, naming the refused input
+          and the reason.
         </p>
       </section>
 
