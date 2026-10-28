@@ -209,6 +209,7 @@ Open `http://127.0.0.1:8401/` in a browser for the web workspace:
 2. Discover models, pick a chat model, and optionally select an embedding model
    or seed memory set. Embeddings and seed memories are disabled by default.
 3. Create a chat, then send a message. Creating a chat never sends your draft.
+   Answers are rendered as Markdown, with code blocks.
 
 The sidebar supports chat search and switching. Drafts stay with each chat in
 the current browser tab. The workspace restores live chats after a page reload
