@@ -65,6 +65,7 @@ export function setupDrawer({api, currentId, root, trigger}) {
     parent.append(node('p', `${label}: ${value}`));
   }
   function toolView(data) {
+    content.append(node('p', 'Viewing tools opens the Agent if it is not already open.'));
     const tools = data.tools || [];
     if (!tools.length) content.append(node('p', 'No tools available.'));
     for (const tool of tools) {
@@ -123,20 +124,24 @@ export function setupDrawer({api, currentId, root, trigger}) {
     if (earlier && runs.length) content.append(button('Earlier runs', () => load(true)));
     else if (earlier) content.append(node('p', 'Earlier runs cannot be loaded because this page has no finished runs.'));
   }
+  function clearContent(...children) {
+    if (open && content.contains(doc.activeElement)) closeButton.focus();
+    content.replaceChildren(...children);
+  }
   function render(data) {
-    content.replaceChildren();
+    clearContent();
     if (tab === 'tools') toolView(data);
     else if (tab === 'memory') memoryView(data);
     else runsView();
   }
-  async function load(append = false) {
+  async function load(append = false, notice = '') {
     if (!open || !id || currentId() !== id || busy) return;
     const session = id;
     const selected = tab;
     const token = ++generation;
     busy = true;
     message.textContent = 'Loading…';
-    if (!append) content.replaceChildren();
+    if (!append) clearContent();
     try {
       const cursor = append ? `?before=${encodeURIComponent(Math.min(...runs.map((run) => run.turn)))}` : '';
       const data = await api(path(session, selected + cursor));
@@ -145,13 +150,13 @@ export function setupDrawer({api, currentId, root, trigger}) {
         runs = append ? [...data.runs, ...runs] : data.runs;
         earlier = data.has_earlier;
       }
-      message.textContent = '';
+      message.textContent = notice;
       render(data);
     } catch (error) {
       if (!valid(token, session, selected)) return;
-      message.textContent = errorText(error);
+      message.textContent = notice ? `${notice} ${errorText(error)}` : errorText(error);
       if (!append) {
-        content.replaceChildren(button('Retry', () => load()));
+        clearContent(button('Retry', () => load(false, notice)));
       }
     } finally {
       if (valid(token, session, selected)) busy = false;
@@ -163,6 +168,7 @@ export function setupDrawer({api, currentId, root, trigger}) {
     const token = ++generation;
     busy = true;
     message.textContent = 'Revoking…';
+    if (content.contains(doc.activeElement)) closeButton.focus();
     for (const item of content.querySelectorAll('button')) item.disabled = true;
     try {
       await api(path(session, `grants${tool === undefined ? '' : '/' + encodeURIComponent(tool)}`), {method: 'DELETE'});
@@ -172,6 +178,11 @@ export function setupDrawer({api, currentId, root, trigger}) {
       busy = false;
       await load();
     } catch (error) {
+      if (error?.status === 404 && open && id === session && currentId() === session && tab === 'tools') {
+        busy = false;
+        await load(false, errorText(error));
+        return;
+      }
       if (!valid(token, session, 'tools')) return;
       message.textContent = errorText(error);
       for (const item of content.querySelectorAll('button')) item.disabled = false;
@@ -188,10 +199,14 @@ export function setupDrawer({api, currentId, root, trigger}) {
     updateControls();
     return load();
   }
+  function guardFocus(event) {
+    if (open && !root.contains(event.target)) closeButton.focus();
+  }
   function close() {
     if (!open) return false;
     generation++;
     open = false;
+    doc.removeEventListener('focusin', guardFocus);
     busy = false;
     root.hidden = true;
     content.replaceChildren();
@@ -200,16 +215,20 @@ export function setupDrawer({api, currentId, root, trigger}) {
     returnFocus?.focus();
     return true;
   }
-  function show() {
+  function show(initialTab) {
     const session = currentId();
-    if (!session) return false;
+    if (!session || (initialTab !== undefined && !['tools', 'memory', 'runs'].includes(initialTab))) return false;
+    if (initialTab !== undefined) tab = initialTab;
     generation++;
     busy = false;
     id = session;
     runs = [];
     earlier = false;
-    returnFocus = doc.activeElement;
-    open = true;
+    if (!open) {
+      returnFocus = doc.activeElement;
+      open = true;
+      doc.addEventListener('focusin', guardFocus);
+    }
     root.hidden = false;
     updateControls();
     closeButton.focus();

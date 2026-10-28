@@ -8,14 +8,17 @@ function deferred() {
   return {promise, resolve, reject};
 }
 function harness(routes) {
-  const doc = {activeElement: null};
+  const doc = {activeElement: null, handlers: {},
+    addEventListener(type, handler) { this.handlers[type] = handler; },
+    removeEventListener(type, handler) { if (this.handlers[type] === handler) delete this.handlers[type]; }};
   class Element {
     constructor(tag) { this.tag = tag; this.children = []; this.attributes = {}; this.handlers = {}; this.textContent = ''; this.ownerDocument = doc; this.tabIndex = tag === 'button' ? 0 : -1; }
     setAttribute(key, value) { this.attributes[key] = value; }
+    contains(element) { return this === element || this.children.some((child) => child.contains(element)); }
     append(...nodes) { this.children.push(...nodes); }
-    replaceChildren(...nodes) { this.children = nodes; }
+    replaceChildren(...nodes) { if (this.contains(doc.activeElement) && this !== doc.activeElement) doc.activeElement = null; this.children = nodes; }
     addEventListener(type, handler) { this.handlers[type] = handler; }
-    focus() { doc.activeElement = this; }
+    focus() { doc.activeElement = this; doc.handlers.focusin?.({target: this}); }
     querySelectorAll(tag) { const match = (c) => tag.includes(',') ? c.tag === 'button' : c.tag === tag; return this.children.flatMap((c) => [...(match(c) ? [c] : []), ...c.querySelectorAll(tag)]); }
     click() { if (!this.disabled) return this.handlers.click?.({target: this}); }
   }
@@ -87,7 +90,9 @@ test('errors expose retry and failed revokes preserve controls', async () => {
     'DELETE /sessions/s%2F1/grants/%3Cshell%2Fa%3E': () => { throw new Error('denied'); }});
   await h.drawer.open();
   assert.match(h.text(), /offline/);
+  h.find('Retry').focus();
   await h.find('Retry').click();
+  assert.equal(h.doc.activeElement, h.find('Close details'));
   await h.find('Revoke').click();
   assert.match(h.text(), /denied/);
   assert.equal(h.find('Revoke').disabled, false);
@@ -147,6 +152,59 @@ test('Tab and Shift+Tab wrap focus while open and ignore disabled buttons', asyn
   h.drawer.close();
   prevented = false; key(true);
   assert.equal(prevented, false);
+});
+
+test('tools hint explains the Agent and open(tab) loads only the requested tab', async () => {
+  const h = harness({'GET /sessions/s%2F1/tools': emptyTools, 'GET /sessions/s%2F1/memory': memory});
+  await h.drawer.open('memory');
+  assert.deepEqual(h.calls, [['/sessions/s%2F1/memory', 'GET']]);
+  await h.drawer.open('tools');
+  assert.deepEqual(h.calls, [['/sessions/s%2F1/memory', 'GET'], ['/sessions/s%2F1/tools', 'GET']]);
+  assert.match(h.text(), /Viewing tools opens the Agent/);
+  h.drawer.close();
+  assert.equal(h.doc.activeElement, h.trigger);
+});
+
+test('404 revoke refreshes stale grants and preserves the notice', async () => {
+  let count = 0;
+  const missing = Object.assign(new Error('Grant already revoked'), {status: 404});
+  const h = harness({'GET /sessions/s%2F1/tools': () => ++count === 1 ? tools : emptyTools,
+    'DELETE /sessions/s%2F1/grants/%3Cshell%2Fa%3E': () => { throw missing; }});
+  await h.drawer.open();
+  await h.find('Revoke').click();
+  assert.equal(count, 2);
+  assert.match(h.text(), /Grant already revoked/);
+  assert.match(h.text(), /No tools available/);
+  assert.equal(h.find('Revoke'), undefined);
+});
+
+test('focus stays in the drawer across removal, external focus, and close', async () => {
+  const pending = deferred();
+  let count = 0;
+  const h = harness({'GET /sessions/s%2F1/tools': () => ++count === 1 ? tools : pending.promise,
+    'DELETE /sessions/s%2F1/grants/%3Cshell%2Fa%3E': {}});
+  await h.drawer.open();
+  h.find('Revoke').focus();
+  const refresh = h.find('Revoke').click();
+  await Promise.resolve();
+  assert.equal(h.doc.activeElement, h.find('Close details'));
+  h.trigger.focus();
+  assert.equal(h.doc.activeElement, h.find('Close details'));
+  h.drawer.close();
+  assert.equal(h.doc.handlers.focusin, undefined);
+  const outside = h.doc.createElement('button');
+  outside.focus();
+  pending.resolve(emptyTools); await refresh;
+  assert.equal(h.doc.activeElement, outside);
+});
+
+test('rendering an appended page restores focus removed with the old content', async () => {
+  const h = harness({'GET /sessions/s%2F1/runs': {runs: [run(3)], has_earlier: true},
+    'GET /sessions/s%2F1/runs?before=3': {runs: [run(1)], has_earlier: false}});
+  await h.drawer.open('runs');
+  h.find('Earlier runs').focus();
+  await h.find('Earlier runs').click();
+  assert.equal(h.doc.activeElement, h.find('Close details'));
 });
 
 test('empty filtered page with earlier turns explains unavailable cursor', async () => {

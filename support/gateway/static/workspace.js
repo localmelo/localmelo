@@ -114,6 +114,10 @@ function button(className, text, onClick) {
   return node;
 }
 
+function setTextIfChanged(node, text) {
+  if (node.textContent !== text) node.textContent = text;
+}
+
 function activeSession() {
   return S.sessions.find((session) => session.id === S.activeId) ?? S.view?.session ?? null;
 }
@@ -308,10 +312,10 @@ function syncUI() {
   document.title = `localmelo · ${session ? title(session) : "New chat"}${pending ? ` · ${pending}` : ""}${turn ? " ●" : ""}`;
   const storeBanner = $("store-banner");
   const storeError = S.health?.sessions && S.health.sessions.store !== "ok";
-  storeBanner.textContent = storeError ? `Chats are unavailable: ${S.health.sessions.store_error || "Store unavailable."}` : (!S.online ? "Could not reach the gateway. Check that the gateway is running." : "");
+  setTextIfChanged(storeBanner, storeError ? `Chats are unavailable: ${S.health.sessions.store_error || "Store unavailable."}` : (!S.online ? "Could not reach the gateway. Check that the gateway is running." : ""));
   storeBanner.hidden = !storeBanner.textContent;
   const modelBanner = $("model-banner");
-  modelBanner.textContent = S.health?.configured === false ? "No model is configured yet. Open connection settings to connect one." : "";
+  setTextIfChanged(modelBanner, S.health?.configured === false ? "No model is configured yet. Open connection settings to connect one." : "");
   modelBanner.hidden = !modelBanner.textContent;
   refreshStreamNotice();
   $("header-model").textContent = session
@@ -730,7 +734,7 @@ function refreshStreamNotice() {
   banner.hidden = S.stream.status !== "paused";
   if (banner.hidden) return;
   const seconds = Math.max(0, Math.ceil(S.stream.retryAt - nowSeconds()));
-  $("stream-banner-text").textContent = `Live updates paused. Reconnecting in ${seconds}s…`;
+  setTextIfChanged($("stream-banner-text"), `Live updates paused. Reconnecting in ${seconds}s…`);
 }
 
 // ── Rendering the turns ──
@@ -976,7 +980,7 @@ function statusNode(turn) {
       catch { notify("Clipboard unavailable. Select the error text to copy it."); }
     }));
   }
-  if (turn.status === "setup_error") actions.append(button("link-button", "Show tools", () => { drawer.open(); drawer.selectTab("tools"); }));
+  if (turn.status === "setup_error") actions.append(button("link-button", "Show tools", () => drawer.open("tools")));
   node.append(actions);
   if (!stopped) {
     const details = el("details", "failure-details");
@@ -1743,7 +1747,7 @@ function sidebar(open) {
 }
 
 const drawer = setupDrawer({ api, currentId: () => S.activeId, root: $("details-drawer"), trigger: $("details-trigger") });
-const openSettings = setupSettings({
+const showSettings = setupSettings({
   api,
   onSaved: async () => {
     try {
@@ -1754,6 +1758,10 @@ const openSettings = setupSettings({
     }
   },
 });
+function openSettings() {
+  drawer.close();
+  return showSettings();
+}
 
 // ── The clock ──
 

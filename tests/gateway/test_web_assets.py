@@ -217,6 +217,7 @@ async def test_the_shell_loads_the_same_assets_as_before(
     assert set(parser.paths) == {
         "/assets/icon_small.png",
         "/assets/melo.png",
+        "/assets/theme-init.js",
         "/assets/workspace.css",
         "/assets/workspace.js",
     }
@@ -229,6 +230,20 @@ async def test_settings_module_is_served_as_javascript(
     assert response.status_code == 200
     assert "javascript" in response.headers["content-type"]
     assert "setupSettings" in response.text
+
+
+def test_quickstart_describes_available_workspace_controls() -> None:
+    quickstart = Path(__file__).parents[2] / "docs" / "quickstart.md"
+    text = quickstart.read_text(encoding="utf-8")
+    assert "Approval cards, connection settings and the session details drawer are" in text
+    assert "The approval cards and the settings dialog arrive in a later update" not in text
+
+
+async def test_theme_init_is_served_as_javascript(client: httpx.AsyncClient) -> None:
+    response = await client.get("/assets/theme-init.js")
+    assert response.status_code == 200
+    assert "javascript" in response.headers["content-type"]
+    assert "localmelo-console.theme" in response.text
 
 
 async def test_drawer_module_is_served_as_javascript(
