@@ -127,6 +127,34 @@ async def test_the_gate_drops_only_an_exact_duplicate(
             await store.aclose()
 
 
+@pytest.mark.parametrize("sqlite", [False, True])
+async def test_a_same_key_digest_competes_with_its_task_digest(
+    tmp_path: Path, sqlite: bool
+) -> None:
+    store: LongTerm = SqliteLongTerm(tmp_path / "long.db") if sqlite else LongTerm()
+    hippo = Hippo(long=store, typed_assertions=True)
+    exact = "Quarterly planning review moved to 2026-06-01.\nfiles: plan.md"
+    key = "same-task-key"
+    try:
+        for name in ("a", "b"):
+            hippo.propose(
+                MemoryCandidate(
+                    name,
+                    "digest",
+                    exact,
+                    "rule",
+                    "task",
+                    provenance={"task_key": key},
+                )
+            )
+            decision = (await hippo.admit(name, "rehearsal"))[0]
+        assert decision.action == "IGNORE"
+        assert len(await store.active_entries()) == 1
+    finally:
+        if isinstance(store, SqliteLongTerm):
+            await store.aclose()
+
+
 async def test_date_field_is_recorded_as_source_time() -> None:
     store = LongTerm()
     hippo = Hippo(long=store, typed_assertions=True)

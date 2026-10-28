@@ -16,10 +16,12 @@ from .test_compress import (
     FakeLLM,
     _agent,
     _answer,
+    _call_reply,
     _options,
     _reflection,
     _write_reply,
 )
+from .test_recall_loop import _entry
 
 
 async def _seed(agent: Any, rows: list[tuple[str, str, str, str]]) -> None:
@@ -161,6 +163,32 @@ async def test_same_task_survives_top_twenty_and_is_counted(tmp_path: Path) -> N
     assert result.memory_stats is not None
     assert result.memory_stats["recall_same_task"] == 1
     assert result.memory_stats["recall_log"][0]["same_task"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_task_note_hit_is_counted_in_recall_task_notes(tmp_path: Path) -> None:
+    server = FakeLLM(
+        _call_reply("<note>plan: check the deployment checklist</note>"),
+        _answer("done"),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            retriever="bm25",
+            max_steps=2,
+        ),
+    )
+    assert agent.load_notes(
+        [_entry("n1", "the deployment checklist is owned by Alice")]
+    )
+    result = await agent.run_task("deployment checklist for the release")
+    await agent.close()
+    assert result.status == "completed"
+    assert result.memory_stats is not None
+    assert result.memory_stats["recall_task_notes"] == 1
+    assert any(row["task_notes"] == 1 for row in result.memory_stats["recall_log"])
 
 
 @pytest.mark.asyncio
