@@ -194,7 +194,9 @@ Before a tool runs, localmelo checks the call:
   an approval policy, because a caller that passes none would otherwise have
   no check at all. The `interactive` and `gateway` modes use the tier and the
   mode instead: the gateway does not offer the tool, and the interactive UI
-  asks about every `exec` call (see [Permission tiers](#permission-tiers)).
+  asks about every `exec` call (see [Permission tiers](#permission-tiers)),
+  except under `--yolo`, where nothing asks and no command is refused by its
+  spelling.
 - With a workspace root, the path of `file_read` and `file_write` must be
   inside it (see [With a workspace root](#with-a-workspace-root)).
 - With an approval policy, a tool whose tier is not `read`, or that is
@@ -256,8 +258,8 @@ The mode decides which built-ins are offered at all. A gateway or console
 session runs in `gateway` mode and gets `file_read`, `file_write` and
 `python_exec`; `shell_exec` is not registered, so the model never sees it.
 The interactive UI and the Python API keep all four (`interactive` and
-`python` mode; the UI always asks before an `exec` call, and a Python run
-asks when it has a policy). The `python` mode keeps the six-pattern
+`python` mode; the UI asks before an `exec` call unless it runs with
+`--yolo`, and a Python run asks when it has a policy). The `python` mode keeps the six-pattern
 blocklist in this release, with or without a policy, so a run that passes no
 approval is not weaker than direct mode. Direct mode is `direct` and, in
 this release, still keeps all four and its six-pattern blocklist.
