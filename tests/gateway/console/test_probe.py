@@ -49,6 +49,15 @@ async def test_a_cloud_backend_has_no_model_server() -> None:
     await probe.aclose()
 
 
+def test_a_malformed_or_relative_url_has_no_label() -> None:
+    from localmelo.support.gateway.console.probe import url_label
+
+    assert url_label("http://user:pass@127.0.0.1:9/v1") == "http://127.0.0.1:9/v1"
+    assert url_label("http://host:bad/v1") == ""
+    assert url_label("user:secret@host:9/v1") == ""
+    assert url_label("not a url") == ""
+
+
 async def test_a_local_backend_without_a_url_is_unreachable() -> None:
     probe = ModelServerProbe(local_cfg(""))
     assert probe.model_server() == {

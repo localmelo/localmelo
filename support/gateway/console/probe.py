@@ -41,12 +41,23 @@ class Probe(Protocol):
 
 
 def url_label(url: str) -> str:
-    """*url* without any user info, for a health response."""
+    """An absolute http(s) *url* without user info, or ``""``.
+
+    A malformed URL never reaches the health response as a 500, and a
+    relative value such as ``user:secret@host:9/v1`` is not echoed back: an
+    unparseable or non-http label is empty, so a credential in a broken
+    ``chat_url`` cannot leak.
+    """
     try:
         parsed = httpx.URL(url)
+    except (TypeError, ValueError, httpx.InvalidURL):
+        return ""
+    if parsed.scheme not in ("http", "https") or not parsed.host:
+        return ""
+    try:
         return str(parsed.copy_with(username="", password=""))
     except (TypeError, ValueError):
-        return url
+        return ""
 
 
 def _first_line(text: str) -> str:

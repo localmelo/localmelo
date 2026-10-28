@@ -98,14 +98,21 @@ class GatewayServer:
             yield
         finally:
             logger.info("gateway shutting down")
-            await self.sessions.close_all()
-            # FastAPI does not run on_event handlers when an explicit lifespan
-            # is installed. Close the web workspace's providers here as well.
-            playground = getattr(app.state, "smoke_playground", None)
-            if playground is not None:
-                await playground.close_all()
-            if self.console is not None:
-                await self.console.aclose()
+            # Each close must run even when an earlier one raises: the
+            # console's aclose releases the gateway store's owner lock last.
+            try:
+                await self.sessions.close_all()
+            finally:
+                try:
+                    # FastAPI does not run on_event handlers when an explicit
+                    # lifespan is installed. Close the web workspace's
+                    # providers here as well.
+                    playground = getattr(app.state, "smoke_playground", None)
+                    if playground is not None:
+                        await playground.close_all()
+                finally:
+                    if self.console is not None:
+                        await self.console.aclose()
 
     # ── Routes ──
 

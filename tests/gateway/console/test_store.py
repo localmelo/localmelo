@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import localmelo.support.gateway.console as console_mod
+from localmelo.support.gateway import GatewayServer
 from localmelo.support.gateway.console import Console, ConsoleOptions
 from localmelo.support.sessions.store import SessionStore
 
@@ -103,3 +104,25 @@ async def test_aclose_is_idempotent(
     await console.aclose()
     await console.aclose()
     assert probe.closed is True
+
+
+async def test_the_console_closes_when_a_later_close_raises(
+    tmp_path: Path, builder: FakeBuilder, probe: FakeProbe
+) -> None:
+    path = str(tmp_path / "sessions.db")
+    server = GatewayServer(
+        make_cfg(),
+        console_options=ConsoleOptions(store_path=path, builder=builder, probe=probe),
+    )
+
+    class BadPlayground:
+        async def close_all(self) -> None:
+            raise RuntimeError("playground close failed")
+
+    server.app.state.smoke_playground = BadPlayground()
+    with pytest.raises(RuntimeError), TestClient(server.app):
+        pass
+    # The console's aclose ran in the finally: the owner lock is free.
+    again = SessionStore(path, writer="gateway")
+    await again.open()
+    await again.aclose()

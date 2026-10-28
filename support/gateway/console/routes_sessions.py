@@ -36,6 +36,8 @@ _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 _INLINE_IMAGES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
 _TURN_LIMIT = 50
 _SESSION_LIMIT = 200
+# SQLite event ids are signed 64-bit integers.
+_EVENT_ID_MAX = 2**63 - 1
 
 
 # ── Helpers ──
@@ -310,16 +312,24 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
 
 def _event_id(value: str, name: str) -> int:
-    """A decimal event id, or 400 ``invalid_request``."""
+    """A decimal event id in SQLite's range, or 400 ``invalid_request``."""
     # Decimal digits only: int() would also take "+1", "1_0" and non-ASCII
-    # digits, which are not an event id.
-    if re.fullmatch(r"[0-9]+", value) is None:
+    # digits, which are not an event id. More digits than a 64-bit integer
+    # can hold are refused before int() or SQLite sees them.
+    if len(value) > 19 or re.fullmatch(r"[0-9]+", value) is None:
         raise ApiError(
             400,
             "invalid_request",
             f"{name} must be an integer of at least 0.",
         )
-    return int(value)
+    number = int(value)
+    if number > _EVENT_ID_MAX:
+        raise ApiError(
+            400,
+            "invalid_request",
+            f"{name} must be an integer of at least 0.",
+        )
+    return number
 
 
 async def _replay_from(console: Console, session_id: str, turns: list[TurnInfo]) -> int:

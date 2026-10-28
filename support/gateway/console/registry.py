@@ -407,6 +407,7 @@ class ConsoleSessions:
 
     async def delete(self, session_id: str) -> None:
         """Close the session's runner and delete its row; 404 when unknown."""
+        removed = False
         try:
             async with self.lock(session_id):
                 entry = self._sessions.get(session_id)
@@ -424,10 +425,12 @@ class ConsoleSessions:
                     raise ApiError(409, "session_busy", str(exc)) from exc
                 if not deleted:
                     raise ApiError(404, "not_found", "Session not found.")
+                removed = True
         finally:
-            # The session is gone; a later open of the same id gets a fresh
-            # lock, and any waiter on the old one still finds no row.
-            self._locks.pop(session_id, None)
+            # Only a row that is really gone may lose its lock: a 409/503
+            # leaves the row, and the same lock must still serialize it.
+            if removed:
+                self._locks.pop(session_id, None)
 
     async def close_all(self) -> None:
         """Stop every turn and close every Agent within the shutdown budget."""

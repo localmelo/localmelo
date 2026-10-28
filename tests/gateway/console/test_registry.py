@@ -159,11 +159,14 @@ async def test_delete_a_running_session_is_409(
     turn = await seed_turn(console.store, workspace, status="running")
     reg = registry(console, builder)
     await open_session(reg, turn.session_id)
+    lock = reg.lock(turn.session_id)
     with pytest.raises(ApiError) as info:
         await reg.delete(turn.session_id)
     assert info.value.status_code == 409
     assert info.value.code == "session_busy"
     assert reg.get(turn.session_id) is None
+    # The row survives, so its lock must survive as the same object.
+    assert reg.lock(turn.session_id) is lock
 
 
 async def test_delete_an_unknown_session_is_404(console: Console) -> None:

@@ -144,7 +144,9 @@ async def test_a_bad_last_event_id_is_a_400(
     assert resp.json()["error"]["code"] == "invalid_request"
 
 
-@pytest.mark.parametrize("value", ["-1", "1_0", "+1", "abc", "1.5"])
+@pytest.mark.parametrize(
+    "value", ["-1", "1_0", "+1", "abc", "1.5", "9" * 100, str(2**63)]
+)
 async def test_a_bad_after_is_a_400(
     client: TestClient, console: Console, workspace: str, value: str
 ) -> None:
