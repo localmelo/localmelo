@@ -135,6 +135,115 @@ async def test_retry_interrupt_and_resume(
     assert receipt is not None and not receipt[1]
 
 
+async def test_no_row_retry_interrupt_and_resume(
+    stores: tuple[SessionStore, TaskStore, ParkStore, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sessions, tasks, parks, task_id = stores
+    async with sessions.component_transaction("reset_no_row") as conn:
+        await conn.execute("DELETE FROM park_priority WHERE task_id=?", (task_id,))
+        await conn.execute(
+            "UPDATE tasks SET state='running', level=3, level_source='user', "
+            "level_pinned=1, level_eff=3, reason='priority' WHERE task_id=?",
+            (task_id,),
+        )
+    await parks.hold(
+        task_id,
+        site="plan",
+        step=1,
+        attempt=1,
+        reason="capacity",
+        expected_generation=None,
+        expected_operation_id=None,
+        operation_id="no-row-hold",
+    )
+
+    def fail(label: str) -> None:
+        if label == "park_parked":
+            raise RuntimeError("injected")
+
+    monkeypatch.setattr(sessions, "_before_commit", fail)
+    with pytest.raises(RuntimeError, match="injected"):
+        await parks.park(task_id, card="card", operation_id="failed-park")
+    monkeypatch.setattr(sessions, "_before_commit", lambda label: None)
+    assert await tasks.park_identity(task_id) == (None, None)
+    await parks.mark_park_retry(
+        task_id,
+        expected_generation=None,
+        expected_operation_id=None,
+        operation_id="no-row-retry",
+    )
+    assert await tasks.park_identity(task_id) == (None, None)
+    with pytest.raises(ParkStoreError):
+        await parks.interrupt(
+            task_id,
+            card="card",
+            expected_generation=1,
+            expected_operation_id=None,
+            operation_id="stale-no-row",
+        )
+    assert await tasks.park_identity(task_id) == (None, None)
+    assert (await tasks.get_task(task_id)).state == "held"
+    await parks.interrupt(
+        task_id,
+        card="card",
+        expected_generation=None,
+        expected_operation_id=None,
+        operation_id="no-row-interrupt",
+    )
+    assert (
+        await parks.interrupt(
+            task_id,
+            card="card",
+            expected_generation=None,
+            expected_operation_id=None,
+            operation_id="no-row-interrupt",
+        )
+    ).state == "interrupted"
+    assert await tasks.park_identity(task_id) == (1, "no-row-interrupt")
+    result = await tasks.resume_interrupted(
+        task_id,
+        expected_generation=1,
+        expected_operation_id="no-row-interrupt",
+        operation_id="no-row-resume",
+    )
+    assert (result.state, result.level, result.level_source, result.reason) == (
+        "queued",
+        2,
+        "computed",
+        "",
+    )
+    assert result.card == "card"
+
+
+async def test_retry_then_park_restores_hold_reason(
+    stores: tuple[SessionStore, TaskStore, ParkStore, str],
+) -> None:
+    _, tasks, parks, task_id = stores
+    await parks.mark_park_retry(
+        task_id,
+        expected_generation=2,
+        expected_operation_id="pause",
+        operation_id="retry-1",
+    )
+    await parks.mark_park_retry(
+        task_id,
+        expected_generation=3,
+        expected_operation_id="pause",
+        operation_id="retry-2",
+        reason="park cleanup retrying",
+    )
+    parked = await parks.park(
+        task_id,
+        card="card",
+        expected_generation=4,
+        expected_operation_id="pause",
+        operation_id="park",
+    )
+    assert parked.reason == "capacity"
+    assert (await tasks.get_task(task_id)).wait_reason == "capacity"
+
+
 async def test_resume_uncertainty_is_idempotent(
     stores: tuple[SessionStore, TaskStore, ParkStore, str],
     monkeypatch: pytest.MonkeyPatch,

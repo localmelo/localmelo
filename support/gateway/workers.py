@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from dataclasses import asdict
-from typing import cast
+from typing import Any, cast
 
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
@@ -267,8 +267,10 @@ class TaskWorkers:
             isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 5
         ):
             raise ValueError("level must be P0-P5 or auto")
-        if task_id in self._unavailable or task_id in self._quarantined:
+        if task_id in self._unavailable:
             raise SessionStoreError("store unavailable")
+        if task_id in self._quarantined and state != "stop":
+            raise TaskStoreError("worker cleanup failed; slot held until restart")
         is_p5 = level == 5 or level == "p5"
         if state == "pause" and level is not None:
             raise ValueError("pause cannot be combined with a level")
@@ -305,11 +307,29 @@ class TaskWorkers:
                 ):
                     raise SessionStoreError("store unavailable")
         async with self._lock:
-            if task_id in self._unavailable or task_id in self._quarantined:
+            if task_id in self._unavailable:
                 raise SessionStoreError("store unavailable")
+            if task_id in self._quarantined and state != "stop":
+                raise TaskStoreError("worker cleanup failed; slot held until restart")
             current = await self.tasks.get_task(task_id)
             if current.state in TERMINAL_PHASES:
                 raise TaskStoreError("task is finished")
+            if task_id in self._quarantined:
+                generation, previous = await self.tasks.park_identity(task_id)
+                args: dict[str, Any] = dict(
+                    state="cancelled",
+                    actor="user",
+                    expected_generation=generation,
+                    expected_operation_id=previous,
+                    operation_id=uuid.uuid4().hex,
+                )
+                try:
+                    record = await self.tasks.change(task_id, **args)
+                except (Exception, asyncio.CancelledError):
+                    record = await self.tasks.change(task_id, **args)
+                self._eligible.discard(task_id)
+                self.gate.finish_task(task_id, "cancelled")
+                return await self._body(record)
             pending_resume = False
             if state == "pause" and current.level == 5:
                 async with self.store.component_transaction("worker_pending") as conn:
@@ -526,6 +546,8 @@ class TaskWorkers:
         turn_id: str,
         kind: str,
     ) -> None:
+        if self._runners.get(task_id) is not runner:
+            raise asyncio.CancelledError()
         point = (call, runner, turn_id)
         self._points[task_id] = point
         evidence = await committed_evidence(
@@ -574,6 +596,8 @@ class TaskWorkers:
         self, task_id: str, runner: SessionRunner, request: ApprovalRequest
     ) -> tuple[SessionRunner, str, SafePointEvidence]:
         turn = runner.current_turn
+        if self._runners.get(task_id) is not runner:
+            raise asyncio.CancelledError()
         if turn is None:
             raise RuntimeError("Approval has no active worker turn")
         self._ready[task_id].clear()
@@ -586,7 +610,11 @@ class TaskWorkers:
         )
         point = (runner, turn.id, evidence)
         async with self._lock:
-            if task_id in self._stopping or runner.current_turn != turn:
+            if (
+                task_id in self._stopping
+                or self._runners.get(task_id) is not runner
+                or runner.current_turn != turn
+            ):
                 raise asyncio.CancelledError()
             self._approval_points[task_id] = point
             generation, previous = await self.tasks.park_identity(task_id)
@@ -719,7 +747,11 @@ class TaskWorkers:
                         raise RuntimeError("Retry marker outcome is unknown") from None
                     log.warning("Could not record park retry for worker %s", task_id)
                 await asyncio.sleep(0.05 * 2**attempt)
-        self.gate.update_task(task_id, phase="parked", paused=True)
+
+    async def _sync_park_phase(self, task_id: str) -> None:
+        record = await self.tasks.get_task(task_id)
+        if record.state in ("parked", "interrupted") and task_id not in self._stopping:
+            self.gate.update_task(task_id, phase=cast(Phase, record.state), paused=True)
 
     def _store_unavailable(self, task_id: str) -> None:
         self._unavailable.add(task_id)
@@ -737,6 +769,11 @@ class TaskWorkers:
             try:
                 if task_id in self._stopping:
                     async with self._lock:
+                        current = await self.tasks.get_task(task_id)
+                        if current.state == "cancelled" and stop_identity is None:
+                            self.gate.finish_task(task_id, "cancelled")
+                            self._eligible.discard(task_id)
+                            return
                         if stop_identity is None:
                             stop_identity = await self.tasks.park_identity(task_id)
                         await self.tasks.change(
@@ -758,28 +795,33 @@ class TaskWorkers:
                     if receipt is not None:
                         if not receipt[1]:
                             raise RuntimeError("Cleanup interruption superseded")
+                        await self._sync_park_phase(task_id)
                         self._unavailable.discard(task_id)
                         return
                     card = await self._park_card(task_id)
-                    current = await self.tasks.park_identity(task_id)
+                    current_identity = await self.tasks.park_identity(task_id)
                     if identity is None:
-                        identity = current
-                    elif identity != current:
+                        identity = current_identity
+                    elif identity != current_identity:
                         raise RuntimeError("Cleanup interruption outcome unknown")
                     generation, previous = identity
-                    await self.parks.interrupt(
-                        task_id,
-                        card=card,
-                        reason="cleanup failed; slot held until restart",
-                        allow_empty=True,
-                        expected_generation=generation,
-                        expected_operation_id=previous,
-                        operation_id=operation_id,
-                    )
+                    async with self._lock:
+                        if task_id in self._stopping:
+                            continue
+                        await self.parks.interrupt(
+                            task_id,
+                            card=card,
+                            reason="cleanup failed; slot held until restart",
+                            allow_empty=True,
+                            expected_generation=generation,
+                            expected_operation_id=previous,
+                            operation_id=operation_id,
+                        )
                 else:
                     await self._finalize_park(
                         task_id, operation_id, interrupt_id, attempts
                     )
+                await self._sync_park_phase(task_id)
                 self._unavailable.discard(task_id)
                 if not cleanup_failed:
                     self._failure_events.setdefault(task_id, asyncio.Event()).clear()

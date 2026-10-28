@@ -120,6 +120,10 @@ async def test_permanent_close_failure_quarantines_slot(
     row = await interrupted()
     assert row["card"]
     assert row["wait_reason"] == "cleanup failed; slot held until restart"
+    assert (
+        next(t.phase for t in gate.registered_tasks if t.task_id == task_id)
+        == "interrupted"
+    )
     assert task_id in workers._runs
     assert not calls
     assert "sched.parked" not in [
@@ -138,7 +142,94 @@ async def test_permanent_close_failure_quarantines_slot(
     assert task_id in workers._runs
     assert sum(other in workers._runs for other in others) == MAX_WORKERS - 1
     assert not calls
+    stopped = await workers.update(task_id, state="stop")
+    assert stopped["state"] == "cancelled"
+    assert task_id in workers._runs
+    assert (
+        next(t.phase for t in gate.registered_tasks if t.task_id == task_id)
+        == "cancelled"
+    )
+    assert not calls
     monkeypatch.setattr(target, "close", original)
+
+
+@pytest.mark.parametrize("uncertain", [False, True])
+async def test_stop_quarantined_task_retains_slot(
+    worker_env: tuple[TaskWorkers, ChatGate, list[list[Message]], Path],
+    monkeypatch: pytest.MonkeyPatch,
+    uncertain: bool,
+) -> None:
+    workers, gate, calls, workspace = worker_env
+
+    async def fail_close(self: Any, *args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("cleanup failed")
+
+    monkeypatch.setattr(SessionRunner, "close", fail_close)
+    task_id = await start_held(workers, gate, workspace)
+    await workers.update(task_id, state="pause")
+    async with asyncio.timeout(3):
+        while (await workers.get(task_id))["state"] != "interrupted":
+            await asyncio.sleep(0.001)
+    original_commit = workers.store._commit
+    injected = False
+
+    async def commit_then_cancel(conn: Any, events: Any, label: str) -> None:
+        nonlocal injected
+        await original_commit(conn, events, label)
+        if uncertain and not injected and label == "task_change":
+            injected = True
+            raise asyncio.CancelledError()
+
+    monkeypatch.setattr(workers.store, "_commit", commit_then_cancel)
+    stopped = await workers.update(task_id, state="stop")
+    assert injected == uncertain
+    assert [
+        event.event["type"] for event in await workers.store.list_events(task_id)
+    ].count("sched.stopped") == 1
+    assert stopped["state"] == "cancelled"
+    assert task_id in workers._runs and not calls
+    assert (
+        next(t.phase for t in gate.registered_tasks if t.task_id == task_id)
+        == "cancelled"
+    )
+
+
+async def test_stop_races_quarantine_interrupted_commit(
+    worker_env: tuple[TaskWorkers, ChatGate, list[list[Message]], Path],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    workers, gate, calls, workspace = worker_env
+    writing, release = asyncio.Event(), asyncio.Event()
+    interrupt = workers.parks.interrupt
+
+    async def fail_close(self: Any, *args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("cleanup failed")
+
+    async def blocked_interrupt(*args: Any, **kwargs: Any) -> Any:
+        writing.set()
+        await release.wait()
+        return await interrupt(*args, **kwargs)
+
+    monkeypatch.setattr(SessionRunner, "close", fail_close)
+    monkeypatch.setattr(workers.parks, "interrupt", blocked_interrupt)
+    task_id = await start_held(workers, gate, workspace)
+    stop = None
+    try:
+        await workers.update(task_id, state="pause")
+        await asyncio.wait_for(writing.wait(), 3)
+        stop = asyncio.create_task(workers.update(task_id, state="stop"))
+        await wait_for(lambda: task_id in workers._stopping)
+        release.set()
+        assert (await asyncio.wait_for(stop, 3))["state"] == "cancelled"
+        assert task_id in workers._runs and not calls
+        assert (
+            next(t.phase for t in gate.registered_tasks if t.task_id == task_id)
+            == "cancelled"
+        )
+    finally:
+        release.set()
+        if stop is not None:
+            await asyncio.gather(stop, return_exceptions=True)
 
 
 @pytest.mark.parametrize("uncertain", [False, True])
