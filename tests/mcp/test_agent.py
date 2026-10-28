@@ -190,9 +190,7 @@ class TestRequireApproval:
     async def test_an_unannotated_tool_asks_the_policy(
         self, log_path: Path, created: list[StdioMcpClient]
     ) -> None:
-        llm = FakeLLM(
-            [_call("mcp__fake__echo", {"text": "hello"}), _answer("done")]
-        )
+        llm = FakeLLM([_call("mcp__fake__echo", {"text": "hello"}), _answer("done")])
         server = fake_server_config(log_path)
         agent, _ = _mcp_agent(llm, [server], created)
         policy = AllowAndRecord()
