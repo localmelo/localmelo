@@ -152,7 +152,9 @@ def _run(tmp_path: Path, stub: StubServer, scenario: str, *args: str) -> dict[st
     )
     assert done.returncode == 0, done.stderr
     assert done.stdout.count("\n") == 1, done.stdout
-    return json.loads(done.stdout)
+    result = json.loads(done.stdout)
+    assert isinstance(result, dict)
+    return result
 
 
 def _blocks(requests: list[dict[str, Any]], role: str) -> list[str]:
@@ -194,6 +196,7 @@ def test_the_recall_tool_returns_the_superseded_note(
 ) -> None:
     result = _run(tmp_path, stub, "tool", "--recall-at", "tool")
     stats = result["memory_stats"]
+    assert stats["recalls"] >= 1
     assert stats["recalls_by_trigger"]["tool"] >= 1
     blocks = _blocks(stub.requests, "tool")
     assert any("[n1]" in block and "parser" in block for block in blocks)
