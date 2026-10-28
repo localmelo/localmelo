@@ -196,7 +196,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 
 - The directory that holds `pyproject.toml` IS the package `localmelo` (`package-dir`: `localmelo = "."`): `melo/agent/agent.py` imports as `localmelo.melo.agent.agent`. Keep the clone named `localmelo`; never create `localmelo/localmelo/`.
 - `melo/` is the core (run loop, checks, executor, memory, contracts); `support/` holds backends, providers, gateway, MCP, config, wizard, `melo-retrieve`, `melo-procedures`, scheduler. `melo/` does not import `support/` (exceptions: `tests/test_layering.py`).
-- Setup: `uv sync --extra dev --extra gateway`. Tests: `uv run pytest -q --ignore=tests/smoke/test_backend_smoke.py` (that file sends a real chat request to any server on `127.0.0.1:11434` or `127.0.0.1:8400`; pre-commit hooks run it too).
+- Setup: `uv sync --extra dev --extra gateway`. Tests: `uv run pytest -q` (a plain run opens no socket; `tests/smoke/test_backend_smoke.py` is skipped unless `LOCALMELO_SMOKE=1`, and `--ignore=tests/smoke/test_backend_smoke.py` still works).
 - Lint: `uv run ruff check .`, `uv run black --check .`, `uv run mypy .`. Web workspace JS (Node from `.nvmrc`): `node --test tests/gateway/*.mjs`.
 - Commits `[Area] Imperative summary`; PR titles add the type (`[Feature][Agent] ...`). Tests and docs (with `README.zh-CN.md`, `docs/zh-CN/`) in the same PR, in English ([CONTRIBUTING.md](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md)).
 

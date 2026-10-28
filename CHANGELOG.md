@@ -151,6 +151,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- A plain `pytest` no longer opens sockets to local model servers while
+  collecting `tests/smoke/test_backend_smoke.py`; its two real-backend tests
+  are skipped unless `LOCALMELO_SMOKE=1` is set. With the switch on they probe
+  and send requests as before, and
+  `--ignore=tests/smoke/test_backend_smoke.py` is no longer needed for an
+  offline run ([#57]).
 - `melo` without a task, in a terminal, opens the interactive UI on the
   saved backend; it used to start the gateway, which `melo --serve` still
   does. `melo --base-url URL` and `melo --chat-model NAME` without a task
@@ -292,3 +298,4 @@ earlier milestones.
 [#53]: https://github.com/localmelo/localmelo/pull/53
 [#55]: https://github.com/localmelo/localmelo/pull/55
 [#56]: https://github.com/localmelo/localmelo/pull/56
+[#57]: https://github.com/localmelo/localmelo/pull/57
