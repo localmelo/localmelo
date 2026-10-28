@@ -174,8 +174,9 @@ pool has no absolute floor. A doc is `long:<entry id>`, not a hash of its text.
   persistence on, the first run that ends creates it, and every run adds
   its record at its end, `--memory off` included. With persistence off,
   procedural memory stays in RAM, and nothing is written.
-- The gateway's web workspace keeps its own files in
-  `~/.cache/localmelo/playground/`. Its `history.db` keeps the model's
+- The legacy playground is disabled by default; `melo --serve
+  --enable-playground` enables it and creates `~/.cache/localmelo/playground/`.
+  Its `history.db` keeps the model's
   reasoning for the same number of days, and clears older reasoning when a
   new chat first uses it: each chat opens its own connection to the shared
   file. Its chats share a `procedures.db` there too.
@@ -196,8 +197,8 @@ Every run saves one row in the `tasks` table of history:
   `Cancelled by SIGTERM` or `Cancelled by SIGHUP`.
 - An interactive run that is cancelled is saved as `cancelled`, with the
   reason as its result: a run started in the Python API with `on_event` or
-  `approval`, or a web workspace chat stopped with Stop or by its 600-second
-  limit (its history is in `~/.cache/localmelo/playground/`). Its
+  `approval`, or a legacy playground chat stopped with Stop or by its 600-second
+  limit (when enabled, its history is in `~/.cache/localmelo/playground/`). Its
   interrupted step gets one row per tool call in `steps` (see
   [Stop a run](../guides/python.md#stop-a-run)). Other cancelled runs are saved as
   `crashed`.
@@ -315,8 +316,8 @@ planning and reflection requests alike. The history in RAM keeps none.
 
 The session store ([Sessions](sessions.md)) keeps conversations in its own
 files, apart from `history.db`. Bare `melo` opens
-`~/.cache/localmelo/cli/sessions.db` at its first message; the gateway does
-not use a store yet.
+`~/.cache/localmelo/cli/sessions.db` at its first message; the gateway's
+console uses its own store.
 
 ```text
 ~/.cache/localmelo/gateway/sessions.db   the gateway's sessions

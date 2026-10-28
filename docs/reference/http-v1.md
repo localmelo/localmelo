@@ -143,8 +143,8 @@ field; see [Run results](run-results.md#where-results-appear).
 
 The answer is HTTP 200 with `{"closed": "demo123"}`, or HTTP 404 with
 `{"error": "session not found"}`. In the in-progress security-1b changes, a session with a running task or queued start is
-left alone: the answer is HTTP 409 with the same error body as a refused run,
-`{"error": "Session demo123 is running a task; wait for it to finish before closing it.", "session_id": "demo123"}`,
+left alone: the answer is HTTP 409,
+`{"error": "Session demo123 is running a task; wait for it to finish before closing it.", "session_id": "demo123", "code": "session_busy"}`,
 and the task goes on. `is_busy` in [GET /v1/sessions](#get-v1sessions)
 shows which sessions are busy.
 

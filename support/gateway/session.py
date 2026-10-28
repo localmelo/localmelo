@@ -130,13 +130,13 @@ class SessionManager:
 
     async def close(self, session_id: str) -> bool:
         s = self._sessions.get(session_id)
-        if not s:
-            return False
-        if s.is_busy or self._starting.get(session_id, 0):
+        if self._starting.get(session_id, 0) or (s is not None and s.is_busy):
             raise SessionBusyError(
                 f"Session {session_id} is running a task; wait for it to finish "
                 "before closing it."
             )
+        if s is None:
+            return False
         s.status = "closed"
         del self._sessions[session_id]
         self._closing.add(session_id)

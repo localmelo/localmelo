@@ -746,6 +746,8 @@ Rename the session, move it to another folder, or both.
 - In the in-progress security-1b changes, 409 `session_busy` refuses a
   delete while a turn is running or a start is queued; it does not cancel
   the turn or delete its row. Cancel or wait for it to finish, then retry.
+  A maintenance operation holding the session lock can also briefly return
+  this error, even when no turn is running; wait and retry.
 - 404 `not_found` for an unknown session.
 
 ## POST /api/sessions/{id}/level

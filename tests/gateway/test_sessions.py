@@ -65,6 +65,22 @@ async def test_queued_start_blocks_close_and_eviction() -> None:
     await mgr.close("queued")
 
 
+async def test_first_queued_start_blocks_close() -> None:
+    mgr = FakeSessionManager()
+    await mgr._creation_lock.acquire()
+    task = asyncio.create_task(mgr.get_or_create("new"))
+    await asyncio.sleep(0)
+    try:
+        with pytest.raises(SessionBusyError):
+            await mgr.close("new")
+        assert mgr.get("new") is None
+    finally:
+        mgr._creation_lock.release()
+    session = await task
+    assert mgr.get("new") is session
+    assert await mgr.close("new")
+
+
 async def test_close_removes_before_awaiting_agent() -> None:
     mgr = FakeSessionManager()
     session = await mgr.create("closing")

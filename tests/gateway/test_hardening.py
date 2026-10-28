@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -20,12 +22,26 @@ def _server(enabled: bool) -> tuple[GatewayServer, TestClient]:
     )
 
 
-def test_playground_is_disabled_without_creating_manager() -> None:
+def test_playground_is_disabled_without_creating_manager(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
     server, client = _server(False)
+    assert not (tmp_path / ".cache/localmelo/playground").exists()
     assert not hasattr(server.app.state, "smoke_playground")
     assert client.get("/v1/playground/scenarios").status_code == 404
     assert client.get("/").status_code == 200
     server.auth.close()
+
+
+def test_playground_flag_requires_serve(capsys: pytest.CaptureFixture[str]) -> None:
+    from localmelo.__main__ import _build_parser, _check_args
+
+    parser = _build_parser()
+    with pytest.raises(SystemExit) as exc:
+        _check_args(parser, parser.parse_args(["--enable-playground"]))
+    assert exc.value.code == 2
+    assert "--enable-playground is only for --serve" in capsys.readouterr().err
 
 
 def test_enabled_playground_requires_auth_and_saved_endpoint(
