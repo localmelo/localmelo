@@ -92,7 +92,7 @@ page, a term may carry the English in parentheses, as in 嵌入（embedding）.
 | web UI (playground) | 网页界面（playground） |
 | web workspace | 网页工作区 |
 | conversation loop (`melo ""`) | 对话循环（`melo ""`） |
-| interactive CLI (planned) | 交互式命令行（计划中） |
+| interactive CLI | 交互式命令行 |
 | setup wizard | 配置向导 |
 | config file | 配置文件 |
 | background service (macOS) | 后台服务（macOS） |
