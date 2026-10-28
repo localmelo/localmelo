@@ -1480,11 +1480,12 @@ class TestRedaction:
             REDACTED_TEXT,
         )
         assert (last.data["content"], last.data["thinking"]) == (clipped, clipped)
-        # Working memory, history and the RunResult keep the text.
+        # Working memory and the RunResult keep the text; history stores
+        # the step's thought redacted, as it does every copy it keeps.
         [call] = [m for m in agent.hippo.working.get_window() if m.tool_calls]
         assert (call.content, call.thinking) == (SECRET_TEXT, SECRET_TEXT)
         steps = await agent.hippo.history.get_steps(result.task_id)
-        assert steps[0].thought == SECRET_TEXT
+        assert steps[0].thought == REDACTED_TEXT
         assert result.result == long_text
         assert recorder.events[-1].data["result"]["result"] == long_text
 
