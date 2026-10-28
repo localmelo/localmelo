@@ -302,7 +302,8 @@ def main(argv: list[str] | None = None) -> int:
         from localmelo.support.config import load
 
         cfg = load().gateway
-        url = address(getattr(args, "gateway", None) or f"http://{cfg.host}:{cfg.port}")
+        host = f"[{cfg.host}]" if ":" in cfg.host else cfg.host
+        url = address(getattr(args, "gateway", None) or f"http://{host}:{cfg.port}")
         try:
             token = read_token(
                 Path.home() / ".cache" / "localmelo" / "gateway" / "auth"
@@ -313,7 +314,10 @@ def main(argv: list[str] | None = None) -> int:
             ) from exc
         with httpx.Client(
             base_url=url,
-            headers={"Authorization": f"Bearer {token}"},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Host": f"127.0.0.1:{urlsplit(url).port}",
+            },
             timeout=10,
             follow_redirects=False,
             trust_env=False,

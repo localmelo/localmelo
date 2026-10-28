@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -199,6 +200,35 @@ def test_human_output_strips_terminal_control_sequences() -> None:
             == 0
         )
     assert chr(27) not in output.getvalue()
+
+
+@pytest.mark.parametrize("host", ["::1", "127.0.0.2"])
+def test_main_configured_loopback_uses_guard_compatible_host(
+    host: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import localmelo.support.config as config
+    import localmelo.support.task_cli as cli
+
+    monkeypatch.setattr(
+        config,
+        "load",
+        lambda: SimpleNamespace(gateway=SimpleNamespace(host=host, port=8901)),
+    )
+    monkeypatch.setattr(cli, "read_token", lambda path: "a" * 64)
+    factory = httpx.Client
+    requests: list[httpx.Request] = []
+
+    def client(**kwargs: Any) -> httpx.Client:
+        def reply(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"tasks": []})
+
+        return factory(**kwargs, transport=httpx.MockTransport(reply))
+
+    monkeypatch.setattr(cli.httpx, "Client", client)
+    assert cli.main(["list"]) == 0
+    assert requests[0].url.host == host
+    assert requests[0].headers["Host"] == "127.0.0.1:8901"
 
 
 def test_main_sends_bearer_without_proxy_or_redirects(
