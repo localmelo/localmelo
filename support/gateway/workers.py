@@ -1141,11 +1141,7 @@ class TaskWorkers:
                         await runner.start_turn(
                             record.card or str(record.spec["objective"]),
                             approval=policy,
-                            **(
-                                {"client_request_id": execution_id}
-                                if execution_id
-                                else {}
-                            ),
+                            client_request_id=execution_id or None,
                         )
                         turn_started = True
                         self._pending_execution.pop(task_id, None)
