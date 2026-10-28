@@ -97,7 +97,7 @@
         <article class="update-entry" id="u-worker-brief">
           <h3>Worker 任务说明与事件流</h3>
           <p class="update-date">尚未发布</p>
-          <p>直接运行的 worker 可读取任务说明和显式收件箱，返回版本化 JSON 结果或事件流。智能体构建失败会产生启动错误结果；输出故障可能阻止最终记录送达。</p>
+          <p>直接运行的 worker 可读取任务说明和显式收件箱——位于工作区之外的文件，或继承的管道 fd（<code>--inbox-fd</code>）——返回版本化 JSON 结果或事件流。worker 会在启动工具前把该 fd 设为 close-on-exec，因此 python、shell 和 MCP 子进程无法写入该通道；不受信任的任务应使用它。智能体构建失败会产生启动错误结果；输出故障可能阻止最终记录送达。</p>
         </article>
 
         <article class="update-entry" id="u-attach">

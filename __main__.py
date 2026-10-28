@@ -505,6 +505,7 @@ async def _run_worker_brief(
     parent_run: str | None,
     routine: str | None,
     inbox_path: str | None = None,
+    inbox_fd: int | None = None,
 ) -> int:
     """Run one opt-in worker and write its versioned report."""
     from localmelo.support.cli.worker_contract import (
@@ -512,7 +513,7 @@ async def _run_worker_brief(
         failure_record,
         result_record,
     )
-    from localmelo.support.cli.worker_inbox import Inbox
+    from localmelo.support.cli.worker_inbox import FdInbox, Inbox
 
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
@@ -524,9 +525,12 @@ async def _run_worker_brief(
         stream=output_format == "stream-json",
         on_failure=lambda: loop.call_soon_threadsafe(task.cancel),
     )
-    inbox_args: dict[str, Any] = (
-        {"inbox": Inbox(inbox_path)} if inbox_path is not None else {}
-    )
+    inbox: Any = None
+    if inbox_path is not None:
+        inbox = Inbox(inbox_path)
+    elif inbox_fd is not None:
+        inbox = FdInbox(inbox_fd)
+    inbox_args: dict[str, Any] = {"inbox": inbox} if inbox is not None else {}
     try:
         if save_session is None:
             outcome = await agent.run_task(
@@ -606,6 +610,7 @@ async def _run(
     parent_run: str | None = None,
     worker_brief: bool = False,
     inbox_path: str | None = None,
+    inbox_fd: int | None = None,
 ) -> int:
     """Run *query*, or with no query the interactive loop; return the exit code.
 
@@ -632,6 +637,7 @@ async def _run(
                     parent_run,
                     routine,
                     inbox_path,
+                    inbox_fd,
                 )
             if save_session is None:
                 outcome = await _run_one(
@@ -744,6 +750,7 @@ def _run_direct(
     parent_run: str | None = None,
     worker_brief: bool = False,
     inbox_path: str | None = None,
+    inbox_fd: int | None = None,
 ) -> int:
     """Run *query*, or for an empty one the interactive loop; return the exit code.
 
@@ -776,6 +783,8 @@ def _run_direct(
                 worker_args["worker_brief"] = True
             if inbox_path is not None:
                 worker_args["inbox_path"] = inbox_path
+            if inbox_fd is not None:
+                worker_args["inbox_fd"] = inbox_fd
             code = asyncio.run(
                 _run(
                     agent,
@@ -828,6 +837,16 @@ def _positive_int(text: str) -> int:
         raise argparse.ArgumentTypeError(f"not an integer: {text!r}") from None
     if value < 1:
         raise argparse.ArgumentTypeError(f"must be at least 1, got {value}")
+    return value
+
+
+def _fd_number(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {text!r}") from None
+    if value < 0:
+        raise argparse.ArgumentTypeError(f"must not be negative, got {value}")
     return value
 
 
@@ -1299,6 +1318,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--save-session",
             "--brief",
             "--inbox",
+            "--inbox-fd",
             "--parent-run",
             "--import-session",
             "--title",
@@ -1358,6 +1378,12 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         )
     direct.add_argument(
         "--inbox", metavar="FILE", help="Read appended worker instructions from FILE"
+    )
+    direct.add_argument(
+        "--inbox-fd",
+        type=_fd_number,
+        metavar="N",
+        help="Read appended worker instructions from inherited pipe fd N",
     )
     direct.add_argument(
         "--brief", metavar="FILE", help="Read a direct worker task from a UTF-8 file"
@@ -1666,6 +1692,10 @@ def main() -> None:
         args = parser.parse_args()
     if args.inbox is not None and args.brief is None:
         parser.error("--inbox requires --brief")
+    if args.inbox_fd is not None and args.brief is None:
+        parser.error("--inbox-fd requires --brief")
+    if args.inbox is not None and args.inbox_fd is not None:
+        parser.error("--inbox and --inbox-fd cannot be combined")
     if args.brief is not None:
         if (
             args.query
@@ -1824,6 +1854,8 @@ def main() -> None:
         )
         if args.inbox is not None:
             worker_args["inbox_path"] = args.inbox
+        if args.inbox_fd is not None:
+            worker_args["inbox_fd"] = args.inbox_fd
         code = _run_direct(
             agent,
             query,

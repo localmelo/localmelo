@@ -53,6 +53,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Direct workers can read steering instructions from an inherited pipe with
+  `--inbox-fd N`: the same lines, size limits and acknowledgements as the file
+  inbox, but the read end is close-on-exec before tools start. Python, shell
+  and MCP subprocesses get no copy, so a tool cannot write the channel; use it
+  for untrusted tasks ([#NN]).
 - Direct workers can read an explicit append-only inbox at planning boundaries,
   with per-line acceptance events and redacted saved history. An inbox inside the
   workspace is refused as `setup_error` before any model call; a slow event
