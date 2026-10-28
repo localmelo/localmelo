@@ -88,6 +88,13 @@ LATER_OPTIONS = [
     "-r",
     "--resume",
     "--note-writer",
+    "--retriever",
+    "--recall-at",
+    "--recall-k",
+    "--recall-kinds",
+    "--recall-placement",
+    "--recall-min-score",
+    "--retrieval-extra-body",
 ]
 
 

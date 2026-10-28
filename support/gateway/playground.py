@@ -247,6 +247,11 @@ class SmokePlayground:
                 guard_poll_s=guard_poll_s,
             )
 
+    @property
+    def gate(self) -> ChatGate:
+        """The one gate this process schedules every model call on."""
+        return self._gate
+
     def _on_machine(self, snapshot: MachineSnapshot) -> None:
         """Feed one observed snapshot to the gate; no await between the two."""
         self._gate.set_machine(snapshot.machine, payload=snapshot.payload())
@@ -678,6 +683,19 @@ class SmokePlayground:
         return True
 
     async def close_all(self) -> None:
+        """Stop every session, then close the gate this page built."""
+        await self.close_sessions()
+        # After the agents: the wrappers' inner providers are closed already.
+        await self._gate.close()
+
+    async def close_sessions(self) -> None:
+        """Stop the monitor and every session, and leave the gate open.
+
+        The gateway closes the one shared gate last, after the console's
+        sessions too, so a console turn waiting for its slot ends
+        ``cancelled`` (cause ``shutdown``) instead of failing on a gate that
+        closed under it.
+        """
         # The monitor writes through the gate's log, so stop it before the
         # gate closes the files (R21).
         await self.stop()
@@ -686,8 +704,6 @@ class SmokePlayground:
                 await self.cancel(session.session_id)
                 await session.agent.close()
         self._sessions.clear()
-        # After the agents: the wrappers' inner providers are closed already.
-        await self._gate.close()
 
     async def _fetch_models(self, url: str) -> list[str]:
         async with httpx.AsyncClient(

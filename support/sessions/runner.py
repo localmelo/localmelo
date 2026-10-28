@@ -230,6 +230,7 @@ class SessionRunner:
         resume_mode: ResumeMode = DEFAULT_RESUME_MODE,
         progress: bool = False,
         before_turn: BeforeTurn | None = None,
+        create_scope_key: bool = False,
     ) -> None:
         _check_agent(agent)
         if resume_mode not in _RESUME_MODES:
@@ -253,6 +254,11 @@ class SessionRunner:
         # for every turn, replace_agent's included.
         self._progress = progress
         self._before_turn = before_turn
+        # One-shot: the key of the session's first turn belongs to a create
+        # request, so it is stored where a create looks it up (the console's
+        # create makes its session row before the Agent, so the gate knows
+        # the id before the first model call).
+        self._create_scope_key = create_scope_key
         self._active: _Turn | None = None
         self._last: _Turn | None = None
         # A begin_turn under way, before its turn exists.
@@ -481,7 +487,9 @@ class SessionRunner:
                 title=title,
                 client_request_id=client_request_id,
                 new_session=self._new_session if self._session_id is None else None,
+                create_scope=self._create_scope_key,
             )
+            self._create_scope_key = False
         finally:
             self._begin = None
         # From here to the return, no await: a cancel by key that finds the

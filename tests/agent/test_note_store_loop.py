@@ -254,7 +254,7 @@ async def test_history_keeps_the_raw_reply_and_gets_no_notes_table(
             "SELECT s.thought, c.content, c.thinking FROM steps s "
             "JOIN llm_calls c ON c.task_id = s.task_id ORDER BY c.seq LIMIT 1"
         ).fetchone()
-    assert version == 1
+    assert version == 2
     assert "notes" not in tables
     assert thought == raw
     assert content == raw

@@ -36,9 +36,14 @@ before the next step: the note asks what the reply planned, found, decided
 and left open, plus what its tools returned, and the model may write it
 itself in a `<note>` block. The notes, the reply's code drafts and one digest
 per attempt stay in a RAM-only note store beside the window; a pending draft
-is pinned once after its tool results. Nothing is recalled from earlier steps
-yet, and nothing harness-derived is written to `history.db`. See
-[Reasoning notes](memory.md#reasoning-notes).
+is pinned once after its tool results. The loop then recalls: a frozen block
+of earlier thinking rides on the task query at the start of an attempt, each
+tool turn appends a block of the notes and drafts the window no longer
+shows, and the `recall` tool lets the model ask for more. Every block is
+delimited, framed as data and checked by the candidate boundary, and the
+first request that carries one records it in `history.db`'s
+`llm_calls.recall_json`. `legacy` keeps its own path unchanged. See
+[Recall in the loop](memory.md#recall-in-the-loop).
 
 ## Reflection
 

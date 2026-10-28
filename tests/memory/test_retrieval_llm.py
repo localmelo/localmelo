@@ -609,3 +609,44 @@ async def test_cached_tokens_reach_the_result_through_the_real_provider() -> Non
     assert [r.headers["X-Localmelo-Call-Kind"] for r in requests] == ["retrieve"]
     # The kind is set only while the request is sent.
     assert LLM_REQUEST_KIND.get() == ""
+
+
+def test_the_catalog_honors_a_docs_declared_alias() -> None:
+    from localmelo.melo.memory.retrieval.llm import _catalog
+
+    docs = [
+        Doc("t:n1", "note", "a note", meta={"alias": "n9"}),
+        Doc("t:d1", "draft", "a draft", meta={"alias": "d4"}),
+        Doc("t:n2", "note", "another note"),
+    ]
+    catalog = _catalog(docs)
+    assert [alias for alias, _doc, _line in catalog] == ["n9", "d4", "n1"]
+    assert catalog[0][2].startswith("[n9] note")
+
+
+def test_a_duplicate_or_empty_alias_falls_back_to_the_derived_one() -> None:
+    from localmelo.melo.memory.retrieval.llm import _catalog
+
+    docs = [
+        Doc("t:n1", "note", "first", meta={"alias": "n1"}),
+        Doc("t:n2", "note", "second", meta={"alias": "n1"}),
+        Doc("t:n3", "note", "third", meta={"alias": ""}),
+        Doc("t:n4", "note", "fourth", meta={"alias": "n1"}),
+    ]
+    catalog = _catalog(docs)
+    aliases = [alias for alias, _doc, _line in catalog]
+    assert aliases[0] == "n1"
+    assert aliases[1] != "n1"
+    assert aliases[2] != "n1"
+    assert len(set(aliases)) == len(aliases)
+
+
+def test_the_catalog_prefix_is_stable_while_docs_append() -> None:
+    from localmelo.melo.memory.retrieval.llm import _catalog
+
+    docs = [
+        Doc(f"t:n{i}", "note", f"note {i}", meta={"alias": f"n{i}"}) for i in range(4)
+    ]
+    first = _catalog(docs[:2])
+    grown = _catalog([*docs[:2], *docs[2:]])
+    assert grown[:2] == first

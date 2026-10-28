@@ -60,6 +60,9 @@ class NoteStoreEntry:
     uses: int = 0
     last_used_at: float = 0.0
     created_at: float = 0.0
+    # The task that produced the document, and a one-line title (R5).
+    task_id: str = ""
+    title: str = ""
 
 
 class NoteStore:
@@ -137,6 +140,8 @@ class NoteStore:
         attempt: int = 0,
         remember: bool = False,
         remember_by: str = "",
+        task_id: str = "",
+        title: str = "",
     ) -> NoteStoreEntry | None:
         """Store one document; ``None`` when the caps refuse it.
 
@@ -170,6 +175,8 @@ class NoteStore:
             remember_by=remember_by,
             created_at=now,
             last_used_at=now,
+            task_id=task_id,
+            title=title,
         )
         self._entries.append(entry)
         return entry
