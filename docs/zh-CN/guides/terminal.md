@@ -85,6 +85,9 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | 命令 | 作用 |
 |---|---|
 | `/help [command]` | 显示命令和按键，或某个命令的详情。 |
+| `/attach PATH` | 暂存一个工作区文本文件；路径含空格时请加引号。 |
+| `/attachments` | 列出已暂存的文件及其编号。 |
+| `/detach N\|all` | 移除指定编号的已暂存文件，或移除全部已暂存文件。 |
 | `/new`（也可用 `/clear`） | 开始新会话：模型忘记当前对话，会话授权结束。 |
 | `/sessions [filter]` | 在当前文件夹中选择已保存的聊天；输入文字筛选，Tab 切换到所有文件夹，↑ ↓ 选择，Enter 恢复，Esc 关闭。 |
 | `/resume [id\|title]` | 按 ID、ID 前缀（至少四个字符）或完整标题恢复；不带参数时打开选择器。 |
@@ -111,6 +114,27 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 - 保存行为：`/model` 保留已配置的后端并更改其模型。`/backend` 在服务器以 Ollama 的方式响应（`GET /api/version`）时将其保存为 `ollama` 后端，否则保存为 `vllm`；它写入 `chat_backend` 和对应表中的 `chat_url`、`chat_model`，并保留其余配置：嵌入、`request_timeout_s` 和 `extra_body`；会话按保存后的配置运行。在 `melo --base-url URL` 会话中，它们只为当前会话切换，除非 melo 询问了 `Save URL · MODEL as the default backend?`（仅当配置文件尚不存在时询问）且你回答了是。首次运行的问题中选择 `s`（仍然启动）后，`/model` 和 `/backend` 会像首次运行一样保存服务器。
 - 模型启动失败时保留当前模型（`✗ Could not start NAME: …`）。新服务器没有响应或没有列出模型时，`/backend` 保留当前服务器：`✗ Could not reach URL: connection refused. Still using URL.`
 - 以 `/` 和小写名称开头，后接空格或消息结束的文本是命令；未知名称会显示 `Unknown command /NAME. /help lists the commands.` 并保留草稿。`/etc/hosts is broken` 是一条消息。要发送看起来以命令开头的消息，请在开头加一个空格。
+
+<a id="attach-text-files"></a>
+
+### 附加文本文件
+
+在空闲的交互式对话中，先暂存文件，再发送消息：
+
+```text
+/attach "notes/my file.txt"
+/attachments
+/detach 1
+/detach all
+```
+
+也可以在消息中输入 `@` 和工作区内的路径前缀，然后从补全菜单中明确选择一个文件。仅仅在正文里输入 `@file` 不会附加文件。已暂存文件行会标明这些文件；发送一条非空消息即可把它们包含进去。轮次运行期间不能执行附加命令，切换会话前必须先移除已暂存的文件。
+
+只接受当前工作区内的普通 UTF-8 文本文件；工作区内的绝对路径也可以。URL、`..` 穿越、符号链接（包括指向工作区内部的链接）、已识别的密钥文件和二进制数据都会被拒绝。清理后的名称不得超过 200 个字符。硬链接可能指向工作区之外的 inode；这不是沙箱。不支持图片附件。上限是 8 个文件、每个 256 KiB、合计 512 KiB，按原始字节计算。显示出的字节数是清理和脱敏后快照的 UTF-8 大小。组合后的消息仍受智能体的提示词上限约束，因此即使文件在这些限制之内，也可能被拒绝。
+
+每个文件只读取一次，存入不可变的快照；之后修改或删除文件不会更新该快照。模型会在一个带分隔、标记为不可信数据的块中收到该快照，而不是作为指令。密钥脱敏是尽力而为，不是保证：附加前请先检查文件。如果脱敏或清理改变了内容或路径，melo 会显示该快照，并在暂存前请求确认。
+
+已提交的快照随会话保存在 `~/.cache/localmelo/cli/sessions.db`（明文，未加密）；`/retry` 使用保存的快照，而不是重新打开文件。持久化并不意味着完整重放：`pairs` 恢复为用户文本和回答提供 32,000 个字符的预算，可能整轮省略附件；`window` 恢复在保留的检查点或尾部不完整包含它时，可能裁剪或省略它。如果模型需要的内容没有被恢复，请重新附加并再次发送。简单的 `melo ""` 循环和直接模式不支持附件。
 
 <a id="inspect-undo-or-copy-a-conversation"></a>
 

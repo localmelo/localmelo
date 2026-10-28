@@ -60,17 +60,7 @@
 
 在 `lock_gate = "record"`（默认值）模式下，其他持有者的锁会被显示和记录，但不会导致等待。在 `wait` 模式下，只要存在其他持有者的锁，对话发出的每个调用都会等待，包括嵌入调用。对话请求最多等待 300 秒；一个轮次在活跃时间达到 600 秒后停止：调度器暂扣调用的时间，包括因其他持有者的锁而暂扣的时间，不计入该限制。
 
-网关安全工作 security-1b 正在进行中。内部 `/v1/playground/` 路由默认禁用（返回 404），其管理器也不会启动。可使用 `melo --serve --enable-playground` 启用；身份验证及 Host/Origin 检查仍然适用。Playground 的发现功能和会话使用已保存的本地对话后端及模型，不使用请求中覆盖的端点或模型。页面不使用这些路由。
-
-这些路由包括：用于获取摘要的 `GET /v1/playground/sessions`、用于获取对话记录的 `GET /v1/playground/session/{id}`、用于取消的 `POST /v1/playground/session/{id}/cancel`、使用 `{"level": 1..4}` 设置对话级别的 `POST /v1/playground/session/{id}/level`，以及使用 `{"session_id": …}` 发送页面输入心跳的 `POST /v1/playground/presence`。普通的 `/v1/agent/` API 仍然独立，且不受此开关限制。
-
-开发时，以下命令使用已保存的配置启动经过身份验证且启用了 playground 的网关：
-
-```bash
-uv run python -m localmelo.support.gateway._test_webapp
-```
-
-该命令会在配置的回环地址上启动常规网关，包括 `/api`。它需要网关配置和身份验证。
+页面不使用默认禁用的[旧版 playground 路由](../../reference/http-v1.md#legacy-playground)（英文）。
 
 工作区有以下限制：
 
