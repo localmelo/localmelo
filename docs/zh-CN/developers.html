@@ -142,6 +142,9 @@ uv run melo --serve</code></pre>
         <p>
           它不需要模型服务器，也不会向任何模型服务器发送请求。少数命令行测试会在本机回环地址上启动一个假的 API，用来测试超时和取消。要直接运行某个目录，请指明它：<code>uv run pytest tests/agent -q</code>。
         </p>
+        <p>
+          每个测试都在临时目录中的 <code>HOME</code> 下运行。测试如果解析到真实的家目录，或写入真实的 <code>~/.cache/localmelo</code>，会直接失败，不会碰到你的配置、记忆、会话或调用日志。真实的缓存永远不允许写入；确实需要真实家目录的测试用 <code>@pytest.mark.allow_real_cache</code> 标记。
+        </p>
         <div class="table-wrap">
           <table>
             <thead>

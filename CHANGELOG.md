@@ -406,6 +406,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The test suite no longer writes into the user's own `~/.cache/localmelo`:
+  every test runs with `HOME` in a temporary directory, the defaults of the
+  gateway's call log, the web workspace's memory and `config.toml` resolve
+  when they are used instead of at import, and a session guard fails a test
+  that resolves the real home or writes the real cache
+  (`@pytest.mark.allow_real_cache` opts a test out of the home rule)
+  ([#90]).
 - `POST /v1/agent/run` answers a non-string `session_id` (a number, a list)
   with the route's own 400 `Invalid session_id format` instead of FastAPI's
   plain-text 500, and its 100,000-character limit counts the query after the
@@ -572,3 +579,4 @@ earlier milestones.
 [#85]: https://github.com/localmelo/localmelo/pull/85
 [#NN]: https://github.com/localmelo/localmelo/pull/NN
 [#89]: https://github.com/localmelo/localmelo/pull/89
+[#90]: https://github.com/localmelo/localmelo/pull/90
