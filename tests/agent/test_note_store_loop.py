@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.schema import Message, ToolCall
+from localmelo.melo.schema import Message, ToolCall, ToolResult
 
 from .test_compress import FakeLLM, _agent, _answer, _options
 
@@ -471,3 +471,21 @@ def test_acted_matching_uses_paths_and_word_boundaries() -> None:
     assert agent._mentions("ran ls in the folder", "ls") is True
     assert agent._mentions("the bug is in list_ops.py", "list_ops.py") is True
     assert agent._mentions("finds the bug", "list_ops.py") is False
+
+
+def test_a_shell_success_needs_a_known_zero_exit() -> None:
+    agent = _agent(FakeLLM(), _options(reasoning="compress"))
+    call = ToolCall(tool_name="shell_exec", arguments={"command": "false"})
+    empty = ToolResult(tool_name="shell_exec", output="")
+    assert agent._call_succeeded(call, empty, []) is False
+    assert agent._call_succeeded(call, empty, [1]) is False
+    assert agent._call_succeeded(call, empty, [0]) is True
+    failed = ToolResult(tool_name="shell_exec", output="[exit code 3]\nboom")
+    assert agent._call_succeeded(call, failed, [3]) is False
+    file_call = ToolCall(tool_name="file_read", arguments={"path": "a.py"})
+    assert (
+        agent._call_succeeded(
+            file_call, ToolResult(tool_name="file_read", output="x"), []
+        )
+        is True
+    )
