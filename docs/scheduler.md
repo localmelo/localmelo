@@ -300,7 +300,7 @@ new calls for a terminal task are refused and logged. Ending a live task must
 go through `finish_task()`; a repeat does not change its terminal phase.
 `update_task()` carries caller-owned fields such as nonterminal phase and wait
 reason, but not level or source. Re-registering an existing task preserves its
-current priority, and forgetting it preserves its identity while its row exists;
+current priority, and forgetting it alone preserves its identity;
 `set_task_level()` handles the chip's `P0`-`P5`, `auto` and `first`, and
 `held(task_id)` reports the gate's reason as it does for a chat. Task routes
 write priority changes through the store.
@@ -310,8 +310,9 @@ New user tasks are queued by effective priority, rank and creation time, with
 at most four resident workers; a parked running worker still occupies its slot.
 Each uses `mode="gateway"`, `memory=False` and the console's shared gate for
 LLM and embedding calls. Stop cancels the runner and finishes the gate task.
-The gate registry discards a task after retention removes its row, not merely
-when it is forgotten.
+A retention sweep discards terminal gate identities whose task rows have
+passed the retention cutoff, even though the rows remain available for
+inspection; forgetting alone does not discard an identity.
 
 Rows survive gateway restart, but startup marks surviving nonterminal tasks
 failed with `gateway restarted; recovery arrives in S3b`. Full recovery is
@@ -320,9 +321,10 @@ validity is checked at creation and again at run or resume; a folder that
 becomes invalid fails the task with `invalid_workspace`. Deadlines are rejected
 and service, wait and tool accounting is deferred. Pause parks a task at P5
 and takes effect at the next model call: running tools finish and an answered
-pending approval waits until resume. Resume restores the prior priority unless
-a new level is supplied; if retention pruned the pause log it falls back to
-computed P2. Resuming an unpaused task returns 409 `not_paused`. The task
+pending approval waits until resume. A task paused before it starts does not
+start a worker until resumed. Resume restores the prior priority unless a new
+level is supplied; if there is no pause log (such as when created or set at
+P5), or retention pruned it, resume falls back to computed P2. Resuming an unpaused task returns 409 `not_paused`. The task
 PATCH route rejects `first` with 400; it is deferred to S6b.
 
 ## Run one simulation

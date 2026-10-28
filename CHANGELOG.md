@@ -16,9 +16,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `gateway restarted; recovery arrives in S3b`; full recovery and accounting
   are deferred, deadlines are rejected, and an invalid workspace fails at run
   or resume. Pause takes effect at the next model call; running tools finish
-  and answered pending approvals wait until resume. Resume restores the
-  pre-pause priority, or computed P2 if retention pruned the pause log; an
-  unpaused task returns 409 `not_paused`. PATCH rejects `first` until S6b
+  and answered pending approvals wait until resume; a task paused before
+  start starts no worker until resumed. Resume restores the pre-pause priority,
+  or computed P2 if the pause log is missing (including a task created or set
+  at P5) or pruned by retention; an unpaused task returns 409 `not_paused`.
+  Retention discards old terminal gate identities while keeping their rows.
+  PATCH rejects `first` until S6b
   ([#NN]).
 
 - Reasoning and recall options now work in the interactive UI, including

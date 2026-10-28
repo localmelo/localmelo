@@ -170,6 +170,8 @@ async def test_pause_resume_restores_user_priority(setup: WorkerSetup) -> None:
     task_id = row["task_id"]
     paused = await workers.update(task_id, state="pause")
     assert paused["state"] == "parked" and paused["level"] == 5
+    again = await workers.update(task_id, level=" P5 ")
+    assert again["reason"] == "pause" and again["state"] == "parked"
     resumed = await workers.update(task_id, state="resume")
     assert resumed["level"] == 1 and resumed["level_source"] == "user"
     assert resumed["state"] == "running"
@@ -217,6 +219,153 @@ async def test_patch_atomic_and_concurrent_key(setup: WorkerSetup) -> None:
     results = await asyncio.gather(*(workers.create(payload) for _ in range(5)))
     assert len({row["task_id"] for row, _ in results}) == 1
     assert sum(repeated for _, repeated in results) == 4
+
+
+async def test_bare_resume_of_initial_p5_and_normalized_auto(
+    setup: WorkerSetup,
+) -> None:
+    workers, workspace, _ = setup
+    first, _ = await workers.create(
+        {"prompt": "one", "workspace": str(workspace), "level": 5}
+    )
+    resumed = await workers.update(first["task_id"], state="resume")
+    assert resumed["level"] == 2 and resumed["level_source"] == "computed"
+    second, _ = await workers.create(
+        {"prompt": "two", "workspace": str(workspace), "level": 5}
+    )
+    changed = await workers.update(second["task_id"], level=" Auto ")
+    assert changed["level"] == 2 and changed["level_source"] == "computed"
+
+
+async def test_patch_normalizes_and_refuses_before_workspace_check(
+    setup: WorkerSetup,
+) -> None:
+    workers, workspace, _ = setup
+    row, _ = await workers.create(
+        {"prompt": "one", "workspace": str(workspace), "level": 1}
+    )
+    await eventually(lambda: len(FakeRunner.instances) == 1)
+    task_id = row["task_id"]
+    paused = await workers.update(task_id, level=" P5 ")
+    assert paused["level"] == 5 and paused["state"] == "parked"
+    assert not workers._ready[task_id].is_set()
+    workspace.rmdir()
+    for level, state in (
+        (" P5 ", "resume"),
+        ("bogus", "resume"),
+        ("P2", "pause"),
+        (True, "resume"),
+    ):
+        with pytest.raises(ValueError):
+            await workers.update(task_id, level=level, state=state)
+        assert (await workers.get(task_id))["state"] == "parked"
+
+
+async def test_pause_during_worker_build_does_not_start(
+    setup: WorkerSetup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workers, workspace, _ = setup
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def build(**kwargs: Any) -> FakeAgent:
+        started.set()
+        await release.wait()
+        return FakeAgent()
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.build_session_agent", build)
+    row, _ = await workers.create({"prompt": "one", "workspace": str(workspace)})
+    task_id = row["task_id"]
+    await started.wait()
+    await workers.update(task_id, state="pause")
+    release.set()
+    await eventually(lambda: task_id not in workers._runs)
+    assert (await workers.get(task_id))["state"] == "parked"
+    assert not any(r.busy for r in FakeRunner.instances)
+    await workers.update(task_id, state="resume")
+    await eventually(
+        lambda: task_id in workers._runs and any(r.busy for r in FakeRunner.instances)
+    )
+
+
+async def test_resume_while_deferred_worker_closes_is_rescheduled(
+    setup: WorkerSetup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workers, workspace, _ = setup
+    building, build_release, closing, close_release = (
+        asyncio.Event() for _ in range(4)
+    )
+    builds = 0
+
+    class SlowCloseAgent(FakeAgent):
+        async def close(self) -> None:
+            closing.set()
+            await close_release.wait()
+
+    async def build(**kwargs: Any) -> FakeAgent:
+        nonlocal builds
+        builds += 1
+        if builds == 1:
+            building.set()
+            await build_release.wait()
+            return SlowCloseAgent()
+        return FakeAgent()
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.build_session_agent", build)
+    row, _ = await workers.create({"prompt": "one", "workspace": str(workspace)})
+    task_id = row["task_id"]
+    await building.wait()
+    await workers.update(task_id, state="pause")
+    build_release.set()
+    await closing.wait()
+    await workers.update(task_id, state="resume")
+    close_release.set()
+    await eventually(lambda: builds == 2 and any(r.busy for r in FakeRunner.instances))
+    assert (await workers.get(task_id))["state"] == "running"
+
+
+async def test_pause_before_failed_workspace_check_keeps_task_parked(
+    setup: WorkerSetup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workers, workspace, _ = setup
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def invalid_workspace(task_id: str) -> str:
+        started.set()
+        await release.wait()
+        raise WorkspaceError("workspace disappeared")
+
+    monkeypatch.setattr(workers, "_workspace", invalid_workspace)
+    row, _ = await workers.create({"prompt": "one", "workspace": str(workspace)})
+    task_id = row["task_id"]
+    await started.wait()
+    await workers.update(task_id, state="pause")
+    release.set()
+    await eventually(lambda: task_id not in workers._runs)
+    assert (await workers.get(task_id))["state"] == "parked"
+    assert not FakeRunner.instances
+
+
+async def test_retention_drops_old_identity_not_row_or_live_call(
+    setup: WorkerSetup, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workers, workspace, _ = setup
+    row, _ = await workers.create(
+        {"prompt": "later", "workspace": str(workspace), "level": 5}
+    )
+    task_id = row["task_id"]
+    call = workers.gate.submit(task_id)
+    await workers.gate.acquire(call)
+    await workers.update(task_id, state="stop")
+    old = await workers.get(task_id)
+    monkeypatch.setattr(
+        workers.store, "retention_cutoff", lambda: old["updated_at"] + 1
+    )
+    await workers.store.apply_retention()
+    assert any(t.task_id == task_id for t in workers.gate.registered_tasks)
+    workers.gate.finish(call)
+    await workers.store.apply_retention()
+    assert all(t.task_id != task_id for t in workers.gate.registered_tasks)
+    assert (await workers.get(task_id))["state"] == "cancelled"
 
 
 async def test_sweep_discards_only_deleted_rows(setup: WorkerSetup) -> None:

@@ -1233,9 +1233,9 @@ class ChatGate:
         )
 
     def discard_task(self, task_id: str) -> bool:
-        """Drop a deleted task's identity only after it has no live calls.
+        """Drop a terminal identity only after it has no live calls.
 
-        The caller must first confirm that the durable task row is gone.
+        The caller must confirm its durable row is gone or past retention.
         """
         task = self._task_registry.get(task_id)
         if (

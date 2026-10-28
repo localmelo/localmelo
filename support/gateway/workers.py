@@ -186,15 +186,27 @@ class TaskWorkers:
             raise ValueError("state must be pause, resume or stop")
         if level is None and state is None:
             raise ValueError("level or state is required")
-        if isinstance(level, str) and level.strip().lower() == "first":
-            raise ValueError("first is not supported yet")
+        if isinstance(level, str):
+            level = level.strip().lower()
+            if level == "first":
+                raise ValueError("first is not supported yet")
+            if level != "auto" and level not in {f"p{i}" for i in range(6)}:
+                raise ValueError("level must be P0-P5 or auto")
+        elif level is not None and (
+            isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 5
+        ):
+            raise ValueError("level must be P0-P5 or auto")
+        is_p5 = level == 5 or level == "p5"
+        if state == "pause" and level is not None:
+            raise ValueError("pause cannot be combined with a level")
+        if state == "resume" and is_p5:
+            raise ValueError("choose a runnable priority to resume a P5 task")
         async with self._lock:
             current = await self.tasks.get_task(task_id)
             if current.state in TERMINAL_PHASES:
                 raise TaskStoreError("task is finished")
             if state == "resume" and current.state != "parked":
                 raise TaskNotPausedError("task is not paused")
-            is_p5 = level == 5 or (isinstance(level, str) and level.lower() == "p5")
             if state == "resume" or (
                 current.level == 5
                 and level is not None
@@ -245,12 +257,7 @@ class TaskWorkers:
                     self._ready[task_id].set()
                 await self._schedule()
                 return await self._body(record)
-            if state == "pause":
-                raise ValueError("pause cannot be combined with a level")
-            is_p5 = level == 5 or (isinstance(level, str) and level.lower() == "p5")
-            if state == "resume" and (is_p5 or (level is None and current.level == 5)):
-                raise ValueError("choose a runnable priority to resume a P5 task")
-            parked = state == "pause" or is_p5
+            parked = is_p5
             runnable = "running" if task_id in self._runs else "queued"
             desired = (
                 "parked"
@@ -356,8 +363,13 @@ class TaskWorkers:
         runner = None
         phase = "failed"
         failure_reason = None
+        deferred = False
         try:
-            record = await self.tasks.get_task(task_id)
+            async with self._lock:
+                record = await self.tasks.get_task(task_id)
+                if record.state == "parked":
+                    deferred = True
+                    return
             workspace = await self._workspace(task_id)
             client = self.gate.client(task_id)
             agent = await build_session_agent(
@@ -395,16 +407,18 @@ class TaskWorkers:
                     phase = "cancelled"
                 else:
                     current = await self.tasks.get_task(task_id)
-                    if current.state != "parked":
+                    if current.state == "parked":
+                        deferred = True
+                    else:
                         await self.tasks.change(
                             task_id, state="running", actor="scheduler"
                         )
                         self.gate.update_task(task_id, phase="running")
-                    self.gate.turn_start(task_id)
-                    await runner.start_turn(
-                        str(record.spec["objective"]), approval=policy
-                    )
-            if phase != "cancelled":
+                        self.gate.turn_start(task_id)
+                        await runner.start_turn(
+                            str(record.spec["objective"]), approval=policy
+                        )
+            if phase != "cancelled" and not deferred:
                 result = await runner.wait()
                 while runner.busy:
                     await asyncio.sleep(0.05)
@@ -418,8 +432,12 @@ class TaskWorkers:
                     )
                 )
         except WorkspaceError:
-            failure_reason = "invalid_workspace"
-            log.warning("Worker %s has an invalid workspace", task_id)
+            async with self._lock:
+                current = await self.tasks.get_task(task_id)
+                deferred = current.state == "parked"
+            if not deferred:
+                failure_reason = "invalid_workspace"
+                log.warning("Worker %s has an invalid workspace", task_id)
         except Exception:
             log.exception("Worker %s failed", task_id)
         finally:
@@ -431,30 +449,43 @@ class TaskWorkers:
             except Exception:
                 log.exception("Could not close worker %s", task_id)
             async with self._lock:
-                if task_id in self._invalid_workspace:
-                    phase = "failed"
-                elif task_id in self._stopping:
-                    phase = "cancelled"
-                try:
-                    if task_id not in self._invalid_workspace:
+                preserve = deferred and not (
+                    self._closed
+                    or task_id in self._stopping
+                    or task_id in self._invalid_workspace
+                )
+                if preserve:
+                    current = await self.tasks.get_task(task_id)
+                    if current.state == "running":
                         await self.tasks.change(
-                            task_id,
-                            state=phase,
-                            actor="scheduler",
-                            failure_reason=(
-                                failure_reason if phase == "failed" else None
-                            ),
+                            task_id, state="queued", actor="scheduler"
                         )
-                except TaskNotFoundError:
-                    pass
-                except TaskStoreError:
-                    log.exception("Could not finish task %s", task_id)
-                self.gate.finish_task(task_id, phase)
-                self._eligible.discard(task_id)
-                self._stopping.discard(task_id)
-                self._invalid_workspace.discard(task_id)
+                        self.gate.update_task(task_id, phase="queued")
+                else:
+                    if task_id in self._invalid_workspace:
+                        phase = "failed"
+                    elif task_id in self._stopping:
+                        phase = "cancelled"
+                    try:
+                        if task_id not in self._invalid_workspace:
+                            await self.tasks.change(
+                                task_id,
+                                state=phase,
+                                actor="scheduler",
+                                failure_reason=(
+                                    failure_reason if phase == "failed" else None
+                                ),
+                            )
+                    except TaskNotFoundError:
+                        pass
+                    except TaskStoreError:
+                        log.exception("Could not finish task %s", task_id)
+                    self.gate.finish_task(task_id, phase)
+                    self._eligible.discard(task_id)
+                    self._stopping.discard(task_id)
+                    self._invalid_workspace.discard(task_id)
+                    self._ready.pop(task_id, None)
                 self._runners.pop(task_id, None)
-                self._ready.pop(task_id, None)
                 self._runs.pop(task_id, None)
                 await self._schedule()
 
@@ -475,15 +506,21 @@ class TaskWorkers:
         async with self._lock:
             for task in self.gate.registered_tasks:
                 try:
-                    await self.tasks.get_task(task.task_id)
+                    record = await self.tasks.get_task(task.task_id)
                 except TaskNotFoundError:
-                    if task.task_id in self._runs:
-                        continue
-                    self._eligible.discard(task.task_id)
-                    self._ready.pop(task.task_id, None)
-                    if task.phase not in TERMINAL_PHASES:
-                        self.gate.finish_task(task.task_id, "cancelled")
-                    self.gate.discard_task(task.task_id)
+                    record = None
+                if task.task_id in self._runs:
+                    continue
+                if record is not None and (
+                    record.state not in TERMINAL_PHASES
+                    or record.updated_at >= self.store.retention_cutoff()
+                ):
+                    continue
+                self._eligible.discard(task.task_id)
+                self._ready.pop(task.task_id, None)
+                if task.phase not in TERMINAL_PHASES:
+                    self.gate.finish_task(task.task_id, "cancelled")
+                self.gate.discard_task(task.task_id)
         return 0
 
     async def aclose(self) -> None:

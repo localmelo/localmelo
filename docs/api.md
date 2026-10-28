@@ -253,14 +253,16 @@ memory off. Tools run with the user's permissions, not in a sandbox.
   `auto`) and/or `state` (`pause`, `resume`, or `stop`). It returns
   `{"task": ...}`. `first` is rejected with 400 `invalid_request`; it is
   deferred to S6b. Pause parks at P5; resume restores the priority before
-  pause unless a new runnable level is supplied. If retention pruned the
-  pause log, resume falls back to computed P2. `auto` selects computed P2.
+  pause unless a new runnable level is supplied. If there is no pause log
+  (for example, a task created or set at P5), or retention pruned it,
+  resume falls back to computed P2. `auto` selects computed P2.
   Pause cannot be combined with a level. Resuming a task that is not paused
   returns 409 `not_paused`. Stop cancels a running worker or cancels a queued
   task. Finished tasks cannot be changed (409 `invalid_transition`).
 
 Pause takes effect at the next model call: an already-running tool finishes,
-and an answered pending approval waits until resume before proceeding.
+and an answered pending approval waits until resume before proceeding. If a
+task is paused before it starts, no worker starts until it resumes.
 
 Task objects include the task id, normalized `spec`, `state`, priority and
 source, `wait_reason`, timestamps, workspace and `priority_events`, along
@@ -560,6 +562,8 @@ curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/turns \
   on a session no route of this gateway had opened, such as the first turn
   after a restart. A session this gateway closed and keeps in memory
   reopens from that conversation and reports `null`.
+- A task session returns 409 `task_session_read_only`; use the task routes
+  instead of starting a chat turn.
 - 409 `session_busy` while a turn runs. One turn runs per session; a second
   is refused before anything is queued.
 - A repeated `client_request_id` answers 200 with that key's stored turn
@@ -579,6 +583,7 @@ curl -X POST http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/retry \
 - The turn is marked undone — an event `turn.undone` — and its text starts
   a new turn with no `client_request_id`. The answer is 202 with the new
   turn and the resume keys of the open that replayed what the undo left.
+- A task session returns 409 `task_session_read_only`; it cannot retry as a chat.
 - 409 `not_latest_turn` unless the id is the newest finished, not undone
   turn: a client that lost a turn's end retries the id it holds. 409
   `session_busy` while a turn runs.
@@ -671,6 +676,7 @@ curl -X PATCH http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e \
 {"session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "...": "..."}}
 ```
 
+- A task session returns 409 `task_session_read_only` for either change.
 - `title` is stripped and must be 1 to 200 characters; another length is
   400 `invalid_request`. A rename is never replaced by the automatic title.
 - `workspace` moves the session: a new Agent is built in the new folder
@@ -686,6 +692,7 @@ curl -X PATCH http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e \
 curl -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 ```
 
+- A task session returns 409 `task_session_read_only`; it cannot be deleted as a chat.
 - 204 with no body: the session's row, turns, events and blobs are gone.
 - A running turn is stopped first, finished `cancelled` with cause
   `closed`; its card is withdrawn.
@@ -755,6 +762,7 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/tools
   session allows it for the rest of the gateway run.
 - A console session is gateway mode: it lists `file_read`, `file_write` and
   `python_exec`, never `shell_exec`.
+- A task session returns 409 `task_session_read_only`; this route cannot open it as a chat.
 - This route opens the session, because a provider's tools appear only once
   its Agent started. It can take seconds, and a start that fails is 502
   `agent_start_failed`.

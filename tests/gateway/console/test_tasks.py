@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -81,9 +82,11 @@ def test_get_and_filter_tasks(client: TestClient, workers: FakeWorkers) -> None:
 def test_patch_task_control(
     client: TestClient, workers: FakeWorkers, state: str
 ) -> None:
-    response = client.patch("/api/tasks/task1", json={"state": state, "level": "first"})
+    level = "P1" if state == "resume" else None
+    body = {"state": state, **({"level": level} if level else {})}
+    response = client.patch("/api/tasks/task1", json=body)
     assert response.status_code == 200
-    assert workers.changes[-1] == ("task1", "first", state)
+    assert workers.changes[-1] == ("task1", level, state)
 
 
 async def test_task_sessions_cannot_be_run_or_deleted_as_chats(
@@ -123,6 +126,59 @@ def test_real_task_api_idempotency_and_stop(
     assert client.get(f"/api/tasks/{task_id}").json()["task"]["state"] == "parked"
     stopped = client.patch(f"/api/tasks/{task_id}", json={"state": "stop"})
     assert stopped.status_code == 200 and stopped.json()["task"]["state"] == "cancelled"
+
+
+def test_real_task_control_errors(
+    client: TestClient,
+    console: Console,
+    workspace: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    async def no_schedule() -> None:
+        pass
+
+    monkeypatch.setattr(console.workers, "_schedule", no_schedule)
+    created = client.post(
+        "/api/tasks", json={"objective": "later", "workspace": workspace, "level": "P2"}
+    )
+    assert created.status_code == 202
+    task_id = created.json()["task"]["task_id"]
+    url = f"/api/tasks/{task_id}"
+    for body, status, code in (
+        ({"state": "resume"}, 409, "not_paused"),
+        ({"level": "first"}, 400, "invalid_request"),
+        ({"state": "nonsense"}, 400, "invalid_request"),
+    ):
+        response = client.patch(url, json=body)
+        assert response.status_code == status
+        assert response.json()["error"]["code"] == code
+    assert client.patch(url, json={"state": "stop"}).status_code == 200
+    response = client.patch(url, json={"state": "stop"})
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "invalid_transition"
+
+
+def test_real_task_workspace_symlink_swap(
+    client: TestClient, workspace: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = Path(workspace)
+    created = client.post(
+        "/api/tasks", json={"objective": "later", "workspace": workspace, "level": "P5"}
+    )
+    assert created.status_code == 202
+    task_id = created.json()["task"]["task_id"]
+    path.rename(tmp_path / "original")
+    replacement = tmp_path / "replacement"
+    replacement.mkdir()
+    path.symlink_to(replacement, target_is_directory=True)
+    response = client.patch(f"/api/tasks/{task_id}", json={"level": "P2"})
+    assert response.status_code == 200
+    assert response.json()["task"]["state"] == "failed"
+    assert response.json()["task"]["wait_reason"] == "invalid_workspace"
 
 
 def test_task_errors_use_api_shape(client: TestClient, workers: FakeWorkers) -> None:

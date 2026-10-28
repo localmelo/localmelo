@@ -19,8 +19,8 @@ different spec raises :class:`TaskConflictError`.
 Retention is the session store's thinking retention (30 days by default):
 :meth:`TaskStore.apply_retention` clears ``sched_log`` rows and
 ``idle_windows`` older than that cutoff; it is a hook of the session store's
-sweep and also runs when the component opens. No route or worker calls the store
-yet; S3a.2 does (design decision 4).
+sweep and also runs when the component opens. Console routes and task workers
+use the store for task persistence.
 """
 
 from __future__ import annotations
@@ -621,7 +621,10 @@ class TaskStore:
                     source = "computed" if choice == "auto" else "user"
                     if level == 0:
                         await self._demote_other_p0(conn, task_id, actor, now)
-                    await self._write_level(conn, current, level, source, None, "", now)
+                    reason = current.reason if current.level == level else ""
+                    await self._write_level(
+                        conn, current, level, source, None, reason, now
+                    )
                     if current.level != level:
                         await self._event(
                             conn,
@@ -636,7 +639,13 @@ class TaskStore:
                         )
                 await self._log(
                     conn,
-                    "task.level",
+                    (
+                        "task.level.noop"
+                        if choice == 5
+                        and current.level == 5
+                        and current.reason == "pause"
+                        else "task.level"
+                    ),
                     task_id,
                     {"choice": choice, "actor": actor},
                     ts=now,
@@ -669,17 +678,7 @@ class TaskStore:
                 raise TaskNotFoundError(f"No task has id {task_id}")
             if current.state in _TERMINAL_STATES:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
-            last = await _first(
-                conn,
-                "SELECT kind FROM sched_log WHERE task_id = ? AND kind IN ('task.pause', 'task.level', 'task.first', 'task.resume') ORDER BY id DESC LIMIT 1",
-                (task_id,),
-            )
-            if (
-                current.state == "parked"
-                and current.level == 5
-                and last
-                and last[0] == "task.pause"
-            ):
+            if current.state == "parked" and current.level == 5:
                 return current
             await self._write_level(conn, current, 5, "user", None, "pause", now)
             await self._event(
@@ -714,7 +713,7 @@ class TaskStore:
         return result
 
     async def resume(self, task_id: str, *, actor: str = "user") -> TaskRecord:
-        """Restore the latest unmodified pause priority, or computed P2."""
+        """Restore a pause priority; a parked P5 without a pause falls back to P2."""
         now = self._clock()
         async with self._store.component_transaction("task_resume") as conn:
             current = await self._get(conn, task_id)
@@ -722,12 +721,16 @@ class TaskStore:
                 raise TaskNotFoundError(f"No task has id {task_id}")
             if current.state in _TERMINAL_STATES:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
-            if current.state != "parked" or current.reason != "pause":
+            if current.state != "parked" or current.level != 5:
                 raise TaskNotPausedError(f"Task {task_id} is not paused")
-            row = await _first(
-                conn,
-                "SELECT id, data FROM sched_log WHERE task_id = ? AND kind = 'task.pause' ORDER BY id DESC LIMIT 1",
-                (task_id,),
+            row = (
+                await _first(
+                    conn,
+                    "SELECT id, data FROM sched_log WHERE task_id = ? AND kind = 'task.pause' ORDER BY id DESC LIMIT 1",
+                    (task_id,),
+                )
+                if current.reason == "pause"
+                else None
             )
             later = (
                 await _first(

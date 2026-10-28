@@ -587,6 +587,7 @@ async def test_pause_resume_restores_user_priority_and_honors_later_changes(
     paused = await tasks.pause(record.task_id)
     assert (paused.level, paused.state) == (5, "parked")
     assert (await priority_events(tasks, record.task_id))[-1].reason == "pause"
+    assert await tasks.pause(record.task_id) == paused
     resumed = await tasks.resume(record.task_id)
     assert (resumed.level, resumed.level_source, resumed.state) == (1, "user", "queued")
     await tasks.pause(record.task_id)
@@ -594,6 +595,75 @@ async def test_pause_resume_restores_user_priority_and_honors_later_changes(
     with pytest.raises(TaskStoreError, match="not paused"):
         await tasks.resume(record.task_id)
     assert (await tasks.get_task(record.task_id)).level == 3
+
+
+async def test_reapplying_p5_preserves_pause_and_restores_priority(
+    tasks: TaskStore,
+) -> None:
+    record, _ = await create_task(
+        tasks,
+        spec("task", level=1, level_source="user", reason="urgent"),
+        origin="user",
+    )
+    await tasks.pause(record.task_id)
+    changed = await tasks.change(record.task_id, priority="P5", state="parked")
+    assert (changed.level, changed.reason) == (5, "pause")
+    resumed = await tasks.resume(record.task_id)
+    assert (resumed.state, resumed.level, resumed.level_source, resumed.reason) == (
+        "queued",
+        1,
+        "user",
+        "urgent",
+    )
+    assert [
+        (event.from_level, event.to_level)
+        for event in await priority_events(tasks, record.task_id)
+    ] == [(None, 1), (1, 5), (5, 1)]
+
+
+@pytest.mark.parametrize("created_at_p5", [True, False])
+async def test_resume_parked_p5_without_pause_uses_computed_default(
+    tasks: TaskStore, created_at_p5: bool
+) -> None:
+    record, _ = await create_task(
+        tasks,
+        spec("task", level=5 if created_at_p5 else 1, level_source="user"),
+        origin="user",
+    )
+    if not created_at_p5:
+        # An obsolete pause must not override a subsequent explicit P5.
+        await tasks.pause(record.task_id)
+        await tasks.resume(record.task_id)
+        await tasks.change(record.task_id, priority="P5")
+    parked = await tasks.change(record.task_id, state="parked")
+    events_before = await priority_events(tasks, record.task_id)
+    log_before = await recent_log(tasks, record.task_id)
+    assert await tasks.pause(record.task_id) == parked
+    assert await priority_events(tasks, record.task_id) == events_before
+    assert await recent_log(tasks, record.task_id) == log_before
+    resumed = await tasks.resume(record.task_id)
+    assert (
+        resumed.state,
+        resumed.level,
+        resumed.level_source,
+        resumed.level_pinned,
+    ) == ("queued", 2, "computed", False)
+    assert (await priority_events(tasks, record.task_id))[-1].reason == "resume"
+
+
+async def test_resume_after_pause_log_retention_uses_computed_default(
+    tasks: TaskStore, clock: Clock
+) -> None:
+    record, _ = await create_task(tasks, spec(), origin="user")
+    await tasks.pause(record.task_id)
+    clock.advance(31 * 86_400)
+    await tasks.apply_retention()
+    resumed = await tasks.resume(record.task_id)
+    assert (resumed.state, resumed.level, resumed.level_source) == (
+        "queued",
+        2,
+        "computed",
+    )
 
 
 async def test_resume_without_pause_and_restore_p0(tasks: TaskStore) -> None:
