@@ -64,7 +64,9 @@ def test_an_empty_query_opens_the_loop(capsys: pytest.CaptureFixture[str]) -> No
     gateway.assert_not_called()
     redirect.assert_not_called()
     # The loop keeps its answers, so each turn sees the earlier ones.
-    assert build.call_args.kwargs["options"] == AgentOptions(record_answers=True)
+    assert build.call_args.kwargs["options"] == AgentOptions(
+        mode="direct", record_answers=True
+    )
     out, err = capsys.readouterr()
     assert "/help" in out and "melo --serve" in out and "42" in out
     assert not err
@@ -158,7 +160,7 @@ def test_bare_melo_opens_the_interactive_ui(argv: list[str]) -> None:
     ):
         cli.main()
     ui.assert_called_once()
-    assert ui.call_args.kwargs["options"] == AgentOptions()
+    assert ui.call_args.kwargs["options"] == AgentOptions(mode="interactive")
     # The UI asks its own questions (test_launch.py); main asks none.
     setup.assert_not_called()
     first.assert_not_called()
@@ -182,7 +184,9 @@ def test_run_flags_without_a_task_reach_the_ui() -> None:
         mock.patch("localmelo.support.cli.run_interactive", return_value=0) as ui,
     ):
         cli.main()
-    assert ui.call_args.kwargs["options"] == AgentOptions(max_steps=5, memory=False)
+    assert ui.call_args.kwargs["options"] == AgentOptions(
+        mode="interactive", max_steps=5, memory=False
+    )
 
 
 @pytest.mark.parametrize("argv", [["melo", "--serve"]])

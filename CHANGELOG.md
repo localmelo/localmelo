@@ -514,6 +514,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A note's items now take their `source_ids` from the observation that
+  established them, even when it came in an earlier reply of the same task:
+  the reply's own tool results first, then the results still in the window,
+  then the rest of the task's (newest first, last 200 records). A record
+  matches only on a strong key (a number, a date or time, an identifier
+  containing a digit, or a capitalised name that is not sentence-initial)
+  or two distinctive non-filler words, and a note with records but no
+  match gets no item source, so "Done." no longer cites an unrelated
+  "no harm done" record. This fills `provenance.source_ids` for facts
+  copied from an earlier tool result and for the digest built from them;
+  another task's records are never used ([#103]).
+- The model-facing recall header no longer carries the retrieval latency:
+  it is `(retriever bm25)`, not `(retriever bm25, 12 ms)`. Identical runs
+  now produce identical prompt bytes, so a block kept in the window does
+  not break the prefix cache. `ms` remains in `llm_calls.recall_json`, the
+  `recall` event and `memory_stats` ([#103]).
 - A thought chunk of an attempt is now superseded at the attempt boundary
   together with that attempt's notes, so a chunk recalled later renders
   with the `(superseded)` marker and names its attempt instead of passing
@@ -615,6 +631,23 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Security
 
+- Gateway and console sessions no longer offer `shell_exec`: both run in the
+  new `gateway` tool mode, which registers `file_read`, `file_write` and
+  `python_exec` only: `/v1` and the workspace have no approval policy, and
+  the console's approvals arrive over the same unauthenticated loopback API,
+  so any local process could approve its own request. `AgentOptions` gains `mode` (`direct`,
+  `interactive`, `gateway` or `python`; `python` is the API default) and the
+  CLI sets its own surface's mode; the interactive UI keeps `shell_exec`
+  behind its existing approval panel, and direct mode is unchanged in this
+  release. The six-pattern command blocklist still applies to `direct` and
+  `python` mode, so a Python caller that passes no `approval=` is not weaker
+  than before: the `python` mode, like `direct`, refuses `rm -rf /`, `mkfs`,
+  `dd if=`, fork bombs, `shutdown` and `reboot` with or without a policy;
+  the interactive UI asks its panel instead. A gateway or
+  console session cannot be given `shell_exec` by the default set; an
+  explicit `AgentOptions(builtins=…)` still names it, and the checker then
+  refuses the call in `gateway` mode with the mode and `--builtins all` in
+  the reason ([#104]).
 - Secrets no longer stay in stored memory. `tasks.query` and `tasks.result`,
   `steps.thought`, a tool call's arguments and a tool result's output and
   error, and the text long-term memory keeps (each step's summary and the
@@ -707,3 +740,5 @@ earlier milestones.
 [#97]: https://github.com/localmelo/localmelo/pull/97
 [#100]: https://github.com/localmelo/localmelo/pull/100
 [#101]: https://github.com/localmelo/localmelo/pull/101
+[#103]: https://github.com/localmelo/localmelo/pull/103
+[#104]: https://github.com/localmelo/localmelo/pull/104

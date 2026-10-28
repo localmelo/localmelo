@@ -33,6 +33,7 @@ def test_defaults_equal_the_schema_constants() -> None:
     assert opts.reflection_gate == "flags"
     assert opts.tool_exposure == "retrieve"
     assert opts.builtins is None
+    assert opts.mode == "python"
     assert opts.memory is True
     assert opts.memory_dir is None
     assert opts.timeout_s is None
@@ -53,6 +54,7 @@ def test_valid_values_are_kept() -> None:
         reflection_gate="utility",
         tool_exposure="all",
         builtins=frozenset({"file_read"}),
+        mode="gateway",
         memory=False,
         memory_dir="~/memory",
         timeout_s=2.5,
@@ -64,6 +66,7 @@ def test_valid_values_are_kept() -> None:
     assert opts.reflection_gate == "utility"
     assert opts.tool_exposure == "all"
     assert opts.builtins == frozenset({"file_read"})
+    assert opts.mode == "gateway"
     assert opts.memory is False
     # Expanded by the agent, not here.
     assert opts.memory_dir == "~/memory"
@@ -72,6 +75,16 @@ def test_valid_values_are_kept() -> None:
 
 def test_integer_timeout_is_accepted() -> None:
     assert AgentOptions(timeout_s=30).timeout_s == 30
+
+
+@pytest.mark.parametrize("mode", ["direct", "interactive", "gateway", "python"])
+def test_every_tool_mode_is_accepted(mode: str) -> None:
+    assert AgentOptions(mode=mode).mode == mode  # type: ignore[arg-type]
+
+
+def test_a_bad_mode_names_the_field() -> None:
+    with pytest.raises(ValueError, match="mode must be one of"):
+        AgentOptions(mode="shell")  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(
@@ -122,6 +135,9 @@ def test_normalized_options_compare_and_hash_equal() -> None:
         ("reflection_gate", None),
         ("tool_exposure", "some"),
         ("tool_exposure", None),
+        ("mode", "shell"),
+        ("mode", None),
+        ("mode", "DIRECT"),
         ("builtins", "shell_exec"),
         ("builtins", 3),
         ("builtins", ["nope"]),

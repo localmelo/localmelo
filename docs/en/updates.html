@@ -88,6 +88,30 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-28-tool-modes">
+          <h3>Gateway and console sessions no longer offer <code>shell_exec</code></h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/104">#104</a>
+          </p>
+          <ul>
+            <li>Gateway and console sessions now run in a new <code>gateway</code> tool mode and register only <code>file_read</code>, <code>file_write</code> and <code>python_exec</code>: <code>shell_exec</code> is not registered at all, so the model never sees it. Neither surface has an approval policy: the console's approvals would arrive over the same unauthenticated loopback API, so any local process could approve its own request; Python code can still start a process. A gateway or console session cannot be given <code>shell_exec</code> by its default set, and an explicit <code>AgentOptions(builtins=…)</code> that names it is refused by the checker in <code>gateway</code> mode, with the mode and <code>--builtins all</code> in the reason.</li>
+            <li><code>AgentOptions</code> gains <code>mode</code>: <code>direct</code>, <code>interactive</code>, <code>gateway</code> or <code>python</code>, the Python API's default, and the command line sets its surface's mode. The interactive UI keeps <code>shell_exec</code> behind its approval panel (<code>--yolo</code> asks nothing), and direct mode is unchanged. The six-pattern blocklist still applies in <code>direct</code> and <code>python</code> mode, so a Python caller that passes no approval is not weaker than before: <code>rm -rf /</code>, <code>mkfs</code>, <code>dd if=</code>, fork bombs, <code>shutdown</code> and <code>reboot</code> are refused, while the interactive UI asks its panel instead. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#permission-tiers">permission tiers</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md#agentoptions">the Python API</a>.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-note-sources">
+          <h3>A note's facts cite the results that established them</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/103">#103</a>
+          </p>
+          <ul>
+            <li>A note's items now take their <code>source_ids</code> from the observation that established them, even when it came in an earlier reply of the same task: the reply's own tool results first, then the results still in the window, then the rest of the task's records, newest first, up to the last 200. A record matches only on a strong key (a number, a date or time, an identifier containing a digit, or a capitalised name that does not start its sentence) or two distinctive non-filler words; a note with records but no match gets no item source, so “Done.” no longer cites an unrelated “no harm done” record. This fills <code>provenance.source_ids</code> for facts copied from an earlier tool result and for the digest built from them, and another task's records are never used.</li>
+            <li>The recall header the model sees no longer carries the retrieval latency: it is <code>(retriever bm25)</code>, not <code>(retriever bm25, 12 ms)</code>. Identical runs now produce identical prompt bytes, so a block kept in the window does not break the prefix cache; the time stays in <code>llm_calls.recall_json</code>, in the <code>recall</code> event and in <code>memory_stats</code>. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#recall-in-the-loop">recall in the loop</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#long-term-memory">long-term memory</a>.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-28-session-commands">
           <h3>Name, undo, inspect and copy a terminal chat</h3>
           <p class="update-date">

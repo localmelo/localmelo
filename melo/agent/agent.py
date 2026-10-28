@@ -48,6 +48,7 @@ from localmelo.melo.checker.payloads import (
     MemoryWritePayload,
     ToolResolutionResult,
 )
+from localmelo.melo.checker.policy import builtin_set_for
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_MEMORY_TEXT_LEN
@@ -66,7 +67,6 @@ from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
 from localmelo.melo.executor import (
     TOOL_EXIT_CODE,
     Executor,
-    builtin_names,
     call_preview,
     register_builtins,
 )
@@ -86,6 +86,7 @@ from localmelo.melo.memory.notes import (
     NOTE_SHOWN_CHARS,
     Draft,
     ReasoningNote,
+    SourceRecordLog,
     candidate_items,
     candidate_text,
     digest_note,
@@ -100,6 +101,7 @@ from localmelo.melo.memory.notes import (
     render_draft_block,
     render_note,
     same_path,
+    source_records,
     split_note,
     thought_chunks,
 )
@@ -1000,6 +1002,9 @@ class _RunState:
     candidates_refused: int = 0
     redactions: int = 0
     digests: int = 0
+    # The task's tool-result records, for a later note's items (T62): the
+    # results still in the window and the rest, both newest first, bounded.
+    source_log: SourceRecordLog = dataclasses.field(default_factory=SourceRecordLog)
     # Rehearsal signals: restated, acted and cited.
     rehearsed: dict[str, int] = dataclasses.field(
         default_factory=lambda: {"restated": 0, "acted": 0, "cited": 0}
@@ -1493,7 +1498,7 @@ class Agent:
             admit_on_outcome=self.options.admit_on_outcome,
             keep_decision_text=self.options.keep_decision_text,
         )
-        self.checker = Checker()
+        self.checker = Checker(mode=self.options.mode)
         self.executor = Executor(
             self.hippo, self.checker, workspace_root=workspace_root
         )
@@ -1554,6 +1559,7 @@ class Agent:
             self.executor,
             self.hippo,
             names=names,
+            mode=self.options.mode,
             workspace_root=workspace_root,
             tool_timeout_s=self.options.tool_timeout_s,
             tool_env=self.options.tool_env,
@@ -1561,7 +1567,7 @@ class Agent:
         # The names of the built-ins registered above (see list_tools), and
         # R5's recall tool when its trigger is on. It is not a builtin_names()
         # member, so register_builtins never registers it.
-        self._builtin_names = builtin_names() if names is None else names
+        self._builtin_names = builtin_set_for(self.options.mode, names)
         if "tool" in self._plan.enabled():
             self.hippo.register_tool(RECALL_TOOL_DEF)
             self.executor.register(
@@ -2000,14 +2006,13 @@ class Agent:
         if limit <= 0:
             run.recall_skipped += 1
             return None, "", []
-        # Fit with the recorded latency, not with 0 and a re-render after:
-        # a block at the exact limit could otherwise grow by a few digits.
+        # The block's bytes do not carry the latency, so fitting is stable;
+        # the record below keeps it for recall_json, the event and stats.
         ms = round((time.perf_counter() - started) * 1000)
         kept, block = fit_recall_block(
             checked_hits,
             trigger=trigger,
             retriever=retriever,
-            ms=ms,
             placement=placement,
             limit=limit,
         )
@@ -2208,6 +2213,12 @@ class Agent:
         run: _RunState,
     ) -> tuple[ReasoningNote, str]:
         """Build the note of *response* and the content without its note block."""
+        window_ids = {
+            message.tool_call_id
+            for message in self.hippo.working.get_window()
+            if message.role == "tool" and message.tool_call_id
+        }
+        window_records, task_records = run.source_log.earlier(window_ids)
         note, rest = note_from_reply(
             response.content,
             response.thinking,
@@ -2215,6 +2226,8 @@ class Agent:
             results,
             kind=kind,
             writer=self.options.note_writer,
+            window_records=window_records,
+            task_records=task_records,
         )
         note = dataclasses.replace(
             note,
@@ -2505,6 +2518,10 @@ class Agent:
             drafts=aliases,
             calls=[call for call, _result in pairs],
         )
+        # The note is built: these observations are earlier results for the
+        # next reply's note, never this one's.
+        for call, result in pairs:
+            run.source_log.add(call.id, source_records([(call, result)]))
         if note_entry is not None:
             await self._restate(note, run)
         note_text = "" if note_entry is None else note_entry.text
@@ -5436,7 +5453,7 @@ class Agent:
     def _run_config(self) -> dict[str, Any]:
         """The effective configuration that ``RunResult.config`` reports."""
         opts = self.options
-        builtins = builtin_names() if opts.builtins is None else opts.builtins
+        builtins = builtin_set_for(opts.mode, opts.builtins)
         config: dict[str, Any] = {
             "max_steps": opts.max_steps,
             "attempt_policy": opts.attempt_policy,

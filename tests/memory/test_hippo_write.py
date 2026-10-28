@@ -289,11 +289,22 @@ def test_an_item_keeps_the_records_that_share_its_number_or_name() -> None:
     assert [item.source_ids for item in items] == [("r1",), ("r2",)]
 
 
-def test_a_note_with_no_matching_record_keeps_all_its_ids() -> None:
+def test_a_note_with_no_matching_record_gets_no_item_source_ids() -> None:
     note = ReasoningNote(
         found=["the deployment happens on Friday"],
         source_ids=["r1", "r2"],
         source_records=[("r1", '{"name": "Alice"}'), ("r2", '{"name": "Bob"}')],
+    )
+    items = candidate_items(note)
+    # A false source is worse than none: the records exist and neither
+    # shares a strong key or two distinctive words with the item.
+    assert items[0].source_ids == ()
+
+
+def test_a_note_with_no_record_text_keeps_all_its_ids() -> None:
+    note = ReasoningNote(
+        found=["the deployment happens on Friday"],
+        source_ids=["r1", "r2"],
     )
     items = candidate_items(note)
     assert items[0].source_ids == ("r1", "r2")

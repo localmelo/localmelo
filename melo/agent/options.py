@@ -7,6 +7,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Literal, get_args
 
+from localmelo.melo.checker.policy import ToolMode
 from localmelo.melo.executor.builtins import builtin_names
 from localmelo.melo.memory.recall import (
     DEFAULT_TRIGGERS,
@@ -88,8 +89,17 @@ class AgentOptions:
       step did not offer (``TOOL_NOT_OFFERED``), and that tool does not
       run.
     - ``builtins``: names of the built-in tools to register. ``None``
-      registers all of them, an empty set none. Any iterable of names
-      except a bare ``str`` is accepted and stored as a ``frozenset``.
+      registers the default set of ``mode``, an empty set none. Any
+      iterable of names except a bare ``str`` is accepted and stored as a
+      ``frozenset``.
+    - ``mode``: the surface the run belongs to, one of ``"direct"``,
+      ``"interactive"``, ``"gateway"`` or ``"python"`` (the default). It
+      decides the built-ins that ``builtins=None`` registers: the gateway
+      does not offer ``shell_exec``, the interactive UI and the Python API
+      do (the UI and a caller that passes an approval policy ask before an
+      ``exec`` call runs), and direct mode keeps it in this release. The CLI sets
+      its own surface's mode; a Python caller names it to get the stricter
+      set. An explicit ``builtins`` wins.
     - ``memory``: ``False`` turns off long-term recall, long-term writes
       and reflection promotion; reflections are still cleared at the end
       of a run.
@@ -191,6 +201,8 @@ class AgentOptions:
     # ``legacy``.
     admit_on_outcome: bool = False
     keep_decision_text: bool = False
+    # The surface the run belongs to; it decides the default built-ins.
+    mode: ToolMode = "python"
 
     def __post_init__(self) -> None:
         for name in ("max_steps", "steps_per_attempt", "max_attempts"):
@@ -202,6 +214,7 @@ class AgentOptions:
             ("attempt_policy", get_args(AttemptPolicy)),
             ("reflection_gate", get_args(ReflectionGate)),
             ("tool_exposure", get_args(ToolExposure)),
+            ("mode", get_args(ToolMode)),
             ("reasoning", get_args(ReasoningMode)),
             ("replay_scope", ("task", "window")),
             ("note_writer", get_args(NoteWriter)),

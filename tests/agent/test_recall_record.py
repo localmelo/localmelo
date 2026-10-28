@@ -76,6 +76,8 @@ async def test_a_block_is_recorded_once_on_the_request_that_first_carries_it(
         assert records[0]["trigger"] == "step"
         assert records[0]["hits"]
         assert "text" in records[0]["hits"][0]
+        # The latency is recorded, but the prompt header never shows it.
+        assert isinstance(records[0]["ms"], int)
 
 
 async def test_the_event_and_the_compact_log_match_the_record(
@@ -111,10 +113,19 @@ async def test_the_event_and_the_compact_log_match_the_record(
     assert data["retriever"] == "bm25"
     assert data["hits"][0]["alias"] == "n1"
     assert "text" not in data["hits"][0]
+    assert isinstance(data["ms"], int)
+    assert all(
+        "(retriever bm25)" in message.content and " ms)" not in message.content
+        for request in llm.requests
+        for message in request
+        if RECALL_START in message.content
+    )
     assert result.memory_stats is not None
     compact = result.memory_stats["recall_log"][0]
     assert compact["trigger"] == data["trigger"]
     assert compact["hits"] == data["hits"]
+    assert compact["ms"] == data["ms"]
+    assert result.memory_stats["recall_ms"] == data["ms"]
     assert "text" not in compact["hits"][0]
     assert RECALL_START == "[localmelo recall:"
 

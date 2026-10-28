@@ -238,6 +238,15 @@ async def test_a_session_agent_works_in_its_workspace_with_session_limits(
     assert SESSION_TOOL_TIMEOUT_S == 600.0
 
 
+def test_session_options_keep_the_callers_mode() -> None:
+    for mode in ("interactive", "gateway"):
+        options = agents.session_options(
+            AgentOptions(mode=mode), "/tmp/workspace"  # type: ignore[arg-type]
+        )
+        assert options.mode == mode
+        assert options.tool_exposure == "all"
+
+
 async def test_a_url_without_a_model_asks_for_default_with_the_timeout_given(
     tmp_path: Path,
 ) -> None:

@@ -214,8 +214,10 @@
           the config file: it lists the models of a server whose URL you
           enter, and keeps up to 12 chats of its own, with search, a draft for
           each chat, and Stop, which ends the run as <code>cancelled</code>.
-          Each chat has its own agent, with the four built-in tools and its
-          own working memory. All chats save to one history and, with an
+          Each chat has its own agent, with the three built-in tools
+          <code>file_read</code>, <code>file_write</code> and
+          <code>python_exec</code> (no <code>shell_exec</code>) and its own
+          working memory. All chats save to one history and, with an
           embedding model, one long-term memory, in
           <code>~/.cache/localmelo/playground/</code>. Chats last while the
           gateway runs, but creating a chat closes those idle for 2 hours
@@ -315,7 +317,7 @@
         <ul>
           <li>before a planning request: the prompt may hold at most 100,000 characters, and the list of offered tools must be valid;</li>
           <li>after it: each tool call in the reply needs a name and an id of its own;</li>
-          <li>before a tool runs: <code>shell_exec</code> refuses six destructive command patterns;</li>
+          <li>before a tool runs: in <code>direct</code> and <code>python</code> mode, <code>shell_exec</code> refuses six destructive command patterns; the <code>interactive</code> and <code>gateway</code> modes use the tool's tier and the mode's policy;</li>
           <li>after a tool runs: output longer than 50,000 characters is cut;</li>
           <li>before a memory write: its size is limited;</li>
           <li>before an event reaches Python code: API keys of well-known shapes, bearer tokens and one-time codes in a model reply's text are replaced with <code>[redacted]</code>;</li>
@@ -367,7 +369,10 @@
         <p>
           The four built-in tools are <code>shell_exec</code>,
           <code>python_exec</code>, <code>file_read</code> and
-          <code>file_write</code>. Direct mode gives them no
+          <code>file_write</code>. A gateway or console session gets three:
+          its mode leaves <code>shell_exec</code> out: the gateway has no
+          approval policy, and the console's approvals arrive over the same
+          unauthenticated loopback API. Direct mode gives the tools no
           workspace root, and the gateway never does, so file tools reach any
           file you can; a direct run's <code>--workspace DIR</code> sets the
           same root as the Python API below. In the Python
@@ -589,7 +594,7 @@
         <ul>
           <li>Direct mode with run options, including <code>--workspace DIR</code> for the folder a task works in and how a reply's reasoning is sent back or kept (<code>legacy</code>, <code>drop</code>, <code>replay</code>, <code>compress</code> or <code>compress+replay</code>), nine run statuses, text or JSON output, and fixed exit codes.</li>
           <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals with the diff a file write will make, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>, <code>/approvals</code>, <code>/status</code>, <code>/mcp</code> and <code>/retry</code>, an MCP servers file (<code>--mcp-config</code> or the config's <code>mcp_config</code>), saved chats that <code>melo -c</code>, <code>melo -r</code>, <code>/sessions</code> and <code>/resume</code> resume, and <code>/title</code>, <code>/undo</code>, <code>/usage</code>, <code>/memory</code> and <code>/copy</code> to name, undo, inspect and copy a conversation; and the plain conversation loop (<code>melo ""</code>).</li>
-          <li>Four built-in tools, with <code>python_exec</code> in a child process in every mode, and tools from local MCP servers in direct mode, the Python API and the interactive UI.</li>
+          <li>Four built-in tools, with <code>python_exec</code> in a child process in every mode; gateway and console sessions get three, without <code>shell_exec</code>; and tools from local MCP servers in direct mode, the Python API and the interactive UI.</li>
           <li>Tool children and MCP servers run with a minimal environment (<code>PATH</code>, <code>HOME</code>, <code>USER</code>, <code>LOGNAME</code>, <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, <code>LC_*</code>, <code>TMPDIR</code>), plus <code>AgentOptions(tool_env)</code> or the server's <code>env</code>; nothing else is inherited.</li>
           <li>A step offers the built-in tools, the tools the model has already called in the conversation and the three closest matches for the task (the default <code>retrieve</code> mode); <code>all</code> offers every tool on every step.</li>
           <li>The Python API (experimental): run events, stopping a run, approval policies for tool calls, a workspace root for the file tools, and conversations that carry over between runs.</li>

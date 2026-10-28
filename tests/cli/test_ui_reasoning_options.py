@@ -142,6 +142,8 @@ async def test_console_uses_configured_mode_but_defaults_to_legacy(
     agent = await default_builder(cfg, str(tmp_path), None, "synthetic-session")
     try:
         assert agent.options.reasoning == mode
+        assert agent.options.mode == "gateway"
+        assert "shell_exec" not in {tool.name for tool in agent.list_tools()}
         assert agent.options.retriever == ("auto" if mode == "legacy" else "bm25")
     finally:
         await agent.close()

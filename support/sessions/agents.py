@@ -72,7 +72,12 @@ def configured_session_options(
 
 
 def session_options(options: AgentOptions, workspace: str) -> AgentOptions:
-    """*options* for a session's Agent that works in *workspace*."""
+    """*options* for a session's Agent that works in *workspace*.
+
+    It replaces the session's workspace, answer recording, exposure, tool
+    timeout and replay scope. The caller's ``mode`` survives, so the UI's
+    ``interactive`` and the console's ``gateway`` reach the Agent.
+    """
     return dataclasses.replace(
         options,
         workspace_root=workspace,

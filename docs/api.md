@@ -128,8 +128,8 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 {
   "session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0},
   "pending_approvals": [{"request_id": "0d6c2a9e8f7b41c3a5e9d1b3f5a7c9e1", "call_id": "call_1", "tool_name": "file_write", "arguments": {"path": "/home/me/demo-project/todo.md"}, "preview": "~/demo-project/todo.md", "workspace_root": "/home/me/demo-project", "workspace_label": "~/demo-project", "target": {"path_label": "todo.md", "exists": false, "size_bytes": 0}}],
-  "grants": ["shell_exec"],
-  "granted_at": {"shell_exec": 1761141604.9},
+  "grants": ["file_write"],
+  "granted_at": {"file_write": 1761141604.9},
   "mcp_error": "",
   "agent": "open",
   "tokens": 18512
@@ -500,12 +500,14 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/tools
 ```
 
 ```json
-{"tools": [{"name": "shell_exec", "description": "Run a shell command ...", "parameters": {"type": "object", "properties": {"command": {"type": "string"}}, "required": ["command"]}, "source": "builtin", "requires_approval": true, "granted": false}], "mcp_config_label": "", "mcp_error": ""}
+{"tools": [{"name": "python_exec", "description": "Run Python code ...", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]}, "source": "builtin", "requires_approval": true, "granted": false}], "mcp_config_label": "", "mcp_error": ""}
 ```
 
 - `source` is `builtin`, `provided` (an MCP server's tool) or `custom`.
   `requires_approval` says a call of it asks first; `granted` says this
   session allows it for the rest of the gateway run.
+- A console session is gateway mode: it lists `file_read`, `file_write` and
+  `python_exec`, never `shell_exec`.
 - This route opens the session, because a provider's tools appear only once
   its Agent started. It can take seconds, and a start that fails is 502
   `agent_start_failed`.
@@ -518,7 +520,7 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/tools
 Take back one session grant, so the tool asks again next time.
 
 ```bash
-curl -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/shell_exec
+curl -X DELETE http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/grants/python_exec
 ```
 
 - 204 with no body; both `grants` and `granted_at` of
@@ -576,7 +578,7 @@ curl 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/runs?limit=20'
 One Python file, standard library only. It creates a session with a first
 turn, follows the event stream to the end, answers the approval the turn
 asks for, and reads the answer back. Point it at a gateway whose model is
-a scripted or local model that wants a `shell_exec` approval for a plain
+a scripted or local model that wants a `python_exec` approval for a plain
 sentence; the workspace must exist and hold a few files.
 
 ```python
@@ -622,7 +624,7 @@ status, created = post(
     {
         "workspace": WORKSPACE,
         "turn": {
-            "text": "list the folder",
+            "text": "run a short Python program",
             "client_request_id": str(uuid.uuid4()),
         },
     },
@@ -647,7 +649,7 @@ print(f"tokens: {turn['result']['usage'].get('completion_tokens', 0)}")
 ```
 
 Run as `python demo.py http://127.0.0.1:8401 ~/demo-project`, against a
-gateway whose model answered the message with a `shell_exec` call:
+gateway whose model answered the message with a `python_exec` call:
 
 ```text
 created 201 session edb425a382be turn 2e2b132e1dcc49e283c52782858ee051
@@ -658,7 +660,7 @@ event step.started
 event assistant.message
 event tool.started
 event approval.requested
-  asks to run shell_exec: ls -1
+  asks to run python_exec: print(6*7)
   answered 200 allowed
 event approval.resolved
 event tool.finished
@@ -667,7 +669,7 @@ event assistant.message
 event run.finished
 event turn.finished
 turn completed cause 'run'
-answer: The folder holds what `ls -1` printed.
+answer: The program printed 42.
 tokens: 24
 ```
 
