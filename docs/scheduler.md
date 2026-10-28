@@ -87,6 +87,18 @@ Only localmelo's runs are kept by default (`harnesses=("localmelo",)`),
 runs with overlapping calls are left out, and every line it drops is counted
 by reason.
 
+A chat call's kind is the `X-Localmelo-Call-Kind` header localmelo sends.
+The proxy keeps request headers only with `--log-bodies`, in the side file
+that the record's `bodies.headers` names (relative to the record's run
+directory); the importer reads only that file for the kind, and a record
+without it keeps the endpoint/role guess. `history.db` is not read for
+kinds: no `llm_calls` row names the proxy record it answered, and a
+retrieval request bypasses the agent's call log and makes no row at all,
+so no sound join exists. `report.kind_sources` counts kept records for
+each source (`header`, `history`, `guess`; `history` is 0 today), and
+`report.kind_unknown` counts the header values the importer does not know,
+each of which keeps its guess.
+
 ```bash
 uv run python -c '
 import sys
@@ -97,6 +109,7 @@ from localmelo.support.scheduler.sim.trace import templates_from_traces
 traces, report = import_calls(Path(sys.argv[1]))
 print(report.files, "files,", report.records_kept, "records kept,", report.tasks, "tasks")
 print("dropped:", dict(report.dropped), "errors:", report.errors)
+print("kinds:", dict(report.kind_sources), "unknown:", report.kind_unknown)
 templates = templates_from_traces(traces)
 print(len(make_workload("W2", 1, templates=templates).tasks), "W2 tasks on",
       len(templates), "imported templates")

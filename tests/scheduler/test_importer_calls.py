@@ -1,29 +1,33 @@
 """The importer turns proxy records into traces and counts everything it drops.
 
 Requirements 53-55: files are found recursively and read in path order;
-calls sort by start; endpoints map to call kinds; status, clocks, tokens,
-service sources, retries and overlap follow the rules; bad lines are
-dropped and counted so the report's identities hold; a file of another
-schema version is rejected whole; ``ttfb_s`` and ``ttft_s`` are never
-read; traces round-trip through schema 1 and become templates.
+calls sort by start; endpoints, roles and the ``X-Localmelo-Call-Kind``
+headers side file map to call kinds; status, clocks, tokens, service
+sources, retries and overlap follow the rules; bad lines are dropped and
+counted so the report's identities hold; a file of another schema
+version is rejected whole; ``ttfb_s`` and ``ttft_s`` are never read;
+traces round-trip through schema 1 and become templates.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import sqlite3
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args
 
 import pytest
 
+from localmelo.melo.contracts.providers import LLM_REQUEST_KINDS
 from localmelo.support.scheduler.costs import (
     RATES_OMLX_OQ5,
     RATES_REC_FLINT,
     alone_service_s,
 )
+from localmelo.support.scheduler.model import CallKind
 from localmelo.support.scheduler.sim import (
     ImportReport,
     TaskTrace,
@@ -32,7 +36,10 @@ from localmelo.support.scheduler.sim import (
     read_trace,
     write_trace,
 )
-from localmelo.support.scheduler.sim.importer import CallsFormatError
+from localmelo.support.scheduler.sim.importer import (
+    REQUEST_KIND_TO_CALL_KIND,
+    CallsFormatError,
+)
 from localmelo.support.scheduler.sim.trace import (
     TraceFormatError,
     templates_from_traces,
@@ -466,6 +473,222 @@ def test_templates_drop_refused_calls_and_fill_failed_tokens() -> None:
     first = replace(calls[2], prompt_tokens=None)
     (alone,) = templates_from_traces([replace(traces[0], calls=(first,))])
     assert alone.calls[0].prompt_tokens == 3235
+
+
+# ── Real call kinds ──
+
+
+def headers_file(
+    root: Path,
+    index: int,
+    value: str | None,
+    *,
+    name: str = "X-Localmelo-Call-Kind",
+) -> dict[str, Any]:
+    """A record's ``bodies`` dict with a headers side file, as the proxy writes it.
+
+    *value* ``None`` writes a headers file without the kind header.
+    """
+    rel = f"bodies/{index:06d}-headers.json"
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    request = [] if value is None else [[name, value]]
+    path.write_text(json.dumps({"request": request, "response": []}))
+    return {"bodies": {"headers": rel}}
+
+
+@pytest.mark.parametrize("value", list(REQUEST_KIND_TO_CALL_KIND))
+def test_the_call_kind_header_names_the_kind_of_a_chat_call(
+    tmp_path: Path, value: str
+) -> None:
+    # A plan call keeps the task one with a chat call; retrieve and
+    # estimate are not chat kinds on their own. role aux would guess
+    # reflect, so the second call asserts the header won.
+    records = [
+        rec(0, 0.0, 1.0),
+        rec(1, 1.0, 2.0, role="aux", **headers_file(tmp_path, 1, value)),
+    ]
+    traces, report = import_calls(write(tmp_path, records))
+    assert [c.kind for c in traces[0].calls] == ["plan", value]
+    assert report.kind_sources == (("header", 1), ("history", 0), ("guess", 1))
+    assert report.kind_unknown == 0
+
+
+def test_the_call_kind_header_name_is_case_insensitive(tmp_path: Path) -> None:
+    records = [
+        rec(0, 0.0, 1.0),
+        rec(
+            1,
+            1.0,
+            2.0,
+            **headers_file(tmp_path, 1, "estimate", name="x-LOCALMELO-call-KIND"),
+        ),
+    ]
+    traces, _ = import_calls(write(tmp_path, records))
+    assert [c.kind for c in traces[0].calls] == ["plan", "estimate"]
+
+
+def test_an_embeddings_record_keeps_embed_whatever_a_headers_file_says(
+    tmp_path: Path,
+) -> None:
+    # localmelo sends no kind header on embeddings, so a stray one is not
+    # evidence about the call.
+    records = [
+        rec(0, 0.0, 1.0),
+        rec(
+            1,
+            1.0,
+            2.0,
+            endpoint="other",
+            path="/v1/embeddings",
+            **headers_file(tmp_path, 1, "plan"),
+        ),
+    ]
+    traces, report = import_calls(write(tmp_path, records))
+    assert [c.kind for c in traces[0].calls] == ["plan", "embed"]
+    assert report.kind_sources == (("header", 0), ("history", 0), ("guess", 2))
+
+
+@pytest.mark.parametrize(("role", "guess"), [("aux", "reflect"), ("main", "plan")])
+def test_an_unknown_call_kind_keeps_the_guess_and_is_counted(
+    tmp_path: Path, role: str, guess: str
+) -> None:
+    record = rec(0, 0.0, 1.0, role=role, **headers_file(tmp_path, 0, "summarize"))
+    traces, report = import_calls(write(tmp_path, [record]))
+    assert traces[0].calls[0].kind == guess
+    assert report.kind_sources == (("header", 0), ("history", 0), ("guess", 1))
+    assert report.kind_unknown == 1
+
+
+@pytest.mark.parametrize(
+    "bodies",
+    [
+        None,
+        {},
+        {"headers": None},
+        {"headers": 7},
+        {"headers": "bodies/no-such-headers.json"},
+        {"headers": "bodies/000000-headers.json"},  # the file below is malformed
+    ],
+)
+def test_a_record_without_a_readable_headers_file_keeps_the_guess(
+    tmp_path: Path, bodies: dict[str, Any] | None
+) -> None:
+    (tmp_path / "bodies").mkdir()
+    (tmp_path / "bodies/000000-headers.json").write_text("{not json")
+    kw: dict[str, Any] = {} if bodies is None else {"bodies": bodies}
+    record = rec(0, 0.0, 1.0, role="aux", **kw)
+    write(tmp_path, [record])
+    traces, report = import_calls(tmp_path)
+    assert traces[0].calls[0].kind == "reflect"
+    assert report.kind_sources == (("header", 0), ("history", 0), ("guess", 1))
+    assert report.kind_unknown == 0
+
+
+def test_a_headers_file_without_the_kind_header_keeps_the_guess(
+    tmp_path: Path,
+) -> None:
+    record = rec(0, 0.0, 1.0, role="aux", **headers_file(tmp_path, 0, None))
+    traces, report = import_calls(write(tmp_path, [record]))
+    assert traces[0].calls[0].kind == "reflect"
+    assert dict(report.kind_sources)["header"] == 0
+    assert report.kind_unknown == 0
+
+
+@pytest.mark.parametrize(
+    "relative",
+    ["../outside-headers.json", "/etc/passwd", "bodies/../../outside-headers.json"],
+)
+def test_a_headers_path_outside_the_calls_directory_is_not_read(
+    tmp_path: Path, relative: str
+) -> None:
+    outside = tmp_path.parent / "outside-headers.json"
+    outside.write_text(json.dumps({"request": [["X-Localmelo-Call-Kind", "retrieve"]]}))
+    record = rec(0, 0.0, 1.0, role="aux", bodies={"headers": relative})
+    (tmp_path / "bodies").mkdir()
+    write(tmp_path, [record])
+    traces, report = import_calls(tmp_path)
+    assert traces[0].calls[0].kind == "reflect"
+    assert report.kind_sources == (("header", 0), ("history", 0), ("guess", 1))
+    assert report.kind_unknown == 0
+
+
+def test_kind_sources_count_every_kept_record(tmp_path: Path) -> None:
+    records = [
+        rec(0, 0.0, 1.0, role="aux", **headers_file(tmp_path, 0, "retrieve")),
+        rec(1, 1.0, 2.0, role="aux", **headers_file(tmp_path, 1, "plan")),
+        rec(2, 2.0, 3.0),  # no headers file: guessed plan
+        rec(3, 3.0, 4.0, role="aux", **headers_file(tmp_path, 2, "made-up")),
+    ]
+    traces, report = import_calls(write(tmp_path, records))
+    assert [c.kind for c in traces[0].calls] == [
+        "retrieve",
+        "plan",
+        "plan",
+        "reflect",
+    ]
+    assert report.kind_sources == (("header", 2), ("history", 0), ("guess", 2))
+    assert report.kind_unknown == 1
+    # Every kept record names one source, as service_sources does for service.
+    assert sum(n for _, n in report.kind_sources) == report.records_kept == 4
+    check_identities(traces, report, kept_tasks=1)
+
+
+def test_pre_r1_records_import_exactly_as_before(tmp_path: Path) -> None:
+    # Before R1 there is no kind header: chat with tools is plan, chat
+    # without tools reflect, and the embeddings endpoint embed.
+    records = [
+        rec(0, 0.0, 1.0),
+        rec(1, 1.0, 2.0, role="aux"),
+        rec(2, 2.0, 3.0, endpoint="other", path="/v1/embeddings"),
+    ]
+    traces, report = import_calls(write(tmp_path, records))
+    assert [c.kind for c in traces[0].calls] == ["plan", "reflect", "embed"]
+    assert report.kind_sources == (("header", 0), ("history", 0), ("guess", 3))
+    assert report.kind_unknown == 0
+    # The pre-R1 fixture is the same: its records have no bodies.
+    old, old_report = import_calls(FIXTURES / "calls_basic")
+    assert [c.kind for c in calls_of(old)] == [
+        "plan",
+        "reflect",
+        "plan",
+        "plan",
+        "plan",
+        "plan",
+        "embed",
+    ]
+    assert dict(old_report.kind_sources)["header"] == 0
+
+
+def test_history_rows_cannot_name_a_proxy_record_so_kinds_stay_guessed(
+    tmp_path: Path,
+) -> None:
+    # No sound join exists: llm_calls has task_id (a fresh uuid), seq,
+    # timestamps and durations, but no run id or request id, and durations
+    # and arrival times differ from the proxy's by a few ms. The importer
+    # therefore reads only the calls.jsonl header side file, and this pins
+    # that a history.db beside the calls changes no kind.
+    db = tmp_path / "mem" / "history.db"
+    db.parent.mkdir()
+    connection = sqlite3.connect(db)
+    try:
+        connection.execute(
+            "CREATE TABLE llm_calls (task_id TEXT, seq INTEGER, kind TEXT)"
+        )
+        connection.execute("INSERT INTO llm_calls VALUES ('t', 0, 'retrieve')")
+        connection.commit()
+    finally:
+        connection.close()
+    traces, report = import_calls(write(tmp_path, [rec(0, 0.0, 1.0, role="aux")]))
+    assert traces[0].calls[0].kind == "reflect"
+    assert report.kind_sources == (("header", 0), ("history", 0), ("guess", 1))
+
+
+def test_the_importer_knows_every_request_kind_the_agent_sends() -> None:
+    # support/scheduler may not import melo/, so the vocabulary is repeated
+    # there; this catches the two drifting apart.
+    assert tuple(REQUEST_KIND_TO_CALL_KIND) == LLM_REQUEST_KINDS
+    assert set(REQUEST_KIND_TO_CALL_KIND.values()) <= set(get_args(CallKind))
 
 
 def test_real_bench_traces_import_when_the_path_is_set() -> None:
