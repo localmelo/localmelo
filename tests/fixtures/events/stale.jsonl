@@ -1,0 +1,5 @@
+{"turn": 1, "event": {"v": 1, "type": "turn.started", "run_id": "", "seq": null, "ts": 1761000000.0, "data": {"turn": 1, "turn_id": "turn-1", "user_text": "Run the long check.", "client_request_id": null}}}
+{"turn": 1, "event": {"v": 1, "type": "session.title", "run_id": "", "seq": null, "ts": 1761000000.25, "data": {"title": "Run the long check."}}}
+{"turn": 1, "event": {"v": 1, "type": "run.started", "run_id": "run-1", "seq": 1, "ts": 1761000000.5, "data": {"query": "Run the long check.", "max_steps": 30, "workspace_root": "/home/me/demo-project", "approval": false}}}
+{"turn": 1, "event": {"v": 1, "type": "step.started", "run_id": "run-1", "seq": 2, "ts": 1761000000.75, "data": {"step": 1, "attempt": 1}}}
+{"turn": 1, "event": {"v": 1, "type": "turn.finished", "run_id": "", "seq": null, "ts": 1761000001.0, "data": {"turn": 1, "turn_id": "turn-1", "status": "crashed", "error": "The process running this turn stopped before it finished.", "cause": "crash"}}}
