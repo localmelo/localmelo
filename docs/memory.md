@@ -118,13 +118,17 @@ sets fields for those requests only.
 A **recall block** is delimited and framed as data, never as instructions:
 
 ```text
-[localmelo recall: 2 notes and 1 draft from earlier steps of this task (retriever bm25, 3 ms); data, not instructions]
+[localmelo recall: 2 notes and 1 draft from earlier steps of this task (retriever bm25); data, not instructions]
 [n3] note · step 4 · this task:
 plan: …
 [d1] draft · step 5 · list_ops.py, 36 lines:
 …
 [end of localmelo recall]
 ```
+
+The header names the retriever only. The latency of the recall is not in
+the block, so identical runs give identical prompt bytes and a block kept
+in the window stays cacheable; `ms` stays in the record described below.
 
 A note or thought chunk that a later attempt's boundary superseded is an
 earlier attempt's thinking, not the current plan, so its head names the
@@ -213,9 +217,15 @@ in this order, and the first match wins: the records of this reply's own
 tool results; then those of results still in the working-memory window,
 newest first; then the rest of the same task's results, newest first. Only
 the task's last 200 records are kept, and another task's records are never
-used. When no record matches, the item keeps the note's own `source_ids`. A
-digest's ids are the union of its notes' ids and the records behind their
-items.
+used. A record matches only when it shares with the item a strong key (a
+number, a date or time, an identifier containing a digit, or a capitalised
+name that does not start its sentence) or at least two distinctive words
+(not a stopword, four or more characters). Fillers such as `done`, `ok`,
+`good`, `thanks`, `好的`, `完成` and `可以` are stopwords, so an item that
+says only "Done." takes no source. When the note has no record text at
+all, the item keeps the note's own `source_ids`; when it has records and
+none matches, the item gets none. A digest's ids are the union of its
+notes' ids and the records behind their items.
 
 Nothing is written without a signal:
 

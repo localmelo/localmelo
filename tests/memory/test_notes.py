@@ -838,6 +838,7 @@ def _record(record_id: str, text: str) -> str:
 
 def _item_note(
     *,
+    found: str = FACT,
     own: tuple[str, str] | None = None,
     window: tuple[str, ...] = (),
     task: tuple[str, ...] = (),
@@ -846,7 +847,7 @@ def _item_note(
     calls = [ToolCall("search", {})] if own else []
     results = [ToolResult("search", _record(*own))] if own else []
     note, _ = note_from_reply(
-        f"<note>found: {FACT}</note>",
+        f"<note>found: {found}</note>",
         "",
         calls,
         results,
@@ -878,6 +879,76 @@ def test_an_unrelated_earlier_record_is_not_attached() -> None:
         prior_text=UNRELATED,
     )
     assert note.source_records == []
+    assert [item.source_ids for item in candidate_items(note)] == [()]
+
+
+def test_a_filler_word_does_not_source_an_earlier_record() -> None:
+    note = _item_note(
+        found="Done.",
+        window=("w1",),
+        task=("t1",),
+        prior_text="The task is complete; no harm done.",
+    )
+    assert note.source_records == []
+    assert [item.source_ids for item in candidate_items(note)] == [()]
+
+
+def test_a_filler_word_does_not_source_the_replys_own_record() -> None:
+    note = _item_note(
+        found="Done.",
+        own=("own", "The task is complete; no harm done."),
+    )
+    assert [record_id for record_id, _text in note.source_records] == ["own"]
+    assert [item.source_ids for item in candidate_items(note)] == [()]
+
+
+def test_the_yoga_fact_still_sources_its_record() -> None:
+    note = _item_note(window=("rec-yoga",))
+    assert [item.source_ids for item in candidate_items(note)] == [("rec-yoga",)]
+
+
+def test_one_plain_shared_word_is_not_enough() -> None:
+    note = _item_note(
+        found="alpha beta gamma",
+        window=("w1",),
+        prior_text="alpha only",
+    )
+    assert [item.source_ids for item in candidate_items(note)] == [()]
+
+
+def test_two_distinctive_words_source_a_record() -> None:
+    note = _item_note(
+        found="alpha beta gamma",
+        window=("w1",),
+        prior_text="alpha and beta",
+    )
+    assert [item.source_ids for item in candidate_items(note)] == [("w1",)]
+
+
+def test_a_non_initial_name_is_a_strong_key() -> None:
+    note = _item_note(
+        found="the discount applies at Main Street",
+        window=("w1",),
+        prior_text="Main Street has a sale",
+    )
+    assert [item.source_ids for item in candidate_items(note)] == [("w1",)]
+
+
+def test_an_identifier_with_a_digit_is_a_strong_key() -> None:
+    note = _item_note(
+        found="deploy build2 to staging",
+        window=("w1",),
+        prior_text="build2 failed at noon",
+    )
+    assert [item.source_ids for item in candidate_items(note)] == [("w1",)]
+
+
+def test_a_sentence_initial_name_alone_is_not_a_strong_key() -> None:
+    note = _item_note(
+        found="Yoga is a practice",
+        window=("w1",),
+        prior_text="Yoga mats are sold here",
+    )
     assert [item.source_ids for item in candidate_items(note)] == [()]
 
 

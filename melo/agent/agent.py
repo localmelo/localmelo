@@ -1999,14 +1999,13 @@ class Agent:
         if limit <= 0:
             run.recall_skipped += 1
             return None, "", []
-        # Fit with the recorded latency, not with 0 and a re-render after:
-        # a block at the exact limit could otherwise grow by a few digits.
+        # The block's bytes do not carry the latency, so fitting is stable;
+        # the record below keeps it for recall_json, the event and stats.
         ms = round((time.perf_counter() - started) * 1000)
         kept, block = fit_recall_block(
             checked_hits,
             trigger=trigger,
             retriever=retriever,
-            ms=ms,
             placement=placement,
             limit=limit,
         )

@@ -882,12 +882,13 @@ def _earlier_records(
 ) -> list[tuple[str, str]]:
     """The earlier records that can establish one of *items*, window then task.
 
-    Only a record whose text shares a number, date, name or distinctive word
-    with an item is kept, so a note does not carry the whole task's records.
-    The caller's order is kept: ``own``, then *window_records*, then
-    *task_records*; :func:`candidate_items` takes the first match.
+    Only a record that would source one of the items (the same strong key
+    or two distinctive words as :func:`_item_source_ids`) is kept, so a
+    note does not carry the whole task's records. The caller's order is
+    kept: ``own``, then *window_records*, then *task_records*;
+    :func:`candidate_items` takes the first match.
     """
-    keys = [key for item in items if (key := _item_keys(item))]
+    keys = [item_keys for item in items if (item_keys := _item_keys(item))]
     if not keys:
         return []
     seen = {record_id for record_id, _text in own}
@@ -897,7 +898,7 @@ def _earlier_records(
             if record_id in seen:
                 continue
             folded = text.lower()
-            if any(key in folded for item_keys in keys for key in item_keys):
+            if any(_item_matches(item_keys, folded) for item_keys in keys):
                 kept.append((record_id, text))
                 seen.add(record_id)
     return kept
@@ -1310,27 +1311,62 @@ CANDIDATE_TEXT_CHARS = 600  # a note's candidate text
 REFLECTION_CANDIDATE_CHARS = 2_000  # a reflection's
 RECORD_TEXT_CHARS = 500  # a source record's text in ReasoningNote.source_records
 
-_ITEM_NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
-_ITEM_DATE_RE = re.compile(r"\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}\b")
+_ITEM_STRONG_RE = re.compile(
+    r"(?P<datetime>\b\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}"
+    r"(?:[T ]\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b)"
+    r"|(?P<time>\b\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\b)"
+    r"|(?P<identifier>\b(?=[A-Za-z0-9_]*\d)(?=[A-Za-z0-9_]*[A-Za-z_])[A-Za-z0-9_]+\b)"
+    r"|(?P<number>\b\d+(?:\.\d+)?\b)"
+)
 _ITEM_NAME_RE = re.compile(r"\b[A-Z][a-z]{2,}\b")
 _ITEM_WORD_RE = re.compile(r"[A-Za-z0-9_]{4,}")
+_ITEM_CJK_RE = re.compile(r"[\u4e00-\u9fff]{2,}")
+_SENTENCE_BREAK_RE = re.compile(r"(?:[.!?](?=\s|$))|\n")
 
 
-def _item_keys(item: str) -> set[str]:
-    """The distinctive strings an item shares with a record's text."""
-    keys: set[str] = set()
-    keys.update(_ITEM_NUMBER_RE.findall(item))
-    keys.update(_ITEM_DATE_RE.findall(item))
-    keys.update(name.lower() for name in _ITEM_NAME_RE.findall(item))
-    keys.update(
+@dataclass(frozen=True)
+class _ItemKeys:
+    """An item's strong keys and its distinctive words."""
+
+    strong: frozenset[str]
+    weak: frozenset[str]
+
+    def __bool__(self) -> bool:
+        return bool(self.strong or self.weak)
+
+
+def _sentence_initial(item: str, start: int) -> bool:
+    """Whether *start* in *item* begins a sentence (only space before it)."""
+    prefix = item[:start]
+    break_end = 0
+    for match in _SENTENCE_BREAK_RE.finditer(prefix):
+        break_end = match.end()
+    return not re.search(r"[A-Za-z0-9]", prefix[break_end:])
+
+
+def _item_keys(item: str) -> _ItemKeys:
+    """The strong keys and distinctive words an item shares with a record.
+
+    A strong key is a number, a date or time, an identifier containing a
+    digit, a capitalised name that does not start its sentence, or a CJK
+    run. A distinctive word is four or more ASCII letters or digits that
+    are not a stopword; one such word is not enough to source a record.
+    """
+    strong: set[str] = {
+        match.group(0).lower() for match in _ITEM_STRONG_RE.finditer(item)
+    }
+    for match in _ITEM_NAME_RE.finditer(item):
+        if not _sentence_initial(item, match.start()):
+            strong.add(match.group(0).lower())
+    strong.update(
+        run for run in _ITEM_CJK_RE.findall(item) if run not in _ITEM_STOPWORDS
+    )
+    weak = {
         word.lower()
         for word in _ITEM_WORD_RE.findall(item)
-        if word.lower() not in _ITEM_STOPWORDS
-    )
-    keys.update(
-        run for run in re.findall(r"[\u4e00-\u9fff]{2,}", item) if len(run) >= 2
-    )
-    return keys
+        if not word.isdigit() and word.lower() not in _ITEM_STOPWORDS
+    }
+    return _ItemKeys(frozenset(strong), frozenset(weak))
 
 
 _ITEM_STOPWORDS = frozenset(
@@ -1341,11 +1377,17 @@ _ITEM_STOPWORDS = frozenset(
         "because",
         "before",
         "being",
+        "complete",
+        "completed",
         "could",
+        "done",
         "every",
+        "fine",
+        "finished",
         "first",
         "found",
         "from",
+        "good",
         "have",
         "into",
         "just",
@@ -1353,13 +1395,20 @@ _ITEM_STOPWORDS = frozenset(
         "made",
         "make",
         "more",
+        "no",
+        "noted",
+        "ok",
+        "okay",
         "only",
         "other",
         "over",
+        "ready",
         "same",
         "should",
         "some",
+        "sure",
         "than",
+        "thanks",
         "that",
         "their",
         "them",
@@ -1380,22 +1429,44 @@ _ITEM_STOPWORDS = frozenset(
         "will",
         "with",
         "would",
+        "yes",
+        "好的",
+        "完成",
+        "可以",
     }
 )
 
 
-def _item_source_ids(item: str, records: Sequence[tuple[str, str]]) -> list[str]:
-    """The first record id whose text shares a number, date, name or word with *item*.
+def _has_key(folded: str, key: str) -> bool:
+    """Whether lower-cased record text *folded* carries *key*."""
+    if _ITEM_CJK_RE.fullmatch(key):
+        return key in folded
+    pattern = r"(?<![0-9a-z_])" + re.escape(key) + r"(?![0-9a-z_])"
+    return re.search(pattern, folded) is not None
 
-    *records* is in the precedence order :func:`note_from_reply` gives it:
-    the reply's own results, the window's, then the rest of the task's.
+
+def _item_matches(keys: _ItemKeys, folded: str) -> bool:
+    """Whether *folded* shares a strong key or two distinctive words."""
+    if any(_has_key(folded, key) for key in keys.strong):
+        return True
+    return sum(1 for word in keys.weak if _has_key(folded, word)) >= 2
+
+
+def _item_source_ids(item: str, records: Sequence[tuple[str, str]]) -> list[str]:
+    """The first record id whose text shares a strong key or two words with *item*.
+
+    A strong key is a number, a date or time, an identifier containing a
+    digit, or a capitalised name that is not sentence-initial; otherwise
+    the record must share at least two distinctive words (not stopwords,
+    at least four characters). *records* is in the precedence order
+    :func:`note_from_reply` gives it: the reply's own results, the
+    window's, then the rest of the task's.
     """
     keys = _item_keys(item)
     if not keys:
         return []
     for record_id, text in records:
-        folded = text.lower()
-        if any(key in folded for key in keys):
+        if _item_matches(keys, text.lower()):
             return [record_id]
     return []
 
@@ -1403,12 +1474,15 @@ def _item_source_ids(item: str, records: Sequence[tuple[str, str]]) -> list[str]
 def candidate_items(note: ReasoningNote) -> tuple[CandidateItem, ...]:
     """A note's found and decided items, each with the records behind it.
 
-    An item keeps the first record whose text shares a number, a date, a
-    capitalised name or a distinctive word with it; when none matches,
-    the note's whole ``source_ids`` are used.
+    An item keeps the first record whose text shares a strong key (a
+    number, a date or time, an identifier containing a digit, or a
+    capitalised name that is not sentence-initial) or at least two
+    distinctive words with it. When the note carries no record text at
+    all, its whole ``source_ids`` are used; when it carries records and
+    none matches, the item gets none (a false source is worse than none).
     """
     items: list[CandidateItem] = []
-    default = tuple(note.source_ids)
+    default = tuple(note.source_ids) if not note.source_records else ()
     for item in (*note.found, *note.decided):
         matched = _item_source_ids(item, note.source_records)
         items.append(CandidateItem(item, tuple(matched) if matched else default))
