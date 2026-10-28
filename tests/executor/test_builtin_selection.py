@@ -7,10 +7,20 @@ from collections.abc import Collection
 import pytest
 
 from localmelo.melo.checker import Checker
-from localmelo.melo.executor import BUILTINS, Executor, builtin_names, register_builtins
+from localmelo.melo.executor import (
+    APPROVAL_BUILTINS,
+    BUILTINS,
+    Executor,
+    builtin_names,
+    register_builtins,
+)
 from localmelo.melo.memory.coordinator import Hippo
 
 ALL_NAMES = {tool_def.name for tool_def, _ in BUILTINS}
+
+
+def test_the_approval_set_still_names_the_same_three() -> None:
+    assert frozenset({"file_write", "python_exec", "shell_exec"}) == APPROVAL_BUILTINS
 
 
 def _registered(names: Collection[str] | None) -> tuple[set[str], set[str]]:

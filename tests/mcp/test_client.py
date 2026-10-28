@@ -25,7 +25,7 @@ from localmelo.melo.checker.validators import (
     MAX_OUTPUT_LEN,
 )
 from localmelo.support.mcp import McpError, StdioMcpClient, tool_result_to_output
-from localmelo.support.mcp.client import STDERR_LINE_CHARS, STREAM_LIMIT
+from localmelo.support.mcp.client import STDERR_LINE_CHARS, STREAM_LIMIT, _parse_tool
 from localmelo.tests.mcp.conftest import (
     Gate,
     SpawnGate,
@@ -34,6 +34,70 @@ from localmelo.tests.mcp.conftest import (
     wait_held,
 )
 from localmelo.tests.mcp.fake_mcp_server import PNG_1X1, TOOLS
+
+
+class TestToolAnnotations:
+    def test_annotations_are_kept_raw(self) -> None:
+        tool = _parse_tool(
+            {
+                "name": "fetch",
+                "inputSchema": {"type": "object", "properties": {}},
+                "annotations": {
+                    "readOnlyHint": True,
+                    "destructiveHint": False,
+                    "title": "Fetch",
+                    "unknown": {"nested": 1},
+                },
+            }
+        )
+        assert tool is not None
+        assert tool.annotations == {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "title": "Fetch",
+            "unknown": {"nested": 1},
+        }
+
+    @pytest.mark.parametrize(
+        "annotations",
+        [
+            pytest.param(None, id="null"),
+            pytest.param(["readOnlyHint", True], id="list"),
+            pytest.param("readOnlyHint", id="string"),
+            pytest.param(7, id="number"),
+        ],
+    )
+    def test_absent_or_not_an_object_gives_an_empty_mapping(
+        self, annotations: object
+    ) -> None:
+        item: dict[str, Any] = {"name": "fetch"}
+        if annotations is not None:
+            item["annotations"] = annotations
+        tool = _parse_tool(item)
+        assert tool is not None
+        assert tool.annotations == {}
+
+    def test_a_non_string_key_gives_an_empty_mapping(self) -> None:
+        tool = _parse_tool({"name": "fetch", "annotations": {3: True}})
+        assert tool is not None
+        assert tool.annotations == {}
+
+    def test_a_non_bool_hint_is_kept_and_does_not_fail_listing(self) -> None:
+        tool = _parse_tool(
+            {"name": "fetch", "annotations": {"readOnlyHint": "yes", "n": 1}}
+        )
+        assert tool is not None
+        assert tool.annotations == {"readOnlyHint": "yes", "n": 1}
+
+    async def test_the_server_annotation_reaches_the_tool(
+        self, client: StdioMcpClient
+    ) -> None:
+        tools = {tool.name: tool for tool in await client.list_tools()}
+        assert tools["cwd"].annotations == {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+        }
+        assert tools["echo"].annotations == {}
 
 
 class TestHandshake:

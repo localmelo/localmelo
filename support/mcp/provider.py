@@ -160,6 +160,7 @@ class McpToolProvider(BaseToolProvider):
                                 or f"{tool.name} (MCP server {server.name})",
                                 parameters=tool.input_schema,
                                 semantic_tags=[server.name, tool.name],
+                                annotations=tool.annotations,
                             ),
                             function=_bind(client, tool.name),
                             timeout_ms=server.timeout_s * 1000,

@@ -690,7 +690,16 @@ class TestStartAndTools:
             parameters=WEATHER.parameters,
             source="provided",
             requires_approval=True,
+            tier="write",
         )
+        assert {tool.name: tool.tier for tool in tools} == {
+            "echo": "write",
+            "file_read": "read",
+            "file_write": "write",
+            "python_exec": "exec",
+            "shell_exec": "exec",
+            "weather": "write",
+        }
         # A copy: changing it does not change the registered tool.
         weather.parameters["properties"].clear()
         assert agent.hippo.get_tool("weather") == WEATHER

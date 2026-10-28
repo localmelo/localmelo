@@ -13,7 +13,7 @@ from prompt_toolkit.data_structures import Size
 from prompt_toolkit.output.vt100 import Vt100_Output
 from rich.text import Text
 
-from localmelo.melo.schema import RunResult, ToolInfo
+from localmelo.melo.schema import RunResult, ToolInfo, ToolTier
 from localmelo.support.cli.output import RecordingOut, TerminalOut
 from localmelo.support.cli.render import LiveState, TurnRenderer, live_rows
 from localmelo.support.cli.text import cells
@@ -547,6 +547,12 @@ def test_the_ascii_symbols() -> None:
 
 
 def _tools() -> list[ToolInfo]:
+    rows: tuple[tuple[str, bool, ToolTier], ...] = (
+        ("file_read", False, "read"),
+        ("file_write", True, "write"),
+        ("shell_exec", True, "exec"),
+        ("python_exec", True, "exec"),
+    )
     return [
         ToolInfo(
             name=name,
@@ -554,13 +560,9 @@ def _tools() -> list[ToolInfo]:
             parameters={},
             source="builtin",
             requires_approval=asks,
+            tier=tier,
         )
-        for name, asks in (
-            ("file_read", False),
-            ("file_write", True),
-            ("shell_exec", True),
-            ("python_exec", True),
-        )
+        for name, asks, tier in rows
     ]
 
 

@@ -11,6 +11,7 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
     ValidationResult,
 )
+from localmelo.melo.checker.tiers import tier_of
 from localmelo.melo.checker.validators import (
     _BLOCKED_RE,
     BLOCKED_COMMANDS,  # noqa: F401 – re-exported for tests
@@ -22,7 +23,7 @@ from localmelo.melo.checker.validators import (
     validate_session_transition,
     validate_tool_resolution,
 )
-from localmelo.melo.schema import CheckResult, Message, ToolCall, ToolDef
+from localmelo.melo.schema import CheckResult, Message, ToolCall, ToolDef, ToolTier
 
 
 def _prompt_chars(msg: Message, *, count_thinking: bool = False) -> int:
@@ -44,6 +45,12 @@ def _prompt_chars(msg: Message, *, count_thinking: bool = False) -> int:
 class Checker:
     def __init__(self) -> None:
         self._blocked = _BLOCKED_RE
+
+    # ── Permission tiers ──
+
+    def tier(self, tool_def: ToolDef) -> ToolTier:
+        """The permission tier of *tool_def* (see :mod:`melo.checker.tiers`)."""
+        return tier_of(tool_def)
 
     # ── Core → Memory boundary ──
 
@@ -80,8 +87,10 @@ class Checker:
                 allowed=False, reason=f"Unknown tool: {tool_call.tool_name}"
             )
 
-        # check dangerous shell commands
-        if tool_call.tool_name == "shell_exec":
+        # The six-pattern blocklist stands in for P13's exec policy. Of the
+        # exec built-ins only shell_exec takes a command line, so the tier
+        # scopes the same patterns to the same inputs as before.
+        if self.tier(tool_def) == "exec" and tool_call.tool_name == "shell_exec":
             cmd = tool_call.arguments.get("command", "")
             if not isinstance(cmd, str):
                 return CheckResult(

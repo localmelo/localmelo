@@ -97,7 +97,12 @@ TOOLS: list[dict[str, Any]] = [
         "description": "Read an env var.",
         "inputSchema": _schema(name="string"),
     },
-    {"name": "cwd", "description": "Report the cwd.", "inputSchema": _schema()},
+    {
+        "name": "cwd",
+        "description": "Report the cwd.",
+        "inputSchema": _schema(),
+        "annotations": {"readOnlyHint": True, "destructiveHint": False},
+    },
     {
         "name": "big_image",
         "description": "Large image.",
