@@ -527,6 +527,80 @@ A database that has the table is read as follows:
   export reads through it, and SQLite may create `history.db-shm`. Export a
   run that has ended.
 
+## The typed long-term store
+
+Three modes read or write the typed `long_term.db` of R6-lite. Each is
+mutually exclusive with the evaluation flags and with `--export-run`, and none
+contacts a model. `DIR` may be a memory directory (the file is
+`long_term.db`) or the file itself.
+
+```bash
+melo-retrieve --export-store DIR|FILE
+melo-retrieve --export-decisions DIR|FILE
+melo-retrieve --route CANDIDATES.jsonl --memory-dir DIR
+```
+
+### `--export-store`
+
+One JSON line per **active** entry, in `(created_at, id)` order:
+
+```json
+{"id": 1, "text": "I live in Berlin near the river", "kind": "profile",
+ "source": "user", "status": "active", "admitted_by": "user_statement",
+ "provenance": {"task_id": "t1", "source_ids": ["r1"]},
+ "created_at": 0.0, "last_used_at": 0.0, "uses": 0, "supersedes": null,
+ "links": [], "embed_model": "", "embed_dim": 0}
+```
+
+The bench's T4 reader reads `text` and `provenance.source_ids`. A count goes
+to stderr. The file is opened read-only: a v0 file is read with its legacy
+columns and the legacy derivation (a reflection by `metadata.type`, otherwise
+episodic/step_summary) and is **not** migrated; a file from a newer version is
+one line on stderr and exit 2; a missing file is the same.
+
+### `--export-decisions`
+
+One JSON line per decision row, in `seq` order:
+
+```json
+{"seq": 1, "candidate_id": "n1", "action": "NEW", "kind": "profile",
+ "admitted_by": "user_statement", "entry_id": 1, "target_id": null,
+ "reason": "new", "source_ids": ["r1"], "text_sha256": "…", "text": null,
+ "timestamp": 0.0, "task_id": "t1"}
+```
+
+`source_ids` is the parsed array, and `text` is `null` unless the run had
+`--keep-decision-text`. A v0 file has no decisions table and prints none.
+
+### `--route`
+
+Each input line is one candidate:
+
+```json
+{"candidate_id": "n1", "source": "user", "text": "…", "source_ids": ["r1"],
+ "signal": "user_statement", "task_id": "t1", "session_id": "",
+ "task_text": "plan the move"}
+```
+
+`source` is one of `reasoning_note`, `digest`, `reflection`, `user` or
+`sleep`; `signal` is one of `rehearsal`, `user_request`, `user_statement`,
+`outcome` or `sleep`; an unknown value is exit 2. The candidate goes through
+the same boundary and policy as a run, into a text-only store under
+`--memory-dir`, and one line comes out per input line, in input order:
+
+```json
+{"candidate_id": "n1", "action": "NEW", "kind": "profile",
+ "admitted_by": "user_statement", "entry_id": 1, "target_id": null,
+ "reason": "new", "source_ids": ["r1"]}
+```
+
+A boundary refusal prints `"action": "REFUSED"` and the reason. `--memory-dir`
+is required and the command refuses the default `~/.cache/localmelo/memory`
+and the `LOCALMELO_MEMORY_DIR` value (resolved paths); the directory is
+created `0700`. `--route` appends to an existing scratch store rather than
+clearing it, so the bench uses a fresh directory per run. `--export-store` on
+that directory shows what the route wrote.
+
 ## How each retriever ranks
 
 **`bm25`** scores the query's candidates with Okapi BM25, so how rare a word

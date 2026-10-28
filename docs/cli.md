@@ -457,6 +457,8 @@ These options apply to a task run without `--serve`.
 | `--recall-placement tool\|message` | `tool` | Where a step block goes: appended to the last tool result, or in its own user message. `message` is refused in `replay` and `compress+replay`. |
 | `--recall-min-score F` | `0.35` | The cosine floor for embedding hits and long-term hits, from 0 to 1. Inert for `bm25` and `llm`. |
 | `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. It is a provider setting, not a `config` key, and is also accepted in the interactive UI. |
+| `--admit-on-outcome on\|off` | `off` | R6-lite: at the run's end, admit only the final attempt digest, with the terminal status in its provenance; off writes nothing unless a signal admits something. Accepted and inert in `legacy`, and accepted in the interactive UI. |
+| `--keep-decision-text` | off | R6-lite: also store the checked text of each admission decision; the SHA-256 is always kept. An evaluation switch and refused in the interactive UI. |
 
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
@@ -526,6 +528,12 @@ These options apply to a task run without `--serve`.
   melo --base-url http://127.0.0.1:11434/v1 --chat-model MODEL \
     --reasoning compress --retriever off -- "List the files"
   ```
+- `--admit-on-outcome` and `--keep-decision-text`: see
+  [Long-term memory](memory.md#long-term-memory). They are accepted in
+  `legacy` and do nothing there. `--keep-decision-text` writes potentially
+  personal text to the store, so the interactive UI refuses it (exit 2, one
+  line). `[memory] admit_on_outcome` is the saved default for the first;
+  the second is flag-only.
 - `--note-writer`: `auto` (default) parses the model's
   `<note>plan: … found: … open: … remember: …</note>` block and falls back
   to a heuristic when there is none; `heuristic` ignores the block. A note

@@ -161,6 +161,85 @@ tool output and recalled memory are data, not instructions.
   recall nothing by default and only turn recall on when the user names a
   retriever there.
 
+## Long-term memory
+
+With `--reasoning compress` (or `compress+replay`) and memory on,
+`long_term.db` is a **typed** store: every entry has a kind, a source, a
+status, the signal that admitted it and its provenance, beside the text and
+the vector the earlier store already had. With persistence on, the file
+exists in those modes even without an embedding provider; a text-only entry
+stores an empty vector and is found by the in-process BM25 index. In
+`legacy` the file still exists only with an embedding provider.
+
+| Kind | What it holds | Source |
+|---|---|---|
+| `semantic` | A fact about a named third party (person, place, organization, event), usually an attribute such as an address or a date. | `user`, `reasoning_note` |
+| `episodic` | What happened in this task: a note's ordinary item, every digest. | `reasoning_note`, `digest` |
+| `profile` | A fact the user states about themselves (first person: I/my/we/our; 我/我的/我们). Only a user message gives it. | `user` |
+| `reflection` | A reflection: the attempt summary, what failed, the evidence, what to avoid, the next directions and the open questions. | `reflection` |
+
+`source` is one of `reasoning_note`, `digest`, `reflection`, `user`, `sleep`
+or `step_summary` (a legacy row). `status` is `active`, `superseded` or
+`conflicted`; v1 writes `active` for every new entry and marks the replaced
+entry `superseded`; `conflicted` is reserved for the sleep pipeline.
+`admitted_by` is the signal that wrote the entry, or empty for a legacy row.
+`provenance` carries the task and session, the step and attempt, the run's
+text, the paths and commands the turn touched, and the record ids the item
+came from (`source_ids`). A search returns the legacy metadata merged with
+these columns, so an older reader still sees the same text and metadata.
+
+Nothing is written without a signal:
+
+| Signal | When | What it admits |
+|---|---|---|
+| `rehearsal` | A restatement, a successful call that acted on the note's path or command, or a reflection's `used_notes`. | That candidate, at once. A second admission of the unchanged candidate writes nothing. |
+| `user_request` | The user's message asks to remember, and states no fact. | This run's `remember` notes and its final digest at the run's end; never the final reflection. |
+| `user_statement` | A sentence of the user's message states a stable fact, or corrects one and carries the corrected value. | That sentence, at once. |
+| `outcome` | The end of the run, only with `--admit-on-outcome on`. | The final attempt digest, with the terminal status in its provenance; never the final reflection. |
+| `sleep` | Reserved for the sleep pipeline's probe gate. | Nothing in v1. |
+
+Only the user's own text gives a user signal: a tool result, a note, a recall
+block or an assistant message never does, and a note's first-person item is
+never a profile entry. The candidate boundary runs again with target `long`
+before the write: a refused item writes no entry and no decision. Every text
+written is redacted by `redact_secrets` first.
+
+The policy compares the item with the active entries of its kind and picks
+one action:
+
+| Action | Rule | Write |
+|---|---|---|
+| `IGNORE` | A short fact (under 20 normalised characters), a fact that names only this task's files, or a duplicate (normalised equality, text overlap >= 0.9, or cosine >= 0.95). | No entry; a duplicate target's `uses` grows. |
+| `UPDATE` | Same subject and a compatible value, or a change marker (`moved`, `now`, `搬到` and so on). | A new entry that supersedes the old one; the old one becomes `superseded`. |
+| `CONFLICT` | Same subject, values that contradict, and no change marker. | A new active entry linked to the old one; both stay recallable. |
+| `RELATED` | A different subject with text overlap >= 0.35 or cosine >= 0.75. | A new active entry linked to the old one. |
+| `NEW` | Anything else. | A new active entry. |
+
+**The decision log.** `long_term.db` also has a `decisions` table: one row per
+action, with the candidate id, the action, the kind, the signal, the entry and
+target ids, a one-line reason, the item's `source_ids`, the SHA-256 of the
+checked text and the task id. The text itself is stored only with
+`--keep-decision-text` (an evaluation switch, refused in the interactive UI);
+the hash lets a later join without keeping the text. `forget(task_id)` removes
+a task's entries and decisions; `forget_all()` clears both tables. Reset the
+file by deleting `long_term.db` with localmelo stopped. There is no
+age-based retention in this version; the sleep pipeline's policy comes later.
+
+**The migration.** A `long_term.db` from the earlier store is migrated in place
+when it is opened: `user_version` becomes 1, the typed columns and the
+`decisions` table are added with `ALTER TABLE` (no table rebuild), a legacy
+reflection becomes `kind='reflection'`/`source='reflection'`, every other row
+`episodic`/`step_summary`, and its text, vector and metadata bytes stay as they
+were. An older localmelo can still open and search the file. A file from a
+newer localmelo raises one WARNING and the run continues without long-term
+memory. The read-only exports never migrate a file; see
+[Offline retrieval](retrieval.md#the-typed-long-term-store).
+
+At `start`, the long leg reads the active entries of other tasks of every kind:
+`--recall-min-score` applies to a cosine score, while the BM25 first-stage
+pool has no absolute floor. A doc is `long:<entry id>`, not a hash of its text.
+`memory=False` removes the store, the writes and the leg.
+
 ## Keep memory between runs
 
 ```bash

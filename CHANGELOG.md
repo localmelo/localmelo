@@ -9,6 +9,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- R6-lite's typed long-term store: `long_term.db` migrates in place to
+  `user_version` 1 with `kind`, `source`, `status`, `admitted_by`,
+  provenance, task/session ids, links and uses beside the text and vector,
+  plus a `decisions` table. A candidate is admitted only by a rehearsal
+  (restatement, a successful call it acted on, a cited note), a user
+  request or statement, or `--admit-on-outcome on` for the final digest;
+  the policy picks `NEW`, `UPDATE`, `RELATED`, `CONFLICT` or `IGNORE`, and
+  every stored text passes the candidate boundary and `redact_secrets`.
+  `--keep-decision-text` keeps a decision's text beside its hash, and the
+  `[memory]` table saves the outcome default. The `start` recall reads
+  active entries of other tasks of every kind, by cosine or BM25, with
+  `long:<entry id>` doc ids; `memory_stats` gains `admitted`, `written` and
+  `ignored`, and a `memory` event reports each decision. `melo-retrieve`
+  gains `--export-store`, `--export-decisions` and `--route` for the
+  bench. Legacy requests, JSON line, window, `tasks`/`steps` and search
+  order are unchanged; an existing `long_term.db` migrates with its rows
+  intact. ([#NN])
+
 - Recall in the loop: `--retriever auto|off|bm25|llm|embedding`,
   `--recall-at`, `--recall-k`, `--recall-kinds`, `--recall-placement`,
   `--recall-min-score` and `--retrieval-extra-body`, plus the `[retrieval]`
