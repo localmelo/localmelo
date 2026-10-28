@@ -21,10 +21,10 @@ docs/
 ```
 
 - The Markdown pages are in English only.
-- The website has five pages in each language: Home, Quickstart,
-  Architecture, Roadmap and Memory design. Each English page has a Chinese
-  twin with the same element `id`s, the same sections in the same order, and
-  identical code blocks.
+- The website has six pages in each language: Home, Quickstart,
+  Architecture, Roadmap, Developers and Memory design. Each English page has
+  a Chinese twin with the same element `id`s, the same sections in the same
+  order, and identical code blocks.
 - Memory design keeps the maintainer's memory design word for word, in
   English and in Chinese. Restyle it if you need to, but change its words
   only with the maintainer.
