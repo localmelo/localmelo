@@ -101,7 +101,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">
             <strong>网关和网页工作区</strong>
-            <span>通过 HTTP 提供智能体服务，会话在重启后仍然保留；网页控制台的实时页面在 <code>http://127.0.0.1:8401/</code>：会话列表、每个回合为每个工具调用显示一张工作卡片、进度行、Stop 和优先级标签；页面只访问 <code>/api</code>。</span>
+            <span>通过 HTTP 提供智能体服务，会话在重启后仍然保留；网页控制台的实时页面在 <code>http://127.0.0.1:8401/</code>：会话列表、每一轮为每个工具调用显示一张工作卡片、进度行、Stop 和优先级标签；页面只访问 <code>/api</code>。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">
             <strong>Worker 历史</strong>
@@ -109,7 +109,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">
             <strong>API v2</strong>
-            <span>通过 <code>/api</code> 读取网页控制台的会话、回合、已存事件（也有 Server-Sent Events 流）、图片 blob、提交查询、工具、授权、记忆和运行记录，也可以创建会话，开始、重试、停止和审批它的回合；只在回环地址上提供，并且只增不改。</span>
+            <span>通过 <code>/api</code> 读取网页控制台的会话、轮次、已存事件（也有 Server-Sent Events 流）、图片 blob、提交查询、工具、授权、记忆和运行记录，也可以创建会话，开始、重试、停止和审批它的轮次；只在回环地址上提供，并且只增不改。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">
             <strong>记忆</strong>
@@ -129,7 +129,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#use-melo-in-scripts">
             <strong>脚本和基准测试</strong>
-            <span>每次运行输出一行 JSON 和固定的退出码，脚本可以放心依赖运行结果；还可以选择后续回合如何发送或保留回复的推理（<code>--reasoning legacy</code>、<code>drop</code>、<code>replay</code>、<code>compress</code> 或 <code>compress+replay</code>）。</span>
+            <span>每次运行输出一行 JSON 和固定的退出码，脚本可以放心依赖运行结果；还可以选择后续轮次如何发送或保留回复的推理（<code>--reasoning legacy</code>、<code>drop</code>、<code>replay</code>、<code>compress</code> 或 <code>compress+replay</code>）。</span>
           </a>
         </div>
       </section>
@@ -164,7 +164,7 @@ source .venv/bin/activate</code></pre>
       <section class="section" id="security">
         <h2>安全</h2>
         <div class="callout warning">
-          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。新建的记忆文件只有你能读取（权限 0600）。网关要求令牌或浏览器会话，并拒绝非回环监听。在终端运行 <code>melo --gateway-login</code> 获取一次性登录链接。持有令牌者可以你的权限操作；令牌无法隔离同一用户的进程，浏览器 cookie 也不按 localhost 端口隔离。</p>
+          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。新建的记忆文件只有你能读取（权限 0600）。网关要求 bearer 令牌或浏览器会话，并拒绝非回环监听。在终端运行 <code>melo --gateway-login</code> 获取一次性登录链接。持有令牌者能以你的权限操作；同一用户的进程之间没有隔离，浏览器 cookie 也不按 localhost 端口隔离。</p>
         </div>
         <p>请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">检查能做什么（英文）</a>。</p>
       </section>
