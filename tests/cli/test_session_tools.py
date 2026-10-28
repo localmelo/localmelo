@@ -122,7 +122,8 @@ async def test_copy_uses_the_stored_redacted_markdown(
     from localmelo.support.cli import terminal
 
     sid = await seed(setup)
-    answer = "## Result\n\n```python\nprint('ok')\n```\n"
+    secret = "sk-" + "f00dfeed12" * 3
+    answer = "## Result\n\n```python\nprint('ok')\n```\n" + secret
     turn = await setup.store.begin_turn(sid, "copy a result", holder="other")
     await setup.store.finish_turn(
         sid,
@@ -144,8 +145,9 @@ async def test_copy_uses_the_stored_redacted_markdown(
     monkeypatch.setattr(terminal, "copy_text", copy_text)
     setup.session.enter("/copy")
     await wait_for(lambda: "Copied the answer of turn 2" in setup.out.text())
-    assert copied == [answer.strip()]
+    assert copied == [answer.replace(secret, "[redacted]")]
     assert "private reasoning" not in copied[0]
+    assert secret not in copied[0]
 
 
 def test_session_commands_are_registered_with_their_busy_rules() -> None:

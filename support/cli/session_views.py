@@ -31,14 +31,17 @@ from localmelo.support.sessions.runner import ResumeInfo
 from localmelo.support.sessions.store import TurnInfo
 
 
-def _number(value: Any) -> float | None:
+def _number(value: Any, *, integer: bool = False) -> int | float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
     try:
-        value = float(value)
+        if not math.isfinite(value) or value < 0:
+            return None
     except OverflowError:
         return None
-    return value if math.isfinite(value) and value >= 0 else None
+    if integer:
+        return int(value) if isinstance(value, int) or value.is_integer() else None
+    return value
 
 
 def usage_view(turns: Sequence[TurnInfo]) -> RenderableType:
@@ -50,7 +53,7 @@ def usage_view(turns: Sequence[TurnInfo]) -> RenderableType:
         table.add_column(
             name, justify="left" if name in ("Started", "Status") else "right"
         )
-    totals = [0.0] * 5
+    totals: list[int | float] = [0] * 5
     unknown = [False] * 5
     for turn in turns:
         result = turn.result if turn.status != "running" else None
@@ -58,10 +61,14 @@ def usage_view(turns: Sequence[TurnInfo]) -> RenderableType:
         usage = result.get("usage")
         usage = usage if isinstance(usage, dict) else {}
         values = [
-            _number(result.get("steps")),
-            _number(result.get("n_tool")),
-            _number(usage.get("prompt_tokens", usage.get("input_tokens"))),
-            _number(usage.get("completion_tokens", usage.get("output_tokens"))),
+            _number(result.get("steps"), integer=True),
+            _number(result.get("n_tool"), integer=True),
+            _number(
+                usage.get("prompt_tokens", usage.get("input_tokens")), integer=True
+            ),
+            _number(
+                usage.get("completion_tokens", usage.get("output_tokens")), integer=True
+            ),
             _number(result.get("duration_s")),
         ]
         cells: list[str] = []
@@ -82,8 +89,12 @@ def usage_view(turns: Sequence[TurnInfo]) -> RenderableType:
             *cells,
         )
     total_cells = [
-        (format_duration(value) if index == 4 else format_tokens(int(value)))
-        + ("+?" if unknown[index] else "")
+        (
+            "?"
+            if _number(value) is None
+            else (format_duration(value) if index == 4 else format_tokens(int(value)))
+            + ("+?" if unknown[index] else "")
+        )
         for index, value in enumerate(totals)
     ]
     table.add_row("Totals", "", "", *total_cells, style="bold")

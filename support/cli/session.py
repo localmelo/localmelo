@@ -464,7 +464,11 @@ class CliSession:
         try:
             await self._command(name, arguments)
         except (ValueError, SessionStoreError, SessionBusyError) as exc:
-            message = DELETED if isinstance(exc, UnknownSessionError) else str(exc)
+            message = (
+                DELETED
+                if isinstance(exc, UnknownSessionError)
+                else BUSY if isinstance(exc, SessionBusyError) else str(exc)
+            )
             self.out.print(self._text(f"✗ {message}", style="error"))
             if self.app is not None:
                 self._give_back(text)
