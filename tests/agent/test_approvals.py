@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.checker import DEFAULT_BUILTINS
 from localmelo.melo.contracts.approvals import (
     AllowAllPolicy,
     ApprovalDecision,
@@ -28,7 +29,6 @@ from localmelo.melo.contracts.approvals import (
 from localmelo.melo.contracts.events import EVENT_FIELDS, AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
-from localmelo.melo.executor import builtin_names
 from localmelo.melo.schema import CALL_NOT_STARTED, Message, ToolCall, ToolDef
 
 # The texts the model reads, pinned literally.
@@ -480,7 +480,7 @@ class TestWhoIsAsked:
         result = await agent.run_task("Tidy up", approval=policy)
 
         assert result.status == "completed"
-        assert llm.offered[0] == sorted(builtin_names())
+        assert llm.offered[0] == sorted(DEFAULT_BUILTINS["python"])
         assert [r.tool_name for r in policy.requests] == ["file_write"]
         assert target.read_text() == "hi"
         assert provider.ran == []

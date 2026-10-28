@@ -127,18 +127,31 @@ resumed 1 turn(s)
 
 `build_session_agent(...)` makes and starts the Agent a surface runs its
 turns on, and closes it when the start fails. It sets the session's rules on
-the options: the workspace, `record_answers=True`, `tool_exposure="all"` and
-the 600 s tool limit. It takes a URL with `base_url` (and `model`, with
+the options: the workspace, `record_answers=True`, `tool_exposure="all"`,
+the 600 s tool limit and `replay_scope="window"`. The caller's tool `mode`
+(`interactive` or `gateway`) survives. It takes a URL with `base_url` (and `model`, with
 `default` when None; an embedding only from `embedding_base_url` and
 `embedding_model`), or the backends of `cfg`, on a copy whose chat model is
 `model` and whose `request_timeout_s` is the one given; `cfg` itself is not
 changed.
 
+With `options=None`, the builder resolves `[agent]` and `[retrieval]`
+defaults, including named `tool_env` variables; an explicit `AgentOptions`
+object takes precedence. The UI resolves explicit flags over these defaults,
+and the console uses them while keeping `mode="gateway"`; its reasoning
+mode defaults to `legacy`. `reasoning_field` overrides a configured replay
+key, but is refused for native Ollama's fixed `thinking` field.
+`retrieval_extra_body` applies only to `retrieve` requests with `llm`/`auto`
+outside `legacy`, and is not persisted.
+
 `wrap_llm` and `wrap_embedding` are called with the provider the builder
 made, before the Agent is built; the Agent is made with what they return, so
 the provider its `Chat` holds is the wrapped one, and every model call goes
-through the wrapper. With neither (the default), the builder is unchanged,
-including the `Agent(config=cfg)` path. An embedding that was not built is
+through the wrapper. Non-replay OpenAI-compatible providers have their
+reasoning key cleared before wrapping; Ollama keeps its native field.
+Legacy without hooks keeps the original `Agent(config=cfg)` path. Explicit
+modes own their providers before construction so a refused mode/provider
+pair closes them without disabling MCP. An embedding that was not built is
 not wrapped.
 
 ```python
@@ -385,7 +398,17 @@ composed `user_text`; `/retry` keeps both after a restart.
 resume that loaded pairs), `turns`, `checkpoint_turns` (how many of `turns`
 came from the checkpoint), `messages` and `chars`. Every turn that ends with
 a `run.finished` stores a checkpoint, whichever mode is set, so you can
-switch modes at any time.
+switch restore modes at any time. This does not change the Agent's reasoning
+mode: that comes from the current process's config/flags, never from an old
+turn's `RunResult.config`.
+
+Pairs contain no old thinking. A window checkpoint includes redacted
+thinking until retention clears it: replay modes send the retained part,
+subject to their replay limits, while `drop` and `compress` strip both the
+thinking field and a legacy inline `<think>` copy from request copies.
+The stored conversation stays intact. `turns.note` remains a stored digest,
+not a restored RAM-only note store; a window may retain the original model
+`<note>` text without reconstructing note entries.
 
 `pairs` stays the default until a benchmark decides between the two with
 `scripts/resume_ab.py`. `window` becomes the default only if, over 90 paired

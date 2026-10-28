@@ -22,6 +22,7 @@ from localmelo.melo.agent.options import (
     ReasoningMode,
     reasoning_refusal,
 )
+from localmelo.melo.checker import builtin_set_for
 from localmelo.melo.executor import builtin_names
 from localmelo.melo.memory.recall import (
     RECALL_K_MAX,
@@ -103,9 +104,7 @@ _UI_FLAGS = {
 
 # Direct-mode flags the interactive UI refuses: its Agents offer every tool,
 # an approval's wait would count toward a timeout, it has no machine output,
-# it draws its own progress, and it does not wire the reasoning field or the
-# retrieval extra body yet (each has its own message below; R2b wires the
-# first, a later change the second). `--keep-decision-text` is an evaluation
+# it draws its own progress. `--keep-decision-text` is an evaluation
 # switch, so the UI never accepts it.
 _UI_REFUSED = (
     "tool_exposure",
@@ -113,8 +112,6 @@ _UI_REFUSED = (
     "output_format",
     "progress",
     "routine",
-    "reasoning_field",
-    "retrieval_extra_body",
     "keep_decision_text",
 )
 
@@ -485,6 +482,13 @@ async def _run(
         _enable_line_editing()
         print("localmelo · local agent")
         print("Enter a task to begin. Type /help for commands or /exit to quit.")
+        if "shell_exec" not in builtin_set_for(
+            agent.options.mode, agent.options.builtins
+        ):
+            print(
+                'shell_exec is off in this loop (direct mode); run melo "" '
+                "--builtins all to turn it on."
+            )
         while True:
             try:
                 q = await _prompt()
@@ -650,12 +654,10 @@ def _routine_name(text: str) -> str:
     return text
 
 
-def _parse_builtins(
-    parser: argparse.ArgumentParser, text: str
-) -> frozenset[str] | None:
-    """``all`` (None: every built-in), ``none`` or comma-separated names."""
+def _parse_builtins(parser: argparse.ArgumentParser, text: str) -> frozenset[str]:
+    """``all`` (every built-in, named explicitly), ``none`` or a name list."""
     if text == "all":
-        return None
+        return frozenset(builtin_names())
     if text == "none":
         return frozenset()
     names = [name.strip() for name in text.split(",")]
@@ -776,9 +778,9 @@ def _check_recall_args(
     if recall_at and "tool" in recall_at:
         if args.mcp_only:
             parser.error("argument --recall-at: tool is not available with --mcp-only")
-        if args.builtins is not None:
+        if args.builtins is not None and args.builtins != "all":
             names = _parse_builtins(parser, args.builtins)
-            if names is not None and "recall" not in names:
+            if "recall" not in names:
                 parser.error(
                     "argument --recall-at tool: --builtins must include recall"
                 )
@@ -830,7 +832,11 @@ def _check_effective_recall(
     if options.recall_at and "tool" in options.recall_at:
         if getattr(args, "mcp_only", False):
             parser.error("argument --recall-at: tool is not available with --mcp-only")
-        if options.builtins is not None and "recall" not in options.builtins:
+        if (
+            options.builtins is not None
+            and "recall" not in options.builtins
+            and getattr(args, "builtins", None) != "all"
+        ):
             parser.error("argument --recall-at tool: --builtins must include recall")
         if options.retriever == "off":
             parser.error(
@@ -840,6 +846,18 @@ def _check_effective_recall(
         args, "retrieval_extra_body", None
     ) is not None and options.retriever in ("off", "bm25", "embedding"):
         parser.error("argument --retrieval-extra-body: it needs --retriever llm")
+
+
+def _check_ui_options(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    options: AgentOptions,
+) -> None:
+    """Apply the direct recall refusals after the UI resolves its config defaults."""
+    effective = argparse.Namespace(**vars(args))
+    effective.reasoning = options.reasoning
+    _check_recall_args(parser, effective)
+    _check_effective_recall(parser, args, options)
 
 
 def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -906,25 +924,21 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             "--host and --port are for --serve and --daemon; "
             "bare melo opens the interactive UI"
         )
-    if interactive and args.reasoning_field is not None:
-        parser.error(
-            "--reasoning-field is not in the interactive UI yet; "
-            'give it with a task (melo -- "<task>")'
-        )
-    if interactive and args.retrieval_extra_body is not None:
-        parser.error(
-            "--retrieval-extra-body is not in the interactive UI yet; "
-            'give it with a task (melo -- "<task>")'
-        )
     # main() joins the words into the query, and an empty one (`melo ""`)
     # runs no task, so the direct-mode flags would have nothing to apply to.
-    direct = bool(" ".join(args.query)) and not args.serve
+    query = " ".join(args.query)
+    direct = bool(query) and not args.serve
+    # `melo ""` is the loop: it runs turns, so --builtins applies to them
+    # even though the other direct-mode flags have no task. --serve and
+    # --daemon are not the loop and keep refusing it, as on main.
+    loop = bool(args.query) and not args.serve and not args.daemon and not query
     if not direct:
         given = [
             flag
             for dest, flag in _DIRECT_FLAGS.items()
             if getattr(args, dest) not in (None, False)
             and (not interactive or dest in _UI_REFUSED)
+            and not (dest == "builtins" and loop)
         ]
         if given:
             parser.error(
@@ -1099,7 +1113,7 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     direct.add_argument(
         "--builtins",
         metavar="all|none|NAME,...",
-        help="Built-in tools to register (default all)",
+        help="Built-in tools to register (default: the mode's set)",
     )
     direct.add_argument(
         "--mcp-config",
@@ -1261,10 +1275,9 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
             "Options for bare melo, which opens the interactive UI on a terminal. "
             "It also takes --base-url, --chat-model, --workspace, --max-steps, "
             "--attempt-policy, --reflection-gate, --builtins, --memory, "
-            "--memory-dir, --request-timeout, --reasoning, --replay-turns, "
-            "--note-writer, --retriever, --recall-*, --retrieval-extra-body and "
-            "the --embedding-* options. It refuses --reasoning-field and "
-            "--retrieval-extra-body until a later release wires them.",
+            "--memory-dir, --request-timeout, --reasoning, --reasoning-field, "
+            "--replay-turns, --note-writer, --retriever, --recall-*, "
+            "--retrieval-extra-body and the --embedding-* options.",
         )
         interactive.add_argument(
             "--yolo",
@@ -1361,8 +1374,8 @@ def main() -> None:
     if args.query and not args.serve:
         query = " ".join(args.query)
         options = _direct_options(parser, args)
-        # The surface is known here: direct mode keeps its default set and
-        # its six-pattern blocklist through P13a.
+        # The surface is known here: direct mode has no approver, so its
+        # default set leaves shell_exec out (--builtins all names it).
         options = dataclasses.replace(options, mode="direct")
         if not query:
             # The loop keeps its answers, so each turn sees the earlier ones; a
@@ -1395,7 +1408,12 @@ def main() -> None:
         # Without a terminal the UI refuses: no folder is made for it.
         if options.memory_dir is not None and ui.ui_terminal():
             _make_memory_dir(options.memory_dir)
-        code = ui.run_interactive(args, parser=parser, options=options)
+        code = ui.run_interactive(
+            args,
+            parser=parser,
+            options=options,
+            validate_options=lambda resolved: _check_ui_options(parser, args, resolved),
+        )
         if code != EXIT_COMPLETED:
             raise SystemExit(code)
         return
@@ -1637,6 +1655,10 @@ def _build_direct_mode_agent(
 
     if options is None:
         options = AgentOptions()
+    if inherited := cfg.tool_environment():
+        options = dataclasses.replace(
+            options, tool_env={**inherited, **(options.tool_env or {})}
+        )
     if getattr(args, "reasoning", None) is None and cfg.agent.reasoning != "legacy":
         options = dataclasses.replace(
             options, reasoning=cast(ReasoningMode, cfg.agent.reasoning)

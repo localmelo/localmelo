@@ -79,7 +79,13 @@
         <article class="update-entry" id="u-2026-10-28-console-controls">
           <h3>工作区控件和恢复</h3>
           <p class="update-date"><time datetime="2026-10-28">2026-10-28</time> · 尚未发布</p>
-          <p>工作区新增连接设置、较早回合分页、失败和停止时的操作，以及浏览器标签页的待发送消息恢复。收到审批请求时会显示带 500 毫秒保护的卡片；网关默认模式不会请求审批。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#web-workspace">网页工作区指南（英文）</a>。</p>
+          <p>工作区新增连接设置、较早回合分页、失败和停止时的操作，以及浏览器标签页的待发送消息恢复。收到审批请求时会显示带 500 毫秒保护的卡片；控制台会话调用 <code>file_write</code> 和 <code>python_exec</code> 前会请求审批；旧版 <code>/v1</code> 没有审批策略。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#web-workspace">网页工作区指南（英文）</a>。</p>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-heuristic-facts">
+          <h3>启发式笔记提取带强键的事实</h3>
+          <p class="update-date"><time datetime="2026-10-28">2026-10-28</time> · 尚未发布</p>
+          <p>没有笔记块的回复可以产生最多 12 条带强键的事实。问题、计划和否定句不会作为肯定事实；来源冲突或得分相同时不引用记录。这是启发式提取，仅含中日韩文字键的行不会被提取。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reasoning-notes">推理笔记（英文）</a>。</p>
         </article>
 
         <article class="update-entry" id="u-2026-10-28-tool-modes">
@@ -89,7 +95,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/104">#104</a>
           </p>
           <ul>
-            <li>网关和控制台会话现在运行在新的 <code>gateway</code> 工具模式中，只注册 <code>file_read</code>、<code>file_write</code> 和 <code>python_exec</code>：<code>shell_exec</code> 完全不注册，模型根本看不到它。这两种界面都没有审批策略：控制台的审批会通过同一个未认证的回环 API 到达，所以任何本地进程都能批准自己的请求；Python 代码仍然可以启动进程。网关或控制台会话不能通过默认组合拿到 <code>shell_exec</code>，显式写出它的 <code>AgentOptions(builtins=…)</code> 会被检查器在 <code>gateway</code> 模式下拒绝，并在原因里写明模式和 <code>--builtins all</code>。</li>
+            <li>网关和控制台会话现在运行在新的 <code>gateway</code> 工具模式中，只注册 <code>file_read</code>、<code>file_write</code> 和 <code>python_exec</code>：<code>shell_exec</code> 完全不注册，模型根本看不到它。旧版 <code>/v1</code> 没有审批策略；控制台会话调用 <code>file_write</code> 和 <code>python_exec</code> 前会请求审批。控制台的审批会通过同一个未认证的回环 API 到达，所以任何本地进程都能批准自己的请求；Python 代码仍然可以启动进程。网关或控制台会话不能通过默认组合拿到 <code>shell_exec</code>，显式写出它的 <code>AgentOptions(builtins=…)</code> 会被检查器在 <code>gateway</code> 模式下拒绝，并在原因里写明模式和 <code>--builtins all</code>。</li>
             <li><code>AgentOptions</code> 新增 <code>mode</code>：<code>direct</code>、<code>interactive</code>、<code>gateway</code> 或 <code>python</code>（Python API 的默认值），命令行会设置各自界面的模式。交互式界面仍把 <code>shell_exec</code> 放在审批面板之后（<code>--yolo</code> 不询问），直接模式不变。针对六种破坏性命令模式的黑名单仍适用于 <code>direct</code> 和 <code>python</code> 模式，所以不传审批策略的 Python 调用者不会比以前更弱：<code>rm -rf /</code>、<code>mkfs</code>、<code>dd if=</code>、fork 炸弹、<code>shutdown</code> 和 <code>reboot</code> 都会被拒绝，而交互式界面改为询问审批面板。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#permission-tiers">权限级别（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md#agentoptions">Python API（英文）</a>。</li>
           </ul>
         </article>
@@ -409,7 +415,7 @@
           <ul>
             <li>每个工具现在都有一个权限级别：<code>read</code>、<code>write</code>、<code>exec</code> 或 <code>network</code>。内置工具沿用固定的级别（<code>file_read</code> 为 read，<code>file_write</code> 为 write，<code>shell_exec</code> 和 <code>python_exec</code> 为 exec）；MCP 工具的级别来自它的 <code>annotations</code>，并谨慎解读：<code>openWorldHint</code> 给出 network，<code>readOnlyHint</code> 给出 read（除非 <code>destructiveHint</code> 与之矛盾），其余情况为 write。</li>
             <li>带审批策略的运行会在每次权限级别不是 <code>read</code> 的调用前询问，所以没有标注的 MCP 工具现在也会询问；<code>require_approval</code> 只是额外加一个标记，也可以让 read 工具询问。终端的审批面板会显示权限级别，<code>ToolInfo.tier</code> 和 <code>ApprovalRequest.tier</code> 也会报告它。</li>
-            <li>直接模式、简单对话循环和网关不传入审批策略，行为不变；<code>--yolo</code> 仍然表示不审批，而不是只读。</li>
+            <li>直接模式、简单对话循环和旧版 <code>/v1</code> 不传入审批策略；控制台会话有审批策略；<code>--yolo</code> 仍然表示不审批，而不是只读。</li>
           </ul>
         </article>
 

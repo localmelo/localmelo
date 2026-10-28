@@ -250,7 +250,7 @@ makes larger requests: leave out `session_id` for an unrelated task.
   options (three built-in tools, `file_read`, `file_write` and
   `python_exec`, and no MCP tools), except that it keeps its answers
   (`AgentOptions(record_answers=True, mode="gateway")`). A session does not
-  offer `shell_exec`: the gateway has no approval policy, so there is no one
+  offer `shell_exec`: legacy `/v1` has no approval policy, so there is no one
   to ask.
 - When `LOCALMELO_PERSIST_MEMORY` is set for the gateway, all sessions save
   to the same SQLite files; see [Memory](memory.md#keep-memory-between-runs).
@@ -320,8 +320,10 @@ save is done. Each message sees the earlier answers of its chat, as in a
 [session](#sessions).
 
 A tool call that needs approval shows a card below its `Needs approval` tool.
-The current gateway's default tool mode has no approval policy, so its default
-turns do not generate these requests. When a request is present, choose
+Console sessions use `RememberingPolicy` and ask before `file_write` and
+`python_exec`; legacy `/v1` has no approval policy. Approvals are not a
+security boundary: any local process that reaches the unauthenticated API
+can answer them. When a request is present, choose
 `Allow once`, `Allow every …` for the session, or `Deny…` with an
 optional reason. The controls wait 500 ms before they can be used; arrival
 does not move focus and no single-key shortcut answers a request. When the

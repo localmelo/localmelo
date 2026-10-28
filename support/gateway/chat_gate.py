@@ -26,10 +26,10 @@ import re
 import shutil
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, fields, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, cast, get_args
 
 from localmelo.melo.contracts.providers import (
     LLM_REQUEST_ATTEMPT,
@@ -65,10 +65,14 @@ from localmelo.support.scheduler import (
 from localmelo.support.scheduler.costs import Rates, charge_s
 from localmelo.support.scheduler.machine_gates import battery_band
 from localmelo.support.scheduler.model import (
+    ACCOUNTING_FIELDS,
+    TERMINAL_PHASES,
     CallKind,
     Event,
     LevelSource,
+    Origin,
     Outcome,
+    Phase,
     SessionKind,
     is_terminal,
 )
@@ -85,6 +89,24 @@ _KINDS: tuple[str, ...] = ("plan", "reflect", "retrieve", "estimate", "embed")
 
 # A workspace chat call is a planning or reflection request.
 _CHAT_KINDS: tuple[str, ...] = ("plan", "reflect")
+
+# The Task fields a caller may change through `update_task`: everything the
+# policy's `advance()`/`apply_dispatch()` does not own, and nothing that
+# identifies the task.
+_TASK_MUTABLE = tuple(
+    name
+    for name in (field.name for field in fields(Task))
+    if name not in ACCOUNTING_FIELDS
+    and name
+    not in {
+        "task_id",
+        "root_id",
+        "kind",
+        "origin",
+        "created_mono_us",
+        "created_wall_us",
+    }
+)
 
 # The trace's ``service_source`` for each vocabulary ``charge_s()`` returns
 # (R20). S1 will align its own strings later (decision D9).
@@ -462,7 +484,7 @@ class ChatGate:
                 idle_gate=False,
                 battery_gate_enforce=False,
                 reservation_policy="respect",
-                p0_meaning="conversation",
+                p0_meaning="task",
             )
         self._clock = clock if clock is not None else _default_clock
         days = (
@@ -491,6 +513,10 @@ class ChatGate:
         self._observed_band = 4
         self._machine_payload: dict[str, Any] | None = None
         self._levels: dict[str, tuple[int, str]] = {}
+        # The worker tasks the console registered on this gate, by task id
+        # (which is the worker session's id). Kept under `policy="off"` too,
+        # so the trace still tags their calls `session_kind="task"`.
+        self._task_registry: dict[str, Task] = {}
         self._counts: dict[str, int] = {}
         self._first_submit: dict[str, int] = {}
         self._last_end: dict[str, int] = {}
@@ -671,13 +697,17 @@ class ChatGate:
         first = self._first_submit.setdefault(session_id, now.mono_us)
         level = self.level(session_id)
         planning = call_kind in _CHAT_KINDS
+        worker = session_id in self._task_registry
         # Only a planning call can be a lane call: an embedding or a
         # retrieval is never held (R14), and S1's lane path would hold it.
         # The trace still logs every call of the focused chat as "front"
         # (4.7), so the logged kind and the policy's kind are separate
-        # (decision 1b).
-        lane = planning and session_id == self._focus
-        session_kind = "front" if session_id == self._focus else "chat"
+        # (decision 1b). A registered worker task is never the lane, even
+        # if a caller focuses it by mistake.
+        lane = planning and not worker and session_id == self._focus
+        session_kind = (
+            "task" if worker else ("front" if session_id == self._focus else "chat")
+        )
         meta = CallMeta(
             session_id=session_id,
             call_id=f"{session_id}:{index}",
@@ -696,6 +726,19 @@ class ChatGate:
         )
         call = GateCall(meta)
         self._calls[meta.call_id] = call
+        registered = self._task_registry.get(session_id)
+        if registered is not None and is_terminal(registered.phase):
+            # Refuse before either the lock pre-gate or policy sees the call.
+            call.future = asyncio.get_running_loop().create_future()
+            call.future.cancel()
+            self._calls.pop(meta.call_id, None)
+            call.done = True
+            self._last_end[session_id] = now.mono_us
+            try:
+                self._write_line(meta, "refused", now, 0.0, "unknown", None, None, None)
+            except Exception:
+                logger.warning("Call log line could not be written", exc_info=True)
+            return call
         if (
             self.lock_gate == "wait"
             and self.machine.lock == "foreign"
@@ -732,9 +775,11 @@ class ChatGate:
         """
         events: list[Event] = []
         planning = meta.kind in _CHAT_KINDS
-        if planning:
+        worker = meta.session_id in self._task_registry
+        if planning and not worker:
             # Only a chat call opens (or reopens) the chat's task; an
-            # embedding or a retrieval is taskless in S1 (section 4.2).
+            # embedding or a retrieval is taskless in S1 (section 4.2), and
+            # a worker task is already registered by `register_task`.
             already = opened is not None and meta.session_id in opened
             current = self._task(meta.session_id)
             if current is None:
@@ -765,10 +810,18 @@ class ChatGate:
             CallSubmitted(
                 Call(
                     call_id=meta.call_id,
-                    # R11: a lane call is taskless; only a background plan or
-                    # reflect call belongs to the chat's task.
-                    task_id=(meta.session_id if planning and not meta.lane else None),
-                    session_kind=cast(SessionKind, "front" if meta.lane else "chat"),
+                    # R11: a lane call is taskless; a background plan or
+                    # reflect call belongs to the chat's task, and every call
+                    # of a registered worker belongs to that task.
+                    task_id=(
+                        meta.session_id
+                        if worker or (planning and not meta.lane)
+                        else None
+                    ),
+                    session_kind=cast(
+                        SessionKind,
+                        "task" if worker else ("front" if meta.lane else "chat"),
+                    ),
                     kind=cast(CallKind, meta.kind),
                     attempt=meta.attempt,
                     submit_mono_us=meta.submit_mono_us,
@@ -829,11 +882,18 @@ class ChatGate:
                     completion_tokens=completion,
                 )
             ]
-            if self._task(meta.session_id) is not None and not any(
-                c.meta.session_id == meta.session_id for c in self._calls.values()
+            if (
+                meta.session_kind != "task"
+                and meta.session_id not in self._task_registry
+                and self._task(meta.session_id) is not None
+                and not any(
+                    c.meta.session_id == meta.session_id for c in self._calls.values()
+                )
             ):
                 # The chat's last call ends: mark it done in the same
                 # transition, so an idle chat is never a reason of its own.
+                # A registered worker's phase belongs to its runner, never to
+                # one call ending mid-turn (S3a.1).
                 events.append(TaskUpdated(meta.session_id, (("phase", "done"),)))
             self._transition(events)
         self._last_end[meta.session_id] = now.mono_us
@@ -875,6 +935,8 @@ class ChatGate:
 
     def set_level(self, session_id: str, level: int) -> int:
         """Set the chat's level, P1-P4; re-dispatch if its task exists."""
+        if session_id in self._task_registry:
+            raise ValueError("use set_task_level for registered worker tasks")
         if isinstance(level, bool) or not isinstance(level, int) or not 1 <= level <= 4:
             raise ValueError("level must be an integer from 1 to 4")
         self._levels[session_id] = (level, "user")
@@ -892,6 +954,230 @@ class ChatGate:
                 )
             )
         return level
+
+    # ── Worker tasks (S3a.1) ──
+
+    def register_task(self, task: Task) -> None:
+        """Register a worker task; its calls run as ``session_kind="task"``.
+
+        The task's id is its worker session's id. An already registered task
+        is updated instead of added, so a recovered task can be registered
+        again. Under ``policy="off"`` this only records the id (the call log
+        still says ``task``) and sends no event.
+        """
+        if task.kind != "task":
+            raise ValueError("register_task needs a task with kind='task'")
+        if (
+            isinstance(task.level, bool)
+            or not isinstance(task.level, int)
+            or not 0 <= task.level <= 5
+        ):
+            raise ValueError("a task's level must be from 0 (P0) to 5 (Later)")
+        if task.origin not in get_args(Origin):
+            raise ValueError(f"unknown task origin {task.origin!r}")
+        if task.phase not in get_args(Phase):
+            raise ValueError(f"unknown task phase {task.phase!r}")
+        if task.level_source not in get_args(LevelSource):
+            raise ValueError(f"unknown task level source {task.level_source!r}")
+        if task.size not in ("", "small", "medium", "large"):
+            raise ValueError(f"unknown task size {task.size!r}")
+        if task.wait_reason not in ("", "input", "approval", "dependency", "lease"):
+            raise ValueError(f"unknown task wait reason {task.wait_reason!r}")
+        if task.level == 0 and task.level_source != "user":
+            raise ValueError("P0 is the user's setting; level 0 needs a user source")
+        registered = self._task_registry.get(task.task_id)
+        if registered is not None:
+            if is_terminal(registered.phase):
+                if task.phase != registered.phase:
+                    raise ValueError("a finished task cannot change phase")
+            elif is_terminal(task.phase):
+                raise ValueError("use finish_task to end a live task")
+            # A refresh is not a priority change, even when its snapshot is stale.
+            task = replace(
+                task,
+                level=registered.level,
+                level_source=registered.level_source,
+                user_rank=registered.user_rank,
+                paused=registered.paused,
+            )
+        current = self._task(task.task_id) if self.policy != "off" else None
+        if current is not None and current.kind != "task":
+            raise ValueError(
+                f"A chat task with id {task.task_id} already exists; a worker "
+                "task must register before its first call"
+            )
+        self._apply_task_update(task)
+
+    def _apply_task_update(self, task: Task, fields: set[str] | None = None) -> None:
+        """Apply a task change and any P0 demotions in one policy transition."""
+        updates: dict[str, Task] = {}
+        if (
+            task.level == 0
+            and task.level_source == "user"
+            and not is_terminal(task.phase)
+        ):
+            updates = {
+                other.task_id: replace(
+                    other, level=1, level_source="user", user_rank=None, paused=False
+                )
+                for other in self._task_registry.values()
+                if other.task_id != task.task_id
+                and other.level == 0
+                and other.level_source == "user"
+                and not is_terminal(other.phase)
+            }
+        updates[task.task_id] = task
+        events: list[Event] = []
+        for task_id, updated in updates.items():
+            current = self._task(task_id) if self.policy != "off" else None
+            self._task_registry[task_id] = updated
+            self._levels[task_id] = (updated.level, updated.level_source)
+            if current is None:
+                events.append(TaskAdded(updated))
+            else:
+                changes = self._task_changes(current, updated)
+                allowed = (
+                    fields
+                    if task_id == task.task_id
+                    else {"level", "level_source", "user_rank", "paused"}
+                )
+                if allowed is not None:
+                    changes = tuple(
+                        (name, value) for name, value in changes if name in allowed
+                    )
+                if changes:
+                    events.append(TaskUpdated(task_id, changes))
+        if events and self.policy != "off" and not self._closed:
+            self._transition(events)
+
+    def update_task(self, task_id: str, **changes: object) -> Task:
+        """Change runner fields; priority changes go through set_task_level."""
+        current = self._task_registry.get(task_id)
+        if current is None:
+            raise ValueError(f"No task is registered with id {task_id}")
+        unknown = sorted(
+            set(changes) - (set(_TASK_MUTABLE) - {"level", "level_source"})
+        )
+        if unknown:
+            raise ValueError(f"task fields that may not change: {', '.join(unknown)}")
+        if "phase" in changes and changes["phase"] not in get_args(Phase):
+            raise ValueError(f"unknown task phase {changes['phase']!r}")
+        if "phase" in changes:
+            if is_terminal(current.phase):
+                raise ValueError("a finished task cannot change phase")
+            if is_terminal(cast(Phase, changes["phase"])):
+                raise ValueError("use finish_task to end a live task")
+        if "size" in changes and changes["size"] not in (
+            "",
+            "small",
+            "medium",
+            "large",
+        ):
+            raise ValueError(f"unknown task size {changes['size']!r}")
+        if "wait_reason" in changes and changes["wait_reason"] not in (
+            "",
+            "input",
+            "approval",
+            "dependency",
+            "lease",
+        ):
+            raise ValueError(f"unknown task wait reason {changes['wait_reason']!r}")
+        for name in ("paused", "blocked_now", "budget_exhausted"):
+            if name in changes and not isinstance(changes[name], bool):
+                raise ValueError(f"{name} must be a boolean")
+        updated = replace(current, **cast(Any, changes))
+        self._apply_task_update(updated, set(changes))
+        return updated
+
+    def set_task_level(
+        self, task_id: str, choice: int | str, *, rank: float | None = None
+    ) -> int:
+        """Set a worker task's priority from the chip's choices.
+
+        *choice* is ``0``-``5``/``"P0"``-``"P5"``, ``"auto"`` (P2, computed)
+        or ``"first"`` (keep the level, set ``user_rank``). A user's P0 is
+        single: another task at user P0 returns to P1 with no rank first, as
+        S1's ``compute_levels()`` does for a conflict (design 2.5).
+        """
+        task = self._task_registry.get(task_id)
+        if task is None:
+            raise ValueError(f"No task is registered with id {task_id}")
+        if is_terminal(task.phase):
+            raise ValueError("cannot change the priority of a finished task")
+        text = choice.strip().lower() if isinstance(choice, str) else choice
+        if text == "auto":
+            updated = replace(
+                task, level=2, level_source="computed", user_rank=None, paused=False
+            )
+        elif text == "first":
+            first_rank = self._clock().wall_us / 1_000_000 if rank is None else rank
+            updated = replace(task, user_rank=first_rank)
+        else:
+            if (
+                isinstance(text, str)
+                and len(text) == 2
+                and text[0] == "p"
+                and text[1].isdigit()
+            ):
+                text = int(text[1])
+            if (
+                isinstance(text, bool)
+                or not isinstance(text, int)
+                or not 0 <= text <= 5
+            ):
+                raise ValueError("priority must be P0-P5, auto or first")
+            updated = replace(
+                task, level=text, level_source="user", user_rank=None, paused=text == 5
+            )
+        self._apply_task_update(
+            updated, {"level", "level_source", "user_rank", "paused"}
+        )
+        return updated.level
+
+    def finish_task(self, task_id: str, phase: str = "done") -> Task:
+        """End a worker task: ``done``, ``failed``, ``cancelled`` or ``expired``.
+
+        The worker's runner owns this call. It is never inferred from a
+        model call ending, which is why a worker's phase survives its tools
+        and its next call.
+        """
+        if phase not in TERMINAL_PHASES:
+            raise ValueError(
+                "a finished task's phase must be done, failed, cancelled or expired"
+            )
+        current = self._task_registry.get(task_id)
+        if current is None:
+            raise ValueError(f"No task is registered with id {task_id}")
+        if is_terminal(current.phase):
+            return current
+        task = replace(current, phase=cast(Phase, phase), wait_reason="")
+        self._apply_task_update(task, {"phase", "wait_reason"})
+        # A call parked at the gate must not wait for a task that is over:
+        # the policy skips a terminal task's calls, so its future would never
+        # resolve (a stop while a worker's call is held).
+        for call in list(self._calls.values()):
+            if (
+                call.meta.session_id != task_id
+                or call.meta.admitted_mono_us is not None
+            ):
+                continue
+            if call.future is not None and not call.future.done():
+                call.future.cancel()
+            self.finish(call, "refused")
+        return task
+
+    @property
+    def registered_tasks(self) -> tuple[Task, ...]:
+        """The worker tasks this gate registered, in registration order."""
+        return tuple(self._task_registry.values())
+
+    @staticmethod
+    def _task_changes(current: Task, new: Task) -> tuple[tuple[str, object], ...]:
+        return tuple(
+            (name, getattr(new, name))
+            for name in _TASK_MUTABLE
+            if getattr(current, name) != getattr(new, name)
+        )
 
     def turn_start(self, session_id: str) -> int:
         """Reset the turn's hold clock; return its start instant in µs."""
@@ -911,16 +1197,15 @@ class ChatGate:
     def forget(self, session_id: str) -> None:
         """Drop a closed chat's bookkeeping once it has no live call.
 
-        The policy's ``State`` has no event that removes a task, and a
-        finished task would otherwise be cleaned and scanned on every later
-        transition of a long-running gateway. Closing is only allowed while
-        the chat is idle, so its task is terminal and its calls are gone.
+        A registered worker keeps its identity and call sequence until its
+        task row is removed. A live worker also needs its policy state intact.
         """
+        if any(c.meta.session_id == session_id for c in self._calls.values()):
+            return
+        registered = self._task_registry.get(session_id)
+        if registered is not None and not is_terminal(registered.phase):
+            return
         for mapping in (
-            self._levels,
-            self._counts,
-            self._first_submit,
-            self._last_end,
             self._turn_start,
             self._held_total_us,
             self._hold_start,
@@ -928,9 +1213,15 @@ class ChatGate:
             self._reason_by_task,
         ):
             mapping.pop(session_id, None)
+        if registered is None:
+            for book in (
+                self._levels,
+                self._counts,
+                self._first_submit,
+                self._last_end,
+            ):
+                book.pop(session_id, None)
         if self._closed or self.policy == "off":
-            return
-        if any(c.meta.session_id == session_id for c in self._calls.values()):
             return
         self._state = replace(
             self._state,
@@ -1265,10 +1556,10 @@ class ChatGate:
 class GatedLLM(BaseLLMProvider):
     """A chat provider that submits each request to *client*'s gate (R18).
 
-    It forwards attributes other than the three the base class documents
-    through ``__getattr__``; ``model``, ``last_reasoning_key`` and
-    ``last_usage`` are copied from the inner provider right after each
-    successful ``chat()``, with no await in between.
+    It forwards attributes through ``__getattr__``, except those with base
+    class defaults: replay capabilities and request-kind overrides are
+    copied at construction; ``model``, ``last_reasoning_key`` and
+    ``last_usage`` are copied again after each successful ``chat()``.
     """
 
     def __init__(self, inner: BaseLLMProvider, client: SessionClient) -> None:
@@ -1281,6 +1572,9 @@ class GatedLLM(BaseLLMProvider):
             else ""
         )
         self.last_usage = _int_usage(inner.last_usage)
+        self.reasoning_field = inner.reasoning_field
+        self.requires_reasoning_replay = inner.requires_reasoning_replay
+        self.extra_body_by_kind = inner.extra_body_by_kind
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self.inner, name)

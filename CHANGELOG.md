@@ -15,6 +15,41 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   revision-checked connection settings; and per-tab outbox recovery. Session
   update events also carry a display-safe workspace label. ([#NN])
 
+- Reasoning and recall options now work in the interactive UI, including
+  `--reasoning-field` and `--retrieval-extra-body`; explicit flags override
+  `[agent]`/`[retrieval]` defaults. Console sessions honor the configured
+  reasoning mode (default `legacy`) without changing legacy `/v1`. Session
+  replay uses the retained window; pairs resume without old thinking,
+  while checkpoint resume can replay retained, redacted thinking using the
+  current process's mode. Scheduler wrappers preserve replay capabilities;
+  rejected mode switches keep the old Agent and MCP state and close new
+  providers; successful switches retain the RAM-only notes/drafts.
+  Explicit-mode requests also remove legacy inline thinking
+  copies after resume without changing the stored window ([#115]).
+- `[agent] tool_env` names extra environment variables inherited by
+  shell/Python tools in config-backed direct runs, the UI and console.
+  Names are validated and missing variables skipped; only names are saved.
+  SSH-agent and proxy access are explicit capability grants; defaults and
+  `--base-url` runs/sessions expose nothing new ([#115]).
+
+- The gateway's `sessions.db` can hold the scheduler's `scheduler` component
+  version 1: `tasks`, `task_deps`, `priority_events`, `questions`,
+  `sched_rules`, `sched_log` and `idle_windows` are created in one
+  transaction in that file only, `PRAGMA user_version` stays the session
+  schema's, and a newer component is refused. A task and its `kind="task"`
+  session are created together behind `UNIQUE(origin, request_key)`, so a
+  repeated request returns its task and a reused key with a different
+  payload is a conflict; actual level changes write `priority_events` and
+  30-day retention clears the log and idle windows.
+  The task boundary normalizes the `TaskSpec`, pins a user-selected level
+  only through a trusted adapter, and resolves a worker's folder under the
+  user's home or `[gateway] workspace`; a non-user task with no folder gets
+  its own child workspace. Only `user` and
+  `user_rule` origins get remembered approvals, unmarked MCP tools and session
+  grants. `ChatGate` can register a worker task, so its calls are logged as
+  `session_kind="task"`, its P0 is the user's single task P0, and only the
+  runner ends it. No `/api/tasks` route or worker runs yet; the console
+  wiring is S3a.2 ([#113]).
 - The workspace page on API v2. `http://127.0.0.1:8401/` now talks only to
   `/api`: the session list with its machine snapshot, one chat's turns, its
   event stream (SSE, reopened from the last applied event id), keyed sends
@@ -37,7 +72,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (`workspace.js`, the new `turns.mjs` holding the event reducer and the
   terminal's wording, `markdown.mjs`). The follow-up adds approval cards,
   the failure block's actions and the settings dialog.
-  `/` and every `/v1/*` route keep their behaviour ([#NN]).
+  `/` and every `/v1/*` route keep their behaviour ([#111]).
 - API v2 settings, model listing, guard body limits and unconfigured gateway
   startup: `GET /api/settings`, `PUT /api/settings`,
   `POST /api/settings/test`, `GET /api/settings/key-status` and
@@ -51,6 +86,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   console's Content-Security-Policy on `/api` and baseline security headers
   on every response; and `melo --serve --allow-unconfigured` so the gateway
   can boot before a backend is configured ([#106]).
+
 - Terminal session commands: `/title [text]` shows or sets a title, including
   before the first message; `/undo` forgets the latest finished turn and
   keeps its typed history without reversing file changes (a committed undo
@@ -456,6 +492,21 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Direct mode and the Python API's default `python` mode no longer offer
+  `shell_exec`: their default built-ins are `file_read`, `file_write` and
+  `python_exec`, and an `exec` call that was registered anyway is refused
+  with a reason naming the mode and the way to enable it. `--builtins all`
+  (or naming `shell_exec`) restores the old set, and a named shell then
+  runs. A call to a built-in the run does not offer returns
+  `shell_exec is not available in this run. Available tools: …`, naming the
+  run's tools; an unknown name keeps the registry message. `--builtins` is
+  still a usage error with `--serve` and `--daemon`. The JSON line's
+  `config` gains `mode` (`"direct"` in a direct run), and `config.builtins`
+  and `config.tools` lose `shell_exec` there. The six-pattern command
+  blocklist, `validate_executor_request` and `ExecutorRequest` are gone: the
+  tool's tier and the mode decide, not the command's spelling. The `melo ""`
+  loop says once at start that `shell_exec` is off and that
+  `melo "" --builtins all` turns it on ([#110]).
 - `shell_exec` and `python_exec` start their child with a minimal
   environment instead of inheriting melo's: `PATH`, `HOME`, `USER`,
   `LOGNAME`, `SHELL`, `TERM`, `LANG`, every `LC_*` variable and `TMPDIR`,
@@ -556,6 +607,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The heuristic note writer reads factual replies without a `<note>` into up
+  to 12 `found` items, and an explicit note can also hold 12. Questions,
+  options, plans and negated or cancelled statements are not promoted as
+  positive facts. Self-work claims are filtered unless a keyed content
+  clause follows the frame; `task:`/code markers and completed outcome
+  digests remain exempt. Source matching scores typed keys independently,
+  retains date years, currencies and whole phone numbers, rejects conflicts,
+  and leaves ties and unmatched items unsourced even after admission. Bare
+  slash dates use US order when ambiguous; quantity/count contexts, mixed
+  numbers and `24/7` are excluded. Digit runs over 20 characters are ignored
+  as keys.
+  Factual extraction remains heuristic and does not extract CJK-only keys.
+  ([#114])
 - A note's items now take their `source_ids` from the observation that
   established them, even when it came in an earlier reply of the same task:
   the reply's own tool results first, then the results still in the window,
@@ -675,21 +739,17 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - Gateway and console sessions no longer offer `shell_exec`: both run in the
   new `gateway` tool mode, which registers `file_read`, `file_write` and
-  `python_exec` only: `/v1` and the workspace have no approval policy, and
+  `python_exec` only: legacy `/v1` has no approval policy; the console asks for
+  `file_write` and `python_exec` using `RememberingPolicy`, and
   the console's approvals arrive over the same unauthenticated loopback API,
-  so any local process could approve its own request. `AgentOptions` gains `mode` (`direct`,
-  `interactive`, `gateway` or `python`; `python` is the API default) and the
-  CLI sets its own surface's mode; the interactive UI keeps `shell_exec`
-  behind its existing approval panel, and direct mode is unchanged in this
-  release. The six-pattern command blocklist still applies to `direct` and
-  `python` mode, so a Python caller that passes no `approval=` is not weaker
-  than before: the `python` mode, like `direct`, refuses `rm -rf /`, `mkfs`,
-  `dd if=`, fork bombs, `shutdown` and `reboot` with or without a policy;
-  the interactive UI asks its panel instead. A gateway or
-  console session cannot be given `shell_exec` by the default set; an
-  explicit `AgentOptions(builtins=…)` still names it, and the checker then
-  refuses the call in `gateway` mode with the mode and `--builtins all` in
-  the reason ([#104]).
+  so any local process could approve its own request. `AgentOptions` gains
+  `mode` (`direct`, `interactive`, `gateway` or `python`; `python` is the
+  API default) and the CLI sets its own surface's mode; the interactive UI
+  keeps `shell_exec` behind its existing approval panel. Direct mode and the
+  library's `python` default follow in the entry above. An explicit
+  `AgentOptions(builtins=…)` or `--builtins` still names `shell_exec` in
+  `direct` and `python` mode, and the call then runs; `gateway` refuses it
+  even when named ([#104]).
 - Secrets no longer stay in stored memory. `tasks.query` and `tasks.result`,
   `steps.thought`, a tool call's arguments and a tool result's output and
   error, and the text long-term memory keeps (each step's summary and the
@@ -785,3 +845,8 @@ earlier milestones.
 [#103]: https://github.com/localmelo/localmelo/pull/103
 [#104]: https://github.com/localmelo/localmelo/pull/104
 [#106]: https://github.com/localmelo/localmelo/pull/106
+[#110]: https://github.com/localmelo/localmelo/pull/110
+[#111]: https://github.com/localmelo/localmelo/pull/111
+[#113]: https://github.com/localmelo/localmelo/pull/113
+[#114]: https://github.com/localmelo/localmelo/pull/114
+[#115]: https://github.com/localmelo/localmelo/pull/115

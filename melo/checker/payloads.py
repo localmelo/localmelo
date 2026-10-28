@@ -56,15 +56,6 @@ class ToolResolutionResult:
 
 
 @dataclass
-class ExecutorRequest:
-    """Request entering the executor."""
-
-    tool_name: str = ""
-    arguments: dict[str, Any] = field(default_factory=dict)
-    tool_def_name: str | None = None  # None means unresolved
-
-
-@dataclass
 class ExecutorResultPayload:
     """Result coming back from the executor."""
 

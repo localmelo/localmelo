@@ -154,6 +154,8 @@ def _run(tmp_path: Path, stub: StubServer, scenario: str, *args: str) -> dict[st
         "bm25",
         "--memory",
         "off",
+        "--builtins",
+        "all",
         "--output-format",
         "json",
         *args,

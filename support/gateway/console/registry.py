@@ -29,7 +29,10 @@ from localmelo.melo.schema import Message
 from localmelo.support.config import gateway_workspace_problem
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
 from localmelo.support.sessions import display
-from localmelo.support.sessions.agents import build_session_agent
+from localmelo.support.sessions.agents import (
+    build_session_agent,
+    configured_session_options,
+)
 from localmelo.support.sessions.approvals import (
     ApprovalBroker,
     AskFunction,
@@ -124,7 +127,7 @@ async def default_builder(
         base_url=None,
         model=None,
         workspace=workspace,
-        options=AgentOptions(mode="gateway"),
+        options=configured_session_options(settings, AgentOptions(mode="gateway")),
         wrap_llm=None if llm is None else (lambda inner: GatedLLM(inner, llm)),
         wrap_embedding=(
             None if llm is None else (lambda inner: GatedEmbedding(inner, llm))

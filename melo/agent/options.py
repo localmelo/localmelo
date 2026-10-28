@@ -94,12 +94,13 @@ class AgentOptions:
       ``frozenset``.
     - ``mode``: the surface the run belongs to, one of ``"direct"``,
       ``"interactive"``, ``"gateway"`` or ``"python"`` (the default). It
-      decides the built-ins that ``builtins=None`` registers: the gateway
-      does not offer ``shell_exec``, the interactive UI and the Python API
-      do (the UI and a caller that passes an approval policy ask before an
-      ``exec`` call runs), and direct mode keeps it in this release. The CLI sets
-      its own surface's mode; a Python caller names it to get the stricter
-      set. An explicit ``builtins`` wins.
+      decides the built-ins that ``builtins=None`` registers: only the
+      interactive UI offers ``shell_exec`` (its panel asks before an
+      ``exec`` call runs); direct, the gateway and the library's ``python``
+      default offer ``file_read``, ``file_write`` and ``python_exec``.
+      The CLI sets its own surface's mode; a Python caller gets
+      ``shell_exec`` by naming it in ``builtins``. An explicit ``builtins``
+      wins.
     - ``memory``: ``False`` turns off long-term recall, long-term writes
       and reflection promotion; reflections are still cleared at the end
       of a run.

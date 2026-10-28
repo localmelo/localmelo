@@ -138,7 +138,7 @@ function notify(message, { sticky = false, kind = "" } = {}) {
   }
 }
 
-/** One `/api` call; an API v2 error keeps its code and message. */
+/** One `/api` call; an API v2 error keeps its code, message and details. */
 async function api(path, { body, method } = {}) {
   const response = await fetch("/api" + path, {
     method: method ?? (body ? "POST" : "GET"),
@@ -151,6 +151,7 @@ async function api(path, { body, method } = {}) {
     );
     error.status = response.status;
     error.code = payload?.error?.code || "";
+    error.details = payload?.error?.details;
     throw error;
   }
   return payload;

@@ -38,9 +38,12 @@ In the `melo ""` loop, turns share one agent and its working memory, which
 keeps each answer, so a turn sees the earlier ones. A turn that does not
 complete prints its status line on stderr, and the loop asks for the next task.
 `/exit`, `/quit`, `exit` or `quit` (in any letter case), or Ctrl-D, ends the
-loop with exit code 0; Ctrl+C ends it at once (a shell shows 130). The loop
-takes `--base-url` and `--chat-model`; the direct-mode options are usage
-errors with it. Its conversation is separate from the web workspace's chats.
+loop with exit code 0; Ctrl+C ends it at once (a shell shows 130). At start
+it prints one line saying that `shell_exec` is off in direct mode and that
+`melo "" --builtins all` reopens the loop with it on (the line is absent when
+the tool is already on). The loop takes `--base-url`, `--chat-model` and
+`--builtins`; the other direct-mode options are usage errors with it. Its
+conversation is separate from the web workspace's chats.
 On a terminal the prompt is edited with readline: Backspace deletes a whole
 character, Chinese and other wide characters included, and the Up arrow
 recalls earlier lines of this loop. A line that is not valid UTF-8 prints
@@ -518,7 +521,7 @@ These options apply to a task run without `--serve`.
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
 | `--reflection-gate flags\|utility` | `flags` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option). |
 | `--tool-exposure retrieve\|all` | `retrieve` | Which tools each step offers the model. |
-| `--builtins all\|none\|NAME,...` | `all` | The built-in tools to register. |
+| `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` (the interactive UI keeps all four by default). |
 | `--mcp-config PATH` | not set | Add the tools of the MCP servers listed in this JSON file. |
 | `--mcp-only` | off | Use only the MCP tools: the same as `--builtins none --tool-exposure all`. |
 | `--memory on\|off` | `on` | `off` turns long-term memory off for this run. |
@@ -540,7 +543,7 @@ These options apply to a task run without `--serve`.
 | `--recall-kinds LIST` | all but `thought` | A comma list of `note`, `draft`, `thought`, `digest`, `reflection` and `long`. |
 | `--recall-placement tool\|message` | `tool` | Where a step block goes: appended to the last tool result, or in its own user message. `message` is refused in `replay` and `compress+replay`. |
 | `--recall-min-score F` | `0.35` | The cosine floor for embedding and long-term cosine hits, from 0 to 1. It is inert for the task-local `bm25` and `llm` ranking and for a long-term row that only BM25 scored. |
-| `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. It is a provider setting, not a `config` key. The interactive UI refuses it for now, like `--reasoning-field`: use it with a task. |
+| `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. Available for a task or the interactive UI with `llm`/`auto` outside `legacy`; never saved to the config file. |
 | `--admit-on-outcome on\|off` | `off` | R6-lite: at the run's end, admit only the final attempt digest, with the terminal status in its provenance; off writes nothing unless a signal admits something. Accepted and inert in `legacy`, and accepted in the interactive UI. |
 | `--keep-decision-text` | off | R6-lite: also store the checked text of each admission decision; the SHA-256 is always kept. An evaluation switch and refused in the interactive UI. |
 
@@ -558,9 +561,11 @@ These options apply to a task run without `--serve`.
   no effect with `--attempt-policy none`.
 - `--tool-exposure`: see [How tools are offered](tools.md#how-tools-are-offered).
 - `--builtins`: `all`, `none`, or a comma-separated list of `file_read`,
-  `file_write`, `python_exec` and `shell_exec`. `recall` is accepted only
-  with `--recall-at tool`, which registers it; without that trigger it is a
-  usage error.
+  `file_write`, `python_exec` and `shell_exec`. A direct run's default set
+  leaves `shell_exec` out: `--builtins all` (or naming `shell_exec`) turns
+  it back on, and it then runs without an approval, because direct mode has
+  no policy. `recall` is accepted only with `--recall-at tool`, which
+  registers it; without that trigger it is a usage error.
 - `--mcp-only` needs `--mcp-config` and cannot be combined with `--builtins`
   or `--tool-exposure`. See [Tools and MCP](tools.md#add-tools-from-mcp-servers).
 - `--memory-dir` turns persistence on for this run, whatever the environment
@@ -646,8 +651,8 @@ These options apply to a task run without `--serve`.
   `compress+replay`; in `legacy`, `drop` and `compress` the wire is as if
   no field were set. The `ollama`
   backend fixes its field to `thinking`, so the flag is a usage error
-  there. The interactive UI refuses the flag until it applies it (R2b);
-  direct mode is the only place it works now.
+  there. The same rule applies in the interactive UI, including after a
+  backend switch.
 
 ### Interactive UI
 
@@ -661,14 +666,26 @@ These options apply to `melo` without a task.
 
 - The UI also takes `--workspace`, `--max-steps`, `--attempt-policy`,
   `--reflection-gate`, `--builtins`, `--memory`, `--memory-dir`,
-  `--request-timeout`, `--reasoning`, `--replay-turns`, `--note-writer`,
-  `--retriever`, `--recall-*` and the `--embedding-*` options, for every
-  turn of the session. It accepts `compress` and `compress+replay` but
-  draws nothing for the notes yet. The UI does not yet apply `[agent]`;
-  use direct mode for that. `--tool-exposure` (the UI offers every tool),
-  `--timeout`, `--output-format`, `--progress`, `--routine`,
-  `--reasoning-field` and `--retrieval-extra-body` are usage errors there;
-  `--mcp-config` and `--mcp-only` are accepted.
+  `--request-timeout`, `--reasoning`, `--reasoning-field`, `--replay-turns`,
+  `--note-writer`, `--retriever`, `--recall-*`, `--retrieval-extra-body` and
+  the `--embedding-*` options, for every turn of the session. Explicit flags
+  win over the saved `[agent]` and `[retrieval]` defaults; retrieval settings
+  stay inert in `legacy`, and explicit retrieval flags there are errors.
+  A `--base-url` session takes these values from flags, not saved defaults.
+  `--tool-exposure` (the UI offers every tool), `--timeout`,
+  `--output-format`, `--progress`, `--routine` and `--keep-decision-text`
+  are usage errors; `--mcp-config` and `--mcp-only` are accepted.
+- For example, `melo --reasoning compress --retriever bm25 --note-writer heuristic`
+  starts a session with short notes and recall. There is no `/reasoning`
+  command: choose the mode when starting the process. `/model` and `/backend`
+  keep the mode, full conversation and RAM-only notes/drafts. A provider that requires replay
+  refuses a `drop` session without changing its model, conversation or MCP
+  state; `compress` on such a provider runs as `compress+replay`.
+- Session replay covers the retained conversation window, not only the
+  current task. On resume, `pairs` restores answers without thinking;
+  `window` can replay the checkpoint's retained, redacted thinking. The
+  current process's mode wins over the mode recorded on old turns. Neither
+  path reconstructs the RAM-only note store. See [Resume](sessions.md#resume).
 - `--workspace` is expanded and resolved here too, and a path that is not a
   folder gives the same one-line usage error as with a task; see
   [Usage errors](#usage-errors).
@@ -725,7 +742,8 @@ These are usage errors:
   without `--embedding-base-url`, `--embedding-base-url` without
   `--base-url`;
 - a direct-mode option, `--workspace` included, with `--serve`, `--daemon`
-  or with `melo ""`, reported as
+  or with `melo ""` (except `--builtins`, which the loop takes for its
+  turns), reported as
   `only for direct mode (a query without --serve): --max-steps`; without a
   task, only those the interactive UI cannot use (`--tool-exposure`,
   `--timeout`, `--output-format`, `--progress`, `--routine`);
@@ -759,12 +777,6 @@ These are usage errors:
   `argument --reasoning: this backend requires reasoning replay, so drop is not possible: use replay or compress+replay`;
 - `--reasoning-field` with the `ollama` backend, reported as
   `argument --reasoning-field: the ollama backend always reads and sends the thinking field`;
-- `--reasoning-field` with bare `melo`, whose interactive UI does not apply it
-  yet, reported as
-  `--reasoning-field is not in the interactive UI yet; give it with a task (melo -- "<task>")`;
-- `--retrieval-extra-body` with bare `melo`, whose interactive UI does not
-  apply it yet, reported as
-  `--retrieval-extra-body is not in the interactive UI yet; give it with a task (melo -- "<task>")`;
 - an MCP config file that cannot be read or is not valid;
 - an invalid `LOCALMELO_THINKING_RETENTION_DAYS`, also with `--serve` or
   `melo ""`, which prints its one `melo: error:` line without the usage
