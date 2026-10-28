@@ -183,6 +183,10 @@ def _rank_rows(
     scores: list[tuple[str, float, dict[str, Any]]] = []
     for text, vec_bytes, meta_json in rows:
         vec = np.frombuffer(vec_bytes, dtype=np.float32)
+        # A vector from another embedding model has another dimension; it
+        # cannot be compared, so it is left out rather than crashing.
+        if vec.shape != q_unit.shape:
+            continue
         e_norm = np.linalg.norm(vec)
         if e_norm == 0:
             continue

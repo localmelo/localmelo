@@ -109,23 +109,27 @@ $ melo
 Found a model server at http://127.0.0.1:11434/v1 (1 model).
 Model server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
+No embedding model on this server. ollama pull qwen3-embedding:0.6b, then melo --reconfigure.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
 │ model      qwen3:8b · Ollama · http://127.0.0.1:11434/v1                 │
 │            saved as the default                                          │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory (no embedding backend)                    │
+│ memory     no long-term memory · melo --reconfigure adds one             │
 │ session    new                                                           │
 ╰──────────────────────────────────────────────────────────────────────────╯
   / commands · esc stop · ctrl+d quit
 ```
 
-Type a message and press Enter, or `/exit` to leave. From then on, `melo`
-goes straight in and `melo "<task>"` uses the saved server. The server here
-is Ollama, so it is saved as the `ollama` backend; any other
-OpenAI-compatible server is saved as `vllm`, the key for those, without
-embeddings; see [First run](configuration.md#first-run).
+If the server also lists an embedding model, the first run adds one question,
+`Use <model> for long-term memory? [Y/n]:`, and `y` saves it after one
+embeddings probe. Type a message and press Enter, or `/exit` to leave. From
+then on, `melo` goes straight in and `melo "<task>"` uses the saved server.
+The server here is Ollama, so it is saved as the `ollama` backend; any other
+OpenAI-compatible server is saved as `vllm`, the key for those. See
+[First run](configuration.md#first-run) and
+[Set up an embedding model](embedding.md).
 
 ### With the setup wizard
 
@@ -146,8 +150,8 @@ The wizard asks:
 | `Base URL` | Your server's URL. Press Enter to accept the default shown in brackets: the saved URL, else the backend's usual one. |
 | `Chat model name` | The model, such as `qwen3:8b`. |
 | `Start?` | Press Enter (yes) to continue. |
-| `Embedding backend` | `5`, the default without a saved one, for `None (no long-term memory)` if you have no embedding server. |
-| `Embedding endpoint URL`, `Embedding model name` | Only asked when you chose an embedding backend. |
+| `Embedding backend` | `5` for `None (no long-term memory)`. Without a saved embedding, the chat server's own embedding models are appended as `6`, `7`, … with the first as the default; choosing one is enough. |
+| `Embedding endpoint URL`, `Embedding model name` | Only asked when you chose one of the fixed embedding backends `1`–`4`, not a detected model. |
 
 For a cloud API, choose the vendor. The wizard then asks for
 `API key env var`, the name of the variable you exported, and `Chat model`

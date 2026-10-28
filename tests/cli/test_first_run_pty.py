@@ -65,6 +65,11 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
         term.type(b"\r")
         assert term.read_until(lambda out: b"Model [2]: " in out, 30), term.output
         term.type(b"3\r")
+        assert term.read_until(
+            lambda out: b"Use nomic-embed-text for long-term memory? [Y/n]: " in out,
+            30,
+        ), term.output
+        term.type(b"\r")
         assert term.read_until(lambda out: READY in out, 30), term.output
         term.type(b"hi\r")
         assert term.read_until(lambda out: b"Worked for" in out, 30), term.output
@@ -82,6 +87,8 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
     saved = (tmp_path / ".cache" / "localmelo" / "config.toml").read_text()
     assert 'chat_backend = "vllm"' in saved
     assert f'chat_url = "{url}"' in saved and 'chat_model = "chat-b"' in saved
+    assert 'embedding_backend = "vllm"' in saved
+    assert 'embedding_model = "nomic-embed-text"' in saved
 
     chat_server.models = []  # the second run lists nothing and asks nothing
     term = _melo(tmp_path, chat_server)
@@ -93,4 +100,5 @@ def test_the_first_run_asks_for_the_model_then_later_runs_go_straight_in(
         term.close()
     text = _text(term)
     assert f"chat-b · vLLM · {url}" in text
+    assert "long-term memory · vLLM · nomic-embed-text" in text
     assert "Model server URL" not in text

@@ -24,22 +24,37 @@ from localmelo.support.sessions.agents import build_session_agent
 URL_LABEL: Final = "OpenAI-compatible"
 
 
-def config_backend(cfg: config.Config, model: str | None) -> BackendInfo:
-    """The configured chat backend, with *model* when one is given."""
+def _backend_label(key: str) -> str:
+    """The backend's display name, or *key* when it is not registered."""
     from localmelo.support.backends.registry import get_backend
 
+    try:
+        return get_backend(key).display_name
+    except KeyError:
+        return key
+
+
+def _embedding_name(cfg: config.Config) -> str:
+    """How the banner names the configured embedding: backend and model."""
+    if not cfg.has_embedding:
+        return ""
+    key = cfg.embedding_backend
+    section = getattr(cfg, key, None)
+    model = getattr(section, "embedding_model", "")
+    label = _backend_label(key)
+    return f"{label} · {model}" if model else label
+
+
+def config_backend(cfg: config.Config, model: str | None) -> BackendInfo:
+    """The configured chat backend, with *model* when one is given."""
     key = cfg.chat_backend
     section = getattr(cfg, key, None)
-    try:
-        label = get_backend(key).display_name
-    except KeyError:
-        label = key
     return BackendInfo(
         key=key,
-        label=label,
+        label=_backend_label(key),
         model=model or getattr(section, "chat_model", "") or "default",
         base_url=getattr(section, "chat_url", "") or getattr(section, "base_url", ""),
-        embedding="" if not cfg.has_embedding else cfg.embedding_backend,
+        embedding=_embedding_name(cfg),
         key_env=getattr(section, "api_key_env", ""),
     )
 
