@@ -26,6 +26,16 @@ from localmelo.melo.checker.stream_filter import (
         ("explicit", "<think>OTP</think> 123456\nmore\n"),
         ("explicit", "<think>secret</think>sk-" + "x" * 30 + "\n"),
         ("closing_only", "sk-" + "x" * 10 + "</think>" + "x" * 15 + "\n"),
+        *[
+            (hint, text)
+            for hint in ("none", "explicit", "closing_only")
+            for text in (
+                "</think>stray<think>later</think>\n",
+                "<think>outer<think>inner</think>end</think>\n",
+                "<think>first</think><think>second</think>answer\n",
+                "<think>literal opening\n",
+            )
+        ],
     ],
 )
 def test_byte_splits_equal_whole_policy(hint: ReasoningTags, text: str) -> None:
@@ -69,6 +79,29 @@ def test_redaction_rules_are_snapshotted_per_stream(
     later = StreamFilter(reasoning_tags="none")
     assert later.feed("new-secret\n") == ("", "")
     assert later.finish() == ("", "[redacted]\n")
+
+
+@pytest.mark.parametrize("hint", ["none", "explicit", "closing_only"])
+def test_abort_discards_held_bearer(hint: ReasoningTags) -> None:
+    stream = StreamFilter(reasoning_tags=hint)
+    prefix = "</think>" if hint == "closing_only" else ""
+    stream.feed(prefix + "Bearer\n ")
+    stream.abort()
+    with pytest.raises(RuntimeError):
+        stream.finish()
+    with pytest.raises(RuntimeError):
+        stream.feed("late")
+
+
+def test_abort_discards_separate_reasoning() -> None:
+    stream = StreamFilter(separate_reasoning=True)
+    stream.feed_reasoning("private")
+    stream.feed("Bearer\n ")
+    stream.abort()
+    with pytest.raises(RuntimeError):
+        stream.finish()
+    with pytest.raises(RuntimeError):
+        stream.feed_reasoning("late")
 
 
 def test_declared_none_releases_and_unknown_buffers() -> None:

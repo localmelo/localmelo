@@ -73,6 +73,37 @@ def test_changed_active_function_buffers(monkeypatch: pytest.MonkeyPatch) -> Non
     assert release.finish() == "[redacted]\n"
 
 
+def test_new_multiline_rule_stays_buffered_even_after_hash_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.melo.checker import _stream_redaction
+
+    assert redaction.__file__ is not None
+    source = Path(redaction.__file__).read_text()
+    source = source.replace(
+        "def redact_secrets(text:",
+        '_PEM = re.compile(r"-----BEGIN [A-Z ]+-----.*?-----END [A-Z ]+-----", re.DOTALL)\n\n\ndef redact_secrets(text:',
+    )
+    source = source.replace(
+        "    text, keys = _KEY.subn(REDACTED, text)",
+        "    text, _ = _PEM.subn(REDACTED, text)\n    text, keys = _KEY.subn(REDACTED, text)",
+    )
+    path = tmp_path / "redaction.py"
+    path.write_text(source)
+    namespace: dict = {"__file__": str(path)}
+    exec(compile(source, str(path), "exec"), namespace)
+    monkeypatch.setattr(
+        _stream_redaction,
+        "_RULES_SHA256",
+        hashlib.sha256(path.read_bytes()).hexdigest(),
+    )
+    assert not _stream_redaction._known_rules(namespace)
+    release = LineRedactor((namespace["redact_secrets"], False))
+    assert release.feed("-----BEGIN PRIVATE KEY-----\nTOPSECRETMATERIAL\n") == ""
+    assert release.feed("-----END PRIVATE KEY-----\n") == ""
+    assert release.finish() == "[redacted]\n"
+
+
 def test_rule_inventory_requires_deliberate_update() -> None:
     # A changed regex must be assessed for cross-line matches before release.
     # Any change, including a new pass, forces a review of line locality.

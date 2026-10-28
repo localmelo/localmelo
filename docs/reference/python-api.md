@@ -208,9 +208,12 @@ agent = Agent(config=load(), tool_providers=[McpToolProvider(servers)])
   tag. `split_thinking(..., reasoning_tags=...)` uses the same rule for the
   completed reply; omitting it keeps the existing whole-reply behavior. A trusted
   separate reasoning field can instead use `StreamFilter(separate_reasoning=True)`
-  and `feed_reasoning()`; it never enters content. Thinking is held until finish.
+  and `feed_reasoning()`; it never enters content. Each `feed()` and
+  `feed_reasoning()` returns `(thinking_delta, content_delta)`; `finish()` returns
+  the remaining tails. For each completed channel, concatenate its deltas in
+  order, including the tail. Thinking is held until finish.
   Redaction rules are snapshotted at stream start; changes apply to the next
-  stream. At commit, apply `redact_for_storage()` separately to each completed
+  stream. At commit, apply `redact_for_storage()` separately to each concatenated
   display channel: it applies the snapshot and then the current rules, so newer
   rules can add masking. Redaction is pattern-based and does not guarantee secret
   removal. This contract
