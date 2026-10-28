@@ -4,6 +4,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from typing import Any
 
 try:
@@ -73,7 +74,11 @@ class GatewayServer:
         # outermost and refuses a foreign request before any route sees it.
         self.console: Console | None = None
         if is_loopback(self.host):
-            self.console = Console(self.cfg, port=self.port, options=console_options)
+            self.console = Console(
+                self.cfg,
+                port=self.port,
+                options=self._console_options(console_options),
+            )
             self.console.mount(self.app)
             self.app.add_middleware(LoopbackGuard, port=self.port)
         else:
@@ -85,6 +90,21 @@ class GatewayServer:
                 "(the default).",
                 self.host,
             )
+
+    def _console_options(self, options: ConsoleOptions | None) -> ConsoleOptions:
+        """*options*, with the workspace page's gate when it built one.
+
+        One scheduler, one gate: the workspace page and the console share a
+        process-wide slot budget, so a call waits behind the other surface's
+        calls. A test may pass a gate of its own and keep it.
+        """
+        if options is not None and options.gate is not None:
+            return options
+        playground = getattr(self.app.state, "smoke_playground", None)
+        gate = getattr(playground, "gate", None)
+        if gate is None:
+            return options or ConsoleOptions()
+        return replace(options or ConsoleOptions(), gate=gate)
 
     # ── Lifespan ──
 
@@ -115,10 +135,18 @@ class GatewayServer:
                     # providers here as well.
                     playground = getattr(app.state, "smoke_playground", None)
                     if playground is not None:
-                        await playground.close_all()
+                        await playground.close_sessions()
                 finally:
-                    if self.console is not None:
-                        await self.console.aclose()
+                    try:
+                        if self.console is not None:
+                            await self.console.aclose()
+                    finally:
+                        # The one shared gate goes last: a console turn
+                        # waiting for its slot must end `cancelled`, cause
+                        # `shutdown`, not fail on a closed gate.
+                        playground = getattr(app.state, "smoke_playground", None)
+                        if playground is not None:
+                            await playground.gate.close()
 
     # ── Routes ──
 

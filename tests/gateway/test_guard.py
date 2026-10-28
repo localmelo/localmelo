@@ -35,6 +35,7 @@ from localmelo.support.config import (  # noqa: E402
     LocalBackendConfig,
 )
 from localmelo.support.gateway import GatewayServer  # noqa: E402
+from localmelo.support.gateway.chat_gate import ChatGate  # noqa: E402
 from localmelo.support.gateway.console import ConsoleOptions  # noqa: E402
 from localmelo.support.gateway.guard import LoopbackGuard, is_loopback  # noqa: E402
 from localmelo.support.gateway.session import AgentLike, SessionManager  # noqa: E402
@@ -148,11 +149,17 @@ class QuietProbe:
         pass
 
 
+class _QuietGate:
+    async def close(self) -> None:
+        pass
+
+
 class RecordingPlayground:
     """Stands in for SmokePlayground: records each call, contacts no server."""
 
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.gate = _QuietGate()
 
     def scenarios_payload(self) -> list[dict[str, Any]]:
         self.calls.append("scenarios")
@@ -175,6 +182,9 @@ class RecordingPlayground:
         return True
 
     async def close_all(self) -> None:
+        pass
+
+    async def close_sessions(self) -> None:
         pass
 
 
@@ -208,7 +218,13 @@ def _build_gateway(
         ),
         gateway=GatewayConfig(port=port, host=host),
     )
-    server = GatewayServer(cfg, console_options=ConsoleOptions(probe=QuietProbe()))
+    server = GatewayServer(
+        cfg,
+        console_options=ConsoleOptions(
+            probe=QuietProbe(),
+            gate=ChatGate(policy="off", call_log_dir=None),
+        ),
+    )
     sessions = RecordingSessions()
     server.sessions = sessions
     client = TestClient(

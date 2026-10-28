@@ -187,15 +187,20 @@
           request, the task's length and the session id, before a run.
         </p>
         <p>
-          Under <code>/api/</code> it serves API v2, the web console's
-          read-only API: health, the sessions list and one session, a
-          session's turns with their events, a Server-Sent Events stream,
-          image blobs and submission lookups. The console opens a session's
-          agent on demand and resumes its conversation when an idle sweep or
-          the open cap closed it. API v2 is served only on a loopback
+          Under <code>/api/</code> it serves API v2, the web console's API:
+          health, the sessions list and one session, a session's turns with
+          their events, a Server-Sent Events stream, image blobs, submission
+          lookups, and a session's tools, grants, memory and runs; and the
+          writes that run a session — create it, with or without a first
+          turn, start, retry and stop its turns, cancel a message by its key,
+          answer an approval, rename or move it, and delete it. A console
+          turn runs in the gateway process, one at a time, and its model
+          calls pass the same scheduler gate a workspace chat's do. The
+          console opens a session's agent on demand and resumes its
+          conversation when an idle sweep or the open cap closed it, or when
+          the gateway restarted. API v2 is served only on a loopback
           address, carries one error envelope and <code>Cache-Control:
-          no-store</code>, and only grows; a turn cannot be started, stopped
-          or retried through it yet. See
+          no-store</code>, and only grows. See
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2</a>.
         </p>
         <p>
@@ -429,9 +434,10 @@
           turn's run for its <code>run.progress</code> events and stores them
           with the turn. The gateway's file and the terminal's file are separate.
           The interactive UI runs its turns on sessions, though it cannot
-          resume one yet; the gateway opens its own file for the web console
-          and API v2, while its <code>/v1</code> sessions stay in RAM (code:
-          <code>support/sessions/</code>, <code>support/gateway/console/</code>). See
+          resume one yet; the web console runs and reads its sessions in the
+          gateway's own file, while its <code>/v1</code> sessions stay in RAM
+          (code: <code>support/sessions/</code>,
+          <code>support/gateway/console/</code>). See
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/sessions.md">Sessions</a>.
         </p>
         <p>
@@ -505,8 +511,9 @@
           use yet. <code>melo/memory/retrieval/</code> and
           <code>melo/memory/notes.py</code> serve only
           <code>melo-retrieve</code>; <code>support/scheduler/</code> is the
-          scheduling policy core and its simulator, which the gateway's chat
-          gate uses, and <code>support/gateway/machine_monitor.py</code> reads
+          scheduling policy core and its simulator, which the gateway's gate
+          uses for the web workspace's chats and the console's turns, and
+          <code>support/gateway/machine_monitor.py</code> reads
           the GPU lock and the battery.
         </p>
       </section>
@@ -553,14 +560,14 @@
           <li>Tool children and MCP servers run with a minimal environment (<code>PATH</code>, <code>HOME</code>, <code>USER</code>, <code>LOGNAME</code>, <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, <code>LC_*</code>, <code>TMPDIR</code>), plus <code>AgentOptions(tool_env)</code> or the server's <code>env</code>; nothing else is inherited.</li>
           <li>A step offers the built-in tools, the tools the model has already called in the conversation and the three closest matches for the task (the default <code>retrieve</code> mode); <code>all</code> offers every tool on every step.</li>
           <li>The Python API (experimental): run events, stopping a run, approval policies for tool calls, a workspace root for the file tools, and conversations that carry over between runs.</li>
-          <li>Sessions (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>); a runner can ask its turns for progress events. The interactive UI keeps its turns in them, and the gateway opens its console session store for the web console and API v2; the <code>/v1</code> HTTP API does not use sessions yet.</li>
-          <li>The gateway: the HTTP API, the console's read-only API v2 under <code>/api</code> (health, sessions, turns, an event stream, blobs and submissions), sessions that close on request only when idle, the web workspace, whose chats pass through the scheduler's policy (<code>off</code> by default) and whose header shows the GPU lock and the battery, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
+          <li>Sessions (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>); a runner can ask its turns for progress events. The interactive UI keeps its turns in them, and the web console runs and reads its sessions in the gateway's own store; the <code>/v1</code> HTTP API does not use sessions yet.</li>
+          <li>The gateway: the HTTP API, the console's API v2 under <code>/api</code> (health, sessions, turns, an event stream, blobs, submissions, tools, grants, memory and runs, and the writes that create a session and start, retry, stop and approve its turns), sessions that close on request only when idle, the web workspace, whose chats and console turns pass through the scheduler's policy (<code>off</code> by default) and whose header shows the GPU lock and the battery, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
           <li>Backends for Ollama, MLC LLM, vLLM, SGLang and four cloud APIs.</li>
           <li>Working memory, history and long-term memory, saved to SQLite when persistence is on; the saved text is redacted first, the saved history also keeps every model call with its reasoning, for 30 days by default, and the Python API can forget a task's memory or all of it.</li>
           <li>Reasoning notes: the <code>compress</code> and <code>compress+replay</code> modes keep a short note of each reply and its code drafts in a RAM-only store beside the working window and rehearse them into an attempt digest; nothing is recalled from them yet.</li>
           <li><code>melo-retrieve</code>, which compares the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers offline. Runs do not use the retrievers yet.</li>
           <li>Procedural memory: each run records its steps, and a completed run updates the step template of its task, in <code>procedures.db</code> with persistence on. Python callers get <code>run.progress</code> events with <code>progress=True</code>, without a percent bar for now. On a terminal, <code>melo &quot;&lt;task&gt;&quot;</code> draws them as a progress line on stderr (<code>support/progress_line.py</code>). <code>melo-procedures</code> replays the progress rules offline.</li>
-          <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>), and the gateway's chat gate, GPU-lock reader and battery reader (<code>support/gateway/chat_gate.py</code>, <code>machine_monitor.py</code>). Direct runs, <code>melo ""</code> and the HTTP API do not go through it.</li>
+          <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>), and the gateway's shared gate, GPU-lock reader and battery reader (<code>support/gateway/chat_gate.py</code>, <code>machine_monitor.py</code>). The web workspace's chats and a console session's turns go through it; direct runs, <code>melo ""</code> and the <code>/v1</code> HTTP API do not.</li>
         </ul>
         <p>What comes next is on the <a href="./updates.html#roadmap">roadmap</a>.</p>
       </section>

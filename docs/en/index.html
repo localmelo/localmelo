@@ -122,7 +122,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">
             <strong>API v2</strong>
-            <span>Read the web console's sessions, turns, stored events (a Server-Sent Events stream too), image blobs and submission lookups over <code>/api</code>; it is loopback-only and only grows.</span>
+            <span>Read the web console's sessions, turns, stored events (a Server-Sent Events stream too), image blobs, submission lookups, tools, grants, memory and runs over <code>/api</code>, and create a session or start, retry, stop and approve its turns there; it is loopback-only and only grows.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">
             <strong>Memory</strong>
@@ -153,7 +153,7 @@ source .venv/bin/activate</code></pre>
         <p>Planned:</p>
         <ul>
           <li>the interactive CLI's next parts: sessions you can resume (<code>melo -c</code>, <code>melo -r</code>), attached files and shell commands;</li>
-          <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
+          <li>a console page that shows the agent's work live, and web-workspace chats that survive a gateway restart (the console's sessions already persist and reopen after one);</li>
           <li>switchable retrieval over the reasoning notes, so a later run can recall them (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
           <li>a percent bar on the progress line for tasks you run again and again, off until their repeated runs pass the replay.</li>

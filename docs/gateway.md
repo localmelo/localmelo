@@ -107,14 +107,33 @@ gateway listens on a loopback address, and it is documented separately in
 [API v2](api.md). API v2 only grows: endpoints, optional request fields and
 response keys are added, never renamed or removed.
 
-This version serves `GET /api/health`, `GET /api/settings`,
-`PUT /api/settings`, `POST /api/settings/test`,
-`GET /api/settings/key-status`, `GET /api/models`, the sessions list and one
-session, a session's turns, its Server-Sent Events stream, its blobs and a
-submission lookup. A turn cannot be started, stopped or retried through
-`/api` yet. The `/api` routes answer the same 421, 403 and 413 as `/v1/`
-(plus 415 for a non-JSON body), and add `Cache-Control: no-store` and the
-error shape `{"error": {"code", "message", "details"}}` to every response.
+This version serves the reads — `GET /api/health`, `GET /api/settings`,
+`GET /api/settings/key-status`, `GET /api/models`, the sessions list and
+one session, a session's turns, its Server-Sent Events stream, its blobs,
+its tools, memory and runs, and a submission lookup — and the writes that
+configure the gateway and run a session: `PUT /api/settings`,
+`POST /api/settings/test`, create a session with or without a first turn,
+start, retry and stop its turns, cancel a message by its key, answer an
+approval, forget a session grant, rename or move a session, and delete it.
+The `/api` routes answer the same 421, 403 and 413 as `/v1/` (plus 415 for
+a non-JSON body), and add `Cache-Control: no-store` and the error shape
+`{"error": {"code", "message", "details"}}` to every response.
+
+A console session runs its turns in the gateway process, one at a time: a
+second turn while one runs is 409 `session_busy`. Its Agent is built when
+the session is first used and kept; when a ninth Agent would open, the
+least recently used idle one is closed with its conversation kept.
+Approvals wait in the gateway's memory with no timeout until a client
+answers them or the turn stops, and stopping the gateway ends a waiting
+turn `cancelled` with cause `shutdown`. A console turn passes the
+scheduler gate like a workspace chat: the gateway builds one gate from the
+`[scheduler]` table and both surfaces use it, so their calls share one
+`n_srv` budget and one call log, and the monitor the workspace page runs
+feeds both (a foreign GPU lock holds a console turn under
+`lock_gate = "wait"`; the battery is read for the page's chip and never
+holds a call). The gateway closes that gate last at shutdown, after both
+surfaces' sessions, so a turn waiting for its slot ends `cancelled` with
+cause `shutdown`.
 
 ### GET /v1/health
 

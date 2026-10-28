@@ -10,8 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalRequest
 from localmelo.melo.contracts.events import json_safe_payload
+from localmelo.melo.schema import Message, ToolInfo
 from localmelo.support.sessions import display
 from localmelo.support.sessions.store import (
     SessionInfo,
@@ -144,4 +146,54 @@ def submission_json(
         "turn": None if turn is None else turn_json(turn),
         "error": submission.error,
         "created_at": submission.created_at,
+    }
+
+
+def memory_json(message: Message, *, limit: int) -> dict[str, Any]:
+    """One working-memory row: role, text, tool names and image count.
+
+    The text is what the conversation holds: a tool's output can carry a
+    key, and a row the browser reads passes the same redaction the stored
+    events do.
+    """
+    text = message.content
+    if message.role == "assistant":
+        # The page shows what was said, not how the model got there.
+        _, text = display.split_thinking(text)
+    text, _ = redact_secrets(text)
+    if len(text) > limit:
+        text = f"{text[:limit]}… (+{len(text) - limit} chars)"
+    return {
+        "role": message.role,
+        "text": text,
+        "tool_calls": [call.tool_name for call in message.tool_calls],
+        "tool_call_id": message.tool_call_id,
+        "images": len(message.images),
+    }
+
+
+def tool_json(tool: ToolInfo, granted: bool) -> dict[str, Any]:
+    """One tool of a session, with whether this session allows it."""
+    return {
+        "name": tool.name,
+        "description": tool.description,
+        "parameters": json_safe_payload(dict(tool.parameters)),
+        "source": tool.source,
+        "requires_approval": tool.requires_approval,
+        "granted": granted,
+    }
+
+
+def run_json(turn: TurnInfo) -> dict[str, Any]:
+    """One finished turn's RunResult without its answer text."""
+    result = turn.result
+    if isinstance(result, dict):
+        result = {key: value for key, value in result.items() if key != "result"}
+    return {
+        "turn": turn.turn,
+        "turn_id": turn.id,
+        "status": turn.status,
+        "started_at": turn.started_at,
+        "finished_at": turn.finished_at,
+        "result": result,
     }

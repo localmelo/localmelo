@@ -12,20 +12,11 @@ from fastapi.staticfiles import StaticFiles
 
 from localmelo.melo.contracts.providers import ProviderError
 from localmelo.support.config import Config, SchedulerConfig
-from localmelo.support.gateway.chat_gate import DEFAULT_CALL_LOG_DIR
+from localmelo.support.gateway.chat_gate import call_log_dir
 from localmelo.support.gateway.machine_monitor import read_pmset
 from localmelo.support.gateway.playground import LockHeldError, SmokePlayground
 
 _STATIC = Path(__file__).with_name("static")
-
-
-def _call_log_dir(scheduler: SchedulerConfig) -> Path | None:
-    """The configured call-log directory, or None when the file is off."""
-    if not scheduler.call_log:
-        return None
-    if scheduler.call_log_dir:
-        return Path(scheduler.call_log_dir).expanduser()
-    return DEFAULT_CALL_LOG_DIR
 
 
 def _manager(app: FastAPI) -> SmokePlayground:
@@ -38,7 +29,7 @@ def _manager(app: FastAPI) -> SmokePlayground:
             n_srv=scheduler.n_srv,
             r_f=scheduler.r_f,
             n_fg=scheduler.n_fg,
-            call_log_dir=_call_log_dir(scheduler),
+            call_log_dir=call_log_dir(scheduler),
             lock_path=scheduler.gpu_lock_file or None,
             lock_self=scheduler.lock_self,
             lock_gate=scheduler.lock_gate,

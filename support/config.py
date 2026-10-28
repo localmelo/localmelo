@@ -18,8 +18,23 @@ class ConfigError(Exception):
     """Raised when configuration is invalid or incomplete."""
 
 
-CONFIG_DIR = os.path.expanduser("~/.cache/localmelo")
+# The cache directory and the config file, as ``~`` strings resolved when
+# read or written. Resolving at import would fix them to the home the
+# process started with, so a later HOME (a test's temporary one) could not
+# redirect them.
+CONFIG_DIR = "~/.cache/localmelo"
 CONFIG_PATH = os.path.join(CONFIG_DIR, "config.toml")
+
+
+def config_dir() -> str:
+    """The cache directory with ``~`` expanded for the current HOME."""
+    return os.path.expanduser(CONFIG_DIR)
+
+
+def config_path() -> str:
+    """The config file with ``~`` expanded for the current HOME."""
+    return os.path.expanduser(CONFIG_PATH)
+
 
 VALID_CHAT_BACKENDS = (
     "mlc",
@@ -380,10 +395,11 @@ _CLOUD_API_PROVIDER_MIGRATION: dict[str, str] = {
 
 
 def load() -> Config:
-    if not os.path.isfile(CONFIG_PATH):
+    path = config_path()
+    if not os.path.isfile(path):
         return Config()
 
-    with open(CONFIG_PATH, "rb") as f:
+    with open(path, "rb") as f:
         data = tomllib.load(f)
 
     cfg = Config()
@@ -600,7 +616,7 @@ def _toml_value(value: Any) -> str:
 
 
 def save(cfg: Config) -> None:
-    os.makedirs(CONFIG_DIR, exist_ok=True)
+    os.makedirs(config_dir(), exist_ok=True)
 
     lines: list[str] = []
     lines.append(f"chat_backend = {_toml_string(cfg.chat_backend)}")
@@ -692,13 +708,18 @@ def save(cfg: Config) -> None:
     except UnicodeEncodeError as exc:
         bad = exc.object[exc.start : exc.end]
         raise ConfigError(f"Cannot write {bad!r} to TOML: {exc.reason}") from exc
+    target_path = os.path.realpath(config_path())
+    target_dir = os.path.dirname(target_path) or "."
+    os.makedirs(target_dir, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(
-        prefix=".config.toml.", suffix=".tmp", dir=CONFIG_DIR
+        prefix=".config.toml.", suffix=".tmp", dir=target_dir
     )
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
-        os.replace(tmp_path, CONFIG_PATH)
+        with contextlib.suppress(OSError):
+            os.chmod(tmp_path, os.stat(target_path).st_mode & 0o777)
+        os.replace(tmp_path, target_path)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp_path)

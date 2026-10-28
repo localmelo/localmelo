@@ -104,4 +104,5 @@ asyncio_mode = "auto"
 cache_dir = ".cache/pytest"
 markers = [
     "smoke_backend: real-backend smoke tests; opt-in with LOCALMELO_SMOKE=1, and skipped when the backend is not reachable",
+    "allow_real_cache: a test that may resolve the real home; writing the real ~/.cache/localmelo is never allowed",
 ]

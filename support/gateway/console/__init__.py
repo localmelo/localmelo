@@ -21,12 +21,14 @@ import contextlib
 import logging
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.routing import Match
 
+from localmelo.support.gateway.chat_gate import ChatGate, call_log_dir
+from localmelo.support.gateway.machine_monitor import MachineMonitor
 from localmelo.support.sessions import display
 from localmelo.support.sessions.approvals import ApprovalBroker
 from localmelo.support.sessions.hub import SessionHub
@@ -39,7 +41,13 @@ from localmelo.support.sessions.store import (
     StoreOwnedError,
 )
 
-from . import errors, routes_sessions, routes_settings
+from . import (
+    errors,
+    routes_details,
+    routes_sessions,
+    routes_settings,
+    routes_turns,
+)
 from .errors import ApiError
 from .probe import ModelServerProbe, Probe
 from .registry import SWEEP_INTERVAL_S, AgentBuilder, ConsoleSessions
@@ -81,6 +89,9 @@ class ConsoleOptions:
     store_path: str | None = None
     builder: AgentBuilder | None = None
     probe: Probe | None = None
+    # None builds the console's gate from the ``[scheduler]`` table; a test
+    # passes a gate of its own (no call log, a fake clock).
+    gate: ChatGate | None = None
     dev_reload: bool = False
 
 
@@ -100,11 +111,17 @@ class Console:
         self.store = SessionStore(self.options.store_path, writer="gateway")
         self.hub = SessionHub(self.store)
         self.broker = ApprovalBroker(timeout_s=None)
+        self.gate = self.options.gate or self._build_gate()
+        # A gate the console built is its own to close; a shared one belongs
+        # to the gateway, which closes it after both surfaces' sessions.
+        self._owns_gate = self.options.gate is None
+        self._monitor = None if self.options.gate is not None else self._build_monitor()
         self.sessions = ConsoleSessions(
             self.store,
             self.broker,
             lambda: self.cfg,
             builder=self.options.builder,
+            gate=self.gate,
         )
         self.probe: Probe = self.options.probe or ModelServerProbe(cfg)
         self._started_at = time.time()
@@ -118,6 +135,41 @@ class Console:
         self._streams = 0
         self.app: FastAPI | None = None
 
+    # ── The gate ──
+
+    def _build_gate(self) -> ChatGate:
+        """The console's scheduler gate, from the ``[scheduler]`` table."""
+        scheduler = self.cfg.scheduler
+        return ChatGate(
+            policy=scheduler.policy,
+            n_srv=scheduler.n_srv,
+            r_f=scheduler.r_f,
+            n_fg=scheduler.n_fg,
+            call_log_dir=call_log_dir(scheduler),
+            lock_gate=scheduler.lock_gate,
+        )
+
+    def _build_monitor(self) -> MachineMonitor | None:
+        """The GPU-lock watcher a ``lock_gate = "wait"`` needs.
+
+        Only ``wait`` holds a call, so only ``wait`` needs to know the
+        machine; the battery is not read here: no console route shows it.
+        """
+        scheduler = self.cfg.scheduler
+        if scheduler.lock_gate != "wait" or not scheduler.gpu_lock_file:
+            return None
+        return MachineMonitor(
+            lock_path=scheduler.gpu_lock_file,
+            lock_self=scheduler.lock_self,
+            lock_gate=scheduler.lock_gate,
+            write=self.gate.write_machine,
+            on_change=self._on_machine,
+        )
+
+    def _on_machine(self, snapshot: Any) -> None:
+        """Feed one observed snapshot to the gate; no await between the two."""
+        self.gate.set_machine(snapshot.machine, payload=snapshot.payload())
+
     # ── Mounting ──
 
     def mount(self, app: FastAPI) -> None:
@@ -127,6 +179,8 @@ class Console:
         errors.install(app)
         routes_settings.add_routes(app, self)
         routes_sessions.add_routes(app, self)
+        routes_turns.add_routes(app, self)
+        routes_details.add_routes(app, self)
         _add_not_found(app)
 
     # ── Lifecycle ──
@@ -139,6 +193,8 @@ class Console:
         until an open succeeds.
         """
         self._started_at = time.time()
+        if self._monitor is not None:
+            await self._monitor.start()
         if await self._try_open():
             self._start_retention()
         else:
@@ -210,9 +266,17 @@ class Console:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        if self._monitor is not None:
+            with contextlib.suppress(Exception):
+                await self._monitor.stop()
         try:
             await self.sessions.close_all()
         finally:
+            # Every live call leaves its one line; the log's files close.
+            # A shared gate stays open: the gateway closes it last.
+            if self._owns_gate:
+                with contextlib.suppress(Exception):
+                    await self.gate.close()
             try:
                 await self.hub.aclose()
             finally:

@@ -41,7 +41,9 @@ from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbe
 from localmelo.support.providers.llm.ollama_chat import OllamaNativeChat
 from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 
-_DEFAULT_MEMORY_DIR = Path("~/.cache/localmelo/playground").expanduser()
+# The default store of a playground's own memories, as a ``~`` string so it
+# resolves when a playground opens one: a test's temporary HOME then applies.
+_DEFAULT_MEMORY_DIR = "~/.cache/localmelo/playground"
 
 _SCENARIOS_PATH = (
     Path(__file__).resolve().parents[2] / "tests" / "smoke" / "data" / "scenarios.json"
@@ -203,7 +205,7 @@ class SmokePlayground:
 
         # Share persisted memories, but let each agent own its connections.
         # Closing one session must not close resources used by another run.
-        mem_dir = Path(memory_dir) if memory_dir else _DEFAULT_MEMORY_DIR
+        mem_dir = Path(memory_dir or _DEFAULT_MEMORY_DIR).expanduser()
         mem_dir.mkdir(parents=True, exist_ok=True)
         self._history_path = mem_dir / "history.db"
         # Read once, so every chat's history keeps reasoning as long.
@@ -244,6 +246,11 @@ class SmokePlayground:
                 settle_s=settle_s,
                 guard_poll_s=guard_poll_s,
             )
+
+    @property
+    def gate(self) -> ChatGate:
+        """The one gate this process schedules every model call on."""
+        return self._gate
 
     def _on_machine(self, snapshot: MachineSnapshot) -> None:
         """Feed one observed snapshot to the gate; no await between the two."""
@@ -676,6 +683,19 @@ class SmokePlayground:
         return True
 
     async def close_all(self) -> None:
+        """Stop every session, then close the gate this page built."""
+        await self.close_sessions()
+        # After the agents: the wrappers' inner providers are closed already.
+        await self._gate.close()
+
+    async def close_sessions(self) -> None:
+        """Stop the monitor and every session, and leave the gate open.
+
+        The gateway closes the one shared gate last, after the console's
+        sessions too, so a console turn waiting for its slot ends
+        ``cancelled`` (cause ``shutdown``) instead of failing on a gate that
+        closed under it.
+        """
         # The monitor writes through the gate's log, so stop it before the
         # gate closes the files (R21).
         await self.stop()
@@ -684,8 +704,6 @@ class SmokePlayground:
                 await self.cancel(session.session_id)
                 await session.agent.close()
         self._sessions.clear()
-        # After the agents: the wrappers' inner providers are closed already.
-        await self._gate.close()
 
     async def _fetch_models(self, url: str) -> list[str]:
         async with httpx.AsyncClient(

@@ -47,8 +47,10 @@ SETTINGS_TEST_TIMEOUT_S: Final = 30.0
 
 # Re-exported so tests may patch either ``onboard_probe.probe_all`` /
 # ``discovery.list_models`` or the names on this module.
-probe_all = onboard_probe.probe_all
-list_models = discovery.list_models
+_ORIG_PROBE_ALL = onboard_probe.probe_all
+_ORIG_LIST_MODELS = discovery.list_models
+probe_all = _ORIG_PROBE_ALL
+list_models = _ORIG_LIST_MODELS
 
 _ENV_NAME_RE: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _LOCAL_FIELDS: Final = (
@@ -78,6 +80,7 @@ class SettingsTestBody(BaseModel):
 class SettingsPutBody(SettingsTestBody):
     """Request body of ``PUT /api/settings``."""
 
+    workspace: StrictStr
     revision: StrictStr
 
 
@@ -85,7 +88,7 @@ def _has_control_or_surrogate(text: str) -> bool:
     """Whether *text* holds a control character, newline or lone surrogate."""
     return any(
         ord(ch) < 0x20
-        or ord(ch) == 0x7F
+        or 0x7F <= ord(ch) <= 0x9F
         or ch in (" ", " ")
         or 0xD800 <= ord(ch) <= 0xDFFF
         for ch in text
@@ -114,7 +117,7 @@ def _check_workspace(workspace: str) -> None:
 def _file_revision() -> str:
     """First 16 hex characters of the SHA-256 of ``config.toml``, or ``""``."""
     try:
-        with open(config.CONFIG_PATH, "rb") as f:
+        with open(config.config_path(), "rb") as f:
             data = f.read()
     except OSError:
         return ""
@@ -124,7 +127,6 @@ def _file_revision() -> str:
 def _redact(text: str) -> str:
     """Return *text* with any secret shapes replaced by ``[redacted]``."""
     return redact_secrets(text)[0]
-
 
 def model_json(cfg: Any) -> dict[str, Any]:
     """The settings' chat model, with the registry's label for its backend."""

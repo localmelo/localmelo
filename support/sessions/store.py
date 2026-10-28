@@ -401,6 +401,21 @@ class StoredEvent:
 # ── Helpers ──
 
 
+def _encodable(value: str | None, name: str) -> None:
+    """Refuse a string SQLite cannot store, before it fails mid-turn.
+
+    Python carries a lone surrogate (a JSON body can escape one into a
+    request) and sqlite cannot write it. The API refuses it at the body;
+    this is the store's own assertion, so no other surface can wedge a turn.
+    """
+    if value is None:
+        return
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{name} must be valid UTF-8") from exc
+
+
 def title_from_text(text: str) -> str:
     """*text* with its whitespace collapsed, in at most 60 characters.
 
@@ -410,6 +425,19 @@ def title_from_text(text: str) -> str:
     if len(collapsed) <= _TITLE_CHARS:
         return collapsed
     return collapsed[: _TITLE_CHARS - 1] + "…"
+
+
+def check_title(title: object) -> str:
+    """*title* stripped, or ``ValueError`` unless it is 1 to 200 characters.
+
+    A surface checks a title with this before it writes anything else, so a
+    refused rename changes nothing.
+    """
+    stripped = title.strip() if isinstance(title, str) else ""
+    if not 1 <= len(stripped) <= _MAX_TITLE_CHARS:
+        raise ValueError(f"title must be 1 to {_MAX_TITLE_CHARS} characters")
+    _encodable(stripped, "title")
+    return stripped
 
 
 def default_path(writer: Writer) -> str:
@@ -1315,8 +1343,7 @@ class SessionStore:
         *query* matches the title or any turn's user text (``LIKE``, with
         ``%`` and ``_`` taken literally); *workspace* the stored workspace
         exactly; *min_turns* keeps the sessions with at least that many
-        turns that are neither running nor undone. *kinds* ``None`` means
-        every kind.
+        turns, running ones included. *kinds* ``None`` means every kind.
         """
         if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
             raise ValueError(f"limit must be an int >= 1, got {limit!r}")
@@ -1335,9 +1362,11 @@ class SessionStore:
             clauses.append("AND s.workspace = ?")
             args.append(workspace)
         if min_turns > 0:
+            # Any turn counts, a running or an undone one too: a session
+            # with a turn is a session the list shows, from the moment its
+            # first turn's row exists.
             clauses.append(
-                "AND (SELECT COUNT(*) FROM turns m WHERE m.session_id = s.id "
-                "AND m.status != 'running' AND m.undone = 0) >= ?"
+                "AND (SELECT COUNT(*) FROM turns m WHERE m.session_id = s.id) >= ?"
             )
             args.append(min_turns)
         async with self._lock:
@@ -1482,9 +1511,7 @@ class SessionStore:
         writes ``session.title`` and is never replaced by the automatic
         title (T-12).
         """
-        title = title.strip() if isinstance(title, str) else ""
-        if not 1 <= len(title) <= _MAX_TITLE_CHARS:
-            raise ValueError("title must be 1 to 200 characters")
+        title = check_title(title)
         async with self._lock:
             conn = await self._ready()
             self._check_writable()
@@ -1589,11 +1616,15 @@ class SessionStore:
         title: str | None = None,
         client_request_id: str | None = None,
         new_session: NewSession | None = None,
+        create_scope: bool = False,
     ) -> TurnInfo:
         """Start a turn of *user_text* under *holder*, in one transaction (T-5).
 
         Takes *session_id*, or *new_session* to create the session with the
-        turn. With *client_request_id*, the key decides first: a stored
+        turn. *create_scope* stores the turn's key in the create scope, as
+        one begun with *new_session* is stored: that is what a client that
+        lost the response to a create looks up without a session id.
+        With *client_request_id*, the key decides first: a stored
         submission of it raises ``SubmissionConflict`` (another text),
         ``SubmissionWithdrawn`` or ``SubmissionRepeated`` (with the turn it
         started), and nothing is written. Then a running turn raises
@@ -1607,6 +1638,7 @@ class SessionStore:
             raise ValueError("begin_turn takes a session_id or a new_session, not both")
         if not isinstance(user_text, str) or not user_text.strip():
             raise ValueError("text must not be blank")
+        _encodable(user_text, "text")
         if len(user_text) > MAX_QUERY_LEN:
             raise ValueError(f"text must be at most {MAX_QUERY_LEN} characters")
         if client_request_id is not None:
@@ -1616,14 +1648,21 @@ class SessionStore:
         kind = None if new_session is None else _check_kind(new_session.kind)
         meta_text = None if new_session is None else _meta_text(new_session.meta)
         typed = title if isinstance(title, str) and title.strip() else ""
+        _encodable(typed, "title")
         async with self._lock:
             conn = await self._ready()
             self._check_writable()
             async with self._transaction(conn, "begin_turn") as stored:
                 now = self._clock()
-                # 1. The key decides before the lease.
+                # 1. The key decides before the lease. A create's key is
+                # judged in the create scope, where step 8 stores it: a
+                # withdrawal recorded while the session's Agent started must
+                # answer here, not collide with the insert below.
                 if client_request_id is not None:
-                    found = await self._submission(conn, session_id, client_request_id)
+                    lookup = (
+                        None if new_session is not None or create_scope else session_id
+                    )
+                    found = await self._submission(conn, lookup, client_request_id)
                     check_submission(found, user_text)
                 # 2. The session.
                 if new_session is not None:
@@ -1694,7 +1733,11 @@ class SessionStore:
                         "state, session_id, turn, created_at) "
                         "VALUES (?, ?, ?, 'accepted', ?, ?, ?)",
                         (
-                            "" if new_session is not None else session_id,
+                            (
+                                ""
+                                if new_session is not None or create_scope
+                                else session_id
+                            ),
                             client_request_id,
                             text_sha256(user_text),
                             session_id,

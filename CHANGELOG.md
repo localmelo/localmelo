@@ -12,14 +12,52 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - API v2 settings, model listing, guard body limits and unconfigured gateway
   startup: `GET /api/settings`, `PUT /api/settings`,
   `POST /api/settings/test`, `GET /api/settings/key-status` and
-  `GET /api/models`; `[gateway] workspace` in `config.toml` (written only
-  when non-empty) and atomic `config.save()` replacement via `os.replace`;
+  `GET /api/models`; `[gateway] workspace` in `config.toml` (validated by
+  `Config.validate()`, read by console sessions, and written only when
+  non-empty) and atomic `config.save()` replacement via `os.replace`
+  (preserving file permissions and following a symlinked `config.toml`);
   `onboard.backend_defaults()`; a 1 MiB request body cap (`413 too_large`),
   `Content-Type: application/json` enforcement on non-empty `/api` bodies
-  (`415 unsupported_media_type`), UTF-8/lone-surrogate validation, and
-  baseline security headers on every response; and
-  `melo --serve --allow-unconfigured` so the gateway can boot before a
-  backend is configured ([#NN]).
+  (`415 unsupported_media_type`), UTF-8/lone-surrogate validation, the
+  console's Content-Security-Policy on `/api` and baseline security headers
+  on every response; and `melo --serve --allow-unconfigured` so the gateway
+  can boot before a backend is configured ([#NN]).
+- Console session details over API v2, and the scheduler gate in front of
+  a console turn: `GET /api/sessions/{id}/tools` lists each tool's source,
+  whether it asks first and whether the session allows it, `/memory` the
+  conversation the gateway holds (thinking stripped, every text redacted,
+  text cut at 2,000 characters) and `/runs` each finished turn's `RunResult`
+  without its answer, while `DELETE /api/sessions/{id}/grants/{tool}` and `/grants`
+  take a session grant back. Every model call of a console turn now waits
+  for its slot under `[scheduler]`, like a workspace chat's: the console
+  shares the gateway's one `ChatGate` and wraps the Agent's providers
+  with `GatedLLM`/`GatedEmbedding` through `build_session_agent`'s hooks,
+  so the call log records the session's id and `lock_gate = "wait"` holds
+  a turn while a foreign GPU lock is present. A create now makes its
+  session row before it builds the Agent, because the gate needs the id;
+  its key still lands in the create scope, so a client without the id finds
+  it, and a create whose Agent or first turn never came up, or was
+  cancelled, deletes the row it made. Console runners ask each turn for
+  `run.progress`. `/`, the workspace page and every `/v1/*` route are
+  unchanged ([#92]).
+- Console turns over API v2: `POST /api/sessions` (with an optional first
+  turn), `POST /api/sessions/{id}/turns`, `/retry` and `/turns/{id}/cancel`,
+  the two cancel-by-key routes, `POST /api/approvals/{request_id}`, and
+  `PATCH`/`DELETE` of a session. A turn starts in the background and its
+  events arrive on the session's stream: `approval.requested` waits for an
+  answer given through the API, and the turn finishes `turn.finished` with
+  the result read from its row. A `client_request_id` makes a create or a
+  turn safe to repeat, one turn runs per session (409 `session_busy`), and
+  a stop during an approval wait withdraws the card. The console keeps the
+  `ApprovalBroker` and its `RememberingPolicy` through `runner.observe`, so
+  the approvals a console turn asks show on the stream. A console turn
+  does not pass the scheduler gate yet; that arrives with the tools and
+  grants change. `docs/api.md` gains the routes and a tested Python script
+  that creates a session, follows the stream, answers an approval and reads
+  the answer; every request string must be valid UTF-8 (a lone surrogate
+  is 400 `invalid_request`), a session's workspace is stored as its real
+  path, and `/`, the workspace page and every `/v1/*` route are unchanged
+  ([#91]).
 - Reasoning notes for the compress modes: `--reasoning compress` and
   `compress+replay`, `--note-writer auto|heuristic`, and the `[agent]`
   `note_writer` key. `compress` sends no reasoning; instead each reply is
@@ -399,6 +437,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The test suite no longer writes into the user's own `~/.cache/localmelo`:
+  every test runs with `HOME` in a temporary directory, the defaults of the
+  gateway's call log, the web workspace's memory and `config.toml` resolve
+  when they are used instead of at import, and a session guard fails a test
+  that resolves the real home or writes the real cache
+  (`@pytest.mark.allow_real_cache` opts a test out of the home rule)
+  ([#90]).
 - `POST /v1/agent/run` answers a non-string `session_id` (a number, a list)
   with the route's own 400 `Invalid session_id format` instead of FastAPI's
   plain-text 500, and its 100,000-character limit counts the query after the
@@ -563,4 +608,7 @@ earlier milestones.
 [#83]: https://github.com/localmelo/localmelo/pull/83
 [#84]: https://github.com/localmelo/localmelo/pull/84
 [#85]: https://github.com/localmelo/localmelo/pull/85
+[#91]: https://github.com/localmelo/localmelo/pull/91
+[#92]: https://github.com/localmelo/localmelo/pull/92
 [#89]: https://github.com/localmelo/localmelo/pull/89
+[#90]: https://github.com/localmelo/localmelo/pull/90
