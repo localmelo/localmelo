@@ -10,7 +10,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 ### Added
 
 - Optional direct worker-session recording and dsh JSONL import, with a
-  read-only, filterable and paginated gateway worker-history API. [#NN]
+  read-only, filterable and paginated gateway worker-history API. [#123]
 - Workspace approval cards with a 500 ms guard, explicit allow/deny choices,
   and a jump-to-approval control; failure and stopped states with retry,
   continuation when eligible, copy-error and details; older-turn paging;
@@ -889,3 +889,4 @@ earlier milestones.
 [#120]: https://github.com/localmelo/localmelo/pull/120
 [#121]: https://github.com/localmelo/localmelo/pull/121
 [#122]: https://github.com/localmelo/localmelo/pull/122
+[#123]: https://github.com/localmelo/localmelo/pull/123
