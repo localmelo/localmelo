@@ -290,7 +290,7 @@ tool with no annotations, which is `write`. The interactive UI always has
 such a policy, unless `--yolo`; direct mode and the gateway's `/v1` and
 workspace sessions have none. A gateway session therefore does not offer
 `shell_exec` at all: there is no one to ask. The console has a policy, but
-its approvals arrive over the same unauthenticated loopback API, so it is
+a credential holder or same-user process can answer approvals, so it is
 gateway mode too. A tool is also asked about when it is explicitly marked: a
 provided tool with `requires_approval=True`, a custom tool whose `register`
 call sets it, or the tools of an MCP server that sets `require_approval` (see

@@ -7,6 +7,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ## [Unreleased]
 
+### Security
+
+- Gateway authentication is in progress: loopback-only binding, a private bearer
+  token for API clients, and a one-use terminal sign-in link for browser sessions.
+  Existing unauthenticated API clients must migrate; see the gateway guide.
+  Same-user processes and localhost services on other ports remain outside the
+  isolation guarantee. Playground and lifecycle hardening are separate work. ([#136])
+
 ### Fixed
 
 - Correct the API v2 response formats and tools example, and update the bilingual
@@ -28,6 +36,18 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   files, but resume budgets and retained windows can omit a turn. No image
   attachments; direct mode is unchanged ([#NN]).
 
+- Heuristic notes retain a bounded set of explicit English negative and Chinese
+  residence/cancellation assertions, and item attribution rejects conflicting
+  event times, rejects opposing detected polarity and requires the full negative
+  assertion ([#137]). Similar opposing assertions are retained as conflicts;
+  structured polarity-aware supersession is not yet implemented.
+
+- Worker park integration fences held provider and approval delivery, persists
+  pause intent and evidence-based cards, releases cleanly parked worker slots,
+  and re-asks withdrawn approvals on resume. Failed park writes retry and can
+  interrupt with a card; unavailable storage keeps the fence closed, and failed
+  cleanup quarantines the slot until restart. Restart replay and accounting are
+  deferred. [#135]
 - Opt-in context fitting shortens request copies and retries one classified overflow without rerunning tools; impossible requests end with a specific status ([#131]).
 - Read-only worker history in the web workspace, with server-side filters,
   paging, recorded transcripts and explicit refresh for unfinished runs. ([#130])
@@ -62,6 +82,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 - A documentation inventory, bilingual style guide and experimental offline
   preview builder lay the groundwork for a later site migration; published
   pages and existing URLs are unchanged ([#120]).
+
 - S3a.2 adds `/api/tasks` creation, inspection and control and in-process
   workers sharing the console's scheduler gate. Creation is idempotent with
   `request_key`; workers disable memory, omit `shell_exec`, and have at most
@@ -945,3 +966,6 @@ earlier milestones.
 [#131]: https://github.com/localmelo/localmelo/pull/131
 [#132]: https://github.com/localmelo/localmelo/pull/132
 [#133]: https://github.com/localmelo/localmelo/pull/133
+[#135]: https://github.com/localmelo/localmelo/pull/135
+[#136]: https://github.com/localmelo/localmelo/pull/136
+[#137]: https://github.com/localmelo/localmelo/pull/137

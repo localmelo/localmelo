@@ -1175,12 +1175,30 @@ class TaskStore:
         assert result is not None
         return result
 
+    async def resume_interrupted(
+        self,
+        task_id: str,
+        *,
+        expected_generation: int | None,
+        expected_operation_id: str | None,
+        operation_id: str,
+        actor: str = "user",
+    ) -> TaskRecord:
+        """Restore an interrupted task's saved priority and queue its card."""
+        return await self.resume(
+            task_id,
+            actor=actor,
+            _guard=(expected_generation, expected_operation_id, operation_id),
+            _interrupted=True,
+        )
+
     async def resume(
         self,
         task_id: str,
         *,
         actor: str = "user",
         _guard: tuple[int | None, str | None, str] | None = None,
+        _interrupted: bool = False,
     ) -> TaskRecord:
         """Restore a pause priority; a parked P5 without a pause falls back to P2."""
         now = self._clock()
@@ -1195,7 +1213,7 @@ class TaskStore:
                 raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
             request = (
                 {
-                    "kind": "cancel",
+                    "kind": "resume_interrupted" if _interrupted else "cancel",
                     "generation": _guard[0],
                     "previous": _guard[1],
                     "actor": actor,
@@ -1212,7 +1230,19 @@ class TaskStore:
                 "SELECT 1 FROM park_priority WHERE task_id = ? AND snapshot_active = 1 AND pause_pending = 1",
                 (task_id,),
             )
-            if (
+            if _interrupted:
+                active = await self._has_snapshot(conn, task_id)
+                if (
+                    not _guard
+                    or current.state != "interrupted"
+                    or not current.card.strip()
+                    or not active
+                    or pending
+                    or current.level != 5
+                    or current.reason != "pause"
+                ):
+                    raise TaskNotPausedError(f"Task {task_id} is not resumable")
+            elif (
                 current.level != 5
                 or (
                     _guard
@@ -1242,7 +1272,13 @@ class TaskStore:
                 operation_id=_guard[2] if _guard else None,
                 request=request,
                 state=(
-                    current.state if _guard else ("parked" if level == 5 else "queued")
+                    "queued"
+                    if _interrupted
+                    else (
+                        current.state
+                        if _guard
+                        else ("parked" if level == 5 else "queued")
+                    )
                 ),
             )
             await self._clear_snapshot(conn, task_id)
@@ -1261,10 +1297,17 @@ class TaskStore:
                     pinned=_pinned(source),
                     ts=now,
                 )
-            if not _guard:
+            if not _guard or _interrupted:
                 await conn.execute(
                     "UPDATE tasks SET state = ?, wait_reason = '', hold_site = '' WHERE task_id = ?",
-                    ("parked" if level == 5 else "queued", task_id),
+                    (
+                        (
+                            "queued"
+                            if _interrupted
+                            else ("parked" if level == 5 else "queued")
+                        ),
+                        task_id,
+                    ),
                 )
             await self._log(
                 conn, "task.resume", task_id, {"level": level, "source": source}, ts=now
