@@ -253,6 +253,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- `shell_exec` and `python_exec` start their child with a minimal
+  environment instead of inheriting melo's: `PATH`, `HOME`, `USER`,
+  `LOGNAME`, `SHELL`, `TERM`, `LANG`, every `LC_*` variable and `TMPDIR`,
+  then the new `AgentOptions(tool_env={...})`, and nothing else. An API key
+  in melo's environment reaches no tool; `VIRTUAL_ENV`, `PYTHONPATH`,
+  `SSH_AUTH_SOCK` and the proxy variables pass only through `tool_env`. MCP
+  servers keep their minimal environment, which now takes every `LC_*`
+  variable too, from the same list ([#NN]).
 - `python_exec` runs its code in a child Python in every mode, not only with
   a workspace root. Code that loops, sleeps or calls `os._exit()` no longer
   holds or ends `melo`: the tool's time limit (60 seconds by default, 10

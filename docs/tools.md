@@ -26,6 +26,14 @@ limits). The call's time limit normally ends it first; the CPU limit only
 stops code that outlives melo or that spends an hour of CPU. An
 address-space limit is not set: macOS refuses a finite one.
 
+`shell_exec` and `python_exec` start their child with a minimal
+environment: `PATH`, `HOME`, `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`,
+every `LC_*` variable and `TMPDIR`, then whatever
+`AgentOptions(tool_env={...})` adds, and nothing else. An API key in melo's
+own environment therefore reaches no tool; `VIRTUAL_ENV`, `PYTHONPATH`,
+`SSH_AUTH_SOCK` and the proxy variables pass only through `tool_env` (see
+[The Python API](python-api.md#work-in-a-directory)).
+
 This is how the built-in tools work in direct mode and the gateway. In the
 Python API, an agent with a workspace root keeps the file tools inside a
 directory and starts `shell_exec` and `python_exec` there (see
@@ -80,6 +88,12 @@ melo --mcp-config mcp.json "What time is it in Tokyo?"
 The server's tools are registered as `mcp__time__<tool>`. To see them, add
 `--output-format json` and read `config.tools`. To use only the MCP tools,
 add `--mcp-only`.
+
+A server does not inherit melo's environment: it gets `PATH`, `HOME`,
+`USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, every `LC_*` variable and
+`TMPDIR`, plus the `env` of its config entry, and nothing else. An API key
+in melo's environment reaches no server; a server that needs one must be
+given the literal value in its `env`.
 
 ### MCP config file
 
@@ -276,6 +290,12 @@ Direct mode and the gateway never set a workspace root.
   code on a pipe (never in argv) and then points fd 0 at `/dev/null`, so
   `input()` gets EOF and neither reads the terminal melo runs in. These two
   tools are not fenced: they can reach any path.
+- **Environment.** The child of `shell_exec` and `python_exec` does not
+  inherit melo's environment: it gets `PATH`, `HOME`, `USER`, `LOGNAME`,
+  `SHELL`, `TERM`, `LANG`, every `LC_*` variable and `TMPDIR`, plus
+  `AgentOptions(tool_env={...})`. Direct mode and the interactive UI pass
+  nothing else; the Python API can pass any variable in `tool_env`. An MCP
+  server gets the same base environment plus its `env`.
 - **Exit status.** A `shell_exec` command that exits with a non-zero status
   starts its text with the line `[exit code <n>]` (`-<signal>` for a command
   that a signal ended), and the call still succeeds. The line comes first,

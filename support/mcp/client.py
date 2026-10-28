@@ -7,13 +7,13 @@ other server-to-client requests (sampling, roots, elicitation). A
 cancelled request (for example by the executor's timeout) is announced
 with ``notifications/cancelled``.
 
-The server runs as a child process with a minimal environment: the
-variables named in ``DEFAULT_ENV_VARS`` that are set in this process
-(``PATH``, ``HOME``, user, shell, terminal, locale and ``TMPDIR``), then
-the server's configured ``env`` on top, as literal values. Nothing else
-is inherited, so API keys and other secrets in the agent's environment
-do not reach MCP servers; a server that needs another variable must
-list it in its ``env``.
+The server runs as a child process with a minimal environment
+(:func:`localmelo.melo.executor.env.child_env`, the one the built-in tools
+give their children too): ``PATH``, ``HOME``, user, shell, terminal,
+locale and ``TMPDIR``, then the server's configured ``env`` on top, as
+literal values. Nothing else is inherited, so API keys and other secrets
+in the agent's environment do not reach MCP servers; a server that needs
+another variable must list it in its ``env``.
 
 On POSIX the server runs in a session of its own. If it has not exited
 within the grace period after its stdin closes, close() signals its
@@ -41,6 +41,7 @@ from localmelo.melo.checker.validators import (
     MAX_IMAGES_PER_RESULT,
     MAX_OUTPUT_LEN,
 )
+from localmelo.melo.executor.env import child_env
 from localmelo.support.mcp.config import McpServerConfig
 
 logger = logging.getLogger(__name__)
@@ -78,22 +79,6 @@ EXIT_WAIT_S = 1.0
 GROUP_POLL_S = 0.05
 
 METHOD_NOT_FOUND = -32601
-
-# Variables a server inherits from this process: the official MCP SDK's
-# POSIX defaults plus the locale and TMPDIR. Anything else must be set in
-# the server's ``env``.
-DEFAULT_ENV_VARS = (
-    "HOME",
-    "LOGNAME",
-    "PATH",
-    "SHELL",
-    "TERM",
-    "USER",
-    "LANG",
-    "LC_ALL",
-    "LC_CTYPE",
-    "TMPDIR",
-)
 
 
 class McpError(Exception):
@@ -184,8 +169,7 @@ class StdioMcpClient:
             )
         if self._proc is not None:
             return
-        env = {k: os.environ[k] for k in DEFAULT_ENV_VARS if k in os.environ}
-        env.update(self.config.env)
+        env = child_env(self.config.env)
         try:
             self._proc = await asyncio.create_subprocess_exec(
                 self.config.command,
