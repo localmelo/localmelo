@@ -30,6 +30,7 @@ class WorkerRecord:
     status: str | None
     steps: Any
     tokens: int | None
+    duration_s: float | None
 
 
 def _total_tokens(meta: dict[str, Any], result: dict[str, Any]) -> int | None:
@@ -147,6 +148,14 @@ class WorkerReader(SessionStore):
                 if not isinstance(result, dict):
                     result = {}
                 meta = info.meta
+                duration = result.get("duration_s")
+                if (
+                    isinstance(duration, bool)
+                    or not isinstance(duration, (float, int))
+                    or not math.isfinite(duration)
+                    or duration < 0
+                ):
+                    duration = None
                 records.append(
                     WorkerRecord(
                         info=info,
@@ -158,6 +167,7 @@ class WorkerReader(SessionStore):
                         ),
                         steps=meta.get("steps", result.get("steps")),
                         tokens=_total_tokens(meta, result),
+                        duration_s=duration,
                     )
                 )
             return records
