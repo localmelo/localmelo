@@ -438,7 +438,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   token after `Bearer` and a one-time code next to its keyword. The run and
   the model keep the text: working memory, the requests a run sends, its
   events and its `result` are unchanged, and the stored images stay
-  references ([#NN]).
+  references ([#83]).
 - On `localhost` or a loopback IP address, the gateway refuses requests that
   are not addressed to it, before any route runs. A `Host` other than
   `127.0.0.1`, `localhost` or `[::1]` with the gateway's port gets HTTP 421
@@ -509,3 +509,4 @@ earlier milestones.
 [#79]: https://github.com/localmelo/localmelo/pull/79
 [#80]: https://github.com/localmelo/localmelo/pull/80
 [#81]: https://github.com/localmelo/localmelo/pull/81
+[#83]: https://github.com/localmelo/localmelo/pull/83
