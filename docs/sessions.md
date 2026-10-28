@@ -92,6 +92,15 @@ resumed 1 turn(s)
 - **`title`**, on `run_turn` and `start_turn`, is the text the person typed.
   A session's first turn sets its title from it, else from the turn's text,
   so a message with an attached file still gets a short title.
+- **`routine`**, on `run_turn` and `start_turn`, names the run's procedural
+  routine ([`run_task`'s `routine=`](python-api.md#follow-a-run-with-events));
+  it is passed to the run only when given.
+- **Progress.** A runner built with `progress=True` asks each turn's run
+  for [`run.progress`](events.md#runprogress) events: they are stored with
+  the turn and reach `on_event` like the rest. The flag stays on the
+  runner, `replace_agent` included, so every later turn asks too. Without
+  it a session turn reports none, as before; the interactive UI does not
+  ask yet.
 - **Listeners.** `turn.started` and `turn.finished` are the store's own
   events, not the run's, and so is an `approval.resolved` that a turn's end
   writes for a request whose answer was not stored: `store.add_listener(fn)`
@@ -110,6 +119,7 @@ resumed 1 turn(s)
 | `on_event` | `None` | Called with each event of a turn's run, and with its `approval.*` events, once it is committed, as a `StoredEvent` with its id (`None` for an event the store could not record). It may return an awaitable, which is awaited for at most 5 seconds. |
 | `holder` | this process | The lease holder, `"<host>:<pid>:<suffix>"`. |
 | `resume_mode` | `"pairs"` | How [`resume()`](#resume) loads a conversation: `"pairs"` or `"window"`. |
+| `progress` | `False` | Ask each turn's run for [`run.progress`](events.md#runprogress) events; kept on the runner, `replace_agent` included. |
 
 ## The two files
 

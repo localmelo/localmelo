@@ -33,9 +33,12 @@ from localmelo.support.progress_line import (
     ProgressLine,
     RunningTool,
     format_line,
+    format_past,
 )
 
 WIDE = 400
+
+ITEMS_TEXT = "Read test_parser.py ✓ · Edit parser.py + pytest (×2) ◐ · git commit"
 
 LIMITS = {
     "max_steps": 30,
@@ -439,6 +442,103 @@ def test_every_payload_is_read_afresh() -> None:
     # Facts at level 1, then a payload without them: nothing is kept.
     assert "last time" in line(level1())
     assert line(level0(tests=None, phase=None)) == "step 4 · 1m03s"
+
+
+# ── format_past: the past facts and items alone ─────────────────────────────
+
+
+def past_tail(data: Mapping[str, Any], *, width: int = WIDE) -> str:
+    """format_past, checked to be a whole tail of format_line, and returned."""
+    text = line(data, width=width)
+    tail = format_past(data, width)
+    assert tail
+    assert text.endswith(tail), (text, tail)
+    start = len(text) - len(tail)
+    assert start == 0 or text[:start].endswith(pl.SEPARATOR), (text, tail)
+    return tail
+
+
+def test_format_past_after_one_past_run_with_items() -> None:
+    assert past_tail(level1()) == f"last time 6 steps, 2m10s: {ITEMS_TEXT}"
+
+
+def test_format_past_after_one_past_run_without_items() -> None:
+    assert past_tail(level1(items=None)) == "last time 6 steps, 2m10s"
+    assert past_tail(level1(items=[])) == "last time 6 steps, 2m10s"
+
+
+def test_format_past_after_several_past_runs() -> None:
+    assert past_tail(level1(past=dict(THREE_PAST_RUNS))) == (
+        f"past 5-8 steps, 2-3 min · last time: {ITEMS_TEXT}"
+    )
+
+
+def test_format_past_of_a_similar_match() -> None:
+    assert past_tail(level1(basis=SIMILAR)) == (
+        f"like Fix the parser tests: 6 steps, 2m10s: {ITEMS_TEXT}"
+    )
+    assert past_tail(level1(basis=SIMILAR, past=dict(THREE_PAST_RUNS))) == (
+        f"like Fix the parser tests: 5-8 steps, 2-3 min · its steps: {ITEMS_TEXT}"
+    )
+    assert past_tail(level1(basis=SIMILAR, past=None)) == (
+        f"like Fix the parser tests: {ITEMS_TEXT}"
+    )
+
+
+def test_format_past_of_a_similar_match_without_a_title() -> None:
+    assert past_tail(level1(basis=_basis("similar"))) == (
+        f"like a similar task: 6 steps, 2m10s: {ITEMS_TEXT}"
+    )
+
+
+def test_format_past_with_items_but_no_past() -> None:
+    assert past_tail(level1(past=None)) == f"last time: {ITEMS_TEXT}"
+
+
+def test_format_past_is_empty_without_facts_or_below_level_1() -> None:
+    assert format_past(level1(items=None, past=None), WIDE) == ""
+    assert format_past(level0(), WIDE) == ""
+    assert format_past(None, WIDE) == ""
+
+
+def test_format_past_drops_past_times_before_items() -> None:
+    data = level1(past=dict(THREE_PAST_RUNS))
+    without_times = f"past 5-8 steps · last time: {ITEMS_TEXT}"
+    assert format_past(data, pl.display_width(without_times)) == without_times
+    without_items = "past 5-8 steps"
+    assert format_past(data, pl.display_width(without_items)) == without_items
+
+
+def test_format_past_keeps_a_single_past_runs_items_in_its_facts() -> None:
+    without_times = f"last time 6 steps: {ITEMS_TEXT}"
+    assert format_past(level1(), pl.display_width(without_times)) == without_times
+
+
+def test_format_past_cuts_with_an_ellipsis() -> None:
+    data = level1()
+    for width in (1, 8, 10, 16):
+        text = format_past(data, width)
+        assert pl.display_width(text) <= width, (width, text)
+        assert text.endswith("…"), (width, text)
+
+
+def test_format_past_never_exceeds_the_width() -> None:
+    data = level1(past=dict(THREE_PAST_RUNS), basis=SIMILAR)
+    for width in range(1, 160):
+        for wide in (False, True):
+            text = format_past(data, width, wide_ambiguous=wide)
+            assert pl.display_width(text, wide_ambiguous=wide) <= width, (width, wide)
+
+
+def test_format_past_counts_wide_characters_in_its_width() -> None:
+    items = [
+        {"label": "读取测试文件.py", "state": "done", "repeat": None},
+        {"label": "编辑 parser.py", "state": "current", "repeat": 2},
+    ]
+    data = level1(items=items, past=dict(THREE_PAST_RUNS))
+    for width in range(1, 120):
+        text = format_past(data, width, wide_ambiguous=True)
+        assert pl.display_width(text, wide_ambiguous=True) <= width
 
 
 # ── Level 2 and off the template (synthetic: level 2 is off) ────────────────
