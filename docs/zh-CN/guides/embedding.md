@@ -29,7 +29,7 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
   -d '{"model": "Qwen3-Embedding-0.6B", "input": "ping"}'
 ```
 
-第二个响应必须包含非空的 `data[0].embedding` 数组。模型列表只能提供候选项：包括 oMLX 和 Ollama 在内的 OpenAI 兼容服务器不会说明哪些 ID 是嵌入模型，因此需要用嵌入请求检查。localmelo 使用相同请求进行探测，绝不会保存没有响应的嵌入模型。
+第二个响应必须包含非空的 `data[0].embedding` 数组。模型列表只能提供候选项：包括 oMLX 和 Ollama 在内的 OpenAI 兼容服务器不会说明哪些 ID 是嵌入模型，因此需要用嵌入请求检查。localmelo 使用相同请求进行探测，绝不会保存对该探测请求没有响应的嵌入模型。
 
 ## Ollama
 
@@ -175,7 +175,7 @@ embedding_model = "nomic-embed-text"
 ## 故障排查
 
 - 嵌入请求返回 **HTTP 404**：服务器不提供该模型 ID。列出模型并使用其中的 ID。
-- 嵌入请求返回 **HTTP 400**：该 ID 是对话模型，而不是嵌入模型。请选择嵌入模型。
+- 嵌入请求返回 **HTTP 400**：该 ID 是对话模型，而不是嵌入模型。请选择嵌入模型，而不是对话模型。
 - **Connection refused**：服务器未在该 URL 上运行，或 URL 有误。
 - **更换模型后召回为空**：旧向量的维度不同，因而被跳过。恢复旧模型，或删除 `long_term.db*` 并让它重新填充。
 
