@@ -100,6 +100,12 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-worker-brief">
+          <h3>Worker briefs and event streams</h3>
+          <p class="update-date">Unreleased</p>
+          <p>Direct workers read a brief and return a versioned JSON result or stream events. Agent construction errors produce a startup result; output failure may prevent a final record. Inbox steering follows separately.</p>
+        </article>
+
         <article class="update-entry" id="u-attach">
           <h3>Attach a text file to a message</h3>
           <p class="update-date">
@@ -107,6 +113,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/155">#155</a>
           </p>
           <p>In the interactive UI, <code>/attach PATH</code> stages one UTF-8 text file from the workspace for the next message; <code>/attachments</code> lists the staged files and <code>/detach N|all</code> removes them. Only regular files within the workspace are accepted (no symlinks, devices, recognized secret files or binary data), at most 8 files, 256 KiB each and 512 KiB in total. Each file is read once into a versioned snapshot saved with the session, so <code>/retry</code> uses the snapshot without reopening the file and <code>/resume</code> replays it where the retained window holds it; a <code>pairs</code> resume can omit an attachment turn when its budget is exceeded, so reattach. Image attachments are not supported, and neither direct mode nor <code>melo ""</code> takes attachments. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#attach-text-files">the interactive UI</a>.</p>
+
         </article>
 
         <article class="update-entry" id="u-stream-release">
