@@ -169,9 +169,17 @@ async def test_pause_resume_restores_user_priority(setup: WorkerSetup) -> None:
     await eventually(lambda: len(FakeRunner.instances) == 1)
     task_id = row["task_id"]
     paused = await workers.update(task_id, state="pause")
-    assert paused["state"] == "parked" and paused["level"] == 5
+    assert paused["state"] == "running" and paused["level"] == 5
+    async with workers.store.component_transaction("test_pending") as conn:
+        pending = await (
+            await conn.execute(
+                "SELECT pause_pending FROM park_priority WHERE task_id = ?", (task_id,)
+            )
+        ).fetchone()
+    assert pending is not None and pending[0] == 1
+    assert not workers._ready[task_id].is_set()
     again = await workers.update(task_id, level=" P5 ")
-    assert again["reason"] == "pause" and again["state"] == "parked"
+    assert again["reason"] == "pause" and again["state"] == "running"
     resumed = await workers.update(task_id, state="resume")
     assert resumed["level"] == 1 and resumed["level_source"] == "user"
     assert resumed["state"] == "running"
@@ -247,7 +255,14 @@ async def test_patch_normalizes_and_refuses_before_workspace_check(
     await eventually(lambda: len(FakeRunner.instances) == 1)
     task_id = row["task_id"]
     paused = await workers.update(task_id, level=" P5 ")
-    assert paused["level"] == 5 and paused["state"] == "parked"
+    assert paused["level"] == 5 and paused["state"] == "running"
+    async with workers.store.component_transaction("test_pending") as conn:
+        pending = await (
+            await conn.execute(
+                "SELECT pause_pending FROM park_priority WHERE task_id = ?", (task_id,)
+            )
+        ).fetchone()
+    assert pending is not None and pending[0] == 1
     assert not workers._ready[task_id].is_set()
     workspace.rmdir()
     for level, state in (
@@ -258,7 +273,8 @@ async def test_patch_normalizes_and_refuses_before_workspace_check(
     ):
         with pytest.raises(ValueError):
             await workers.update(task_id, level=level, state=state)
-        assert (await workers.get(task_id))["state"] == "parked"
+        assert (await workers.get(task_id))["state"] == "running"
+        assert not workers._ready[task_id].is_set()
 
 
 async def test_pause_during_worker_build_does_not_start(
@@ -381,6 +397,70 @@ async def test_sweep_discards_only_deleted_rows(setup: WorkerSetup) -> None:
     assert await workers.store.delete_session(task_id)
     await workers.store.apply_retention()
     assert all(t.task_id != task_id for t in workers.gate.registered_tasks)
+
+
+async def test_pause_parks_held_worker_and_resume_uses_card(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    cfg = Config()
+    cfg.gateway.workspace = str(workspace)
+    store = SessionStore(tmp_path / "data" / "sessions.db", writer="gateway")
+    await store.open()
+    gate = ChatGate(policy="off", lock_gate="wait")
+    gate.set_machine(Machine(lock="foreign"))
+    hub = SessionHub(store)
+    calls: list[list[Message]] = []
+
+    class LLM(BaseLLMProvider):
+        async def chat(
+            self, messages: list[Message], tools: list[ToolDef] | None = None
+        ) -> Message:
+            calls.append(messages)
+            return Message(role="assistant", content="done")
+
+        async def close(self) -> None:
+            pass
+
+    async def build(**kwargs: Any) -> Agent:
+        agent = Agent(
+            llm=kwargs["wrap_llm"](LLM()),
+            options=session_options(kwargs["options"], kwargs["workspace"]),
+        )
+        await agent.start()
+        return agent
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.build_session_agent", build)
+    workers = TaskWorkers(store, gate, lambda: cfg, hub)
+    await workers.open()
+    try:
+        row, _ = await workers.create({"prompt": "hello", "workspace": str(workspace)})
+        task_id = row["task_id"]
+        await eventually(lambda: gate.held(task_id) == "Reservation")
+        turn = workers._runners[task_id].current_turn
+        assert turn is not None
+        calls_for_task = [
+            c for c in gate._calls.values() if c.meta.session_id == task_id
+        ]
+        assert len(calls_for_task) == 1 and calls_for_task[0].turn_id == turn.id
+        await workers.update(task_id, state="pause")
+        await eventually(lambda: task_id not in workers._runs)
+        parked = await workers.get(task_id)
+        assert parked["state"] == "parked" and parked["card"]
+        assert not calls
+        types = [event.event["type"] for event in await store.list_events(task_id)]
+        assert "sched.held" in types
+        gate.set_machine(Machine(lock="none"))
+        await workers.update(task_id, state="resume")
+        await eventually(lambda: bool(calls))
+        assert any(parked["card"] in msg.content for msg in calls[0])
+    finally:
+        await workers.aclose()
+        await hub.aclose()
+        await gate.close()
+        await store.aclose()
 
 
 async def test_blocked_gate_cancel_real_runner(
