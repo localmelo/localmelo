@@ -47,8 +47,9 @@ cause `shutdown`.
 S3a.2 task workers use that same gate for model and embedding calls, with
 memory off and gateway tools (no `shell_exec`). Up to four workers can be
 resident; a paused running worker can still occupy a slot. Task rows survive
-restart, but startup marks surviving nonterminal tasks failed with the reason
-`gateway restarted; recovery arrives in S3b`. Full recovery, deadlines and worker
+restart; startup interrupts uncertain work and preserves proved-never-started
+queued tasks, with Stop available while ordinary creation remains unproved.
+Full recovery, deadlines and worker
 accounting are deferred. Workspace validation also runs before a worker starts
 or resumes; a no-longer-valid folder fails the task rather than running it.
 Pause waits for the next model call: running tools finish, and an answered
