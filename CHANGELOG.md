@@ -13,7 +13,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and a jump-to-approval control; failure and stopped states with retry,
   continuation when eligible, copy-error and details; older-turn paging;
   revision-checked connection settings; and per-tab outbox recovery. Session
-  update events also carry a display-safe workspace label. ([#NN])
+  update events also carry a display-safe workspace label. ([#122])
 - A documentation inventory, bilingual style guide and experimental offline
   preview builder lay the groundwork for a later site migration; published
   pages and existing URLs are unchanged ([#121]).
@@ -886,3 +886,4 @@ earlier milestones.
 [#119]: https://github.com/localmelo/localmelo/pull/119
 [#120]: https://github.com/localmelo/localmelo/pull/120
 [#121]: https://github.com/localmelo/localmelo/pull/121
+[#122]: https://github.com/localmelo/localmelo/pull/122
