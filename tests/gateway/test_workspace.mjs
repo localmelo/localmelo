@@ -1820,7 +1820,9 @@ test('a stream paused on a deleted chat starts a new one instead of reopening', 
 test('worker detail is read-only and isolates the chat draft and stream', async () => {
   const h = harness(baseRoutes({
     'GET /sessions/w': {session: session('w', {kind: 'worker', title: 'Worker', source: 'dsh', status: 'running', steps: 0, tokens: null})},
-    'GET /sessions/w/turns?limit=50&events=true': {turns: [turnRow({user_text: 'Worker brief', answer: 'Worker answer', events: []})], has_earlier: false},
+    'GET /sessions/w/turns?limit=50&events=true': {turns: [turnRow({user_text: 'Worker brief', answer: 'Worker answer', events: [
+      {id: 1, turn: 1, type: 'approval.requested', data: {request_id: 'old', call_id: 'call', tool_name: 'file_write'}},
+    ]})], has_earlier: false},
   }));
   await h.run('init()');
   const stream = h.stream();
@@ -1835,6 +1837,8 @@ test('worker detail is read-only and isolates the chat draft and stream', async 
   assert.match(h.text('worker-panel'), /Worker brief/);
   assert.match(h.text('worker-panel'), /Not recorded/);
   assert.match(h.text('worker-panel'), /does not update live/);
+  assert.equal(findNode(h.element('worker-panel'), (node) => node.classList.contains('approval-card')), null);
+  assert.equal(findNode(h.element('worker-panel'), (node) => node.classList.contains('live-row')), null);
   await h.run('send()');
   await h.run('stop()');
   h.run('presence(true)');
