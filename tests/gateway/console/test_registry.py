@@ -379,6 +379,31 @@ async def test_a_session_without_a_workspace_gets_the_default(
     assert workspace != str(default)
 
 
+async def test_configured_gateway_workspace_is_used_by_create_and_open(
+    console: Console, builder: FakeBuilder, home: Path
+) -> None:
+    configured = home / "configured-ws"
+    console.cfg.gateway.workspace = "~/configured-ws"
+
+    created, _ = await console.sessions.create(None)
+    created_info = await console.store.get_session(created.session_id)
+    assert created_info is not None
+    assert created_info.workspace == str(configured.resolve())
+    assert configured.is_dir()
+
+    updated = home / "updated-ws"
+    console.cfg.gateway.workspace = str(updated)
+    turn = await console.store.begin_turn(
+        None, "hello", holder="h:1:x", new_session=NewSession()
+    )
+    entry = await open_session(console.sessions, turn.session_id)
+    assert entry.agent is not None
+    opened_info = await console.store.get_session(turn.session_id)
+    assert opened_info is not None
+    assert opened_info.workspace == str(updated.resolve())
+    assert updated.is_dir()
+
+
 async def test_a_create_in_flight_at_shutdown_registers_nothing(
     console: Console, builder: FakeBuilder, tmp_path: Path
 ) -> None:
