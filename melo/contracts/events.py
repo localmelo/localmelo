@@ -121,6 +121,7 @@ EVENT_FIELDS: Final[Mapping[str, frozenset[str]]] = MappingProxyType(
                 "input_limit",
                 "over_limit",
                 "image_allowance",
+                "pruned",
             }
         ),
         "run.finished": frozenset({"result"}),
