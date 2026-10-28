@@ -9,6 +9,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- `--workspace DIR` in direct mode: a task run keeps its file tools inside
+  the folder and starts `shell_exec` and `python_exec` there. Without the
+  flag a run keeps the current folder, exactly as before; `~` is expanded
+  and the path is resolved like the interactive UI's. `melo ""` and
+  `--serve` refuse it, and a path that is not a folder exits 2 with one
+  line ([#98]).
 - R6-lite's typed long-term store: `long_term.db` migrates in place to
   `user_version` 1 with `kind`, `source`, `status`, `admitted_by`,
   provenance, task/session ids, links and uses beside the text and vector,

@@ -16,7 +16,9 @@ We never import localmelo.support.gateway at module level.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
+from pathlib import Path
 from typing import Any
 from unittest import mock
 
@@ -312,6 +314,25 @@ class TestDirectMode:
             main()
 
         agent.run_task.assert_called_once_with("do the thing")
+
+    def test_workspace_reaches_the_agent_options(self, tmp_path: Path) -> None:
+        """melo --workspace DIR "hello" runs in DIR."""
+        agent = _mock_agent("done")
+
+        with (
+            mock.patch("localmelo.__main__._register_backends"),
+            mock.patch(
+                "localmelo.__main__._build_direct_mode_agent", return_value=agent
+            ) as build,
+            mock.patch("sys.argv", ["melo", "--workspace", str(tmp_path), "hello"]),
+            mock.patch("builtins.print"),
+        ):
+            from localmelo.__main__ import main
+
+            main()
+
+        options = build.call_args.kwargs["options"]
+        assert options.workspace_root == os.path.realpath(tmp_path)
 
 
 class TestBuildDirectModeAgent:

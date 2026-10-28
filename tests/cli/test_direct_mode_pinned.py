@@ -11,8 +11,10 @@ functions again; R5's seven retrieval flags change them a third time, and its
 review fixes moved the effective-recall check in ``_build_direct_mode_agent``
 after a replay-requiring backend converts ``compress`` to ``compress+replay``,
 so that combination is a usage error, not a traceback. R6-lite's two memory
-flags and their config fallback change them a fourth. The other pinned
-functions are unchanged. ``_check_args``,
+flags and their config fallback change them a fourth. P5 moved ``--workspace``
+into direct mode, so ``_direct_options`` resolves and checks the folder and
+sets ``workspace_root``; it has a new hash. The other pinned functions are
+unchanged. ``_check_args``,
 which carries the refusals, is not pinned.
 """
 
@@ -40,7 +42,7 @@ PINNED = {
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
-    "_direct_options": "c546e706ebd11ed4a8e6558ea91c21ff8d24aff7e1d32c401ff077e807f79619",
+    "_direct_options": "8dfc68c99329cdfcd18f490be57160210143efa2402bfde409a1bc64e4c53b59",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",
     "_enable_line_editing": "dbabe09864704ee4e435380ce32e19234ce0a3cafb072a7cc39cf053a9904b07",
