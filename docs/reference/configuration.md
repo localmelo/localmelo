@@ -210,6 +210,31 @@ retry policy. Events and JSON results report the estimate, actual prompt count i
 pruning counts without storing prompt text. The output reserve is not a provider generation cap;
 the independent character guard still applies.
 
+`[agent] fixed_prefix = true` opts direct, interactive and API v2 console runs into
+`fixed-prefix-v1`; `--fixed-prefix on|off` overrides it for a direct or interactive
+run. It snapshots the local date and UTC offset at each run's start, including across
+midnight, and places changing recall and reflections in labelled user-side data.
+An explicit end delimiter leaves the task and reflection request outside that data;
+data lines starting with that delimiter are deterministically quoted.
+`all` freezes sorted tool definitions for that run; `retrieve` keeps selecting tools
+as before. The JSON result's `prefix_cache.schema_changes` counts changes to the
+offered planning schemas within the run, not actual cache misses; an optional
+`reported_cached_tokens` is the server-reported total for planning and reflection responses only. Providers
+may not report caching, and byte-stable prefixes do not guarantee a cache hit.
+The legacy `/v1` API and the default-off request bytes remain unchanged.
+
+Opt in to separate captured tool history with `[agent] captured_history = true` or
+`--captured-history on`; `off` overrides the setting. The checked preview uses a 50,000-character
+ceiling including truncation and image notices. History stores a distinct, pattern-redacted copy of
+up to 200,000 characters per result (errors first), with exact omitted counts relative to the
+redacted capture. Counts live in `capture_metadata`, not in-band markers in stored text.
+`acquisition_omitted_chars` is null because the tool may already have limited its
+output. Capture is not a complete file or unlimited stdout; redaction is pattern-based and can miss
+secrets. The model's checked preview can still contain raw text; the `Message.tool_result`,
+`tool.finished` event and trace use redacted copies. Existing history retention and permissions
+apply. `Agent.run_tool()` does not write captured history and retains its existing result check.
+The option is off by default.
+
 ## Embedding and long-term memory
 
 Long-term memory needs an embedding backend; see

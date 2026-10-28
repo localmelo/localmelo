@@ -493,6 +493,10 @@ def test_local_links_and_anchors() -> None:
         "docs/guides/sessions.md",
         "docs/guides/gateway.md",
         "docs/guides/web-console.md",
+        "docs/concepts/how-it-works.md",
+        "docs/concepts/memory.md",
+        "docs/concepts/procedures.md",
+        "docs/concepts/retrieval.md",
     ],
 )
 def test_chinese_twin_keeps_anchors_and_examples(source: str) -> None:

@@ -73,7 +73,7 @@ melo: the interactive UI needs a terminal (stdin and stdout must be TTYs).
 | Ctrl+Z | 无操作（此版本的 melo 不会挂起）。 |
 
 - **队列。**一次只能有一条消息等待，显示为 `↳ Queued for the next turn: …`。如果当前轮次以 `completed` 以外的状态结束（停止、失败），消息会返回输入框，不会发送。完全无法运行的轮次所对应的消息（`✗ The turn could not run: …`）也会返回，并排在它前面。
-- **停止。**Esc 立即停止当前轮次；该轮以 `cancelled` 结束并输出 `■ Stopped`。回答输出后，melo 最多花 2 秒记录运行步骤（参见[程序性记忆](../../concepts/procedures.md)（英文））；此时 Esc 不起作用，下一条消息会等待记录完成。
+- **停止。**Esc 立即停止当前轮次；该轮以 `cancelled` 结束并输出 `■ Stopped`。回答输出后，melo 最多花 2 秒记录运行步骤（参见[程序性记忆](../concepts/procedures.md)）；此时 Esc 不起作用，下一条消息会等待记录完成。
 - **历史记录。**消息和命令保存在 `~/.cache/localmelo/cli_history` 中（权限为 0600；超过 1 MB 时保留最新的 1,000 条），文件内容绝不会保存到其中。无法打开该文件时，会话在内存中保留历史记录并提示你。
 
 <a id="commands"></a>
