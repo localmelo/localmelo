@@ -394,6 +394,40 @@ test('the header pill and the bubble show a hold, then Working when it ends', ()
   assert.equal(rows[rows.length - 1].children[1].textContent, 'Working on your request…');
 });
 
+test('a pending send follows the hold without re-selecting the chat', async () => {
+  const run = deferred();
+  const details = [];
+  let held = 'Resources';
+  const h = harness(async path => {
+    if (path === '/sessions')
+      return {sessions: [session('a', {is_busy: true, held, last_active: 2})]};
+    if (path === '/session/a') {
+      details.push(path);
+      return session('a', {is_busy: true, messages: [{role: 'user', content: 'Hi'}]});
+    }
+    if (path.endsWith('/run')) return run.promise;
+    return {};
+  }, {renderMessages: true});
+  h.state.sessions = [session('a')];
+  h.state.activeId = 'a';
+  h.element('input').value = 'Hi';
+  const sending = h.run('send()');
+  assert.equal(h.state.pending.has('a'), true);
+  await h.run('poll()');
+  assert.equal(h.element('connection-label').textContent, 'Waiting: Resources');
+  let rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Waiting: Resources…');
+  assert.deepEqual(details, [], 'The detail is not fetched while the send is pending');
+  held = '';
+  await h.run('poll()');
+  assert.equal(h.element('connection-label').textContent, 'Working');
+  rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Working on your request…');
+  run.resolve({result: 'Done'});
+  await sending;
+  assert.equal(h.state.pending.has('a'), false);
+});
+
 test('presence is throttled to one request per 2.5 seconds', async () => {
   const posts = [];
   const h = harness(async () => ({}));

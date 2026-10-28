@@ -610,17 +610,28 @@ async function poll() {
     const old = new Map(S.sessions.map((s) => [s.session_id, s]));
     S.sessions = data.sessions.map((s) => ({ ...old.get(s.session_id), ...s }));
     renderSessions();
-    if (S.activeId && !S.pending.has(S.activeId)) {
+    if (S.activeId) {
       const summary = active();
       const previous = old.get(S.activeId);
-      if (
+      if (S.pending.has(S.activeId)) {
+        // The send is still awaiting its run, so the detail is not refreshed;
+        // the summary's hold moves the header pill and the message area as the
+        // scheduler reports it (R30).
+        if (
+          summary &&
+          (summary.held !== previous?.held ||
+            summary.is_busy !== previous?.is_busy)
+        )
+          renderMessages();
+      } else if (
         !summary ||
         summary.is_busy ||
         previous?.is_busy ||
         summary.last_active !== S.detailVersions.get(S.activeId) ||
         !summary.messages
-      )
+      ) {
         await refreshSession(S.activeId);
+      }
     }
     syncUI();
   } catch {
