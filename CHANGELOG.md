@@ -24,6 +24,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A turn cancelled before its run reported `run.finished`, such as a SIGHUP
+  during setup, now saves the cancel reason in the stored result, so saved
+  history shows why the turn ended instead of an empty error ([#NN]).
+
 - Prefer same-task episodic digests during recall; gate and cap cross-task
   digests, with an optional cold-start allowance. A digest key includes the
   run's workspace realpath, and a final evidence-less attempt keeps the last
