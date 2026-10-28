@@ -285,10 +285,9 @@ def test_bare_melo_without_a_terminal_exits_2_and_says_why(tmp_path: Path) -> No
 @pytest.mark.parametrize(
     ("argv", "given"),
     [
-        (["--workspace", "/tmp", "task"], "--workspace"),
         (["--yolo", "task"], "--yolo"),
         (["--yolo", ""], "--yolo"),  # `melo ""` is direct mode
-        (["--serve", "--yolo", "--workspace", "/tmp"], "--workspace, --yolo"),
+        (["--serve", "--yolo", "--workspace", "/tmp"], "--yolo"),
         (["--daemon", "status", "--yolo"], "--yolo"),
     ],
 )

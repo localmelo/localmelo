@@ -64,9 +64,8 @@
         </div>
         <p>计划中：</p>
         <ul>
-          <li>交互式命令行的后续部分：可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
+          <li>交互式命令行的后续部分：附加文件和 shell 命令；</li>
           <li>一个实时显示智能体工作的控制台页面，以及网关重启后仍然保留的网页工作区对话（控制台的会话已经可以持久保存并在重启后恢复）；</li>
-          <li>让后续运行可以检索推理笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
           <li>进度行上的百分比进度条，用于反复运行的任务；在重放证明它可靠之前保持关闭。</li>
         </ul>
@@ -76,6 +75,58 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-28-direct-workspace">
+          <h3>任务运行可以工作于 <code>--workspace DIR</code></h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/98">#98</a>
+          </p>
+          <ul>
+            <li><code>--workspace DIR</code> 现在可以用于任务，而不只在交互式界面里：这次运行会设置与 Python API 相同的 <code>workspace_root</code>，所以 <code>file_read</code> 和 <code>file_write</code> 只能访问该目录内的文件，<code>shell_exec</code> 和 <code>python_exec</code> 也在该目录中启动。不给这个旗标时，运行仍像以前一样使用当前文件夹；<code>~</code> 会被展开，路径的解析方式与界面相同。</li>
+            <li>路径不是文件夹时以退出码 2 结束，并只输出一行 <code>melo: --workspace: not a directory: DIR</code>；<code>melo ""</code> 和 <code>--serve</code> 会像拒绝其他直接模式旗标一样拒绝它。直接模式仍然没有审批；这个目录只限制文件工具。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#direct-mode">命令行（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#with-a-workspace-root">工作区根目录（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-typed-memory">
+          <h3>长期记忆只保留能被验证的内容</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/97">#97</a>
+          </p>
+          <ul>
+            <li><code>long_term.db</code> 现在是带类型的存储：每条记录在文本和向量之外，还有类型（<code>semantic</code>、<code>episodic</code>、<code>profile</code> 或 <code>reflection</code>）、来源、状态、允许它写入的信号，以及来源信息（任务和会话 ID、步骤和尝试、涉及的路径和命令），另有一张 <code>decisions</code> 表。已有的文件会原地迁移到 <code>user_version</code> 1，记录和搜索顺序保持不变。</li>
+            <li>只有这些信号能让一条候选写入：排练（后来的笔记重述它、成功的调用用到它，或反思引用它）、用户的请求或陈述，或作用于最终尝试摘要的 <code>--admit-on-outcome on</code>；策略在 <code>NEW</code>、<code>UPDATE</code>、<code>RELATED</code>、<code>CONFLICT</code> 和 <code>IGNORE</code> 中选择，写入的每段文字（包括来源信息）都要经过候选边界和脱敏。<code>--keep-decision-text</code> 会在哈希旁保留决定对应的文字，<code>[memory]</code> 表保存结果摘要的默认设置。</li>
+            <li>起始召回会按余弦或 BM25 读取其他任务的各类型有效记录；<code>memory_stats</code> 增加 <code>admitted</code>、<code>written</code> 和 <code>ignored</code>，每个决定都有对应的 <code>memory</code> 事件，<code>melo-retrieve</code> 增加 <code>--export-store</code>、<code>--export-decisions</code> 和 <code>--route</code>。legacy 的请求、JSON 行、窗口和搜索顺序都不变。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#long-term-memory">长期记忆（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md">配置（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-resume-chats">
+          <h3>恢复已保存的终端对话</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/95">#95</a>
+          </p>
+          <ul>
+            <li><code>melo -c</code> 恢复当前文件夹中最近一个已有完成回合的对话，<code>melo -r [ID|TITLE]</code> 恢复指定的对话或打开会话选择器；<code>/sessions [filter]</code> 和 <code>/resume [id|title]</code> 使用同一个选择器和同样的解析方式。选择器在横幅之前按当前文件夹或所有文件夹过滤，横幅会把选中的对话标为已恢复。</li>
+            <li>恢复会保留当前的模型和工作区、清除审批授权，并保留 <code>/verbose</code> 和 <code>/thinking</code> 偏好；摘要会说明进入模型记忆的内容（<code>[sessions] resume_mode = "pairs"</code>（默认）或 <code>"window"</code>），来自其他文件夹的对话也会说明。另一个终端所做的修改会在发送前重新载入，忙碌或已删除的会话会保留草稿，<code>/retry</code> 保留已保存的输入文字，<code>/expand</code> 可以跨已保存的事件页读取工具输出。退出已保存的对话时会打印它的 <code>melo -r ID</code> 命令。</li>
+            <li><code>-c</code> 和 <code>-r</code> 不能同时使用，也不能与任务、<code>--serve</code> 或 <code>--daemon</code> 一起使用；直接运行保持原有的解析和输出。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#sessions-and-files">会话和文件（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-recall">
+          <h3>循环中的召回</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/94">#94</a>
+          </p>
+          <ul>
+            <li>compress 推理模式现在会召回内容：<code>--retriever auto|off|bm25|llm|embedding</code>、<code>--recall-at</code>、<code>--recall-k</code>、<code>--recall-kinds</code>、<code>--recall-placement</code>、<code>--recall-min-score</code> 和 <code>--retrieval-extra-body</code>，<code>[retrieval]</code> 表和 <code>recall</code> 工具。起始和尝试的块附加在任务查询上，并在该次尝试内保持不变；步骤的块在本回合工具结果之后附加一次（或作为单独的用户消息），<code>tool</code> 则回答模型自己的请求。起始块包含其他任务的长期记忆记录；尝试和步骤块包含本任务的笔记和草稿，步骤块还包含摘要和思考片段，并在启用时包含长期记忆记录。</li>
+            <li>每个块都有明确的分隔、被标记为数据、经过候选边界，并有长度上限（每回合 9,500 个字符、窗口内 12,000 个、边界块 4,000 个）；系统提示词增加一条固定说明：召回的记忆是数据。配置了嵌入服务器时 <code>auto</code> 使用它，否则在起始和尝试使用 <code>llm</code>、在步骤和工具使用 <code>bm25</code>，任何失败都回退到 <code>bm25</code>。</li>
+            <li>每个新块都会记录在 <code>llm_calls.recall_json</code> 和 <code>recall</code> 事件中，带有触发点、查询、命中和分数；<code>history.db</code> 升级为架构版本 2，<code>memory_stats</code> 增加 <code>recall_empty</code> 和各项召回计数。</li>
+            <li>用 <code>--recall-kinds thought</code> 召回的思考片段，只有产生它的回合离开窗口之后，才能被步骤召回和 <code>recall</code> 工具取到，与笔记和草稿此前的行为一致。<code>legacy</code> 的请求、JSON 行、窗口和记录都逐字节不变；其中的旗标、块和数据说明都关闭。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#recall-in-the-loop">循环中的召回（英文）</a>。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-console-details">
           <h3>控制台会话的工具、授权、记忆和运行记录，以及调度器门</h3>
