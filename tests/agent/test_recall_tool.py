@@ -6,6 +6,8 @@ import json
 import sqlite3
 from pathlib import Path
 
+import pytest
+
 from localmelo.melo.agent.agent import RECALL_RUN
 from localmelo.melo.schema import Message, ToolCall
 
@@ -16,6 +18,20 @@ from .test_recall_loop import (
     _entry,
     _options,
 )
+
+
+def _step_calls(path: Path) -> list[dict[str, object]]:
+    connection = sqlite3.connect(path)
+    try:
+        return [
+            json.loads(call)
+            for (call,) in connection.execute(
+                "SELECT tool_call_json FROM steps ORDER BY seq"
+            )
+            if call is not None
+        ]
+    finally:
+        connection.close()
 
 
 def _rows(path: Path) -> list[tuple[str, str | None]]:
@@ -97,10 +113,8 @@ async def test_the_tool_adds_a_steps_row_only_when_it_is_called(
     finally:
         await agent.close()
     assert result.n_tool == 0
-    assert all(
-        kind != "retrieve"
-        for kind, _recall in _rows(tmp_path / "unused" / "history.db")
-    )
+    unused_calls = _step_calls(tmp_path / "unused" / "history.db")
+    assert all(call["tool_name"] != "recall" for call in unused_calls)
 
     used = FakeLLM(
         Message(
@@ -133,6 +147,8 @@ async def test_the_tool_adds_a_steps_row_only_when_it_is_called(
         await agent.close()
     assert result.n_tool == 1
     assert result.steps == 2
+    used_calls = _step_calls(tmp_path / "used" / "history.db")
+    assert sum(call["tool_name"] == "recall" for call in used_calls) == 1
 
 
 async def test_the_tools_k_is_clamped_to_ten() -> None:
@@ -173,3 +189,15 @@ async def test_file_read_and_recall_are_offered_together() -> None:
         await agent.close()
     offered = set(llm.offers[0])
     assert {"file_read", "recall"} <= offered
+
+
+def test_a_recall_builtin_without_the_tool_trigger_is_refused() -> None:
+    with pytest.raises(ValueError, match="recall needs --recall-at tool"):
+        _agent(
+            FakeLLM(),
+            _options(
+                reasoning="compress",
+                retriever="bm25",
+                builtins=frozenset({"recall"}),
+            ),
+        )

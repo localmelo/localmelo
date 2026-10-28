@@ -394,12 +394,17 @@ def retrieval_refusal(
     placement: str = "tool",
     recall_at: Iterable[str] = (),
     mcp_only: bool = False,
+    builtins: frozenset[str] | None = None,
 ) -> str | None:
     """Why this recall configuration cannot run, or ``None``.
 
     *plan* is a :class:`~localmelo.melo.memory.recall.RecallPlan` (or the
-    options' retriever string); only its trigger map is read.
+    options' retriever string); only its trigger map is read. The recall
+    options are inert in ``legacy`` (decision 10), so nothing is refused
+    there; the CLI refuses the flags themselves before this runs.
     """
+    if reasoning == "legacy":
+        return None
     if mode == "embedding" and not has_embedding:
         return "--retriever embedding needs an embedding provider"
     if mode == "embedding" and not memory:
@@ -416,6 +421,8 @@ def retrieval_refusal(
         triggers.update(DEFAULT_TRIGGERS)
     if "tool" in triggers and mcp_only:
         return "--recall-at tool is not available with --mcp-only"
+    if builtins is not None and "recall" in builtins and "tool" not in triggers:
+        return "--builtins recall needs --recall-at tool"
     return None
 
 

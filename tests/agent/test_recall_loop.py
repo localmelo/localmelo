@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections import deque
 from typing import Any
@@ -14,9 +15,9 @@ from localmelo.melo.contracts.providers import (
 from localmelo.melo.memory.notes import (
     RECALL_END,
     RECALL_START,
-    Draft,
     ReasoningNote,
 )
+from localmelo.melo.memory.retrieval.llm import LLMRetriever
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.memory.short.note_store import NoteStoreEntry
 from localmelo.melo.schema import Message, ToolCall, ToolDef
@@ -261,6 +262,35 @@ async def test_message_placement_puts_the_block_in_its_own_user_message() -> Non
     assert any(m.role == "tool" for m in recall_units[0][:-1])
 
 
+async def test_the_empty_reply_nudge_does_not_recall_its_own_new_note() -> None:
+    llm = FakeLLM(
+        Message(
+            role="assistant",
+            content=(
+                "<note>\nplan: the last reply was empty; continue the task\n</note>"
+            ),
+        ),
+        _answer(),
+    )
+    agent = _agent(llm, _options(reasoning="compress", retriever="bm25", max_steps=2))
+    try:
+        result = await agent.run_task("q")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    window = agent.hippo.working.get_window()
+    labels = [m for m in window if m.role == "assistant" and "empty" in m.content]
+    assert labels
+    # The label already carries the note's text, so the step block must not
+    # quote the same note back.
+    assert "plan: the last reply was empty" in labels[0].content
+    nudges = [
+        m for m in window if m.role == "user" and "last reply was empty" in m.content
+    ]
+    assert nudges
+    assert RECALL_START not in nudges[0].content
+
+
 async def test_the_empty_reply_nudge_carries_the_step_block() -> None:
     note = _entry("n1", "plan: the empty reply means the answer is 42 and tests pass")
     llm = FakeLLM(
@@ -347,6 +377,44 @@ async def test_attempt_recall_runs_before_the_digest_and_fills_the_boundary() ->
 # ── the tool ──
 
 
+class SlowLLM(FakeLLM):
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        if tools is None:  # a retrieve request
+            await asyncio.sleep(0.05)
+        return await super().chat(messages, tools)
+
+
+async def test_a_timed_out_llm_recall_falls_back_to_bm25_and_still_blocks() -> None:
+    note = _entry("n0", "plan: the answer is 42 and tests pass")
+    llm = SlowLLM(
+        _call("<note>\nplan: the answer is 42 and tests pass\n</note>"),
+        _answer(),
+    )
+    agent = _agent(llm, _options(reasoning="compress", retriever="llm", max_steps=2))
+    assert agent.load_notes([note]) == 1
+    agent._retrievers["llm"] = LLMRetriever(agent.chat.retrieve, timeout_s=0.01)
+    try:
+        result = await agent.run_task("q")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    assert result.memory_stats is not None
+    assert result.memory_stats["recall_fallbacks"] == 1
+    assert result.memory_stats["retrieve_errors"] == 1
+    log = result.memory_stats["recall_log"]
+    assert log
+    assert log[0]["retriever"] == "bm25"
+    assert log[0]["fallback"] == "timeout"
+    tools = [
+        message
+        for message in agent.hippo.working.get_window()
+        if message.role == "tool"
+    ]
+    assert any("[n0]" in message.content for message in tools)
+
+
 async def test_the_recall_tool_is_offered_and_records_on_the_next_row() -> None:
     note = _entry("n1", "plan: the answer is 42\nfound: tests pass")
     tool_call = Message(
@@ -399,6 +467,109 @@ async def test_the_recall_tool_outside_a_run_answers_one_line() -> None:
     assert "only available inside a run" in result.output
 
 
+async def test_the_recall_tool_does_not_return_a_note_the_window_shows() -> None:
+    llm = FakeLLM(
+        _call("<note>\nplan: the answer is 42 and tests pass\n</note>"),
+        Message(
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(
+                    tool_name="recall",
+                    arguments={"query": "the answer 42 tests"},
+                    id="r1",
+                )
+            ],
+        ),
+        _answer(),
+    )
+    agent = _agent(
+        llm,
+        _options(
+            reasoning="compress",
+            retriever="bm25",
+            recall_at=frozenset({"tool"}),
+            max_steps=3,
+        ),
+    )
+    try:
+        result = await agent.run_task("q")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    tool_results = [
+        message
+        for message in agent.hippo.working.get_window()
+        if message.role == "tool"
+    ]
+    recall_results = [m for m in tool_results if "recall" in m.content]
+    assert recall_results
+    # The only document is the note the window already shows, so the tool
+    # has nothing to add.
+    assert "recall found nothing for that query" in recall_results[0].content
+    assert not any("[n1]" in m.content for m in tool_results)
+
+
+def _shell() -> ToolDef:
+    return ToolDef(
+        name="shell_exec",
+        description="run a command",
+        parameters={
+            "type": "object",
+            "properties": {"command": {"type": "string"}},
+            "required": ["command"],
+        },
+    )
+
+
+async def _run_shell(command: str) -> str:
+    return "ran"
+
+
+async def test_a_tool_arguments_secret_is_redacted_before_the_retrieval_request() -> (
+    None
+):
+    secret = "sk-abcdefghijklmnopqrstuvwxyz"
+    llm = FakeLLM(
+        Message(
+            role="assistant",
+            content=("<note>\nplan: echo the answer and check the output\n</note>"),
+            tool_calls=[ToolCall("shell_exec", {"command": f"echo {secret}"}, "c1")],
+        ),
+        Message(role="assistant", content='{"ids": ["n0"]}'),
+        _answer(),
+    )
+    agent = _agent(llm, _options(reasoning="compress", retriever="llm", max_steps=2))
+    agent.hippo.register_tool(_shell())
+    agent.executor.register("shell_exec", _run_shell)
+    assert (
+        agent.load_notes(
+            [_entry("n0", "plan: echo the answer and check the output for n0")]
+        )
+        == 1
+    )
+    try:
+        result = await agent.run_task("q")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    # A retrieve request is the one sent without tools.
+    retrievals = [
+        request
+        for request, offered in zip(llm.requests, llm.offers, strict=True)
+        if not offered
+    ]
+    assert retrievals
+    for request in retrievals:
+        for message in request:
+            assert secret not in message.content
+    assert "[redacted]" in retrievals[0][-1].content
+    assert result.memory_stats is not None
+    query = result.memory_stats["recall_log"][0]["query"]
+    assert secret not in query
+    assert "[redacted]" in query
+
+
 # ── thought chunks ──
 
 
@@ -441,6 +612,22 @@ async def test_thought_chunks_are_off_by_default_and_capped_at_six() -> None:
 # ── legacy ──
 
 
+async def test_the_recall_options_are_inert_in_a_legacy_agent() -> None:
+    llm = FakeLLM(_answer())
+    # No embedding provider, yet retriever="embedding" must not refuse: the
+    # options are inert in legacy (decision 10).
+    agent = _agent(
+        llm,
+        _options(reasoning="legacy", retriever="embedding", max_steps=1),
+    )
+    try:
+        result = await agent.run_task("q")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    assert not any(RECALL_START in m.content for m in llm.requests[0])
+
+
 async def test_legacy_has_no_data_note_and_no_recall() -> None:
     llm = FakeLLM(_answer())
     agent = Agent(
@@ -472,17 +659,6 @@ def _entry(alias: str, text: str) -> NoteStoreEntry:
     )
 
 
-def _draft_entry(alias: str, text: str) -> NoteStoreEntry:
-    return NoteStoreEntry(
-        alias=alias,
-        kind="draft",
-        text=text,
-        draft=Draft(draft_id=f"d-{alias}", text=text, target="a.py", lines=1),
-        task_id="",
-        created_at=1.0,
-    )
-
-
 async def test_the_current_turns_note_is_not_recalled_again() -> None:
     llm = FakeLLM(
         _call("<note>\nplan: the answer is 42 and tests pass\n</note>"),
@@ -500,15 +676,13 @@ async def test_the_current_turns_note_is_not_recalled_again() -> None:
 async def test_the_pinned_draft_is_not_recalled_while_the_pin_is_shown() -> None:
     draft = "def f():\n    return 42\n"
     first = _call(
-        f"<note>\nplan: write a.py\n</note>\n```python\n{draft}```\n"
-        "I will write a.py.",
+        f"<note>\nplan: write the file\n</note>\n"
+        f"I will write app.py:\n```python\n{draft}```",
         arguments={"text": "a"},
     )
-    if first.tool_calls:
-        first.tool_calls[0].arguments["text"] = "a"
     llm = FakeLLM(
         first,
-        _call("<note>\nplan: check a.py\n</note>", arguments={"text": "b"}),
+        _call("<note>\nplan: check app.py\n</note>", arguments={"text": "b"}),
         _answer(),
     )
     agent = _agent(llm, _options(reasoning="compress", retriever="bm25", max_steps=3))
@@ -519,8 +693,11 @@ async def test_the_pinned_draft_is_not_recalled_while_the_pin_is_shown() -> None
     assert result.status == "completed"
     drafts = [e for e in agent.notes() if e.kind == "draft"]
     assert drafts
+    assert drafts[0].draft is not None and drafts[0].draft.target == "app.py"
     second = llm.requests[1]
-    assert all("[d1]" not in message.content for message in second)
+    # The pin is in request 2, and the step block does not repeat it.
+    assert any("1 draft from step 1" in message.content for message in second)
+    assert sum(message.content.count("[d1]") for message in second) == 1
 
 
 async def test_a_long_entry_is_recalled_once_while_its_block_is_shown() -> None:
