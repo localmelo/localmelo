@@ -71,7 +71,6 @@ class _Mapper:
         self.text = ""
         self.calls: dict[str, tuple[str, int, str | None]] = {}
         self.usage: dict[str, int] = {}
-        self.last_usage: dict[str, int] = {}
         self.final: str | None = None
         self.skipped = 0
         self.tool_count = 0
@@ -193,22 +192,12 @@ class _Mapper:
             self.final = _text(row.get("text"))
         elif kind != "usage":
             self.skipped += 1
-        # dsh's usage in the sampled log is cumulative, including on step
-        # records; emit only its delta, allowing a counter reset.
+        # dsh reports usage per model response, including on status records.
         current = _usage(row.get("usage") if kind != "usage" else row.get("usage", row))
         if current:
-            delta = {
-                k: (
-                    n - self.last_usage.get(k, 0)
-                    if n >= self.last_usage.get(k, 0)
-                    else n
-                )
-                for k, n in current.items()
-            }
-            for k, n in delta.items():
+            for k, n in current.items():
                 self.usage[k] = self.usage.get(k, 0) + n
-            self.last_usage.update(current)
-            self.flush(delta)
+            self.flush(current)
 
     def finish(self) -> dict[str, Any]:
         self.flush()

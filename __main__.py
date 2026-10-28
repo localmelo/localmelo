@@ -1098,7 +1098,19 @@ def _direct_tool_providers(
     parser.exit(EXIT_NOT_COMPLETED, f"{parser.prog}: error: {problem}\n")
 
 
-class _DirectParser(argparse.ArgumentParser):
+class _WorkerFlagParser(argparse.ArgumentParser):
+    """Keep old abbreviations unambiguous; worker options require full names."""
+
+    def _get_option_tuples(self, option_string: str) -> Any:
+        worker = {"--save-session", "--parent-run", "--import-session", "--title"}
+        return [
+            item
+            for item in super()._get_option_tuples(option_string)
+            if item[1] not in worker
+        ]
+
+
+class _DirectParser(_WorkerFlagParser):
     """Probe legacy argv without printing usage or exiting the process."""
 
     validation_error: str | None = None
@@ -1114,7 +1126,7 @@ class _DirectParser(argparse.ArgumentParser):
         raise argparse.ArgumentError(None, message)
 
 
-class _InteractiveParser(argparse.ArgumentParser):
+class _InteractiveParser(_WorkerFlagParser):
     """Report a legacy value error without reinterpreting an abbreviated option."""
 
     validation_error: str | None = None

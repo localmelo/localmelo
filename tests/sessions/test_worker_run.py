@@ -7,8 +7,12 @@ import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
+
+import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.schema import Message
 from localmelo.support.sessions.store import SessionStore
 from localmelo.support.sessions.worker import run_worker
 
@@ -16,7 +20,7 @@ from .helpers import ScriptedLLM, answer, tool_call
 
 
 async def test_worker_run_records_one_redacted_turn(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     secret = "sk-" + "f00dfeed12" * 3
@@ -70,7 +74,7 @@ if (view.turns.length !== 1 || view.turns[0].status !== 'completed') process.exi
 
 
 async def test_saved_and_unsaved_runs_send_the_same_requests(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     options = AgentOptions(workspace_root=str(tmp_path), memory=False)
@@ -84,7 +88,7 @@ async def test_saved_and_unsaved_runs_send_the_same_requests(
     await run_worker(agent, "Do the task", title="", parent_run=None)
     await agent.close()
 
-    def wire(messages):
+    def wire(messages: list[list[Message]]) -> list[list[tuple[Any, ...]]]:
         return [
             [
                 (m.role, m.content, m.tool_calls, m.tool_call_id, m.thinking)
@@ -97,7 +101,7 @@ async def test_saved_and_unsaved_runs_send_the_same_requests(
 
 
 async def test_worker_git_and_url_metadata_are_minimal(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
@@ -139,7 +143,9 @@ async def test_worker_git_and_url_metadata_are_minimal(
     await store.aclose()
 
 
-async def test_sensitive_file_read_is_not_stored(tmp_path: Path, monkeypatch) -> None:
+async def test_sensitive_file_read_is_not_stored(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     (tmp_path / "settings.json").write_text("fixture-private-content")
     llm = ScriptedLLM(
