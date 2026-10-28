@@ -135,6 +135,10 @@ def test_the_parsers_canonicalize_and_refuse_unknown_names() -> None:
         parse_triggers("start,bogus")
     with pytest.raises(ValueError, match="unknown recall kind"):
         parse_kinds("note,bogus")
+    with pytest.raises(ValueError, match="give at least one recall trigger"):
+        parse_triggers("")
+    with pytest.raises(ValueError, match="give at least one recall kind"):
+        parse_kinds(",")
 
 
 # ── The state query ──
@@ -154,6 +158,19 @@ def test_build_step_query_uses_the_checked_note_and_the_calls() -> None:
     assert "pytest" in query
     assert query.count("/work/a.py") == 1
     assert len(query) <= RECALL_QUERY_CHARS
+
+
+def test_build_step_query_includes_what_the_step_found() -> None:
+    # A heuristic note whose plan is only the call form keeps its content in
+    # ``found:``; the query needs it, or bm25 has nothing to rank.
+    query = build_step_query(
+        "plan: read a.py\nfound: the parser module error is in build.log\n"
+        "outcome: ok",
+        [],
+    )
+    assert query.startswith(
+        "read a.py · found: the parser module error is in build.log · outcome: ok"
+    )
 
 
 def test_build_step_query_falls_back_when_the_note_is_empty() -> None:
@@ -247,6 +264,16 @@ def test_docs_from_notes_keeps_only_the_newest_pending_draft() -> None:
         doc.meta["alias"]
         for doc in docs_from_notes(entries, task_id=TASK, one_pending_draft=False)
     } == {"d1", "d2"}
+
+
+def test_docs_from_notes_skips_every_pending_draft_when_the_newest_is_shown() -> None:
+    entries = [
+        _entry("draft", "old", "d1", draft=Draft(target="a.py", lines=1)),
+        _entry("draft", "new", "d2", draft=Draft(target="b.py", lines=2)),
+    ]
+    # The newest pending draft is pinned/shown: the older one must not take
+    # its place in the block (Requirement 7).
+    assert docs_from_notes(entries, task_id=TASK, exclude_aliases={"d2"}) == []
 
 
 def test_docs_from_entries_gets_aliases_origin_ids_and_the_date() -> None:
@@ -406,21 +433,41 @@ def test_the_draft_pointer_line_keeps_the_title() -> None:
 
 
 def test_fit_recall_block_shrinks_in_the_documented_order() -> None:
-    task_hits = [
-        _hit(f"n{index}", "note", "n" * 4_000, rank=index) for index in range(1, 11)
-    ]
-    long_hit = _hit("m1", "long", "m" * 1_000, rank=4, origin="task t-old")
-    kept, block = fit_recall_block(
-        [*task_hits, long_hit],
-        trigger="step",
-        retriever="bm25",
-        ms=1,
-        placement="tool",
-        limit=RECALL_TURN_CHARS,
-    )
-    assert len(block) <= RECALL_TURN_CHARS
-    assert kept
-    assert len(kept) < 11
+    def items() -> list[RecallHit]:
+        return [
+            _hit("n1", "note", "n" * 4_000, rank=1),
+            _hit("d1", "draft", "d" * 6_000, rank=2, title="a.py, 2 lines"),
+            _hit("m1", "long", "m" * 1_000, rank=3, origin="task t-old"),
+        ]
+
+    def fit(limit: int) -> tuple[list[RecallHit], str]:
+        return fit_recall_block(
+            items(),
+            trigger="step",
+            retriever="bm25",
+            ms=1,
+            placement="tool",
+            limit=limit,
+        )
+
+    # (1) The lowest-ranked task hit goes first: the draft and long hit
+    # stay whole once the note is gone.
+    kept, block = fit(7_500)
+    assert [hit.kind for hit in kept] == ["draft", "long"]
+    assert kept[0].omitted is False
+    assert len(block) <= 7_500
+    # (2) The draft becomes a pointer before the long hit is dropped.
+    kept, block = fit(2_000)
+    assert [hit.kind for hit in kept] == ["draft", "long"]
+    assert kept[0].omitted is True
+    assert "[text omitted: over the recall budget]" in block
+    assert len(block) <= 2_000
+    # (3) The long hit is dropped last.
+    kept, block = fit(800)
+    assert [hit.kind for hit in kept] == ["draft"]
+    assert kept[0].omitted is True
+    assert "memory" not in block
+    assert len(block) <= 800
 
 
 def test_fit_recall_block_turns_a_draft_into_a_pointer_bit_by_bit() -> None:
@@ -435,6 +482,15 @@ def test_fit_recall_block_turns_a_draft_into_a_pointer_bit_by_bit() -> None:
     )
     assert len(kept) == 1
     assert kept[0].omitted is True
+    # The block and the record carry the pointer, not the 6,000 characters
+    # the window never saw.
+    assert kept[0].text == ""
+    assert kept[0].chars == 0
+    record = RecallRecord(trigger="step", retriever="bm25", hits=kept, chars=len(block))
+    recorded = record_to_dict(record)["hits"][0]
+    assert recorded["text"] == ""
+    assert recorded["chars"] == 0
+    assert recorded["omitted"] is True
     assert "[text omitted: over the recall budget]" in block
     assert "dddd" not in block
 

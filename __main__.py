@@ -97,8 +97,10 @@ _UI_FLAGS = {"workspace": "--workspace", "yolo": "--yolo"}
 
 # Direct-mode flags the interactive UI refuses: its Agents offer every tool,
 # an approval's wait would count toward a timeout, it has no machine output,
-# it draws its own progress, and it does not wire the reasoning field yet
-# (that one has its own message below; R2b wires it).
+# it draws its own progress, and it does not wire the reasoning field or the
+# retrieval extra body yet (each has its own message below; R2b wires the
+# first, a later change the second). `--keep-decision-text` is an evaluation
+# switch, so the UI never accepts it.
 _UI_REFUSED = (
     "tool_exposure",
     "timeout",
@@ -106,6 +108,7 @@ _UI_REFUSED = (
     "progress",
     "routine",
     "reasoning_field",
+    "retrieval_extra_body",
     "keep_decision_text",
 )
 
@@ -708,6 +711,14 @@ def _json_object(text: str) -> dict[str, Any]:
         raise argparse.ArgumentTypeError(f"not JSON: {exc}") from None
     if not isinstance(value, dict):
         raise argparse.ArgumentTypeError("must be a JSON object")
+    # Validate here, not in the provider: a reserved field is a usage
+    # error (exit 2, one line), never a traceback from OpenAICompatLLM.
+    from localmelo.support.providers.llm._protocol import prepare_extra_body
+
+    try:
+        prepare_extra_body(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
     return value
 
 
@@ -804,6 +815,12 @@ def _check_effective_recall(
         or options.recall_min_score != 0.35
     ):
         parser.error("argument --retriever off: do not give the --recall-* flags")
+    if (
+        options.builtins is not None
+        and "recall" in options.builtins
+        and "tool" not in (options.recall_at or ())
+    ):
+        parser.error("argument --builtins: recall needs --recall-at tool")
     if options.recall_at and "tool" in options.recall_at:
         if getattr(args, "mcp_only", False):
             parser.error("argument --recall-at: tool is not available with --mcp-only")
@@ -876,6 +893,11 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
     if interactive and args.reasoning_field is not None:
         parser.error(
             "--reasoning-field is not in the interactive UI yet; "
+            'give it with a task (melo -- "<task>")'
+        )
+    if interactive and args.retrieval_extra_body is not None:
+        parser.error(
+            "--retrieval-extra-body is not in the interactive UI yet; "
             'give it with a task (melo -- "<task>")'
         )
     # main() joins the words into the query, and an empty one (`melo ""`)
@@ -1150,8 +1172,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--recall-min-score",
         type=_unit_score,
         metavar="F",
-        help="Cosine floor for embedding and long hits, 0-1 (default 0.35; "
-        "inert for bm25 and llm)",
+        help="Cosine floor for the long-term leg and embedding hits, 0-1 "
+        "(default 0.35; inert only for the task-local bm25/llm ranking)",
     )
     direct.add_argument(
         "--admit-on-outcome",
@@ -1181,8 +1203,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "--reflection-gate, --builtins, --memory, --memory-dir, "
         "--request-timeout, --reasoning, --replay-turns, --note-writer, "
         "--retriever, --recall-*, --retrieval-extra-body and the "
-        "--embedding-* options. It refuses --reasoning-field until a later "
-        "release wires it.",
+        "--embedding-* options. It refuses --reasoning-field and "
+        "--retrieval-extra-body until a later release wires them.",
     )
     interactive.add_argument(
         "--workspace",
@@ -1575,8 +1597,6 @@ def _build_direct_mode_agent(
             )
         if not options.memory:
             parser.error("argument --retriever: embedding needs --memory on")
-    _check_effective_recall(parser, args, options)
-
     requires_replay = bool(getattr(section, "requires_reasoning_replay", False))
     if options.reasoning == "compress" and requires_replay:
         # A provider that requires replay runs compress as compress+replay;
@@ -1587,6 +1607,9 @@ def _build_direct_mode_agent(
             replay_turns=None,
             replay_scope="task",
         )
+    # After the conversion above: a recall placement that the effective
+    # mode refuses must be a usage error, not a traceback from Agent.
+    _check_effective_recall(parser, args, options)
 
     # The field only has meaning in replay; legacy keeps the provider's own
     # behavior (OpenAI-compatible sends none) even if the file names one.

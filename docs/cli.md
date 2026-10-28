@@ -455,8 +455,8 @@ These options apply to a task run without `--serve`.
 | `--recall-k N` | `3` | Task-local hits per recall, from 1 to 10 (plus at most 2 long-term hits). |
 | `--recall-kinds LIST` | all but `thought` | A comma list of `note`, `draft`, `thought`, `digest`, `reflection` and `long`. |
 | `--recall-placement tool\|message` | `tool` | Where a step block goes: appended to the last tool result, or in its own user message. `message` is refused in `replay` and `compress+replay`. |
-| `--recall-min-score F` | `0.35` | The cosine floor for embedding hits and long-term hits, from 0 to 1. Inert for `bm25` and `llm`. |
-| `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. It is a provider setting, not a `config` key, and is also accepted in the interactive UI. |
+| `--recall-min-score F` | `0.35` | The cosine floor for embedding and long-term cosine hits, from 0 to 1. It is inert for the task-local `bm25` and `llm` ranking and for a long-term row that only BM25 scored. |
+| `--retrieval-extra-body JSON` | not set | Extra top-level fields for `retrieve` requests only (the `llm` retriever), as a JSON object. It is a provider setting, not a `config` key. The interactive UI refuses it for now, like `--reasoning-field`: use it with a task. |
 | `--admit-on-outcome on\|off` | `off` | R6-lite: at the run's end, admit only the final attempt digest, with the terminal status in its provenance; off writes nothing unless a signal admits something. Accepted and inert in `legacy`, and accepted in the interactive UI. |
 | `--keep-decision-text` | off | R6-lite: also store the checked text of each admission decision; the SHA-256 is always kept. An evaluation switch and refused in the interactive UI. |
 
@@ -467,7 +467,9 @@ These options apply to a task run without `--serve`.
   no effect with `--attempt-policy none`.
 - `--tool-exposure`: see [How tools are offered](tools.md#how-tools-are-offered).
 - `--builtins`: `all`, `none`, or a comma-separated list of `file_read`,
-  `file_write`, `python_exec` and `shell_exec`.
+  `file_write`, `python_exec` and `shell_exec`. `recall` is accepted only
+  with `--recall-at tool`, which registers it; without that trigger it is a
+  usage error.
 - `--mcp-only` needs `--mcp-config` and cannot be combined with `--builtins`
   or `--tool-exposure`. See [Tools and MCP](tools.md#add-tools-from-mcp-servers).
 - `--memory-dir` turns persistence on for this run, whatever the environment
@@ -512,12 +514,14 @@ These options apply to a task run without `--serve`.
   `--replay-turns` applies. `--base-url` runs use these flags and do not
   read the config file.
 - `--retriever`, `--recall-*` and `--retrieval-extra-body`: see
-  [Recall in the loop](memory.md#recall-in-the-loop). They are accepted in
-  the interactive UI and have no effect in `legacy`: every one of them is a
-  usage error there (exit 2, one line), as are `--retriever embedding`
-  without an embedding provider or with `--memory off`, `--recall-placement
-  message` in `replay`/`compress+replay`, `--recall-at tool` with
-  `--mcp-only` or a `--builtins` list without `recall`, and
+  [Recall in the loop](memory.md#recall-in-the-loop). `--retriever` and
+  `--recall-*` are accepted in the interactive UI; `--retrieval-extra-body`
+  is refused there for now. They have no effect in `legacy`: every one of
+  them is a usage error there (exit 2, one line), as are `--retriever
+  embedding` without an embedding provider or with `--memory off`,
+  `--recall-placement message` in `replay`/`compress+replay`, `--recall-at
+  tool` with `--mcp-only` or a `--builtins` list without `recall`,
+  `--builtins recall` without `--recall-at tool`, and
   `--retrieval-extra-body` with an explicit `off`, `bm25` or `embedding`
   retriever. A provided tool named `recall` while the tool is registered is
   a setup error. The arms differ only in these flags:
@@ -656,6 +660,9 @@ These are usage errors:
 - `--reasoning-field` with bare `melo`, whose interactive UI does not apply it
   yet, reported as
   `--reasoning-field is not in the interactive UI yet; give it with a task (melo -- "<task>")`;
+- `--retrieval-extra-body` with bare `melo`, whose interactive UI does not
+  apply it yet, reported as
+  `--retrieval-extra-body is not in the interactive UI yet; give it with a task (melo -- "<task>")`;
 - an MCP config file that cannot be read or is not valid;
 - an invalid `LOCALMELO_THINKING_RETENTION_DAYS`, also with `--serve` or
   `melo ""`, which prints its one `melo: error:` line without the usage

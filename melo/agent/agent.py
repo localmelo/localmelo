@@ -144,7 +144,6 @@ from localmelo.melo.memory.recall import (
     recall_span_chars,
     recall_spans,
     record_to_dict,
-    render_recall_block,
     resolve_plan,
 )
 from localmelo.melo.memory.retrieval import build_retriever
@@ -1067,6 +1066,7 @@ class _RunState:
     recall_fallbacks: int = 0
     recall_skipped: int = 0
     recall_refused: int = 0
+    recall_empty: int = 0
     aux_retrieve_calls: int = 0
     retrieve_errors: int = 0
     retrieve_prompt_tokens: int = 0
@@ -1760,6 +1760,7 @@ class Agent:
             memory=self.options.memory,
             placement=self.options.recall_placement,
             recall_at=self.options.recall_at or (),
+            builtins=self.options.builtins,
         )
 
     def _get_retriever(self, name: str) -> Retriever:
@@ -1888,6 +1889,11 @@ class Agent:
         if name is None:
             return None, "", []
         started = time.perf_counter()
+        # The query can carry a tool call's command or path, so it is a
+        # request path P4 must redact too: before an llm or embedding
+        # retriever sees it (bm25 ranks on the raw text; decision 1).
+        redacted_query, query_spans = redact_secrets(query)
+        search_query = redacted_query if name in ("llm", "embedding") else query
         limit_k = (
             self.options.recall_k if k is None else max(1, min(int(k), RECALL_K_MAX))
         )
@@ -1901,7 +1907,7 @@ class Agent:
                 exclude_aliases=excluded,
                 include_superseded=include_superseded,
             )
-        long_docs = await self._long_docs(query, run)
+        long_docs = await self._long_docs(redacted_query, run)
         if long_docs:
             shown = "\n".join(
                 [*recall_spans(self.hippo.working.get_window()), run.boundary_block]
@@ -1912,6 +1918,7 @@ class Agent:
                 if hit_from_doc(doc, score=0.0, rank=1).text not in shown
             ]
         if not task_docs and not long_docs:
+            run.recall_empty += 1
             return None, "", []
         hits: list[RecallHit] = []
         retriever = name
@@ -1920,9 +1927,11 @@ class Agent:
             docs = [*task_docs, *long_docs]
             long_ids = {doc.doc_id for doc in long_docs}
             result = await self._get_retriever("llm").search(
-                query, docs, k=limit_k + min(len(long_docs), RECALL_LONG_K)
+                search_query,
+                docs,
+                k=limit_k + min(len(long_docs), RECALL_LONG_K),
             )
-            if query.strip():
+            if search_query.strip():
                 run.aux_retrieve_calls += 1
             self._count_retrieve_usage(result, run)
             retriever, fallback = result.retriever, result.fallback
@@ -1930,7 +1939,7 @@ class Agent:
         else:
             if task_docs:
                 result = await self._get_retriever(name).search(
-                    query, task_docs, k=limit_k
+                    search_query, task_docs, k=limit_k
                 )
                 retriever, fallback = result.retriever, result.fallback
                 self._count_retrieve_usage(result, run)
@@ -1950,6 +1959,7 @@ class Agent:
         if trigger == "start":
             hits = [hit for hit in hits if hit.kind == "long"][:RECALL_LONG_K]
         if not hits:
+            run.recall_empty += 1
             return None, "", []
         candidates = len(task_docs) + len(long_docs)
         checked_hits: list[RecallHit] = []
@@ -1980,29 +1990,23 @@ class Agent:
         if limit <= 0:
             run.recall_skipped += 1
             return None, "", []
+        # Fit with the recorded latency, not with 0 and a re-render after:
+        # a block at the exact limit could otherwise grow by a few digits.
+        ms = round((time.perf_counter() - started) * 1000)
         kept, block = fit_recall_block(
             checked_hits,
             trigger=trigger,
             retriever=retriever,
-            ms=0,
+            ms=ms,
             placement=placement,
             limit=limit,
         )
-        ms = round((time.perf_counter() - started) * 1000)
         if not kept or not block:
             run.recall_skipped += 1
             return None, "", []
-        block = render_recall_block(
-            kept,
-            trigger=trigger,
-            retriever=retriever,
-            ms=ms,
-            placement=placement,
-        )
         checked_block = self._check_recall_block(block, run)
         if checked_block is None:
             return None, "", []
-        redacted_query, query_spans = redact_secrets(query)
         run.redactions += query_spans
         record_hits = [
             dataclasses.replace(
@@ -2089,7 +2093,14 @@ class Agent:
         fallback: str,
         exclude: Iterable[str] = (),
     ) -> tuple[str, list[RecallHit]]:
-        """The step trigger's block for the next planning call, and its hits."""
+        """The step trigger's block for the next planning call, and its hits.
+
+        A note from an earlier attempt is ``superseded`` at that attempt's
+        boundary, but its turn can still be evicted from the window, and
+        R5's step trigger is what makes an evicted turn reachable again;
+        step recall therefore ranks superseded notes too. The window's
+        aliases still exclude what the request already shows.
+        """
         if self._plan.step is None:
             return "", []
         note_text = "" if note_entry is None else note_entry.text
@@ -2098,7 +2109,12 @@ class Agent:
             outcome = note_entry.note.outcome
         query = build_step_query(note_text, calls, fallback=fallback, outcome=outcome)
         _record, block, hits = await self._run_recall(
-            "step", query, run, placement=self.options.recall_placement, exclude=exclude
+            "step",
+            query,
+            run,
+            placement=self.options.recall_placement,
+            exclude=exclude,
+            include_superseded=True,
         )
         if block:
             run.pending_shown.update(hit.alias for hit in hits if hit.kind != "long")
@@ -2148,6 +2164,7 @@ class Agent:
             include_superseded=True,
             k=k,
             placement="tool-result",
+            exclude=self.hippo.working.shown_aliases(),
         )
         if not block:
             if run.recall_refused > refused_before:
@@ -4287,7 +4304,10 @@ class Agent:
                     entry,
                     (),
                     fallback=EMPTY_REPLY_LABEL,
-                    exclude={*self.hippo.working.shown_aliases()},
+                    exclude={
+                        *self.hippo.working.shown_aliases(),
+                        *({entry.alias} if entry is not None else set()),
+                    },
                 )
                 if block:
                     nudge = f"{nudge}\n\n{block}"
@@ -5316,6 +5336,7 @@ class Agent:
                 "recall_fallbacks": run.recall_fallbacks,
                 "recall_skipped": run.recall_skipped,
                 "recall_refused": run.recall_refused,
+                "recall_empty": run.recall_empty,
                 "aux_retrieve_calls": run.aux_retrieve_calls,
                 "retrieve_errors": run.retrieve_errors,
                 "retrieve_prompt_tokens": run.retrieve_prompt_tokens,

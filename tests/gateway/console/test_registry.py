@@ -389,11 +389,11 @@ async def test_a_create_in_flight_at_shutdown_registers_nothing(
         """A builder the test holds until the shutdown has run."""
 
         async def __call__(
-            self, settings: Any, workspace: str, mcp_config: str | None
+            self, settings: Any, workspace: str, mcp_config: str | None, session_id: str
         ) -> Any:
             entered.set()
             await release.wait()
-            return await builder(settings, workspace, mcp_config)
+            return await builder(settings, workspace, mcp_config, session_id)
 
     reg = ConsoleSessions(console.store, console.broker, make_cfg, builder=Slow())
     creating = asyncio.create_task(reg.create(str(tmp_path)))

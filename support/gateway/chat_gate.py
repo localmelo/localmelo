@@ -39,6 +39,7 @@ from localmelo.melo.contracts.providers import (
 )
 from localmelo.melo.memory._sqlite import thinking_retention_days
 from localmelo.melo.schema import Message, ToolDef
+from localmelo.support.config import SchedulerConfig
 from localmelo.support.gateway.machine_monitor import canonical_machine_line
 from localmelo.support.scheduler import (
     Call,
@@ -103,6 +104,21 @@ def _trace_source(source: str) -> str:
 # The default directory of the per-run call logs, as a ``~`` string so it
 # resolves when a gate opens one: a test's temporary HOME then applies.
 DEFAULT_CALL_LOG_DIR = "~/.cache/localmelo/scheduler"
+
+
+def call_log_dir(scheduler: SchedulerConfig) -> Path | None:
+    """The scheduler's call-log directory, or ``None`` when the file is off.
+
+    The default is expanded here, not at import, for the same reason: a gate
+    may run under a HOME another one set since, as a test's temporary HOME
+    does. The workspace page and the console both use this one rule.
+    """
+    if not scheduler.call_log:
+        return None
+    if scheduler.call_log_dir:
+        return Path(scheduler.call_log_dir).expanduser()
+    return Path(DEFAULT_CALL_LOG_DIR).expanduser()
+
 
 # A run directory's name: UTC yyyymmddThhmmss, with "-N" on a same-second clash.
 _RUN_DIR = re.compile(r"^\d{8}T\d{6}(?:-\d+)?$")
@@ -924,6 +940,11 @@ class ChatGate:
                 x for x in self._state.recent_admits if x != session_id
             ),
         )
+
+    @property
+    def closed(self) -> bool:
+        """Whether this gate was closed; a closed gate admits without a hold."""
+        return self._closed
 
     async def close(self) -> None:
         """Cancel pending futures and close the log; a second close is a no-op."""

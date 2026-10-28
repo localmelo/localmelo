@@ -23,8 +23,8 @@ tools and memory on your own model server or a cloud API. The website is at
 - [Gateway and HTTP API](gateway.md): the HTTP API, sessions, the web
   workspace, and running the gateway at login on macOS.
 - [API v2](api.md): the web console's `/api`: health, sessions, turns, the
-  event stream, blobs, submission lookups, and the writes that run and
-  approve a turn.
+  event stream, blobs, submission lookups, the writes that run and approve
+  a turn, and its tools, grants, memory and runs.
 - [Memory](memory.md): what localmelo remembers, and how to keep, inspect and
   reset it.
 - [Troubleshooting](troubleshooting.md): error messages and how to fix them.

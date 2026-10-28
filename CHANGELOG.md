@@ -26,7 +26,6 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   bench. Legacy requests, JSON line, window, `tasks`/`steps` and search
   order are unchanged; an existing `long_term.db` migrates with its rows
   intact. ([#NN])
-
 - Recall in the loop: `--retriever auto|off|bm25|llm|embedding`,
   `--recall-at`, `--recall-k`, `--recall-kinds`, `--recall-placement`,
   `--recall-min-score` and `--retrieval-extra-body`, plus the `[retrieval]`
@@ -41,7 +40,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (9,500 per turn, 12,000 live, 4,000 boundary); the system prompt gains
   one static data note. Each block is recorded once in
   `llm_calls.recall_json` with its hits' `origin_task_ids`, and in the
-  `recall` event and `memory_stats.recall_log`. `history.db` is schema
+  `recall` event and `memory_stats.recall_log`. A step's query carries the
+  latest note's plan, what it found and its open questions and outcome, and
+  its candidates include a superseded note whose turn the window no longer
+  shows, so a later attempt's earlier thinking stays reachable.
+  `memory_stats.recall_empty` counts a triggered recall that found nothing.
+  `history.db` is schema
   version 2: a v1 file gains the `recall_json` column in the same
   transaction, and the column is `NULL` in `legacy`. `legacy` keeps its
   requests, JSON line, window and `tasks`/`steps` rows byte-identical; the
@@ -49,6 +53,24 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   recall only when a retriever is named). The JSON line gains
   `config.retriever`/`retriever_effective`/`recall_*` and the recall
   counters ([#NN]).
+- Console session details over API v2, and the scheduler gate in front of
+  a console turn: `GET /api/sessions/{id}/tools` lists each tool's source,
+  whether it asks first and whether the session allows it, `/memory` the
+  conversation the gateway holds (thinking stripped, every text redacted,
+  text cut at 2,000 characters) and `/runs` each finished turn's `RunResult`
+  without its answer, while `DELETE /api/sessions/{id}/grants/{tool}` and `/grants`
+  take a session grant back. Every model call of a console turn now waits
+  for its slot under `[scheduler]`, like a workspace chat's: the console
+  shares the gateway's one `ChatGate` and wraps the Agent's providers
+  with `GatedLLM`/`GatedEmbedding` through `build_session_agent`'s hooks,
+  so the call log records the session's id and `lock_gate = "wait"` holds
+  a turn while a foreign GPU lock is present. A create now makes its
+  session row before it builds the Agent, because the gate needs the id;
+  its key still lands in the create scope, so a client without the id finds
+  it, and a create whose Agent or first turn never came up, or was
+  cancelled, deletes the row it made. Console runners ask each turn for
+  `run.progress`. `/`, the workspace page and every `/v1/*` route are
+  unchanged ([#92]).
 - Console turns over API v2: `POST /api/sessions` (with an optional first
   turn), `POST /api/sessions/{id}/turns`, `/retry` and `/turns/{id}/cancel`,
   the two cancel-by-key routes, `POST /api/approvals/{request_id}`, and
@@ -618,6 +640,7 @@ earlier milestones.
 [#84]: https://github.com/localmelo/localmelo/pull/84
 [#85]: https://github.com/localmelo/localmelo/pull/85
 [#91]: https://github.com/localmelo/localmelo/pull/91
+[#92]: https://github.com/localmelo/localmelo/pull/92
 [#89]: https://github.com/localmelo/localmelo/pull/89
 [#90]: https://github.com/localmelo/localmelo/pull/90
 [#NN]: https://github.com/localmelo/localmelo/pull/NN

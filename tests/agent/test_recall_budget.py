@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from localmelo.melo.agent.agent import _RunState
-from localmelo.melo.memory.notes import RECALL_END, RECALL_START
+from localmelo.melo.memory.notes import RECALL_END
 from localmelo.melo.memory.recall import (
+    RECALL_BOUNDARY_CHARS,
     RECALL_LIVE_CHARS,
     RECALL_TURN_CHARS,
     recall_span_chars,
+    recall_spans,
 )
 from localmelo.melo.schema import Message
 
@@ -40,10 +42,10 @@ async def test_the_boundary_block_fits_four_thousand_characters() -> None:
     finally:
         await agent.close()
     assert result.status == "completed"
-    block = llm.requests[0][1].content
-    assert block.count(RECALL_START) == 1
-    assert block.endswith(RECALL_END)
-    assert len(block) <= 4_100
+    spans = recall_spans(llm.requests[0])
+    assert len(spans) == 1
+    assert spans[0].endswith(RECALL_END)
+    assert len(spans[0]) <= RECALL_BOUNDARY_CHARS
 
 
 async def test_the_live_allowance_stops_a_new_block() -> None:
@@ -129,8 +131,6 @@ async def test_six_thought_chunks_per_task_at_most() -> None:
 
 
 async def test_a_thirty_step_run_stays_inside_every_budget() -> None:
-    from localmelo.melo.memory.notes import RECALL_END, RECALL_START
-
     filler = "the answer is 42 and the tests pass " * 40  # about 1,200 chars
     replies = [
         _call(f"<note>\nplan: {filler}\n</note>", arguments={"text": str(i)})
@@ -162,6 +162,9 @@ async def test_a_thirty_step_run_stays_inside_every_budget() -> None:
     assert recall_span_chars(window) <= RECALL_LIVE_CHARS
     for request in llm.requests:
         assert sum(len(message.content) for message in request) < 100_000
-    blocks = [m.content for m in window if RECALL_START in m.content]
+    blocks = recall_spans(window)
     assert blocks
     assert all(block.endswith(RECALL_END) for block in blocks)
+    # Each block is under the per-turn cap on its own, not only the live
+    # total of all of them.
+    assert all(len(block) <= RECALL_TURN_CHARS for block in blocks)
