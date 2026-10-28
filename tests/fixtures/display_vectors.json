@@ -44,5 +44,39 @@
     ["bell\u0007 nul\u0000 del\u007f", "bell nul del"],
     ["tag󠁁󠁿 end", "tag end"],
     ["\u001b[2K\rprogress 50%\rprogress 100%", "progress 100%"]
+  ],
+  "status_text": [
+    ["completed", "", "Done", "ok", "Done"],
+    ["cancelled", "", "Stopped", "stopped", "Stopped"],
+    ["cancelled", "run", "Stopped", "stopped", "Stopped"],
+    ["failed", "", "Failed", "warn", "A check stopped the run"],
+    ["stuck", "", "Stuck", "warn", "Stopped: the same calls kept repeating"],
+    ["gate_stopped", "", "Stopped after reflection", "warn", "Stopped after reflection"],
+    ["budget_exhausted", "", "Out of steps", "warn", "Ran out of steps"],
+    ["timeout", "", "Timed out", "warn", "Timed out"],
+    ["provider_error", "", "Model server error", "error", "Could not get an answer from the model server"],
+    ["setup_error", "", "Tools failed to start", "error", "Tools could not start"],
+    ["crashed", "", "Crashed", "error", "Something went wrong inside localmelo"],
+    ["crashed", "run", "Crashed", "error", "Something went wrong inside localmelo"],
+    ["crashed", "crash", "Interrupted", "warn", "Interrupted: melo stopped unexpectedly"],
+    ["cancelled", "user_stop", "Stopped", "stopped", "Stopped by you"],
+    ["cancelled", "crash", "Interrupted", "warn", "Interrupted: melo stopped unexpectedly"],
+    ["cancelled", "shutdown", "Interrupted", "warn", "Interrupted: melo stopped before this turn finished"],
+    ["cancelled", "closed", "Stopped", "stopped", "Stopped: the session was closed"],
+    ["cancelled", "takeover", "Stopped", "stopped", "Stopped: another melo window took over this session"],
+    ["cancelled", "park", "Parked", "stopped", "Parked"]
+  ],
+  "approval_tag": [
+    ["success", "none", {"allowed": true, "origin": "user", "remember": false}, "allowed", "Allowed once by you"],
+    ["success", "none", {"allowed": true, "origin": "user", "remember": true}, "allowed for the session", "Allowed by you for this session"],
+    ["success", "none", {"allowed": true, "origin": "session", "remember": false}, "allowed by a session grant", "Allowed by a grant for this session"],
+    ["success", "none", {"allowed": true, "origin": "policy", "remember": false}, "auto-allowed", "Allowed: approvals are set to auto"],
+    ["blocked", "approval_denied", {"allowed": false, "origin": "user", "remember": false, "reason": "keep the\n item first"}, "denied: keep the item first", "Denied by you: keep the item first"],
+    ["blocked", "approval_denied", {"allowed": false, "origin": "user", "remember": false}, "denied", "Denied by you"],
+    ["blocked", "approval_denied", {"allowed": false, "origin": "policy", "remember": false, "reason": "not in the plan"}, "denied by policy: not in the plan", "Denied by the approval policy: not in the plan"],
+    ["blocked", "approval_denied", {"allowed": false, "origin": "policy", "remember": false}, "denied by policy", "Denied by the approval policy"],
+    ["blocked", "approval_denied", {"allowed": false, "origin": "timeout", "remember": false}, "not answered in time", "Not approved in time"],
+    ["blocked", "approval_denied", {"allowed": false, "origin": "error", "remember": false, "reason": "boom"}, "approval failed", "Approval failed; the call did not run"],
+    ["cancelled", "cancelled", {"allowed": false, "origin": "withdrawn", "remember": false}, "not run", "Not run: the turn was stopped"]
   ]
 }

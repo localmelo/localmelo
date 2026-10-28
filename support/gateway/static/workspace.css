@@ -288,6 +288,14 @@ button:hover:not(:disabled) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.machine-chip {
+  max-width: min(480px, 55vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
 .connection-chip {
   display: flex;
   align-items: center;
@@ -298,6 +306,58 @@ button:hover:not(:disabled) {
   padding: 6px 10px;
   font-size: 11px;
   white-space: nowrap;
+}
+.level-picker {
+  position: relative;
+}
+.level-chip {
+  min-width: 40px;
+  padding: 6px 9px;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.level-chip:hover:not(:disabled) {
+  background: var(--soft);
+}
+.level-chip[aria-expanded="true"] {
+  background: var(--soft);
+}
+.level-chip:disabled {
+  opacity: 0.5;
+}
+.level-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 20;
+  min-width: 164px;
+  padding: 5px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  box-shadow: 0 12px 32px rgb(0 0 0 / 14%);
+}
+.level-item {
+  display: block;
+  width: 100%;
+  padding: 7px 9px;
+  background: none;
+  border: 0;
+  border-radius: 6px;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+.level-item:hover {
+  background: var(--soft);
+}
+.level-item[aria-selected="true"] {
+  font-weight: 600;
 }
 .icon-button {
   border: 0;
@@ -892,6 +952,10 @@ dialog::backdrop {
     max-width: 48vw;
   }
   .connection-chip {
+    font-size: 10px;
+  }
+  .machine-chip {
+    max-width: 120px;
     font-size: 10px;
   }
   .scroll {

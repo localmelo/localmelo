@@ -4,8 +4,7 @@ Each test starts ``python -m localmelo`` with HOME and the workspace in a
 temporary folder, a config naming the stub (except the no-config test), a
 100x30 terminal, ``TERM=xterm-256color`` and ``NO_COLOR=1``, and reads what
 it draws. The stub picks its reply by the message typed (its scenarios'
-``match``). SIGHUP and a closed terminal (steps 4 and 5 of the spec) come
-with U2a.2.
+``match``).
 """
 
 from __future__ import annotations
@@ -311,6 +310,38 @@ def test_with_no_config_a_url_is_offered_and_declining_saves_nothing(
 
 
 # ── Review fixes: whatever ends the session, it closes and melo exits ──
+
+
+def test_sighup_during_a_turn_ends_the_process_by_it(
+    melo: Callable[..., Melo], tmp_path: Path
+) -> None:
+    term = melo()
+    term.see("Ask melo")
+    term.type("hold on\r")
+    term.see("esc to stop")
+    term.process.send_signal(signal.SIGHUP)
+    assert term.wait(20) == -signal.SIGHUP
+    assert "Traceback" not in term.text()
+    [turn] = _turns(tmp_path)
+    assert (turn["status"], turn["cause"], turn["error"]) == (
+        "cancelled",
+        "shutdown",
+        "Cancelled by SIGHUP",
+    )
+
+
+def test_a_closed_terminal_master_ends_the_process_by_sighup(
+    melo: Callable[..., Melo], tmp_path: Path
+) -> None:
+    term = melo()
+    term.see("Ask melo")
+    term.type("hold on\r")
+    term.see("esc to stop")
+    term.hang_up()
+    assert term.process.wait(timeout=20) == -signal.SIGHUP
+    [turn] = _turns(tmp_path)
+    assert turn["status"] != "running"
+    assert (turn["status"], turn["cause"]) == ("cancelled", "shutdown")
 
 
 def test_a_closed_terminal_under_nohup_takes_the_hangup_path(

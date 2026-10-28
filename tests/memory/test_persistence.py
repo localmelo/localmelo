@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from localmelo.melo.memory.history.sqlite import SqliteHistory
+from localmelo.melo.memory.long import LongTerm
 from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.memory.tools import ToolIndex, ToolRegistry
 from localmelo.melo.schema import (
@@ -450,3 +451,28 @@ class TestSqliteLongTerm:
         results = await lt.search([1.0, 0.0], top_k=1)
         assert results[0][2] == {"step_id": "abc", "num": 42}
         await lt.aclose()
+
+    @pytest.mark.asyncio
+    async def test_a_vector_from_another_model_is_skipped(self, tmp_path: Path) -> None:
+        """Changing the embedding model degrades recall, it does not raise."""
+        db = tmp_path / "long.db"
+        lt = SqliteLongTerm(db)
+        await lt.add("old model", [1.0, 0.0, 0.0])
+        await lt.add("new model", [1.0, 0.0, 0.0, 0.0])
+        assert await lt.search([1.0, 0.0, 0.0, 0.0], top_k=5) == [
+            ("new model", 1.0, {})
+        ]
+        assert await lt.search([1.0, 0.0, 0.0], top_k=5) == [("old model", 1.0, {})]
+        await lt.aclose()
+
+
+class TestLongTermDimensions:
+    @pytest.mark.asyncio
+    async def test_a_vector_from_another_model_is_skipped(self) -> None:
+        lt = LongTerm()
+        await lt.add("old model", [1.0, 0.0, 0.0])
+        await lt.add("new model", [1.0, 0.0, 0.0, 0.0])
+        assert await lt.search([1.0, 0.0, 0.0, 0.0], top_k=5) == [
+            ("new model", 1.0, {})
+        ]
+        assert await lt.search([1.0, 0.0, 0.0], top_k=5) == [("old model", 1.0, {})]

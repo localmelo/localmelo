@@ -126,7 +126,8 @@ checks, the tool executor, memory, and the interfaces that model providers
 implement. `support/` connects it to the outside: backends and model
 providers, the gateway and its web workspace, MCP servers, configuration and
 the setup wizard. It also holds the `melo-retrieve` command, which compares
-memory retrievers offline, and the scheduler (runs do not use it yet). See
+memory retrievers offline, and the scheduler (the web workspace's chats
+use its gate; direct runs do not). See
 the [architecture page](https://localmelo.github.io/localmelo/en/architecture.html)
 and the
 [project layout](https://github.com/localmelo/localmelo/blob/main/CONTRIBUTING.md#project-layout).

@@ -85,11 +85,39 @@ class AgentConfig:
 
 
 @dataclass
+class SchedulerConfig:
+    """The live gate's settings (S2): off, or one of the two enforcing arms.
+
+    ``n_srv`` is the model server's slot count, ``r_f`` the reserve kept for
+    callers the gate cannot see (the CLI and direct runs) and ``n_fg`` the
+    background cap while a chat is focused. The call log holds one JSONL
+    file per gateway run; an empty ``call_log_dir`` means the default.
+    """
+
+    policy: str = "off"  # off | fcfs | class
+    n_srv: int = 8
+    r_f: int = 1
+    n_fg: int = 1
+    call_log: bool = True
+    call_log_dir: str = ""
+    # The GPU lock and the battery (S2b). An empty path means no lock
+    # reader; the gateway's battery reader is always on. ``record`` only
+    # observes; ``wait`` holds every workspace call while a foreign lock is
+    # present.
+    gpu_lock_file: str = ""
+    lock_self: str = ""
+    lock_gate: str = "record"  # record | wait
+
+
+@dataclass
 class Config:
     chat_backend: str = (
         ""  # mlc | ollama | vllm | sglang | openai | gemini | anthropic | nvidia
     )
     embedding_backend: str = ""  # mlc | ollama | vllm | sglang | none
+
+    # A path to an MCP servers JSON file the CLI and the gateway both read.
+    mcp_config: str = ""
 
     # HTTP timeout of each chat request, in seconds, for every chat backend.
     # None keeps each chat provider's own default (120 s; 300 s for the
@@ -110,6 +138,7 @@ class Config:
 
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
+    scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
     @property
     def is_configured(self) -> bool:
@@ -131,6 +160,7 @@ class Config:
         """Return a list of validation errors. Empty list means valid."""
         errors: list[str] = []
         errors.extend(self._validate_agent())
+        errors.extend(self._validate_scheduler())
 
         # -- chat_backend validation --
         if not self.chat_backend:
@@ -176,6 +206,44 @@ class Config:
                 f"[gateway] port={self.gateway.port} is out of range (1-65535)"
             )
 
+        return errors
+
+    def _validate_scheduler(self) -> list[str]:
+        """``[scheduler]`` values are inside their documented ranges."""
+        scheduler = self.scheduler
+        errors: list[str] = []
+        if scheduler.policy not in ("off", "fcfs", "class"):
+            errors.append(
+                f"[scheduler] policy={scheduler.policy!r} is not one of "
+                "('off', 'fcfs', 'class')"
+            )
+        for name, minimum in (("n_srv", 1), ("r_f", 0), ("n_fg", 0)):
+            value: object = getattr(scheduler, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+                errors.append(
+                    f"[scheduler] {name} must be an integer >= {minimum}, "
+                    f"got {value!r}"
+                )
+        if not isinstance(scheduler.call_log, bool):
+            errors.append(
+                f"[scheduler] call_log must be a boolean, got {scheduler.call_log!r}"
+            )
+        if not isinstance(scheduler.call_log_dir, str):
+            errors.append(
+                "[scheduler] call_log_dir must be a string, "
+                f"got {scheduler.call_log_dir!r}"
+            )
+        if scheduler.lock_gate not in ("record", "wait"):
+            errors.append(
+                f"[scheduler] lock_gate={scheduler.lock_gate!r} is not one of "
+                "('record', 'wait')"
+            )
+        for name in ("gpu_lock_file", "lock_self"):
+            value = getattr(scheduler, name)
+            if not isinstance(value, str):
+                errors.append(f"[scheduler] {name} must be a string, got {value!r}")
+            elif "\x00" in value:
+                errors.append(f"[scheduler] {name} must not contain a NUL byte")
         return errors
 
     def _validate_request_timeout(self) -> list[str]:
@@ -366,8 +434,16 @@ def load() -> Config:
             if hasattr(cfg.agent, k):
                 setattr(cfg.agent, k, v)
 
+    # A [scheduler] that is not a table is ignored, like an unknown key; a
+    # malformed value inside a real table is left for Config.validate.
+    if isinstance(data.get("scheduler"), dict):
+        for k, v in data["scheduler"].items():
+            if hasattr(cfg.scheduler, k):
+                setattr(cfg.scheduler, k, v)
+
     # A bad value is left for Config.validate to report.
     cfg.request_timeout_s = data.get("request_timeout_s")
+    cfg.mcp_config = str(data.get("mcp_config") or "")
 
     return cfg
 
@@ -529,6 +605,8 @@ def save(cfg: Config) -> None:
     # is written, so a config without one is saved as it was before.
     if cfg.request_timeout_s is not None:
         lines.append(f"request_timeout_s = {_toml_value(cfg.request_timeout_s)}")
+    if cfg.mcp_config:
+        lines.append(f"mcp_config = {_toml_string(cfg.mcp_config)}")
     lines.append("")
 
     # Local backend sections
@@ -578,6 +656,23 @@ def save(cfg: Config) -> None:
             lines.append(f"replay_turns = {cfg.agent.replay_turns}")
         if cfg.agent.note_writer != "auto":
             lines.append(f"note_writer = {_toml_string(cfg.agent.note_writer)}")
+        lines.append("")
+
+    # Only a settings section that differs from the defaults is written, so
+    # an existing config is saved exactly as before and a reconfigure keeps
+    # a non-default scheduler (decision D7).
+    scheduler = cfg.scheduler
+    if scheduler != SchedulerConfig():
+        lines.append("[scheduler]")
+        lines.append(f"policy = {_toml_string(scheduler.policy)}")
+        lines.append(f"n_srv = {scheduler.n_srv}")
+        lines.append(f"r_f = {scheduler.r_f}")
+        lines.append(f"n_fg = {scheduler.n_fg}")
+        lines.append(f"call_log = {'true' if scheduler.call_log else 'false'}")
+        lines.append(f"call_log_dir = {_toml_string(scheduler.call_log_dir)}")
+        lines.append(f"gpu_lock_file = {_toml_string(scheduler.gpu_lock_file)}")
+        lines.append(f"lock_self = {_toml_string(scheduler.lock_self)}")
+        lines.append(f"lock_gate = {_toml_string(scheduler.lock_gate)}")
         lines.append("")
 
     # TOML files are UTF-8. Encode before opening the file, so text that

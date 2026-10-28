@@ -692,8 +692,13 @@ class SessionRunner:
             closing = turn.closing or cause == "shutdown"
             delays = () if closing else CLI_FINISH_RETRY_DELAYS_S
         for attempt in range(len(delays) + 1):
+            # The committed turn.finished (and any withdrawn approval), for
+            # the sink: the renderer takes a cancelled turn's cause from it.
+            stored: list[StoredEvent] = []
             try:
-                await self._store.finish_turn(**end)
+                await self._store.finish_turn(**end, on_stored=stored.append)
+                for event in stored:
+                    await self._forward(event)
                 return
             except Exception as exc:
                 final = attempt == len(delays) or _cannot_retry(exc)

@@ -48,17 +48,18 @@ again.
 ## The interactive UI
 
 `melo` without a task, in a terminal, opens a chat that shows its work as
-it happens: each tool call as it finishes, a spinner with the step and the
-time while the model works, and the answer as Markdown. What it prints
-stays in the terminal's scrollback; the input box and a status bar stay at
-the bottom.
+it happens: the model's thinking, each tool call as it finishes, notices
+and reflections, and a live area with the step, the phase, the running
+tool and the run's progress facts while the model works. The answer
+prints as Markdown. What it prints stays in the terminal's scrollback; the
+input box and a status bar stay at the bottom.
 
 ```text
 ╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
 │ model      Qwen3-8B · vLLM · http://127.0.0.1:8000/v1                    │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory (no embedding backend)                    │
+│ memory     no long-term memory · melo --reconfigure adds one             │
 │ session    new                                                           │
 ╰──────────────────────────────────────────────────────────────────────────╯
   / commands · esc stop · ctrl+d quit
@@ -155,6 +156,14 @@ type more letters to narrow them, Tab or Enter to take one.
 |---|---|
 | `/help [command]` | The commands and keys, or one command's details. |
 | `/new` (also `/clear`) | Start a new session: the model forgets the conversation, and session grants end. |
+| `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's summary and whole rationale; without an argument, flips it. |
+| `/thinking [on\|off]` | The thinking excerpt on (the default) or off, leaving only `Thought for 1.2s`; without an argument, flips it. |
+| `/expand [turn.call]` | A tool call's whole output or error: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
+| `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
+| `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). Under `--yolo`, says how to turn prompts on. |
+| `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, files and version. |
+| `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp-config` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
+| `/retry` | Undo the newest turn and run it again. |
 | `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
 | `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default (as `ollama` when the server answers like Ollama, else `vllm`). |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
@@ -196,29 +205,51 @@ type more letters to narrow them, Tab or Enter to take one.
 
 ### A turn's output
 
-- **The spinner** shows what melo does (`Thinking`, `Running`,
-  `Waiting for your approval`), the step (`step 4`, never against
-  `--max-steps`), the attempt from the second one, the time, the output
-  tokens, and `esc to stop`. A running tool shows its own clock under it,
-  and for `shell_exec` and `python_exec` their limit:
-  `└ shell_exec  pytest -q tests · 0:25 of 10:00`.
+- **Approvals show what changes.** A `file_write` over an existing file shows a diff (removed
+  lines in red, added in green, with the counts), and a write too large or not text says why;
+  `/approvals` switches between `ask`, `auto` and `deny`, and the session's grants.
+- **The live area.** The first row names what melo does (`Starting`,
+  `Thinking`, `Running`, `Waiting for your approval`, `Retrying in 4s`,
+  `Reflecting`, `Wrapping up`, `Stopping`), then the run's facts: the step
+  (`step 4`, never against `--max-steps`), the attempt from the second
+  one, the phase with its cycle, the tests seen, and the time; the output
+  tokens and `esc to stop` follow. When the line is narrow the hint goes
+  first, then the tokens, and the facts are cut with `…`. The second row
+  is the running tool, its own clock, and for `shell_exec` and
+  `python_exec` their limit: `└ shell_exec  pytest -q tests · 0:25 of
+  10:00`. On a session's first turn, a third row shows the past runs the
+  progress line would: `last time 6 steps, 2m10s: Run ls ✓ · Read app.py
+  ✓`.
+- **Thinking.** `✻ Thought for 1.2s`, then the first 3 rows of the
+  thinking (40 with `/verbose`, none with `/thinking off`), wrapped to
+  the width. An intermediate message prints as Markdown after `●`; the
+  last one is held, prints at the next step, and at the end only when it
+  differs from the final answer.
 - **Tool calls** print one block each when they finish: `✓` ran, `✗`
   failed, `⊘` blocked or denied, `◌` stopped or not run; the duration;
   `exit N` when a command ran and exited with another code than 0 (`grep`
   exits 1 without failing); how its approval ended; and up to 3 lines of
-  its output, then `… +N lines` (a single line left prints instead).
-  Escape sequences in the output are removed, so a tool cannot move the
-  cursor, set the title or write the clipboard.
+  its output (20 with `/verbose`), then `… +N lines (/expand T.C)` (a
+  single line left prints instead). `/verbose` adds the call's arguments
+  and images print as `▪ image/png · 312 KB · not shown`. Escape
+  sequences in the output are removed, so a tool cannot move the cursor,
+  set the title or write the clipboard.
+- **Notices and reflections.** `↻` marks a retry, with its delay counting
+  down in the live area; `·` an empty reply; `⚠` a stuck or spent-budget
+  notice. A reflection prints as `✻ Reflected after attempt 1: continue ·
+  Read the test before editing. (2.3s)`; `/verbose` adds its summary and
+  whole rationale, and `asked twice` when it was; an unreadable one says
+  whether the run continues.
 - **The answer** prints as Markdown after `●`. A run that did not complete
   prints its best effort, the [status line](#output) and a hint, such as
   `Is the model server running at URL?` for a server that does not answer.
-- Thinking excerpts, retry notices and reflections come in a later release.
 
 ### Approvals
 
-`shell_exec`, `python_exec` and `file_write` run only once you answer. (The
-interactive UI does not load MCP servers yet; in a Python run, an approval
-policy asks about an MCP tool by the same tiers.) The panel takes the place
+`shell_exec`, `python_exec` and `file_write` run only once you answer, and
+so do MCP tools marked for approval. (The interactive UI loads the MCP
+servers of `--mcp-config`, else of the top-level `mcp_config` key; a server
+that fails to start turns MCP off for the session and `/mcp` says why.) The panel takes the place
 of the input box, and your draft stays:
 
 ```text
@@ -304,14 +335,22 @@ for a task.
 ### First run
 
 In a terminal with no config file, `melo` asks for a model server and a
-model, saves them, and opens the UI. Later runs go straight in.
+model, saves them, and opens the UI. When the server lists an embedding
+model, it asks once more whether to use it. Later runs go straight in.
 
 ```text
 $ melo
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
 Model server URL [http://127.0.0.1:8000/v1]:
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
+No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, then melo --reconfigure.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+```
+
+With a server that lists an embedding model too:
+
+```text
+Use nomic-embed-text for long-term memory? [Y/n]:
 ```
 
 - melo looks for a server on this computer with `GET /v1/models` on
@@ -338,10 +377,16 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   Ollama, and chat requests use Ollama's native API with its 300 s timeout.
   Any other OpenAI-compatible server is saved as `chat_backend = "vllm"`
   (the key for any OpenAI-compatible server), with its `[vllm]` table's
-  `chat_url` and `chat_model`. Either way the file gets
-  `embedding_backend = "none"` and its other settings are kept. For
-  embeddings, a cloud API or another backend key, run
-  `melo --reconfigure`.
+  `chat_url` and `chat_model`. The file's other settings are kept.
+- When the server lists an embedding model other than the chosen chat model,
+  melo asks `Use <model> for long-term memory? [Y/n]:`, recommending
+  Qwen3-Embedding first. `y` sends one `POST /v1/embeddings` probe and saves
+  `embedding_backend = "<chat key>"` with that table's `embedding_url` (the
+  chat URL) and `embedding_model`. `n`, a failed probe, or no candidate
+  saves `embedding_backend = "none"` and says why; the no-candidate line
+  names `ollama pull qwen3-embedding:0.6b` for an Ollama server and
+  `Serve Qwen3-Embedding-0.6B on it` otherwise. See
+  [Set up an embedding model](embedding.md).
 - When the server cannot be used, melo says why, as
   `✗ URL: connection refused.`, and asks
   `[r]etry, [s]tart anyway, [q]uit [r]:`. `r` asks for the URL again, with
@@ -397,7 +442,7 @@ These options apply to a task run without `--serve`.
 | `--timeout SECONDS` | not set | End the run with status `timeout` after this many seconds. |
 | `--request-timeout SECONDS` | `120` | How long each chat request may wait for the server. |
 | `--output-format text\|json` | `text` | Print the result as text, or the run record as one JSON line. |
-| `--embedding-base-url URL` | not set | An OpenAI-compatible embedding server for long-term memory. |
+| `--embedding-base-url URL` | not set | An OpenAI-compatible embedding server for long-term memory; see [Set up an embedding model](embedding.md). |
 | `--embedding-model NAME` | `default` | The model to request from the `--embedding-base-url` server. |
 | `--progress auto\|off` | `auto` | Draw a [progress line](#progress-line) on stderr while the task runs: `auto` when stderr is a terminal and the output is text, `off` never. |
 | `--routine NAME` | not set | Learn and recall this task's steps as the routine `NAME`, in any folder and whatever the task's wording. |
@@ -488,10 +533,10 @@ These options apply to `melo` without a task.
   `--reasoning`, `--replay-turns`, `--note-writer` and the
   `--embedding-*` options, for every turn of the session. It accepts
   `compress` and `compress+replay` but draws nothing for the notes yet.
-  The UI does not yet apply `[agent]`; use direct mode for that. `--tool-exposure`
-  (the UI offers every tool), `--timeout`, `--output-format`, `--progress`,
-  `--routine` and `--reasoning-field` are usage errors there, and so, for
-  now, are `--mcp-config` and `--mcp-only`.
+  The UI does not yet apply `[agent]`; use direct mode for that.
+  `--tool-exposure` (the UI offers every tool), `--timeout`,
+  `--output-format`, `--progress`, `--routine` and `--reasoning-field` are
+  usage errors there; `--mcp-config` and `--mcp-only` are accepted.
 - `--workspace` that is not a folder exits with code 2:
   `melo: --workspace: not a directory: DIR`.
 
@@ -543,8 +588,6 @@ These are usage errors:
   `only for direct mode (a query without --serve): --max-steps`; without a
   task, only those the interactive UI cannot use (`--tool-exposure`,
   `--timeout`, `--output-format`, `--progress`, `--routine`);
-- `--mcp-config` or `--mcp-only` without a task, reported as
-  `--mcp-config and --mcp-only are not in the interactive UI yet; give them with a task (melo -- "<task>")`;
 - `--workspace` or `--yolo` with a task, `--serve` or `--daemon`, reported as
   `only for the interactive UI (melo without a query, --serve or --daemon): --yolo`;
 - `--base-url` or `--chat-model` with `--serve` or `--daemon`, reported as

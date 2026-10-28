@@ -232,6 +232,74 @@ def test_pick_model_skips_embedding_and_reranking_models(
     assert pick_model(models) == picked
 
 
+@pytest.mark.parametrize(
+    ("models", "found"),
+    [
+        (
+            [
+                "qwen3:8b",
+                "qwen3-embedding:0.6b",
+                "bge-m3",
+                "bge-base-en-v1.5",
+                "nomic-embed-text",
+                "snowflake-arctic-embed-m",
+                "mxbai-embed-large",
+                "bge-reranker-v2-m3",
+                "Qwen3-8B",
+            ],
+            [
+                "qwen3-embedding:0.6b",
+                "bge-m3",
+                "bge-base-en-v1.5",
+                "nomic-embed-text",
+                "snowflake-arctic-embed-m",
+                "mxbai-embed-large",
+            ],
+        ),
+        ([], []),
+        (
+            ["chat", "e5-large", "gte-base", "chat", "e5-large"],
+            ["e5-large", "gte-base"],
+        ),
+        (["bge-reranker-v2-m3", "Qwen3-Reranker"], []),
+    ],
+)
+def test_embedding_models_names_the_embedding_ids_in_order(
+    models: list[str], found: list[str]
+) -> None:
+    assert discovery.embedding_models(models) == found
+
+
+def test_embedding_detection_is_additive_to_the_chat_rule() -> None:
+    assert discovery.is_embedding_model("bge-m3")
+    # The older rule calls this a chat model; unchanged, so --base-url's
+    # model choice stays byte-identical.
+    assert discovery.is_chat_model("bge-m3")
+    assert not discovery.is_embedding_model("bge-reranker-v2-m3")
+    assert discovery.is_embedding_model("Qwen3-Embedding-0.6B")
+
+
+@pytest.mark.parametrize(
+    ("models", "recommended"),
+    [
+        ([], None),
+        (
+            ["bge-m3", "nomic-embed-text", "Qwen3-Embedding-0.6B"],
+            "Qwen3-Embedding-0.6B",
+        ),
+        (["bge-m3", "nomic-embed-text"], "nomic-embed-text"),
+        (["bge-m3", "bge-base-en-v1.5"], "bge-base-en-v1.5"),
+        (["e5-large", "bge-m3"], "bge-m3"),
+        (["unknown-embed", "e5-large", "bge-m3", "gte-base"], "bge-m3"),
+        (["unknown-embed", "another-embed"], "unknown-embed"),
+    ],
+)
+def test_recommend_embedding_puts_the_named_families_first(
+    models: list[str], recommended: str | None
+) -> None:
+    assert discovery.recommend_embedding(models) == recommended
+
+
 async def test_detection_returns_the_first_url_in_order_that_lists_a_model() -> None:
     lists = {
         "http://127.0.0.1:1/v1/models": None,  # nothing listening

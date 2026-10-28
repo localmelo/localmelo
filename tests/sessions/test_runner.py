@@ -198,9 +198,9 @@ async def test_a_turns_events_are_stored_in_order_with_its_outcome(
     assert turn.run_id == result.task_id
     assert (turn.status, turn.cause, turn.answer) == ("completed", "run", "Buy milk.")
     assert turn.result == result.to_dict()
-    # on_event got every event of the run, with its durable id, once committed;
-    # the store's own turn.started and turn.finished reach its listeners.
-    assert [e.id for e in s.events] == [e.id for e in events[2:-1]]
+    # on_event got every event of the run and the committed turn.finished,
+    # each with its durable id; the store's turn.started reaches its listeners.
+    assert [e.id for e in s.events] == [e.id for e in events[2:]]
     assert all(e.id is not None for e in s.events)
     check_invariants(s.path, "gateway")
     await s.aclose()
@@ -228,7 +228,7 @@ async def test_a_slow_on_event_is_cut_off_and_a_raising_one_logged(
     result = await asyncio.wait_for(s.runner.run_turn("hi"), timeout=5)
     assert loop.time() - began < 1.0  # cut at SINK_TIMEOUT_S, not after 10 s
     assert result.status == "completed"
-    assert "run.finished" in calls and "turn.finished" not in calls  # it is the store's
+    assert "run.finished" in calls and calls[-1] == "turn.finished"
     messages = [r.getMessage() for r in caplog.records]
     assert any("on_event took more than" in m for m in messages)
     assert any("on_event failed" in m for m in messages)
@@ -1553,5 +1553,20 @@ async def test_a_compress_turn_stores_its_digest_in_turns_note(tmp_path: Path) -
         assert notes[0].event["data"]["text"] == note
         # resume() still loads the conversation, not the note.
         assert await s.runner.resume() is not None
+    finally:
+        await s.aclose()
+
+
+async def test_turn_finished_reaches_on_event_after_the_run(tmp_path: Path) -> None:
+    """The committed turn.finished, with its cause, follows run.finished."""
+    s = await setup(tmp_path, [answer("done")])
+    try:
+        await s.runner.run_turn("q")
+        types = types_of(s.events)
+        assert types[-2:] == ["run.finished", "turn.finished"], types
+        forwarded = s.events[-1]
+        assert forwarded.id is not None  # the stored event, not a copy
+        data = forwarded.event["data"]
+        assert (data["status"], data["cause"]) == ("completed", "run")
     finally:
         await s.aclose()
