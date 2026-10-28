@@ -243,6 +243,8 @@ def status_hint(
             "melo judged that another attempt would not help. "
             "Rephrase the request, or /retry."
         )
+    if status == "context_budget_exceeded":
+        return "Reduce the task or increase the configured context window; then /retry."
     if status == "budget_exhausted":
         return (
             "/retry tries again, or quit and run melo -c --max-steps 60 for more steps."
