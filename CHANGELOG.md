@@ -11,7 +11,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - A documentation inventory, bilingual style guide and experimental offline
   preview builder lay the groundwork for a later site migration; published
-  pages and existing URLs are unchanged ([#NN]).
+  pages and existing URLs are unchanged ([#120]).
 - S3a.2 adds `/api/tasks` creation, inspection and control and in-process
   workers sharing the console's scheduler gate. Creation is idempotent with
   `request_key`; workers disable memory, omit `shell_exec`, and have at most
@@ -875,3 +875,4 @@ earlier milestones.
 [#115]: https://github.com/localmelo/localmelo/pull/115
 [#116]: https://github.com/localmelo/localmelo/pull/116
 [#119]: https://github.com/localmelo/localmelo/pull/119
+[#120]: https://github.com/localmelo/localmelo/pull/120
