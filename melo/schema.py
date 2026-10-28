@@ -103,7 +103,7 @@ _THINK_OPENING = re.compile(r"\s*<think>", re.IGNORECASE)
 _THINK_CLOSING = re.compile(r"</think>", re.IGNORECASE)
 
 
-def split_thinking(text: str) -> tuple[str, str]:
+def split_thinking(text: str, *, strip_answer: bool = True) -> tuple[str, str]:
     """Split the reasoning in a ``<think>`` block off *text*: ``(thinking, text)``.
 
     - The first ``<think>...</think>`` block, in any letter case and
@@ -116,7 +116,8 @@ def split_thinking(text: str) -> tuple[str, str]:
       prompt (DeepSeek-R1 and Qwen3 thinking models) leave only the closing
       tag in the reply, and vLLM's R1 reasoning parser reads it the same way.
     - The rest, stripped, is the text. Without a block the result is
-      ``("", text.strip())``.
+      ``("", text.strip())``. With ``strip_answer=False``, preserve the
+      answer's surrounding whitespace, including Markdown code indentation.
 
     The thinking is returned stripped too. Ollama's provider, and an
     OpenAI-compatible server without a reasoning parser, put the reasoning
@@ -125,14 +126,15 @@ def split_thinking(text: str) -> tuple[str, str]:
     block = _THINK_BLOCK.search(text)
     if block is not None:
         rest = text[: block.start()] + text[block.end() :]
-        return block.group(1).strip(), rest.strip()
+        return block.group(1).strip(), rest.strip() if strip_answer else rest
     opening = _THINK_OPENING.match(text)
     if opening is not None:
         return text[opening.end() :].strip(), ""
     closing = _THINK_CLOSING.search(text)
     if closing is not None:
-        return text[: closing.start()].strip(), text[closing.end() :].strip()
-    return "", text.strip()
+        rest = text[closing.end() :]
+        return text[: closing.start()].strip(), rest.strip() if strip_answer else rest
+    return "", text.strip() if strip_answer else text
 
 
 # ── Data types ──
@@ -398,6 +400,9 @@ class LLMCallRecord:
     usage: dict[str, int] | None
     duration_s: float
     timestamp: float
+    # The recall records the request carried for the first time (R5), or
+    # None when it carried no new block. Serialized as ``recall_json``.
+    recall: Any | None = None
 
 
 @dataclass
@@ -528,3 +533,39 @@ class ReflectionDecision:
     repeat_risk: float = 0.0
     novelty: float = 0.0
     feasibility: float = 0.0
+
+
+# ── Long-term memory candidates (R6-lite) ──
+
+
+@dataclass(frozen=True)
+class CandidateItem:
+    """One item of a note or user message: its text and the records behind it."""
+
+    text: str
+    source_ids: tuple[str, ...] = ()
+
+
+@dataclass
+class MemoryCandidate:
+    """One document offered to long-term memory, before the write boundary.
+
+    ``candidate_id`` is the note id for a note and a fresh record id for a
+    user fact; ``items`` carries a note's found/decided items so the policy
+    routes each one, ``()`` routes the whole text. ``entry_id`` and
+    ``processed`` are the staged copy's bookkeeping: an unchanged candidate
+    that was already decided is not written twice.
+    """
+
+    candidate_id: str
+    source: str
+    text: str
+    remember_by: str
+    task_id: str
+    session_id: str = ""
+    provenance: dict[str, Any] = field(default_factory=dict)
+    created_at: float = 0.0
+    remember: bool = False
+    items: tuple[CandidateItem, ...] = ()
+    entry_id: int | None = None
+    processed: bool = False

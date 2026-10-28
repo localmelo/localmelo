@@ -52,8 +52,9 @@ CREATE TABLE IF NOT EXISTS steps (
 logger = logging.getLogger(__name__)
 
 # The history schema this code reads and writes, kept in the file's
-# ``PRAGMA user_version``. Version 0 is a file written before llm_calls.
-HISTORY_SCHEMA_VERSION: Final = 1
+# ``PRAGMA user_version``. Version 0 is a file written before llm_calls;
+# version 2 adds ``llm_calls.recall_json`` (R5).
+HISTORY_SCHEMA_VERSION: Final = 2
 
 # One row per model response (see :meth:`SqliteHistory.add_llm_call`). No
 # foreign key, so no row is ever refused for its task, and no index: the
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS llm_calls (
   step_ids_json TEXT,
   redactions INTEGER NOT NULL DEFAULT 0,
   tool_calls_json TEXT, usage_json TEXT, duration_s REAL, timestamp REAL NOT NULL,
+  recall_json TEXT,
   PRIMARY KEY (task_id, seq));
 """
 
@@ -241,6 +243,10 @@ class SqliteHistory(History):
                     f"localmelo reads version {HISTORY_SCHEMA_VERSION}"
                 )
             await conn.execute(_LLM_CALLS_SCHEMA)
+            async with conn.execute("PRAGMA table_info(llm_calls)") as cur:
+                columns = {row[1] for row in await cur.fetchall()}
+            if "recall_json" not in columns:
+                await conn.execute("ALTER TABLE llm_calls ADD COLUMN recall_json TEXT")
             if version < HISTORY_SCHEMA_VERSION:
                 await conn.execute(f"PRAGMA user_version = {HISTORY_SCHEMA_VERSION}")
                 migrated = True
@@ -409,6 +415,7 @@ class SqliteHistory(History):
                 ]
             )
         usage_json = None if record.usage is None else json.dumps(record.usage)
+        recall_json = None if record.recall is None else json.dumps(record.recall)
 
         async with self._write_lock:
             # BEGIN IMMEDIATE is inside the try, as in add_step.
@@ -418,8 +425,9 @@ class SqliteHistory(History):
                     """INSERT INTO llm_calls
                        (task_id, seq, kind, step, attempt, outcome, content,
                         thinking, reasoning_key, step_ids_json, redactions,
-                        tool_calls_json, usage_json, duration_s, timestamp)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)""",
+                        tool_calls_json, usage_json, duration_s, timestamp,
+                        recall_json)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)""",
                     (
                         record.task_id,
                         record.seq,
@@ -435,6 +443,7 @@ class SqliteHistory(History):
                         usage_json,
                         record.duration_s,
                         record.timestamp,
+                        recall_json,
                     ),
                 )
                 await conn.commit()

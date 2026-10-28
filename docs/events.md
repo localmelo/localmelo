@@ -163,6 +163,7 @@ asyncio.run(main())
 | `tool.started` | Before each tool call goes to the executor, also a call that the checks then refuse. | `step`, `call_id`, `name`, `arguments`, `preview` |
 | `tool.finished` | When that call is done, refused, cancelled or crashed. | `step`, `call_id`, `name`, `status`, `error_category`, `output`, `output_chars`, `error`, `duration_s`, `images`, `approval`, `exit_code` |
 | `notice` | When an attempt ends, the model gave an empty reply, or a model request is retried. | `kind`, `message`, `step`, `attempt`, `detail` |
+| `recall` | When a recall block enters a request: at `start`, `attempt`, `step`, or from the `recall` tool. | `step`, `attempt`, `trigger`, `retriever`, `query`, `hits`, `chars`, `ms`, `fallback`, `placement` |
 | `reflection.started` | Before the reflection that follows an attempt. | `attempt`, `failure_type` |
 | `reflection` | Once the reflection's effect is known. | `attempt`, `action`, `continue_run`, `rationale`, `summary`, `best_effort_result`, `requests`, `readable`, `usage`, `duration_s` |
 | `run.progress` | Only with `progress=True`: right after `run.started`; after each `step.started`, `tool.finished`, `reflection.started` and `stuck` notice; and right before `run.finished`. | `level`, `state`, `step`, `attempt`, `limits`, `phase`, `cycle`, `tests`, `items`, `fraction`, `expected_steps`, `past`, `off_reason`, `basis` |
@@ -293,6 +294,22 @@ The number of `tool.started` events is `RunResult.n_tool`.
 The CLI ignores the event until its plan line lands; the session runner
 stores it, and a turn's last `digest` note goes to the turn's `note` column.
 
+### memory
+
+One event per admission decision, after its store transaction commits.
+
+- `candidate_id`: the note id, or the fresh id of a user fact.
+- `action`: `NEW`, `UPDATE`, `RELATED`, `CONFLICT` or `IGNORE`.
+- `kind`: the entry's kind (`semantic`, `episodic`, `profile`, `reflection`).
+- `admitted_by`: `rehearsal`, `user_request`, `user_statement`, `outcome` or
+  `sleep`.
+- `entry_id`: the new entry's id, or `null` for `IGNORE`.
+
+It carries no text and no ids beyond the entry id; the decision log is the
+audit surface. A boundary refusal emits nothing and counts
+`candidates_refused`. No `memory` event is emitted in `legacy`. The CLI
+ignores it.
+
 ### notice
 
 | `kind` | When | `message` | `detail` |
@@ -303,6 +320,25 @@ stores it, and a turn's last `digest` note goes to the turn's `note` column.
 | `retry` | A model request failed and is sent again after a delay; see [Provider errors and retries](run-results.md#provider-errors-and-retries). | `Model request failed; retrying in <delay> s: <the first 200 characters of the error>` | `{"request_attempt", "delay_s", "status_code"}` |
 
 `step` and `attempt` are those of the latest `step.started`.
+
+### recall
+
+- `step`, `attempt`: the planning step and attempt the block was built in.
+- `trigger`: `start`, `attempt`, `step` or `tool`.
+- `retriever`: the retriever that answered, `bm25` after a fallback.
+- `query`: the state query the retriever ranked, redacted.
+- `hits`: one object per hit, `{doc_id, alias, kind, score, rank,
+  origin_task_ids, chars, omitted}`, without item text. `kind` is `note`,
+  `draft`, `thought`, `digest`, `reflection` or `long`; `origin_task_ids`
+  names the task that produced it; `omitted` is true for a draft turned
+  into a pointer line.
+- `chars`: the block's characters; `ms`: its wall time; `fallback`: `""` or
+  `timeout`, `parse` or `provider_error`; `placement`: `query`, `tool`,
+  `message` or `tool-result`.
+
+The event is additive and the CLI draws nothing for it yet. The same record
+is in `memory_stats.recall_log` and, with its item text, in
+`llm_calls.recall_json`.
 
 ### reflection.started
 

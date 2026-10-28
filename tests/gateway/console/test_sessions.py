@@ -158,12 +158,12 @@ async def test_a_session_with_its_tokens_and_agent_state(
     assert body["tokens"] == 7
 
     entry = await open_session(console.sessions, turn.session_id)
-    entry.policy._granted.add("shell_exec")
-    entry.granted_at["shell_exec"] = 123.0
+    entry.policy._granted.add("python_exec")
+    entry.granted_at["python_exec"] = 123.0
     body = client.get(f"/api/sessions/{turn.session_id}").json()
     assert body["agent"] == "open"
-    assert body["grants"] == ["shell_exec"]
-    assert body["granted_at"] == {"shell_exec": 123.0}
+    assert body["grants"] == ["python_exec"]
+    assert body["granted_at"] == {"python_exec": 123.0}
 
     await console.sessions.keep(turn.session_id)
     body = client.get(f"/api/sessions/{turn.session_id}").json()

@@ -14,7 +14,7 @@ the model's reasoning, code drafts and chunks of its thinking, for a query:
 | `llm` | The chat model picks the documents from a catalog of them. |
 | `embedding` | The cosine similarity of embedding vectors. |
 
-`melo` does not use these retrievers during a run. `melo-retrieve` is
+`melo-retrieve` evaluates these retrievers offline; the compress modes use the same `bm25`, `llm` and `embedding` retrievers in the loop. `melo-retrieve` is
 installed with localmelo, next to `melo`, and runs the same way: for example
 `uv run melo-retrieve --help` inside the clone.
 
@@ -142,6 +142,10 @@ melo-retrieve --export-run DIR|FILE
 | `--embedding-base-url URL` | not set | The OpenAI-compatible embedding server, for `embedding`. |
 | `--embedding-model NAME` | `default` | The model to request from `--embedding-base-url`. |
 | `--export-run DIR\|FILE` | not set | Print a run's model calls as corpus lines; see [Export a run](#export-a-run). |
+| `--export-store DIR\|FILE` | not set | Print the active entries of a typed `long_term.db`; see [The typed long-term store](#the-typed-long-term-store). |
+| `--export-decisions DIR\|FILE` | not set | Print its decision log, in `seq` order. |
+| `--route CANDIDATES.jsonl` | not set | Score synthetic candidates through the boundary and policy; needs `--memory-dir`. |
+| `--memory-dir DIR` | not set | The scratch directory `--route` writes; never the user's memory directory. |
 
 - An evaluation needs `--retriever`, `--corpus` and `--queries`.
   `--export-run` takes no other option.
@@ -527,6 +531,90 @@ A database that has the table is read as follows:
   export reads through it, and SQLite may create `history.db-shm`. Export a
   run that has ended.
 
+## The typed long-term store
+
+Three modes read or write the typed `long_term.db` of R6-lite. Each is
+mutually exclusive with the evaluation flags other than the model ones and
+with `--export-run`, and none contacts a model: `--base-url`, `--chat-model`,
+`--embedding-base-url`, `--embedding-model`, `--retrieval-timeout` and
+`--retrieval-extra-body` are accepted and ignored, so a bench script can pass
+the same flags everywhere. The same store is what [recall in the loop](memory.md#recall-in-the-loop)
+reads at `start`, and what `--export-store` shows the bench. `DIR` may be a memory directory (the file is
+`long_term.db`) or the file itself.
+
+```bash
+melo-retrieve --export-store DIR|FILE
+melo-retrieve --export-decisions DIR|FILE
+melo-retrieve --route CANDIDATES.jsonl --memory-dir DIR
+```
+
+### `--export-store`
+
+One JSON line per **active** entry, in `(created_at, id)` order:
+
+```json
+{"id": 1, "text": "I live in Berlin near the river", "kind": "profile",
+ "source": "user", "status": "active", "admitted_by": "user_statement",
+ "provenance": {"task_id": "t1", "source_ids": ["r1"]},
+ "created_at": 0.0, "last_used_at": 0.0, "uses": 0, "supersedes": null,
+ "links": [], "embed_model": "", "embed_dim": 0}
+```
+
+The bench's T4 reader reads `text` and `provenance.source_ids`. A count goes
+to stderr. The file is opened read-only: a v0 file is read with its legacy
+columns and the legacy derivation (a reflection by `metadata.type`, otherwise
+episodic/step_summary) and is **not** migrated; a file from a newer version is
+one line on stderr and exit 2. A directory with no `long_term.db` yet — a
+bench directory whose run wrote nothing — is an empty store: no line on
+stdout, `exported 0 active entries from DIR/long_term.db` on stderr, and
+exit 0, so a bench script need not test for the file first. A path that is
+not a directory keeps the missing-file error: one line and exit 2.
+
+### `--export-decisions`
+
+One JSON line per decision row, in `seq` order:
+
+```json
+{"seq": 1, "candidate_id": "n1", "action": "NEW", "kind": "profile",
+ "admitted_by": "user_statement", "entry_id": 1, "target_id": null,
+ "reason": "new", "source_ids": ["r1"], "text_sha256": "…", "text": null,
+ "timestamp": 0.0, "task_id": "t1"}
+```
+
+`source_ids` is the parsed array, and `text` is `null` unless the run had
+`--keep-decision-text`. A v0 file has no decisions table and prints none; a
+directory with no `long_term.db` prints none and exits 0, with
+`exported 0 decisions from DIR/long_term.db` on stderr.
+
+### `--route`
+
+Each input line is one candidate:
+
+```json
+{"candidate_id": "n1", "source": "user", "text": "…", "source_ids": ["r1"],
+ "signal": "user_statement", "task_id": "t1", "session_id": "",
+ "task_text": "plan the move"}
+```
+
+`source` is one of `reasoning_note`, `digest`, `reflection`, `user` or
+`sleep`; `signal` is one of `rehearsal`, `user_request`, `user_statement`,
+`outcome` or `sleep`; an unknown value is exit 2. The candidate goes through
+the same boundary and policy as a run, into a text-only store under
+`--memory-dir`, and one line comes out per input line, in input order:
+
+```json
+{"candidate_id": "n1", "action": "NEW", "kind": "profile",
+ "admitted_by": "user_statement", "entry_id": 1, "target_id": null,
+ "reason": "new", "source_ids": ["r1"]}
+```
+
+A boundary refusal prints `"action": "REFUSED"` and the reason. `--memory-dir`
+is required and the command refuses the default `~/.cache/localmelo/memory`
+and the `LOCALMELO_MEMORY_DIR` value (resolved paths); the directory is
+created `0700`. `--route` appends to an existing scratch store rather than
+clearing it, so the bench uses a fresh directory per run. `--export-store` on
+that directory shows what the route wrote.
+
 ## How each retriever ranks
 
 **`bm25`** scores the query's candidates with Okapi BM25, so how rare a word
@@ -702,6 +790,23 @@ asyncio.run(main())
   `OpenAICompatEmbedding("http://127.0.0.1:11434/v1", "nomic-embed-text")`
   from `localmelo.support.providers.embedding.openai_compat`.
 - Close each provider with `await provider.close()` when you are done.
+
+## Recall in the loop
+
+The same three retrievers rank a run's own documents. `--reasoning compress`
+(and `compress+replay`) recalls at `start`, `attempt` and `step` by default;
+`--recall-at` replaces those triggers, and `tool` adds the `recall` tool.
+`--retriever auto` takes `embedding` when one is configured and otherwise
+`llm` at `start`/`attempt` and `bm25` at `step`/`tool`; `off` turns recall
+off, and a named retriever runs every trigger the user names. A retriever
+failure falls back to `bm25`, and the record names the reason.
+
+The offline command below is unchanged: it measures a retriever on a corpus
+of recorded calls. A run's blocks are recorded in
+`llm_calls.recall_json` (trigger, retriever, query, hits, `ms`, fallback),
+and `memory_stats` breaks out the loop's `recall_ms`,
+`aux_retrieve_calls` and `retrieve_*` token counts. See
+[Recall in the loop](memory.md#recall-in-the-loop).
 
 ## See also
 

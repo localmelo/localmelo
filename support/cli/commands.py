@@ -45,6 +45,13 @@ class Command:
 COMMANDS: Final[tuple[Command, ...]] = (
     Command("help", (), "[command]", "Show commands and keys", True),
     Command("new", ("clear",), "", "Start a new session", False),
+    Command("sessions", (), "[filter]", "Pick a session to resume", False),
+    Command("resume", (), "[id|title]", "Resume a session", False),
+    Command("title", (), "[text]", "Show or set the session title", True),
+    Command("undo", (), "", "Forget the last turn (files stay changed)", False),
+    Command("usage", (), "", "Show recorded tokens, tools and time", True),
+    Command("memory", (), "", "Show what the model remembers", True),
+    Command("copy", (), "[turn]", "Copy a stored answer to the clipboard", True),
     Command("verbose", (), "[on|off]", "Toggle verbose rendering", True),
     Command("thinking", (), "[on|off]", "Toggle thinking excerpts", True),
     Command("expand", (), "[turn.call]", "Show a tool call's full output", True),

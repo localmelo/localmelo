@@ -419,11 +419,16 @@ def _strings(path: Path) -> list[str]:
 
 def test_every_command_a_hint_names_exists() -> None:
     folder = Path(commands.__file__).parent
+    pattern = re.compile(r"(?:^|[\s(])/([a-z][a-z-]*)(?=$|[^a-z0-9_/-])")
+    assert pattern.findall("/usr/bin/pbcopy /help /etc/hosts (/copy)") == [
+        "help",
+        "copy",
+    ]
     named = {
         match
         for path in folder.glob("*.py")
         for text in _strings(path)
-        for match in re.findall(r"(?:^|[\s(])/([a-z][a-z-]*)\b", text)
+        for match in pattern.findall(text)
     }
     assert named, "no command found: the scan is broken"
     assert named <= set(commands.names()), named - set(commands.names())

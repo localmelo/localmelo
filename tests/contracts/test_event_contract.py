@@ -51,11 +51,13 @@ class TestCatalogue:
             "step.started",
             "assistant.message",
             "note",
+            "memory",
             "tool.started",
             "tool.finished",
             "notice",
             "reflection.started",
             "reflection",
+            "recall",
             "run.progress",
             "run.finished",
         } == EVENT_TYPES

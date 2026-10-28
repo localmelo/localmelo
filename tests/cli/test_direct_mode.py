@@ -114,9 +114,27 @@ class TestFlags:
     def test_no_flags_keep_the_defaults(self) -> None:
         ran = _main("what", "is", "6*7")
         assert ran.code == 0
-        assert ran.options == AgentOptions()
+        assert ran.options == AgentOptions(mode="direct")
         assert ran.tool_providers == []
         ran.agent.run_task.assert_awaited_once_with("what is 6*7")
+
+    def test_workspace_sets_the_root(self, tmp_path: Path) -> None:
+        ran = _main("--workspace", str(tmp_path), "q")
+        assert ran.code == 0
+        assert ran.options == AgentOptions(
+            mode="direct", workspace_root=os.path.realpath(tmp_path)
+        )
+
+    def test_workspace_is_resolved_like_the_ui(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        root = _main("--workspace", ".", "q").options.workspace_root
+        assert root == os.path.realpath(tmp_path)
+
+    def test_no_workspace_keeps_the_current_directory(self) -> None:
+        # Q10: without the flag a direct run stays where it always ran.
+        assert _main("q").options.workspace_root is None
 
     def test_each_flag_sets_its_option(self) -> None:
         ran = _main(
@@ -140,6 +158,7 @@ class TestFlags:
         )
         assert ran.code == 0
         assert ran.options == AgentOptions(
+            mode="direct",
             max_steps=7,
             attempt_policy="none",
             reflection_gate="utility",
@@ -170,7 +189,7 @@ class TestFlags:
         ran = _main("--attempt-policy", "none", "--reflection-gate", "utility", "q")
         assert ran.code == 0
         assert ran.options == AgentOptions(
-            attempt_policy="none", reflection_gate="utility"
+            mode="direct", attempt_policy="none", reflection_gate="utility"
         )
 
     def test_reflection_gate_help(self) -> None:
@@ -194,7 +213,7 @@ class TestFlags:
     ) -> None:
         ran = _main("--request-timeout", value, "q")
         assert ran.code == 0
-        assert ran.options == AgentOptions()  # not a run option
+        assert ran.options == AgentOptions(mode="direct")  # not a run option
         [args] = ran.build.call_args.args
         assert args.request_timeout == seconds
 
@@ -207,7 +226,7 @@ class TestFlags:
     ) -> None:
         ran = _main("--mcp-config", str(_mcp_config(tmp_path)), "q")
         assert ran.code == 0
-        assert ran.options == AgentOptions()
+        assert ran.options == AgentOptions(mode="direct")
         [provider] = ran.tool_providers
         assert isinstance(provider, McpToolProvider)
         assert provider.clients == []  # the agent starts it in its first run
@@ -215,7 +234,9 @@ class TestFlags:
     def test_mcp_only_offers_only_the_mcp_tools(self, tmp_path: Path) -> None:
         ran = _main("--mcp-only", "--mcp-config", str(_mcp_config(tmp_path)), "q")
         assert ran.code == 0
-        assert ran.options == AgentOptions(builtins=frozenset(), tool_exposure="all")
+        assert ran.options == AgentOptions(
+            mode="direct", builtins=frozenset(), tool_exposure="all"
+        )
         [provider] = ran.tool_providers
         assert isinstance(provider, McpToolProvider)
 
@@ -403,6 +424,15 @@ class TestUsageErrors:
                 "only for direct mode (a query without --serve): --attempt-policy, "
                 "--reflection-gate",
             ),
+            (
+                ["--serve", "--workspace", "/tmp"],
+                "only for direct mode (a query without --serve): --workspace",
+            ),
+            (
+                # `melo ""` runs no task, so the folder would apply to nothing.
+                ["--workspace", "/tmp", ""],
+                "only for direct mode (a query without --serve): --workspace",
+            ),
         ],
     )
     def test_rejected_before_the_run(
@@ -415,12 +445,26 @@ class TestUsageErrors:
         assert out == ""
         assert f"melo: error: {message}" in err
 
+    @pytest.mark.parametrize("kind", ["missing", "file"])
+    def test_a_workspace_that_is_not_a_directory_exits_2(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], kind: str
+    ) -> None:
+        target = tmp_path / kind
+        if kind == "file":
+            target.write_text("", encoding="utf-8")
+        ran = _main("--workspace", str(target), "q")
+        assert ran.code == 2
+        ran.build.assert_not_called()
+        assert capsys.readouterr().err == (
+            f"melo: --workspace: not a directory: {target}\n"
+        )
+
     def test_an_unknown_builtin_lists_the_known_ones(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
         ran = _main("--builtins", "file_read,teleport", "q")
         assert ran.code == 2
-        known = ", ".join(sorted(builtin_names()))
+        known = ", ".join(sorted(builtin_names() | {"recall"}))
         assert (
             f"unknown built-in tools teleport; known: {known}"
             in capsys.readouterr().err

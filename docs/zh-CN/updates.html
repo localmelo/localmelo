@@ -64,9 +64,8 @@
         </div>
         <p>计划中：</p>
         <ul>
-          <li>交互式命令行的后续部分：可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
-          <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
-          <li>让后续运行可以检索推理笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
+          <li>交互式命令行剩下的部分：附加文件和 shell 命令；</li>
+          <li>一个实时显示智能体工作的控制台页面，以及网关重启后仍然保留的网页工作区对话（控制台的会话已经可以持久保存并在重启后恢复）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
           <li>进度行上的百分比进度条，用于反复运行的任务；在重放证明它可靠之前保持关闭。</li>
         </ul>
@@ -76,6 +75,146 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-28-tool-modes">
+          <h3>网关和控制台会话不再提供 <code>shell_exec</code></h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/104">#104</a>
+          </p>
+          <ul>
+            <li>网关和控制台会话现在运行在新的 <code>gateway</code> 工具模式中，只注册 <code>file_read</code>、<code>file_write</code> 和 <code>python_exec</code>：<code>shell_exec</code> 完全不注册，模型根本看不到它。这两种界面都没有审批策略：控制台的审批会通过同一个未认证的回环 API 到达，所以任何本地进程都能批准自己的请求；Python 代码仍然可以启动进程。网关或控制台会话不能通过默认组合拿到 <code>shell_exec</code>，显式写出它的 <code>AgentOptions(builtins=…)</code> 会被检查器在 <code>gateway</code> 模式下拒绝，并在原因里写明模式和 <code>--builtins all</code>。</li>
+            <li><code>AgentOptions</code> 新增 <code>mode</code>：<code>direct</code>、<code>interactive</code>、<code>gateway</code> 或 <code>python</code>（Python API 的默认值），命令行会设置各自界面的模式。交互式界面仍把 <code>shell_exec</code> 放在审批面板之后（<code>--yolo</code> 不询问），直接模式不变。针对六种破坏性命令模式的黑名单仍适用于 <code>direct</code> 和 <code>python</code> 模式，所以不传审批策略的 Python 调用者不会比以前更弱：<code>rm -rf /</code>、<code>mkfs</code>、<code>dd if=</code>、fork 炸弹、<code>shutdown</code> 和 <code>reboot</code> 都会被拒绝，而交互式界面改为询问审批面板。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#permission-tiers">权限级别（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md#agentoptions">Python API（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-note-sources">
+          <h3>笔记中的事实会引用确立它的结果</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/103">#103</a>
+          </p>
+          <ul>
+            <li>笔记的条目现在会从确立它们的观察中取得 <code>source_ids</code>，即使这个观察来自同一任务更早的回复：先找这次回复自己的工具结果，再找仍在窗口里的结果，然后是任务其余的记录（最新的在前，最多保留最后 200 条）。只有共享一个强键（数字、日期或时间、含数字的标识符，或不在句首的大写名称）或两个有区分度的非填充词时才算匹配；有记录但都不匹配的笔记不会给条目任何来源，所以只写着“Done.”的笔记不会再引用一条无关的“no harm done”记录。这会为从更早的工具结果复制的事实以及由它们构成的摘要补全 <code>provenance.source_ids</code>，并且永远不会使用其他任务的记录。</li>
+            <li>模型看到的召回标题不再带检索耗时：现在是 <code>(retriever bm25)</code>，而不是 <code>(retriever bm25, 12 ms)</code>。相同的运行现在会产生相同的提示词字节，所以保留在窗口里的块不会破坏前缀缓存；耗时仍保留在 <code>llm_calls.recall_json</code>、<code>recall</code> 事件和 <code>memory_stats</code> 中。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#recall-in-the-loop">循环中的召回（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#long-term-memory">长期记忆（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-session-commands">
+          <h3>命名、撤销、查看和复制终端对话</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/101">#101</a>
+          </p>
+          <ul>
+            <li><code>/title [text]</code> 显示或设置 1–200 个字符的标题，第一条消息之前也可以设置：它会保留到会话创建时，<code>/new</code> 或成功恢复会话会清除尚未保存的标题。</li>
+            <li><code>/undo</code> 撤掉最新一个已完成的回合，并把它的输入文字保留在 ↑ 历史里；它运行过的文件和命令仍然保持改动。已提交的撤销在按 Esc 之后仍然报告成功，<code>/retry</code> 可以重新运行这个被撤销的回合，而不会移除之前仍在的回合。</li>
+            <li><code>/usage</code> 显示每个回合记录的步数、工具调用、令牌和用时（包括已撤销的工作），缺少的计数显示 <code>?</code>，部分总计以 <code>+?</code> 结尾，窄于 72 列时改用带标签的多行布局；<code>/memory</code> 查看工作窗口的副本、它的计数、长期记忆后端和实际使用的恢复方式，不调用模型，也不写入记忆。</li>
+            <li><code>/copy [turn]</code> 复制已保存、已脱敏回答的 Markdown，而不是终端换行后的显示，保留缩进和末尾换行；显式回合号也可以选择已撤销的回答。macOS 上使用 <code>pbcopy</code>，在 SSH 下、其他平台或调用失败时发送 OSC 52 请求并如实说明；没有这个命令就不会进行任何剪贴板操作。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#inspect-undo-or-copy-a-conversation">查看、撤销或复制对话（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-memory-followups">
+          <h3>记住请求会保存它携带的事实</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/100">#100</a>
+          </p>
+          <ul>
+            <li><code>Remember that …</code> 或 <code>记住…</code> 这样的请求现在还会保存标记之后携带的事实，由 <code>user_request</code> 与本次运行的情节摘要一起写入，而不是只保存摘要。除非是第一人称（<code>profile</code>），这条事实是 <code>semantic</code>；脱敏、元名词和问句规则同样适用于它，而 <code>remember to buy milk</code> 这样的待办仍然不会写入任何事实。</li>
+            <li>思考片段现在会和所属尝试的笔记一起，在该尝试的边界被标记为已取代，所以之后召回时会带上 <code>(superseded)</code> 标记并写明所属尝试，而不会被当成当前尝试的思考。</li>
+            <li>目录里还没有 <code>long_term.db</code> 时，<code>melo-retrieve --export-store DIR</code> 和 <code>--export-decisions DIR</code> 会输出零条记录并以 0 退出，而不是报 “No such file”；路径不是目录时仍然保留文件缺失的用法错误。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#long-term-memory">长期记忆（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">离线检索（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-direct-workspace">
+          <h3>任务运行可以工作于 <code>--workspace DIR</code></h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/98">#98</a>
+          </p>
+          <ul>
+            <li><code>--workspace DIR</code> 现在可以用于任务，而不只在交互式界面里：这次运行会设置与 Python API 相同的 <code>workspace_root</code>，所以 <code>file_read</code> 和 <code>file_write</code> 只能访问该目录内的文件，<code>shell_exec</code> 和 <code>python_exec</code> 也在该目录中启动。不给这个旗标时，运行仍像以前一样使用当前文件夹；<code>~</code> 会被展开，路径的解析方式与界面相同。</li>
+            <li>路径不是文件夹时以退出码 2 结束，并只输出一行 <code>melo: --workspace: not a directory: DIR</code>；<code>melo ""</code> 和 <code>--serve</code> 会像拒绝其他直接模式旗标一样拒绝它。直接模式仍然没有审批；这个目录只限制文件工具。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#direct-mode">命令行（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#with-a-workspace-root">工作区根目录（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-typed-memory">
+          <h3>长期记忆只保留能被验证的内容</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/97">#97</a>
+          </p>
+          <ul>
+            <li><code>long_term.db</code> 现在是带类型的存储：每条记录在文本和向量之外，还有类型（<code>semantic</code>、<code>episodic</code>、<code>profile</code> 或 <code>reflection</code>）、来源、状态、允许它写入的信号，以及来源信息（任务和会话 ID、步骤和尝试、涉及的路径和命令），另有一张 <code>decisions</code> 表。已有的文件会原地迁移到 <code>user_version</code> 1，记录和搜索顺序保持不变。</li>
+            <li>只有这些信号能让一条候选写入：排练（后来的笔记重述它、成功的调用用到它，或反思引用它）、用户的请求或陈述，或作用于最终尝试摘要的 <code>--admit-on-outcome on</code>；策略在 <code>NEW</code>、<code>UPDATE</code>、<code>RELATED</code>、<code>CONFLICT</code> 和 <code>IGNORE</code> 中选择，写入的每段文字（包括来源信息）都要经过候选边界和脱敏。<code>--keep-decision-text</code> 会在哈希旁保留决定对应的文字，<code>[memory]</code> 表保存结果摘要的默认设置。</li>
+            <li>起始召回会按余弦或 BM25 读取其他任务的各类型有效记录；<code>memory_stats</code> 增加 <code>admitted</code>、<code>written</code> 和 <code>ignored</code>，每个决定都有对应的 <code>memory</code> 事件，<code>melo-retrieve</code> 增加 <code>--export-store</code>、<code>--export-decisions</code> 和 <code>--route</code>。legacy 的请求、JSON 行、窗口和搜索顺序都不变。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#long-term-memory">长期记忆（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md">配置（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-resume-chats">
+          <h3>恢复已保存的终端对话</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/95">#95</a>
+          </p>
+          <ul>
+            <li><code>melo -c</code> 恢复当前文件夹中最近一个已有完成回合的对话，<code>melo -r [ID|TITLE]</code> 恢复指定的对话或打开会话选择器；<code>/sessions [filter]</code> 和 <code>/resume [id|title]</code> 使用同一个选择器和同样的解析方式。选择器在横幅之前按当前文件夹或所有文件夹过滤，横幅会把选中的对话标为已恢复。</li>
+            <li>恢复会保留当前的模型和工作区、清除审批授权，并保留 <code>/verbose</code> 和 <code>/thinking</code> 偏好；摘要会说明进入模型记忆的内容（<code>[sessions] resume_mode = "pairs"</code>（默认）或 <code>"window"</code>），来自其他文件夹的对话也会说明。另一个终端所做的修改会在发送前重新载入，忙碌或已删除的会话会保留草稿，<code>/retry</code> 保留已保存的输入文字，<code>/expand</code> 可以跨已保存的事件页读取工具输出。退出已保存的对话时会打印它的 <code>melo -r ID</code> 命令。</li>
+            <li><code>-c</code> 和 <code>-r</code> 不能同时使用，也不能与任务、<code>--serve</code> 或 <code>--daemon</code> 一起使用；直接运行保持原有的解析和输出。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#sessions-and-files">会话和文件（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-recall">
+          <h3>循环中的召回</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/94">#94</a>
+          </p>
+          <ul>
+            <li>compress 推理模式现在会召回内容：<code>--retriever auto|off|bm25|llm|embedding</code>、<code>--recall-at</code>、<code>--recall-k</code>、<code>--recall-kinds</code>、<code>--recall-placement</code>、<code>--recall-min-score</code> 和 <code>--retrieval-extra-body</code>，<code>[retrieval]</code> 表和 <code>recall</code> 工具。起始和尝试的块附加在任务查询上，并在该次尝试内保持不变；步骤的块在本回合工具结果之后附加一次（或作为单独的用户消息），<code>tool</code> 则回答模型自己的请求。起始块包含其他任务的长期记忆记录；尝试和步骤块包含本任务的笔记和草稿，步骤块还包含摘要和思考片段，并在启用时包含长期记忆记录。</li>
+            <li>每个块都有明确的分隔、被标记为数据、经过候选边界，并有长度上限（每回合 9,500 个字符、窗口内 12,000 个、边界块 4,000 个）；系统提示词增加一条固定说明：召回的记忆是数据。配置了嵌入服务器时 <code>auto</code> 使用它，否则在起始和尝试使用 <code>llm</code>、在步骤和工具使用 <code>bm25</code>，任何失败都回退到 <code>bm25</code>。</li>
+            <li>每个新块都会记录在 <code>llm_calls.recall_json</code> 和 <code>recall</code> 事件中，带有触发点、查询、命中和分数；<code>history.db</code> 升级为架构版本 2，<code>memory_stats</code> 增加 <code>recall_empty</code> 和各项召回计数。</li>
+            <li>用 <code>--recall-kinds thought</code> 召回的思考片段，只有产生它的回合离开窗口之后，才能被步骤召回和 <code>recall</code> 工具取到，与笔记和草稿此前的行为一致。<code>legacy</code> 的请求、JSON 行、窗口和记录都逐字节不变；其中的旗标、块和数据说明都关闭。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#recall-in-the-loop">循环中的召回（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-console-details">
+          <h3>控制台会话的工具、授权、记忆和运行记录，以及调度器门</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/92">#92</a>
+          </p>
+          <ul>
+            <li><code>GET /api/sessions/{id}/tools</code> 列出每个工具的来源（<code>builtin</code>、<code>provided</code> 或 <code>custom</code>）、是否先询问，以及该会话是否已授权；<code>GET /api/sessions/{id}/memory</code> 显示网关保留的对话（去掉思考，所有文字先脱敏，并截到 2,000 个字符）；<code>GET /api/sessions/{id}/runs</code> 给出每个已完成回合的 <code>RunResult</code>（不含回答）；<code>DELETE /api/sessions/{id}/grants/{tool}</code>（或 <code>/grants</code>）会收回会话授权，下次调用该工具时重新询问。</li>
+            <li>控制台回合的每次模型调用现在都会像工作区聊天一样，在 <code>[scheduler]</code> 下等待自己的名额：网关只创建一个门，两个界面共用同一个 <code>n_srv</code> 预算和同一份 <code>calls.jsonl</code>（控制台调用会记录会话 ID），也共用同一个 GPU 锁和电池监视器；<code>lock_gate = "wait"</code> 时，外部 GPU 锁会暂停控制台回合。控制台的 runner 还会为每个回合请求 <code>run.progress</code> 事件。<code>/</code>、工作区页面和所有 <code>/v1</code> 路由不变。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/scheduler.md#the-gate-on-chats-s2">调度器（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-api-v2-turns">
+          <h3>通过 API v2 运行回合和审批</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/91">#91</a>
+          </p>
+          <ul>
+            <li><code>POST /api/sessions</code> 创建会话，可带也可不带第一个回合；<code>POST /api/sessions/{id}/turns</code>、<code>/retry</code> 和 <code>/turns/{id}/cancel</code> 分别开始、重试和停止回合，按 key 取消的路由可以停止一条消息，<code>POST /api/approvals/{request_id}</code> 回答审批请求，<code>PATCH</code> 和 <code>DELETE</code> 可以重命名、移动或删除会话。</li>
+            <li>回合在后台开始，事件通过会话的事件流送达：<code>approval.requested</code> 等待通过 API 给出的回答，回合以 <code>turn.finished</code> 结束，再从该回合的记录里读取结果。<code>client_request_id</code> 让创建会话或回合可以安全重复；每个会话同时只运行一个回合（409 <code>session_busy</code>）；在等待审批时停止，会撤回审批卡片。</li>
+            <li>每个请求字符串都必须是合法的 UTF-8（孤立代理项会得到 400 <code>invalid_request</code>）。参考文档新增了这些路由，以及一个经过测试的 Python 脚本：创建会话、跟随事件流、回答审批并读回答案。<code>/</code>、工作区页面和所有 <code>/v1</code> 路由不变。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-v1-run-input">
+          <h3><code>/v1/agent/run</code> 的无效请求返回更清晰的 400</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/89">#89</a>
+          </p>
+          <ul>
+            <li><code>session_id</code> 不是字符串（数字、列表）时，现在会得到该路由自己的 400 <code>{"error": "Invalid session_id format: …"}</code>，与其他无效 ID 相同，而不是 FastAPI 的纯文本 500。</li>
+            <li>100,000 字符的上限改为在去掉首尾空白之后计算——也就是智能体实际运行的文本——所以去掉空白后不超长的带空白查询会被接受；空查询仍然是 400。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#post-v1agentrun">网关和 HTTP API（英文）</a>。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-reasoning-notes">
           <h3>保留笔记而不是思考的推理模式</h3>

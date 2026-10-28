@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from localmelo.melo.contracts.providers import BaseLLMProvider
+from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, BaseLLMProvider
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef, describe_images
 from localmelo.support.providers._http import (
     attempt_headers,
@@ -292,6 +292,10 @@ class OpenAICompatLLM(BaseLLMProvider):
         ``{"chat_template_kwargs": {"enable_thinking": False}}``. Fields
         the provider owns (``model``, ``messages``, ``tools``,
         ``tool_choice``, ``stream``) are rejected with ``ValueError``.
+    extra_body_by_kind : Mapping[str, Mapping[str, Any]] | None
+        Extra fields for one call kind, merged over ``extra_body`` for that
+        request only (R5's ``--retrieval-extra-body`` sets
+        ``{"retrieve": ...}``). Each entry is prepared like ``extra_body``.
     transport : httpx.AsyncBaseTransport | None
         Optional HTTP transport, e.g. ``httpx.MockTransport`` in tests.
     reasoning_field : str | None
@@ -313,6 +317,7 @@ class OpenAICompatLLM(BaseLLMProvider):
         timeout: float = 120.0,
         *,
         extra_body: Mapping[str, Any] | None = None,
+        extra_body_by_kind: Mapping[str, Mapping[str, Any]] | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
         reasoning_field: str | None = None,
         requires_reasoning_replay: bool = False,
@@ -325,6 +330,10 @@ class OpenAICompatLLM(BaseLLMProvider):
             )
         self.model = model
         self.extra_body = prepare_extra_body(extra_body)
+        self.extra_body_by_kind = {
+            kind: prepare_extra_body(body)
+            for kind, body in (extra_body_by_kind or {}).items()
+        }
         self.reasoning_field = reasoning_field
         self.requires_reasoning_replay = requires_reasoning_replay
         headers: dict[str, str] = {}
@@ -345,8 +354,10 @@ class OpenAICompatLLM(BaseLLMProvider):
         reasoning_key = self.reasoning_field
         if reasoning_key == "auto":
             reasoning_key = self.last_reasoning_key or None
+        by_kind = self.extra_body_by_kind.get(LLM_REQUEST_KIND.get(), {})
         payload: dict[str, Any] = {
             **self.extra_body,
+            **by_kind,
             "model": self.model,
             "messages": _messages_to_openai(messages, reasoning_key=reasoning_key),
         }

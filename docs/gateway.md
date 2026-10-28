@@ -234,8 +234,11 @@ makes larger requests: leave out `session_id` for an unrelated task.
 - Creating a session also closes the sessions that have been idle for more
   than 1 hour.
 - Each session's agent uses the config file's backends and the default run
-  options (all four built-in tools and no MCP tools), except that it keeps
-  its answers (`AgentOptions(record_answers=True)`).
+  options (three built-in tools, `file_read`, `file_write` and
+  `python_exec`, and no MCP tools), except that it keeps its answers
+  (`AgentOptions(record_answers=True, mode="gateway")`). A session does not
+  offer `shell_exec`: the gateway has no approval policy, so there is no one
+  to ask.
 - When `LOCALMELO_PERSIST_MEMORY` is set for the gateway, all sessions save
   to the same SQLite files; see [Memory](memory.md#keep-memory-between-runs).
 
@@ -288,8 +291,8 @@ written to the one gate the gateway shares:
 `POST /api/sessions/{id}/level` and `POST /api/presence` to set them.
 
 Stop cancels the run. A model request in flight is abandoned, although the
-model server may finish computing it, and a running `shell_exec` command or
-`python_exec` child is killed with its process group. `python_exec` code runs
+model server may finish computing it, and a running `python_exec` child is
+killed with its process group. `python_exec` code runs
 in a child process, so the gateway keeps answering other requests while it
 runs. See [Tools and MCP](tools.md) for the tools' limits. The turn is saved
 with the status `cancelled`, and the chat takes the next message once that
@@ -308,6 +311,20 @@ The page's chats are sessions in the gateway's own session file,
 gateway restart keeps them, and a chat reopens with its transcript read from
 the file, no Agent built yet (`not_loaded`); its Agent is built on the
 conversation the file holds when the next turn or retry starts.
+
+A chat runs in gateway mode: its Agent gets the gateway's default run options,
+the three built-in tools `file_read`, `file_write` and `python_exec`, and no
+MCP tools, except that it keeps its answers. It can read and write files and
+run Python code; `shell_exec` is not offered, so there is no direct shell
+command (Python code can still start a process). Its model is the gateway's
+own, from the config file, and the page reads that file's `[scheduler]` table
+too — `policy`, the lane sizes, the call log and the lock and battery keys.
+
+In `lock_gate = "record"` (the default) a foreign lock is shown and logged but
+nothing waits. In `wait`, every call a chat makes waits while a foreign lock is
+present, embeddings included. A chat request waits up to 300 seconds, and a
+turn is stopped after 600 seconds of active time: a call the scheduler holds,
+including a foreign-lock hold, does not count against that bound.
 
 The web workspace's earlier routes under `/v1/playground/` are kept as they
 were for compatibility and are still internal; the page no longer uses them.

@@ -48,6 +48,10 @@ VALID_EMBEDDING_BACKENDS = ("mlc", "ollama", "vllm", "sglang", "none")
 REASONING_MODES = ("legacy", "drop", "replay", "compress", "compress+replay")
 NOTE_WRITERS = ("auto", "heuristic")
 REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
+RETRIEVAL_MODES = ("auto", "off", "bm25", "llm", "embedding")
+RECALL_TRIGGERS = ("start", "attempt", "step", "tool")
+RECALL_KINDS = ("note", "draft", "thought", "digest", "reflection", "long")
+RECALL_PLACEMENTS = ("tool", "message")
 
 
 @dataclass
@@ -91,12 +95,38 @@ class GatewayConfig:
 
 
 @dataclass
+class SessionsConfig:
+    """How an interactive surface restores a saved conversation."""
+
+    resume_mode: str = "pairs"
+
+
+@dataclass
 class AgentConfig:
     """The ``[agent]`` table: how a direct run or a session reasons."""
 
     reasoning: str = "legacy"  # legacy | drop | replay | compress | compress+replay
     replay_turns: int | None = None  # None: every turn in scope
     note_writer: str = "auto"  # auto | heuristic (compress modes)
+
+
+@dataclass
+class RetrievalConfig:
+    """The ``[retrieval]`` table: R5's recall defaults for direct runs."""
+
+    retriever: str = "auto"  # auto | off | bm25 | llm | embedding
+    recall_at: list[str] = field(default_factory=list)  # empty: the defaults
+    k: int = 3
+    kinds: list[str] = field(default_factory=list)  # empty: all but thought
+    placement: str = "tool"  # tool | message
+    min_score: float = 0.35
+
+
+@dataclass
+class MemoryConfig:
+    """The ``[memory]`` table: R6-lite's admission default for direct runs."""
+
+    admit_on_outcome: bool = False
 
 
 @dataclass
@@ -153,6 +183,9 @@ class Config:
 
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
+    sessions: SessionsConfig = field(default_factory=SessionsConfig)
+    retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
     @property
@@ -175,6 +208,8 @@ class Config:
         """Return a list of validation errors. Empty list means valid."""
         errors: list[str] = []
         errors.extend(self._validate_agent())
+        errors.extend(self._validate_retrieval())
+        errors.extend(self._validate_memory())
         errors.extend(self._validate_scheduler())
 
         # -- chat_backend validation --
@@ -222,6 +257,13 @@ class Config:
             )
 
         return errors
+
+    def _validate_memory(self) -> list[str]:
+        """``[memory]`` holds a bool."""
+        value: object = self.memory.admit_on_outcome
+        if not isinstance(value, bool):
+            return [f"[memory] admit_on_outcome must be a bool, got {value!r}"]
+        return []
 
     def _validate_scheduler(self) -> list[str]:
         """``[scheduler]`` values are inside their documented ranges."""
@@ -298,6 +340,46 @@ class Config:
             isinstance(turns, bool) or not isinstance(turns, int) or turns < 1
         ):
             errors.append(f"[agent] replay_turns must be an int >= 1, got {turns!r}")
+        return errors
+
+    def _validate_retrieval(self) -> list[str]:
+        """``[retrieval]`` holds known values inside their documented ranges."""
+        retrieval = self.retrieval
+        errors: list[str] = []
+        if retrieval.retriever not in RETRIEVAL_MODES:
+            errors.append(
+                f"[retrieval] retriever {retrieval.retriever!r} is not "
+                f"recognised. Must be one of {RETRIEVAL_MODES}."
+            )
+        if retrieval.placement not in RECALL_PLACEMENTS:
+            errors.append(
+                f"[retrieval] placement {retrieval.placement!r} is not "
+                f"recognised. Must be one of {RECALL_PLACEMENTS}."
+            )
+        k: object = retrieval.k
+        if isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= 10:
+            errors.append(f"[retrieval] k must be an int from 1 to 10, got {k!r}")
+        score: object = retrieval.min_score
+        if (
+            isinstance(score, bool)
+            or not isinstance(score, int | float)
+            or not 0 <= score <= 1
+        ):
+            errors.append(
+                f"[retrieval] min_score must be a number from 0 to 1, got {score!r}"
+            )
+        for name, allowed in (
+            ("recall_at", RECALL_TRIGGERS),
+            ("kinds", RECALL_KINDS),
+        ):
+            values = getattr(retrieval, name)
+            if not isinstance(values, list) or any(
+                not isinstance(item, str) or item not in allowed for item in values
+            ):
+                errors.append(
+                    f"[retrieval] {name} must be a list of "
+                    f"{', '.join(allowed)}, got {values!r}"
+                )
         return errors
 
     def _validate_reasoning_fields(self) -> list[str]:
@@ -452,12 +534,25 @@ def load() -> Config:
 
     # A [scheduler] that is not a table is ignored, like an unknown key; a
     # malformed value inside a real table is left for Config.validate.
+    if isinstance(data.get("retrieval"), dict):
+        for k, v in data["retrieval"].items():
+            if hasattr(cfg.retrieval, k):
+                setattr(cfg.retrieval, k, v)
+
+    if isinstance(data.get("memory"), dict):
+        for k, v in data["memory"].items():
+            if hasattr(cfg.memory, k):
+                setattr(cfg.memory, k, v)
+
     if isinstance(data.get("scheduler"), dict):
         for k, v in data["scheduler"].items():
             if hasattr(cfg.scheduler, k):
                 setattr(cfg.scheduler, k, v)
 
     # A bad value is left for Config.validate to report.
+    if isinstance(data.get("sessions"), dict):
+        cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
+
     cfg.request_timeout_s = data.get("request_timeout_s")
     cfg.mcp_config = str(data.get("mcp_config") or "")
 
@@ -568,6 +663,9 @@ def _migrate_legacy(data: dict) -> Config:
             if hasattr(cfg.agent, k):
                 setattr(cfg.agent, k, v)
 
+    if isinstance(data.get("sessions"), dict):
+        cfg.sessions.resume_mode = data["sessions"].get("resume_mode", "pairs")
+
     cfg.request_timeout_s = data.get("request_timeout_s")
 
     return cfg
@@ -672,6 +770,33 @@ def save(cfg: Config) -> None:
             lines.append(f"replay_turns = {cfg.agent.replay_turns}")
         if cfg.agent.note_writer != "auto":
             lines.append(f"note_writer = {_toml_string(cfg.agent.note_writer)}")
+        lines.append("")
+
+    if cfg.memory != MemoryConfig():
+        lines.append("[memory]")
+        if cfg.memory.admit_on_outcome:
+            lines.append("admit_on_outcome = true")
+        lines.append("")
+
+    if cfg.sessions.resume_mode != "pairs":
+        lines.extend(
+            [
+                "[sessions]",
+                f"resume_mode = {_toml_value(cfg.sessions.resume_mode)}",
+                "",
+            ]
+        )
+    retrieval = cfg.retrieval
+    if retrieval != RetrievalConfig():
+        lines.append("[retrieval]")
+        lines.append(f"retriever = {_toml_string(retrieval.retriever)}")
+        if retrieval.recall_at:
+            lines.append(f"recall_at = {_toml_value(retrieval.recall_at)}")
+        lines.append(f"k = {retrieval.k}")
+        if retrieval.kinds:
+            lines.append(f"kinds = {_toml_value(retrieval.kinds)}")
+        lines.append(f"placement = {_toml_string(retrieval.placement)}")
+        lines.append(f"min_score = {_toml_value(retrieval.min_score)}")
         lines.append("")
 
     # Only a settings section that differs from the defaults is written, so

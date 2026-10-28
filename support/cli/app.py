@@ -37,6 +37,7 @@ from prompt_toolkit.key_binding.defaults import load_key_bindings
 from prompt_toolkit.layout import (
     ConditionalContainer,
     Dimension,
+    DynamicContainer,
     FormattedTextControl,
     HSplit,
     Layout,
@@ -68,6 +69,7 @@ from localmelo.support.cli.approvals import (
     panel_text,
     session_warning,
 )
+from localmelo.support.cli.picker import SessionPicker
 from localmelo.support.cli.render import TurnRenderer, live_rows
 from localmelo.support.cli.text import (
     cells,
@@ -80,6 +82,7 @@ from localmelo.support.cli.text import (
 )
 from localmelo.support.cli.theme import PT_STYLE, Symbols, in_symbols
 from localmelo.support.sessions.display import home_label
+from localmelo.support.sessions.store import SessionInfo, SessionStore
 
 # Seconds between redraws of the live area while the session is busy.
 TICK_S: Final = 0.12
@@ -373,6 +376,7 @@ class InteractiveApp:
         self._hint_until = 0.0
         self._last_ctrl_c = -DOUBLE_PRESS_S
         self._question: _Question | None = None
+        self.picker: SessionPicker | None = None
         self._last_rows = 0
         frame = os.environ.get(SPINNER_FRAME_ENV, "")
         self._frame = int(frame) if frame.isdigit() else None
@@ -438,7 +442,18 @@ class InteractiveApp:
                 ),
                 *self._panels(),
                 ConditionalContainer(
-                    self.input_box, filter=Condition(lambda: not self._panel_open())
+                    DynamicContainer(
+                        lambda: (
+                            self.picker.container if self.picker else Window(height=0)
+                        )
+                    ),
+                    filter=Condition(lambda: self.picker is not None),
+                ),
+                ConditionalContainer(
+                    self.input_box,
+                    filter=Condition(
+                        lambda: not self._panel_open() and self.picker is None
+                    ),
                 ),
                 CompletionsMenu(max_height=COMPLETION_ROWS, scroll_offset=1),
                 ConditionalContainer(
@@ -492,6 +507,34 @@ class InteractiveApp:
     def bell(self) -> None:
         if os.environ.get("LOCALMELO_BELL") != "0":
             self.app.output.bell()
+
+    async def choose_session(
+        self,
+        store: SessionStore,
+        workspace: str,
+        *,
+        query: str = "",
+        choices: list[SessionInfo] | None = None,
+    ) -> SessionInfo | None:
+        picker = SessionPicker(
+            store,
+            workspace,
+            query=query,
+            choices=choices,
+            width=lambda: max(1, self.app.output.get_size().columns),
+            invalidate=self.invalidate,
+            symbols=self.symbols,
+        )
+        self.picker = picker
+        self.buffer.cancel_completion()
+        self.app.layout.focus(picker.control)
+        self.invalidate()
+        try:
+            return await picker.run()
+        finally:
+            self.picker = None
+            self.app.layout.focus(self.input_window)
+            self.invalidate()
 
     async def ask(self, prompt: str, default: str = "") -> str | None:
         """Ask *prompt* in the input box; the answer, *default* on Enter, None on Esc."""
@@ -1063,6 +1106,9 @@ class InteractiveApp:
         Only a press that stopped something or said "press ctrl+c again"
         arms the second press, so clearing a draft never quits.
         """
+        if self.picker is not None:
+            self.picker.close()
+            return
         now = self._clock()
         double = now - self._last_ctrl_c < DOUBLE_PRESS_S
         pending = self._pending()

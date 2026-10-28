@@ -40,6 +40,9 @@ class Doc:
     text: str
     title: str = ""  # one line; the llm catalog falls back to the text's first line
     # task_id, session_id, step, attempt, stage, source, created_at, ...
+    # R5's recall adds ``alias`` (the prompt alias the block uses),
+    # ``origin_task_ids`` (the tasks that produced a long entry), ``score``
+    # (a long entry's embedding score) and ``origin`` (its task label).
     meta: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

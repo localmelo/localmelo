@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.schema import Message, ToolCall, ToolResult
+from localmelo.melo.schema import Message, ToolCall, ToolDef, ToolResult
 
 from .test_compress import FakeLLM, _agent, _answer, _options
 
@@ -85,6 +85,89 @@ async def test_a_restatement_compacts_into_the_older_note() -> None:
 
 
 @pytest.mark.asyncio
+async def test_a_restatement_merges_the_new_ids_and_drops_its_candidate(
+    tmp_path: Path,
+) -> None:
+    # T53R finding 8: the merged note keeps the new note's records, and the
+    # superseded note's candidate cannot be admitted on its own.
+    first = Message(
+        role="assistant",
+        content="<note>found: the bug is in list_ops.py</note>",
+        tool_calls=[
+            ToolCall(
+                tool_name="raw",
+                arguments={"text": '{"id": "r1", "name": "Alice"}'},
+                id="call_1",
+            )
+        ],
+    )
+    second = Message(
+        role="assistant",
+        content=(
+            "<note>found: THE BUG IS IN list_ops.py\n"
+            "decided: the team should use the fix after the review</note>"
+        ),
+        tool_calls=[
+            ToolCall(
+                tool_name="raw",
+                arguments={"text": '{"id": "r2", "name": "Bob"}'},
+                id="call_1",
+            )
+        ],
+    )
+    server = FakeLLM(first, second, _answer("The test passed because the fix works."))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            max_steps=3,
+        ),
+    )
+
+    async def _raw(text: str) -> str:
+        return text
+
+    agent.hippo.register_tool(
+        ToolDef(
+            name="raw",
+            description="return text unchanged",
+            parameters={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+            },
+        )
+    )
+    agent.executor.register("raw", _raw)
+    try:
+        await agent.run_task("q")
+        entries = [
+            entry
+            for entry in agent.notes()
+            if entry.kind == "note" and entry.alias in ("n1", "n2")
+        ]
+        older, newer = entries
+        assert older.note is not None and newer.note is not None
+        assert older.note.source_ids == ["r1", "r2"]
+        assert {record_id for record_id, _text in older.note.source_records} == {
+            "r1",
+            "r2",
+        }
+        staged = {candidate.candidate_id for candidate in agent.hippo.staged.all()}
+        assert older.note.note_id in staged
+        assert newer.note.note_id not in staged
+        # Both merged items are distinct traces; neither supersedes the other.
+        active = await agent.hippo.long.active_entries("episodic")
+        assert {entry.text for entry in active} == {
+            "the bug is in list_ops.py",
+            "the team should use the fix after the review",
+        }
+    finally:
+        await agent.close()
+
+
+@pytest.mark.asyncio
 async def test_a_successful_call_that_touches_a_note_rehearses_it(
     tmp_path: Path,
 ) -> None:
@@ -137,6 +220,42 @@ async def test_a_cited_note_is_rehearsed_and_counted() -> None:
     first = next(entry for entry in agent.notes() if entry.alias == "n1")
     assert first.stage == "superseded"
     assert first.uses == 1
+
+
+@pytest.mark.asyncio
+async def test_an_attempts_thought_chunks_are_superseded_with_its_notes() -> None:
+    # T59: a later attempt's boundary supersedes the earlier attempt's
+    # thinking chunks as well as its notes, so a recalled chunk is marked.
+    server = FakeLLM(
+        _note_reply(
+            "the bug is in list_ops.py",
+            thinking="First attempt: read list_ops.py to find the bug.",
+        ),
+        _reflection(used_notes=["n1"]),
+        _note_reply(
+            "the bug is in list_ops.py",
+            thinking="Second attempt: reread list_ops.py after the reflection.",
+        ),
+        _reflection(used_notes=["n2"]),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            attempt_policy="reflect",
+            steps_per_attempt=1,
+            max_attempts=2,
+            recall_kinds=frozenset({"note", "draft", "thought"}),
+        ),
+    )
+    await agent.run_task("q")
+    await agent.close()
+    thoughts = [entry for entry in agent.notes() if entry.kind == "thought"]
+    assert [entry.alias for entry in thoughts] == ["t1", "t2"]
+    assert [entry.attempt for entry in thoughts] == [1, 2]
+    assert [entry.stage for entry in thoughts] == ["superseded", "superseded"]
+    notes = [entry for entry in agent.notes() if entry.kind == "note"]
+    assert notes and all(entry.stage == "superseded" for entry in notes)
 
 
 @pytest.mark.asyncio
@@ -254,7 +373,7 @@ async def test_history_keeps_the_raw_reply_and_gets_no_notes_table(
             "SELECT s.thought, c.content, c.thinking FROM steps s "
             "JOIN llm_calls c ON c.task_id = s.task_id ORDER BY c.seq LIMIT 1"
         ).fetchone()
-    assert version == 1
+    assert version == 2
     assert "notes" not in tables
     assert thought == raw
     assert content == raw

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import contextvars
 from abc import ABC, abstractmethod
-from typing import Final
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import Any, Final
 
 from localmelo.melo.schema import Message, ToolDef
 
@@ -107,6 +109,10 @@ class BaseLLMProvider(ABC):
     # reasoning it produced. Such a provider gets whole-unit eviction and
     # no cap; ``drop`` is refused for it.
     requires_reasoning_replay: bool = False
+    # Extra body fields for one call kind, merged over the provider's
+    # ``extra_body`` for that request (R5's --retrieval-extra-body). Empty
+    # and immutable by default, so a provider without one is unaffected.
+    extra_body_by_kind: Mapping[str, Mapping[str, Any]] = MappingProxyType({})
 
     @abstractmethod
     async def chat(
