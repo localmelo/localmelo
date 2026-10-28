@@ -8,7 +8,9 @@ anything but a regular file, and cap what they read. Its ``shell_exec`` and
 ``python_exec`` run in the root, in a process group of their own, within
 ``tool_timeout_s``; the shell starts the text of a non-zero exit with
 ``[exit code <n>]``, and both record their child's exit status in
-``TOOL_EXIT_CODE``. Without a root, the built-ins are Phase 1a's functions.
+``TOOL_EXIT_CODE``. Without a root, the file tools and ``shell_exec`` are
+Phase 1a's functions, and ``python_exec`` runs the same child Python, in
+this process's directory.
 An agent with a root names it in the system prompt of its planning requests.
 """
 
@@ -600,12 +602,190 @@ def test_tool_timeout_s_needs_a_workspace_root() -> None:
     assert executor._callables == {}
 
 
-async def test_without_a_root_python_exec_runs_in_process() -> None:
+# ── python_exec without a root ──────────────────────────────────────────────
+
+
+async def test_without_a_root_python_exec_runs_in_a_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
     executor = _executor(None)
 
-    outcome = await _run(executor, "python_exec", code="import os; print(os.getpid())")
+    outcome, codes = await _run_recording(
+        executor,
+        "python_exec",
+        code="import os\nprint(os.getpid())\nprint(os.getcwd())\nos.chdir('/')",
+    )
 
-    assert outcome.output == str(os.getpid())
+    pid, cwd = outcome.output.splitlines()
+    assert outcome.status == ExecutionStatus.SUCCESS
+    assert int(pid) != os.getpid()
+    assert cwd == str(Path(os.path.realpath(tmp_path)))
+    assert codes == [0]
+    assert os.getcwd() == str(Path(os.path.realpath(tmp_path)))
+
+
+async def test_without_a_root_python_exec_never_reads_this_process_stdin() -> None:
+    executor = _executor(None)
+    read = "import sys\nprint(repr(sys.stdin.read()))"
+
+    with _stdin_holding(b"hello\n"):
+        outcome = await asyncio.wait_for(_run(executor, "python_exec", code=read), 10.0)
+
+    assert outcome.output == "''"
+
+
+async def test_without_a_root_a_python_input_gets_eof() -> None:
+    executor = _executor(None)
+
+    outcome = await asyncio.wait_for(
+        _run(executor, "python_exec", code="input()"), 10.0
+    )
+
+    assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
+    assert "EOFError" in outcome.error
+
+
+@pytest.mark.parametrize("rooted", [False, True], ids=["no_root", "root"])
+async def test_the_code_goes_to_the_child_on_a_pipe_not_in_argv(
+    root: Path, monkeypatch: pytest.MonkeyPatch, rooted: bool
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+    real = asyncio.create_subprocess_exec
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        calls.append(args)
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    executor = _executor(root if rooted else None)
+    marker = "LOCALMELO_CODE_MARKER_7f3a"
+
+    outcome = await _run(executor, "python_exec", code=f"print({marker!r})")
+
+    assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, marker)
+    (argv,) = calls
+    # The executable, ``-c`` and the fixed wrapper: never the code.
+    assert len(argv) == 3
+    assert argv[1] == "-c"
+    assert argv[2] == builtin_tools._python_wrapper()
+    assert marker not in "".join(argv)
+
+
+@pytest.mark.parametrize("rooted", [False, True], ids=["no_root", "root"])
+async def test_a_two_megabyte_python_code_runs(root: Path, rooted: bool) -> None:
+    # Past this Mac's ARG_MAX (1,048,576 bytes of argv and environment); in
+    # argv this would fail with E2BIG before the code ran.
+    code = "print('ok')\n#" + "y" * 2_000_000 + "\n"
+    executor = _executor(root if rooted else None)
+
+    outcome = await asyncio.wait_for(_run(executor, "python_exec", code=code), 60.0)
+
+    assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, "ok")
+
+
+async def test_without_a_root_a_hang_ends_at_the_executors_limit(
+    pid_file: Path,
+) -> None:
+    executor = _executor(None)
+
+    outcome = await executor.execute_structured(
+        ExecutionRequest(
+            tool_name="python_exec",
+            arguments={"code": _hang(pid_file)},
+            timeout_ms=500,
+        )
+    )
+
+    assert outcome.status == ExecutionStatus.TIMEOUT
+    assert outcome.error_category == ErrorCategory.TIMEOUT
+    assert await _group_gone(await _pid(pid_file))
+
+
+async def test_without_a_root_no_process_of_the_python_group_survives_a_cancel(
+    pid_file: Path,
+) -> None:
+    executor = _executor(None)
+    running = asyncio.create_task(
+        executor.execute_structured(
+            ExecutionRequest(
+                tool_name="python_exec", arguments={"code": _hang(pid_file)}
+            )
+        )
+    )
+    python = await _pid(pid_file)
+
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    assert python != os.getpid()
+    assert await _group_gone(python)
+
+
+async def test_without_a_root_the_success_text_is_the_same() -> None:
+    executor = _executor(None)
+
+    outcome = await _run(executor, "python_exec", code="print(1 + 1)")
+
+    assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, "2")
+
+
+async def test_without_a_root_a_python_error_reads_as_the_rooted_one() -> None:
+    executor = _executor(None)
+
+    outcome = await _run(
+        executor, "python_exec", code="print('y' * 10_000)\nraise ValueError('boom')"
+    )
+
+    assert outcome.error.startswith("Python exited with code 1:\n")
+    tail = outcome.error.removeprefix("Python exited with code 1:\n")
+    assert len(tail) == 4_000
+    assert tail.endswith("ValueError: boom")
+
+
+async def test_without_a_root_a_keyboard_interrupt_keeps_its_exit_status() -> None:
+    executor = _executor(None)
+
+    outcome = await _run(executor, "python_exec", code="raise KeyboardInterrupt")
+
+    # As python -c's own status, which the rooted child kept before this path.
+    assert outcome.error.startswith("Python exited with code 130:\n")
+    assert outcome.error.endswith("KeyboardInterrupt")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX resource limits")
+async def test_a_python_child_gets_the_posix_resource_limits() -> None:
+    executor = _executor(None)
+
+    outcome = await _run(
+        executor,
+        "python_exec",
+        code=(
+            "import resource\n"
+            "print(resource.getrlimit(resource.RLIMIT_CPU))\n"
+            "print(resource.getrlimit(resource.RLIMIT_NOFILE))"
+        ),
+    )
+
+    cpu = builtin_tools.PYTHON_CPU_LIMIT_S
+    files = builtin_tools.PYTHON_NOFILE_LIMIT
+    assert outcome.output.splitlines() == [f"({cpu}, {cpu})", f"({files}, {files})"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX resource limits")
+async def test_a_python_child_that_uses_too_much_cpu_is_killed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(builtin_tools, "PYTHON_CPU_LIMIT_S", 1)
+    executor = _executor(None)
+
+    outcome = await asyncio.wait_for(
+        _run(executor, "python_exec", code="while True: pass"), 20.0
+    )
+
+    assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
+    assert outcome.error == f"Python exited with code {-signal.SIGXCPU}"
 
 
 # ── shell_exec with a root ──────────────────────────────────────────────────

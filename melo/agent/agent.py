@@ -103,7 +103,7 @@ from localmelo.melo.memory.procedures.tracker import (
     shown_view,
 )
 from localmelo.melo.memory.short import group_turns
-from localmelo.melo.memory.short.note_store import NoteStoreEntry, strip_note_spans
+from localmelo.melo.memory.short.note_store import NoteStoreEntry
 from localmelo.melo.schema import (
     ANSWER_NOT_KEPT_LABEL,
     CALL_INTERRUPTED,
@@ -2396,8 +2396,8 @@ class Agent:
         """Stage 1+2: retrieve context, resolve tools, run boundary checks.
 
         With ``tool_exposure="retrieve"`` the tools are every registered
-        built-in, sorted by name, then the other tools that hint
-        extraction and BM25 resolve among themselves, also sorted by name;
+        built-in, sorted by name, then the other tools that the model's
+        tool calls and BM25 resolve among themselves, also sorted by name;
         with ``"all"`` they are every registered tool, sorted by name.
 
         In ``drop`` and ``replay`` no long-term recall is read, so the
@@ -2434,15 +2434,9 @@ class Agent:
             # sorted by name too: the list stays byte-identical for as long
             # as the chosen set does not change, whatever the hint order.
             builtins = builtin_names()
-            # Include reflection context in tool hint extraction. In the
-            # compress modes the harness's own notes and recall blocks are
-            # stripped first, so a note that names a tool does not offer it.
-            scanned = short_window
-            if self._notes_mode:
-                scanned = strip_note_spans(
-                    short_window, self.hippo.working.notes.texts()
-                )
-            hint_sources = long_context + scanned + reflection_msgs
+            # Hints are the model's tool calls, which live in the window; the
+            # long-term and reflection messages carry none.
+            hint_sources = long_context + short_window + reflection_msgs
             tool_hints = [
                 name
                 for name in self.hippo.extract_tool_hints(hint_sources)
@@ -3514,14 +3508,10 @@ class Agent:
           ``setup_error`` too, before its first step;
         - ``timeout``: the run was still going after ``timeout_s``
           seconds. It is cancelled wherever it was: a request in flight
-          is abandoned (and counts in ``llm_errors``), a shell command is
-          killed with every process it started, and tool providers still
-          being set up are closed (so later runs end as ``setup_error``).
-          ``python_exec`` code without a ``workspace_root`` is the
-          exception: it runs on the event loop, so neither ``timeout_s``
-          nor the executor's timeout can interrupt it, and the run ends
-          only once that code returns. With a root it runs in a child
-          process, which is killed with every process it started.
+          is abandoned (and counts in ``llm_errors``), a shell command or
+          a ``python_exec`` child is killed with every process it
+          started, and tool providers still being set up are closed (so
+          later runs end as ``setup_error``).
           Closing the providers is not cut short, also when the deadline
           expires while a failed setup is closing them, so the run
           returns once they are closed, which can be after ``timeout_s``;

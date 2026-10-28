@@ -678,10 +678,10 @@ class TestReflectionReceivesPriorReflections:
 
 
 class TestReflectionInfluencesRetrieval:
-    """Reflection context should be included in tool hint extraction."""
+    """A reflection's text must not add tools to the offered list."""
 
     @pytest.mark.asyncio
-    async def test_reflection_messages_in_hint_sources(self) -> None:
+    async def test_reflection_text_does_not_add_a_tool(self) -> None:
         options = AgentOptions(steps_per_attempt=1, max_attempts=3, max_steps=10)
 
         llm = FakeLLM()
@@ -708,8 +708,8 @@ class TestReflectionInfluencesRetrieval:
         llm.enqueue(Message(role="assistant", content="done"))
 
         agent = _make_echo_agent(llm, options=options)
-        # Also register web_fetch so it can be found. It is not a built-in:
-        # every step offers the built-ins, hinted or not.
+        # Also register web_fetch so that a hint from the reflection would
+        # offer it; only a tool call is a hint now.
         agent.hippo.register_tool(
             ToolDef(
                 name="web_fetch",
@@ -719,13 +719,12 @@ class TestReflectionInfluencesRetrieval:
         )
         await agent.run("echo test")
 
-        # The planning call for attempt 1 should have tools that include
-        # web_fetch (found via reflection hint) — verify it was offered
+        # The planning call for attempt 1 offers the built-ins alone: the
+        # reflection names web_fetch in prose, which resolves nothing.
         plan_call_2 = llm.calls[2]  # 0=plan, 1=reflect, 2=plan
-        tools_offered = plan_call_2.get("tools")
-        if tools_offered:
-            tool_names = [t.name for t in tools_offered]
-            assert "web_fetch" in tool_names
+        tool_names = [t.name for t in plan_call_2.get("tools") or []]
+        assert "echo" in tool_names
+        assert "web_fetch" not in tool_names
 
 
 class TestPrePlanIncludesReflections:

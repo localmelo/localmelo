@@ -8,7 +8,7 @@ from MCP servers, which tools each step offers, and what the checks do.
 | Tool | What it does | Limits |
 |---|---|---|
 | `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. Six destructive command patterns are refused. |
-| `python_exec` | Runs Python code inside the localmelo process and returns what it prints. | No time limit: it cannot be interrupted. |
+| `python_exec` | Runs Python code in a child process and returns what it prints. | Killed with every process it started after 60 seconds. `sys.exit()` ends only the child. |
 | `file_read` | Reads a text file. | Any file your account can read. |
 | `file_write` | Writes text to a file, creating or replacing it. | Any file your account can write. |
 
@@ -16,9 +16,19 @@ A `file_read` or `file_write` call may take up to 60 seconds, and an MCP tool
 call up to its server's `timeout`. Output longer than 50,000 characters is
 cut.
 
+The `python_exec` code reaches the child on its standard input, a pipe,
+never in its `-c` argument: `ps` does not show the code, and a call has no
+`ARG_MAX` limit (about 1 MiB of argv and environment on macOS). The child
+runs a fixed wrapper; once that has read the code it points fd 0 at
+`/dev/null`, so `input()` gets EOF. The child may have at most 1,024 open
+files and one hour of CPU time (the POSIX `RLIMIT_NOFILE` and `RLIMIT_CPU`
+limits). The call's time limit normally ends it first; the CPU limit only
+stops code that outlives melo or that spends an hour of CPU. An
+address-space limit is not set: macOS refuses a finite one.
+
 This is how the built-in tools work in direct mode and the gateway. In the
 Python API, an agent with a workspace root keeps the file tools inside a
-directory and runs `shell_exec` and `python_exec` there (see
+directory and starts `shell_exec` and `python_exec` there (see
 [With a workspace root](#with-a-workspace-root)). The interactive UI (bare
 `melo`) runs with its workspace as the root and asks before each
 `shell_exec`, `python_exec` and `file_write` call, unless `--yolo` (see
@@ -140,9 +150,12 @@ those tools. `--tool-exposure` chooses the list:
 - **`retrieve`** (the default): every registered built-in tool, sorted by
   name, then the extra tools for the step, also sorted by name. The extra
   tools are chosen among the other tools, such as MCP tools:
-  - the tools that the conversation has already named or called, and
+  - the tools the model has already called in this conversation, and
   - the 3 best matches for the task, by a keyword search (Okapi BM25 with
     IDF) over each tool's name, description and tags.
+
+  Only the model's tool calls are hints: a tool name in the task, in a tool
+  result or in recalled memory adds nothing.
 - **`all`**: every registered tool, sorted by name, on every step. The list
   never changes, which helps servers that cache prompt prefixes.
 
@@ -185,8 +198,8 @@ The checks are guardrails, not a sandbox:
 
 - Tools run with your account's permissions.
 - Without a workspace root, as in direct mode and the gateway, file tools
-  reach any file you can, and `python_exec` runs code inside the localmelo
-  process.
+  reach any file you can. `python_exec` runs in a child process of melo, not
+  in a sandbox: it reaches any file you can too.
 - With a workspace root, `shell_exec` and `python_exec` still reach any
   file you can: only the file tools are kept inside the root.
 - Approvals apply only to a run with an approval policy, and in the
@@ -259,22 +272,25 @@ Direct mode and the gateway never set a workspace root.
   file over 200,000 bytes, or whose text is longer than 50,000 characters,
   is cut to 50,000 characters, which end with
   `... [truncated: the file has <size> bytes]`.
-- **Commands.** `shell_exec` and `python_exec` start in the root, each in a
-  child process with a process group of its own, which a timeout or a
-  cancellation kills with every process it started. A shell command's
-  standard input is `/dev/null`, with or without a root, so it never reads
-  the terminal melo runs in. `python_exec` code runs in a child Python, so a
-  time limit can stop it. These two tools are not fenced: they can reach any
-  path.
+- **Commands.** `shell_exec` and `python_exec` always run in a child process
+  with a process group of its own, which a timeout or a cancellation kills
+  with every process it started; a root only sets the directory they start
+  in. A shell command's standard input is `/dev/null`; `python_exec` gets its
+  code on a pipe (never in argv) and then points fd 0 at `/dev/null`, so
+  `input()` gets EOF and neither reads the terminal melo runs in. These two
+  tools are not fenced: they can reach any path.
 - **Exit status.** A `shell_exec` command that exits with a non-zero status
   starts its text with the line `[exit code <n>]` (`-<signal>` for a command
   that a signal ended), and the call still succeeds. The line comes first,
   so it stays when the output is cut. Python code that exits with a non-zero
-  status fails with `Python exited with code <n>`.
+  status fails with `Python exited with code <n>`, followed by the last
+  4,000 characters of its output.
 - **Time limits.** `AgentOptions(tool_timeout_s=...)` sets the time limit of
   `shell_exec` and `python_exec`, in seconds. Without it they keep 30
   seconds for a shell command and 60 seconds for Python. A shell command
-  that runs too long fails with `Command timed out after <n> s`.
+  that runs too long fails with `Command timed out after <n> s`; a Python
+  call whose child is still running ends the call as a timeout with
+  `Execution timed out after <n>s`, and kills it.
 
 ### With an approval policy
 

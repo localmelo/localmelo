@@ -526,7 +526,7 @@ def _tool_messages(body: dict[str, Any]) -> list[str]:
 
 
 @pytest.mark.parametrize("output_format", ["text", "json"])
-def test_sys_exit_in_python_exec_fails_only_the_call(
+def test_sys_exit_in_python_exec_stays_in_the_child(
     chat_server: FakeChatServer, tmp_path: Path, output_format: str
 ) -> None:
     """Code that calls sys.exit(0) must not end melo, unreported, with 0."""
@@ -541,11 +541,10 @@ def test_sys_exit_in_python_exec_fails_only_the_call(
         assert (record["status"], record["n_tool"]) == ("completed", 1)
     else:
         assert done.stdout == "done\n"
-    # The model was told, and answered.
+    # The model was told, and answered. The exit ended only the child, so
+    # the call succeeded with what it printed before the exit.
     assert chat_server.requests == 2
-    assert _tool_messages(chat_server.bodies[1]) == [
-        "Error: Code called sys.exit(0), which python_exec does not allow"
-    ]
+    assert _tool_messages(chat_server.bodies[1]) == ["hi"]
 
 
 # Code that writes to fd 1 past python_exec's own capture of sys.stdout.
@@ -566,10 +565,10 @@ LEAKS = [
 
 
 @pytest.mark.parametrize("output_format", ["text", "json"])
-def test_what_tools_write_to_stdout_goes_to_stderr(
+def test_what_python_code_writes_to_stdout_is_the_calls_output(
     chat_server: FakeChatServer, tmp_path: Path, output_format: str
 ) -> None:
-    """Stdout carries the result or the one JSON line, and nothing else."""
+    """The child's stdout is a pipe, so nothing it writes reaches melo's."""
     chat_server.replies.append(_tool_call("python_exec", {"code": LEAKING_CODE}))
     done = _run_melo(chat_server, tmp_path, output_format)
 
@@ -578,7 +577,7 @@ def test_what_tools_write_to_stdout_goes_to_stderr(
         assert _json_record(done.stdout)["status"] == "completed"
     else:
         assert done.stdout == "done\n"
-    for leak in LEAKS:
-        assert leak in done.stderr.splitlines(), done.stderr
-    # What the code printed is still the call's output.
-    assert _tool_messages(chat_server.bodies[1]) == ["printed"]
+    assert done.stderr == ""
+    # Stdout carries the result or the one JSON line, and nothing else; the
+    # code's writes, its subprocesses' included, are the call's output.
+    assert _tool_messages(chat_server.bodies[1]) == ["\n".join([*LEAKS, "printed"])]

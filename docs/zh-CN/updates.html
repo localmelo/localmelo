@@ -77,6 +77,45 @@
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
 
+        <article class="update-entry" id="u-2026-10-27-gpu-lock">
+          <h3>网关读取 GPU 锁和电池</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/76">#76</a>
+          </p>
+          <ul>
+            <li>网页工作区的标题栏会显示外部的 GPU 锁（持有者和用途，并标注 <code>(recorded)</code> 或 <code>(chats wait)</code>）、自己的锁、无法读取的锁、<code>· ETA passed</code>，以及使用电池时的电量和状态。同样的变化会写入 <code>calls.jsonl</code> 旁边的 <code>machine.jsonl</code>。</li>
+            <li><code>[scheduler] lock_gate</code> 默认是 <code>record</code>：只显示和记录锁与电池，不改变任何请求。<code>wait</code> 会在外部锁存在时扣住工作区的每个调用（包括向量调用），聊天显示 <code>Waiting: Reservation</code>。</li>
+            <li><code>lock_self</code> 必须与持有者完全一致（或写成 <code>holder:run</code>）。无法读取或已过期的锁仍算外部锁，永远不会被自动清除；localmelo 从不写入、重命名或删除锁。直接运行、命令行和 <code>/v1/agent/run</code> 都不变。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-approval-diffs">
+          <h3>审批中显示改动，新增恢复命令</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/75">#75</a>
+          </p>
+          <ul>
+            <li>批准对已有文本文件的 <code>file_write</code> 之前，界面现在会显示将要发生的变化：头部有 <code>+a -b lines</code> 的统一 diff，删除的行显示为红色、新增的行显示为绿色；新文件显示内容和行数；文件太大、不是文本或不是普通文件时会说明原因。</li>
+            <li>终端界面新增 <code>/approvals</code>（当前模式和本次会话的授权，并可切换 <code>ask</code>、<code>auto</code> 或 <code>deny</code>）、<code>/status</code>（模型与服务器、会话、工具、记忆、限制和文件）、<code>/retry</code>（重新运行最近一轮）和 <code>/mcp</code>（服务器、它们的工具，以及 MCP 为什么关闭）。相应的提示会在适用时列出这些命令。</li>
+            <li>界面可以通过 <code>--mcp-config</code> 或配置文件新增的顶层 <code>mcp_config</code> 键加载 MCP 服务器文件；服务器启动失败时只会让该会话关闭 MCP，不会结束界面。直接模式从不读取这个键。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-embedding-setup">
+          <h3>为长期记忆设置嵌入模型</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/74">#74</a>
+          </p>
+          <ul>
+            <li>第一次运行会提供聊天服务器已经列出的嵌入模型（<code>Use nomic-embed-text for long-term memory? [Y/n]:</code>），配置向导会把服务器的嵌入模型追加为后端之后的选项，并默认选择推荐的那个。</li>
+            <li>banner 会写明已配置的嵌入后端和模型（<code>long-term memory · vLLM · Qwen3-Embedding-0.6B</code>），没有配置时提示 <code>melo --reconfigure adds one</code>；来自其他模型的已存向量会被跳过，而不是让召回失败。</li>
+            <li>新增的<a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">指南（英文）</a>覆盖 Ollama、oMLX、vLLM、SGLang 和 MLC。</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-27-held-labels">
           <h3>被挂起的聊天处处显示 Waiting</h3>
           <p class="update-date">
@@ -100,19 +139,6 @@
             <li>网页工作区里每个聊天发出的规划、反思和向量调用现在都经过调度器的策略：聊天调用要么立刻发出，要么等一个槽位；向量调用从不被扣住，但会计入在途数量；等待时页面显示 <code>Waiting: Resources</code>（或策略给出的其他原因）。</li>
             <li>标题栏的等级按钮（P1 到 P4，默认 P2）决定这个聊天相对其他聊天的顺序；你正在输入的聊天就是快车道，在不超出服务器槽位的前提下优先放行。</li>
             <li><code>[scheduler] policy</code> 默认是 <code>off</code>：只把每次调用记录到 <code>~/.cache/localmelo/scheduler/</code>，不扣住任何调用。<code>fcfs</code> 和 <code>class</code> 会真正执行策略。直接运行、命令行和 <code>/v1/agent/run</code> 都不变。</li>
-          </ul>
-        </article>
-
-        <article class="update-entry" id="u-2026-10-27-gpu-lock">
-          <h3>网关读取 GPU 锁和电池</h3>
-          <p class="update-date">
-            <time datetime="2026-10-27">2026-10-27</time> ·
-            <a href="https://github.com/localmelo/localmelo/pull/76">#76</a>
-          </p>
-          <ul>
-            <li>网页工作区的标题栏会显示外部的 GPU 锁（持有者和用途，并标注 <code>(recorded)</code> 或 <code>(chats wait)</code>）、自己的锁、无法读取的锁、<code>· ETA passed</code>，以及使用电池时的电量和状态。同样的变化会写入 <code>calls.jsonl</code> 旁边的 <code>machine.jsonl</code>。</li>
-            <li><code>[scheduler] lock_gate</code> 默认是 <code>record</code>：只显示和记录锁与电池，不改变任何请求。<code>wait</code> 会在外部锁存在时扣住工作区的每个调用（包括向量调用），聊天显示 <code>Waiting: Reservation</code>。</li>
-            <li><code>lock_self</code> 必须与持有者完全一致（或写成 <code>holder:run</code>）。无法读取或已过期的锁仍算外部锁，永远不会被自动清除；localmelo 从不写入、重命名或删除锁。直接运行、命令行和 <code>/v1/agent/run</code> 都不变。</li>
           </ul>
         </article>
 

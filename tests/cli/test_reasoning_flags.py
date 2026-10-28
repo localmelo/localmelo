@@ -526,8 +526,8 @@ def test_the_interactive_ui_refuses_the_reasoning_field(
         cli._check_args(parser, parser.parse_args(["--reasoning-field", "auto"]))
     assert exc.value.code == 2
     assert _error_line(capsys) == (
-        "melo: error: only for direct mode (a query without --serve): "
-        "--reasoning-field"
+        "melo: error: --reasoning-field is not in the interactive UI yet; "
+        'give it with a task (melo -- "<task>")'
     )
 
 
