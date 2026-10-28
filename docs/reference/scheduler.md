@@ -115,10 +115,13 @@ park generation; interrupted recovery preserves a pending pause until explicit
 resume or a terminal outcome. Missing provenance and missing process records
 are unknown, not proof that a task never ran or that its processes are gone.
 The internal legacy-adoption seam records explicit orphan-risk confirmation but
-does not itself queue or launch a task. Version 4 adds dormant per-execution
-capture state, process identity checks and a gated subprocess primitive. No worker
-uses them yet, so existing process records still lack completeness proof. Startup
-classification uses the recovery journal; process verification, controlled restart
+does not itself queue or launch a task. Version 4 adds per-execution
+capture state, process identity checks and a gated subprocess primitive. Workers
+record a launch's process group through that gate before releasing the child and
+mark capture incomplete at each arbitrary-code tool entry; a store outage retries
+the marker for up to 10 seconds, then refuses that one call. An unsupported
+platform releases the child only after the marker commits. Nothing reads this
+evidence yet, so Resume stays fenced; process verification, controlled restart
 scheduling and user-facing confirmation remain later work.
 
 A task row's id is its `kind="task"` session's id. `create_task()` writes the

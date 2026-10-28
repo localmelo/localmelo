@@ -20,7 +20,8 @@ from localmelo.melo.contracts.tool_capture import _ENTRY_MARKED
 from localmelo.melo.executor.env import child_env
 from localmelo.melo.executor.process_gate import (
     PROCESS_RECORD,
-    UnsupportedProcessGate,
+    UnsupportedProcessGateError,
+    gate_supported,
     gated_exec,
 )
 from localmelo.melo.schema import ToolDef
@@ -125,15 +126,22 @@ async def _shell_exec(command: str) -> str:
     return text
 
 
+def _require_incomplete_entry() -> None:
+    """Refuse a launch whose entry marker may not have committed."""
+    if not _ENTRY_MARKED.get():
+        raise RuntimeError(
+            "execution evidence could not be recorded; the call was not run"
+        )
+
+
 async def _gated_or_fallback(
     argv: list[str], *, record: Any, **kwargs: Any
 ) -> asyncio.subprocess.Process:
     try:
         return await gated_exec(argv, record=record, **kwargs)
-    except UnsupportedProcessGate:
+    except UnsupportedProcessGateError:
         # Only Executor can establish that the incomplete marker committed.
-        if not _ENTRY_MARKED.get():
-            raise
+        _require_incomplete_entry()
         return await asyncio.create_subprocess_exec(
             *argv, start_new_session=True, **kwargs
         )
@@ -163,7 +171,9 @@ async def _run_shell(
     # group, which is killed as a whole when the command times out or the
     # call is cancelled (the executor's timeout, the run's timeout_s).
     record = PROCESS_RECORD.get()
-    if record is None:
+    if record is None or not gate_supported():
+        if record is not None:
+            _require_incomplete_entry()
         proc = await asyncio.create_subprocess_shell(
             command,
             stdin=stdin,
@@ -420,7 +430,9 @@ async def _run_python(
     if not sys.executable:
         raise RuntimeError("No Python interpreter is available for python_exec")
     record = PROCESS_RECORD.get()
-    if record is None:
+    if record is None or not gate_supported():
+        if record is not None:
+            _require_incomplete_entry()
         proc = await asyncio.create_subprocess_exec(
             sys.executable,
             "-c",

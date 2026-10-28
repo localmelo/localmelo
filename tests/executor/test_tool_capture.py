@@ -12,9 +12,12 @@ from localmelo.melo.checker import Checker
 from localmelo.melo.contracts.approvals import ApprovalDecision
 from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.executor import Executor, register_builtins
-from localmelo.melo.executor.builtins import _run_python
+from localmelo.melo.executor.builtins import _run_python, _run_shell
 from localmelo.melo.executor.models import ExecutionRequest, ExecutionStatus
-from localmelo.melo.executor.process_gate import PROCESS_RECORD, UnsupportedProcessGate
+from localmelo.melo.executor.process_gate import (
+    PROCESS_RECORD,
+    UnsupportedProcessGateError,
+)
 from localmelo.melo.memory.coordinator import Hippo
 from localmelo.melo.schema import ToolDef
 
@@ -172,7 +175,7 @@ async def test_unsupported_gate_falls_back_only_after_marker(
 
     async def unsupported(*args: Any, **kwargs: Any) -> Any:
         events.append("spawn")
-        raise UnsupportedProcessGate("subprocess gate unsupported")
+        raise UnsupportedProcessGateError("subprocess gate unsupported")
 
     monkeypatch.setattr("localmelo.melo.executor.builtins.gated_exec", unsupported)
     entry_token = TOOL_ENTRY.set(capture)
@@ -180,7 +183,8 @@ async def test_unsupported_gate_falls_back_only_after_marker(
     try:
         outcome = await executor.execute_structured(
             ExecutionRequest(
-                tool_name="python_exec", arguments={"code": "open('marker', 'w').close()"}
+                tool_name="python_exec",
+                arguments={"code": "open('marker', 'w').close()"},
             )
         )
         assert outcome.status == (
@@ -191,25 +195,6 @@ async def test_unsupported_gate_falls_back_only_after_marker(
     finally:
         PROCESS_RECORD.reset(process_token)
         TOOL_ENTRY.reset(entry_token)
-
-
-async def test_direct_builtin_cannot_fallback_without_entry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def unsupported(*args: Any, **kwargs: Any) -> Any:
-        raise UnsupportedProcessGate("unsupported")
-
-    async def record(pid: int) -> None:
-        raise AssertionError("must not record")
-
-    monkeypatch.setattr("localmelo.melo.executor.builtins.gated_exec", unsupported)
-    token = PROCESS_RECORD.set(record)
-    try:
-        with pytest.raises(UnsupportedProcessGate):
-            await _run_python("open('marker', 'w').close()", cwd=str(tmp_path))
-        assert not (tmp_path / "marker").exists()
-    finally:
-        PROCESS_RECORD.reset(token)
 
 
 @pytest.mark.parametrize("name", ["python_exec", "shell_exec"])
@@ -278,5 +263,99 @@ async def test_entry_callback_suppressed_cancellation_never_invokes_tool() -> No
         with pytest.raises(asyncio.CancelledError):
             await task
         assert calls == []
+    finally:
+        TOOL_ENTRY.reset(token)
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        ("python_exec", {"code": "open('marker', 'w').close()"}),
+        ("shell_exec", {"command": "touch marker"}),
+    ],
+)
+@pytest.mark.parametrize("marked", [True, False])
+async def test_unsupported_platform_fallback_needs_incomplete_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    arguments: dict[str, str],
+    marked: bool,
+) -> None:
+    marker = tmp_path / "marker"
+    events: list[str] = []
+
+    async def capture() -> None:
+        events.append("entry")
+
+    async def record(pid: int) -> None:
+        raise AssertionError("must not record")
+
+    monkeypatch.setattr(
+        "localmelo.melo.executor.builtins.gate_supported", lambda: False
+    )
+    process_token = PROCESS_RECORD.set(record)
+    entry_token = TOOL_ENTRY.set(capture) if marked else None
+    try:
+        if marked:
+            hippo = Hippo()
+            executor = Executor(
+                hippo, Checker(mode="interactive"), workspace_root=str(tmp_path)
+            )
+            register_builtins(
+                executor, hippo, names={name}, workspace_root=str(tmp_path)
+            )
+            result = await executor.execute_structured(
+                ExecutionRequest(tool_name=name, arguments=arguments)
+            )
+            assert result.status == ExecutionStatus.SUCCESS
+            assert events == ["entry"] and marker.exists()
+        else:
+            with pytest.raises(RuntimeError, match="the call was not run"):
+                if name == "python_exec":
+                    await _run_python("open('marker', 'w').close()", cwd=str(tmp_path))
+                else:
+                    await _run_shell("touch marker", cwd=str(tmp_path))
+            assert not marker.exists()
+    finally:
+        if entry_token is not None:
+            TOOL_ENTRY.reset(entry_token)
+        PROCESS_RECORD.reset(process_token)
+
+
+async def test_entry_outage_refuses_one_call_then_a_later_call_runs(
+    tmp_path: Path,
+) -> None:
+    hippo = Hippo()
+    executor = Executor(
+        hippo, Checker(mode="interactive"), workspace_root=str(tmp_path)
+    )
+    register_builtins(
+        executor, hippo, names={"python_exec"}, workspace_root=str(tmp_path)
+    )
+    calls: list[str] = []
+    marker = tmp_path / "marker"
+    error = (
+        "execution evidence could not be recorded; the call was not run; "
+        "task store unavailable"
+    )
+    arguments = {"code": "open('marker', 'w').close()"}
+
+    async def capture() -> None:
+        calls.append("entry")
+        if len(calls) == 1:
+            raise RuntimeError(error)
+
+    token = TOOL_ENTRY.set(capture)
+    try:
+        first = await executor.execute_structured(
+            ExecutionRequest(tool_name="python_exec", arguments=arguments)
+        )
+        assert first.status == ExecutionStatus.ERROR and first.error == error
+        assert not marker.exists()
+        second = await executor.execute_structured(
+            ExecutionRequest(tool_name="python_exec", arguments=arguments)
+        )
+        assert second.status == ExecutionStatus.SUCCESS and marker.exists()
     finally:
         TOOL_ENTRY.reset(token)

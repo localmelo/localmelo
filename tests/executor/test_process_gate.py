@@ -8,8 +8,7 @@ from typing import Any
 
 import pytest
 
-from localmelo.melo.executor.builtins import _run_python, _run_shell
-from localmelo.melo.executor.process_gate import PROCESS_RECORD, gated_exec
+from localmelo.melo.executor.process_gate import gated_exec
 
 # The driver crashes with os._exit so no Python cleanup runs in the parent.
 _CRASH_DRIVER = """
@@ -212,33 +211,3 @@ async def test_parent_crash_never_releases_an_unrecorded_child(
         await asyncio.sleep(0.1)
     else:
         pytest.fail("an unreleased child survived its crashed parent")
-
-
-@pytest.mark.parametrize("kind", ["python", "shell"])
-async def test_builtin_exec_waits_for_record(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, kind: str
-) -> None:
-    monkeypatch.setenv("HOME", str(tmp_path))
-    marker = tmp_path / "marker"
-    entered, release = asyncio.Event(), asyncio.Event()
-
-    async def record(pid: int) -> None:
-        assert pid > 0
-        entered.set()
-        await release.wait()
-
-    token = PROCESS_RECORD.set(record)
-    try:
-        work = asyncio.create_task(
-            _run_python(f"open({str(marker)!r}, 'w').close()", cwd=str(tmp_path))
-            if kind == "python"
-            else _run_shell(f"touch {marker}", cwd=str(tmp_path))
-        )
-        await asyncio.wait_for(entered.wait(), 3)
-        assert not marker.exists()
-        release.set()
-        await asyncio.wait_for(work, 3)
-        assert marker.exists()
-    finally:
-        release.set()
-        PROCESS_RECORD.reset(token)

@@ -1,6 +1,7 @@
 """Worker capture admission and launch-fence boundaries."""
 
 import asyncio
+import os
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -53,33 +54,6 @@ async def create(tasks: TaskStore, tmp_path: Path, *, proof: bool) -> str:
     return task.task_id
 
 
-async def test_ordinary_start_is_atomically_untrusted(
-    setup: CaptureSetup, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    store, tasks, worker = setup
-    task = await create(tasks, tmp_path, proof=False)
-    original = store._before_commit
-
-    def fail(label: str) -> None:
-        original(label)
-        if label == "task_change":
-            raise RuntimeError("rollback")
-
-    monkeypatch.setattr(store, "_before_commit", fail)
-    with pytest.raises(RuntimeError):
-        await tasks.change(
-            task, state="running", actor="scheduler", _capture_execution="run"
-        )
-    assert (await tasks.get_task(task)).state == "queued"
-    monkeypatch.setattr(store, "_before_commit", original)
-    await tasks.change(
-        task, state="running", actor="scheduler", _capture_execution="run"
-    )
-    assert not await RecoveryStore(store).capture_complete(task, execution_id="run")
-    await worker._capture_incomplete(task, "run")
-    assert not await RecoveryStore(store).capture_complete(task, execution_id="run")
-
-
 async def test_first_fence_receipt_survives_capture_and_hold_but_not_stop(
     setup: CaptureSetup, tmp_path: Path
 ) -> None:
@@ -108,6 +82,7 @@ async def test_first_fence_receipt_survives_capture_and_hold_but_not_stop(
         expected_operation_id=previous,
         operation_id="hold",
     )
+    assert await recovery.capture_complete(task, execution_id="run")
     assert not (await recovery.start(task, **args)).acquired
     generation, previous = await tasks.park_identity(task)
     await parks.resume(
@@ -116,6 +91,7 @@ async def test_first_fence_receipt_survives_capture_and_hold_but_not_stop(
         expected_operation_id=previous,
         operation_id="resume",
     )
+    assert await recovery.capture_complete(task, execution_id="run")
     await worker._capture_incomplete(task, "run")
     assert not (await recovery.start(task, **args)).acquired
     generation, previous = await tasks.park_identity(task)
@@ -394,4 +370,162 @@ async def test_worker_context_hooks_bind_execution(
         await workers.aclose()
         await hub.aclose()
         await gate.close()
+        await store.aclose()
+
+
+async def test_current_execution_guard_only_preserves_its_own_capture(
+    setup: CaptureSetup, tmp_path: Path
+) -> None:
+    store, tasks, worker = setup
+    task = await create(tasks, tmp_path, proof=True)
+    recovery = RecoveryStore(store)
+    generation, previous = await tasks.park_identity(task)
+    await recovery.start(
+        task,
+        operation_id="start",
+        execution_id="run",
+        expected_generation=generation,
+        expected_operation_id=previous,
+        _capture=True,
+    )
+    assert await recovery.capture_complete(task, execution_id="run")
+
+    # The live execution's own running/resume transition keeps its capture.
+    await tasks.change(
+        task,
+        state="running",
+        actor="scheduler",
+        _capture_execution="run",
+        _capture_existing=True,
+    )
+    assert await recovery.capture_complete(task, execution_id="run")
+
+    # A stale execution cannot revive or preserve the current capture.
+    with pytest.raises(TaskStoreError, match="launch capture is no longer active"):
+        await tasks.change(
+            task,
+            state="running",
+            actor="scheduler",
+            _capture_execution="stale",
+            _capture_existing=True,
+        )
+    assert await recovery.capture_complete(task, execution_id="run")
+
+    # A new ordinary execution retires it and starts incomplete.
+    other = await create(tasks, tmp_path, proof=False)
+    await tasks.change(
+        other, state="running", actor="scheduler", _capture_execution="new"
+    )
+    assert not await recovery.capture_complete(other, execution_id="new")
+
+
+# A separate process crashes with os._exit, so no Python cleanup runs between
+# the durable record and the gate release.
+_CAPTURE_CRASH_DRIVER = """
+import asyncio, os, sys
+from pathlib import Path
+
+async def main():
+    db, workspace, mode, marker, pid_file = sys.argv[1:6]
+    from localmelo.melo.executor.process_gate import gated_exec
+    from localmelo.support.gateway.recovery_store import RecoveryStore
+    from localmelo.support.gateway.task_policy import TaskSpec
+    from localmelo.support.gateway.task_store import TaskStore
+    from localmelo.support.gateway.workers import TaskWorkers
+    from localmelo.support.sessions.store import SessionStore
+
+    store = SessionStore(Path(db), writer="gateway")
+    await store.open()
+    tasks = TaskStore(store)
+    await tasks.open()
+    task, _ = await tasks.create_task(
+        TaskSpec.from_payload({"objective": "work"}), origin="user",
+        workspace=workspace, _recovery_proof=True,
+    )
+    generation, previous = await tasks.park_identity(task.task_id)
+    await RecoveryStore(store).start(
+        task.task_id, operation_id="start", execution_id="run",
+        expected_generation=generation, expected_operation_id=previous,
+        _capture=True,
+    )
+    worker = TaskWorkers.__new__(TaskWorkers)
+    worker.store, worker.tasks = store, tasks
+    worker._lock, worker._closed, worker._stopping = asyncio.Lock(), False, set()
+
+    async def record(pid):
+        Path(pid_file).write_text(str(pid))
+        if mode == "before-record":
+            os._exit(9)
+        await TaskWorkers._capture_process(worker, task.task_id, "run", pid)
+        if mode == "after-record":
+            os._exit(9)
+
+    proc = await gated_exec(
+        [sys.executable, "-c",
+         "from pathlib import Path; import sys; Path(sys.argv[1]).touch()", marker],
+        record=record,
+    )
+    if mode == "after-release":
+        os._exit(9)
+    await proc.wait()
+
+asyncio.run(main())
+"""
+
+
+@pytest.mark.parametrize(
+    ("mode", "recorded", "released"),
+    [
+        ("before-record", False, False),
+        ("after-record", True, False),
+        ("after-release", True, True),
+    ],
+)
+async def test_worker_crash_keeps_capture_before_release(
+    tmp_path: Path, mode: str, recorded: bool, released: bool
+) -> None:
+    db, workspace = tmp_path / "sessions.db", tmp_path / "workspace"
+    workspace.mkdir()
+    marker, pid_file = tmp_path / "marker", tmp_path / "pid"
+    driver = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-c",
+        _CAPTURE_CRASH_DRIVER,
+        str(db),
+        str(workspace),
+        mode,
+        str(marker),
+        str(pid_file),
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, errors = await asyncio.wait_for(driver.communicate(), 30)
+    assert driver.returncode == 9, errors.decode()
+    store = SessionStore(db, writer="gateway")
+    await store.open()
+    try:
+        tasks = TaskStore(store)
+        await tasks.open()
+        (task,) = await tasks.list_tasks()
+        recovery = RecoveryStore(store)
+        assert await recovery.capture_complete(task.task_id, execution_id="run")
+        processes = await recovery.processes(task.task_id, execution_id="run")
+        assert bool(processes) is recorded
+        if released:
+            for _ in range(100):
+                if marker.exists():
+                    break
+                await asyncio.sleep(0.05)
+            assert marker.exists()
+            return
+        assert not marker.exists()
+        pid = int(pid_file.read_text())
+        for _ in range(100):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            pytest.fail("an unreleased child survived its crashed parent")
+    finally:
         await store.aclose()

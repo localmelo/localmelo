@@ -13,7 +13,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     denial_text,
 )
-from localmelo.melo.contracts.tool_capture import TOOL_ENTRY, _ENTRY_MARKED
+from localmelo.melo.contracts.tool_capture import _ENTRY_MARKED, TOOL_ENTRY
 from localmelo.melo.executor.builtins import builtin_names
 from localmelo.melo.executor.models import (
     ArtifactMeta,
