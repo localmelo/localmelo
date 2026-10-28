@@ -3867,11 +3867,23 @@ class Agent:
         def message_result(result: ToolResult, text: str, index: int) -> ToolResult:
             if not self.options.captured_history:
                 return result
-            if index in withheld:
-                safe_text = "[Tool result withheld from working memory]"
+            if index < len(captured) and not captured[index][1].get("redactions"):
+                safe_text = text
             elif index < len(captured):
-                safe, _ = preview_result(captured[index][0])
-                safe_text = _tool_result_text(safe)[: len(text)]
+                safe, safe_cut = preview_result(captured[index][0])
+                safe_body = _tool_result_text(safe)
+                note = image_notes[index]
+                if index in withheld:
+                    safe_body = "\n".join(
+                        (
+                            "[Tool result withheld from working memory]",
+                            safe_body[:WITHHELD_PREVIEW_CHARS],
+                        )
+                    )
+                else:
+                    room = max(0, len(text) - len(note) - bool(note))
+                    safe_body = _cut_to(safe_body, room, cut_before=safe_cut)
+                safe_text = "\n".join(part for part in (safe_body, note) if part)
             else:
                 safe_text = (
                     text

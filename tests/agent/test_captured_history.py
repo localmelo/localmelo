@@ -441,7 +441,46 @@ async def test_tool_error_is_bounded_and_stored_with_status(tmp_path: Path) -> N
         await agent.close()
 
 
-async def test_image_drop_notice_survives_model_fitting() -> None:
+@pytest.mark.parametrize("at_boundary", [False, True])
+async def test_trace_receives_redacted_output(
+    monkeypatch: pytest.MonkeyPatch, at_boundary: bool
+) -> None:
+    from localmelo.melo.memory.procedures.trace import Trace, TraceCall
+
+    secret = "sk-" + "a" * 80
+    text = ("x" * (PREVIEW_LIMIT - 80) + " " if at_boundary else "") + secret
+    seen: list[str] = []
+    original = Trace.tool
+
+    def spy(
+        self: Trace, name: str, arguments: object, status: str, output: str
+    ) -> TraceCall:
+        seen.append(output)
+        return original(self, name, arguments, status, output)
+
+    monkeypatch.setattr(Trace, "tool", spy)
+    agent = Agent(
+        llm=Provider(),
+        options=AgentOptions(
+            captured_history=True, tool_exposure="all", builtins=frozenset()
+        ),
+    )
+    agent.hippo.register_tool(ToolDef("sample", "sample", {}))
+
+    async def sample() -> str:
+        return text
+
+    agent.executor.register("sample", sample)
+    try:
+        await agent.run_task("run sample")
+        assert len(seen) == 1
+        assert secret not in seen[0] and "sk-" not in seen[0]
+    finally:
+        await agent.close()
+
+
+@pytest.mark.parametrize("with_secret", [False, True])
+async def test_image_drop_notice_survives_model_fitting(with_secret: bool) -> None:
     class TwoCalls(Provider):
         async def chat(
             self, messages: list[Message], tools: list[ToolDef] | None = None
@@ -466,9 +505,12 @@ async def test_image_drop_notice_survives_model_fitting() -> None:
     )
     agent.hippo.register_tool(ToolDef("sample", "sample", {}))
 
+    secret = "sk-" + "a" * 32
+
     async def sample() -> ToolOutput:
         return ToolOutput(
-            "x" * 100_000, [ImagePart.from_bytes(b"image", "application/invalid")]
+            (secret + " " if with_secret else "") + "x" * 100_000,
+            [ImagePart.from_bytes(b"image", "application/invalid")],
         )
 
     agent.executor.register("sample", sample)
@@ -493,7 +535,13 @@ async def test_image_drop_notice_survives_model_fitting() -> None:
         )
         assert all(
             tool.tool_result is not None
-            and len(tool.tool_result.output) <= PREVIEW_LIMIT
+            and "image dropped:" in tool.tool_result.output
+            and secret not in tool.tool_result.output
+            and (
+                "truncated:" in tool.tool_result.output
+                or "withheld" in tool.tool_result.output
+            )
+            and (with_secret or tool.tool_result.output in tool.content)
             for tool in tools
         )
     finally:
