@@ -19,7 +19,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   bounded, redacted cards from the task spec and persisted events. Worker API
   pause behavior remains as in #119; there is no worker hold/park integration or
   new API in this slice.
-  S3b.1b follows ([#NN]).
+  S3b.1b follows ([#125]).
 
 - Workspace settings gain connection testing and an immediately applied theme;
   a session details drawer shows tools, grant revocation, memory and runs.
@@ -907,3 +907,4 @@ earlier milestones.
 [#122]: https://github.com/localmelo/localmelo/pull/122
 [#123]: https://github.com/localmelo/localmelo/pull/123
 [#124]: https://github.com/localmelo/localmelo/pull/124
+[#125]: https://github.com/localmelo/localmelo/pull/125
