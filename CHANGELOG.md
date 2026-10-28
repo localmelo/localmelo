@@ -32,7 +32,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   terminal's wording, `markdown.mjs`). Approval cards, the failure block's
   `Continue`/`Try again`/`Copy error` and the settings dialog follow in a
   later update; a waiting approval shows as `Needs approval` until then.
-  `/` and every `/v1/*` route keep their behaviour ([#NN]).
+  `/` and every `/v1/*` route keep their behaviour ([#111]).
 - API v2 settings, model listing, guard body limits and unconfigured gateway
   startup: `GET /api/settings`, `PUT /api/settings`,
   `POST /api/settings/test`, `GET /api/settings/key-status` and
@@ -791,3 +791,4 @@ earlier milestones.
 [#104]: https://github.com/localmelo/localmelo/pull/104
 [#106]: https://github.com/localmelo/localmelo/pull/106
 [#110]: https://github.com/localmelo/localmelo/pull/110
+[#111]: https://github.com/localmelo/localmelo/pull/111
