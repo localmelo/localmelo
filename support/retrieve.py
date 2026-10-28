@@ -29,6 +29,7 @@ import asyncio
 import contextlib
 import json
 import math
+import os
 import sys
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -38,6 +39,15 @@ from typing import Any, TypeVar
 import httpx
 
 from localmelo.melo.contracts.providers import LLM_REQUEST_KIND, ProviderError
+from localmelo.melo.memory._sqlite import make_private_dir
+from localmelo.melo.memory.coordinator import Hippo
+from localmelo.melo.memory.hippo import SIGNALS, SOURCES, MemoryCandidate
+from localmelo.melo.memory.long import LongTermSchemaError
+from localmelo.melo.memory.long.sqlite import (
+    SqliteLongTerm,
+    read_export_decisions,
+    read_export_entries,
+)
 from localmelo.melo.memory.retrieval import (
     RETRIEVER_NAMES,
     CorpusError,
@@ -61,6 +71,7 @@ from localmelo.melo.memory.retrieval.corpus import (
     load_history_calls,
 )
 from localmelo.melo.memory.retrieval.llm import RETRIEVE_TIMEOUT_S
+from localmelo.melo.schema import new_record_id
 from localmelo.support.providers._http import attempt_headers, post_json
 from localmelo.support.providers.embedding.openai_compat import OpenAICompatEmbedding
 from localmelo.support.providers.llm._protocol import prepare_extra_body
@@ -85,6 +96,8 @@ MIN_HTTP_TIMEOUT_S = 120.0
 RETRIEVAL_TEMPERATURE = 0
 
 HISTORY_FILE = "history.db"
+LONG_TERM_FILE = "long_term.db"
+DEFAULT_MEMORY_DIR = "~/.cache/localmelo/memory"
 
 # The flags of an evaluation, with their argparse destinations.
 _EVALUATION_FLAGS = {
@@ -129,6 +142,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             if args.export_run is not None:
                 return _export_run(args.export_run)
+            if args.export_store is not None:
+                return _export_store(args.export_store)
+            if args.export_decisions is not None:
+                return _export_decisions(args.export_decisions)
+            if args.route is not None:
+                assert args.memory_dir is not None  # checked with the flags
+                return asyncio.run(_route(args.route, args.memory_dir))
             return _evaluate(args)
         except _InputError as exc:
             _error(str(exc))
@@ -276,6 +296,36 @@ def _build_parser() -> argparse.ArgumentParser:
             "history.db, a history.db file, or raw-call JSONL"
         ),
     )
+    export.add_argument(
+        "--export-store",
+        metavar="DIR|FILE",
+        help=(
+            "print the active entries of a typed long_term.db, one JSON line "
+            "each: a directory holding it, or the file; it is read only"
+        ),
+    )
+    export.add_argument(
+        "--export-decisions",
+        metavar="DIR|FILE",
+        help=(
+            "print the admission decisions of a typed long_term.db, one JSON "
+            "line each, in seq order; it is read only"
+        ),
+    )
+    route = parser.add_argument_group("route")
+    route.add_argument(
+        "--route",
+        metavar="CANDIDATES.jsonl",
+        help=(
+            "send each input candidate through the write boundary and the "
+            "admission policy into the --memory-dir scratch store; no model"
+        ),
+    )
+    route.add_argument(
+        "--memory-dir",
+        metavar="DIR",
+        help="the scratch memory directory --route writes (required, never the default)",
+    )
     return parser
 
 
@@ -286,10 +336,34 @@ def _check_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> N
         for flag, dest in _EVALUATION_FLAGS.items()
         if getattr(args, dest) is not None
     ]
+    new_modes = [
+        flag
+        for flag, dest in (
+            ("--export-store", "export_store"),
+            ("--export-decisions", "export_decisions"),
+            ("--route", "route"),
+        )
+        if getattr(args, dest) is not None
+    ]
     if args.export_run is not None:
-        if given:
-            parser.error(f"--export-run cannot be combined with {', '.join(given)}")
+        if given or new_modes:
+            other = ", ".join([*given, *new_modes])
+            parser.error(f"--export-run cannot be combined with {other}")
         return
+    if new_modes:
+        if len(new_modes) > 1:
+            parser.error(f"{' and '.join(new_modes)} cannot be combined")
+        if given:
+            parser.error(f"{new_modes[0]} cannot be combined with {', '.join(given)}")
+        if args.route is not None and args.memory_dir is None:
+            parser.error("--route needs --memory-dir")
+        if args.route is None and args.memory_dir is not None:
+            parser.error("--memory-dir applies only to --route")
+        if args.memory_dir is not None and not args.memory_dir:
+            parser.error("--memory-dir must not be empty")
+        return
+    if args.memory_dir is not None:
+        parser.error("--memory-dir applies only to --route")
     missing = [
         flag for flag in ("--retriever", "--corpus", "--queries") if flag not in given
     ]
@@ -624,6 +698,180 @@ def _export_run(target: str) -> int:
         f"{kinds.count('thought')} thought chunks) from {tasks} tasks",
         file=sys.stderr,
     )
+    return EXIT_OK
+
+
+def _store_file(target: str) -> str:
+    """The ``long_term.db`` path at *target*: the file itself, or in a directory."""
+    path = Path(target)
+    return str(path / LONG_TERM_FILE if path.is_dir() else path)
+
+
+def _export_store(target: str) -> int:
+    """Print the active entries of the store at *target*, then a count on stderr."""
+    path = _store_file(target)
+    try:
+        entries = read_export_entries(path)
+    except FileNotFoundError:
+        raise _InputError(f"{path}: No such file or directory") from None
+    except LongTermSchemaError as exc:
+        raise _InputError(str(exc)) from None
+    except Exception as exc:  # a damaged or non-SQLite file
+        raise _InputError(f"{path}: {exc}") from None
+    for entry in entries:
+        _print_line(entry)
+    print(
+        f"{PROG}: exported {len(entries)} active entries from {path}",
+        file=sys.stderr,
+    )
+    return EXIT_OK
+
+
+def _export_decisions(target: str) -> int:
+    """Print the decision rows at *target*, in ``seq`` order, with a count."""
+    path = _store_file(target)
+    try:
+        rows = read_export_decisions(path)
+    except FileNotFoundError:
+        raise _InputError(f"{path}: No such file or directory") from None
+    except LongTermSchemaError as exc:
+        raise _InputError(str(exc)) from None
+    except Exception as exc:  # a damaged or non-SQLite file
+        raise _InputError(f"{path}: {exc}") from None
+    for row in rows:
+        _print_line(row)
+    print(
+        f"{PROG}: exported {len(rows)} decisions from {path}",
+        file=sys.stderr,
+    )
+    return EXIT_OK
+
+
+def _scratch_memory_dir(path: str) -> str:
+    """The route's scratch directory, refused when it is the user's own."""
+    resolved = str(Path(path).expanduser().resolve())
+    default = str(Path(DEFAULT_MEMORY_DIR).expanduser().resolve())
+    env = os.environ.get("LOCALMELO_MEMORY_DIR", "")
+    env_path = str(Path(env).expanduser().resolve()) if env else default
+    if resolved in {default, env_path}:
+        raise _InputError(
+            f"--route: --memory-dir must not be the user's memory directory ({resolved})"
+        )
+    make_private_dir(resolved)
+    return resolved
+
+
+def _route_line(line: str, number: int) -> dict[str, Any]:
+    """One input candidate object, checked."""
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError as exc:
+        raise _InputError(
+            f"--route: line {number} is not JSON: {exc.msg} at column {exc.colno}"
+        ) from None
+    except (ValueError, RecursionError):
+        raise _InputError(f"--route: line {number} is not JSON") from None
+    if not isinstance(value, dict):
+        raise _InputError(f"--route: line {number} is not a JSON object")
+    source = value.get("source")
+    if source not in SOURCES:
+        raise _InputError(
+            f"--route: line {number}: unknown source {source!r}; "
+            f"known sources: {SOURCES}"
+        )
+    signal = value.get("signal")
+    if signal not in SIGNALS:
+        raise _InputError(
+            f"--route: line {number}: unknown signal {signal!r}; "
+            f"known signals: {SIGNALS}"
+        )
+    text = value.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise _InputError(f"--route: line {number}: text must be a non-empty string")
+    source_ids = value.get("source_ids", [])
+    if not isinstance(source_ids, list) or any(
+        not isinstance(item, str) for item in source_ids
+    ):
+        raise _InputError(
+            f"--route: line {number}: source_ids must be a list of strings"
+        )
+    for key in ("candidate_id", "task_id", "session_id", "task_text"):
+        item = value.get(key, "")
+        if not isinstance(item, str):
+            raise _InputError(f"--route: line {number}: {key} must be a string")
+    return value
+
+
+async def _route(candidates: str, memory_dir: str) -> int:
+    """Route each input candidate through the boundary and policy into a scratch store."""
+    directory = _scratch_memory_dir(memory_dir)
+    try:
+        text = _read_text(candidates)
+    except _InputError:
+        raise
+    store = SqliteLongTerm(Path(directory) / LONG_TERM_FILE)
+    hippo = Hippo(long=store, memory=True)
+    try:
+        lines = text.splitlines()
+        count = 0
+        for number, line in enumerate(lines, start=1):
+            if not line.strip():
+                continue
+            value = _route_line(line, number)
+            task_id = str(value.get("task_id") or "")
+            candidate = MemoryCandidate(
+                candidate_id=str(value.get("candidate_id") or new_record_id()),
+                source=str(value["source"]),
+                text=str(value["text"]),
+                remember_by="rule",
+                task_id=task_id,
+                session_id=str(value.get("session_id") or ""),
+                provenance={
+                    "task_id": task_id,
+                    "session_id": str(value.get("session_id") or ""),
+                    "task_text": str(value.get("task_text") or ""),
+                    "source_ids": list(value.get("source_ids") or ()),
+                },
+                remember=True,
+            )
+            hippo.propose(candidate)
+            decisions = await hippo.admit(candidate.candidate_id, str(value["signal"]))
+            if not decisions:
+                decisions = []
+            decision = decisions[0] if decisions else None
+            if decision is None or decision.refused:
+                _print_line(
+                    {
+                        "candidate_id": candidate.candidate_id,
+                        "action": "REFUSED",
+                        "kind": decision.kind if decision else "",
+                        "admitted_by": str(value["signal"]),
+                        "entry_id": None,
+                        "target_id": None,
+                        "reason": decision.reason if decision else "no decision",
+                        "source_ids": list(value.get("source_ids") or ()),
+                    }
+                )
+            else:
+                _print_line(
+                    {
+                        "candidate_id": decision.candidate_id,
+                        "action": decision.action,
+                        "kind": decision.kind,
+                        "admitted_by": decision.admitted_by,
+                        "entry_id": decision.entry_id,
+                        "target_id": decision.target_id,
+                        "reason": decision.reason,
+                        "source_ids": list(decision.source_ids),
+                    }
+                )
+            count += 1
+        print(
+            f"{PROG}: routed {count} candidates into {directory}",
+            file=sys.stderr,
+        )
+    finally:
+        await store.aclose()
     return EXIT_OK
 
 

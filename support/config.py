@@ -101,6 +101,13 @@ class RetrievalConfig:
 
 
 @dataclass
+class MemoryConfig:
+    """The ``[memory]`` table: R6-lite's admission default for direct runs."""
+
+    admit_on_outcome: bool = False
+
+
+@dataclass
 class SchedulerConfig:
     """The live gate's settings (S2): off, or one of the two enforcing arms.
 
@@ -155,6 +162,7 @@ class Config:
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
     @property
@@ -178,6 +186,7 @@ class Config:
         errors: list[str] = []
         errors.extend(self._validate_agent())
         errors.extend(self._validate_retrieval())
+        errors.extend(self._validate_memory())
         errors.extend(self._validate_scheduler())
 
         # -- chat_backend validation --
@@ -225,6 +234,13 @@ class Config:
             )
 
         return errors
+
+    def _validate_memory(self) -> list[str]:
+        """``[memory]`` holds a bool."""
+        value: object = self.memory.admit_on_outcome
+        if not isinstance(value, bool):
+            return [f"[memory] admit_on_outcome must be a bool, got {value!r}"]
+        return []
 
     def _validate_scheduler(self) -> list[str]:
         """``[scheduler]`` values are inside their documented ranges."""
@@ -499,6 +515,11 @@ def load() -> Config:
             if hasattr(cfg.retrieval, k):
                 setattr(cfg.retrieval, k, v)
 
+    if isinstance(data.get("memory"), dict):
+        for k, v in data["memory"].items():
+            if hasattr(cfg.memory, k):
+                setattr(cfg.memory, k, v)
+
     if isinstance(data.get("scheduler"), dict):
         for k, v in data["scheduler"].items():
             if hasattr(cfg.scheduler, k):
@@ -719,6 +740,12 @@ def save(cfg: Config) -> None:
             lines.append(f"replay_turns = {cfg.agent.replay_turns}")
         if cfg.agent.note_writer != "auto":
             lines.append(f"note_writer = {_toml_string(cfg.agent.note_writer)}")
+        lines.append("")
+
+    if cfg.memory != MemoryConfig():
+        lines.append("[memory]")
+        if cfg.memory.admit_on_outcome:
+            lines.append("admit_on_outcome = true")
         lines.append("")
 
     retrieval = cfg.retrieval

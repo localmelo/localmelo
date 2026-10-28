@@ -457,7 +457,23 @@ def test_the_json_line_reports_the_mode_and_counters(
         "retrieve_completion_tokens": 0,
         "thought_chunks": 0,
         "recall_log": [],
+        "admitted": {
+            "rehearsal": 0,
+            "user_request": 0,
+            "user_statement": 0,
+            "outcome": 0,
+            "sleep": 0,
+        },
+        "written": {
+            "semantic": 0,
+            "episodic": 0,
+            "profile": 0,
+            "reflection": 0,
+        },
+        "ignored": 0,
     }
+    assert record["config"]["admit_on_outcome"] is False
+    assert record["config"]["keep_decision_text"] is False
 
 
 def test_the_legacy_json_line_has_none_of_the_new_keys(

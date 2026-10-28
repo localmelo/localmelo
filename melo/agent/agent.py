@@ -119,6 +119,7 @@ from localmelo.melo.memory.procedures.tracker import (
 )
 from localmelo.melo.memory.recall import (
     DEFAULT_TRIGGERS,
+    LONG_POOL,
     RECALL_BOUNDARY_CHARS,
     RECALL_DATA_NOTE,
     RECALL_END,
@@ -136,7 +137,7 @@ from localmelo.melo.memory.recall import (
     build_step_query,
     compact_record,
     default_kinds,
-    docs_from_long,
+    docs_from_entries,
     docs_from_notes,
     fit_recall_block,
     hit_from_doc,
@@ -1778,17 +1779,15 @@ class Agent:
         return retriever
 
     async def _long_docs(self, query: str, run: _RunState) -> list[Doc]:
-        """The other tasks' long entries that may answer *query*, aliased."""
+        """The other tasks' active long entries that may answer *query*, aliased."""
         if "long" not in self._effective_kinds:
             return []
-        embedding = self.hippo.embedding
-        if embedding is None:
-            return []
-        if await self.hippo.long.count_entries() == 0:
-            return []
         try:
-            vectors = await embedding.embed([query])
-            rows = await self.hippo.long.search(vectors[0], top_k=8)
+            rows = await self.hippo.recall_long(
+                query,
+                exclude_task_ids={run.task_id},
+                pool=LONG_POOL,
+            )
         except ProviderError as exc:
             run.retrieve_errors += 1
             logger.info("Long-term recall of task %s failed: %s", run.task_id, exc)
@@ -1797,10 +1796,13 @@ class Agent:
             run.retrieve_errors += 1
             logger.info("Long-term recall of task %s failed: %s", run.task_id, exc)
             return []
-        docs = docs_from_long(
+        # The cosine floor applies only to an embedding score; BM25 has no
+        # absolute floor (R5's decision).
+        min_score = self.options.recall_min_score if self.hippo.embedding else 0.0
+        docs = docs_from_entries(
             rows,
             exclude_task_ids={run.task_id},
-            min_score=self.options.recall_min_score,
+            min_score=min_score,
         )
         # Keep the two best by score, then order and alias them by creation
         # time so an appended entry never renumbers an old one.
@@ -1934,7 +1936,11 @@ class Agent:
                 hits = self._hits_from_result(result, task_docs, k=limit_k)
             for doc in long_docs:
                 score = float(doc.meta.get("score") or 0.0)
-                if score < self.options.recall_min_score - 1e-6:
+                # The floor is a cosine floor; BM25 has no absolute one.
+                if (
+                    self.hippo.embedding is not None
+                    and score < self.options.recall_min_score - 1e-6
+                ):
                     continue
                 hits.append(hit_from_doc(doc, score=score, rank=len(hits) + 1))
         if fallback:

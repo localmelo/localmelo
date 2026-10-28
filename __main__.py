@@ -88,6 +88,8 @@ _DIRECT_FLAGS = {
     "recall_placement": "--recall-placement",
     "recall_min_score": "--recall-min-score",
     "retrieval_extra_body": "--retrieval-extra-body",
+    "admit_on_outcome": "--admit-on-outcome",
+    "keep_decision_text": "--keep-decision-text",
 }
 
 # Flags of the interactive UI (bare melo), by dest.
@@ -104,6 +106,7 @@ _UI_REFUSED = (
     "progress",
     "routine",
     "reasoning_field",
+    "keep_decision_text",
 )
 
 
@@ -942,6 +945,11 @@ def _direct_options(
     recall_min_score = getattr(args, "recall_min_score", None)
     if recall_min_score is not None:
         fields["recall_min_score"] = recall_min_score
+    admit_on_outcome = getattr(args, "admit_on_outcome", None)
+    if admit_on_outcome is not None:
+        fields["admit_on_outcome"] = admit_on_outcome == "on"
+    if getattr(args, "keep_decision_text", False):
+        fields["keep_decision_text"] = True
     try:
         return AgentOptions(**fields)
     except ValueError as exc:  # the flag types should have caught it
@@ -1144,6 +1152,19 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="F",
         help="Cosine floor for embedding and long hits, 0-1 (default 0.35; "
         "inert for bm25 and llm)",
+    )
+    direct.add_argument(
+        "--admit-on-outcome",
+        choices=["on", "off"],
+        help="R6-lite: with a reasoning mode other than legacy, admit the final "
+        "attempt digest to long-term memory at the end of the run (default off); "
+        "inert in legacy",
+    )
+    direct.add_argument(
+        "--keep-decision-text",
+        action="store_true",
+        help="R6-lite: also store the checked text of each admission decision "
+        "(the hash is always kept); an evaluation switch, refused in the UI",
     )
     direct.add_argument(
         "--retrieval-extra-body",
@@ -1506,6 +1527,8 @@ def _build_direct_mode_agent(
         options = dataclasses.replace(
             options, note_writer=cast(NoteWriter, cfg.agent.note_writer)
         )
+    if getattr(args, "admit_on_outcome", None) is None and cfg.memory.admit_on_outcome:
+        options = dataclasses.replace(options, admit_on_outcome=True)
 
     # R5's [retrieval]: a value applies only when its flag is absent, and
     # the table is inert in legacy (decision 10).

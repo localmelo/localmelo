@@ -30,7 +30,7 @@ from localmelo.melo.memory.recall import (
     build_step_query,
     compact_record,
     default_kinds,
-    docs_from_long,
+    docs_from_entries,
     docs_from_notes,
     fit_recall_block,
     hit_from_doc,
@@ -249,36 +249,38 @@ def test_docs_from_notes_keeps_only_the_newest_pending_draft() -> None:
     } == {"d1", "d2"}
 
 
-def test_docs_from_long_gets_aliases_origin_ids_and_the_date() -> None:
+def test_docs_from_entries_gets_aliases_origin_ids_and_the_date() -> None:
     created = 1_700_000_000.0
     rows = [
-        ("older fact", 0.8, {"task_id": "t-old", "created_at": created}),
+        ("older fact", 0.8, {"id": 1, "task_id": "t-old", "created_at": created}),
         (
             "merged fact",
             0.5,
             {
+                "id": 2,
                 "task_id": "t-a",
                 "origin_task_ids": ["t-a", "t-b"],
                 "created_at": created + 1,
             },
         ),
-        ("mine", 0.9, {"task_id": TASK, "created_at": created}),
+        ("mine", 0.9, {"id": 3, "task_id": TASK, "created_at": created}),
     ]
-    docs = docs_from_long(rows, exclude_task_ids={TASK})
+    docs = docs_from_entries(rows, exclude_task_ids={TASK})
     assert [doc.meta["alias"] for doc in docs] == ["m1", "m2"]
     assert docs[0].meta["origin_task_ids"] == ("t-old",)
     assert docs[1].meta["origin_task_ids"] == ("t-a", "t-b")
-    assert docs[0].doc_id.startswith("long:")
+    assert docs[0].doc_id == "long:1"
+    assert docs[0].meta["entry_id"] == 1
     assert docs[0].meta["origin"] == "task t-old"
     assert docs[0].title == "2023-11-14"
 
 
-def test_docs_from_long_drops_under_the_score_floor() -> None:
+def test_docs_from_entries_drops_under_the_score_floor() -> None:
     rows = [
-        ("low", 0.34, {"task_id": "t-old"}),
-        ("high", 0.35, {"task_id": "t-old"}),
+        ("low", 0.34, {"id": 1, "task_id": "t-old"}),
+        ("high", 0.35, {"id": 2, "task_id": "t-old"}),
     ]
-    assert [doc.text for doc in docs_from_long(rows, min_score=0.35)] == ["high"]
+    assert [doc.text for doc in docs_from_entries(rows, min_score=0.35)] == ["high"]
 
 
 # ── The block ──
@@ -374,7 +376,9 @@ def test_the_renderer_cuts_each_kind_before_rendering() -> None:
     thought_doc = docs_from_notes(
         [_entry("thought", "t " * 3_000, "t1")], task_id=TASK
     )[0]
-    long_doc = docs_from_long([("m " * 3_000, 0.9, {"task_id": "t-old"})])[0]
+    long_doc = docs_from_entries([("m " * 3_000, 0.9, {"id": 1, "task_id": "t-old"})])[
+        0
+    ]
     hits = [
         hit_from_doc(note_doc, score=1.0, rank=1),
         hit_from_doc(draft_doc, score=0.9, rank=2),
@@ -536,14 +540,15 @@ def test_the_boundary_cap_is_smaller_than_the_turn_cap() -> None:
     assert RECALL_K_DEFAULT == 3
 
 
-def test_docs_from_long_deduplicates_identical_texts() -> None:
+def test_docs_from_entries_keeps_two_identical_texts_as_two_docs() -> None:
     rows = [
-        ("same memory", 0.9, {"task_id": "t-a", "created_at": 1.0}),
-        ("same memory", 0.8, {"task_id": "t-b", "created_at": 2.0}),
+        ("same memory", 0.9, {"id": 1, "task_id": "t-a", "created_at": 1.0}),
+        ("same memory", 0.8, {"id": 2, "task_id": "t-b", "created_at": 2.0}),
     ]
-    docs = docs_from_long(rows)
-    assert len(docs) == 1
-    assert docs[0].meta["alias"] == "m1"
+    docs = docs_from_entries(rows)
+    assert len(docs) == 2
+    assert [doc.doc_id for doc in docs] == ["long:1", "long:2"]
+    assert [doc.meta["alias"] for doc in docs] == ["m1", "m2"]
 
 
 def test_docs_from_notes_skips_another_tasks_documents() -> None:

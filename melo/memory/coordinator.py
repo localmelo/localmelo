@@ -449,6 +449,8 @@ class Hippo:
         if not self._store_ready():
             return []
         try:
+            if await self.long.count_entries() == 0:
+                return []
             if self.embedding is not None:
                 vectors = await self.embedding.embed([query])
                 return await self.long.search_embedding(
