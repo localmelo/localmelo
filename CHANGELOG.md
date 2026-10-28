@@ -532,6 +532,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- Organize Markdown documentation into start, guides, reference, concepts and
+  project sections. Old paths retain readable links for each historical
+  fragment; the agent entry points and printed CLI paths remain stable ([#NN]).
+
 - An attempt's `compress` digest now says what the attempt did: the paths its
   successful `file_write` calls wrote (at most six, workspace-relative, then
   `+N`), the last `shell_exec` or `python_exec` check and its result (test

@@ -18,7 +18,7 @@ tools and memory on your own model server or a cloud API. The website is at
   [model servers](guides/model-servers.md): setup, backends and maintenance.
 - [Set up an embedding model](guides/embedding.md): servers and connection checks.
 - [Tools and MCP](guides/tools-mcp.md): selection, configuration and approvals.
-- [Gateway and HTTP API](gateway.md): startup, security, sessions and the workspace.
+- [Gateway](guides/gateway.md): startup and security; [web console](guides/web-console.md): the workspace.
 - [API client](guides/api-client.md): create and follow a console session.
 - [Python examples](guides/python.md) and [sessions](guides/sessions.md).
 - [Memory](guides/memory.md): persistence, inspection, reset and privacy.
@@ -32,8 +32,8 @@ tools and memory on your own model server or a cloud API. The website is at
   and [run results](reference/run-results.md).
 - [Python API](reference/python-api.md), [events](reference/events.md) and
   [sessions](reference/sessions.md).
-- [API v2](reference/api-v2.md), [tools](reference/tools.md) and
-  [memory](reference/memory.md).
+- [API v2](reference/api-v2.md), [HTTP v1](reference/http-v1.md),
+  [tools](reference/tools.md) and [memory](reference/memory.md).
 - [Offline retrieval](reference/retrieval.md),
   [procedures](reference/procedures.md) and [scheduler](reference/scheduler.md).
 

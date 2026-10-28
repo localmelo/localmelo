@@ -33,7 +33,7 @@ lines, abbreviations and the `melo ""` loop keep their previous parsing.
 | `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI. Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
 | `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). |
 | `melo ""` (empty task) | Opens the plain conversation loop: each line you type is a task for the same agent, and only the answer prints. `/help` lists its commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
-| `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](../gateway.md#run-the-gateway-at-login-macos). |
+| `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](../guides/gateway.md#run-the-gateway-at-login-macos). |
 
 In the `melo ""` loop, turns share one agent and its working memory, which
 keeps each answer, so a turn sees the earlier ones. A turn that does not
@@ -308,7 +308,7 @@ These options apply to `melo` without a task.
 - Ctrl-D at a wizard question prints `Setup cancelled.` and exits with
   code 0; Ctrl+C prints the same and exits with 130.
 - The gateway has no authentication. Keep it on `127.0.0.1`; see
-  [Keep the gateway private](../gateway.md#keep-the-gateway-private).
+  [Keep the gateway private](../guides/gateway.md#keep-the-gateway-private).
 
 ## Usage errors
 

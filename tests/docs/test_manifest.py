@@ -165,8 +165,8 @@ def test_fragment_rules_accept_unsplit_new_anchors() -> None:
     )
     check_fragment_mapping(
         "docs/en/quickstart.html",
-        "en/start/quickstart.html",
-        ["old", "new"],
+        "same",
+        ["json-output", "new"],
         "en/quickstart.html",
     )
 
@@ -203,6 +203,9 @@ def test_historical_fragments_survive_page_moves() -> None:
                 anchors
             ), source
             continue
+        assert (
+            "<script" not in path.read_text().lower()
+        ), f"{source}: stub needs JavaScript"
         assert set(mapping) <= set(
             anchors
         ), f"{source}: missing historical stub anchors"
@@ -236,18 +239,34 @@ def test_historical_fragments_survive_page_moves() -> None:
             ), f"{source}#{anchor}: missing {destination}"
 
 
+def test_historical_website_paths_and_ids_remain() -> None:
+    baseline = json.loads((ROOT / "tests/docs/legacy_site_ids.json").read_text())
+    for source, expected in baseline.items():
+        path = ROOT / source
+        assert path.is_file(), f"missing historical website path {source}"
+        actual, _ = inventory(path.read_text(), ".html")
+        missing = Counter(expected) - Counter(actual)
+        assert not missing, f"{source}: missing historical IDs {dict(missing)}"
+
+
 def test_entry_point_document_links() -> None:
     prefixes = (
         ("https://localmelo.github.io/localmelo/", ROOT / "docs"),
         ("https://github.com/localmelo/localmelo/blob/main/", ROOT),
     )
-    for name in (
+    names = [
         "README.md",
         "README.zh-CN.md",
         "docs/README.md",
         "docs/llms.txt",
         "docs/for-agents.md",
-    ):
+    ]
+    names.extend(
+        path.relative_to(ROOT).as_posix()
+        for language in ("en", "zh-CN")
+        for path in sorted((ROOT / "docs" / language).glob("*.html"))
+    )
+    for name in names:
         source = ROOT / name
         _, links = inventory(source.read_text(), source.suffix)
         for link in links:
@@ -367,10 +386,52 @@ def test_split_destinations_and_existing_language_pairs() -> None:
         "docs/STYLE.md",
         "docs/zh-CN/STYLE.md",
     )
-    assert (
-        pages["site-quickstart"]["fragments"]["docs/en/quickstart.html"]
-        == "en/start/quickstart.html"
-    )
+    quickstart = pages["site-quickstart"]
+    for lang, source in (
+        ("en", "docs/en/quickstart.html"),
+        ("zh", "docs/zh-CN/quickstart.html"),
+    ):
+        # Keep the real HTML and every ID at its existing URL until both
+        # language destinations and per-fragment mappings are implemented.
+        assert quickstart["fragments"][source] == "same"
+        assert quickstart[f"{lang}_output"] == source.removeprefix("docs/")
+
+
+def test_manifest_fragment_destinations_exist() -> None:
+    pages = json.loads(MANIFEST.read_text())["pages"]
+    outputs = {
+        page[f"{lang}_output"]: page[f"{lang}_source"]
+        for page in pages
+        for lang in ("en", "zh")
+        if page[f"{lang}_output"] and page[f"{lang}_source"]
+    }
+
+    @cache
+    def output_ids(path: Path) -> set[str]:
+        ids, _ = inventory(path.read_text(), path.suffix)
+        return set(ids)
+
+    for page in pages:
+        for alias, rule in page["fragments"].items():
+            if isinstance(rule, str):
+                lang = "zh" if alias.startswith("docs/zh-CN/") else "en"
+                target = page[f"{lang}_output"] if rule == "same" else rule
+                anchors, _ = inventory((ROOT / alias).read_text(), Path(alias).suffix)
+                destinations = {anchor: f"{target}#{anchor}" for anchor in anchors}
+            else:
+                destinations = rule
+            for old_anchor, destination in destinations.items():
+                output, _, anchor = destination.partition("#")
+                assert (
+                    output in outputs
+                ), f"{alias}#{old_anchor}: missing output {output}"
+                source = ROOT / outputs[output]
+                assert (
+                    source.is_file()
+                ), f"{alias}#{old_anchor}: missing source {source}"
+                assert anchor in output_ids(
+                    source
+                ), f"{alias}#{old_anchor}: missing destination {destination}"
 
 
 def test_inventory_slug_and_code_fences() -> None:

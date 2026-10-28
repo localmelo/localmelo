@@ -74,7 +74,7 @@ Details:
   started with `on_event` or `approval` in the Python API (see
   [Stop a run](../guides/python.md#stop-a-run)), or a web workspace chat stopped
   with Stop or by its 600-second limit. The gateway runs each web chat with
-  an event sink (see [Web workspace](../gateway.md#web-workspace)). `result` is
+  an event sink (see [Web workspace](../guides/web-console.md#web-workspace)). `result` is
   empty, and `error` is the reason: the reason given to `Agent.begin_exit`
   when the process is exiting, else the message of `task.cancel(msg)`, such
   as `Timed out after 600 s` for a web chat, else `Cancelled by the caller`.
@@ -217,7 +217,7 @@ second try may succeed:
   [Output](cli.md#output).
 - **Gateway:** `POST /v1/agent/run` answers HTTP 200 with `result`: the
   answer or best effort, or `[<status>] <error>` when that is empty. The
-  status is not reported otherwise. See [HTTP API](../gateway.md#http-api).
+  status is not reported otherwise. See [HTTP API](http-v1.md#http-api).
 - **Python:** `Agent.run_task()` returns a `RunResult`, and the
   `run.finished` event carries it too. See
   [Python API](python-api.md#results) and [Events](events.md#runfinished).

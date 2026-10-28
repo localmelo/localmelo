@@ -3,7 +3,7 @@
 API v2 is the web console's HTTP API. It is served under `/api/` on the
 gateway, only when the gateway listens on a loopback address
 (`127.0.0.1`, `localhost` or `::1`). It has no login: do not expose the
-gateway. See [Gateway and HTTP API](../gateway.md#keep-the-gateway-private).
+gateway. See [Gateway and HTTP API](../guides/gateway.md#keep-the-gateway-private).
 
 The API only grows: endpoints, optional request fields and response keys
 are added, never renamed or removed. A client may ignore keys it does not
@@ -869,4 +869,4 @@ ones later changes extend.
 FastAPI's `/docs`, `/redoc` and `/openapi.json` are off: this page is the
 reference. Run the API only on the loopback address. A gateway on `0.0.0.0`
 mounts no console and no `/api`, and logs a warning at startup; see
-[Gateway and HTTP API](../gateway.md#keep-the-gateway-private).
+[Gateway and HTTP API](../guides/gateway.md#keep-the-gateway-private).

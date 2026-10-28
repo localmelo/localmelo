@@ -189,7 +189,7 @@ See [Mix backends](model-servers.md#mix-backends).
   and remove `~/.cache/localmelo/memory/long_term.db*`; see
   [Reset memory](memory.md#reset-memory).
 - The web workspace has its own embedding selector; this setting does not
-  change it. See [the web workspace](../gateway.md#web-workspace).
+  change it. See [the web workspace](web-console.md#web-workspace).
 
 ## Check it works
 

@@ -9,7 +9,7 @@ traces.
 
 > [!NOTE]
 > The web workspace's chats are gated: the gateway wraps each chat's chat and
-> embedding providers with the gate described below. `[scheduler] policy`
+> embedding providers with the [scheduler gate](../guides/scheduler.md#the-gate-on-chats-s2). `[scheduler] policy`
 > defaults to `off`, which only records; `fcfs` and `class` are the two
 > enforcing arms. Direct runs and the terminal CLI are not gated.
 

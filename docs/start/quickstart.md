@@ -249,13 +249,13 @@ notices, the live progress row and the answer with its facts and
 `Needs approval`, and the chats are saved in the gateway's `sessions.db`, so
 a restart keeps them. Other browser tabs on the same gateway see the same
 chats. Approval cards, connection settings and the session details drawer are
-available in the workspace; see [Web workspace](../gateway.md#web-workspace).
+available in the workspace; see [Web workspace](../guides/web-console.md#web-workspace).
 
 ## Next steps
 
 - [Configuration](../reference/configuration.md): backends, cloud API keys, timeouts.
 - [Tools and MCP](../reference/tools.md): choose built-in tools and add MCP servers.
-- [Gateway and HTTP API](../gateway.md): sessions, the web workspace, running at login.
+- [Gateway and HTTP API](../guides/gateway.md): sessions, the web workspace, running at login.
 - [Python API](../reference/python-api.md): run tasks from Python, follow their events, approve tool calls.
 - [Memory](../reference/memory.md): keep memory between runs, inspect and reset it.
 - [Command-line reference](../reference/cli.md): every option, exit codes, scripting.

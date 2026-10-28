@@ -54,7 +54,7 @@ The same three retrievers rank a run's own documents. `--reasoning compress`
 off, and a named retriever runs every trigger the user names. A retriever
 failure falls back to `bm25`, and the record names the reason.
 
-The offline command below is unchanged: it measures a retriever on a corpus
+The [offline command](../guides/offline-retrieval.md) is unchanged: it measures a retriever on a corpus
 of recorded calls. A run's blocks are recorded in
 `llm_calls.recall_json` (trigger, retriever, query, hits, `ms`, fallback),
 and `memory_stats` breaks out the loop's `recall_ms`,

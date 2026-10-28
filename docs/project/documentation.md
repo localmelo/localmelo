@@ -73,7 +73,11 @@ with raw HTML escaped; it is not a complete replacement site. In particular,
 old-path redirects, split-page fragment routing and links in copied HTML are
 not migrated into the preview yet. The old Markdown paths instead have readable
 stubs with a link for each historical fragment; these work without JavaScript.
-Missing Chinese pages are not generated. Do not commit the
+Missing Chinese pages are not generated. The existing English and Chinese
+quickstart HTML pages keep their own URLs and IDs; their future conversion must
+map each legacy fragment to an existing destination in both languages. In
+particular, `#json-output` and `#serve-a-model-with-omlx` do not both map
+unchanged to the new English quickstart. Do not commit the
 preview. See the [English style guide](../STYLE.md) and
 [Chinese style guide](../zh-CN/STYLE.md).
 

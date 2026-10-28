@@ -54,7 +54,7 @@ and the last three a bar (level 2), whose mean error over their steps was
 | `--protocol loo` | Each run of a template with 3 or more runs, predicted from its other runs, with no gate. One line per denominator. |
 | `--protocol first-k` | Every later run of a template, judged on its first 2 runs only, held fixed, with the spread gate. One line per denominator. |
 | `--arms` | Also each arm that changes one default: the denominators `median`, `milestone` and `hybrid`, the spread 0.4 and 0.6, the drop `off` and `unconditional`, and the statistics `normal`. |
-| `--denominator` | The bar's rule: `dynamic` (above, the default), `median` (k ÷ m), `milestone` (anchored on the first write, test and pass) or `hybrid` (`dynamic`, jumping to 90% after the first pass). `loo` and `first-k` report all four without it. |
+| `--denominator` | The bar's rule: [`dynamic`](../concepts/procedures.md#how-it-works) (the default), `median` (k ÷ m), `milestone` (anchored on the first write, test and pass) or `hybrid` (`dynamic`, jumping to 90% after the first pass). `loo` and `first-k` report all four without it. |
 | `--spread S` | The gate's spread (default 0.5). |
 | `--drop` | The exploration drop: `conditional` (default), `off` or `unconditional`. |
 | `--stats` | The runs the statistics use: `completed` (default) or `normal`, which adds runs that ended `budget_exhausted`, `stuck` or `gate_stopped`. |

@@ -340,7 +340,7 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
 
 - **Cause:** the request body is not valid: `query` must be a non-empty
   string, and `session_id` 1 to 64 letters, digits, `_` or `-`.
-- **Fix:** correct the body. See [HTTP API](../gateway.md#http-api).
+- **Fix:** correct the body. See [HTTP API](http-v1.md#http-api).
 
 ### HTTP 421 misdirected_request
 
@@ -359,7 +359,7 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
   it on `127.0.0.1`: set `host = "127.0.0.1"` in `[gateway]`, or run
   `melo --serve --host 127.0.0.1`. Proxies and remote access are not
   supported; see
-  [Keep the gateway private](../gateway.md#keep-the-gateway-private).
+  [Keep the gateway private](../guides/gateway.md#keep-the-gateway-private).
 
 ### HTTP 403 foreign_origin
 

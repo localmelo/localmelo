@@ -2,8 +2,8 @@
 
 This page moved. Choose a section below to open its new location.
 
-## [layout](project/documentation.md#layout)
-## [publishing](project/documentation.md#publishing)
-## [add-or-change-a-page](project/documentation.md#add-or-change-a-page)
-## [translations](project/documentation.md#translations)
-## [translation-glossary](project/documentation.md#translation-glossary)
+## [Layout](project/documentation.md#layout)
+## [Publishing](project/documentation.md#publishing)
+## [Add or change a page](project/documentation.md#add-or-change-a-page)
+## [Translations](project/documentation.md#translations)
+## [Translation glossary](project/documentation.md#translation-glossary)
