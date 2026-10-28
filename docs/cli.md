@@ -246,9 +246,10 @@ type more letters to narrow them, Tab or Enter to take one.
 
 ### Approvals
 
-`shell_exec`, `python_exec` and `file_write` run only once you answer. (The
-interactive UI does not load MCP servers yet; in a Python run, an approval
-policy asks about an MCP tool by the same tiers.) The panel takes the place
+`shell_exec`, `python_exec` and `file_write` run only once you answer, and
+so do MCP tools marked for approval. (The interactive UI loads the MCP
+servers of `--mcp-config`, else of the top-level `mcp_config` key; a server
+that fails to start turns MCP off for the session and `/mcp` says why.) The panel takes the place
 of the input box, and your draft stays:
 
 ```text
@@ -476,8 +477,8 @@ These options apply to `melo` without a task.
   `--builtins`, `--memory`, `--memory-dir`, `--request-timeout` and the
   `--embedding-*` options, for every turn of the session. `--tool-exposure`
   (the UI offers every tool), `--timeout`, `--output-format`, `--progress`
-  and `--routine` are usage errors there, and so, for now, are
-  `--mcp-config` and `--mcp-only`.
+  and `--routine` are usage errors there; `--mcp-config` and `--mcp-only`
+  are accepted.
 - `--workspace` that is not a folder exits with code 2:
   `melo: --workspace: not a directory: DIR`.
 

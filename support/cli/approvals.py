@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -117,7 +118,7 @@ def _diff_body(
             continue
         number = row.old if row.kind == "-" else row.new
         sign = {"+": "+", "-": minus, " ": " "}[row.kind]
-        style = {"+": "ok", "-": "error", " ": ""}[row.kind]
+        style = {"+": "ok", "-": "error", " ": "muted"}[row.kind]
         text = shown(row.text)
         for index, part in enumerate(wrap_cells(f"{number:4} {sign} {text}", width)):
             body.append((style, part if index == 0 else "      " + part))
@@ -276,6 +277,15 @@ class TerminalApprover:
         pending.future.set_result(decision)
 
 
+def _stat_key(path: str) -> tuple[int, int, int, int] | None:
+    """A file's identity and size/time, or None when it cannot be stat'ed."""
+    try:
+        info = os.stat(path, follow_symlinks=False)
+    except OSError:
+        return None
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns)
+
+
 @dataclass(frozen=True)
 class Snapshot:
     """What a ``file_write`` call is about to change, by its request id."""
@@ -285,6 +295,8 @@ class Snapshot:
     new: str
     added: int
     removed: int
+    # The target's identity and size/time when it was read (F6).
+    stat: tuple[int, int, int, int] | None = None
 
 
 class EditSnapshots:
@@ -301,9 +313,12 @@ class EditSnapshots:
         self._snapshots: dict[str, Snapshot] = {}
 
     async def decide(self, request: ApprovalRequest) -> ApprovalDecision:
+        path = ""
+        stat: tuple[int, int, int, int] | None = None
         if request.tool_name == "file_write" and isinstance(request.arguments, Mapping):
             path = str(request.arguments.get("path") or "")
             target = await asyncio.to_thread(edits.read_target, path)
+            stat = await asyncio.to_thread(_stat_key, path)
             new = str(request.arguments.get("content") or "")
             if target.diffable:
                 _, added, removed = edits.diff(target.text or "", new)
@@ -315,10 +330,26 @@ class EditSnapshots:
                 new=new,
                 added=added,
                 removed=removed,
+                stat=stat,
             )
-        if self.inner is None:
-            return ApprovalDecision(True)
-        return await self.inner.decide(request)
+        decision = (
+            ApprovalDecision(True)
+            if self.inner is None
+            else await self.inner.decide(request)
+        )
+        # Q1 a: the person approved what they saw. If the file changed while
+        # the panel was open, deny rather than write over the newer file.
+        if (
+            decision.allow
+            and stat is not None
+            and await asyncio.to_thread(_stat_key, path) != stat
+        ):
+            return ApprovalDecision(
+                False,
+                "The file changed while this was waiting; look again.",
+                origin="policy",
+            )
+        return decision
 
     def target_for(self, request_id: str) -> edits.Target | None:
         """The target read for *request_id*, kept for the panel."""

@@ -225,8 +225,9 @@
           start of the first run, <code>support/mcp</code> starts each server,
           lists its tools and registers them, as
           <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>, with the tool registry
-          and the executor. MCP tools work in direct mode and the Python API,
-          not in gateway sessions or the interactive UI. A server's <code>require_approval</code>
+          and the executor. MCP tools work in direct mode, the Python API and
+          the interactive UI (<code>--mcp-config</code>, else the config's
+          <code>mcp_config</code> key); the gateway does not load them yet. A server's <code>require_approval</code>
           makes calls of its tools, or of the tools it names, ask the run's
           approval policy first; a run without a policy, such as a direct run,
           runs them without asking.

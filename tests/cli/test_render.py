@@ -1546,3 +1546,72 @@ def test_a_write_without_a_snapshot_shows_its_output() -> None:
         .text()
     )
     assert "  └ Written 2 bytes to todo.md" in text
+
+
+# ── T22R review fixes ──
+
+
+def test_a_file_write_block_uses_the_snapshots_counts() -> None:
+    from localmelo.support.cli import edits
+    from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+
+    snapshots = EditSnapshots()
+    target = edits.Target(path="todo.md", exists=True, text="a\n")
+    snapshots._snapshots["r1"] = Snapshot("r1", target, "b\n", 7, 9)
+    text = (
+        Turn(snapshots=snapshots)
+        .tool(
+            "file_write",
+            "todo.md",
+            request_id="r1",
+            status="success",
+            output="Written",
+            approval={"request_id": "r1", "allowed": True, "origin": "user"},
+        )
+        .text()
+    )
+    assert "  └ +7 −9 lines" in text
+
+
+def test_a_write_with_no_diff_shows_that() -> None:
+    from localmelo.support.cli import edits
+    from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+
+    snapshots = EditSnapshots()
+    target = edits.Target(
+        path="big.bin", exists=True, problem="overwrites a 1.2 MB file"
+    )
+    snapshots._snapshots["r1"] = Snapshot("r1", target, "x\ny\n", 2, 0)
+    text = (
+        Turn(snapshots=snapshots)
+        .tool(
+            "file_write",
+            "big.bin",
+            request_id="r1",
+            status="success",
+            output="Written",
+            approval={"request_id": "r1", "allowed": True, "origin": "user"},
+        )
+        .text()
+    )
+    assert "  └ changed; no diff shown" in text
+
+
+def test_verbose_hunks_cannot_act_on_the_terminal() -> None:
+    from localmelo.support.cli import edits
+    from localmelo.support.cli.approvals import EditSnapshots, Snapshot
+
+    snapshots = EditSnapshots()
+    target = edits.Target(path="todo.md", exists=True, text="old\x1b[2J\n")
+    snapshots._snapshots["r1"] = Snapshot("r1", target, "new\x1b]0;PWNED\x07\n", 1, 1)
+    turn = Turn(snapshots=snapshots)
+    turn.renderer.verbose = True
+    text = turn.tool(
+        "file_write",
+        "todo.md",
+        request_id="r1",
+        status="success",
+        output="Written",
+        approval={"request_id": "r1", "allowed": True, "origin": "user"},
+    ).text()
+    assert "\x1b" not in text and "\x07" not in text

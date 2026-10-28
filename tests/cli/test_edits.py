@@ -86,3 +86,32 @@ def test_a_missing_file_differs_from_an_empty_one() -> None:
     rows, added, removed = edits.diff("", "new\n")
     assert (added, removed) == (1, 0)
     assert [(row.kind, row.new) for row in rows] == [("+", 1)]
+
+
+def test_changed_lines_that_look_like_diff_headers_are_kept() -> None:
+    rows, added, removed = edits.diff("-- x\nkeep\n", "keep\n")
+    assert (added, removed) == (0, 1)
+    assert ("-", 1, None, "-- x") in [(r.kind, r.old, r.new, r.text) for r in rows]
+    rows, added, removed = edits.diff("keep\n", "++ y\nkeep\n")
+    assert (added, removed) == (1, 0)
+    assert ("+", None, 1, "++ y") in [(r.kind, r.old, r.new, r.text) for r in rows]
+
+
+def test_a_line_ending_or_final_newline_change_is_a_change() -> None:
+    assert edits.diff("a", "a\n")[1:] == (1, 1)
+    assert edits.diff("a\r\nb\r\n", "a\nb\n")[1:] == (2, 2)
+    assert edits.diff("keep\n", "keep\n")[1:] == (0, 0)
+
+
+def test_a_file_that_cannot_be_read_says_so(tmp_path: Path) -> None:
+    from unittest import mock
+
+    path = tmp_path / "notes.txt"
+    path.write_text("buy milk\n", encoding="utf-8")
+    with (
+        mock.patch("localmelo.support.cli.edits.file_facts", return_value=(True, 9)),
+        mock.patch("os.open", side_effect=PermissionError(13, "Permission denied")),
+    ):
+        target = edits.read_target(str(path))
+    assert target.exists and not target.diffable
+    assert target.problem == "cannot be read"

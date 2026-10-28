@@ -80,6 +80,7 @@ class AgentFactory:
         request_timeout_s: float | None = None,
         mcp_config: str | None = None,
         mcp_source: str = "",
+        mcp_servers: list[Any] | None = None,
         saves: bool = True,
     ) -> None:
         self.backend = backend
@@ -94,11 +95,11 @@ class AgentFactory:
         self.mcp_config = mcp_config
         self.mcp_source = mcp_source
         self.mcp_error: str | None = None
-        self.mcp_servers: list[Any] = []
-        if mcp_config:
+        if mcp_servers is None and mcp_config:
             from localmelo.support.mcp import load_mcp_config
 
-            self.mcp_servers = load_mcp_config(os.path.expanduser(mcp_config))
+            mcp_servers = load_mcp_config(os.path.expanduser(mcp_config))
+        self.mcp_servers: list[Any] = list(mcp_servers or [])
         # Whether /model and /backend save their choice as the default: not
         # for a --base-url session whose save question was answered no.
         self.saves = saves

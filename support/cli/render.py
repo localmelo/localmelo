@@ -837,10 +837,20 @@ class TurnRenderer:
                 no_wrap=True,
                 overflow="ellipsis",
             )
-        rows, added, removed = edits.diff(target.text or "", snapshot.new)
+        if not target.diffable:
+            # No text was read (too large, binary, not regular): no counts
+            # are known, and the panel said why.
+            return Text(
+                f"  {self.symbols.connector} changed; no diff shown",
+                style="muted",
+                no_wrap=True,
+                overflow="ellipsis",
+            )
+        rows, _, _ = edits.diff(target.text or "", snapshot.new)
         body = Text(no_wrap=True, overflow="ellipsis")
         body.append(
-            f"  {self.symbols.connector} +{added} {self.symbols.minus}{removed} lines",
+            f"  {self.symbols.connector} +{snapshot.added} "
+            f"{self.symbols.minus}{snapshot.removed} lines",
             style="muted",
         )
         if self.verbose:
@@ -851,7 +861,9 @@ class TurnRenderer:
                     continue
                 sign = {"+": "+", "-": self.symbols.minus, " ": " "}[row.kind]
                 style = {"+": "ok", "-": "error", " ": "muted"}[row.kind]
-                line = cut_cells(f"{row.old or row.new:4} {sign} {row.text}", width)
+                number = row.old if row.kind == "-" else row.new
+                text = clean_output(row.text)
+                line = cut_cells(f"{number:4} {sign} {text}", width)
                 body.append("\n      " + line, style=style)
         return body
 

@@ -253,11 +253,12 @@ def run_interactive(
     requested = getattr(args, "mcp_config", None)
     mcp_config = requested or config.load().mcp_config or None
     mcp_source = "--mcp-config" if requested else ("mcp_config" if mcp_config else "")
+    mcp_servers: list[Any] = []
     if mcp_config is not None:
         from localmelo.support.mcp import McpConfigError, load_mcp_config
 
         try:
-            load_mcp_config(os.path.expanduser(mcp_config))
+            mcp_servers = load_mcp_config(os.path.expanduser(mcp_config))
         except McpConfigError as exc:
             print(f"melo: error: {exc}", file=sys.stderr)
             return 2
@@ -279,6 +280,7 @@ def run_interactive(
                 log_path=log_path,
                 mcp_config=mcp_config,
                 mcp_source=mcp_source,
+                mcp_servers=mcp_servers,
             )
         )
     except KeyboardInterrupt:
@@ -300,6 +302,7 @@ async def main_async(
     log_path: str,
     mcp_config: str | None = None,
     mcp_source: str = "",
+    mcp_servers: list[Any] | None = None,
 ) -> tuple[int, int | None]:
     """Run the session: open the store, build the Agent, show the banner, run the app.
 
@@ -371,6 +374,7 @@ async def main_async(
             request_timeout_s=args.request_timeout,
             mcp_config=mcp_config,
             mcp_source=mcp_source,
+            mcp_servers=mcp_servers,
             saves=choice.saves,
         )
         try:
@@ -409,6 +413,17 @@ async def main_async(
         )
         if choice.warning:
             out.print(Text(f"{symbols.warn} {choice.warning}", style="warn"))
+        if factory.mcp_error:
+            from localmelo.melo.checker.redaction import redact_secrets
+
+            problem = redact_secrets(factory.mcp_error)[0]
+            out.print(
+                Text(
+                    f"{symbols.warn} MCP servers failed to start: {problem}. "
+                    "Continuing without MCP tools; /mcp has details.",
+                    style="warn",
+                )
+            )
         history: History
         try:
             history = open_history(os.path.expanduser(HISTORY_FILE))

@@ -16,7 +16,7 @@ import stat
 from dataclasses import dataclass
 from typing import Final, Literal
 
-from localmelo.support.sessions.display import format_bytes
+from localmelo.support.sessions.display import file_facts
 
 # A larger file gets no diff: the panel would not show it whole either.
 DIFF_MAX_BYTES: Final = 200_000
@@ -55,14 +55,19 @@ class DiffLine:
 
 def read_target(path: str, *, max_bytes: int = DIFF_MAX_BYTES) -> Target:
     """Read the file at *path* for a diff; never follows a final symlink."""
+    exists, size = file_facts(path)
+    if not exists:
+        return Target(path=path, exists=False)
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except FileNotFoundError:
-        return Target(path=path, exists=False)
+    except PermissionError:
+        return Target(path=path, exists=True, size_bytes=size, problem="cannot be read")
     except OSError:
-        # A symlink (ELOOP), a permission problem, a path below a file: the
-        # file is there, but its text cannot be shown.
-        return Target(path=path, exists=True, problem="is not a regular file")
+        # A symlink (ELOOP), a path below a file: the file is there, but its
+        # text cannot be shown.
+        return Target(
+            path=path, exists=True, size_bytes=size, problem="is not a regular file"
+        )
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
@@ -73,6 +78,8 @@ def read_target(path: str, *, max_bytes: int = DIFF_MAX_BYTES) -> Target:
                 problem="is not a regular file",
             )
         if info.st_size > max_bytes:
+            from localmelo.support.sessions.display import format_bytes
+
             return Target(
                 path=path,
                 exists=True,
@@ -104,17 +111,19 @@ def diff(old: str, new: str) -> tuple[list[DiffLine], int, int]:
     the panel shows it. A removed line carries the old line's number, any
     other row the new one.
     """
-    old_lines = old.splitlines()
-    new_lines = new.splitlines()
+    # Keep the line endings: a CRLF rewrite or a missing final newline is
+    # a change the panel must show (F2).
+    old_lines = old.splitlines(keepends=True)
+    new_lines = new.splitlines(keepends=True)
     rows: list[DiffLine] = []
     added = removed = 0
     old_number = new_number = 0
+    in_hunk = False
     for line in difflib.unified_diff(
         old_lines, new_lines, n=2, fromfile="", tofile="", lineterm=""
     ):
-        if line.startswith("--- ") or line.startswith("+++ "):
-            continue
         if line.startswith("@@"):
+            in_hunk = True
             # @@ -5,3 +5,4 @@
             header = line.split(" ")
             old_start = int(header[1][1:].split(",")[0])
@@ -123,7 +132,11 @@ def diff(old: str, new: str) -> tuple[list[DiffLine], int, int]:
             if rows:
                 rows.append(DiffLine("…", None, None, ""))
             continue
-        sign, text = line[:1], line[1:]
+        if not in_hunk:
+            # Only difflib's own ---/+++ header lines come before the first
+            # hunk; a changed line may start with them after it (F1).
+            continue
+        sign, text = line[:1], line[1:].rstrip("\r\n")
         if sign == "-":
             rows.append(DiffLine("-", old_number, None, text))
             old_number += 1

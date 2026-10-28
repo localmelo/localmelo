@@ -701,7 +701,7 @@ def test_the_diff_uses_the_uis_minus() -> None:
     assert [line for _, line in text.body] == ["   1 - a", "   1 + b"]
 
 
-async def test_the_panel_draws_a_diff_with_the_theme_styles(tmp_path: Path) -> None:
+async def test_the_diff_panel_renders(tmp_path: Path) -> None:
     path = tmp_path / "notes.txt"
     path.write_text("buy milk\n", encoding="utf-8")
     approver = TerminalApprover()
@@ -713,3 +713,30 @@ async def test_the_panel_draws_a_diff_with_the_theme_styles(tmp_path: Path) -> N
         assert "file_write" in app.text() and "1. Yes" in app.text()
         approver.answer("once")
         await asking
+
+
+def test_the_diff_context_is_dim() -> None:
+    path = f"{WORKSPACE}/todo.md"
+    text = panel_text(
+        _request("file_write", path=path, content="a\nB\nc\n"),
+        target=edits.Target(path=path, exists=True, text="a\nb\nc\n"),
+        width=60,
+    )
+    context = [style for style, line in text.body if line.strip().endswith(" c")]
+    assert context and all(style == "muted" for style in context)
+
+
+async def test_a_file_changed_while_the_panel_waits_is_denied(tmp_path: Path) -> None:
+    path = tmp_path / "notes.txt"
+    path.write_text("old\n", encoding="utf-8")
+
+    async def ask_and_rewrite(request: ApprovalRequest) -> ApprovalDecision:
+        path.write_text("someone else's newer line\n", encoding="utf-8")
+        return ApprovalDecision(True)
+
+    snapshots = EditSnapshots(RememberingPolicy(ask_and_rewrite))
+    decision = await snapshots.decide(
+        _request("file_write", path=str(path), content="mine\n")
+    )
+    assert not decision.allow and decision.origin == "policy"
+    assert "changed while this was waiting" in decision.reason

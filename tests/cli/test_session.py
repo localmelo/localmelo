@@ -150,13 +150,19 @@ async def setup(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     await store.open()
     agent = await factory.build()
     out = RecordingOut(80)
-    renderer = TurnRenderer(out, symbols=UNICODE, backend=lambda: factory.backend)
+    approver = TerminalApprover()
+    renderer = TurnRenderer(
+        out,
+        symbols=UNICODE,
+        backend=lambda: factory.backend,
+        snapshots=approver.snapshots,
+    )
     session = CliSession(
         store=store,
         factory=factory,
         agent=agent,
         renderer=renderer,
-        approver=TerminalApprover(),
+        approver=approver,
         mode="ask",
         out=out,
     )
@@ -1239,3 +1245,44 @@ async def test_mcp_lists_the_servers_and_a_start_failure(setup: Setup) -> None:
         lambda: "MCP is off for this session: the server exited." in out.text()
     )
     assert "Fix the config, then restart melo." in " ".join(out.text().split())
+
+
+async def test_deny_mode_refuses_a_file_write(setup: Setup) -> None:
+    from localmelo.tests.sessions.helpers import tool_call
+
+    session, out = setup.session, setup.out
+    setup.factory.scripts["m1"] = [
+        tool_call("file_write", {"path": "blocked.txt", "content": "x\n"}),
+        answer("I did not write it."),
+    ]
+    session.agent = await setup.factory.build()
+    session.approvals.set_mode("deny")
+    session.enter("write it")
+    await setup.idle()
+    assert "denied by policy: approvals are set to de" in out.text()
+    root = Path(session.agent.workspace_root or "")
+    assert not (root / "blocked.txt").exists()
+
+
+async def test_auto_mode_writes_and_shows_the_change(setup: Setup) -> None:
+    from localmelo.tests.sessions.helpers import tool_call
+
+    session, out = setup.session, setup.out
+    setup.factory.scripts["m1"] = [
+        tool_call("file_write", {"path": "notes.txt", "content": "new note\n"}),
+        answer("Written."),
+    ]
+    session.agent = await setup.factory.build()
+    session.approvals.set_mode("auto")
+    session.enter("write the notes")
+    await setup.idle()
+    assert "auto-allowed" in out.text() or "allowed" in out.text()
+    assert "└ +1 −1 lines" in out.text()
+
+
+async def test_approvals_forget_takes_back_a_grant(setup: Setup) -> None:
+    session, out = setup.session, setup.out
+    session.approvals._policy._granted.add("file_write")
+    session.enter("/approvals forget file_write")
+    await _until(lambda: "Approvals: ask · grants: none" in out.text())
+    assert session.approvals.allowed_tools == frozenset()

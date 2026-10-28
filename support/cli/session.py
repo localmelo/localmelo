@@ -26,6 +26,7 @@ from rich.text import Text
 
 from localmelo.melo.agent import Agent
 from localmelo.melo.agent.agent import FINALIZE_TIMEOUT_S
+from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.schema import RunResult
 from localmelo.support.backends import discovery
@@ -575,7 +576,8 @@ class CliSession:
         self.out.print(
             self._text(
                 f"model      {backend.model} · {backend.label} · "
-                f"{backend.base_url or backend.label} · {state}{source}"
+                f"{redact_secrets(backend.base_url or backend.label)[0]} · "
+                f"{state}{source}"
             )
         )
         self.out.print(self._text(f"workspace  {where}"))
@@ -637,6 +639,16 @@ class CliSession:
             )
         )
         files = [getattr(self.store, "path", ""), LOG_PATH]
+        if os.environ.get("LOCALMELO_PERSIST_MEMORY") == "1" or getattr(
+            self.agent.options, "memory_dir", None
+        ):
+            memory_dir = os.environ.get("LOCALMELO_MEMORY_DIR") or os.path.join(
+                os.path.expanduser("~"), ".cache", "localmelo", "memory"
+            )
+            files += [
+                os.path.join(memory_dir, "procedures.db"),
+                os.path.join(memory_dir, "history.db"),
+            ]
         files = [home_label(str(path)) for path in files if path]
         self.out.print(self._text("files      " + " · ".join(files)))
         self.out.print(self._text(f"version    melo {localmelo_version()}"))
@@ -673,28 +685,35 @@ class CliSession:
                 )
             )
             return
+        from localmelo.melo.checker.redaction import redact_secrets
+
         path = home_label(os.path.expanduser(factory.mcp_config))
-        self.out.print(self._text(f"MCP servers from {path} ({factory.mcp_source})"))
-        if factory.mcp_error:
-            self.out.print(
-                self._text(
-                    f"MCP is off for this session: {factory.mcp_error}. "
-                    "Fix the config, then restart melo.",
-                    "warn",
-                )
+        self.out.print(
+            self._text(
+                f"MCP servers from {redact_secrets(path)[0]} ({factory.mcp_source})"
             )
-            return
-        tools = self.agent.list_tools()
+        )
+        tools = self.agent.list_tools() if factory.mcp_error is None else []
         for server in factory.mcp_servers:
             prefix = f"mcp__{server.namespace}__"
             count = sum(1 for tool in tools if tool.name.startswith(prefix))
-            command = " ".join([server.command, *server.args])
-            self.out.print(
-                self._text(
+            command = redact_secrets(" ".join([server.command, *server.args]))[0]
+            if factory.mcp_error is not None:
+                line = f"  {server.name}: not running · {command}"
+            else:
+                line = (
                     f"  {server.name}: running, {count} tool"
                     + ("" if count == 1 else "s")
-                    + f" · {command}",
-                    "muted",
+                    + f" · {command}"
+                )
+            self.out.print(self._text(line, "muted"))
+        if factory.mcp_error:
+            problem = redact_secrets(factory.mcp_error)[0]
+            self.out.print(
+                self._text(
+                    f"MCP is off for this session: {problem}. "
+                    "Fix the config, then restart melo.",
+                    "warn",
                 )
             )
 
