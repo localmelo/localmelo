@@ -408,9 +408,7 @@ def _file_only(text: str) -> bool:
         for index in range(start, end):
             stripped[index] = " "
     remaining = content_tokens("".join(stripped))
-    return bool(remaining) and all(
-        token in FILE_ONLY_WORDS or token.isdigit() for token in remaining
-    )
+    return all(token in FILE_ONLY_WORDS or token.isdigit() for token in remaining)
 
 
 def _entry_text(entry: Any) -> str:
@@ -522,6 +520,7 @@ def decide(
                 item.overlap,
                 item.cosine,
                 _entry_created(item.entry),
+                _entry_id(item.entry) or 0,
             ),
             reverse=True,
         )

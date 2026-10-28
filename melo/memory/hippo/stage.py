@@ -27,7 +27,12 @@ class StagedCandidates:
         return len(self._items)
 
     def propose(self, candidate: MemoryCandidate) -> None:
-        if candidate.candidate_id in self._items:
+        existing = self._items.get(candidate.candidate_id)
+        if existing is not None:
+            if existing.processed and existing.text == candidate.text:
+                # An unchanged restatement is not a second write.
+                self._items.move_to_end(candidate.candidate_id)
+                return
             self._items[candidate.candidate_id] = replace(
                 candidate, entry_id=None, processed=False
             )

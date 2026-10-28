@@ -148,6 +148,7 @@ class Hippo:
         # R6-lite's typed write path exists only for a real long store: an
         # injected backend, never the in-memory fallback of a legacy run.
         self._store_enabled = long is not None and memory
+        self._store_broken = False
         self._store_error_logged = False
         self.staged = StagedCandidates()
         self.policy = HippoPolicy()
@@ -330,6 +331,13 @@ class Hippo:
             except LongTermSchemaError as exc:
                 self._disable_store(exc)
                 return decisions
+            except Exception as exc:  # a locked or damaged store
+                logger.warning(
+                    "Could not read long-term memory for task %s: %s",
+                    candidate.task_id,
+                    _exception_text(exc),
+                )
+                continue
             try:
                 decision = self.policy.decide(
                     checked,
@@ -338,7 +346,7 @@ class Hippo:
                     provenance=candidate.provenance,
                     active=active,
                 )
-            except (TypeError, ValueError) as exc:  # malformed stored data
+            except Exception as exc:  # malformed stored data or a policy bug
                 logger.warning("Could not route a memory candidate: %s", exc)
                 continue
             try:
@@ -347,7 +355,10 @@ class Hippo:
                     kind=kind,
                     source=candidate.source,
                     admitted_by=signal,
-                    provenance=candidate.provenance,
+                    provenance={
+                        **candidate.provenance,
+                        "source_ids": list(source_ids),
+                    },
                     task_id=candidate.task_id,
                     session_id=candidate.session_id,
                     created_at=candidate.created_at,
@@ -397,13 +408,41 @@ class Hippo:
         run_request: bool,
         digest: MemoryCandidate | None,
         final_reflection: MemoryCandidate | None,
+        task_id: str = "",
     ) -> list[MemoryDecision]:
-        """Admit the run's candidates at its end; never raises."""
+        """Admit the run's candidates at its end; never raises.
+
+        *task_id* scopes the run's candidates in a long-lived Agent: without
+        it a candidate of an earlier turn stays staged and a later request
+        would admit it. It is optional so a direct Hippo test can omit it.
+        """
+        try:
+            return await self._flush(
+                run_request=run_request,
+                digest=digest,
+                final_reflection=final_reflection,
+                task_id=task_id,
+            )
+        except Exception as exc:  # a flush never replaces the run's result
+            logger.warning("Could not flush the memory candidates: %s", exc)
+            return []
+
+    async def _flush(
+        self,
+        *,
+        run_request: bool,
+        digest: MemoryCandidate | None,
+        final_reflection: MemoryCandidate | None,
+        task_id: str = "",
+    ) -> list[MemoryDecision]:
         if not self._store_ready():
             return []
+        scope = task_id or (digest.task_id if digest is not None else "")
         selected: list[tuple[MemoryCandidate, str]] = []
         if run_request:
             for candidate in self.staged.all():
+                if scope and candidate.task_id != scope:
+                    continue
                 if not candidate.remember or candidate.processed:
                     continue
                 if candidate.source == "digest":
@@ -426,7 +465,7 @@ class Hippo:
         return decisions
 
     def _store_ready(self) -> bool:
-        return self.memory and self._store_enabled
+        return self.memory and self._store_enabled and not self._store_broken
 
     def _disable_store(self, exc: Exception) -> None:
         """Stop using a store a newer localmelo wrote, with one WARNING."""
@@ -436,6 +475,7 @@ class Hippo:
             )
             self._store_error_logged = True
         self._store_enabled = False
+        self._store_broken = True
 
     async def recall_long(
         self,
@@ -446,25 +486,43 @@ class Hippo:
         pool: int = 20,
     ) -> list[tuple[str, float, dict[str, Any]]]:
         """Up to *pool* active entries, by embedding or by BM25."""
-        if not self._store_ready():
+        if not self.memory or self._store_broken:
             return []
         try:
             if await self.long.count_entries() == 0:
                 return []
             if self.embedding is not None:
                 vectors = await self.embedding.embed([query])
-                return await self.long.search_embedding(
+                rows = await self.long.search_embedding(
                     vectors[0],
                     top_k=pool,
                     kinds=kinds,
                     exclude_task_ids=exclude_task_ids,
                 )
-            return await self.long.search_text(
-                query,
-                top_k=pool,
-                kinds=kinds,
-                exclude_task_ids=exclude_task_ids,
-            )
+                # R6-lite's typed writes are text-only, so the embedding
+                # search cannot see them; the BM25 rows fill the pool.
+                text_rows = await self.long.search_text(
+                    query,
+                    top_k=pool,
+                    kinds=kinds,
+                    exclude_task_ids=exclude_task_ids,
+                )
+                seen = {row[2].get("id") for row in rows}
+                rows = [
+                    *rows,
+                    *(row for row in text_rows if row[2].get("id") not in seen),
+                ][:pool]
+            else:
+                rows = await self.long.search_text(
+                    query,
+                    top_k=pool,
+                    kinds=kinds,
+                    exclude_task_ids=exclude_task_ids,
+                )
+            return [
+                (text, score, {**meta, "retrieval_rank": rank})
+                for rank, (text, score, meta) in enumerate(rows, start=1)
+            ]
         except LongTermSchemaError as exc:
             self._disable_store(exc)
             return []
@@ -494,6 +552,7 @@ class Hippo:
         """
         await self.history.forget_all()
         await self.long.forget_all()
+        self.staged.clear()
 
     # ── Reflection promotion ──
 

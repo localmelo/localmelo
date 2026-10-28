@@ -132,7 +132,11 @@ def _stored(entry: _Entry) -> StoredEntry:
 
 def _tie_key(entry: _Entry, score: float) -> tuple[float, bool, float]:
     """The documented equal-score order: rehearsed, then newest."""
-    return (score, entry.admitted_by == "rehearsal", entry.created_at)
+    return (
+        score,
+        entry.admitted_by == "rehearsal",
+        entry.created_at if entry.admitted_by else 0.0,
+    )
 
 
 class LongTerm:
@@ -186,6 +190,14 @@ class LongTerm:
         candidate_id: str,
     ) -> tuple[int | None, str]:
         """Write one decision in one step; returns ``(entry_id, action)``."""
+        for name, value, allowed in (
+            ("kind", kind, KINDS),
+            ("source", source, SOURCES),
+            ("admitted_by", admitted_by, SIGNALS),
+            ("action", action, ACTIONS),
+        ):
+            if value not in allowed:
+                raise ValueError(f"Unknown long-term {name}: {value!r}")
         target = self._find(target_id) if target_id is not None else None
         if action == "UPDATE" and (target is None or target.status != "active"):
             action = "NEW"

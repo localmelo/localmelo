@@ -160,6 +160,7 @@ from localmelo.melo.schema import (
     MAX_AGENT_STEPS,
     MAX_REFLECTION_CHARS,
     MIN_AGENT_STEPS,
+    CandidateItem,
     ImagePart,
     MemoryCandidate,
     Message,
@@ -2211,6 +2212,24 @@ class Agent:
         run.redactions += int(payload.metadata.get("redactions", 0) or 0)
         return str(payload.text)
 
+    def _checked_candidate_text(
+        self, text: str, source: str, run: _RunState
+    ) -> str | None:
+        """A candidate text through the boundary, without counting a document.
+
+        The note or draft it comes from was counted when it entered its own
+        store; this pass is the one R6-lite requires before a candidate is
+        staged, so the policy never compares raw text.
+        """
+        check = self.checker.check_memory_candidate(
+            MemoryCandidatePayload(text=text, source=source, target="candidate")
+        )
+        if not check.allowed:
+            return None
+        payload = check.sanitized_payload
+        run.redactions += int((payload.metadata or {}).get("redactions", 0) or 0)
+        return str(payload.text)
+
     def _memory_provenance(
         self,
         run: _RunState,
@@ -2249,17 +2268,25 @@ class Agent:
         """Stage a rememberable note's items for long-term memory."""
         if not note.remember or not (note.found or note.decided):
             return
+        text = self._checked_candidate_text(candidate_text(note), "reasoning_note", run)
+        if text is None:
+            return
+        items: list[CandidateItem] = []
+        for item in candidate_items(note):
+            checked = self._checked_candidate_text(item.text, "reasoning_note", run)
+            if checked is not None:
+                items.append(CandidateItem(checked, item.source_ids))
         candidate = MemoryCandidate(
             candidate_id=note.note_id,
             source="reasoning_note",
-            text=candidate_text(note),
+            text=text,
             remember_by=note.remember_by or "rule",
             task_id=run.task_id,
             session_id="",
             provenance=self._memory_provenance(run, note=note, calls=calls),
             created_at=note.created_at,
             remember=True,
-            items=candidate_items(note),
+            items=tuple(items),
         )
         self.hippo.propose(candidate)
 
@@ -2292,22 +2319,21 @@ class Agent:
     ) -> None:
         """Stage the final reflection, with its next directions and open questions."""
         candidate_id = note_id or new_record_id()
+        text = self._checked_candidate_text(
+            reflection_candidate_text(entry), "reflection", run
+        )
+        if text is None:
+            return
+        provenance = self._memory_provenance(run, note=None)
+        provenance["note_id"] = candidate_id
         candidate = MemoryCandidate(
             candidate_id=candidate_id,
             source="reflection",
-            text=reflection_candidate_text(entry),
+            text=text,
             remember_by="rule",
             task_id=run.task_id,
             session_id="",
-            provenance={
-                "task_id": run.task_id,
-                "session_id": "",
-                "step": run.steps,
-                "attempt": run.attempts,
-                "task_text": run.task_text[:300],
-                "source_ids": [],
-                "note_id": candidate_id,
-            },
+            provenance=provenance,
             created_at=time.time(),
             remember=True,
         )
@@ -4582,8 +4608,17 @@ class Agent:
                         for candidate in user_candidates(
                             query,
                             task_id=run.task_id,
-                            provenance={"task_text": run.task_text[:300]},
+                            provenance={
+                                "task_text": run.task_text[:300],
+                                "source_ids": [],
+                            },
                         ):
+                            checked = self._checked_candidate_text(
+                                candidate.text, "user", run
+                            )
+                            if checked is None:
+                                continue
+                            candidate.text = checked
                             self.hippo.propose(candidate)
                             decisions = await self.hippo.admit(
                                 candidate.candidate_id, "user_statement"
@@ -4859,12 +4894,17 @@ class Agent:
                 # nothing unchecked to long-term memory. R6-lite's flush
                 # admits the run's candidates through the boundary and
                 # policy; its failure is logged, never raised.
-                if run.final_digest is not None:
+                if (
+                    run.final_digest is not None
+                    and self.options.admit_on_outcome
+                    and not run.remember_request
+                ):
                     run.final_digest.provenance["final_status"] = run.status
                 decisions = await self.hippo.flush(
                     run_request=run.remember_request,
                     digest=run.final_digest,
                     final_reflection=run.final_reflection,
+                    task_id=run.task_id,
                 )
                 self._drain_decisions(decisions, run)
                 self.hippo.working.clear_reflections()

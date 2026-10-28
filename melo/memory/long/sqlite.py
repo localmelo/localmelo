@@ -34,6 +34,15 @@ logger = logging.getLogger(__name__)
 
 _SCHEMA_VERSION = 1
 
+# The base table; kept under its old name for callers that read it.
+_SCHEMA = """CREATE TABLE IF NOT EXISTS long_term (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    text     TEXT NOT NULL,
+    vector   BLOB NOT NULL,
+    metadata TEXT NOT NULL DEFAULT '{}'
+);
+"""
+
 _BASE_SCHEMA = """
 CREATE TABLE IF NOT EXISTS long_term (
     id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -203,39 +212,39 @@ class SqliteLongTerm(LongTerm):
             if self._db_path != ":memory:":
                 create_private_file(self._db_path)
             conn = await aiosqlite.connect(self._db_path)
-            await prepare_connection(conn, _BASE_SCHEMA)
-            await self._migrate(conn)
+            try:
+                await prepare_connection(conn, _BASE_SCHEMA)
+                await self._migrate(conn)
+            except BaseException:
+                with contextlib.suppress(Exception):
+                    await conn.close()
+                raise
             self._conn = conn
             return conn
 
     async def _migrate(self, conn: aiosqlite.Connection) -> None:
         """Migrate the file to v1 in one transaction; a v1 file is left alone."""
-        async with conn.execute("PRAGMA user_version") as cur:
-            row = await cur.fetchone()
-        version = int(row[0]) if row else 0
-        if version > _SCHEMA_VERSION:
-            raise LongTermSchemaError(
-                f"{self._db_path} is at schema version {version}; this localmelo "
-                f"understands version {_SCHEMA_VERSION} and older"
-            )
-        if version == _SCHEMA_VERSION:
-            # A v1 file may still lack the decisions table after an unusual
-            # interruption; CREATE IF NOT EXISTS repairs it without touching
-            # the entries.
-            await conn.execute("BEGIN IMMEDIATE")
-            try:
+        await conn.execute("BEGIN IMMEDIATE")
+        try:
+            # Read the version inside the transaction, as history does, so a
+            # second opener sees the version the first one committed.
+            async with conn.execute("PRAGMA user_version") as cur:
+                row = await cur.fetchone()
+            version = int(row[0]) if row else 0
+            if version > _SCHEMA_VERSION:
+                raise LongTermSchemaError(
+                    f"{self._db_path} is at schema version {version}; this "
+                    f"localmelo understands version {_SCHEMA_VERSION} and older"
+                )
+            if version == _SCHEMA_VERSION:
+                # A v1 file may still lack the decisions table after an
+                # unusual interruption; CREATE IF NOT EXISTS repairs it
+                # without touching the entries.
                 for statement in _DECISIONS.split(";"):
                     if statement.strip():
                         await conn.execute(statement)
                 await conn.commit()
-            except BaseException:
-                with contextlib.suppress(Exception):
-                    await conn.rollback()
-                raise
-            return
-
-        await conn.execute("BEGIN IMMEDIATE")
-        try:
+                return
             async with conn.execute("PRAGMA table_info(long_term)") as cur:
                 existing = {str(row[1]) for row in await cur.fetchall()}
             for name, ddl in _COLUMNS:
@@ -460,7 +469,7 @@ class SqliteLongTerm(LongTerm):
             sql += f" AND task_id NOT IN ({', '.join('?' for _ in excluded)})"
             params.extend(excluded)
         async with conn.execute(sql, params) as cur:
-            rows = list(await cur.fetchall())
+            rows = [tuple(row) for row in await cur.fetchall()]
         if not rows:
             return []
         return await asyncio.to_thread(_rank_rows, rows, q_unit, top_k)
@@ -477,9 +486,19 @@ class SqliteLongTerm(LongTerm):
         kinds: Any = None,
         exclude_task_ids: Any = (),
     ) -> list[tuple[str, float, dict[str, Any]]]:
-        await self._ensure_ready()
+        conn = await self._ensure_ready()
         filtered = bool(kinds) or bool(tuple(exclude_task_ids))
-        if filtered:
+        if self._db_path == ":memory:":
+            async with conn.execute(
+                f"SELECT {_SELECT_COLUMNS} FROM long_term "
+                "WHERE status = 'active' ORDER BY created_at, id"
+            ) as cur:
+                rows = [tuple(row) for row in await cur.fetchall()]
+            metas, texts = _index_rows(
+                rows, tuple(kinds or ()), tuple(exclude_task_ids)
+            )
+            filtered = True
+        elif filtered:
             metas, texts = await asyncio.to_thread(
                 _fetch_and_index,
                 self._db_path,
@@ -523,7 +542,7 @@ class SqliteLongTerm(LongTerm):
             params.append(kind)
         sql += " ORDER BY created_at, id"
         async with conn.execute(sql, params) as cur:
-            rows = list(await cur.fetchall())
+            rows = [tuple(row) for row in await cur.fetchall()]
         return [_stored(row) for row in rows]
 
     async def decisions(self) -> list[dict[str, Any]]:
@@ -533,7 +552,7 @@ class SqliteLongTerm(LongTerm):
             "target_id, reason, source_ids_json, text_sha256, text, timestamp, "
             "task_id FROM decisions ORDER BY seq"
         ) as cur:
-            return [_decision_dict(row) for row in await cur.fetchall()]
+            return [_decision_dict(tuple(row)) for row in await cur.fetchall()]
 
     async def count_entries(self) -> int:
         """Diagnostic helper: total long-term entries persisted."""
@@ -597,7 +616,7 @@ def _tie_key(meta: dict[str, Any], score: float) -> tuple[float, bool, float]:
     return (
         score,
         meta.get("admitted_by") == "rehearsal",
-        float(meta.get("created_at") or 0.0),
+        float(meta.get("created_at") or 0.0) if meta.get("admitted_by") else 0.0,
     )
 
 
@@ -623,6 +642,26 @@ def _rank_rows(
         scored.append((meta, float(np.dot(q_unit, vector / norm)), str(row[1])))
     scored.sort(key=lambda item: _tie_key(item[0], item[1]), reverse=True)
     return [(text, score, meta) for meta, score, text in scored[:top_k]]
+
+
+def _index_rows(
+    rows: list[tuple[Any, ...]],
+    kinds: tuple[str, ...],
+    exclude: tuple[str, ...],
+) -> tuple[dict[str, Any], dict[str, str]]:
+    metas: dict[str, Any] = {}
+    texts: dict[str, str] = {}
+    excluded = set(exclude)
+    for row in rows:
+        meta = _row_meta(row)
+        if kinds and meta["kind"] not in kinds:
+            continue
+        if meta["task_id"] in excluded:
+            continue
+        doc_id = str(meta["id"])
+        metas[doc_id] = {**meta, "text": str(row[1])}
+        texts[doc_id] = str(row[1])
+    return metas, texts
 
 
 def _fetch_and_index(

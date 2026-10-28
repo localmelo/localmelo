@@ -52,8 +52,19 @@ _MARKER_PATTERNS: dict[str, re.Pattern[str]] = {
     "我对…过敏": re.compile(r"我对[^。\n]{0,40}过敏"),
 }
 
-# A remember request stores a fact only when the sentence states one.
-_FIRST_PERSON = re.compile(r"(?<![a-z0-9_])(i|i'm|my|we|our)(?![a-z0-9_])")
+# A remember request stores a fact only when the sentence states one. The
+# patterns are declarative and stable; a to-do ("remember to …"), a request
+# ("I need you to …") and a question ("do you remember …?") are not facts.
+_FACT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\b(my|our)\b[^.\n]{0,80}\b(is|are|was|were)\b", re.IGNORECASE),
+    re.compile(
+        r"\bI\s+(live|work|prefer|use|like|am allergic|am based|always)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"我的[^。\n]{0,40}是"),
+    re.compile(r"我(住在|喜欢|习惯|在[^。\n]{0,20}工作|对[^。\n]{0,20}过敏)"),
+)
+_QUESTION_END = ("?", "？")
 
 
 @dataclass(frozen=True)
@@ -83,10 +94,11 @@ def _matches(text: str, marker: str) -> bool:
     return marker in text
 
 
-def _first_person(text: str) -> bool:
-    return _FIRST_PERSON.search(text.lower()) is not None or any(
-        marker in text for marker in ("我", "我的", "我们")
-    )
+def _states_a_fact(text: str) -> bool:
+    """Whether one sentence states a stable first-person fact."""
+    if text.rstrip().endswith(_QUESTION_END):
+        return False
+    return any(pattern.search(text) for pattern in _FACT_PATTERNS)
 
 
 def classify_user_text(text: str) -> UserSignals:
@@ -100,11 +112,10 @@ def classify_user_text(text: str) -> UserSignals:
         stated = any(_matches(stripped, marker) for marker in USER_STATEMENT_MARKERS)
         if not stated and remember:
             # "remember that my birthday is ..." carries its fact after the
-            # marker; a bare "remember to buy milk" carries none.
+            # marker; "remember to buy milk" and a question carry none.
             stated = any(
                 _matches(stripped, marker) for marker in REMEMBER_MARKERS
-            ) and _first_person(stripped)
-            stated = stated and len(stripped) >= 20
+            ) and _states_a_fact(stripped)
         if stated and stripped not in facts:
             facts.append(stripped)
     return UserSignals(remember=remember, facts=tuple(facts))
@@ -129,7 +140,11 @@ def user_candidates(
                 remember_by="rule",
                 task_id=task_id,
                 session_id=session_id,
-                provenance={**(provenance or {}), "task_id": task_id},
+                provenance={
+                    "source_ids": [],
+                    **(provenance or {}),
+                    "task_id": task_id,
+                },
                 remember=True,
             )
         )

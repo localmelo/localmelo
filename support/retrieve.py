@@ -349,6 +349,8 @@ def _check_flags(parser: argparse.ArgumentParser, args: argparse.Namespace) -> N
         if given or new_modes:
             other = ", ".join([*given, *new_modes])
             parser.error(f"--export-run cannot be combined with {other}")
+        if args.memory_dir is not None:
+            parser.error("--memory-dir applies only to --route")
         return
     if new_modes:
         if len(new_modes) > 1:
