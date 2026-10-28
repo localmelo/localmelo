@@ -160,6 +160,11 @@ type more letters to narrow them, Tab or Enter to take one.
 | `/new` (also `/clear`) | Start a new session: the model forgets the conversation, and session grants end. |
 | `/sessions [filter]` | Pick a saved chat in this folder; type to filter, Tab for all folders, ↑ ↓ to select, Enter to resume, Esc to close. |
 | `/resume [id\|title]` | Resume by ID, ID prefix (at least four characters) or exact title; no argument opens the picker. |
+| `/title [text]` | Show or set a 1–200-character title. Before the first message it is kept until the session is created. |
+| `/undo` | Forget the newest finished turn and put its typed message in ↑ history. Files the tools changed stay changed. |
+| `/usage` | Recorded steps, tool calls, tokens and time per turn, including undone work, with totals. `?` means not recorded. |
+| `/memory` | Inspect the model's copied working window, its counts, the long-term backend and any restore limitation; no model call or memory write. |
+| `/copy [turn]` | Copy a stored answer's Markdown, not the wrapped display. Without a number, use the latest finished, non-undone turn. |
 | `/verbose [on\|off]` | Verbose rendering: 40 thinking rows, a tool call's arguments, 20 output lines, the reflection's summary and whole rationale; without an argument, flips it. |
 | `/thinking [on\|off]` | The thinking excerpt on (the default) or off, leaving only `Thought for 1.2s`; without an argument, flips it. |
 | `/expand [turn.call]` | A tool call's whole output or error, including stored calls after resuming: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
@@ -175,7 +180,7 @@ type more letters to narrow them, Tab or Enter to take one.
 - A command that runs is echoed in the scrollback as a message is
   (`› /model 2`), followed by its output. A refused one is not, and
   `/exit` prints nothing.
-- `/new`, `/sessions`, `/resume`, `/retry`, `/model` and `/backend` are refused while a turn runs: the
+- `/new`, `/sessions`, `/resume`, `/undo`, `/retry`, `/model` and `/backend` are refused while a turn runs: the
   draft stays and the hint says
   `/model is not available while a turn runs (esc stops it).`; press Enter
   again once the turn ends.
@@ -206,6 +211,37 @@ type more letters to narrow them, Tab or Enter to take one.
   `Unknown command /NAME. /help lists the commands.` and keeps the draft.
   `/etc/hosts is broken` is a message. To send a message that starts like
   a command, start it with a space.
+
+### Inspect, undo or copy a conversation
+
+`/title` can name a chat before any message is sent; it does not create a
+saved session on its own. The chosen title is applied when the first turn
+creates that session. `/new` or a successful resume clears an unsaved title.
+Titles may be changed during a turn, but not while switching sessions.
+
+`/undo` removes the newest finished turn from the model's restored working
+window and keeps the original typed message in input history (↑). It does
+not reverse shell commands, Python code or file edits. In another window,
+a running turn blocks undo; the command stays in the draft. `/retry` uses
+the same undo operation and then sends that turn's message again.
+
+`/usage` includes undone rows because that work was performed. A running
+turn or missing counter is `?`, not zero; a partial total ends in `+?`.
+`/memory` reads a copy of the window, so it and `/usage` may run during a
+turn. Memory rows show user/assistant/tool messages, not hidden thinking;
+the footer explains whether a resume restored pairs or a checkpoint with
+later pairs. It does not read all persistent memories or ask the model to
+summarize them.
+
+`/copy` reads the **stored, redacted answer** after removing thinking, so
+Markdown and code are not copied from the terminal's wrapped rendering.
+An explicit turn number may select an undone answer. Empty answers,
+running turns and status-only labels cannot be copied. On macOS outside
+SSH it uses `/usr/bin/pbcopy` with a two-second timeout; under SSH, on other
+platforms or if that utility fails it sends a base64-encoded OSC 52 request.
+The latter says `Sent the answer …` rather than claiming success: the
+terminal must support and allow clipboard requests. No clipboard operation
+happens without the explicit `/copy` command.
 
 ### A turn's output
 

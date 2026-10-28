@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -47,10 +48,20 @@ async def native(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         state["calls"].append((args, kwargs))
         if "error" in state:
             raise state["error"]
-        return state["process"]
+        process = state["process"]
+        assert isinstance(process, FakeProcess)
+        return process
 
     monkeypatch.setattr(terminal.asyncio, "create_subprocess_exec", spawn)
     return state
+
+
+def record(controls: list[str]) -> Callable[[str], bool]:
+    def write(sequence: str) -> bool:
+        controls.append(sequence)
+        return True
+
+    return write
 
 
 def decoded(sequence: str) -> str:
@@ -66,9 +77,7 @@ async def test_local_mac_uses_bounded_pbcopy_without_terminal_controls(
 ) -> None:
     controls: list[str] = []
     assert (
-        await terminal.copy_text(
-            "```python\nprint('你好')\n```", lambda s: controls.append(s) or True
-        )
+        await terminal.copy_text("```python\nprint('你好')\n```", record(controls))
         == "pbcopy"
     )
     process = native["process"]
@@ -92,9 +101,7 @@ async def test_ssh_uses_encoded_osc52_not_the_remote_macos_clipboard(
     monkeypatch.setenv(environment, "test-session")
     controls: list[str] = []
     text = "markdown\n\x1b]52;c;not-a-second-control\x07\n你好"
-    assert (
-        await terminal.copy_text(text, lambda s: controls.append(s) or True) == "osc52"
-    )
+    assert await terminal.copy_text(text, record(controls)) == "osc52"
     assert native["calls"] == []
     assert decoded(controls[0]) == text
 
@@ -105,10 +112,7 @@ async def test_other_platforms_request_terminal_clipboard(
 ) -> None:
     monkeypatch.setattr(terminal.sys, "platform", "linux")
     controls: list[str] = []
-    assert (
-        await terminal.copy_text("answer", lambda s: controls.append(s) or True)
-        == "osc52"
-    )
+    assert await terminal.copy_text("answer", record(controls)) == "osc52"
     assert not native["calls"] and decoded(controls[0]) == "answer"
 
 
@@ -121,10 +125,7 @@ async def test_native_failure_falls_back_without_claiming_native_success(
     else:
         native["error"] = FileNotFoundError("fake pbcopy is missing")
     controls: list[str] = []
-    assert (
-        await terminal.copy_text("stored answer", lambda s: controls.append(s) or True)
-        == "osc52"
-    )
+    assert await terminal.copy_text("stored answer", record(controls)) == "osc52"
     assert decoded(controls[0]) == "stored answer"
 
 
@@ -135,10 +136,7 @@ async def test_timeout_kills_and_reaps_native_child_before_fallback(
     native["process"] = FakeProcess(block=True)
     monkeypatch.setattr(terminal, "CLIPBOARD_TIMEOUT_S", 0.01)
     controls: list[str] = []
-    assert (
-        await terminal.copy_text("answer", lambda s: controls.append(s) or True)
-        == "osc52"
-    )
+    assert await terminal.copy_text("answer", record(controls)) == "osc52"
     assert native["process"].killed and native["process"].waited
     assert decoded(controls[0]) == "answer"
 
@@ -149,9 +147,7 @@ async def test_cancellation_kills_native_child_and_never_falls_back(
     process = FakeProcess(block=True)
     native["process"] = process
     controls: list[str] = []
-    task = asyncio.create_task(
-        terminal.copy_text("answer", lambda s: controls.append(s) or True)
-    )
+    task = asyncio.create_task(terminal.copy_text("answer", record(controls)))
     await process.started.wait()
     task.cancel()
     with pytest.raises(asyncio.CancelledError):

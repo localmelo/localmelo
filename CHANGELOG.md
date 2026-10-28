@@ -9,6 +9,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Terminal session commands: `/title [text]` shows or sets a title, including
+  before the first message; `/undo` forgets the latest finished turn and
+  keeps its typed history without reversing file changes; `/usage` shows
+  recorded work and totals including undone turns, with missing counters
+  left unknown; `/memory` inspects the copied working window and explains
+  its actual restore mode. `/copy [turn]` copies stored, redacted Markdown
+  without thinking via bounded macOS `pbcopy` or an OSC 52 request when
+  remote, unsupported locally or on other platforms. Clipboard requests
+  only happen on an explicit command; direct runs are unchanged ([#NN]).
+
 - Resume saved terminal chats with `melo -c`, `melo -r [ID|TITLE]`,
   `/sessions [filter]` or `/resume [ID|TITLE]`. The inline picker filters
   eligible chats by folder or across folders before the startup banner,
