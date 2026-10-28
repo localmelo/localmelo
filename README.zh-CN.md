@@ -55,7 +55,7 @@ melo --base-url http://127.0.0.1:11434/v1 --chat-model qwen3:8b "What is 6*7?"
 ## 安全
 
 > [!WARNING]
-> 工具以你的账户权限运行，并且没有沙箱：模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 `127.0.0.1`（默认值）。详见 [SECURITY.md（英文）](SECURITY.md)和[检查能做什么（英文）](docs/tools.md#what-the-checks-do)。
+> 工具以你的账户权限运行，并且没有沙箱：模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 `127.0.0.1`（默认值）。详见 [SECURITY.md（英文）](SECURITY.md)和[检查能做什么（英文）](docs/guides/tools-mcp.md#what-the-checks-do)。
 
 ## 参与贡献
 

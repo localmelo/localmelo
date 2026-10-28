@@ -982,9 +982,9 @@ async def test_another_server_is_saved_as_vllm(
 def test_the_embedding_guides_toml_examples_load(
     config_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Every TOML block in docs/embedding.md is a file config.load() reads."""
+    """Every TOML block in the embedding guide is a file config.load() reads."""
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")  # the cloud example names it
-    guide = Path(__file__).resolve().parents[2] / "docs" / "embedding.md"
+    guide = Path(__file__).resolve().parents[2] / "docs" / "guides" / "embedding.md"
     blocks = re.findall(r"```toml\n(.*?)```", guide.read_text(), re.S)
     assert len(blocks) == 4
     for block in blocks:
