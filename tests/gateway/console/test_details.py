@@ -339,6 +339,10 @@ async def test_default_builder_without_a_gate_wraps_nothing(
 
     try:
         assert not isinstance(agent._llm, GatedLLM)
+        # The production builder, not only the test one, is gateway mode.
+        assert agent.options.mode == "gateway"
+        names = {tool.name for tool in agent.list_tools()}
+        assert names == {"file_read", "file_write", "python_exec"}
     finally:
         await agent.close()
 

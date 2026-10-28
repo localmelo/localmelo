@@ -3,8 +3,8 @@
 A tier says what a tool can reach (:mod:`melo.checker.tiers`); the mode
 says who is there to answer before a call runs. This module is the one
 table that decides both, so a surface names its mode instead of choosing a
-tool set next to the agent it builds. It imports only the schema and the
-tiers, so the checker, the executor and the agent can read it without an
+tool set next to the agent it builds. It imports only ``ToolTier`` from the
+schema, so the checker, the executor and the agent can read it without an
 import cycle.
 
 The surfaces set the mode where they are known (the CLI's two branches,
@@ -17,7 +17,7 @@ gateway and the console do not offer ``shell_exec`` at all.
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping
-from typing import Literal
+from typing import Literal, get_args
 
 from localmelo.melo.schema import ToolTier
 
@@ -78,8 +78,17 @@ def exec_refusal(tool_name: str, tier: ToolTier, mode: ToolMode) -> str | None:
         return None
     return (
         f"{tool_name} is not available in this mode ({mode} mode has no "
-        "approval policy). Use --builtins all to enable it."
+        "approval policy). Use --builtins all in a direct run to enable it."
     )
+
+
+def validated_mode(mode: object) -> ToolMode:
+    """*mode* if it names a tool mode, else ``ValueError`` naming the field."""
+    allowed = get_args(ToolMode)
+    if mode not in allowed:
+        names = ", ".join(repr(name) for name in allowed)
+        raise ValueError(f"mode must be one of {names}, got {mode!r}")
+    return mode  # type: ignore[return-value]
 
 
 __all__ = [
@@ -89,4 +98,5 @@ __all__ = [
     "builtin_set_for",
     "exec_refusal",
     "mode_requires_approval",
+    "validated_mode",
 ]

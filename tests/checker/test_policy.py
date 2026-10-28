@@ -31,7 +31,7 @@ def test_every_mode_has_a_default_set() -> None:
         ("python", True),
     ],
 )
-def test_shell_exec_is_off_only_where_nobody_can_ask(
+def test_shell_exec_is_in_the_default_set_per_mode_in_this_release(
     mode: ToolMode, shell: bool
 ) -> None:
     assert ("shell_exec" in DEFAULT_BUILTINS[mode]) is shell
@@ -64,11 +64,19 @@ def test_no_names_resolves_the_mode_default() -> None:
         assert builtin_set_for(mode, None) == DEFAULT_BUILTINS[mode]
 
 
+def test_a_bad_checker_mode_raises_value_error() -> None:
+    from localmelo.melo.checker import Checker
+
+    with pytest.raises(ValueError, match="mode must be one of"):
+        Checker(mode="bogus")  # type: ignore[arg-type]
+
+
 def test_a_gateway_refuses_shell_exec_but_keeps_python_exec() -> None:
     reason = exec_refusal("shell_exec", "exec", "gateway")
     assert reason is not None
     assert "gateway" in reason
     assert "--builtins all" in reason
+    assert "direct run" in reason
     assert exec_refusal("python_exec", "exec", "gateway") is None
 
 

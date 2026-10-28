@@ -192,6 +192,8 @@ class TestBuiltinSelection:
     def test_direct_mode_keeps_every_builtin_in_p13a(self) -> None:
         agent = Agent(llm=FakeLLM(), options=AgentOptions(mode="direct"))
         assert _tool_names(agent) == builtin_names()
+        # P13a's direct JSON line has no `mode` key yet.
+        assert "mode" not in agent._run_config()
 
     def test_the_gateway_mode_registers_no_shell(self) -> None:
         agent = Agent(llm=FakeLLM(), options=AgentOptions(mode="gateway"))

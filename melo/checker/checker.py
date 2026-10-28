@@ -12,7 +12,7 @@ from localmelo.melo.checker.payloads import (
     ToolResolutionResult,
     ValidationResult,
 )
-from localmelo.melo.checker.policy import ToolMode, exec_refusal
+from localmelo.melo.checker.policy import ToolMode, exec_refusal, validated_mode
 from localmelo.melo.checker.tiers import tier_of
 from localmelo.melo.checker.validators import (
     _BLOCKED_RE,
@@ -52,9 +52,11 @@ class Checker:
         The default keeps the pre-P13 behaviour for a checker built on its
         own, which is direct mode's; :class:`Agent` always passes its
         ``AgentOptions.mode``. Direct mode still applies the six-pattern
-        blocklist in this release; every other mode asks the tier policy instead.
+        blocklist in this release; every other mode lets the tier policy
+        decide, and the executor still asks the run's approval policy before
+        an ``exec`` call when there is one.
         """
-        self._mode = mode
+        self._mode = validated_mode(mode)
         self._blocked = _BLOCKED_RE
 
     # ── Permission tiers ──
