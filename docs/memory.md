@@ -99,10 +99,19 @@ transpose in transpose.py … outcome: completed") is kept.
 - Notes are **rehearsed** when a later note restates their facts, when a
   successful tool call acts on a path or command they name, or when a
   reflection cites them in `used_notes`. A rehearsed note feeds the
-  attempt's **digest**: the task, the outcome, the facts, the observed
-  lines and the open questions, at most 1,500 characters. An unrehearsed
-  note stays out of it. The attempt's notes and thought chunks are
-  superseded after its digest.
+  attempt's **digest**: the task's first sentence or heading, the outcome,
+  the files the attempt's successful `file_write` calls wrote (at most six,
+  workspace-relative, then `+N`), the last check the attempt ran with its
+  result, the facts, up to three decisions, the observed lines and the open
+  questions, at most 1,500 characters. The check is a `shell_exec` or
+  `python_exec` whose command or code runs tests or the program; its result
+  is the test counts, the exit code or its last output line. An observed
+  line whose result is empty or only a boolean, `None`, an exit code or
+  punctuation is left out, so it cannot enter a digest or make one a
+  rehearsal candidate. An unrehearsed note stays out of it. Over the limit,
+  open questions drop first, then observed lines, decisions, facts and
+  files, then the task is shortened; the outcome and the verification stay.
+  The attempt's notes and thought chunks are superseded after its digest.
 - Nothing here is written to `history.db` or `sessions.db` as a note.
   `history.db` keeps no notes table; it still keeps the model's raw reply
   in `steps` and in `llm_calls`. The only new session field is the turn's

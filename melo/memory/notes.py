@@ -22,6 +22,7 @@ from __future__ import annotations
 import calendar
 import hashlib
 import json
+import os
 import posixpath
 import re
 from collections.abc import Callable, Iterable, Sequence
@@ -60,6 +61,10 @@ DRAFT_WRITTEN_SHARE = 0.6  # a write holding this share of a draft's lines write
 THOUGHT_CHUNK_CHARS = 1_500  # ≈ 435 tokens
 DIGEST_CHARS = 1_500  # ≈ 435 tokens: the attempt digest
 DIGEST_TASK_CHARS = 300  # the query line of a digest
+DIGEST_FILES = 6  # paths named in a digest before "+N"
+DIGEST_PATH_CHARS = 120  # one path in a digest
+DIGEST_COMMAND_CHARS = 120  # the check command in a digest
+DIGEST_RESULT_CHARS = 80  # the check's result in a digest
 NOTE_SHOWN_CHARS = 400  # a note's text in the reflection's notes block
 
 # Caps inside the short form of a call and the summary of an output.
@@ -156,6 +161,10 @@ class ReasoningNote:
     open_questions: list[str] = field(default_factory=list)  # <= 3 x 200
     # <= 5 x 160, from the executor only, one per call
     observed: list[str] = field(default_factory=list)
+    # A digest only: the paths its attempt wrote, and the last check command
+    # with its result (see digest_note).
+    files: list[str] = field(default_factory=list)
+    verified: str = ""
     outcome: str = ""  # <= 160: "ok" | "exit 1: 24 failed" | "Error: <first line>"
     drafts: list[str] = field(default_factory=list)  # draft ids
     reasoning_chars: int = 0
@@ -772,10 +781,36 @@ def _error(result: ToolResult) -> str:
     return _first_nonblank_line(result.error)
 
 
+# A result that says nothing about what the attempt did: no text, only a
+# boolean or None, only an exit code, or only empty quotes and punctuation
+# around one of those (the D11 run's "'' True."). It never becomes an
+# observed digest item and never makes one a rehearsal candidate.
+_TRIVIAL_LINE_RE = re.compile(
+    r"(?:\[exit code -?\d+\]|exit code -?\d+|True|False|None)"
+)
+_TRIVIAL_NOISE_RE = re.compile(r"''|\"\"|[\s\[\]{}()'\".,:;=+-]")
+_EXIT_CODE_RE = re.compile(r"\[exit code (-?\d+)\]")
+
+
+def _trivial_line(line: str) -> bool:
+    """Whether one non-blank output line carries no information."""
+    if _TRIVIAL_LINE_RE.fullmatch(line):
+        return True
+    return _TRIVIAL_NOISE_RE.sub("", line).strip() in ("", "True", "False", "None")
+
+
+def _trivial_output(text: str) -> bool:
+    """Whether *text* is empty or only trivial lines (see ``_trivial_line``)."""
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return not lines or all(_trivial_line(line) for line in lines)
+
+
 def _observed(call: ToolCall, result: ToolResult) -> str:
-    """The observed line of one call and its result."""
+    """The observed line of one call and its result; "" when trivial."""
     name = call.tool_name
     error = _error(result)
+    if not error and _trivial_output(result.output):
+        return ""
     if error:
         line = f"{short_call(call)}: Error: {error}"
     elif name == "file_read":
@@ -1049,8 +1084,8 @@ def note_from_reply(
 
     pairs = list(zip(tool_calls, tool_results, strict=False))
     note.observed = [
-        _observed(call, result) for call, result in pairs[:NOTE_MAX_OBSERVED]
-    ]
+        line for call, result in pairs if (line := _observed(call, result))
+    ][:NOTE_MAX_OBSERVED]
     note.outcome = _outcome(pairs)
     own = _source_records(pairs)
     note.source_ids = [record_id for record_id, _text in own]
@@ -1351,6 +1386,144 @@ def _observed_key(line: str) -> str:
     return line
 
 
+def _task_line(query: str) -> str:
+    """The task's first sentence or heading, at most :data:`DIGEST_TASK_CHARS`."""
+    text = query.strip()
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    if first_line.startswith("#"):
+        heading = first_line.lstrip("#").strip()
+        if heading:
+            text = heading
+    sentences = split_sentences(text)
+    if sentences:
+        text = sentences[0][1]
+    return _shorten(_collapse(text), DIGEST_TASK_CHARS)
+
+
+def _workspace_relative(path: str, root: str) -> str:
+    """*path* relative to *root* when it is absolute and inside it."""
+    path = path.strip()
+    if not path:
+        return ""
+    if root:
+        try:
+            base = os.path.abspath(root)
+        except OSError:
+            base = ""
+        if base and os.path.isabs(path):
+            try:
+                relative = os.path.relpath(path, base)
+            except (OSError, ValueError):
+                relative = path
+            if relative != ".." and not relative.startswith(".." + os.sep):
+                path = relative
+        elif not os.path.isabs(path):
+            path = os.path.normpath(path)
+    return path.replace(os.sep, "/")
+
+
+def _digest_files(calls: Sequence[tuple[ToolCall, ToolResult]], root: str) -> list[str]:
+    """The paths this attempt's successful ``file_write`` calls wrote."""
+    files: list[str] = []
+    for call, result in calls:
+        if call.tool_name != "file_write" or result.error.strip():
+            continue
+        path = _workspace_relative(_string_argument(call, "path"), root)
+        if path and path not in files:
+            files.append(_shorten(path, DIGEST_PATH_CHARS))
+    if len(files) > DIGEST_FILES:
+        more = len(files) - DIGEST_FILES
+        files = [*files[:DIGEST_FILES], f"+{more}"]
+    return files
+
+
+# A command that runs the tests, or the program the attempt wrote. The
+# shell case reads the command's words; the python case reads the code.
+_CHECK_RE = re.compile(
+    r"pytest|\bunittest\b|_test\.py|\btest_[A-Za-z0-9_]*\.py|\bverify\b"
+    r"|\bcheck\b|\bassert\b|\bmake\s+test\b|\b(?:npm|pnpm|yarn)\s+(?:run\s+)?test\b"
+    r"|\bcargo\s+test\b|\bgo\s+test\b",
+    re.IGNORECASE,
+)
+_PROGRAM_RE = re.compile(
+    r"(?:^|[;&|]\s*)(?:python[0-9.]*|node|ruby|php|perl|java|make|npm|pnpm"
+    r"|yarn|cargo|go|\./[^\s;&|]+)\b"
+)
+_PYTHON_RUN_RE = re.compile(r"\b(?:import|from\s+\w+\s+import|__main__)\b")
+
+
+def _call_text(call: ToolCall) -> str:
+    """The command or code a check is read from; other tools give ""."""
+    if call.tool_name == "python_exec":
+        return _string_argument(call, "code")
+    if call.tool_name == "shell_exec":
+        command = call.arguments.get("command")
+        if isinstance(command, list) and all(isinstance(part, str) for part in command):
+            return " ".join(command)
+        return command if isinstance(command, str) else ""
+    return ""
+
+
+def _is_check(call: ToolCall) -> bool:
+    """Whether *call* runs tests or the program the attempt wrote."""
+    text = _call_text(call)
+    if not text.strip():
+        return False
+    if _CHECK_RE.search(text):
+        return True
+    if call.tool_name == "python_exec":
+        return bool(_PYTHON_RUN_RE.search(text))
+    return bool(_PROGRAM_RE.search(text))
+
+
+def _check_command(call: ToolCall) -> str:
+    """A one-line form of a check call's command or first line of code."""
+    text = _call_text(call)
+    if call.tool_name == "python_exec":
+        line = _first_nonblank_line(text)
+        text = _joined("python", line)
+    return _shorten(_collapse(text), DIGEST_COMMAND_CHARS)
+
+
+def _check_result(result: ToolResult) -> str:
+    """The result of a check in one phrase: test counts, exit code or last line."""
+    if result.error.strip():
+        return _shorten("Error: " + _error(result), DIGEST_RESULT_CHARS)
+    output = result.output
+    # Imported here: classify is a higher layer than the note types.
+    from localmelo.melo.memory.procedures.classify import parse_test_summary
+
+    summary = parse_test_summary(output)
+    if summary is not None and summary.total:
+        parts: list[str] = []
+        if summary.failed:
+            parts.append(f"{summary.failed} failed")
+        if summary.errors:
+            parts.append(f"{summary.errors} errors")
+        if summary.passed or not parts:
+            parts.append(f"{summary.passed} passed")
+        return ", ".join(parts)
+    first = output.split("\n", 1)[0].strip()
+    match = _EXIT_CODE_RE.fullmatch(first)
+    if match is not None:
+        return f"exit {int(match.group(1))}"
+    last = next(
+        (line.strip() for line in reversed(output.splitlines()) if line.strip()), ""
+    )
+    return _shorten(last, DIGEST_RESULT_CHARS) if last else "no output"
+
+
+def _digest_verified(calls: Sequence[tuple[ToolCall, ToolResult]]) -> str:
+    """The last check call of this attempt and its result, if any."""
+    last: tuple[ToolCall, ToolResult] | None = None
+    for call, result in calls:
+        if _is_check(call):
+            last = (call, result)
+    if last is None:
+        return ""
+    return f"{_check_command(last[0])} -> {_check_result(last[1])}"
+
+
 def digest_note(
     query: str,
     outcome: str = "",
@@ -1359,23 +1532,32 @@ def digest_note(
     task_id: str = "",
     attempt: int = 0,
     step: int = 0,
+    calls: Sequence[tuple[ToolCall, ToolResult]] = (),
+    root: str = "",
 ) -> ReasoningNote:
     """The digest of one attempt: its rehearsed notes and confirmed outcomes.
 
     Only *notes* whose stage is ``"rehearsed"`` contribute: their ``found``
-    and ``decided`` items become ``found`` (deduplicated by normalized
-    text, in note order), their ``observed`` lines become ``observed``
-    (one per path or command, the first kept), and their
-    ``open_questions`` become ``open_questions`` (deduplicated). ``plan``
-    is *query*, shortened to :data:`DIGEST_TASK_CHARS`; ``outcome`` is the
-    attempt's failure type or the run's status. ``source_ids`` is the
-    union of the contributing notes' ids and the records behind their
-    items, in order. The digest has
-    ``kind="digest"``, ``remember=True`` and ``remember_by="rule"``. Its
-    identity fields stay at their defaults; the caller sets them.
+    items become ``found`` (deduplicated by normalized text, in note
+    order), their ``decided`` items become ``decided`` (the first three),
+    their ``observed`` lines become ``observed`` (one per path or command,
+    the first kept, trivial ones left out), and their ``open_questions``
+    become ``open_questions`` (deduplicated). *calls* are the attempt's
+    own tool calls and results: a successful ``file_write`` gives one
+    ``files`` path, relative to *root* when it is absolute (at most
+    :data:`DIGEST_FILES`, then ``+N``), and the last call that runs tests
+    or the program gives ``verified`` (none when there is no such call).
+    ``plan`` is *query*'s first sentence or heading, shortened to
+    :data:`DIGEST_TASK_CHARS`; ``outcome`` is the attempt's failure type
+    or the run's status. ``source_ids`` is the union of the contributing
+    notes' ids and the records behind their items, in order. The digest
+    has ``kind="digest"``, ``remember=True`` and ``remember_by="rule"``.
+    Its identity fields stay at their defaults; the caller sets them.
     """
     facts: list[str] = []
     seen_facts: set[str] = set()
+    decided: list[str] = []
+    seen_decided: set[str] = set()
     observed: list[str] = []
     seen_observed: set[str] = set()
     open_questions: list[str] = []
@@ -1386,12 +1568,19 @@ def digest_note(
         if note.stage != "rehearsed":
             continue
         reasoning_chars += note.reasoning_chars
-        for item in (*note.found, *note.decided):
+        for item in note.found:
             key = _normalized_item(item)
             if key and key not in seen_facts:
                 seen_facts.add(key)
                 facts.append(item)
+        for item in note.decided:
+            key = _normalized_item(item)
+            if key and key not in seen_decided and len(decided) < 3:
+                seen_decided.add(key)
+                decided.append(item)
         for line in note.observed:
+            if not line.strip() or _trivial_output(line.split(": ", 1)[-1]):
+                continue
             key = _observed_key(line)
             if key and key not in seen_observed:
                 seen_observed.add(key)
@@ -1414,10 +1603,13 @@ def digest_note(
         attempt=attempt,
         kind="digest",
         source="heuristic",
-        plan=_shorten(_collapse(query), DIGEST_TASK_CHARS),
+        plan=_task_line(query),
         found=facts,
+        decided=decided,
         open_questions=open_questions,
         observed=observed,
+        files=_digest_files(calls, root),
+        verified=_digest_verified(calls),
         outcome=_shorten(_collapse(outcome), NOTE_OBSERVED_CHARS),
         reasoning_chars=reasoning_chars,
         source_ids=source_ids,
@@ -1430,16 +1622,20 @@ def digest_note(
 def render_digest(note: ReasoningNote, *, limit: int = DIGEST_CHARS) -> str:
     """*note*'s digest text, at most *limit* characters; the note is not changed.
 
-    Lines ``task: …``, ``outcome: …``, ``facts: …``, ``observed: …`` and
-    ``open: …``, each left out when empty, list items joined with ``; ``.
-    Over *limit*, items are dropped from the end of ``open``, then
-    ``observed``, then ``found``, then ``plan`` is shortened, then the
-    text is cut at *limit*.
+    Lines ``task: …``, ``outcome: …``, ``files: …``, ``verified: …``,
+    ``facts: …``, ``decided: …``, ``observed: …`` and ``open: …``, each
+    left out when empty, list items joined with ``; ``. Over *limit*,
+    items are dropped from the end of ``open``, then ``observed``, then
+    ``decided``, then ``found``, then ``files``, then ``plan`` is
+    shortened, then the text is cut at *limit*; ``outcome`` and
+    ``verified`` are never dropped.
     """
     plan = note.plan
     open_questions = list(note.open_questions)
     observed = list(note.observed)
+    decided = list(note.decided)
     found = list(note.found)
+    files = list(note.files)
 
     def render() -> str:
         lines: list[str] = []
@@ -1447,8 +1643,14 @@ def render_digest(note: ReasoningNote, *, limit: int = DIGEST_CHARS) -> str:
             lines.append(f"task: {plan}")
         if note.outcome:
             lines.append(f"outcome: {note.outcome}")
+        if files:
+            lines.append("files: " + "; ".join(files))
+        if note.verified:
+            lines.append(f"verified: {note.verified}")
         if found:
             lines.append("facts: " + "; ".join(found))
+        if decided:
+            lines.append("decided: " + "; ".join(decided))
         if observed:
             lines.append("observed: " + "; ".join(observed))
         if open_questions:
@@ -1456,7 +1658,7 @@ def render_digest(note: ReasoningNote, *, limit: int = DIGEST_CHARS) -> str:
         return "\n".join(lines)
 
     text = render()
-    for items in (open_questions, observed, found):
+    for items in (open_questions, observed, decided, found, files):
         while items and len(text) > limit:
             items.pop()
             text = render()
