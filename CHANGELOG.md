@@ -26,7 +26,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   grants. `ChatGate` can register a worker task, so its calls are logged as
   `session_kind="task"`, its P0 is the user's single task P0, and only the
   runner ends it. No `/api/tasks` route or worker runs yet; the console
-  wiring is S3a.2 ([#NN]).
+  wiring is S3a.2 ([#113]).
 - The workspace page on API v2. `http://127.0.0.1:8401/` now talks only to
   `/api`: the session list with its machine snapshot, one chat's turns, its
   event stream (SSE, reopened from the last applied event id), keyed sends
@@ -811,3 +811,4 @@ earlier milestones.
 [#106]: https://github.com/localmelo/localmelo/pull/106
 [#110]: https://github.com/localmelo/localmelo/pull/110
 [#111]: https://github.com/localmelo/localmelo/pull/111
+[#113]: https://github.com/localmelo/localmelo/pull/113
