@@ -13,9 +13,11 @@ console and leave a request outside ``/api`` alone.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Mapping
 from typing import Any, Final
+from urllib.parse import unquote_to_bytes
 
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import (
@@ -26,6 +28,16 @@ from fastapi.exceptions import RequestValidationError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from localmelo.support.gateway.guard import (
+    _SECURITY_HEADERS,
+    _TOO_LARGE_ERROR,
+    _UNSUPPORTED_MEDIA_TYPE_ERROR,
+    API_CSP,
+    BODY_BYTES_LIMIT,
+    _content_length_too_large,
+    is_json_content_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,10 +114,46 @@ def validation_message(exc: RequestValidationError) -> str:
     return f"{field}: {error.get('msg', 'Invalid request')}"
 
 
-class ApiMiddleware:
-    """Add ``no-store`` to ``/api`` responses and catch what a route did not.
+def _utf8_problem(value: Any, path: str) -> str | None:
+    """``field: problem`` for the first string with a lone surrogate, else ``None``."""
+    if isinstance(value, str):
+        if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
+            return f"{path or 'request'}: the text must be valid UTF-8"
+        return None
+    if isinstance(value, Mapping):
+        for key, inner in value.items():
+            if isinstance(key, str) and any(0xD800 <= ord(ch) <= 0xDFFF for ch in key):
+                return f"{path or 'request'}: the text must be valid UTF-8"
+            found = _utf8_problem(inner, f"{path}.{key}" if path else str(key))
+            if found is not None:
+                return found
+        return None
+    if isinstance(value, list | tuple):
+        for index, inner in enumerate(value):
+            found = _utf8_problem(inner, f"{path}.{index}" if path else str(index))
+            if found is not None:
+                return found
+    return None
 
-    A request outside ``/api`` passes through untouched. Inside it, an
+
+def _query_is_valid_utf8(scope: Scope) -> bool:
+    """Whether the raw query string decodes as UTF-8 after percent-decoding."""
+    raw = scope.get("query_string", b"")
+    if not raw:
+        return True
+    try:
+        decoded = unquote_to_bytes(raw).decode("utf-8")
+    except UnicodeDecodeError:
+        return False
+    return _utf8_problem(decoded, "query") is None
+
+
+class ApiMiddleware:
+    """Add ``no-store`` and security headers to ``/api`` responses and validate bodies.
+
+    A request outside ``/api`` passes through untouched. Inside it, body size
+    (1 MiB), ``Content-Type: application/json`` on non-empty bodies, UTF-8
+    encoding and lone surrogates are checked before any route runs, and an
     exception that no handler caught becomes the 500 shape, unless the
     response has already started, when it is re-raised.
     """
@@ -124,13 +172,108 @@ class ApiMiddleware:
             if message["type"] == "http.response.start":
                 started = True
                 headers = list(message.get("headers", ()))
-                if not any(key.lower() == b"cache-control" for key, _ in headers):
+                present = {key.lower() for key, _ in headers}
+                if b"cache-control" not in present:
                     headers.append((b"cache-control", b"no-store"))
+                if b"content-security-policy" not in present:
+                    headers.append((b"content-security-policy", API_CSP))
+                for name, header_value in _SECURITY_HEADERS:
+                    if name not in present:
+                        headers.append((name, header_value))
                 message = {**message, "headers": headers}
             await send(message)
 
+        if not _query_is_valid_utf8(scope):
+            response = error_response(
+                400, "invalid_request", "Query string must be valid UTF-8."
+            )
+            await response(scope, receive, send_with_headers)
+            return
+
+        req_headers: dict[bytes, list[str]] = {}
+        for name, value in scope.get("headers", ()):
+            req_headers.setdefault(name.lower(), []).append(value.decode("latin-1"))
+
+        content_lengths = req_headers.get(b"content-length", [])
+        if _content_length_too_large(content_lengths):
+            response = error_response(413, "too_large", _TOO_LARGE_ERROR)
+            await response(scope, receive, send_with_headers)
+            return
+        if any(
+            raw.strip().isdigit() and int(raw.strip()) > 0 for raw in content_lengths
+        ) and not is_json_content_type(req_headers.get(b"content-type", [])):
+            response = error_response(
+                415, "unsupported_media_type", _UNSUPPORTED_MEDIA_TYPE_ERROR
+            )
+            await response(scope, receive, send_with_headers)
+            return
+
+        chunks: list[bytes] = []
+        total = 0
+        disconnected = False
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                disconnected = True
+                break
+            chunk = message.get("body", b"")
+            if chunk:
+                total += len(chunk)
+                if total > BODY_BYTES_LIMIT:
+                    response = error_response(413, "too_large", _TOO_LARGE_ERROR)
+                    await response(scope, receive, send_with_headers)
+                    return
+                chunks.append(chunk)
+            if not message.get("more_body", False):
+                break
+
+        full_body = b"".join(chunks)
+        if total > 0:
+            if not is_json_content_type(req_headers.get(b"content-type", [])):
+                response = error_response(
+                    415, "unsupported_media_type", _UNSUPPORTED_MEDIA_TYPE_ERROR
+                )
+                await response(scope, receive, send_with_headers)
+                return
+            try:
+                text = full_body.decode("utf-8")
+            except UnicodeDecodeError:
+                response = error_response(
+                    400, "invalid_request", "Request body must be valid UTF-8."
+                )
+                await response(scope, receive, send_with_headers)
+                return
+            try:
+                parsed = json.loads(text)
+            except ValueError:
+                response = error_response(
+                    400, "invalid_request", "Malformed JSON request body."
+                )
+                await response(scope, receive, send_with_headers)
+                return
+            problem = _utf8_problem(parsed, "")
+            if problem is not None:
+                response = error_response(400, "invalid_request", problem)
+                await response(scope, receive, send_with_headers)
+                return
+
+        first_sent = False
+
+        async def replay_receive() -> Message:
+            nonlocal first_sent
+            if not first_sent:
+                first_sent = True
+                if disconnected:
+                    return {"type": "http.disconnect"}
+                return {
+                    "type": "http.request",
+                    "body": full_body,
+                    "more_body": False,
+                }
+            return await receive()
+
         try:
-            await self.app(scope, receive, send_with_headers)
+            await self.app(scope, replay_receive, send_with_headers)
         except Exception:
             logger.exception("Unhandled API error")
             if started:

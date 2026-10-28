@@ -38,9 +38,12 @@ In the `melo ""` loop, turns share one agent and its working memory, which
 keeps each answer, so a turn sees the earlier ones. A turn that does not
 complete prints its status line on stderr, and the loop asks for the next task.
 `/exit`, `/quit`, `exit` or `quit` (in any letter case), or Ctrl-D, ends the
-loop with exit code 0; Ctrl+C ends it at once (a shell shows 130). The loop
-takes `--base-url` and `--chat-model`; the direct-mode options are usage
-errors with it. Its conversation is separate from the web workspace's chats.
+loop with exit code 0; Ctrl+C ends it at once (a shell shows 130). At start
+it prints one line saying that `shell_exec` is off in direct mode and that
+`melo "" --builtins all` reopens the loop with it on (the line is absent when
+the tool is already on). The loop takes `--base-url`, `--chat-model` and
+`--builtins`; the other direct-mode options are usage errors with it. Its
+conversation is separate from the web workspace's chats.
 On a terminal the prompt is edited with readline: Backspace deletes a whole
 character, Chinese and other wide characters included, and the Up arrow
 recalls earlier lines of this loop. A line that is not valid UTF-8 prints
@@ -518,7 +521,7 @@ These options apply to a task run without `--serve`.
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
 | `--reflection-gate flags\|utility` | `flags` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option). |
 | `--tool-exposure retrieve\|all` | `retrieve` | Which tools each step offers the model. |
-| `--builtins all\|none\|NAME,...` | `all` | The built-in tools to register. |
+| `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` (the interactive UI keeps all four by default). |
 | `--mcp-config PATH` | not set | Add the tools of the MCP servers listed in this JSON file. |
 | `--mcp-only` | off | Use only the MCP tools: the same as `--builtins none --tool-exposure all`. |
 | `--memory on\|off` | `on` | `off` turns long-term memory off for this run. |
@@ -558,9 +561,11 @@ These options apply to a task run without `--serve`.
   no effect with `--attempt-policy none`.
 - `--tool-exposure`: see [How tools are offered](tools.md#how-tools-are-offered).
 - `--builtins`: `all`, `none`, or a comma-separated list of `file_read`,
-  `file_write`, `python_exec` and `shell_exec`. `recall` is accepted only
-  with `--recall-at tool`, which registers it; without that trigger it is a
-  usage error.
+  `file_write`, `python_exec` and `shell_exec`. A direct run's default set
+  leaves `shell_exec` out: `--builtins all` (or naming `shell_exec`) turns
+  it back on, and it then runs without an approval, because direct mode has
+  no policy. `recall` is accepted only with `--recall-at tool`, which
+  registers it; without that trigger it is a usage error.
 - `--mcp-only` needs `--mcp-config` and cannot be combined with `--builtins`
   or `--tool-exposure`. See [Tools and MCP](tools.md#add-tools-from-mcp-servers).
 - `--memory-dir` turns persistence on for this run, whatever the environment
@@ -692,6 +697,7 @@ These options apply to `melo` without a task.
 | `--serve` | off | Start the gateway: the HTTP API and the web workspace. |
 | `--host HOST` | `127.0.0.1` | The address the gateway listens on. |
 | `--port PORT` | `8401` | The port the gateway listens on. |
+| `--allow-unconfigured` | off | With `--serve`, start the gateway even when no backend is configured or the config file has validation errors, so it can be configured over `/api/settings`. |
 | `--reconfigure` | off | Run the setup wizard, then start the gateway (with `--serve`) or open the interactive UI (without). Without a terminal it reads the answers from stdin; without `--serve` it then exits. |
 | `--daemon install\|uninstall\|status` | not set | Manage the macOS background service; `install` also takes `--port`. |
 
@@ -705,6 +711,9 @@ These options apply to `melo` without a task.
   `melo: no backend is configured; run melo --reconfigure in a terminal`.
   `--reconfigure` still runs the wizard without a terminal and reads its
   answers from stdin, so a script can pipe them in.
+  `--allow-unconfigured` skips both the wizard and startup validation so
+  `melo --serve --allow-unconfigured` starts without a config file; it
+  cannot be combined with `--reconfigure` or used without `--serve`.
 - Ctrl-D at a wizard question prints `Setup cancelled.` and exits with
   code 0; Ctrl+C prints the same and exits with 130.
 - The gateway has no authentication. Keep it on `127.0.0.1`; see
@@ -733,7 +742,8 @@ These are usage errors:
   without `--embedding-base-url`, `--embedding-base-url` without
   `--base-url`;
 - a direct-mode option, `--workspace` included, with `--serve`, `--daemon`
-  or with `melo ""`, reported as
+  or with `melo ""` (except `--builtins`, which the loop takes for its
+  turns), reported as
   `only for direct mode (a query without --serve): --max-steps`; without a
   task, only those the interactive UI cannot use (`--tool-exposure`,
   `--timeout`, `--output-format`, `--progress`, `--routine`);

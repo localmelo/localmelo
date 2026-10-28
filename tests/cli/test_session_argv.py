@@ -69,6 +69,8 @@ R5_DEFAULTS = dict.fromkeys(
 P5_DEFAULTS = {"workspace": None}
 # R6-lite added two direct-mode options.
 R6_DEFAULTS = {"admit_on_outcome": None, "keep_decision_text": False}
+# U3 PR 4 added --allow-unconfigured for --serve.
+U3_PR4_DEFAULTS = {"allow_unconfigured": False}
 
 
 @pytest.fixture
@@ -130,6 +132,7 @@ def test_historical_dispatch(
             **R5_DEFAULTS,
             **P5_DEFAULTS,
             **R6_DEFAULTS,
+            **U3_PR4_DEFAULTS,
             "continue_session": False,
             "resume": None,
             **case["namespace"],
@@ -154,6 +157,7 @@ def test_historical_dispatch(
         **R5_DEFAULTS,
         **P5_DEFAULTS,
         **R6_DEFAULTS,
+        **U3_PR4_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:

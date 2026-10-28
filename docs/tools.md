@@ -7,7 +7,7 @@ from MCP servers, which tools each step offers, and what the checks do.
 
 | Tool | What it does | Limits |
 |---|---|---|
-| `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. A gateway or console session does not offer it. In `direct` and `python` mode, six destructive command patterns are refused. |
+| `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. Only `interactive` mode offers it by default: a direct run and a Python caller need an explicit `builtins` set that names it; a gateway or console session does not offer it by default and refuses it even when named. |
 | `python_exec` | Runs Python code in a child process and returns what it prints. | Killed with every process it started after 60 seconds. `sys.exit()` ends only the child. |
 | `file_read` | Reads a text file. | Any file your account can read. |
 | `file_write` | Writes text to a file, creating or replacing it. | Any file your account can write. |
@@ -44,8 +44,8 @@ with `workspace_root` keep the file tools inside a directory and start
 [With a workspace root](#with-a-workspace-root)). The interactive UI (bare
 `melo`) runs with its workspace as the root too, and asks before each
 `shell_exec`, `python_exec` and `file_write` call, unless `--yolo` (see
-[Permission tiers](#permission-tiers)); direct mode has no approval policy,
-with or without a root. The interactive UI loads the MCP
+[Permission tiers](#permission-tiers)); direct mode has no approval policy
+and does not offer `shell_exec`, with or without a root. The interactive UI loads the MCP
 servers of `--mcp-config`, else of the top-level `mcp_config` key; a server
 that fails to start turns MCP off for that session (`/mcp` says why). A
 Python run with an approval policy asks its own policy about an MCP tool by
@@ -58,8 +58,12 @@ melo --builtins none "What is 6*7?"
 melo --builtins file_read,shell_exec "How many lines does notes.txt have?"
 ```
 
-- `--builtins` takes `all` (the default), `none`, or a comma-separated list
-  of tool names. An unknown name is a usage error.
+- `--builtins` takes `all` (every built-in, `shell_exec` included), `none`,
+  or a comma-separated list of tool names. An unknown name is a usage error.
+  Without the flag, the mode decides: `file_read`, `file_write` and
+  `python_exec` in a direct run, the gateway and the Python API; all four in
+  the interactive UI. `--builtins all` is the way to keep the old direct-run
+  set, and `--builtins shell_exec` names only the shell.
 - `config.builtins` and `config.tools` in the JSON line show what was
   registered.
 - In Python, use `AgentOptions(builtins=...)`; see
@@ -191,15 +195,16 @@ Before a tool runs, localmelo checks the call:
   also have the type the tool declares; a call such as `shell_exec` with a
   list for `command` is refused with
   `Arguments for shell_exec: 'command' must be of type string, not array`.
-- In `direct` and `python` mode, `shell_exec` refuses commands that match one
-  of six patterns: `rm -rf /`, `mkfs`, `dd if=`, a fork bomb, `shutdown` and
-  `reboot`. The `python` mode keeps the blocklist whether or not the run has
-  an approval policy, because a caller that passes none would otherwise have
-  no check at all. The `interactive` and `gateway` modes use the tier and the
-  mode instead: the gateway does not offer the tool, and the interactive UI
-  asks about every `exec` call (see [Permission tiers](#permission-tiers)),
-  except under `--yolo`, where nothing asks and no command is refused by its
-  spelling.
+- The tool's tier and the mode decide, never the command's spelling. A mode
+  with an approver (the interactive UI) offers `shell_exec` and asks about
+  each `exec` call (see [Permission tiers](#permission-tiers)); under
+  `--yolo` nothing asks and the call runs. The modes with no approver
+  (direct, the gateway, the console and the Python API's default `python`
+  mode) leave `shell_exec` out of their default set, so the model never sees
+  it, and the checker refuses an `exec` call that was registered anyway,
+  unless a `direct` or `python` caller named it in `builtins`. A named
+  `shell_exec` is the caller's opt-in there and runs; `gateway` still
+  refuses it, named or not.
 - With a workspace root, the path of `file_read` and `file_write` must be
   inside it (see [With a workspace root](#with-a-workspace-root)).
 - With an approval policy, a tool whose tier is not `read`, or that is
@@ -227,13 +232,14 @@ The checks are guardrails, not a sandbox:
   child process of melo, not in a sandbox: it reaches any file you can too.
 - With a workspace root, `shell_exec` and `python_exec` still reach any
   file you can: only the file tools are kept inside the root.
-- Approvals apply only to a run with an approval policy, and in the
-  interactive UI (unless `--yolo`). Direct mode, `melo ""` and the gateway
-  have none.
-- In `direct` and `python` mode, the command blocklist is easy to get
-  around, and a `python` run with an approval policy also asks before an
-  `exec` call. A gateway or console session offers no shell at all; the
-  interactive UI asks rather than matches.
+- Approvals apply to a run with an approval policy, including the
+  interactive UI (unless `--yolo`) and console sessions. Direct mode,
+  `melo ""` and the legacy gateway API have no approval policy.
+- Direct and Python modes do not offer `shell_exec` by default, but an
+  explicit `--builtins all` or `--builtins shell_exec` (Python:
+  `AgentOptions(builtins=frozenset({"shell_exec"}))`) enables it without
+  an approval policy. Gateway and console modes never offer it. The
+  interactive UI keeps it behind its approval panel, unless `--yolo`.
 
 To limit what a task can do, use `--builtins none` or a subset of tools,
 `--mcp-only`, a container or virtual machine, or a separate user account.
@@ -257,17 +263,20 @@ The built-ins are fixed by name: `file_read` is `read`, `file_write` is
 tool's own claims, so a provided or custom tool that reuses a built-in's name
 inherits that tier.
 
-The mode decides which built-ins are offered at all. A gateway or console
-session runs in `gateway` mode and gets `file_read`, `file_write` and
-`python_exec`; `shell_exec` is not registered, so the model never sees it.
-The interactive UI and the Python API keep all four (`interactive` and
-`python` mode; the UI asks before an `exec` call unless it runs with
-`--yolo`, and a Python run asks when it has a policy). The `python` mode keeps the six-pattern
-blocklist in this release, with or without a policy, so a run that passes no
-approval is not weaker than direct mode. Direct mode is `direct` and, in
-this release, still keeps all four and its six-pattern blocklist.
-`AgentOptions(builtins=…)` or `--builtins` always wins over the mode's
-default set.
+The mode decides which built-ins are offered at all. The interactive UI
+runs in `interactive` mode and gets all four; it asks before an `exec` call
+unless it runs with `--yolo`. A direct run, a gateway or console session and
+the Python API's default `python` mode get `file_read`, `file_write` and
+`python_exec`: `shell_exec` is not registered, so the model never sees it,
+and the checker refuses one that was registered anyway unless the caller
+named it in `builtins`. A model that calls it anyway gets
+`shell_exec is not available in this run. Available tools: …`, naming the
+run's tools (an unknown non-built-in name keeps the `Tool not found in
+registry` message). A named `shell_exec` (`--builtins all`,
+`--builtins shell_exec`, `AgentOptions(builtins={"shell_exec"})`) is the
+caller's opt-in in `direct` and `python` mode and runs; `gateway` refuses it
+even when named. `AgentOptions(builtins=…)` or `--builtins` always wins over
+the mode's default set, except in gateway mode.
 
 Every other tool's tier comes from the MCP `annotations` object that the
 server lists with it, read cautiously:
@@ -346,7 +355,8 @@ without the flag and the gateway never set a workspace root.
 A run started in Python with `approval=policy` asks the policy before each
 call of a built-in or provided tool whose tier is not `read` (see
 [Permission tiers](#permission-tiers)): the built-ins it offers
-(`shell_exec`, `python_exec` and `file_write` in the default `python` mode),
+(`python_exec` and `file_write` in the default `python` mode; `shell_exec`
+too when the caller names it),
 a provided or MCP tool that is `write`, `exec` or `network`, including an MCP
 tool with no annotations, which is `write`. The interactive UI always has
 such a policy, unless `--yolo`; direct mode and the gateway's `/v1` and

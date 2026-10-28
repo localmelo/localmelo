@@ -11,10 +11,10 @@ from typing import Any
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.checker import DEFAULT_BUILTINS
 from localmelo.melo.checker.payloads import ToolResolutionResult, ValidationResult
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 from localmelo.melo.contracts.tools import BaseToolProvider, ProvidedTool
-from localmelo.melo.executor import builtin_names
 from localmelo.melo.executor.executor import ToolCallable
 from localmelo.melo.schema import TOOL_SEARCH_TOP_K, Message, ToolCall, ToolDef
 
@@ -201,7 +201,7 @@ class TestAllExposure:
         agent, _ = _agent(llm, AgentOptions(tool_exposure="all"), {"echo": "echo"})
 
         assert await agent.run("hello") == "done"
-        assert _offered(llm.calls[0]) == sorted(builtin_names() | {"echo"})
+        assert _offered(llm.calls[0]) == sorted(DEFAULT_BUILTINS["python"] | {"echo"})
 
     @pytest.mark.asyncio
     async def test_skips_hints_and_bm25_but_checks_the_resolution(
@@ -280,7 +280,7 @@ TEN_TOOLS = {
     "web_fetch": "Fetch the text of a web page",
 }
 
-BUILTINS = sorted(builtin_names())
+BUILTINS = sorted(DEFAULT_BUILTINS["python"])
 
 
 def _with_providers(
@@ -318,7 +318,8 @@ class TestRetrieveExposure:
             ["file_read", "shell_exec"]
         ] * 2
         assert _results(llm.calls[1]) == [
-            "Error: Tool not found in registry: file_write"
+            "Error: file_write is not available in this run. "
+            "Available tools: file_read, shell_exec."
         ]
         # Both planning calls offered tools, so both count as main requests,
         # none as auxiliary ones.

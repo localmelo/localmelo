@@ -23,11 +23,11 @@
       "max_attempts": 5,
       "reflection_gate": "flags",
       "tool_exposure": "retrieve",
+      "mode": "python",
       "builtins": [
         "file_read",
         "file_write",
-        "python_exec",
-        "shell_exec"
+        "python_exec"
       ],
       "memory": true,
       "memory_dir": "<memory_dir>",
@@ -35,8 +35,7 @@
       "tools": [
         "file_read",
         "file_write",
-        "python_exec",
-        "shell_exec"
+        "python_exec"
       ]
     }
   },
@@ -114,25 +113,6 @@
               },
               "required": [
                 "code"
-              ]
-            }
-          }
-        },
-        {
-          "type": "function",
-          "function": {
-            "name": "shell_exec",
-            "description": "Execute a shell command and return its output",
-            "parameters": {
-              "type": "object",
-              "properties": {
-                "command": {
-                  "type": "string",
-                  "description": "Shell command"
-                }
-              },
-              "required": [
-                "command"
               ]
             }
           }

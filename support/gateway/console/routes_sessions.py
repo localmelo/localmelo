@@ -24,7 +24,7 @@ from localmelo.support.sessions.store import (
 from localmelo.support.sessions.submissions import check_client_request_id
 
 from .errors import ApiError
-from .shapes import approval_json, session_json, submission_json, turn_json
+from .shapes import approval_json, submission_json, turn_json
 from .sse import EventStream, EventStreamResponse
 
 if TYPE_CHECKING:
@@ -139,13 +139,10 @@ def add_routes(app: FastAPI, console: Console) -> None:
         has_more = len(sessions) > limit
         return JSONResponse(
             content={
-                "sessions": [
-                    session_json(
-                        info,
-                        pending_approvals=len(console.broker.pending(info.id)),
-                    )
-                    for info in sessions[:limit]
-                ],
+                "sessions": [console.session_body(info) for info in sessions[:limit]],
+                # The one shared gate's machine snapshot: the page's header
+                # shows the GPU lock and battery, as its /v1 list did (S2b).
+                "machine": console.gate.machine_payload(),
                 "has_more": has_more,
             }
         )
@@ -167,9 +164,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         tokens = sum(_completion_tokens(turn) for turn in turns)
         return JSONResponse(
             content={
-                "session": session_json(
-                    info, pending_approvals=len(console.broker.pending(session_id))
-                ),
+                "session": console.session_body(info),
                 "pending_approvals": _pending_approvals(console, session_id),
                 "grants": grants,
                 "granted_at": granted_at,

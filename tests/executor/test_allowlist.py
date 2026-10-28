@@ -37,8 +37,8 @@ def _echo_executor(
 ) -> Executor:
     """An executor with the built-ins plus an ``echo`` tool that records calls."""
     hippo = Hippo()
-    executor = Executor(hippo, checker or Checker())
-    register_builtins(executor, hippo)
+    executor = Executor(hippo, checker or Checker(mode="interactive"))
+    register_builtins(executor, hippo, mode="interactive")
 
     async def echo(**arguments: Any) -> str:
         calls.append(arguments)

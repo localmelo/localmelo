@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Final, Literal
 from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.melo.schema import Message
+from localmelo.support.config import gateway_workspace_problem
 from localmelo.support.gateway.chat_gate import ChatGate, GatedEmbedding, GatedLLM
 from localmelo.support.sessions import display
 from localmelo.support.sessions.agents import (
@@ -73,8 +74,8 @@ CLOSE_ALL_TIMEOUT_S: Final = 10.0
 EXIT_SAVE_RESERVE_S: Final = 1.0
 # Seconds between idle sweeps.
 SWEEP_INTERVAL_S: Final = 60.0
-# Where a session whose row has no workspace starts, until the settings
-# gain their [gateway] workspace key (PR 4).
+# Where a session starts when neither the request nor [gateway] workspace
+# names a folder.
 DEFAULT_WORKSPACE: Final = "~/localmelo-workspace"
 
 SettingsSource = Callable[[], "Config"]
@@ -189,7 +190,6 @@ class ConsoleSessions:
         self._idle_close_s = idle_close_s
         self._max_open = max_open
         self._clock = clock
-        self._default_workspace = os.path.expanduser(DEFAULT_WORKSPACE)
         self._holder = process_holder("gateway")
         self._sessions: dict[str, OpenSession] = {}
         self._locks: dict[str, SessionLock] = {}
@@ -296,7 +296,7 @@ class ConsoleSessions:
             raise ApiError(404, "not_found", "Session not found.")
         workspace = info.workspace
         if workspace is None:
-            workspace = self._default_workspace
+            workspace = self._default_workspace()
             try:
                 os.makedirs(workspace, mode=0o700, exist_ok=True)
                 # The real path, as a create stores it: the row and the
@@ -541,6 +541,15 @@ class ConsoleSessions:
                 "Change it in the header.",
             )
 
+    def _default_workspace(self) -> str:
+        """The configured ``[gateway] workspace``, or :data:`DEFAULT_WORKSPACE`."""
+        settings = self._settings()
+        gateway = getattr(settings, "gateway", None)
+        raw = getattr(gateway, "workspace", "") if gateway is not None else ""
+        if gateway_workspace_problem(raw, allow_empty=False) is None:
+            return os.path.expanduser(raw)
+        return os.path.expanduser(DEFAULT_WORKSPACE)
+
     def _resolve_workspace(self, workspace: str | None) -> str:
         """The folder a new session gets: the default, or a checked path.
 
@@ -549,7 +558,7 @@ class ConsoleSessions:
         a session that a later open reads as a different folder.
         """
         if workspace is None:
-            path = self._default_workspace
+            path = self._default_workspace()
             try:
                 os.makedirs(path, mode=0o700, exist_ok=True)
             except OSError as exc:
@@ -693,6 +702,10 @@ class ConsoleSessions:
         )
         turn: TurnInfo | None = None
         if has_turn:
+            # The first turn is a turn of this chat, so the gate hears it as
+            # the page's later sends make it heard: the hold clock restarts
+            # and this chat becomes the lane's focus before its first call.
+            self._note_turn_start(info.id)
             try:
                 turn = await runner.start_turn(
                     composed or "",
@@ -778,6 +791,7 @@ class ConsoleSessions:
             resumed = entry.resumed
             entry.resumed = None
             await self._reconcile(entry)
+            self._note_turn_start(session_id)
             turn = await entry.runner.start_turn(
                 composed,
                 approval=entry.policy,
@@ -821,6 +835,7 @@ class ConsoleSessions:
                 )
             resumed = entry.runner.last_resume
             await self._reconcile(entry)
+            self._note_turn_start(session_id)
             turn = await entry.runner.start_turn(
                 undone.user_text, approval=entry.policy
             )
@@ -883,6 +898,17 @@ class ConsoleSessions:
             entry.granted_at.clear()
             entry.last_used = self._clock()
             return info
+
+    def _note_turn_start(self, session_id: str) -> None:
+        """The gate's turn facts, as the page's chats set them (S2).
+
+        The hold clock restarts for the new turn and this chat becomes the
+        lane's focus. A console built without a gate (a unit test) has none.
+        """
+        if self._gate is None:
+            return
+        self._gate.turn_start(session_id)
+        self._gate.focus(session_id)
 
     async def _reconcile(self, entry: OpenSession) -> None:
         """Record the settings' chat model on the session, when it changed."""

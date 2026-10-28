@@ -1492,7 +1492,7 @@ class Agent:
             admit_on_outcome=self.options.admit_on_outcome,
             keep_decision_text=self.options.keep_decision_text,
         )
-        self.checker = Checker(mode=self.options.mode)
+        self.checker = Checker(mode=self.options.mode, builtins=self.options.builtins)
         self.executor = Executor(
             self.hippo, self.checker, workspace_root=workspace_root
         )
@@ -5463,6 +5463,7 @@ class Agent:
             "max_attempts": opts.max_attempts,
             "reflection_gate": opts.reflection_gate,
             "tool_exposure": opts.tool_exposure,
+            "mode": opts.mode,
             "builtins": sorted(builtins),
             "memory": opts.memory,
             "memory_dir": self._memory_dir,

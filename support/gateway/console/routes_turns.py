@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, ConfigDict, model_validator
 
 from localmelo.melo.checker import Checker, GatewayIngressPayload
 from localmelo.melo.contracts.approvals import ApprovalDecision
@@ -34,9 +33,10 @@ from localmelo.support.sessions.submissions import (
     check_client_request_id,
 )
 
+from .bodies import Body
 from .errors import ApiError
 from .registry import STOP_REASON
-from .shapes import session_json, submission_json, turn_json
+from .shapes import submission_json, turn_json
 
 if TYPE_CHECKING:
     from localmelo.support.sessions.runner import ResumeInfo
@@ -50,84 +50,38 @@ _checker = Checker()
 # ── Request bodies ──
 
 
-def _utf8_problem(value: Any, path: str) -> str | None:
-    """``field: problem`` for the first string that is not UTF-8, else ``None``.
-
-    Walks the raw body, so a nested or listed string names its own path
-    (``turn.text``, ``attachments.0.text``).
-    """
-    if isinstance(value, str):
-        try:
-            value.encode("utf-8")
-        except UnicodeEncodeError:
-            return f"{path or 'request'}: the text must be valid UTF-8"
-        return None
-    if isinstance(value, dict):
-        for key, inner in value.items():
-            found = _utf8_problem(inner, f"{path}.{key}" if path else str(key))
-            if found is not None:
-                return found
-        return None
-    if isinstance(value, (list, tuple)):
-        for index, inner in enumerate(value):
-            found = _utf8_problem(inner, f"{path}.{index}" if path else str(index))
-            if found is not None:
-                return found
-    return None
-
-
-class _Body(BaseModel):
-    """A request body: unknown keys refused, every string UTF-8.
-
-    SQLite stores text, and a lone surrogate (``"\\ud800"``, which a JSON
-    body can carry and Python accepts) encodes to nothing: written, it fails
-    the turn after the route answered. The walk runs on the raw input,
-    before any field validates and before any write.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _utf8(cls, data: Any) -> Any:
-        problem = _utf8_problem(data, "")
-        if problem is not None:
-            raise ApiError(400, "invalid_request", problem)
-        return data
-
-
-class _Attachment(_Body):
+class _Attachment(Body):
     name: str
     text: str
     chars: int
 
 
-class TurnRequest(_Body):
+class TurnRequest(Body):
     text: str
     attachments: list[_Attachment] = []
     client_request_id: str | None = None
 
 
-class CreateRequest(_Body):
+class CreateRequest(Body):
     workspace: str | None = None
     turn: TurnRequest | None = None
 
 
-class RetryRequest(_Body):
+class RetryRequest(Body):
     turn_id: str
 
 
-class PatchRequest(_Body):
+class PatchRequest(Body):
     title: str | None = None
     workspace: str | None = None
 
 
-class CancelRequest(_Body):
+class CancelRequest(Body):
     text: str
     attachments: list[_Attachment] = []
 
 
-class ApprovalAnswer(_Body):
+class ApprovalAnswer(Body):
     choice: Literal["once", "session", "deny"]
     reason: str = ""
 
@@ -250,10 +204,6 @@ def _turn_body(turn: TurnInfo, resumed: ResumeInfo | None) -> dict[str, Any]:
     return {"turn_id": turn.id, "turn": turn_json(turn), **_resume_json(resumed)}
 
 
-def _pending(console: Console, session_id: str) -> int:
-    return len(console.broker.pending(session_id))
-
-
 # ── Routes ──
 
 
@@ -279,9 +229,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             return JSONResponse(
                 status_code=200,
                 content={
-                    "session": session_json(
-                        info, pending_approvals=_pending(console, info.id)
-                    ),
+                    "session": console.session_body(info),
                     **_turn_body(exc.turn, None),
                     "repeated": True,
                 },
@@ -289,11 +237,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         except SubmissionError as exc:
             raise _submission_error(exc) from exc
         info = await _require_session(console, entry.session_id)
-        content: dict[str, Any] = {
-            "session": session_json(
-                info, pending_approvals=_pending(console, entry.session_id)
-            )
-        }
+        content: dict[str, Any] = {"session": console.session_body(info)}
         if turn is not None:
             content.update(_turn_body(turn, None))
         return JSONResponse(status_code=201, content=content)
@@ -475,13 +419,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
             if not renamed:
                 raise ApiError(404, "not_found", "Session not found.")
         info = await _require_session(console, session_id)
-        return JSONResponse(
-            content={
-                "session": session_json(
-                    info, pending_approvals=_pending(console, session_id)
-                )
-            }
-        )
+        return JSONResponse(content={"session": console.session_body(info)})
 
     @app.delete("/api/sessions/{session_id}")
     async def delete_session(session_id: str) -> Response:
