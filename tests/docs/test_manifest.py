@@ -487,6 +487,12 @@ def test_local_links_and_anchors() -> None:
         "docs/guides/api-client.md",
         "docs/guides/python.md",
         "docs/guides/tools-mcp.md",
+        "docs/guides/memory.md",
+        "docs/guides/offline-retrieval.md",
+        "docs/guides/terminal.md",
+        "docs/guides/sessions.md",
+        "docs/guides/gateway.md",
+        "docs/guides/web-console.md",
     ],
 )
 def test_chinese_twin_keeps_anchors_and_examples(source: str) -> None:
