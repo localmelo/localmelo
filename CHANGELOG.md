@@ -441,7 +441,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   blocklist, `validate_executor_request` and `ExecutorRequest` are gone: the
   tool's tier and the mode decide, not the command's spelling. The `melo ""`
   loop says once at start that `shell_exec` is off and that
-  `melo "" --builtins all` turns it on ([#NN]).
+  `melo "" --builtins all` turns it on ([#110]).
 - `shell_exec` and `python_exec` start their child with a minimal
   environment instead of inheriting melo's: `PATH`, `HOME`, `USER`,
   `LOGNAME`, `SHELL`, `TERM`, `LANG`, every `LC_*` variable and `TMPDIR`,
@@ -766,4 +766,4 @@ earlier milestones.
 [#103]: https://github.com/localmelo/localmelo/pull/103
 [#104]: https://github.com/localmelo/localmelo/pull/104
 [#106]: https://github.com/localmelo/localmelo/pull/106
-[#NN]: https://github.com/localmelo/localmelo/pull/NN
+[#110]: https://github.com/localmelo/localmelo/pull/110
