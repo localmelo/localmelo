@@ -108,9 +108,12 @@ async def test_a_request_that_states_no_fact_admits_notes_and_the_digest(
 
 
 @pytest.mark.asyncio
-async def test_a_stated_fact_is_admitted_at_the_start_without_a_model_call(
+async def test_a_remember_request_admits_the_fact_it_carries_and_the_digest(
     tmp_path: Path,
 ) -> None:
+    # T59: "Remember that X" is an encoding instruction for X, and the
+    # digest keeps the episode. X is the clause after the marker, not the
+    # whole request.
     server = FakeLLM(_answer("noted"))
     agent = _agent(
         server,
@@ -126,14 +129,102 @@ async def test_a_stated_fact_is_admitted_at_the_start_without_a_model_call(
     await agent.close()
 
     entries = await _entries(tmp_path)
-    assert [entry["text"] for entry in entries] == [
-        "Please remember that my birthday is 12 May 1990 and I like green tea."
+    facts = [entry for entry in entries if entry["source"] == "user"]
+    assert [entry["text"] for entry in facts] == [
+        "my birthday is 12 May 1990 and I like green tea."
     ]
-    assert entries[0]["kind"] == "profile"
-    assert entries[0]["admitted_by"] == "user_statement"
-    assert entries[0]["provenance"]["source_ids"] == []
+    assert facts[0]["kind"] == "profile"
+    assert facts[0]["admitted_by"] == "user_request"
+    assert facts[0]["provenance"]["source_ids"] == []
+    digests = [entry for entry in entries if entry["source"] == "digest"]
+    assert len(digests) == 1
+    assert digests[0]["kind"] == "episodic"
+    assert digests[0]["admitted_by"] == "user_request"
     assert result.memory_stats is not None
-    assert result.memory_stats["admitted"]["user_statement"] == 1
+    assert result.memory_stats["admitted"]["user_request"] >= 2
+    assert result.memory_stats["admitted"]["user_statement"] == 0
+
+
+@pytest.mark.asyncio
+async def test_a_remember_request_admits_a_third_party_fact_as_semantic(
+    tmp_path: Path,
+) -> None:
+    # The R6-lite smoke's miss: "Remember that the Bluebird launch code is
+    # NECTAR-42." stored only the episodic digest.
+    server = FakeLLM(_answer("noted"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            max_steps=1,
+        ),
+    )
+    result = await agent.run_task(
+        "Remember that the Bluebird launch code is NECTAR-42."
+    )
+    await agent.close()
+
+    entries = await _entries(tmp_path)
+    facts = [entry for entry in entries if entry["source"] == "user"]
+    assert [entry["text"] for entry in facts] == [
+        "the Bluebird launch code is NECTAR-42."
+    ]
+    assert facts[0]["kind"] == "semantic"
+    assert facts[0]["admitted_by"] == "user_request"
+    digests = [entry for entry in entries if entry["source"] == "digest"]
+    assert len(digests) == 1
+    assert (
+        "task: Remember that the Bluebird launch code is NECTAR-42."
+        in digests[0]["text"]
+    )
+    assert result.memory_stats is not None
+    assert result.memory_stats["admitted"]["user_request"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_a_remember_request_does_not_admit_a_meta_sentence(
+    tmp_path: Path,
+) -> None:
+    # Decision 4's meta-noun rule applies to the clause X as well.
+    server = FakeLLM(_answer("noted"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            max_steps=1,
+        ),
+    )
+    await agent.run_task("Remember that my task is to fix the build.")
+    await agent.close()
+
+    entries = await _entries(tmp_path)
+    assert [entry for entry in entries if entry["source"] == "user"] == []
+    assert [entry["source"] for entry in entries] == ["digest"]
+
+
+@pytest.mark.asyncio
+async def test_a_remember_request_redacts_the_fact_it_carries(
+    tmp_path: Path,
+) -> None:
+    key = "sk-" + "a" * 24
+    server = FakeLLM(_answer("noted"))
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            max_steps=1,
+        ),
+    )
+    await agent.run_task(f"Remember that the API key is {key}.")
+    await agent.close()
+
+    entries = await _entries(tmp_path)
+    facts = [entry for entry in entries if entry["source"] == "user"]
+    assert [entry["text"] for entry in facts] == ["the API key is [redacted]."]
+    assert key not in json.dumps(entries)
 
 
 @pytest.mark.asyncio

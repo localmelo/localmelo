@@ -231,11 +231,16 @@ class NoteStore:
         return True
 
     def supersede_attempt(self, attempt: int) -> int:
-        """Mark the attempt's notes superseded; returns how many changed."""
+        """Mark the attempt's notes and thought chunks superseded.
+
+        Returns how many entries changed. A chunk is the attempt's earlier
+        thinking as a note is its earlier plan, so it leaves with the notes
+        at the same boundary (T59).
+        """
         changed = 0
         for entry in self._entries:
             if (
-                entry.kind == "note"
+                entry.kind in ("note", "thought")
                 and entry.attempt == attempt
                 and entry.stage != "superseded"
             ):

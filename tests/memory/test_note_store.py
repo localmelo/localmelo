@@ -175,6 +175,19 @@ def test_supersede_attempt_leaves_digests_and_later_attempts_alone() -> None:
     assert new.stage == "fresh"
 
 
+def test_supersede_attempt_marks_its_thought_chunks_with_its_notes() -> None:
+    # T59: a chunk of the attempt is that attempt's earlier thinking too,
+    # so it leaves with its notes.
+    store = NoteStore(clock=Clock())
+    note = _add(store, "note", "old", note=_note("old"), attempt=1)
+    thought = _add(store, "thought", "why it failed", attempt=1)
+    later = _add(store, "thought", "why the retry failed", attempt=2)
+    assert store.supersede_attempt(1) == 2
+    assert note.stage == "superseded"
+    assert thought.stage == "superseded"
+    assert later.stage == "fresh"
+
+
 def test_a_newer_draft_supersedes_older_pending_ones_for_the_same_target() -> None:
     store = NoteStore(clock=Clock())
     older = _add(store, "draft", "one", draft=_draft(target="./a.py"))

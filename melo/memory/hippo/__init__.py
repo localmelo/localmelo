@@ -30,6 +30,7 @@ from localmelo.melo.memory.hippo.signals import (
     USER_STATEMENT_MARKERS,
     UserSignals,
     classify_user_text,
+    request_candidates,
     user_candidates,
 )
 from localmelo.melo.memory.hippo.stage import STAGE_CAP, StagedCandidates
@@ -95,6 +96,7 @@ __all__ = [
     "decide",
     "normalise",
     "overlap",
+    "request_candidates",
     "subjects",
     "user_candidates",
     "value_tokens",

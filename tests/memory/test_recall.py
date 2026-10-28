@@ -423,6 +423,57 @@ def test_a_superseded_note_names_its_attempt_and_says_so() -> None:
     assert record_to_dict(record)["hits"][0]["stage"] == "superseded"
 
 
+def test_a_superseded_thought_names_its_attempt_and_says_so() -> None:
+    # #94's T47d rule now covers a thought chunk too: a later attempt's
+    # boundary supersedes the chunk, so a recalled one is marked.
+    old = docs_from_notes(
+        [
+            _entry(
+                "thought",
+                "the parser fails on an empty line",
+                "t1",
+                stage="superseded",
+                step=1,
+                attempt=1,
+            )
+        ],
+        task_id=TASK,
+        include_superseded=True,
+    )[0]
+    hit = hit_from_doc(old, score=1.0, rank=1)
+    assert hit.stage == "superseded"
+    block = render_recall_block(
+        [hit], trigger="step", retriever="bm25", ms=1, placement="tool"
+    )
+    assert (
+        "[t1] thinking · step 1 · attempt 1 (superseded): "
+        "the parser fails on an empty line"
+    ) in block
+    # A chunk the store has not superseded keeps its line byte for byte.
+    fresh = docs_from_notes(
+        [
+            _entry(
+                "thought",
+                "the parser recovers on a blank line",
+                "t2",
+                step=2,
+                attempt=2,
+            )
+        ],
+        task_id=TASK,
+    )[0]
+    fresh_block = render_recall_block(
+        [hit_from_doc(fresh, score=1.0, rank=1)],
+        trigger="step",
+        retriever="bm25",
+        ms=1,
+        placement="tool",
+    )
+    assert (
+        "[t2] thinking · step 2 · this task: the parser recovers on a blank line"
+    ) in fresh_block
+
+
 def test_the_header_names_earlier_tasks_at_start() -> None:
     block = render_recall_block(
         [_hit("m1", "long", "x", rank=1, origin="task t-old")],
