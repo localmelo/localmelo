@@ -20,7 +20,8 @@ docs/
   assets/         the website's stylesheet and images
 ```
 
-- The Markdown pages are in English only.
+- The existing guides and reference pages are in English; the documentation
+  style guide has an English and Chinese pair.
 - The website has six pages in each language: Home, Quickstart,
   Architecture, Roadmap, Developers and Memory design. Each English page has
   a Chinese twin with the same element `id`s, the same sections in the same
@@ -47,6 +48,34 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory docs
 
 Then open `http://127.0.0.1:8080/en/`.
 
+The manifest and experimental builder are the foundation for a later site
+migration; they do not change the published site. After `uv sync --extra dev`,
+run the following from the repository root to build into a new temporary
+folder and compare a second build with it:
+
+```bash
+SITE="$(mktemp -d)"
+uv run --offline --locked --extra dev python scripts/build_docs.py --output "$SITE"
+uv run --offline --locked --extra dev python scripts/build_docs.py --output "$SITE" --check
+```
+
+The output must be empty and outside the checkout. `--check` compares the
+entire isolated output tree byte for byte, including assets, and reports stale
+or extra files. The preview copies existing HTML unchanged and renders Markdown
+with raw HTML escaped; it is not a complete replacement site. In particular,
+old-path redirects, split-page fragment routing and links in copied HTML are
+not migrated yet. Missing Chinese pages are not generated. Do not commit the
+preview. See the [English style guide](STYLE.md) and
+[Chinese style guide](zh-CN/STYLE.md).
+
+In `docs/manifest.json`, a page's `fragments` maps each old source path to
+its migration rule. `"same"` sends every fragment to that language's output
+page with the same ID; a single output path instead sends every fragment to
+that page with the same ID. Neither rule needs an edit for a new heading.
+A split page uses an explicit old-ID-to-`page.html#ID` map: adding a heading
+requires choosing its destination and adding it to that map. The docs tests
+report the source and missing anchors; keep known retired IDs in the map too.
+
 ## Add or change a page
 
 - Add a new Markdown page to the index in `README.md` in this folder. Add it
@@ -65,7 +94,8 @@ Then open `http://127.0.0.1:8080/en/`.
 
 - English is the source. Change the Chinese counterpart in the same pull
   request as the English page.
-- Only `README.zh-CN.md` and `docs/zh-CN/*.html` are translated.
+- The style guide and `README.zh-CN.md`, as well as `docs/zh-CN/*.html`,
+  currently have Chinese translations.
 - Chinese pages mark links to English-only pages with （英文）.
 - Keep code blocks identical in both languages; comments in shared code
   blocks are in English.

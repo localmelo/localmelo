@@ -6,11 +6,13 @@ This page lists the events, the order they come in, and the rules for the
 function that receives them.
 
 > [!NOTE]
-> Events are part of the Python API, which is experimental and may change
-> before v0.1.0. Direct mode (`melo "<task>"`), the `melo ""` loop and the
-> HTTP API do not use them. The gateway's web workspace runs each chat with
-> an event sink so that Stop ends the run as `cancelled`, but it keeps only
-> `run.finished` and shows no events.
+> Events are part of the experimental Python API and may change before
+> v0.1.0. A direct task uses an `observe` sink when its progress line is
+> enabled; the `melo ""` loop runs without a sink. The interactive UI and
+> the gateway's `/api` console run turns with event sinks and save events in
+> sessions; the console exposes them over SSE and shows them in the web
+> workspace. The legacy `/v1/playground` sink keeps only the `run.finished`
+> outcome for Stop and does not show live events.
 
 ## Follow a run
 
