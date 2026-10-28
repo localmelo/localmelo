@@ -203,7 +203,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   vLLM's 120 s chat timeout instead of Ollama's 300 s, and the banner said
   vLLM. A server that answers `GET /api/version` like Ollama is saved as the
   `ollama` backend now; any other OpenAI-compatible server is still saved as
-  `vllm` ([#NN]).
+  `vllm` ([#55]).
 - `melo --serve` with no config file and no terminal, as under launchd,
   ended in an `EOFError` traceback, again every few seconds; it prints one
   line and exits with code 1. Ctrl-D or Ctrl+C in the setup wizard prints
@@ -281,3 +281,4 @@ earlier milestones.
 [#51]: https://github.com/localmelo/localmelo/pull/51
 [#52]: https://github.com/localmelo/localmelo/pull/52
 [#53]: https://github.com/localmelo/localmelo/pull/53
+[#55]: https://github.com/localmelo/localmelo/pull/55
