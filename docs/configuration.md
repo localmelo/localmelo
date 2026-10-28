@@ -99,8 +99,8 @@ file, and then opens the interactive UI or, with `--serve`, starts the
 gateway. Press Ctrl+C to stop the gateway.
 
 - Each question offers the config file's current value in brackets: press
-  Enter to keep it. The embedding question offers `None` when no embedding
-  backend is set.
+  Enter to keep it. The embedding question offers the saved backend; with
+  none saved, the first candidate the chat server lists, else `None`.
 - When no embedding is saved, the wizard lists the chat server's models
   once (only for a local chat backend) and appends each embedding model it
   finds as options `6`, `7`, … after the fixed five. The first candidate is
@@ -117,7 +117,8 @@ gateway. Press Ctrl+C to stop the gateway.
   API key to local servers. In oMLX, turn on
   **Allow inference without API key**.
 - When the embedding server's check fails, the wizard saves with embedding
-  off (`embedding_backend = "none"`, no long-term memory) and says so.
+  off (`embedding_backend = "none"`, no long-term memory) and says so. A
+  detected model that fails its probe is not left in the config's table.
 - `melo --serve` runs the wizard by itself when there is no config file.
 - Without a terminal the wizard reads its answers from stdin. With no
   config file and no terminal, `melo --serve` exits with code 1 and one

@@ -68,9 +68,10 @@ embedding_url = "http://127.0.0.1:11434"
 embedding_model = "qwen3-embedding:0.6b"
 ```
 
-Ollama's `embedding_url` has no `/v1`, as its `chat_url` has none: the
-`ollama` backend uses Ollama's own API. For the smaller model, pull
-`nomic-embed-text` and use that id instead.
+Ollama's `embedding_url` has no `/v1`, as its `chat_url` has none; the
+backend adds `/v1` for embeddings (`POST /v1/embeddings`). Chat goes to
+Ollama's own `/api/chat` API. For the smaller model, pull `nomic-embed-text`
+and use that id instead.
 
 ## oMLX
 
@@ -144,7 +145,7 @@ mlc_llm serve <artifact> --port 8080
 curl -sS http://127.0.0.1:8080/v1/embeddings \
   -H 'Content-Type: application/json' \
   -d '{"model": "<the served id>", "input": "ping"}'
-melo --reconfigure    # Embedding backend: 1 (MLC); URL http://localhost:8400/v1
+melo --reconfigure    # Embedding backend: 1 (MLC); URL http://localhost:8080/v1; model <the served id>
 ```
 
 Neither command is run on this Mac. The archived backend smoke used a

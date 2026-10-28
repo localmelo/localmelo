@@ -335,6 +335,7 @@ $ melo
 Found a model server at http://127.0.0.1:8000/v1 (1 model).
 Model server URL [http://127.0.0.1:8000/v1]:
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
+No embedding model on this server. Serve Qwen3-Embedding-0.6B on it, then melo --reconfigure.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ```
 
