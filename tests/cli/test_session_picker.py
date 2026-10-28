@@ -58,7 +58,8 @@ async def test_filter_scope_selection_and_draft_preservation(
                 lambda: driver.ui.picker is not None
                 and driver.ui.picker.buffer.text == "中文"
             )
-            await driver.wait(lambda: "1 sessions" in driver.text())
+            await driver.wait(lambda: "1 session" in driver.text())
+            assert "1 turns" not in driver.text() and "1 sessions" not in driver.text()
             driver.type("\t")
             await driver.wait(lambda: "all folders" in driver.text())
             driver.type(ENTER)

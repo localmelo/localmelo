@@ -154,14 +154,18 @@ class SessionPicker:
                 else ""
             )
             ref = "running elsewhere" if info.busy else info.id[:12]
-            suffix = f"{where} · {info.turns} turns · {session_age(info.updated_at, time.time())} · {ref}"
+            suffix = f"{where} · {info.turns} turn{'s' if info.turns != 1 else ''} · {session_age(info.updated_at, time.time())} · {ref}"
             title = " ".join(clean_output(info.title).split())
             title = cut_cells(title, max(1, self.width() - cells(suffix) - 3))
             lines.append(f" {mark} {title}{suffix}")
         lines.append(
             " Loading…"
             if self.loading
-            else f" {len(self.rows)} sessions" if self.rows else " No sessions yet."
+            else (
+                f" {len(self.rows)} session{'s' if len(self.rows) != 1 else ''}"
+                if self.rows
+                else " No sessions yet."
+            )
         )
         return "\n".join(
             cut_cells(clean_output(in_symbols(line, self.symbols)), self.width())
