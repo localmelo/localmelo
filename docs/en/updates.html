@@ -88,6 +88,19 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-28-scheduler-gate">
+          <h3>The web workspace's chats go through the scheduler</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/NN">#NN</a>
+          </p>
+          <ul>
+            <li>Every model call a chat in the web workspace makes now passes through the scheduler's policy: it is sent at once or waits for a slot, and the page says <code>Waiting: Resources</code> (or the policy's other reason) while it waits.</li>
+            <li>A level chip (P1 to P4, P2 by default) sets how the chat ranks against other chats; the chat you are typing in is the lane and is admitted first, up to the server's slots.</li>
+            <li><code>[scheduler] policy</code> is <code>off</code> by default: it records each call under <code>~/.cache/localmelo/scheduler/</code> and holds nothing. <code>fcfs</code> and <code>class</code> enforce. Direct runs, the CLI and <code>/v1/agent/run</code> are unchanged.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-27-interactive-ui">
           <h3>An interactive UI in the terminal</h3>
           <p class="update-date">
@@ -191,7 +204,7 @@
           <ul>
             <li>A scheduler will share one local model server between your conversation, background tasks and chats. Its policy decides which model call goes next and why a task waits, and keeps your conversation answering first.</li>
             <li>A simulator replays workloads through the policy, so its variants can be compared offline, on synthetic workloads or on traces from the benchmark.</li>
-            <li>Nothing uses the scheduler yet: runs and the gateway work as before. The next step puts it in front of the model server.</li>
+            <li>Only the web workspace's chats use the gate so far; direct runs and the CLI work as before. The next step puts it in front of their calls too.</li>
           </ul>
         </article>
 

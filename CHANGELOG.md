@@ -9,6 +9,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- The web workspace's chats go through the scheduler: each chat and embedding
+  call is admitted at once or held according to `[scheduler] policy` (`off`
+  by default, which only records), a chat's level chip (P1-P4), the focused
+  chat's lane, the server's `n_srv` slots and the `r_f`/`n_fg` reserves. A
+  held chat shows `Waiting: <reason>` in the page, and every call leaves one
+  schema-1 line in `~/.cache/localmelo/scheduler/runs/<UTC>/calls.jsonl`.
+  Direct runs, the CLI and `/v1/agent/run` are unchanged and gated nowhere
+  ([#NN]).
 - A session runner can ask its turns for progress events, and the progress
   line's past facts are available alone. `SessionRunner(..., progress=True)`
   asks each turn's run for `run.progress` and stores it with the turn; the

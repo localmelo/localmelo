@@ -133,6 +133,16 @@ tables of the chosen backends.
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
 | `host` | `[gateway]` | `"127.0.0.1"` | The address the gateway listens on: keep `127.0.0.1`, or use `localhost` or `::1`. On a host that is not `localhost` or a loopback IP address, such as `0.0.0.0`, the gateway does not check the `Host` and `Origin` of requests; see [Keep the gateway private](gateway.md#keep-the-gateway-private). |
 | `port` | `[gateway]` | `8401` | The port the gateway listens on. |
+| `policy` | `[scheduler]` | `"off"` | How the web workspace's calls reach the model server: `off` records only, `fcfs` admits first come and `class` admits P1 before P2 (and so on); see [Scheduler](scheduler.md#the-gate-on-chats-s2). |
+| `n_srv` | `[scheduler]` | `8` | The model server's slots. |
+| `r_f` | `[scheduler]` | `1` | Slots kept for the CLI and direct runs; forced to 0 when `n_srv <= 2`. |
+| `n_fg` | `[scheduler]` | `1` | Background calls allowed in flight while a chat is focused. |
+| `call_log` | `[scheduler]` | `true` | Write one JSONL call log per gateway run. |
+| `call_log_dir` | `[scheduler]` | `""` | The log's parent directory; the default is `~/.cache/localmelo/scheduler`. |
+
+Only a `[scheduler]` table that differs from these defaults is written, so an
+existing config file keeps its exact bytes and the wizard keeps a
+non-default policy.
 
 Top-level keys must come before the first `[table]` line. How URLs are used:
 

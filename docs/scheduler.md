@@ -8,9 +8,10 @@ is for maintainers and for the bench: what the code under
 traces.
 
 > [!NOTE]
-> Nothing is wired in yet. The gateway, the CLI and every request run exactly
-> as before: only the tests under `tests/scheduler/` import the scheduler. A
-> later phase adds the gate that uses it.
+> The web workspace's chats are gated: the gateway wraps each chat's chat and
+> embedding providers with the gate described below. `[scheduler] policy`
+> defaults to `off`, which only records; `fcfs` and `class` are the two
+> enforcing arms. Direct runs and the terminal CLI are not gated.
 
 ## What is here
 
@@ -49,6 +50,61 @@ Every arm keeps the lane's fast path, the reserve, the background cap, the
 machine gates and the park marks. Mode `off` still books charges and levels,
 so its metrics compare with the gated modes; with no gate, nothing answers
 the lane by code.
+
+## The gate on chats (S2)
+
+Every model call a web workspace chat makes passes through one in-process
+gate (`support/gateway/chat_gate.py`). The gate submits the call to the
+policy and either sends it at once or holds it until the policy admits it.
+The page polls its chats every 2.5 seconds, so a held chat shows
+`Waiting: <reason>` in the status label and `● Waiting` in the sidebar; the
+reason is one of the policy's codes (`Resources` for the first blocked call,
+`Priority` for later ones). A hold is a wait: it never counts against the
+600-second bound on a turn, and a Stop during a hold ends the turn as
+cancelled.
+
+The `[scheduler]` table of `config.toml` sets the policy:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `policy` | `"off"` | `off` records only; `fcfs` is first come, first served; `class` admits P1 before P2, P2 before P3, P3 before P4, first come within a class |
+| `n_srv` | `8` | the model server's slots |
+| `r_f` | `1` | slots kept for callers the gate cannot see (the CLI and direct runs); it is forced to 0 when `n_srv <= 2` |
+| `n_fg` | `1` | background P2-P4 calls allowed in flight while a chat is focused (P1 is exempt) |
+| `call_log` | `true` | write one JSONL call log per gateway run |
+| `call_log_dir` | `""` | the log's parent directory; `~/.cache/localmelo/scheduler` when empty |
+
+The lane is the chat being typed in: `POST /v1/playground/presence` sets it
+while you type, and every run sets it too. Its next call is admitted before
+the background calls and bypasses their limit, but never the server's
+`n_srv`. The non-lane limit is `max(1, n_srv - 1 - r_f)`; embedding,
+`retrieve` and `estimate` calls are never held, but they count in flight, so
+a trailing embedding of a finished turn cannot make the lane wait behind a
+stale task.
+
+A level is P1-P4 per chat, P2 by default; the chip in the chat header sets
+it, and `fcfs` records it and ignores it. A level lives in the gateway's
+memory: it is not written to `sessions.db`.
+
+The gate writes one file per gateway run,
+`<call_log_dir>/runs/<UTC yyyymmddThhmmss>/calls.jsonl` (mode 0600, run
+directories older than the thinking retention, 30 days by default, are
+removed at startup). Each line is S1's schema-1 trace record for one call,
+with the submit, admit and end times, the hold (`admit_s - submit_s`), the
+tokens and the charge. Read a file back with `read_trace()`:
+
+```bash
+uv run python -c '
+from localmelo.support.scheduler.sim.trace import read_trace
+for task in read_trace("/Users/you/.cache/localmelo/scheduler/runs/20261028T120000/calls.jsonl"):
+    print(task.task_key, len(task.calls))
+'
+```
+
+Not gated, exactly as before: direct mode (`melo --base-url … -- <task>` and
+`melo` with a config), the interactive CLI, and the legacy `/v1/agent/run`
+route. They build their providers in their own process or inside `melo/`, so
+the gate never sees their calls, and `r_f` keeps a slot for them.
 
 ## Run one simulation
 
