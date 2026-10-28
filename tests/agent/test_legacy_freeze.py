@@ -76,14 +76,16 @@ BASE_OPTIONS = [
 
 # Options added after R1, each by a stage whose spec calls for it: P3's
 # progress line (progress_spec.md section 11, "New flags only"), U2a.1's
-# interactive UI (u2_spec.md section 1, "Flags") and R4's note writer
-# (r4_spec.md Requirement 12).
+# interactive UI (u2_spec.md section 1, "Flags"), R4's note writer
+# (r4_spec.md Requirement 12) and U3 PR 4's unconfigured gateway boot
+# (app_spec.md "The lead's decisions" item 3).
 LATER_OPTIONS = [
     "--progress",
     "--routine",
     "--workspace",
     "--yolo",
     "--note-writer",
+    "--allow-unconfigured",
 ]
 
 
