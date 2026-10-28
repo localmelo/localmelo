@@ -110,6 +110,9 @@ type more letters to narrow them, Tab or Enter to take one.
 | Command | What it does |
 |---|---|
 | `/help [command]` | The commands and keys, or one command's details. |
+| `/attach PATH` | Stage one workspace text file; quote a path containing spaces. |
+| `/attachments` | List staged files and their numbers. |
+| `/detach N\|all` | Remove the numbered staged file or all staged files. |
 | `/new` (also `/clear`) | Start a new session: the model forgets the conversation, and session grants end. |
 | `/sessions [filter]` | Pick a saved chat in this folder; type to filter, Tab for all folders, ↑ ↓ to select, Enter to resume, Esc to close. |
 | `/resume [id\|title]` | Resume by ID, ID prefix (at least four characters) or exact title; no argument opens the picker. |
@@ -164,6 +167,49 @@ type more letters to narrow them, Tab or Enter to take one.
   `Unknown command /NAME. /help lists the commands.` and keeps the draft.
   `/etc/hosts is broken` is a message. To send a message that starts like
   a command, start it with a space.
+
+### Attach text files
+
+In an idle interactive chat, stage a file before sending your message:
+
+```text
+/attach "notes/my file.txt"
+/attachments
+/detach 1
+/detach all
+```
+
+Alternatively, type `@` and a workspace-relative prefix in a message and
+explicitly select a file from the completion menu. Merely typing `@file` in
+prose does not attach it. The staged-file line identifies the files; send a
+non-empty message to include them. Attachment commands cannot run during a
+turn, and staged files must be detached before switching sessions.
+
+Only regular UTF-8 text files within the current workspace are accepted;
+absolute paths inside it work too. URLs, `..` traversal, symlinks (including
+ones pointing inside the workspace), recognized secret files and binary data
+are refused. Names after sanitization must fit 200 characters. Hardlinks can
+refer to an inode outside the workspace; this is not a sandbox. Image attachments
+are not supported. Limits are 8 files, 256 KiB per file and 512 KiB total,
+measured in original bytes. The displayed byte count is the snapshot's UTF-8
+size after cleaning and redaction. The composed message is also subject to the
+agent's prompt limit, so files within these limits can still be rejected.
+
+Each file is read once into an immutable snapshot; changing or deleting the
+file afterwards does not update it. The model receives the snapshot in a
+delimited block marked as untrusted data, not an instruction. Secret
+redaction is best effort, not a guarantee: inspect files before attaching.
+If redaction or cleaning changes the content or path, melo displays the
+snapshot and asks for confirmation before staging it.
+
+Submitted snapshots are saved with the session in
+`~/.cache/localmelo/cli/sessions.db` (plain text, not encrypted); `/retry`
+uses the saved snapshot rather than reopening the file. Persistence does not
+mean full replay: `pairs` resume has a 32,000-character budget for user text
+and answers and can omit an entire attachment turn; `window` resume may clip
+or omit it when the retained checkpoint or tail does not contain it fully. Reattach
+and send again if the model needs content that was not restored. Attachments
+are not supported in the plain `melo ""` loop or direct mode.
 
 ### Inspect, undo or copy a conversation
 

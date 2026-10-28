@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -38,6 +39,39 @@ def _box(driver: Driver) -> list[str]:
     rules = [i for i, line in enumerate(screen) if line.startswith("──────")]
     assert len(rules) >= 2, "\n".join(screen)
     return screen[rules[0] + 1 : rules[1]]
+
+
+async def test_explicit_attachment_selection_preserves_draft(tmp_path: Path) -> None:
+    (tmp_path / "file.txt").write_text("not read by completion")
+
+    class Controller(FakeController):
+        agent = SimpleNamespace(workspace_root=str(tmp_path))
+        attachment_line = ""
+        paths: list[str] = []
+
+        def attach_path(self, path: str) -> str | None:
+            self.paths.append(path)
+            self.attachment_line = f"Attached: {path}"
+            return None
+
+    controller = Controller()
+    async with running_app(controller, completer=SlashCompleter()) as app:
+        app.type("look @fi")
+        await app.wait(lambda: app.ui.buffer.text == "look @fi")
+        app.type("\t" + ENTER)
+        await app.wait(lambda: controller.paths == ["file.txt"])
+        assert app.ui.buffer.text == "look @file.txt"
+        assert controller.entered == []
+        await app.wait(lambda: "Attached: file.txt" in app.text())
+        assert app.ui._attachments_fragments() == [
+            ("class:muted", "  Attached: "),
+            ("", "file.txt"),
+        ]
+        app.type(ENTER)
+        await app.wait(lambda: controller.entered == ["look @file.txt"])
+        app.type("literal @file.txt" + ENTER)
+        await app.wait(lambda: len(controller.entered) == 2)
+        assert controller.paths == ["file.txt"]
 
 
 async def test_enter_sends_and_blank_drafts_are_not_sent() -> None:
@@ -422,7 +456,7 @@ LISTED = ["stub-model", "qwen3-8b", "llama-3.1"]
         ("/he", "\t", "/help"),
         ("/model q", "\t", "/model qwen3-8b"),
         ("/model ll", "\x1b[B", "/model llama-3.1"),
-        ("/", "\x1b[B\x1b[B", "/new"),
+        ("/", "\x1b[B\x1b[B", "/attach"),
     ],
 )
 async def test_enter_takes_the_picked_completion(
@@ -535,7 +569,7 @@ async def test_a_tall_draft_during_a_turn_keeps_the_live_rows() -> None:
         ("/he\t", "/help"),
         ("/mo\t", "/model"),
         ("/\t", "/help"),
-        ("/\t\t", "/new"),
+        ("/\t\t", "/attach"),
     ],
 )
 async def test_tab_completes_at_once_before_the_menu_shows(

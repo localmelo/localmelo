@@ -345,8 +345,11 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID</code></pre>
             <code>/progress</code> the facts the live area rests on,
             <code>/approvals</code> the mode and grants, <code>/status</code>
             the session's facts, <code>/mcp</code> the MCP servers,
-            <code>/retry</code> the newest turn again, <code>/new</code> starts
-            over, <code>/exit</code> or Ctrl+D leaves.</li>
+            <code>/retry</code> the newest turn again, <code>/attach PATH</code>
+            stages one workspace text file (at most 256 KiB) for the next
+            message, <code>/attachments</code> and <code>/detach N|all</code>
+            list and remove the staged files, <code>/new</code> starts over,
+            <code>/exit</code> or Ctrl+D leaves.</li>
           <li>melo asks before it runs a shell command, Python code or a file
             write: press <code>1</code> to allow it, <code>2</code> to allow
             that tool for the session, <code>3</code> to refuse and tell melo
