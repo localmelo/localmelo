@@ -272,8 +272,10 @@ def test_parse_note_block_caps() -> None:
     # 399 characters cut at 299, where a space follows a whole "step".
     assert note.plan == "step " * 59 + "step…"
     assert len(note.plan) == 300
-    # The first item, 249 characters, is cut at 199; empty items are dropped.
-    assert note.found == ["long " * 39 + "long…", "b", "c", "d"]
+    # The first item, 249 characters, is cut at 199; empty items are
+    # dropped. An explicit note keeps up to 12 found items (T68): its cap
+    # is not lower than the 12 a factual reply may carry.
+    assert note.found == ["long " * 39 + "long…", "b", "c", "d", "e"]
     assert note.decided == ["a", "b", "c"]
     assert note.hypotheses == ["a", "b", "c"]
     assert note.open_questions == ["a", "b", "c"]
@@ -857,19 +859,24 @@ def _item_note(
     return note
 
 
-def test_an_item_sources_its_own_pairs_before_earlier_results() -> None:
+def test_equal_own_and_earlier_matches_are_not_sourced() -> None:
     note = _item_note(own=("own", FACT), window=("w1",), task=("t1",))
-    assert [item.source_ids for item in candidate_items(note)] == [("own",)]
+    assert [item.source_ids for item in candidate_items(note)] == [()]
 
 
-def test_an_item_sources_the_window_before_the_rest_of_the_task() -> None:
+def test_equal_window_and_task_matches_are_not_sourced() -> None:
     note = _item_note(own=("own", UNRELATED), window=("w1",), task=("t1",))
-    assert [item.source_ids for item in candidate_items(note)] == [("w1",)]
+    assert [item.source_ids for item in candidate_items(note)] == [()]
 
 
-def test_an_item_sources_the_rest_of_the_task_newest_first() -> None:
+def test_equal_task_matches_are_not_sourced() -> None:
     note = _item_note(own=("own", UNRELATED), task=("t-new", "t-old"))
-    assert [item.source_ids for item in candidate_items(note)] == [("t-new",)]
+    assert [item.source_ids for item in candidate_items(note)] == [()]
+
+
+def test_a_unique_earlier_match_is_sourced() -> None:
+    note = _item_note(own=("own", UNRELATED), task=("t1",))
+    assert [item.source_ids for item in candidate_items(note)] == [("t1",)]
 
 
 def test_an_unrelated_earlier_record_is_not_attached() -> None:

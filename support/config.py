@@ -486,6 +486,15 @@ def gateway_workspace_problem(value: object, *, allow_empty: bool = True) -> str
         return "Must be a single line with no control characters."
     if not (os.path.isabs(value) or value.startswith("~/")):
         return "Must be an absolute path or start with ~/."
+    resolved = os.path.realpath(os.path.expanduser(value))
+    home = os.path.realpath(os.path.expanduser("~"))
+    if resolved in ("/", home):
+        return "Must not resolve to / or the home folder."
+    try:
+        if os.path.samefile(resolved, home):
+            return "Must not resolve to / or the home folder."
+    except OSError:
+        pass  # A workspace may be created later.
     return None
 
 
