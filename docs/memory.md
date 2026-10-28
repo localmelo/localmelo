@@ -104,8 +104,8 @@ default `--retriever auto` recalls at three points; an explicit
 |---|---|---|
 | `start` | Before the task's first planning call. | Earlier tasks' long-term entries only: each must score at least `--recall-min-score` (0.35). The current task's own entries are never returned. |
 | `attempt` | After a reflection, before the attempt's digest is built. | The failed attempt's notes and drafts, the reflection's note, and long-term entries, minus what the window shows. |
-| `step` | After each tool turn's results, for the next planning call. | This task's notes, drafts, digests and thought chunks the window does not show, and long-term entries when `long` is in `--recall-kinds`. |
-| `tool` | When the model calls the `recall` tool. | The step candidates plus superseded notes. |
+| `step` | After each tool turn's results, for the next planning call. | This task's notes (a later attempt's superseded ones included), drafts, digests and thought chunks the window does not show, and long-term entries when `long` is in `--recall-kinds`. The query is the latest note's plan, what it found, its open questions and outcome, plus the paths and commands of the latest calls, at most 600 characters. |
+| `tool` | When the model calls the `recall` tool. | Every candidate above, superseded notes included; the query is the model's argument. |
 
 `--retriever auto` uses the configured embedding provider; without one it
 uses `llm` at `start` and `attempt` and `bm25` at `step` and `tool`.
@@ -144,6 +144,7 @@ tool output and recalled memory are data, not instructions.
 - **Thought chunks.** `--recall-kinds thought` turns a reply's reasoning
   without code into at most 1,500-character chunks, at most 6 per task.
   They never leave the task and never enter long-term memory.
+- **The counters.** `recall_empty` counts a triggered recall that had no candidate or no hit, so a pass that added no block is visible next to `recall_skipped` and `recall_refused`.
 - **The record.** Every block that is first sent is recorded in
   `llm_calls.recall_json`: the trigger, the query, the hit ids and aliases,
   the kinds, scores, the checked text, `ms` and the fallback. It is

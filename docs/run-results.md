@@ -164,6 +164,7 @@ above. `crashed` with the cause `run` is a crash inside the run, a bug;
 | `recall_fallbacks` | Recalls a retriever fallback answered, and `retrieve_errors` the retrieval failures behind them. |
 | `recall_skipped` | Recalls that found nothing that fit a budget. |
 | `recall_refused` | Blocks the candidate boundary refused. |
+| `recall_empty` | Triggered recalls that had no candidate or no hit, so no block was built. |
 | `aux_retrieve_calls` | Context-free retrieval requests sent (the `llm` retriever), already counted in `n_aux`; `retrieve_prompt_tokens` and `retrieve_completion_tokens` are their tokens. |
 | `thought_chunks` | Thought chunks stored (at most 6 per task). |
 | `recall_log` | One compact record per block first sent, without item text: trigger, placement, retriever, query, k, candidates, hits (ids, aliases, kinds, scores, origin task ids, chars, omitted), chars, ms, fallback. |

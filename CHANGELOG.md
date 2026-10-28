@@ -23,7 +23,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   (9,500 per turn, 12,000 live, 4,000 boundary); the system prompt gains
   one static data note. Each block is recorded once in
   `llm_calls.recall_json` with its hits' `origin_task_ids`, and in the
-  `recall` event and `memory_stats.recall_log`. `history.db` is schema
+  `recall` event and `memory_stats.recall_log`. A step's query carries the
+  latest note's plan, what it found and its open questions and outcome, and
+  its candidates include a superseded note whose turn the window no longer
+  shows, so a later attempt's earlier thinking stays reachable.
+  `memory_stats.recall_empty` counts a triggered recall that found nothing.
+  `history.db` is schema
   version 2: a v1 file gains the `recall_json` column in the same
   transaction, and the column is `NULL` in `legacy`. `legacy` keeps its
   requests, JSON line, window and `tasks`/`steps` rows byte-identical; the
