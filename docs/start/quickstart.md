@@ -177,9 +177,12 @@ If you saved the configuration with `melo`, start the gateway with
 `melo --serve`; the wizard above starts it by itself. From a second
 terminal, check the gateway and run a task through it:
 
+The examples read the gateway bearer token from its private file. A command-line
+header can be visible to local processes; keep the token out of logs and history.
+
 ```bash
-curl http://127.0.0.1:8401/v1/health
-curl -X POST http://127.0.0.1:8401/v1/agent/run \
+curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" http://127.0.0.1:8401/v1/health
+curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
   -d '{"query": "What is 6*7?"}'
 ```

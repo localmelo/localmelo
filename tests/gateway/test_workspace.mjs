@@ -537,7 +537,9 @@ function harness(routes, {mobile = false} = {}) {
     setupSettings: () => async () => {},
     setupDrawer: () => drawer,
     document,
-    location: {hash: ''},
+    location: {hash: '', pathname: '/', search: ''},
+    history: {replaceState(_state, _title, url) { context.location.hash = ''; context.replacedUrl = url; }},
+    URLSearchParams,
     localStorage: storage(),
     sessionStorage: storage(),
     navigator: {clipboard: {writeText: async (text) => { context.copied = text; }}},
@@ -615,6 +617,104 @@ function baseRoutes(extra = {}) {
     ...extra,
   };
 }
+
+test('locked startup does not load protected workspace data', async () => {
+  const h = harness(baseRoutes({'GET /health': {status: 401}}));
+  await h.run('init()');
+  assert.deepEqual(h.net.calls.map((call) => call.path), ['/health']);
+  assert.equal(h.element('app').hidden, true);
+  assert.equal(h.element('app').inert, true);
+  assert.equal(h.element('lock-screen').hidden, false);
+  await h.run('api("/sessions").catch(() => {})');
+  h.documentListeners.visibilitychange[0]();
+  assert.equal(h.net.calls.length, 1);
+});
+
+test('login removes the fragment before exchange and health precedes workspace initialization', async () => {
+  let h;
+  h = harness(baseRoutes({'POST /auth/login': (body) => {
+    assert.equal(h.context.location.hash, '');
+    assert.equal(h.context.replacedUrl, '/?view=one');
+    assert.equal(body.code, 'single-use-code');
+    return {status: 204};
+  }}));
+  h.context.location.search = '?view=one';
+  h.context.location.hash = '#login=single-use-code';
+  await h.run('init()');
+  assert.deepEqual(h.net.calls.slice(0, 3).map((call) => call.path), ['/auth/login', '/health', '/sessions']);
+  assert.equal(h.element('app').hidden, false);
+  assert.equal(h.element('lock-screen').hidden, true);
+  assert.equal(h.local.getItem('single-use-code'), null);
+  assert.equal(h.session.getItem('single-use-code'), null);
+});
+
+test('invalid login never proceeds to health or displays the code', async () => {
+  const h = harness(baseRoutes({'POST /auth/login': {status: 401}}));
+  h.context.location.hash = '#login=secret-code';
+  await h.run('init()');
+  assert.deepEqual(h.net.calls.map((call) => call.path), ['/auth/login']);
+  assert.equal(h.context.location.hash, '');
+  assert.equal(h.element('app').hidden, true);
+  assert.doesNotMatch(h.text('lock-status'), /secret-code/);
+});
+
+test('failed fragment removal and a rejected health check both fail closed', async () => {
+  const failedRemoval = harness(baseRoutes());
+  failedRemoval.context.location.hash = '#login=secret';
+  failedRemoval.context.history.replaceState = () => { throw new Error('denied'); };
+  await failedRemoval.run('init()');
+  assert.equal(failedRemoval.net.calls.length, 0);
+  assert.equal(failedRemoval.element('app').hidden, true);
+  const rejected = harness(baseRoutes({'POST /auth/login': {status: 204}, 'GET /health': {status: 401}}));
+  rejected.context.location.hash = '#login=secret';
+  await rejected.run('init()');
+  assert.deepEqual(rejected.net.calls.map((call) => call.path), ['/auth/login', '/health']);
+  assert.equal(rejected.element('app').hidden, true);
+});
+
+test('a presence 401 locks and closes the stream', async () => {
+  let expired = false;
+  const h = harness(baseRoutes({'POST /presence': () => expired ? {status: 401} : {ok: true}}));
+  await h.run('init()');
+  const source = h.stream();
+  expired = true;
+  h.run('presence(true)');
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(source.closed, true);
+  assert.equal(h.element('app').hidden, true);
+});
+
+test('a 401 locks, preserves the draft, closes the stream and suppresses retries', async () => {
+  const h = harness(baseRoutes({'GET /settings': {status: 401}}));
+  await h.run('init()');
+  const source = h.stream();
+  h.element('input').value = 'unfinished draft';
+  await h.run('api("/settings").catch(() => {})');
+  assert.equal(source.closed, true);
+  assert.equal(h.element('app').hidden, true);
+  assert.equal(JSON.parse(h.session.getItem('localmelo-console-drafts')).a, 'unfinished draft');
+  const count = h.net.calls.length;
+  for (const timer of h.timers.filter((item) => item.interval)) await timer.handler();
+  source.fail();
+  assert.equal(h.net.calls.length, count);
+  assert.equal(h.state().stream.timer, null);
+});
+
+test('a stream failure closes browser retries and a 401 on reconnect locks', async () => {
+  let fail = false;
+  const h = harness(baseRoutes({'GET /sessions/a': () => fail ? {status: 401} : {
+    session: session('a'), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0,
+  }}));
+  await h.run('init()');
+  const source = h.stream();
+  fail = true;
+  source.fail();
+  assert.equal(source.closed, true);
+  const timer = h.timers.find((item) => !item.interval && item.ms === 1000 && !item.cleared);
+  await timer.handler();
+  assert.equal(h.element('app').hidden, true);
+  assert.equal(FakeEventSource.instances.length, 1);
+});
 
 test('approval guard, denial keyboard and focus never allow by accident', async () => {
   const h = harness(baseRoutes({'POST /approvals/req1': {outcome: 'denied'}}));
@@ -1377,6 +1477,8 @@ test('a chat left before its load finishes keeps no stream', async () => {
     'GET /sessions/b': {session: session('b'), pending_approvals: [], grants: [], granted_at: {}, mcp_error: '', agent: 'not_loaded', tokens: 0},
     'GET /sessions/b/turns?limit=10': {turns: [], has_earlier: false, replay_from: 0},
   }));
+  h.context.location.hash = '#/new';
+  await h.run('init()');
   const first = h.run('openSession("a")');
   await h.run('openSession("b")');
   release(detail);

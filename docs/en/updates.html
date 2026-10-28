@@ -71,6 +71,7 @@
         <p>Website sync landed in <a href="https://github.com/localmelo/localmelo/pull/118">#118</a>; Task scheduler-2: task API and workers (S3a.2) landed in <a href="https://github.com/localmelo/localmelo/pull/119">#119</a>.</p>
         <p>In flight, landing in this order:</p>
         <ul>
+            <li>Gateway authentication is in progress: loopback-only binding, bearer credentials and a one-use browser login link. Same-user processes and other localhost ports are not isolated.</li>
           <li>Web console-3: settings and details drawer (U3 PR 6); approvals, errors, history and settings landed in <a href="https://github.com/localmelo/localmelo/pull/122">#122</a>; worker session recording and import landed in <a href="https://github.com/localmelo/localmelo/pull/123">#123</a>.</li>
         </ul>
         <p>Next, in order:</p>
@@ -771,7 +772,7 @@
           <ul>
             <li>On <code>localhost</code> or a loopback IP address, such as the default <code>127.0.0.1</code>, the gateway refuses requests whose <code>Host</code> is not <code>127.0.0.1</code>, <code>localhost</code> or <code>[::1]</code> with its port (HTTP 421), and requests that web pages at another origin send through your browser (HTTP 403). A web page can no longer reach the gateway through DNS rebinding and run tasks with your tools.</li>
             <li>No web page can show the gateway's pages in a frame.</li>
-            <li>On any other host, such as <code>0.0.0.0</code>, the gateway makes no such checks and logs a warning when it starts: it has no authentication.</li>
+            <li>At that release, non-loopback hosts were not protected; current versions refuse non-loopback binds.</li>
           </ul>
         </article>
 

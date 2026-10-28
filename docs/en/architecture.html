@@ -232,15 +232,7 @@
           while their conversations are kept).
         </p>
         <p>
-          The gateway has no authentication. When it listens on
-          <code>localhost</code> or a loopback address, such as the default
-          <code>127.0.0.1:8401</code>, it refuses requests whose
-          <code>Host</code> is not <code>127.0.0.1</code>,
-          <code>localhost</code> or <code>[::1]</code> with its port (HTTP
-          421), and requests to its API that web pages at another origin send
-          through your browser (HTTP 403). No web page can show it in a
-          frame. On any other host, such as <code>0.0.0.0</code>, it makes
-          none of these checks and logs a warning when it starts.
+          The gateway requires a bearer token or browser session and refuses non-loopback binds. Run <code>melo --gateway-login</code> in a terminal for a one-use link. A token holder can act as you; same-user processes are not isolated, and browser cookies are not isolated by localhost port.
         </p>
         <p>
           Key files: <code>support/gateway/__init__.py</code>,

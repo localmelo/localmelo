@@ -42,10 +42,24 @@ melo --serve
 ## Keep the gateway private
 
 > [!WARNING]
-> The gateway has no authentication. Any program that can reach its port can
-> run tasks with your tools and your account's permissions, and the web
-> workspace makes the gateway fetch any URL it is given. Keep the default host
-> `127.0.0.1`.
+> The gateway accepts only loopback binds and requires a bearer token or browser session cookie for protected APIs. A token holder can act with your permissions. The private token file does not protect against malicious processes running as the same OS user, browser extensions, or compromised same-origin code. Browser cookies are not isolated by port: a port-specific name is not a security boundary against another service on the same host. Do not expose the gateway through a proxy.
+
+Start the gateway, then run `melo --gateway-login` in a terminal and open the
+printed single-use link within 60 seconds. For a nondefault port, add
+`--port PORT`. Do not share the link. The page exchanges its fragment for an
+HttpOnly, SameSite=Strict cookie valid for up to 30 days and removes the
+fragment. Run `melo --gateway-rotate-token` to replace the private token file.
+All gateways using that file reject old credentials; open event streams are
+closed when they observe the change (normally within 250 ms).
+
+The bearer is generated on first use and stored at
+`~/.cache/localmelo/gateway/auth/token` (directory 0700, file 0600). For
+non-browser clients send `Authorization: Bearer <token>` on every `/api/`
+and `/v1/` request, including health, streams and blobs. A missing or invalid
+credential returns 401. The page and static assets are public bootstrap only.
+Keep tokens out of URLs, logs and shell history; supplying a header on a command
+line can expose it to local process inspection. This token is separate from
+model-server credentials.
 
 On the default host, only programs on your computer can reach the gateway.
 Web pages can still send it requests through your browser, so the gateway
@@ -54,7 +68,7 @@ refuses requests that are not addressed to it:
 | HTTP status | `code` | When |
 |---|---|---|
 | 421 | `misdirected_request` | The `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>`. This stops a page on another site that reaches the gateway under its own domain name (DNS rebinding). |
-| 403 | `foreign_origin` | A web page at another origin sent the request: a `POST`, `PUT`, `PATCH`, `DELETE` or `OPTIONS` request whose `Origin` is not `http://127.0.0.1:<port>`, `http://localhost:<port>` or `http://[::1]:<port>`, or a request under `/v1/` or `/api/` whose `Sec-Fetch-Site` is `cross-site` or `same-site`. |
+| 403 | `foreign_origin` | A supplied `Origin` does not match the request Host exactly, or a request under `/v1/` or `/api/` has disallowed `Sec-Fetch-Site`. The login exchange requires an Origin. |
 | 413 | `too_large` | The request body exceeds 1 MiB (1,048,576 bytes). |
 | 415 | `unsupported_media_type` | A request under `/api/` has a non-empty body without `Content-Type: application/json`. |
 
@@ -71,8 +85,8 @@ A refused request under `/api/` uses [API v2](../reference/api-v2.md)'s envelope
   `http://localhost:8401/`, with your port; with `host = "::1"`, use
   `http://localhost:8401/` or `http://[::1]:8401/`. Other addresses that
   reach the gateway, such as `http://0.0.0.0:8401/`, get 421.
-- curl and scripts send no `Origin` header, so only the `Host` check applies
-  to them.
+- curl and scripts normally send no `Origin` header; Host and authentication
+  checks still apply.
 - Every response tells the browser not to show it in a frame, with
   `X-Frame-Options: DENY` and a `Content-Security-Policy` that ends
   `frame-ancestors 'none'`, so a page on another site cannot embed the web
@@ -87,12 +101,8 @@ A refused request under `/api/` uses [API v2](../reference/api-v2.md)'s envelope
   still name the gateway as `127.0.0.1`, `localhost` or `[::1]`, so use one
   of these three as the host: on `127.0.0.2`, for example, your browser gets
   421 too.
-- With `host = "0.0.0.0"`, or any other host, none of this applies, and the
-  gateway logs a warning when it starts. With no checks and no
-  authentication, anything that can reach the port, web pages included, can
-  run tasks with your tools. This is not recommended.
-- Remote access, through a reverse proxy or Tailscale Serve for example, is
-  not supported until the gateway has authentication.
+- Non-loopback binds, including `0.0.0.0`, are refused at startup.
+- Remote access through a reverse proxy or Tailscale Serve is not supported.
 
 ## Sessions
 

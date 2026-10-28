@@ -1,8 +1,8 @@
 """Refuse requests that are not addressed to the local gateway.
 
-The gateway runs tasks with tools and has no authentication. On a
-loopback address only programs on this machine can reach it, but a
-browser on this machine sends requests for any web page: through DNS
+The gateway runs tasks with tools. Loopback binding and authentication protect
+access from other machines and unauthenticated clients, but a browser can send
+requests for any web page: through DNS
 rebinding, a page on another domain becomes same-origin with the
 gateway, any page can send it simple cross-origin requests, and any
 page can show the gateway's pages in a frame. :class:`LoopbackGuard`
@@ -11,11 +11,15 @@ refuses the requests before they reach any route, and forbids framing.
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import socket
+from http.cookies import CookieError, SimpleCookie
 
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from localmelo.support.gateway.auth import GatewayAuth
 
 # Names of a loopback address, compared ignoring case.
 _LOOPBACK_NAMES = frozenset({"localhost", "localhost."})
@@ -213,8 +217,12 @@ class LoopbackGuard:
     page can show the gateway's pages in a frame.
     """
 
-    def __init__(self, app: ASGIApp, *, port: int) -> None:
+    def __init__(
+        self, app: ASGIApp, *, port: int, auth: GatewayAuth | None = None
+    ) -> None:
         self.app = app
+        self.port = port
+        self.auth = auth
         hosts = {f"{name}:{port}" for name in _GATEWAY_NAMES}
         if port == 80:
             hosts.update(_GATEWAY_NAMES)
@@ -235,13 +243,32 @@ class LoopbackGuard:
             await self.app(scope, receive, send)
             return
         if scope["type"] == "http":
-            send = _forbid_framing(send, is_api=_is_api_path(scope))
+            send = _forbid_framing(
+                send, is_api=_is_api_path(scope) or scope.get("path") == "/"
+            )
 
         refusal = self._refusal(scope)
+        generation = (
+            self.auth.read_token()
+            if refusal is None and self.auth is not None
+            else None
+        )
+        if refusal is None and self.auth is not None:
+            refusal = self._auth_refusal(scope)
+        rotation = self.auth.rotation if self.auth is not None else None
         if refusal is None and scope["type"] == "http":
             receive, refusal = await self._read_body(scope, receive)
+        if refusal is None and self.auth is not None:
+            refusal = self._auth_refusal(scope)
         if refusal is None:
-            await self.app(scope, receive, send)
+            if (
+                rotation is not None
+                and generation is not None
+                and str(scope.get("path", "")).endswith("/events")
+            ):
+                await self._serve_stream(scope, receive, send, rotation, generation)
+            else:
+                await self.app(scope, receive, send)
             return
 
         status_code, code, error = refusal
@@ -263,13 +290,118 @@ class LoopbackGuard:
             response = JSONResponse(
                 status_code=status_code,
                 content=content,
-                headers=_API_REFUSAL_HEADERS,
+                headers={
+                    **_API_REFUSAL_HEADERS,
+                    **({"WWW-Authenticate": "Bearer"} if status_code == 401 else {}),
+                },
             )
         else:
             response = JSONResponse(
-                status_code=status_code, content={"error": error, "code": code}
+                status_code=status_code,
+                content={"error": error, "code": code},
+                headers={"WWW-Authenticate": "Bearer"} if status_code == 401 else None,
             )
         await response(scope, receive, send)
+
+    def _auth_refusal(self, scope: Scope) -> tuple[int, str, str] | None:
+        assert self.auth is not None
+        path = "/" + str(scope.get("path", "")).lstrip("/")
+        method = str(scope.get("method", "")).upper()
+        headers: dict[bytes, list[str]] = {}
+        for name, value in scope.get("headers", ()):
+            headers.setdefault(name.lower(), []).append(value.decode("latin-1"))
+        # A cookie is ambient across localhost ports. Origin, when present,
+        # must match this request's actual Host, not just another allowed host.
+        origins = headers.get(b"origin", [])
+        hosts = headers.get(b"host", [])
+        if origins and (
+            len(origins) != 1
+            or len(hosts) != 1
+            or origins[0].lower() != "http://" + hosts[0].lower()
+        ):
+            return 403, "foreign_origin", self._origin_error
+        if method in ("GET", "HEAD") and (path == "/" or path.startswith("/assets/")):
+            return None
+        if path == "/api/auth/login" and method == "POST":
+            if not origins or any(
+                site.lower() != "same-origin"
+                for site in headers.get(b"sec-fetch-site", [])
+            ):
+                return 403, "foreign_origin", self._origin_error
+            return None
+        authorization = headers.get(b"authorization", [])
+        if (
+            len(authorization) == 1
+            and authorization[0].startswith("Bearer ")
+            and self.auth.valid_bearer(authorization[0][7:])
+        ):
+            return None
+        cookie_headers = headers.get(b"cookie", [])
+        if not authorization and len(cookie_headers) == 1:
+            name = f"melo_session_{self.port}"
+            parts = [p.strip() for p in cookie_headers[0].split(";")]
+            if sum(p.startswith(name + "=") for p in parts) == 1:
+                cookie = SimpleCookie()
+                try:
+                    cookie.load(cookie_headers[0])
+                    if name in cookie and self.auth.valid_cookie(
+                        cookie[name].value, self.port
+                    ):
+                        return None
+                except (CookieError, ValueError, OSError):
+                    pass
+        return 401, "unauthorized", "Authentication required."
+
+    async def _serve_stream(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        event: asyncio.Event,
+        generation: bytes,
+    ) -> None:
+        assert self.auth is not None
+
+        def current() -> bool:
+            try:
+                valid = self.auth is not None and self.auth.read_token() == generation
+            except (OSError, ValueError):
+                valid = False
+            if not valid and self.auth is not None and self.auth.rotation is event:
+                self.auth.invalidate_streams()
+            return valid and not event.is_set()
+
+        async def send_current(message: Message) -> None:
+            if not current():
+                raise asyncio.CancelledError
+            await send(message)
+
+        async def watch_rotation() -> None:
+            while current():
+                try:
+                    await asyncio.wait_for(event.wait(), timeout=0.25)
+                except TimeoutError:
+                    continue
+
+        app_task = asyncio.ensure_future(self.app(scope, receive, send_current))
+        rotated = asyncio.create_task(watch_rotation())
+        revoked = False
+        try:
+            done, _ = await asyncio.wait(
+                {app_task, rotated}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if rotated in done:
+                revoked = True
+                app_task.cancel()
+            await app_task
+        except asyncio.CancelledError:
+            if not revoked and not event.is_set():
+                raise
+        finally:
+            rotated.cancel()
+            if not app_task.done():
+                app_task.cancel()
+            await asyncio.gather(app_task, rotated, return_exceptions=True)
 
     async def _read_body(
         self, scope: Scope, receive: Receive

@@ -3,15 +3,15 @@
 ## HTTP API
 
 Requests and responses are JSON. The examples use the default address. Any
-route can also answer 421 or 403; see
+route requires bearer authentication and can also answer 401, 421 or 403; see
 [Keep the gateway private](../guides/gateway.md#keep-the-gateway-private).
 
 ### API v2 (web console)
 
 The web console's own API is under `/api/`. It is served only when the
 gateway listens on a loopback address, and it is documented separately in
-[API v2](api-v2.md). API v2 only grows: endpoints, optional request fields and
-response keys are added, never renamed or removed.
+[API v2](api-v2.md). Authentication is a compatibility change for existing
+clients; API fields otherwise remain additive.
 
 This version serves the reads — `GET /api/health`, `GET /api/settings`,
 `GET /api/settings/key-status`, `GET /api/models`, the sessions list and
@@ -58,8 +58,11 @@ or computed P2 if retention pruned the pause log; an unpaused task returns
 
 ### GET /v1/health
 
+The examples read the gateway bearer token from its private file. A command-line
+header can be visible to local processes; keep the token out of logs and history.
+
 ```bash
-curl http://127.0.0.1:8401/v1/health
+curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" http://127.0.0.1:8401/v1/health
 ```
 
 ```json
@@ -80,7 +83,7 @@ The health check does not contact the model server.
 Runs one task in a session and returns its result.
 
 ```bash
-curl -X POST http://127.0.0.1:8401/v1/agent/run \
+curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
   -d '{"query": "What is 6*7?", "session_id": "demo123"}'
 ```
@@ -116,7 +119,7 @@ field; see [Run results](run-results.md#where-results-appear).
 ### GET /v1/sessions
 
 ```bash
-curl http://127.0.0.1:8401/v1/sessions
+curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" http://127.0.0.1:8401/v1/sessions
 ```
 
 ```json
@@ -134,7 +137,7 @@ curl http://127.0.0.1:8401/v1/sessions
 ### DELETE /v1/sessions/{session_id}
 
 ```bash
-curl -X DELETE http://127.0.0.1:8401/v1/sessions/demo123
+curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" -X DELETE http://127.0.0.1:8401/v1/sessions/demo123
 ```
 
 The answer is HTTP 200 with `{"closed": "demo123"}`, or HTTP 404 with

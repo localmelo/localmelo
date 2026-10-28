@@ -48,7 +48,11 @@ def build(tmp_path: Path, *, host: str = "127.0.0.1") -> GatewayServer:
 
 def test_the_workspace_page_is_the_same_file(tmp_path: Path) -> None:
     server = build(tmp_path)
-    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    client = TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    )
     resp = client.get("/")
     assert resp.status_code == 200
     static = Path(__file__).parents[3] / "support" / "gateway" / "static" / "index.html"
@@ -62,7 +66,11 @@ def test_v1_health_is_byte_identical(
     # the whole body can be compared as the bytes a client receives.
     monkeypatch.setattr("localmelo.support.gateway.time.time", lambda: 1000.0)
     server = build(tmp_path)
-    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    client = TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    )
     assert client.get("/v1/health").content == (
         b'{"status":"ok","uptime":0.0,"sessions":{"active":0,"busy":0,"max":50},'
         b'"chat_backend":"mlc","embedding_backend":"none"}'
@@ -71,13 +79,21 @@ def test_v1_health_is_byte_identical(
 
 def test_v1_sessions_is_byte_identical(tmp_path: Path) -> None:
     server = build(tmp_path)
-    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    client = TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    )
     assert client.get("/v1/sessions").content == b'{"sessions":[]}'
 
 
 def test_v1_write_rejections_keep_the_legacy_bodies(tmp_path: Path) -> None:
     server = build(tmp_path)
-    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    client = TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    )
     # FastAPI's own 422 body, not API v2's envelope.
     refused = client.post(
         "/v1/agent/run",
@@ -96,7 +112,11 @@ def test_v1_write_rejections_keep_the_legacy_bodies(tmp_path: Path) -> None:
 
 def test_v1_agent_run_rejection_is_byte_identical(tmp_path: Path) -> None:
     server = build(tmp_path)
-    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    client = TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    )
     # The checker's own 400 body, not API v2's envelope.
     assert client.post("/v1/agent/run", json={"query": ""}).content == (
         b'{"error":"Query must be a non-empty string"}'
@@ -106,7 +126,11 @@ def test_v1_agent_run_rejection_is_byte_identical(tmp_path: Path) -> None:
 def test_v1_close_is_byte_identical(tmp_path: Path) -> None:
     server = build(tmp_path)
     server.sessions._sessions["a1b2c3d4e5f6"] = Session(agent=QuietAgent())
-    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    client = TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    )
 
     assert client.delete("/v1/sessions/a1b2c3d4e5f6").content == (
         b'{"closed":"a1b2c3d4e5f6"}'
@@ -116,7 +140,11 @@ def test_v1_close_is_byte_identical(tmp_path: Path) -> None:
 
 def test_v1_playground_routes_are_byte_identical(tmp_path: Path) -> None:
     server = build(tmp_path)
-    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    client = TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    )
     # The scenario list is static, so its digest pins the playground's bytes.
     scenarios = client.get("/v1/playground/scenarios")
     assert hashlib.sha256(scenarios.content).hexdigest() == (
@@ -129,14 +157,15 @@ def test_v1_playground_routes_are_byte_identical(tmp_path: Path) -> None:
 
 def test_the_api_description_pages_are_off(tmp_path: Path) -> None:
     server = build(tmp_path)
-    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
+    client = TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    )
     for path in ("/docs", "/redoc", "/openapi.json"):
         assert client.get(path).status_code == 404
 
 
 def test_a_non_loopback_gateway_has_no_api(tmp_path: Path) -> None:
-    server = build(tmp_path, host="0.0.0.0")
-    assert server.console is None
-    client = TestClient(server.app, base_url="http://127.0.0.1:8401")
-    assert client.get("/api/health").status_code == 404
-    assert client.get("/v1/health").status_code == 200
+    with pytest.raises(ValueError, match="loopback"):
+        build(tmp_path, host="0.0.0.0")

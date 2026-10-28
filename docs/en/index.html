@@ -175,10 +175,7 @@ source .venv/bin/activate</code></pre>
             <strong>Tools run with your account's permissions, and there is no
             sandbox.</strong> The model can run shell commands and Python code,
             and read or write any file you can. New memory files are created
-            readable only by you (mode 0600). The gateway has no
-            authentication, so keep it on <code>127.0.0.1</code> (the default):
-            there it refuses requests to its API that web pages at other
-            sites send through your browser.
+            readable only by you (mode 0600). The gateway requires a bearer token or browser session and refuses non-loopback binds. Run <code>melo --gateway-login</code> in a terminal for a one-use link. A token holder can act as you; same-user processes are not isolated, and browser cookies are not isolated by localhost port.
           </p>
         </div>
         <p>

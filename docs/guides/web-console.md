@@ -4,7 +4,9 @@
 
 Open `http://127.0.0.1:8401/` in a browser for the web workspace. It is the
 console's page and talks only to `/api` ([API v2](../reference/api-v2.md)), so the gateway
-must be running to serve it: `melo --serve`, then open the address it prints.
+must be running to serve it: `melo --serve`. Run `melo --gateway-login` in a
+terminal and open its single-use link within 60 seconds (add `--port PORT`
+for a nondefault port). Keep the link private; see [gateway security](gateway.md#keep-the-gateway-private).
 
 1. Use **Connection settings** to choose the chat backend, model and workspace;
    local model discovery lists models without starting one. A cloud backend
@@ -77,8 +79,8 @@ save is done. Each message sees the earlier answers of its chat, as in a
 A tool call that needs approval shows a card below its `Needs approval` tool.
 Console sessions use `RememberingPolicy` and ask before `file_write` and
 `python_exec`; legacy `/v1` has no approval policy. Approvals are not a
-security boundary: any local process that reaches the unauthenticated API
-can answer them. When a request is present, choose
+security boundary against a bearer holder or a malicious process under the same
+OS account, which can answer them. When a request is present, choose
 `Allow once`, `Allow every …` for the session, or `Deny…` with an
 optional reason. The controls wait 500 ms before they can be used; arrival
 does not move focus and no single-key shortcut answers a request. When the
@@ -129,12 +131,14 @@ uv run python -m localmelo.support.gateway._test_webapp
 
 It always listens on `http://127.0.0.1:8401/`, so it cannot run while the
 gateway uses that port. It mounts no `/api`, so the page itself needs the
-gateway; this server only reaches the `/v1/playground/` routes.
+gateway; this server only reaches the `/v1/playground/` routes. This standalone
+test server does not use gateway authentication; run it only in a trusted
+local environment and do not expose it.
 
 The workspace has these limits:
 
-- It is for loopback use only. Like the rest of the gateway, it has no
-  authentication: open it on this computer as `http://127.0.0.1:8401/` or
+- It is for loopback use only. Sign in as described above and open it on this
+  computer as `http://127.0.0.1:8401/` or
   `http://localhost:8401/`. Remote access, from another device or through a
   proxy, is not supported; see
   [Keep the gateway private](gateway.md#keep-the-gateway-private).
