@@ -65,6 +65,7 @@ STATUS_LINE_ERROR_CHARS = 500
 _DIRECT_FLAGS = {
     "workspace": "--workspace",
     "fixed_prefix": "--fixed-prefix",
+    "captured_history": "--captured-history",
     "context_window": "--context-window",
     "output_reserve": "--output-reserve",
     "safety_margin": "--safety-margin",
@@ -1141,6 +1142,8 @@ def _direct_options(
         fields["timeout_s"] = args.timeout
     if getattr(args, "fixed_prefix", None) is not None:
         fields["fixed_prefix"] = args.fixed_prefix == "on"
+    if getattr(args, "captured_history", None) is not None:
+        fields["captured_history"] = args.captured_history == "on"
     reasoning = getattr(args, "reasoning", None)
     if reasoning is not None:
         fields["reasoning"] = reasoning
@@ -1221,6 +1224,7 @@ class _WorkerFlagParser(argparse.ArgumentParser):
             "--import-session",
             "--title",
             "--fixed-prefix",
+            "--captured-history",
             "--context-window",
             "--output-reserve",
             "--safety-margin",
@@ -1308,6 +1312,11 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         help="After a reflection, start the next attempt when it chooses continue "
         "and its three checks hold (flags, default), or also require its utility "
         "score to reach 0.1 (utility, the behavior before this option)",
+    )
+    direct.add_argument(
+        "--captured-history",
+        choices=["on", "off"],
+        help="Store bounded, redacted captured tool results (default off)",
     )
     direct.add_argument(
         "--fixed-prefix",
@@ -1926,6 +1935,14 @@ def _build_direct_mode_agent(
         parser.error("[agent] fixed_prefix must be a boolean")
     if getattr(args, "fixed_prefix", None) is None and budget_cfg.agent.fixed_prefix:
         options = dataclasses.replace(options, fixed_prefix=True)
+
+    if not isinstance(budget_cfg.agent.captured_history, bool):
+        parser.error("[agent] captured_history must be a boolean")
+    if (
+        getattr(args, "captured_history", None) is None
+        and budget_cfg.agent.captured_history
+    ):
+        options = dataclasses.replace(options, captured_history=True)
 
     if base_url:
         # Generic OpenAI-compatible endpoint

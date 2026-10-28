@@ -344,6 +344,8 @@ class SqliteHistory(History):
                 "error": step.tool_result.error,
                 "duration_ms": step.tool_result.duration_ms,
             }
+            if step.capture_metadata is not None:
+                tr_fields["capture_metadata"] = step.capture_metadata
             if step.tool_result.images:
                 # References only: the base64 payload is never stored.
                 tr_fields["images"] = [
@@ -535,6 +537,7 @@ class SqliteHistory(History):
                     tool_call=tc,
                     tool_result=tr,
                     timestamp=row[4],
+                    capture_metadata=d.get("capture_metadata") if row[3] else None,
                 )
             )
         return steps
