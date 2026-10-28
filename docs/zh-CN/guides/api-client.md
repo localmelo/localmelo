@@ -75,7 +75,7 @@ print(f"answer: {turn['answer']}")
 print(f"tokens: {turn['result']['usage'].get('completion_tokens', 0)}")
 ```
 
-使用 `python demo.py http://127.0.0.1:8401 ~/demo-project` 运行，连接的网关中，模型以 `python_exec` 调用响应了消息：
+使用 `python demo.py http://127.0.0.1:8401 ~/demo-project` 运行；所用网关的模型已用一次 `python_exec` 调用响应了这条消息：
 
 ```text
 created 201 session edb425a382be turn 2e2b132e1dcc49e283c52782858ee051

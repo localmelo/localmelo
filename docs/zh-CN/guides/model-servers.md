@@ -37,7 +37,7 @@
    curl -sS http://127.0.0.1:8000/v1/models
    ```
 
-   响应的 `data` 列表中应有一项包含 `"id": "Qwen3-8B-4bit"`。它也可能列出 Hugging Face 缓存中的 MLX 模型。`Failed to connect` 表示该端口没有服务监听：请检查 oMLX 启动日志中的端口。`API key required` 表示已设置密钥：见第 3 步。
+   响应的 `data` 列表中有一项包含 `"id": "Qwen3-8B-4bit"`。它也可能列出 Hugging Face 缓存中的 MLX 模型。`Failed to connect` 表示该端口没有服务监听：请检查 oMLX 启动日志中的端口。`API key required` 表示已设置密钥：见第 3 步。
 
 5. 使用该 ID 运行任务：
 
@@ -64,7 +64,7 @@
 | `gemini` | 云端 | Google Gemini API | `https://generativelanguage.googleapis.com/v1beta/openai` | 不支持 |
 | `nvidia` | 云端 | NVIDIA API | `https://integrate.api.nvidia.com/v1` | 不支持 |
 
-向导会建议本地 URL；请使用你的服务器地址和端口。localmelo 只连接本地服务器：你需要自行启动和停止服务器。`mlc`、`vllm` 和 `sglang` 使用普通的 OpenAI 兼容 API，因此其他 OpenAI 兼容服务器可以搭配其中任何一个使用。
+向导会建议本地 URL；请使用你的服务器地址和端口。localmelo 只负责连接本地服务器：你需要自行启动和停止服务器。`mlc`、`vllm` 和 `sglang` 使用普通的 OpenAI 兼容 API，因此其他 OpenAI 兼容服务器可以搭配其中任何一个使用。
 
 ### oMLX
 
@@ -86,12 +86,12 @@ enable_thinking = false
 - `chat_model` 是模型在 oMLX 的 `GET /v1/models` 中的 ID：文件夹名称，或在 oMLX 中为其设置的别名。
 - [首次运行](configure.md#first-run)会写入 `chat_backend`、`chat_url` 和 `chat_model` 行：在没有配置文件的终端中运行 `melo`，同时让 oMLX 运行。当它提供嵌入模型时，还会写入 `embedding_backend = "vllm"`，以及该表的 `embedding_url` 和 `embedding_model`。其他行请手动添加。
 - `request_timeout_s = 600` 为 oMLX 留出时间，以便在请求遇到未加载的模型时加载它；见[对话请求超时](../../reference/configuration.md#chat-request-timeout)（英文）。
-- `extra_body` 表会关闭 Qwen3 模型的思考，使每一步更快。省略该表可保持思考开启。除非模型在 oMLX 中的设置强制指定 `enable_thinking`，否则 oMLX 会应用该设置。
+- `extra_body` 表会关闭 Qwen3 模型的思考，使每一步更快。省略该表可保持思考开启。除非模型在 oMLX 中的设置强制指定 `enable_thinking`，否则 oMLX 会应用上述表中的设置。
 - 要使用长期记忆，oMLX 也可以从同一目录提供嵌入模型：设置 `embedding_backend = "vllm"`，并在 `[vllm]` 中添加 `embedding_url = "http://127.0.0.1:8000/v1"` 和 `embedding_model = "<its id>"`。oMLX 的 `GET /v1/models` 返回 ID 但不返回类型，因此无法区分嵌入模型和对话模型：需要使用 ID 发送一次 `POST /v1/embeddings` 进行检查。见[配置嵌入模型](embedding.md#omlx)。
 
 <a id="ollama-with-embeddings"></a>
 
-### 使用嵌入的 Ollama
+### Ollama 配嵌入
 
 ```toml
 chat_backend = "ollama"

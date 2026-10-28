@@ -8,11 +8,11 @@
 
 ## 有什么作用
 
-没有嵌入后端时，工作记忆和历史记录仍然可用。记忆开启时，显式推理模式可以接纳纯文本长期记忆条目，并通过 BM25 找到它们；开启持久化后，这些条目可以跨进程保留。显式模式的回忆需要启用触发点，并包含 `long` 类型。在 `legacy` 模式中，长期记忆的写入和回忆需要嵌入后端。见[记忆](../../concepts/memory.md#what-localmelo-remembers)（英文）。
+没有嵌入后端时，工作记忆和历史记录仍然可用。记忆开启时，显式推理模式可以接纳纯文本长期记忆条目，并通过 BM25 找到它们；开启持久化后，这些条目可以跨进程保留。显式模式的召回要求触发点已启用，并且包含 `long` 类型。在 `legacy` 模式中，长期记忆的写入和召回需要嵌入后端。见[记忆](../../concepts/memory.md#what-localmelo-remembers)（英文）。
 
-嵌入后端为带有向量的条目增加向量相似度搜索；纯文本条目仍通过 BM25 查找。在 `compress` 和 `compress+replay` 模式下，`auto` 检索器还会使用嵌入提供方对任务内回忆排序；没有嵌入提供方时，`auto` 在 start 和 attempt 触发点使用 LLM，在 step 触发点使用 BM25。[回忆参考](../../concepts/memory.md#recall-in-the-loop)（英文）说明了触发点和其他模式。
+嵌入后端为带有向量的条目增加向量相似度搜索；纯文本条目仍通过 BM25 查找。在 `compress` 和 `compress+replay` 模式下，`auto` 检索器还会使用嵌入提供方对任务内召回排序；没有嵌入提供方时，`auto` 在 start 和 attempt 触发点使用 LLM，在 step 触发点使用 BM25。[召回参考](../../concepts/memory.md#recall-in-the-loop)（英文）说明了触发点和其他模式。
 
-一项离线比较在 97 个标准查询上以封顶 grade-2 recall@3 衡量三种检索器：`bm25` 为 0.284、`llm` 为 0.576、`embedding` 为 0.636。`embedding` 与 `llm` 相差 +0.06，95% 置信区间为 [−0.055, +0.179]，因此在该样本规模下两者无法区分；只有相对于 `bm25` 的提升可以区分。所以优先选择嵌入模型是产品选择——点估计最佳、不需要额外的对话调用，而且模型可以小巧并在本地运行——而不是已证明的优势。
+一项离线比较在 97 个金标准查询上以封顶 grade-2 recall@3 衡量三种检索器：`bm25` 为 0.284、`llm` 为 0.576、`embedding` 为 0.636。`embedding` 与 `llm` 相差 +0.06，95% 置信区间为 [−0.055, +0.179]，因此在该样本规模下两者无法区分；只有相对于 `bm25` 的提升可以区分。所以优先选择嵌入模型是产品选择——点估计最佳、不需要额外的对话调用，而且模型可以小巧并在本地运行——而不是已证明的优势。
 
 localmelo 本身不会下载、启动或提供模型。以下命令用于你自己的服务器。
 
@@ -86,7 +86,7 @@ embedding_model = "Qwen3-Embedding-0.6B"
 
 ## vLLM
 
-vLLM 将嵌入模型作为独立端点提供。这里没有在这台 Mac 上运行（这台机器没有 vLLM）；请在 `vllm serve --help` 中检查你所用版本的选项。
+vLLM 将嵌入模型作为独立端点提供。这一步没有在这台 Mac 上运行（本机没有 vLLM）；请在 `vllm serve --help` 中检查你所用版本的选项。
 
 ```bash
 vllm serve Qwen/Qwen3-Embedding-0.6B --task embed --port 8001
@@ -167,7 +167,7 @@ embedding_model = "nomic-embed-text"
 
 - 在终端启动 `melo`，查看横幅中的记忆行。
 - `/status` 可用后，其 `memory` 行来自相同的文本。
-- 运行一个使用工具的任务并结束，然后运行一个相关任务。持久化可以让已接纳的条目在后续运行中可用；回忆还取决于模式、启用的触发点和相关匹配。见[跨运行保留记忆](../../guides/memory.md#keep-memory-between-runs)（英文）。
+- 运行一个使用工具的任务并结束，然后运行一个相关任务。持久化可以让已接纳的条目在后续运行中可用；召回还取决于模式、启用的触发点和相关匹配。见[跨运行保留记忆](../../guides/memory.md#keep-memory-between-runs)（英文）。
 - 要在自己的语料上衡量模型，使用 `melo-retrieve --retriever embedding …`；见[离线检索](../../reference/retrieval.md)（英文）。
 
 <a id="troubleshooting"></a>

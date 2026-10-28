@@ -34,10 +34,10 @@ asyncio.run(main())
 `await agent.run_task(query, on_event=sink)` 对运行中的每个事件按顺序同步调用一次 `sink`：每一步的开始、模型的每次回复、每次工具调用及其结果、每次反思，以及携带 `RunResult` 的 `run.finished`。接收函数不能阻塞。[事件（英文）](../../reference/events.md)列出了事件和接收函数的规则。
 
 - 用 `observe=sink` 代替 `on_event=sink` 会向接收函数提供相同事件，但不会让运行变成交互式运行，因此被取消的运行仍以 `crashed` 结束（见[停止运行](#stop-a-run)）。适用于仅观察的展示界面。
-- 两种方式都可搭配 `progress=True`，以增加 [`run.progress`（英文）](../../reference/events.md#runprogress)事件：步数、尝试、阶段和测试计数，以及该模型此前运行过同一任务时的历史运行情况。没有接收函数时，它不起作用。
-- 无论任务的措辞和目录如何，`routine="name"` 都会将这些运行归为[程序性记忆（英文）](../../concepts/procedures.md)中的同一个例程；不指定时，例程由屏蔽日期和时间后的查询以及运行工具所使用的目录决定。空白名称会在运行前引发 `ValueError`。
+- 两种方式都可搭配 `progress=True`，以增加 [`run.progress`（英文）](../../reference/events.md#runprogress)事件：步数、尝试、阶段和测试计数，以及此前在该模型上运行过这个任务时，过去的运行都做了什么。没有接收函数时，它不起作用。
+- 无论任务的措辞和目录如何，`routine="name"` 都会将这些运行归为[程序记忆（英文）](../../concepts/procedures.md)中的同一个例程；不指定时，例程由屏蔽日期和时间后的查询以及运行工具所使用的目录决定。空白名称会在运行前引发 `ValueError`。
 
-在 `run.finished` 之后、`run_task` 返回之前，运行会记录到程序性记忆中：最多耗时 2 秒，通常只有几毫秒（见[记忆（英文）](../../concepts/memory.md#how-memory-works)）。引发异常的运行（如被取消的运行）不会被记录，在 `agent.begin_exit()` 之后结束的运行也不会。
+在 `run.finished` 之后、`run_task` 返回之前，运行会记录到程序记忆中：最多耗时 2 秒，通常只有几毫秒（见[记忆（英文）](../../concepts/memory.md#how-memory-works)）。引发异常的运行（如被取消的运行）不会被记录，在 `agent.begin_exit()` 之后结束的运行也不会。
 
 <a id="stop-a-run"></a>
 
@@ -105,8 +105,8 @@ asyncio.run(main())
 审批策略决定工具调用是否可以运行。将策略作为 `approval` 传给 `run_task` 或 `run_tool`。内置工具或提供的工具在权限级别不是 `read` 时会请求审批（见[权限级别](tools-mcp.md#permission-tiers)）：
 
 - 本次运行提供的内置工具：默认 `python` 模式下的 `python_exec`（`exec`）和 `file_write`（`write`）；调用方在 `builtins` 中指定 `shell_exec`（`exec`）时，也包括它。除 `interactive` 外，没有模式默认提供 `shell_exec`；
-- 没有注解，或注解使其归为 `write` 或 `network` 的提供工具；
-- `ProvidedTool.requires_approval` 为 `True` 的提供工具，这也会让 `read` 工具请求审批；
+- 没有注解，或注解使其归为 `write` 或 `network` 的提供的工具；
+- `ProvidedTool.requires_approval` 为 `True` 的提供的工具，这也会让 `read` 工具请求审批；
 - 配置项设置了 `require_approval` 的 MCP 服务器的工具；见 [MCP 配置文件](tools-mcp.md#mcp-config-file)。
 
 交互式界面始终有审批策略（除非使用 `--yolo`）；直接模式、网关和没有 `approval=` 的 Python 运行则没有，这也是这些模式默认不提供 `shell_exec` 的原因。`file_read` 属于 `read`，不请求审批：它由[工作区根目录](#work-in-a-directory)限制。只读 MCP 工具（`readOnlyHint: true`）也不请求审批，除非 `require_approval` 指定了它。通过 `agent.executor.register` 直接注册的工具保留其明确的 `requires_approval`；它的级别只是标签。没有策略时，本会请求审批的工具也像其他工具一样运行，正如从不设置策略的直接模式。`direct` 或 `python` 调用方在 `builtins` 中指定 `shell_exec` 是明确启用它，没有策略时它无需审批即可运行；`gateway` 仍会拒绝它。

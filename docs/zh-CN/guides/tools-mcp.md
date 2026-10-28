@@ -75,7 +75,7 @@ melo --mcp-config mcp.json "What time is it in Tokyo?"
 | `timeout` | `120` | 每次工具调用允许的秒数。 |
 | `startup_timeout` | `30` | 启动服务器并列出其工具允许的秒数。 |
 | `include_tools` | 所有工具 | 仅注册这些工具，名称使用服务器提供的名称。 |
-| `require_approval` | `false` | `true`：每次调用该服务器的工具，包括只读工具，都先询问本次运行的审批策略。也可指定工具名称列表，拼写与 `include_tools` 相同：只有这些工具的调用会询问。这是在工具级别之上的额外标记（见[权限级别](#permission-tiers)），仅在运行具有策略时生效。 |
+| `require_approval` | `false` | `true`：每次调用该服务器的工具，包括只读工具，都先询问本次运行的审批策略。也可指定工具名称列表，拼写与 `include_tools` 相同：只有这些工具的调用会询问。这是在工具的权限级别之上的额外标记（见[权限级别](#permission-tiers)），仅在运行具有策略时生效。 |
 | `disabled` | `false` | `true` 跳过该服务器。 |
 
 - 可用 `servers` 代替 `mcpServers`。其他键会被忽略，`type`（或 `transport`）除外：如果提供，它必须是 `stdio`。
@@ -95,7 +95,7 @@ melo --mcp-config mcp.json "What time is it in Tokyo?"
 
 - 本步必须提供了该工具。
 - 参数必须是 JSON 对象。对于内置工具，每个参数还必须符合工具声明的类型；例如 `shell_exec` 的 `command` 使用列表时，会以 `Arguments for shell_exec: 'command' must be of type string, not array` 拒绝。
-- 由工具级别和模式决定，而非命令的写法。有审批者的模式（交互式界面）提供 `shell_exec` 并对每次 `exec` 调用请求审批（见[权限级别](#permission-tiers)）；使用 `--yolo` 时不请求审批，调用直接运行。没有审批者的模式（直接模式、网关、控制台及 Python API 默认的 `python` 模式）默认不提供 `shell_exec`，因此模型看不到它；即使 `exec` 工具已注册，检查器也会拒绝其调用，除非 `direct` 或 `python` 调用方在 `builtins` 中指定了它。在这些模式中指定 `shell_exec` 表示调用方明确启用它，调用可以运行；`gateway` 无论是否指定都会拒绝。
+- 由工具的权限级别和模式决定，而非命令的写法。有审批者的模式（交互式界面）提供 `shell_exec` 并对每次 `exec` 调用请求审批（见[权限级别](#permission-tiers)）；使用 `--yolo` 时不请求审批，调用直接运行。没有审批者的模式（直接模式、网关、控制台及 Python API 默认的 `python` 模式）默认不提供 `shell_exec`，因此模型看不到它；即使 `exec` 工具已注册，检查器也会拒绝其调用，除非 `direct` 或 `python` 调用方在 `builtins` 中指定了它。在这些模式中指定 `shell_exec` 表示调用方明确启用它，调用可以运行；`gateway` 无论是否指定都会拒绝。
 - 设置工作区根目录时，`file_read` 和 `file_write` 的路径必须在其中（见[设置工作区根目录时](#with-a-workspace-root)）。
 - 设置审批策略时，级别不是 `read` 或明确标记的工具会等待策略决策；若还设置了工作区根目录，文件路径之后会再次检查（见[权限级别](#permission-tiers)和[设置审批策略时](#with-an-approval-policy)）。
 
@@ -130,7 +130,7 @@ melo --mcp-config mcp.json "What time is it in Tokyo?"
 | `exec` | 以你的权限运行命令、代码或其他程序。 | 是。 |
 | `network` | 向本机外的对象发送数据或对其执行操作：HTTP API、聊天、支付、图形界面等。 | 是。 |
 
-内置工具的级别按名称固定：`file_read` 是 `read`，`file_write` 是 `write`，`shell_exec` 和 `python_exec` 是 `exec`。该表优先于工具自身的声明，因此复用内置工具名称的提供工具或自定义工具会继承该级别。
+内置工具的级别按名称固定：`file_read` 是 `read`，`file_write` 是 `write`，`shell_exec` 和 `python_exec` 是 `exec`。该表优先于工具自身的声明，因此复用内置工具名称的提供的工具或自定义工具会继承该级别。
 
 模式决定实际提供哪些内置工具。交互式界面以 `interactive` 模式运行，获得全部四个工具；除非使用 `--yolo`，它在 `exec` 调用前会询问。直接运行、网关或控制台会话以及 Python API 默认的 `python` 模式获得 `file_read`、`file_write` 和 `python_exec`：`shell_exec` 未注册，因此模型看不到它；即使注册了，检查器也会拒绝它，除非调用方在 `builtins` 中指定。模型仍然调用它时会收到 `shell_exec is not available in this run. Available tools: …`，其中列出本次运行的工具（未知的非内置名称仍使用 `Tool not found in registry` 消息）。指定 `shell_exec`（`--builtins all`、`--builtins shell_exec`、`AgentOptions(builtins={"shell_exec"})`）表示调用方在 `direct` 和 `python` 模式中明确启用它，调用可以运行；`gateway` 即使在指定时也会拒绝。除了网关模式，`AgentOptions(builtins=…)` 或 `--builtins` 始终优先于模式的默认工具集合。
 
@@ -138,7 +138,7 @@ melo --mcp-config mcp.json "What time is it in Tokyo?"
 
 - `openWorldHint: true` 使其成为 `network`，无论它是否也声明只读。
 - `readOnlyHint: true` 使其成为 `read`，除非 `destructiveHint: true` 与之矛盾；此时采用更保守的解读，级别为 `write`。
-- 其他情况均为 `write`：没有注解、注解不是对象、提示不是布尔值，以及 `idempotentHint` 和 `title` 键。工具只有声明只读才被视为只读。
+- 其他情况均为 `write`：没有注解、注解不是对象、提示项不是布尔值，以及 `idempotentHint` 和 `title` 键。工具只有声明只读才被视为只读。
 
 注解是服务器的声明，不是证明：服务器可能对破坏性工具声明 `readOnlyHint: true`。localmelo 只在你选择启动该服务器后才信任这一提示。通过 Python 注册的工具保留其明确的 `requires_approval`：级别只是标签，不带该标记的 `register` 调用不会请求审批。
 
@@ -148,7 +148,7 @@ MCP 服务器的 `require_approval` 是级别之上的额外标记：`true` 或�
 
 ### 设置工作区根目录时
 
-使用 `--workspace DIR` 的直接运行和通过 Python 使用 `AgentOptions(workspace_root=DIR)` 创建的智能体会改变内置工具的行为（见[在目录中工作](python.md#work-in-a-directory)）。不带该选项的直接运行和网关从不设置工作区根目录。
+使用 `--workspace DIR` 的直接运行和通过 Python 使用 `AgentOptions(workspace_root=DIR)` 创建的智能体会改变内置工具（见[在目录中工作](python.md#work-in-a-directory)）。不带该选项的直接运行和网关从不设置工作区根目录。
 
 - **范围限制。** `file_read` 和 `file_write` 相对于根目录解析相对路径，在解析 `..` 和符号链接后，只能访问真实路径位于根目录内的文件。外部路径会以 `Path '<path>' is outside allowed workspace root` 拒绝，空路径或包含 NUL 字符的路径会以 `Argument 'path' for <tool> must be a non-empty string without NUL characters.` 拒绝。工具获得解析后的路径。`~` 不会展开，与根目录字母大小写不同的路径会被拒绝，硬链接不会被检测。
 - **打开文件。** 文件工具打开解析后的路径时不跟随符号链接，因此检查后取代文件的符号链接会被拒绝。非普通文件，例如 FIFO，会以 `Not a regular file: <path>` 拒绝。`file_read` 最多读取 200,000 字节。超过 200,000 字节或文本超过 50,000 字符的文件会截断至 50,000 字符，末尾为 `... [truncated: the file has <size> bytes]`。
@@ -161,7 +161,7 @@ MCP 服务器的 `require_approval` 是级别之上的额外标记：`true` 或�
 
 ### 设置审批策略时
 
-通过 Python 使用 `approval=policy` 启动的运行，在每次调用级别不是 `read` 的内置工具或提供工具前都会询问策略（见[权限级别](#permission-tiers)）：包括运行提供的内置工具（默认 `python` 模式下的 `python_exec` 和 `file_write`；调用方指定时也包括 `shell_exec`），以及级别为 `write`、`exec` 或 `network` 的提供工具或 MCP 工具，包括没有注解因而为 `write` 的 MCP 工具。交互式界面始终有这样的策略，除非使用 `--yolo`；直接模式以及网关的 `/v1` 和工作区会话没有。因此网关会话完全不提供 `shell_exec`：没有人可以询问。控制台有策略，但其审批通过同一个未经身份验证的本机回环 API 传递，因此也属于网关模式。工具被明确标记时也会请求审批：例如 `requires_approval=True` 的提供工具、在 `register` 调用中设置该标记的自定义工具，或设置了 `require_approval` 的 MCP 服务器的工具（见[审批工具调用](python.md#approve-tool-calls)）。自定义工具的级别只是标签：只有其 `register` 调用设置了标记才会询问。
+通过 Python 使用 `approval=policy` 启动的运行，在每次调用级别不是 `read` 的内置工具或提供的工具前都会询问策略（见[权限级别](#permission-tiers)）：包括运行提供的内置工具（默认 `python` 模式下的 `python_exec` 和 `file_write`；调用方指定时也包括 `shell_exec`），以及级别为 `write`、`exec` 或 `network` 的提供的工具或 MCP 工具，包括没有注解因而为 `write` 的 MCP 工具。交互式界面始终有这样的策略，除非使用 `--yolo`；直接模式以及网关的 `/v1` 和工作区会话没有。因此网关会话完全不提供 `shell_exec`：没有人可以询问。控制台有策略，但其审批通过同一个未经身份验证的本机回环 API 传递，因此也属于网关模式。工具被明确标记时也会请求审批：例如 `requires_approval=True` 的提供的工具、在 `register` 调用中设置该标记的自定义工具，或设置了 `require_approval` 的 MCP 服务器的工具（见[审批工具调用](python.md#approve-tool-calls)）。自定义工具的级别只是标签：只有其 `register` 调用设置了标记才会询问。
 
 - **在其他检查之后。** 策略只会收到上述所有检查均通过的调用，因此能看到将要运行的确切内容，包括解析后的文件路径。参数不符合工具参数定义的调用会以 `Arguments for <tool> do not match its parameters: <message>` 拒绝，不会请求策略决策。
 - **不计入工具时限。** 工具时限从策略允许调用后开始计算。

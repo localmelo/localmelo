@@ -141,7 +141,7 @@ Ollama 的默认 URL `http://localhost:11434` 不带 `/v1`。这是正确的：`
 
 ## 启动网关
 
-如果使用 `melo` 保存了配置，使用 `melo --serve` 启动网关；上面的向导会自行启动它。在第二个终端中，检查网关并通过它运行任务：
+如果配置是用 `melo` 保存的，就用 `melo --serve` 启动网关；上面的向导会自行启动它。在第二个终端中，检查网关并通过它运行任务：
 
 ```bash
 curl http://127.0.0.1:8401/v1/health
@@ -165,7 +165,7 @@ curl -X POST http://127.0.0.1:8401/v1/agent/run \
 melo "What is 6*7?"
 ```
 
-要不运行向导而再次启动网关，运行 `melo --serve`。
+要跳过向导再次启动网关，运行 `melo --serve`。
 
 <a id="interactive-conversations"></a>
 
@@ -188,7 +188,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 
 [交互式界面](../../guides/terminal.md#the-interactive-ui)（英文）介绍了按键和其他内容。`melo ""` 打开早期版本的普通对话循环。没有终端时，单独运行 `melo` 会以退出码 2 退出；请使用 `melo --serve` 启动网关。
 
-`http://127.0.0.1:8401/` 上的网页工作区是控制台的实时页面，只与 `/api` 通信：它使用网关配置的模型，因此 `melo --reconfigure` 会改变该模型。它按最新优先列出对话，支持搜索和每个对话各自的草稿，并像终端一样展示每一轮：你的消息、每次工具调用的工作卡片、折叠的推理和反思、提示、实时进度行，以及带事实和 `Copy response` 的答案。停止操作会取消当前轮次，等待中的审批显示为 `Needs approval`，对话保存在网关的 `sessions.db` 中，因此重启后仍然存在。同一网关上的其他浏览器标签页可看到相同的对话。工作区提供审批卡片、连接设置和会话详情抽屉；见[网页工作区](../../guides/web-console.md#web-workspace)（英文）。
+`http://127.0.0.1:8401/` 上的网页工作区是控制台的实时页面，只与 `/api` 通信：它使用网关配置的模型，因此 `melo --reconfigure` 会改变该模型。它按最新优先列出对话，支持搜索和每个对话各自的草稿，并像终端一样展示每一轮：你的消息、每次工具调用的工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 `Copy response` 的答案。停止操作会取消当前轮次，等待中的审批显示为 `Needs approval`，对话保存在网关的 `sessions.db` 中，因此重启后仍然存在。同一网关上的其他浏览器标签页可看到相同的对话。工作区提供审批卡片、连接设置和会话详情抽屉；见[网页工作区](../../guides/web-console.md#web-workspace)（英文）。
 
 <a id="next-steps"></a>
 
