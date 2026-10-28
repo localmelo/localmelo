@@ -27,7 +27,6 @@ from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 from localmelo.melo.agent._call_log import CallHistory, CallLog
 from localmelo.melo.agent._chat import (
     CALL_RECORDER,
-    REFLECTION_WINDOW,
     RETRY_HOOK,
     Chat,
     RequestStats,
@@ -83,7 +82,7 @@ from localmelo.melo.memory.procedures.tracker import (
     progress_state,
     shown_view,
 )
-from localmelo.melo.memory.short import group_turns, tail_turns
+from localmelo.melo.memory.short import group_turns
 from localmelo.melo.schema import (
     ANSWER_NOT_KEPT_LABEL,
     CALL_INTERRUPTED,
@@ -289,13 +288,13 @@ def _replay_plan(
     *,
     task_query: Message | None = None,
     requires_replay: bool = False,
-) -> tuple[list[Message], list[Message]]:
+) -> tuple[list[Message], list[int]]:
     """The window as an explicit-mode request carries it, and its cap skips.
 
     The first list is the one :func:`_as_sent` returns. The second holds the
-    assistant turns whose thinking was left out because it exceeds
-    :data:`REPLAY_TURN_CAP` (empty on a replay-required provider, and in
-    ``legacy``/``drop``).
+    indexes in *window* of the assistant turns whose thinking was left out
+    because it exceeds :data:`REPLAY_TURN_CAP` (empty on a replay-required
+    provider, and in ``legacy``/``drop``).
     """
     if options.reasoning == "legacy":
         return window, []
@@ -316,7 +315,7 @@ def _replay_plan(
         else set(in_scope[-options.replay_turns :])
     )
     sent: list[Message] = []
-    skipped: list[Message] = []
+    skipped: list[int] = []
     for index, msg in enumerate(window):
         if msg.role != "assistant" or not msg.thinking:
             sent.append(msg)
@@ -326,7 +325,7 @@ def _replay_plan(
             continue
         if not requires_replay and len(msg.thinking) > REPLAY_TURN_CAP:
             sent.append(dataclasses.replace(msg, thinking=""))
-            skipped.append(msg)
+            skipped.append(index)
             continue
         sent.append(msg)
     return sent, skipped
@@ -1625,6 +1624,16 @@ class Agent:
 
         if not await fits(self.hippo.working.get_window()):
             if self.options.reasoning == "replay" and not self._requires_replay:
+                carried = {
+                    id(msg)
+                    for msg in _as_sent(
+                        self.hippo.working.get_window(),
+                        self.options,
+                        task_query=task_query,
+                        requires_replay=self._requires_replay,
+                    )
+                    if msg.role == "assistant" and msg.thinking
+                }
                 for first in range(1, len(units)):
                     kept = [
                         (
@@ -1632,6 +1641,7 @@ class Agent:
                             if index < first
                             and msg.role == "assistant"
                             and msg.thinking
+                            and id(msg) in carried
                             else msg
                         )
                         for index, unit in enumerate(units)
@@ -1639,7 +1649,7 @@ class Agent:
                     ]
                     if not await fits(kept):
                         continue
-                    changed = self.hippo.working.strip_thinking(first)
+                    changed = self.hippo.working.strip_thinking(first, only=carried)
                     if run is not None:
                         run.replay_stripped += changed
                     logger.info(
@@ -2192,7 +2202,12 @@ class Agent:
     # ── Reflection ──
 
     async def _fit_reflection_messages(
-        self, messages: list[Message], run: _RunState | None
+        self,
+        messages: list[Message],
+        run: _RunState | None,
+        *,
+        skipped: list[int] | None = None,
+        sent: list[Message] | None = None,
     ) -> list[Message] | None:
         """*messages* with the oldest reflection tail units dropped to fit.
 
@@ -2208,10 +2223,7 @@ class Agent:
             )
             if not check.allowed:
                 return None
-            if run is not None:
-                run.replayed_chars += sum(
-                    len(msg.thinking) for msg in messages if msg.role == "assistant"
-                )
+            self._note_reflection_sent(messages, run, skipped, sent)
             return messages
         units = group_turns(messages[1:-1])
         for first in range(len(units)):
@@ -2221,14 +2233,26 @@ class Agent:
                 candidate, count_thinking=self._counts_thinking
             )
             if check.allowed:
-                if run is not None:
-                    run.replayed_chars += sum(
-                        len(msg.thinking)
-                        for msg in candidate
-                        if msg.role == "assistant"
-                    )
+                self._note_reflection_sent(candidate, run, skipped, sent)
                 return candidate
         return None
+
+    @staticmethod
+    def _note_reflection_sent(
+        candidate: list[Message],
+        run: _RunState | None,
+        skipped: list[int] | None,
+        sent: list[Message] | None,
+    ) -> None:
+        """Count what a reflection request that *candidate* sends carries."""
+        if run is None:
+            return
+        run.replayed_chars += sum(
+            len(msg.thinking) for msg in candidate if msg.role == "assistant"
+        )
+        if skipped and sent is not None:
+            kept = {id(msg) for msg in candidate}
+            run.replay_skipped += sum(1 for index in skipped if id(sent[index]) in kept)
 
     async def _do_reflect(
         self,
@@ -2285,16 +2309,13 @@ class Agent:
             task_query=task_query,
             requires_replay=self._requires_replay,
         )
-        if run is not None:
-            # Only the turns a reflection request can carry count as skipped;
-            # the request sends the newest whole units of the window.
-            in_tail = {id(msg) for msg in tail_turns(short_window, REFLECTION_WINDOW)}
-            run.replay_skipped += sum(1 for msg in skipped if id(msg) in in_tail)
         fit = None
         if self.options.reasoning != "legacy":
 
             async def fit(messages: list[Message]) -> list[Message] | None:
-                return await self._fit_reflection_messages(messages, run)
+                return await self._fit_reflection_messages(
+                    messages, run, skipped=skipped, sent=sent
+                )
 
         prior_reflections = self.hippo.working.get_reflections()
         response = await self.chat.reflect(
@@ -2306,6 +2327,8 @@ class Agent:
             final=final,
             fit=fit,
         )
+        if response is None:
+            return None
         if self.options.reasoning != "legacy":
             before = response.thinking
             response = _split_inline_reasoning(response)
@@ -2331,6 +2354,8 @@ class Agent:
                 retry=True,
                 fit=fit,
             )
+            if response is None:
+                return None
             if self.options.reasoning != "legacy":
                 before = response.thinking
                 response = _split_inline_reasoning(response)

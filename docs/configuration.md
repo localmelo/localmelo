@@ -162,8 +162,8 @@ replay_turns = 3          # optional; omit for every turn
 ```
 
 A direct-mode flag wins over `[agent]`, and a `--base-url` run uses only the
-flags (it does not read this file). The gateway does not read `[agent]` in
-this release.
+flags (it does not read this file). The interactive UI and the gateway do
+not read `[agent]` in this release.
 
 Each backend section can name the request key and say that the server
 requires replay:

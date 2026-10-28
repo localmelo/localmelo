@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from localmelo.support.config import Config, GatewayConfig, LocalBackendConfig
+from localmelo.support.config import (
+    CloudVendorConfig,
+    Config,
+    GatewayConfig,
+    LocalBackendConfig,
+)
 
 
 class _StubBackend:
@@ -317,3 +322,21 @@ class TestReasoningConfig:
         errors = cfg.validate()
         assert any("[agent] reasoning" in e for e in errors)
         assert any("[agent] replay_turns" in e for e in errors)
+
+    def test_a_cloud_section_validates_the_same_keys(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+        cfg = Config(
+            chat_backend="openai",
+            embedding_backend="none",
+            openai=CloudVendorConfig(
+                api_key_env="OPENAI_API_KEY",
+                chat_model="m",
+                reasoning_field="reasoning",
+                requires_reasoning_replay=True,
+            ),
+        )
+        assert cfg.validate() == []
+        cfg.openai.reasoning_field = "thinking"
+        assert any("[openai] reasoning_field" in e for e in cfg.validate())

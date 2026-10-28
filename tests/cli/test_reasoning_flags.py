@@ -50,6 +50,15 @@ def _parse(argv: list[str]) -> Any:
     return parser, args
 
 
+def _error_line(capsys: pytest.CaptureFixture[str]) -> str:
+    """The single ``melo: error:`` line argparse printed."""
+    lines = capsys.readouterr().err.splitlines()
+    errors = [line for line in lines if line.startswith("melo: error:")]
+    assert len(errors) == 1
+    assert lines[-1] == errors[0]
+    return errors[0]
+
+
 def _main(argv: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
     monkeypatch.setattr(sys, "argv", ["melo", *argv])
     with pytest.raises(SystemExit) as exc:
@@ -70,12 +79,11 @@ def test_replay_with_base_url_needs_a_reasoning_field(
             ),
         )
     assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert (
+    assert _error_line(capsys) == (
         "melo: error: argument --reasoning: replay needs a reasoning field: give "
         "--reasoning-field (auto, reasoning_content or reasoning) with --base-url, "
-        "or set reasoning_field in the backend's config\n"
-    ) in err
+        "or set reasoning_field in the backend's config"
+    )
 
 
 def test_the_configured_backend_needs_a_reasoning_field(
@@ -85,10 +93,10 @@ def test_the_configured_backend_needs_a_reasoning_field(
     _write_config(path)
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
     assert _main(["--reasoning", "replay", "q"], monkeypatch) == 2
-    assert (
+    assert _error_line(capsys) == (
         "melo: error: argument --reasoning: replay needs a reasoning field: set "
-        "reasoning_field in the chat backend's config section\n"
-    ) in capsys.readouterr().err
+        "reasoning_field in the chat backend's config section"
+    )
 
 
 def test_drop_on_a_replay_required_backend_is_refused(
@@ -101,10 +109,10 @@ def test_drop_on_a_replay_required_backend_is_refused(
     )
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
     assert _main(["--reasoning", "drop", "q"], monkeypatch) == 2
-    assert (
+    assert _error_line(capsys) == (
         "melo: error: argument --reasoning: this backend requires reasoning "
-        "replay, so drop is not possible: use replay\n"
-    ) in capsys.readouterr().err
+        "replay, so drop is not possible: use replay"
+    )
 
 
 def test_reasoning_field_on_ollama_is_refused(
@@ -114,10 +122,10 @@ def test_reasoning_field_on_ollama_is_refused(
     _write_config(path, backend="ollama")
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
     assert _main(["--reasoning-field", "auto", "q"], monkeypatch) == 2
-    assert (
+    assert _error_line(capsys) == (
         "melo: error: argument --reasoning-field: the ollama backend always "
-        "reads and sends the thinking field\n"
-    ) in capsys.readouterr().err
+        "reads and sends the thinking field"
+    )
 
 
 def test_invalid_reasoning_values_are_argparse_errors(
@@ -127,10 +135,10 @@ def test_invalid_reasoning_values_are_argparse_errors(
     with pytest.raises(SystemExit) as exc:
         parser.parse_args(["--reasoning", "compress", "q"])
     assert exc.value.code == 2
-    assert (
-        "argument --reasoning: invalid choice: 'compress' "
+    assert _error_line(capsys) == (
+        "melo: error: argument --reasoning: invalid choice: 'compress' "
         "(choose from 'legacy', 'drop', 'replay')"
-    ) in capsys.readouterr().err
+    )
 
     with pytest.raises(SystemExit) as exc:
         parser.parse_args(["--replay-turns", "0", "q"])
@@ -174,11 +182,65 @@ def test_base_url_does_not_read_the_agent_table(
     parser, args = _parse(["--base-url", "http://127.0.0.1:1/v1", "q"])
     options = cli._direct_options(parser, args)
     with (
-        mock.patch("localmelo.support.providers.llm.openai_compat.OpenAICompatLLM"),
+        mock.patch(
+            "localmelo.support.providers.llm.openai_compat.OpenAICompatLLM"
+        ) as provider,
+        mock.patch.object(cli, "Agent") as agent_cls,
         mock.patch.object(config, "load") as load,
     ):
         cli._build_direct_mode_agent(args, options=options)
     load.assert_not_called()
+    assert agent_cls.call_args.kwargs["options"].reasoning == "legacy"
+
+    parser, args = _parse(
+        [
+            "--base-url",
+            "http://127.0.0.1:1/v1",
+            "--reasoning",
+            "replay",
+            "--reasoning-field",
+            "auto",
+            "q",
+        ]
+    )
+    options = cli._direct_options(parser, args)
+    with (
+        mock.patch(
+            "localmelo.support.providers.llm.openai_compat.OpenAICompatLLM"
+        ) as provider,
+        mock.patch.object(cli, "Agent") as agent_cls,
+    ):
+        cli._build_direct_mode_agent(args, options=options)
+    assert provider.call_args.kwargs["reasoning_field"] == "auto"
+    assert agent_cls.call_args.kwargs["options"].reasoning == "replay"
+
+    parser, args = _parse(
+        ["--base-url", "http://127.0.0.1:1/v1", "--reasoning-field", "auto", "q"]
+    )
+    options = cli._direct_options(parser, args)
+    with (
+        mock.patch(
+            "localmelo.support.providers.llm.openai_compat.OpenAICompatLLM"
+        ) as provider,
+        mock.patch.object(cli, "Agent"),
+    ):
+        cli._build_direct_mode_agent(args, options=options)
+    assert "reasoning_field" not in provider.call_args.kwargs
+    assert options.reasoning == "legacy"
+
+
+def test_a_config_reasoning_field_is_inert_without_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.toml"
+    _write_config(path, extra='reasoning_field = "auto"\n')
+    monkeypatch.setattr(config, "CONFIG_PATH", str(path))
+    parser, args = _parse(["q"])
+    options = cli._direct_options(parser, args)
+    with mock.patch.object(cli, "Agent") as agent_cls:
+        cli._build_direct_mode_agent(args, options=options)
+    built_cfg = agent_cls.call_args.kwargs["config"]
+    assert built_cfg.vllm.reasoning_field == ""
 
 
 def test_the_agent_table_round_trips_and_is_dropped_at_defaults(tmp_path: Path) -> None:
@@ -192,8 +254,14 @@ def test_the_agent_table_round_trips_and_is_dropped_at_defaults(tmp_path: Path) 
         save(cfg)
         text = path.read_text(encoding="utf-8")
         assert "[agent]" in text
+        assert text.index("[gateway]") < text.index("[agent]")
         loaded = config.load()
         assert (loaded.agent.reasoning, loaded.agent.replay_turns) == ("replay", 3)
+        loaded.agent = AgentConfig(replay_turns=3)
+        save(loaded)
+        text = path.read_text(encoding="utf-8")
+        assert 'reasoning = "legacy"' in text
+        assert "replay_turns = 3" in text
         loaded.agent = AgentConfig()
         save(loaded)
         assert "[agent]" not in path.read_text(encoding="utf-8")
@@ -230,14 +298,26 @@ def test_the_backend_reasoning_keys_round_trip_only_when_set(tmp_path: Path) -> 
         assert "requires_reasoning_replay" not in text
 
 
+@pytest.mark.parametrize(
+    ("argument", "message"),
+    [
+        ('reasoning = "compress"', "[agent] reasoning 'compress' is not recognised"),
+        ("replay_turns = 0", "[agent] replay_turns must be an int >= 1"),
+        ('replay_turns = "three"', "[agent] replay_turns must be an int >= 1"),
+    ],
+)
 def test_an_invalid_agent_value_exits_through_the_config_path(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    argument: str,
+    message: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     path = tmp_path / "config.toml"
-    _write_config(path, agent='\n[agent]\nreasoning = "compress"\n')
+    _write_config(path, agent=f"\n[agent]\n{argument}\n")
     monkeypatch.setattr(config, "CONFIG_PATH", str(path))
     assert _main(["q"], monkeypatch) == 1
-    assert "[agent] reasoning 'compress' is not recognised" in capsys.readouterr().err
+    assert message in capsys.readouterr().err
 
 
 class FakeLLM(BaseLLMProvider):

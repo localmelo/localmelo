@@ -462,7 +462,7 @@ class Chat:
         final: bool = False,
         retry: bool = False,
         fit: Callable[[list[Message]], Awaitable[list[Message] | None]] | None = None,
-    ) -> Message:
+    ) -> Message | None:
         """Ask the LLM to reflect on the current attempt.
 
         The request is a user message after the newest turns of *short*.
@@ -477,7 +477,9 @@ class Chat:
         *fit*, when given, receives the built messages before they are
         sent and returns them, maybe shortened, or ``None`` to refuse the
         request. The explicit reasoning modes pass it to keep the
-        reflection under the prompt cap; ``legacy`` sends unchecked.
+        reflection under the prompt cap; ``legacy`` sends unchecked. A
+        refused request returns ``None``: no reply is invented and no
+        request is sent.
         """
         # Build system prompt with prior reflection context
         system_parts = [REFLECTION_PROMPT]
@@ -529,8 +531,7 @@ class Chat:
         if fit is not None:
             fitted = await fit(messages)
             if fitted is None:
-                # Refused before it is sent: no request, so the caller sees
-                # an unreadable reflection.
-                return Message(role="assistant", content="")
+                # Refused before it is sent: no request and no reply.
+                return None
             messages = fitted
         return await self._request(messages, tools=None, kind="reflect")

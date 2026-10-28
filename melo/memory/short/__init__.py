@@ -139,13 +139,16 @@ class WorkingMemory:
             dropped += size
         return dropped
 
-    def strip_thinking(self, count: int) -> int:
+    def strip_thinking(self, count: int, *, only: set[int] | None = None) -> int:
         """Clear the thinking of the *count* oldest units of the buffer.
 
         Only an assistant message's ``thinking`` is cleared; its content,
         calls and results stay, so the unit is not dropped. Returns the
         number of messages changed. The newest unit always stays, as in
         :meth:`drop_oldest_units`: a window with one unit changes nothing.
+        With *only*, a set of ``id()`` values, only those messages change;
+        the fit-to-cap loop uses it so it never clears reasoning the
+        request does not carry (an earlier task's, or a turn over the cap).
         """
         changed = 0
         index = 0
@@ -157,9 +160,12 @@ class WorkingMemory:
                 break  # only the newest unit is left
             for offset in range(index, index + size):
                 msg = self._buf[offset]
-                if msg.role == "assistant" and msg.thinking:
-                    self._buf[offset] = dataclasses.replace(msg, thinking="")
-                    changed += 1
+                if msg.role != "assistant" or not msg.thinking:
+                    continue
+                if only is not None and id(msg) not in only:
+                    continue
+                self._buf[offset] = dataclasses.replace(msg, thinking="")
+                changed += 1
             index += size
         return changed
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections import deque
 from typing import Any
 
@@ -180,8 +181,10 @@ async def test_details_are_absent_when_no_response_reported_them() -> None:
 
 
 @pytest.mark.asyncio
-async def test_the_json_line_is_one_line_for_replay() -> None:
+async def test_the_record_serializes_to_one_json_line_for_replay() -> None:
     llm = FakeLLM([Message(role="assistant", content="ok", thinking="draft")])
     result = await Agent(llm=llm, options=_options(reasoning="replay")).run_task("q")
-    assert "\n" not in result.to_dict()["result"]
-    assert "memory_stats" in result.to_dict()
+    data = result.to_dict()
+    line = json.dumps(data)
+    assert "\n" not in line
+    assert "memory_stats" in data

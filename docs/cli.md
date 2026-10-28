@@ -455,8 +455,9 @@ These options apply to `melo` without a task.
 
 - The UI also takes `--max-steps`, `--attempt-policy`, `--reflection-gate`,
   `--builtins`, `--memory`, `--memory-dir`, `--request-timeout`,
-  `--reasoning`, `--reasoning-field`, `--replay-turns` and the
-  `--embedding-*` options, for every turn of the session. `--tool-exposure`
+  `--reasoning`, `--replay-turns` and the `--embedding-*` options, for
+  every turn of the session. The UI does not yet apply `[agent]` or a
+  `--base-url` `--reasoning-field`; use direct mode for those. `--tool-exposure`
   (the UI offers every tool), `--timeout`, `--output-format`, `--progress`
   and `--routine` are usage errors there, and so, for now, are
   `--mcp-config` and `--mcp-only`.

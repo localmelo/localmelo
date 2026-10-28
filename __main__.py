@@ -1159,7 +1159,8 @@ def _build_direct_mode_agent(
             {} if request_timeout is None else {"timeout": request_timeout}
         )
         reasoning_field = getattr(args, "reasoning_field", None)
-        if reasoning_field is not None:
+        mode = options.reasoning if options is not None else "legacy"
+        if reasoning_field is not None and mode == "replay":
             llm_options["reasoning_field"] = reasoning_field
         llm = OpenAICompatLLM(base_url=base_url, model=model, **llm_options)
         return Agent(
@@ -1201,13 +1202,11 @@ def _build_direct_mode_agent(
     if section is None:
         parser.error(f"chat_backend {cfg.chat_backend!r}: no registered adapter found")
     reasoning_field = getattr(args, "reasoning_field", None)
-    if reasoning_field is not None:
-        if cfg.chat_backend == "ollama":
-            parser.error(
-                "argument --reasoning-field: the ollama backend always reads "
-                "and sends the thinking field"
-            )
-        section.reasoning_field = reasoning_field
+    if reasoning_field is not None and cfg.chat_backend == "ollama":
+        parser.error(
+            "argument --reasoning-field: the ollama backend always reads "
+            "and sends the thinking field"
+        )
 
     if options is None:
         options = AgentOptions()
@@ -1220,6 +1219,14 @@ def _build_direct_mode_agent(
         and cfg.agent.replay_turns is not None
     ):
         options = dataclasses.replace(options, replay_turns=cfg.agent.replay_turns)
+
+    # The field only has meaning in replay; legacy keeps the provider's own
+    # behavior (OpenAI-compatible sends none) even if the file names one.
+    if options.reasoning == "replay":
+        if reasoning_field is not None:
+            section.reasoning_field = reasoning_field
+    else:
+        section.reasoning_field = ""
 
     field = getattr(section, "reasoning_field", "") or (
         "thinking" if cfg.chat_backend == "ollama" else None

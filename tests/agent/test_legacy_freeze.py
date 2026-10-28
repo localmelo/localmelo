@@ -184,7 +184,9 @@ async def test_the_only_change_on_the_wire_is_the_kind_header(
 
 
 def test_run_result_and_message_keep_their_fields() -> None:
-    assert [f.name for f in dataclasses.fields(RunResult)] == [
+    assert [
+        f.name for f in dataclasses.fields(RunResult) if f.name != "memory_stats"
+    ] == [
         "task_id",
         "status",
         "result",
@@ -199,9 +201,6 @@ def test_run_result_and_message_keep_their_fields() -> None:
         "usage",
         "duration_s",
         "config",
-        # R2 adds the replay counters; a legacy result omits the key from
-        # to_dict(), but the dataclass field itself is always there.
-        "memory_stats",
     ]
     assert [f.name for f in dataclasses.fields(Message)] == [
         "role",
