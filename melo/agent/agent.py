@@ -4489,6 +4489,8 @@ class Agent:
           effort, if any, is the result, or the latest planning text when
           that reflection was unreadable (``reflection_gate="flags"``, see
           :meth:`_run_reflective_attempts`);
+        - ``context_budget_exceeded``: the pinned request cannot fit the
+          configured input budget, or the smaller overflow retry was refused;
         - ``stuck``: stuck detection fired with ``attempt_policy="none"``;
         - ``provider_error``: a model server request failed with a
           :class:`~localmelo.melo.contracts.providers.ProviderError`: a

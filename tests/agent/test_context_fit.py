@@ -158,6 +158,87 @@ def test_user_text_that_looks_like_recall_is_pinned() -> None:
         fit(messages, estimate([messages[0], *messages[-2:]], None))
 
 
+def test_two_fits_do_not_repreview_or_recount() -> None:
+    messages = [Message("user", "task"), *pair(1, "x" * 5000), *pair(2, "y" * 5000)]
+    first, counts = fit(messages, estimate(messages, None) - 1000)
+    assert counts["tool_results"] == 1 and "4744 characters omitted" in first[2].content
+    second, counts = fit(
+        first, estimate(first, None) + 100, threshold=estimate(first, None)
+    )
+    assert "4744 characters omitted" in second[2].content
+    assert (
+        counts["tool_results"] == 1 and "4744 characters omitted" in second[4].content
+    )
+
+
+def test_preview_keeps_exit_code_across_boundary() -> None:
+    messages = [
+        Message("user", "task"),
+        *pair(1, "x" * 250 + "[exit code 0]" + "y" * 237),
+    ]
+    result, _ = fit(messages, estimate(messages, None) - 30)
+    assert "[exit code 0]" in result[2].content
+    assert "237 characters omitted" in result[2].content
+
+
+def test_preview_oldest_before_thinking() -> None:
+    messages = [
+        Message("user", "task"),
+        *pair(1, "a" * 3000, thinking="t" * 3000),
+        *pair(2, "b" * 3000),
+    ]
+    result, counts = fit(messages, estimate(messages, None) - 400)
+    assert "characters omitted" in result[2].content
+    assert (
+        result[4].content == messages[4].content
+        and result[1].thinking == messages[1].thinking
+    )
+    assert counts == {"tool_results": 1, "thinking": 0, "units": 0}
+
+
+def test_old_recall_evicted_whole_current_recall_kept() -> None:
+    from localmelo.melo.memory.notes import RECALL_END, RECALL_START
+
+    old = RECALL_START + " old]\n" + "r" * 2000 + "\n" + RECALL_END
+    current = RECALL_START + " current]\n" + "s" * 2000 + "\n" + RECALL_END
+    messages = [
+        Message("user", "task"),
+        *pair(1, "old output"),
+        Message("user", old),
+        *pair(2, "new output\n" + current),
+    ]
+    expected = [messages[0], *messages[1:3], *messages[-2:]]
+    result, counts = fit(messages, estimate(expected, None))
+    assert result == expected and counts["units"] == 1
+    assert current in result[-1].content
+    with pytest.raises(ContextFitError):
+        fit(messages, 1)
+
+
+def test_old_embedded_recall_removed_without_changing_tool_pair() -> None:
+    from localmelo.melo.memory.notes import RECALL_END, RECALL_START
+
+    recall = RECALL_START + " old]\n" + "r" * 1000 + "\n" + RECALL_END
+    messages = [
+        Message("user", "task"),
+        *pair(1, "old output\n" + recall),
+        *pair(2, "new output"),
+    ]
+    expected = [Message("user", "task"), *pair(1, "old output"), *pair(2, "new output")]
+    result, counts = fit(messages, estimate(expected, None))
+    assert result[2].content == "old output" and result[2].tool_call_id == "id1"
+    assert counts["units"] == 1 and counts["tool_results"] == 0
+
+
+def test_preview_preserves_embedded_current_recall() -> None:
+    from localmelo.melo.memory.notes import RECALL_END, RECALL_START
+
+    recall = RECALL_START + " current]\n" + "r" * 1000 + "\n" + RECALL_END
+    messages = [Message("user", "task"), *pair(1, "x" * 2000 + "\n" + recall)]
+    result, _ = fit(messages, estimate(messages, None) - 200)
+    assert result[-1].content.endswith(recall)
+
+
 def test_error_metadata_preserved() -> None:
     messages = [Message("user", "task"), *pair(1, "a" * 2000), *pair(2, "latest")]
     messages[2].tool_result = ToolResult("shell", error="important")

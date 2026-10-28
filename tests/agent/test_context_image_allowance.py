@@ -5,8 +5,16 @@ import zlib
 
 import pytest
 
-from localmelo.melo.agent._request_accounting import IMAGE_TOKENS, request_proxy
+from localmelo.melo.agent._request_accounting import (
+    IMAGE_TOKENS,
+    PROXY_VERSION,
+    request_proxy,
+)
 from localmelo.melo.schema import ImagePart, Message
+
+
+def test_image_formula_has_new_proxy_version() -> None:
+    assert PROXY_VERSION == "utf8-bytes-v2"
 
 
 def png(width: int, height: int) -> bytes:

@@ -59,11 +59,12 @@ def _context_overflow(response: httpx.Response) -> bool:
     except ValueError:
         return False
     error = data.get("error") if isinstance(data, dict) else None
-    if not isinstance(error, dict):
-        return False
-    if error.get("code") in ("context_length_exceeded", "context_window_exceeded"):
-        return True
-    message = error.get("message")
+    if isinstance(error, dict):
+        if error.get("code") in ("context_length_exceeded", "context_window_exceeded"):
+            return True
+        message = error.get("message")
+    else:
+        message = error
     return isinstance(message, str) and bool(
         re.search(r"maximum context length is \d+ tokens", message, re.IGNORECASE)
     )

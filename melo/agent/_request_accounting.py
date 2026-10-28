@@ -10,7 +10,7 @@ from typing import Any
 
 from localmelo.melo.schema import ImagePart, Message, ToolDef, decode_base64
 
-PROXY_VERSION = "utf8-bytes-v1"
+PROXY_VERSION = "utf8-bytes-v2"
 # Allowance is an estimate, not a guarantee: vision tokenization is model-specific.
 IMAGE_TOKENS = 16384
 

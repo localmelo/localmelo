@@ -80,6 +80,50 @@ async def test_overflow_retry_shrinks_request_without_rerunning_tool(
     assert sum(e.type == "tool.started" for e in events) == 1
 
 
+async def test_initial_fit_sends_preview_without_changing_history(
+    tmp_path: Path,
+) -> None:
+    output = "evidence " * 1000
+    (tmp_path / "input.txt").write_text(output)
+    llm = Scripted(
+        [
+            Message(
+                role="assistant",
+                tool_calls=[ToolCall("file_read", {"path": "input.txt"}, id="c1")],
+            ),
+            Message(role="assistant", content="done"),
+        ]
+    )
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_read"}),
+            memory=False,
+            context_window=3000,
+            output_reserve=100,
+            safety_margin=100,
+        ),
+    )
+    try:
+        result = await agent.run_task("Read input.txt")
+        window = agent.hippo.working.get_window()
+        history = await agent.hippo.history.get_steps(result.task_id)
+        assert result.status == "completed" and result.n_tool == 1
+        assert len(llm.requests) == 2
+        assert "characters omitted" in next(
+            m.content for m in llm.requests[1] if m.role == "tool"
+        )
+        assert any(m.role == "tool" and output in m.content for m in window)
+        assert (
+            history[0].tool_result is not None
+            and output in history[0].tool_result.output
+        )
+        assert result.to_dict()["context_budget"][-1]["pruned"]["tool_results"] == 1
+    finally:
+        await agent.close()
+
+
 async def test_second_overflow_does_not_retry_again(tmp_path: Path) -> None:
     (tmp_path / "input.txt").write_text("evidence " * 1000)
 
@@ -150,6 +194,8 @@ async def test_impossible_request_is_a_noncrash_status() -> None:
             },
             True,
         ),
+        (400, {"error": "maximum context length is 8192 tokens"}, True),
+        (429, {"error": "maximum context length is 8192 tokens"}, False),
         (400, {"error": {"message": "bad request"}}, False),
         (429, {"error": {"code": "context_length_exceeded"}}, False),
         (401, {"error": {"code": "context_length_exceeded"}}, False),

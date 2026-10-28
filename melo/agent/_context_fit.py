@@ -6,6 +6,7 @@ import copy
 import re
 from collections.abc import Callable
 
+from localmelo.melo.memory.notes import RECALL_END, RECALL_START
 from localmelo.melo.memory.short import group_turns
 from localmelo.melo.schema import EMPTY_REPLY_LABEL, Message, ToolDef
 
@@ -17,6 +18,17 @@ class ContextFitError(Exception):
 _EXIT = re.compile(r"\[exit code (-?\d+)\]", re.IGNORECASE)
 _FAILURE = re.compile(r"\b(error|errors|failed|failure|traceback)\b", re.IGNORECASE)
 _PREVIEW_CHARS = 256
+_PREVIEW = re.compile(r"\n\[tool output preview: \d+ characters omitted\]")
+
+
+def _recall_suffix(text: str) -> tuple[str, str]:
+    """Separate one complete trailing recall block from its tool output."""
+    start = text.rfind(RECALL_START)
+    if start < 0 or not text.rstrip().endswith(RECALL_END):
+        return text, ""
+    if start and text[start - 1] != "\n":
+        return text, ""
+    return text[:start], text[start:]
 
 
 def _failed(message: Message) -> bool:
@@ -97,21 +109,26 @@ def fit_request(
         for message in unit:
             if message.role != "tool" or _failed(message):
                 continue
-            text = message.content
-            if len(text) <= _PREVIEW_CHARS:
+            text, recall = _recall_suffix(message.content)
+            if len(text) <= _PREVIEW_CHARS or _PREVIEW.search(text):
                 continue
-            # Keep every exit status, even if it is beyond the preview.
-            statuses = [m.group(0) for m in _EXIT.finditer(text[_PREVIEW_CHARS:])]
-            preview = text[:_PREVIEW_CHARS]
-            omitted = len(text) - len(preview) - sum(map(len, statuses))
+            statuses = list(_EXIT.finditer(text))
+            cut = _PREVIEW_CHARS
+            for status in statuses:
+                if status.start() < cut < status.end():
+                    cut = status.start()
+                    break
+            kept_statuses = [m.group(0) for m in statuses if m.start() >= cut]
+            preview = text[:cut]
+            omitted = len(text) - len(preview) - sum(map(len, kept_statuses))
             replacement = (
                 f"{preview}\n[tool output preview: {omitted} characters omitted]"
             )
-            if statuses:
-                replacement += "\n" + " ".join(statuses)
+            if kept_statuses:
+                replacement += "\n" + " ".join(kept_statuses)
             if len(replacement) >= len(text):
                 continue
-            message.content = replacement
+            message.content = replacement + ("\n" + recall if recall else "")
             counts["tool_results"] += 1
             if fits():
                 return flatten(), counts
@@ -129,6 +146,29 @@ def fit_request(
                     counts["thinking"] += 1
                     if fits():
                         return flatten(), counts
+
+    # Recall is a whole evictable item, even when attached to a tool result.
+    # Keep the current unit's recall and every incomplete tool unit intact.
+    for unit in list(units):
+        if unit is newest or unit is units[-1]:
+            continue
+        if unit[0].tool_calls and not _complete_tool_unit(unit):
+            continue
+        for message in list(unit):
+            body, recall = _recall_suffix(message.content)
+            if not recall or message.images:
+                continue
+            if message.role == "user" and not body:
+                unit.remove(message)
+                if not unit:
+                    units.remove(unit)
+            elif message.role == "tool":
+                message.content = body.rstrip("\n")
+            else:
+                continue
+            counts["units"] += 1
+            if fits():
+                return flatten(), counts
 
     for unit in list(units):
         if (
