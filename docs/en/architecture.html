@@ -307,7 +307,8 @@
           the checker then sees every call that is left. With a workspace
           root, the workspace policy then resolves the path of a file tool
           and refuses one outside the root. With an approval policy, a call of
-          a tool that requires approval then waits for the policy's decision,
+          a tool whose permission tier is not <code>read</code>, or that is
+          marked as requiring approval, then waits for the policy's decision,
           and once it is allowed, a file path under a workspace root is
           resolved again and refused if it changed in the meantime. Each
           tool runs with a time limit, which starts after the approval:
