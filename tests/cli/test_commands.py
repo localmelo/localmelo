@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
-from prompt_toolkit.completion import CompleteEvent
+from prompt_toolkit.completion import CompleteEvent, Completion
 from prompt_toolkit.document import Document
 
 from localmelo.support.cli.commands import COMMANDS, find, help_text, parse_command
-from localmelo.support.cli.completion import SlashCompleter
+from localmelo.support.cli.completion import AttachmentCompletion, SlashCompleter
 from localmelo.support.cli.output import RecordingOut
 
 
@@ -53,10 +55,35 @@ def _complete(text: str, models: list[str] | None = None) -> list[tuple[str, str
     ]
 
 
+def test_attachment_completions_are_workspace_files_only(tmp_path: Path) -> None:
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "file.txt").write_text("private")
+    (root / "dir").mkdir()
+    (root / "dir" / "nested.txt").write_text("private")
+    (root / "link").symlink_to(tmp_path, target_is_directory=True)
+    (root / "file-link").symlink_to(root / "file.txt")
+    completer = SlashCompleter()
+    completer.workspace = lambda: str(root)
+
+    def complete(text: str) -> list[Completion]:
+        return list(completer.get_completions(Document(text), CompleteEvent()))
+
+    assert [
+        (c.text, isinstance(c, AttachmentCompletion)) for c in complete("see @")
+    ] == [("@dir/", False), ("@file.txt", True)]
+    assert [c.text for c in complete("see @dir/n")] == ["@dir/nested.txt"]
+    for text in ("email@file", "@../", "@/etc/", "@link/", "@file-link"):
+        assert complete(text) == []
+
+
 def test_slash_lists_every_command_with_its_line() -> None:
     shown = _complete("/")
     assert [text for text, _, _ in shown] == [
         "/help",
+        "/attach",
+        "/attachments",
+        "/detach",
         "/new",
         "/clear",
         "/sessions",

@@ -495,7 +495,7 @@ def test_arrows_then_enter_run_the_picked_command(listed: Melo) -> None:
     listed.see("Ask melo")
     listed.type("/")
     listed.see("Start a new session")
-    listed.type("\x1b[B\x1b[B")  # /help, then /new
+    listed.type("\x1b[B" * 5)  # /help, three attachment commands, then /new
     time.sleep(0.3)
     listed.type("\r")
     listed.see("─ New session ─")
@@ -506,11 +506,11 @@ def test_arrows_then_enter_run_the_picked_command(listed: Melo) -> None:
 def test_a_command_is_echoed_in_the_scrollback(melo: Callable[..., Melo]) -> None:
     term = melo()
     term.see("Ask melo")
-    term.type("/help\r")
-    term.see("esc stop the turn · ctrl+c clear, stop or quit")
+    term.type("/help attach\r")
+    term.see("During a turn: no")
     screen = pyte.Screen(100, 30)
     pyte.Stream(screen).feed(term.output.decode("utf-8", "replace"))
     rows = [row.rstrip() for row in screen.display]
-    echo = rows.index("› /help")
-    assert rows[echo - 1] == "" and rows[echo + 1] == "Commands", rows
+    echo = rows.index("› /help attach")
+    assert rows[echo - 1] == "" and rows[echo + 1] == "/attach PATH", rows
     assert term.quit() == 0
