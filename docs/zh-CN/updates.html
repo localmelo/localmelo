@@ -64,7 +64,7 @@
         </div>
         <p>计划中：</p>
         <ul>
-          <li>交互式命令行的后续部分：审批中显示改动的 diff、可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
+          <li>交互式命令行的后续部分：可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
           <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
           <li>把模型的推理过程保存为记忆笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
@@ -76,6 +76,44 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-28-tool-hints">
+          <h3>工具提示只来自模型自己的调用</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/80">#80</a>
+          </p>
+          <ul>
+            <li>默认的 <code>retrieve</code> 模式下，每一步额外提供的工具只有模型在这次对话中已经调用过的工具，以及按关键词搜索与任务最接近的三个匹配。任务、工具结果、召回的长期记忆或反思里出现的工具名不再提供那个工具，所以运行中的文字无法把模型从未调用过的工具重新放到它面前。</li>
+            <li>内置工具和调用被拒绝后的再次提供都不变；<code>all</code> 仍然在每一步提供所有已注册的工具。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-python-exec-child">
+          <h3>Python 代码始终在子进程中运行</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/79">#79</a>
+          </p>
+          <ul>
+            <li>Python 代码现在在所有模式下都在子 Python 中运行，而不只是设置了工作区根目录时：循环、休眠或调用 <code>os._exit()</code> 的代码不会再占住或结束 <code>melo</code>。工具的时间限制（默认 60 秒，交互式界面中 10 分钟）和一次运行的 <code>timeout_s</code> 会连同它启动的所有进程一起终止子进程；子进程还有一小时的 CPU 时间限制和 1,024 个打开文件的上限。</li>
+            <li>代码通过标准输入（一个管道）交给子进程，而不在它的命令行里，所以 <code>ps</code> 看不到代码，调用也不受命令行长度限制；此后子进程从标准输入读到的是文件结尾。代码以 <code>__main__</code> 运行，<code>sys.argv == [&quot;-c&quot;]</code>，每次调用都是新的命名空间，所以模块状态不会从一次调用带到下一次；写入标准输出或标准错误的内容（包括子进程写入的）都是这次调用的输出，而不是 melo 的输出。</li>
+            <li>失败时现在显示 <code>Python exited with code &lt;n&gt;:</code> 和子进程输出的末尾，而不是异常的文字；<code>sys.exit(0)</code> 算成功。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-reasoning-modes">
+          <h3>选择如何把回复的推理发回模型</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/78">#78</a>
+          </p>
+          <ul>
+            <li>直接运行可以用 <code>--reasoning legacy|drop|replay</code>（默认 <code>legacy</code>）、<code>--reasoning-field</code>（<code>auto</code>、<code>reasoning_content</code> 或 <code>reasoning</code>）和 <code>--replay-turns N</code>，或在 <code>config.toml</code> 里使用 <code>[agent]</code> 的 <code>reasoning</code> 和 <code>replay_turns</code>。<code>legacy</code> 保持请求不变，<code>drop</code> 从不发送推理，<code>replay</code> 在范围内的助手回合上发送推理，默认只限当前任务的回合。</li>
+            <li><code>replay</code> 每个回合最多保留 40,000 个字符的推理（更长的推理会被跳过并计数）；<code>requires_reasoning_replay = true</code> 的后端会收到窗口内所有助手回合的推理，开启 <code>record_answers</code> 时会保留最终回答的思考，并且拒绝 <code>drop</code>。</li>
+            <li>在 <code>legacy</code> 之外，JSON 行会加上 <code>config.reasoning</code>、<code>config.replay_turns</code>、<code>usage.reasoning_chars</code> 和 <code>memory_stats</code> 里的重放计数；<code>legacy</code> 的记录与之前逐字节相同。交互式界面目前还不接受 <code>--reasoning-field</code>。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-27-gpu-lock">
           <h3>网关读取 GPU 锁和电池</h3>

@@ -11,11 +11,12 @@ import signal
 import stat
 import subprocess
 import sys
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Mapping
 from typing import Any
 
 from localmelo.melo.checker.tiers import BUILTIN_TIERS, tier_requires_approval
 from localmelo.melo.checker.validators import MAX_OUTPUT_LEN
+from localmelo.melo.executor.env import child_env
 from localmelo.melo.schema import ToolDef
 
 # A built-in tool's callable.
@@ -112,7 +113,8 @@ async def _shell_exec(command: str) -> str:
     # ttyname(stdin) without O_NOCTTY in its start-up check and takes it as
     # its controlling terminal; when the shell exits, the pty is hung up
     # and melo's own streams return EIO, so the flush at exit turns 0 into
-    # 120.  The rooted shell_exec passes /dev/null too.
+    # 120.  The rooted shell_exec passes /dev/null too. The shell gets the
+    # minimal environment of _run_shell, not this process's.
     text, _ = await _run_shell(command, stdin=subprocess.DEVNULL)
     return text
 
@@ -123,6 +125,7 @@ async def _run_shell(
     cwd: str | None = None,
     stdin: int | None = None,
     timeout_s: float | None = None,
+    tool_env: Mapping[str, str] | None = None,
 ) -> tuple[str, int]:
     """Run *command* in a shell; return its output and its exit status.
 
@@ -131,7 +134,9 @@ async def _run_shell(
     limits the command, ``None`` standing for :data:`SHELL_TIMEOUT_S` as it
     is when the command starts. A command that runs past it is killed with
     its process group, and ``TimeoutError("Command timed out after <limit>
-    s")`` is raised.
+    s")`` is raised. The shell gets the environment of
+    :func:`~localmelo.melo.executor.env.child_env` with *tool_env* on top,
+    never this process's own.
     """
     limit = SHELL_TIMEOUT_S if timeout_s is None else timeout_s
     # A new session puts the shell and everything it starts in one process
@@ -143,6 +148,7 @@ async def _run_shell(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=cwd,
+        env=child_env(tool_env),
         start_new_session=True,
     )
     try:
@@ -235,7 +241,34 @@ async def _python_exec(code: str) -> str:
     # Its directory is this process's, and the code arrives on its standard
     # input, a pipe, which the wrapper turns into /dev/null before the code
     # runs, so it never reads the terminal melo runs in (see _shell_exec).
+    # Its environment is the minimal one of _run_python, not this process's.
     return await _run_python(code)
+
+
+# ── The child environment ──
+
+
+def builtins_with_env(
+    tool_env: Mapping[str, str],
+) -> dict[str, ToolFunction]:
+    """The unrooted ``shell_exec`` and ``python_exec``, with *tool_env* added.
+
+    The functions of :data:`BUILTINS` give their child the environment of
+    :func:`~localmelo.melo.executor.env.child_env` and nothing from this
+    process beyond the allowlist; these add the run's own variables, such
+    as ``AgentOptions.tool_env``, on top. The dict goes where
+    :func:`rooted_builtins` does (see
+    :func:`~localmelo.melo.executor.register_builtins`).
+    """
+
+    async def shell_exec(command: str) -> str:
+        text, _ = await _run_shell(command, stdin=subprocess.DEVNULL, tool_env=tool_env)
+        return text
+
+    async def python_exec(code: str) -> str:
+        return await _run_python(code, tool_env=tool_env)
+
+    return {"shell_exec": shell_exec, "python_exec": python_exec}
 
 
 # ── The child Python ──
@@ -326,7 +359,12 @@ def _python_wrapper() -> str:
     return limits + read + run
 
 
-async def _run_python(code: str, *, cwd: str | None = None) -> str:
+async def _run_python(
+    code: str,
+    *,
+    cwd: str | None = None,
+    tool_env: Mapping[str, str] | None = None,
+) -> str:
     """Run *code* in a child Python, in *cwd* (``None``: this directory).
 
     The child runs ``sys.executable -c`` with the fixed wrapper of
@@ -336,7 +374,9 @@ async def _run_python(code: str, *, cwd: str | None = None) -> str:
     running it, so ``input()`` gets EOF and it never reads the terminal
     melo runs in. The child starts a new session, so it and everything it
     starts are one process group, and the POSIX limits of
-    :func:`_posix_rlimits` apply to it.
+    :func:`_posix_rlimits` apply to it. Its environment is the one of
+    :func:`~localmelo.melo.executor.env.child_env` with *tool_env* on top,
+    never this process's own.
 
     A timeout or a cancellation kills that group, as for shell_exec. Once
     the child has exited by itself, its status goes to
@@ -355,6 +395,7 @@ async def _run_python(code: str, *, cwd: str | None = None) -> str:
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         cwd=cwd,
+        env=child_env(tool_env),
         start_new_session=True,
     )
     try:
@@ -377,7 +418,10 @@ async def _run_python(code: str, *, cwd: str | None = None) -> str:
 
 
 def rooted_builtins(
-    root: str, *, tool_timeout_s: float | None = None
+    root: str,
+    *,
+    tool_timeout_s: float | None = None,
+    tool_env: Mapping[str, str] | None = None,
 ) -> dict[str, tuple[ToolFunction, float | None]]:
     """The built-ins that work in the workspace *root*, by tool name.
 
@@ -419,7 +463,10 @@ def rooted_builtins(
 
     Both run in a process group of their own, which a timeout or a
     cancellation kills as a whole. Once their child has exited by itself,
-    they record its status in :data:`TOOL_EXIT_CODE`.
+    they record its status in :data:`TOOL_EXIT_CODE`. Both children get
+    the environment of :func:`~localmelo.melo.executor.env.child_env` with
+    *tool_env* on top, never this process's own: a secret in the agent's
+    environment reaches neither, unless *tool_env* names it.
     """
     root = os.path.realpath(root)
     shell_timeout_ms = (
@@ -431,15 +478,24 @@ def rooted_builtins(
     return {
         "file_read": (_rooted_file_read(root), None),
         "file_write": (_rooted_file_write(root), None),
-        "shell_exec": (_rooted_shell_exec(root, tool_timeout_s), shell_timeout_ms),
-        "python_exec": (_rooted_python_exec(root), python_timeout_ms),
+        "shell_exec": (
+            _rooted_shell_exec(root, tool_timeout_s, tool_env),
+            shell_timeout_ms,
+        ),
+        "python_exec": (_rooted_python_exec(root, tool_env), python_timeout_ms),
     }
 
 
-def _rooted_shell_exec(root: str, tool_timeout_s: float | None) -> ToolFunction:
+def _rooted_shell_exec(
+    root: str, tool_timeout_s: float | None, tool_env: Mapping[str, str] | None
+) -> ToolFunction:
     async def shell_exec(command: str) -> str:
         text, returncode = await _run_shell(
-            command, cwd=root, stdin=subprocess.DEVNULL, timeout_s=tool_timeout_s
+            command,
+            cwd=root,
+            stdin=subprocess.DEVNULL,
+            timeout_s=tool_timeout_s,
+            tool_env=tool_env,
         )
         _record_exit_code(returncode)
         if returncode:
@@ -450,9 +506,9 @@ def _rooted_shell_exec(root: str, tool_timeout_s: float | None) -> ToolFunction:
     return shell_exec
 
 
-def _rooted_python_exec(root: str) -> ToolFunction:
+def _rooted_python_exec(root: str, tool_env: Mapping[str, str] | None) -> ToolFunction:
     async def python_exec(code: str) -> str:
-        return await _run_python(code, cwd=root)
+        return await _run_python(code, cwd=root, tool_env=tool_env)
 
     return python_exec
 

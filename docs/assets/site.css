@@ -1058,6 +1058,11 @@ caption {
     white-space: nowrap;
   }
 
+  .update-entry :not(pre) > code {
+    overflow-wrap: break-word;
+    white-space: normal;
+  }
+
   .footer-inner {
     flex-direction: column;
     padding: 22px 16px;

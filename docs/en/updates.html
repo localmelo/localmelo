@@ -70,7 +70,7 @@
         </div>
         <p>Planned:</p>
         <ul>
-          <li>the interactive CLI's next parts: diffs in approvals, sessions you can resume (<code>melo -c</code>, <code>melo -r</code>), attached files and shell commands;</li>
+          <li>the interactive CLI's next parts: sessions you can resume (<code>melo -c</code>, <code>melo -r</code>), attached files and shell commands;</li>
           <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
           <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
@@ -88,6 +88,44 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-2026-10-28-tool-hints">
+          <h3>Tool hints come from the model's own calls</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/80">#80</a>
+          </p>
+          <ul>
+            <li>In the default <code>retrieve</code> mode, the extra tools a step offers are the ones the model has already called in the conversation and the three closest matches for the task by keyword search. A tool named in the task, in a tool result, in recalled memory or in a reflection no longer offers that tool, so text in a run cannot put back in front of the model a tool it never called.</li>
+            <li>The built-in tools and the re-offer after a refused call are unchanged, and <code>all</code> still offers every registered tool on every step.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-python-exec-child">
+          <h3>Python code always runs in a child process</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/79">#79</a>
+          </p>
+          <ul>
+            <li>Python code now runs in a child Python in every mode, not only with a workspace root: code that loops, sleeps or calls <code>os._exit()</code> no longer holds or ends <code>melo</code>. The tool's time limit (60 seconds by default, 10 minutes in the interactive UI) and a run's <code>timeout_s</code> kill the child with every process it started; the child also gets a one-hour CPU-time limit and an open-file limit of 1,024.</li>
+            <li>The code reaches the child on its standard input, a pipe, never in its command line, so <code>ps</code> does not show it and a call has no argument-length limit; the child then gets end-of-file on standard input. The code runs as <code>__main__</code> with <code>sys.argv == [&quot;-c&quot;]</code> in a fresh namespace, so module state does not carry from one call to the next, and writes to stdout or stderr, from a subprocess too, are the call's output instead of melo's.</li>
+            <li>A failure now reads <code>Python exited with code &lt;n&gt;:</code> and the end of the child's output instead of the exception's text, and <code>sys.exit(0)</code> is a success.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-reasoning-modes">
+          <h3>Choose how a reply's reasoning is sent back</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/78">#78</a>
+          </p>
+          <ul>
+            <li>Direct runs take <code>--reasoning legacy|drop|replay</code> (the default is <code>legacy</code>), <code>--reasoning-field</code> (<code>auto</code>, <code>reasoning_content</code> or <code>reasoning</code>) and <code>--replay-turns N</code>, or the <code>[agent]</code> keys <code>reasoning</code> and <code>replay_turns</code> in <code>config.toml</code>. <code>legacy</code> leaves the request unchanged, <code>drop</code> never sends reasoning, and <code>replay</code> sends it on the assistant turns in scope, by default only the current task's.</li>
+            <li><code>replay</code> keeps at most 40,000 characters of one turn's reasoning (a longer turn's reasoning is skipped and counted); a backend with <code>requires_reasoning_replay = true</code> gets every assistant turn in the window, keeps the final answer's thinking when <code>record_answers</code> is on, and refuses <code>drop</code>.</li>
+            <li>Outside <code>legacy</code>, the JSON line adds <code>config.reasoning</code>, <code>config.replay_turns</code>, <code>usage.reasoning_chars</code> and the <code>memory_stats</code> replay counters; a <code>legacy</code> record is byte-identical to before. The interactive UI does not accept <code>--reasoning-field</code> yet.</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-27-gpu-lock">
           <h3>The gateway reads the GPU lock and the battery</h3>
