@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 
 import pytest
 
@@ -13,7 +13,7 @@ from localmelo.melo.schema import Message
 from localmelo.support.gateway.console import Console
 from localmelo.support.gateway.console.errors import ApiError
 from localmelo.support.gateway.console.registry import ConsoleSessions, SettingsSource
-from localmelo.support.sessions.store import NewSession
+from localmelo.support.sessions.store import NewSession, SessionStoreError
 
 from .conftest import FakeAgent, FakeBuilder, make_cfg, open_session, seed_turn
 
@@ -189,6 +189,46 @@ async def test_close_all_closes_every_agent(
     for agent in agents:
         assert agent.closed
         assert agent.exited is not None
+
+
+async def test_open_requires_the_session_lock(console: Console, workspace: str) -> None:
+    turn = await seed_turn(console.store, workspace)
+    with pytest.raises(RuntimeError, match="lock held"):
+        await console.sessions.open(turn.session_id)
+
+
+async def test_open_maps_a_store_read_failure(
+    console: Console, workspace: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+
+    async def broken(session_id: str) -> Any:
+        raise SessionStoreError("read failed")
+
+    monkeypatch.setattr(console.store, "get_session", broken)
+    with pytest.raises(ApiError) as info:
+        await open_session(console.sessions, turn.session_id)
+    assert info.value.status_code == 503
+    assert info.value.code == "store_unavailable"
+
+
+async def test_open_maps_a_resume_failure(
+    console: Console,
+    builder: FakeBuilder,
+    workspace: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+
+    async def broken(*args: Any, **kwargs: Any) -> Any:
+        raise SessionStoreError("resume failed")
+
+    monkeypatch.setattr(console.store, "list_turns", broken)
+    with pytest.raises(ApiError) as info:
+        await open_session(console.sessions, turn.session_id)
+    assert info.value.status_code == 503
+    assert console.sessions.get(turn.session_id) is None
+    assert len(builder.calls) == 1
 
 
 async def test_open_under_its_own_lock_does_not_deadlock(

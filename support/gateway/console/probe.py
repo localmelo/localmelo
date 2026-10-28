@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, Final, Protocol
@@ -65,6 +66,14 @@ def _first_line(text: str) -> str:
     return line
 
 
+_USERINFO = re.compile(r"(://)[^/@\s]+@")
+
+
+def redact_userinfo(text: str) -> str:
+    """Remove ``user:pass@`` from every URL in *text*."""
+    return _USERINFO.sub(r"\1", text)
+
+
 def _exception_text(exc: BaseException) -> str:
     message = str(exc)
     return f"{type(exc).__name__}: {message}" if message else type(exc).__name__
@@ -80,9 +89,11 @@ async def default_probe(backend: str, url: str) -> tuple[bool, str]:
     try:
         await discovery_list_models(backend, url, timeout_s=DISCOVERY_TIMEOUT_S)
     except DiscoveryError as exc:
-        return exc.reachable, "" if exc.reachable else _first_line(str(exc))
+        if exc.reachable:
+            return True, ""
+        return False, _first_line(redact_userinfo(str(exc)))
     except Exception as exc:  # anything else the connection raised
-        return False, _first_line(_exception_text(exc))
+        return False, _first_line(redact_userinfo(_exception_text(exc)))
     return True, ""
 
 
@@ -119,12 +130,22 @@ class ModelServerProbe:
             return None
         section = getattr(self._cfg, backend, None)
         url = getattr(section, "chat_url", "") if section is not None else ""
-        label = url_label(url)
         if not url:
             return {
                 "url_label": "",
                 "reachable": False,
                 "error": "No chat URL is configured.",
+                "checked_s_ago": 0,
+            }
+        label = url_label(url)
+        if not label:
+            # Never probe a value that is not an absolute http(s) URL: a
+            # relative URL can carry a credential, and a malformed one would
+            # make the probe error echo it.
+            return {
+                "url_label": "",
+                "reachable": False,
+                "error": "Not a valid http(s) URL.",
                 "checked_s_ago": 0,
             }
         now = self._clock()

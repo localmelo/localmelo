@@ -115,6 +115,44 @@ async def test_one_shot_stops_at_the_id_the_request_read(
     assert max(event["id"] for event in events) == high_water
 
 
+async def test_leading_zeros_in_an_event_id_are_accepted(
+    client: TestClient, console: Console, workspace: str
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+    resp = client.get(
+        f"/api/sessions/{turn.session_id}/events?after={'0' * 30}1&follow=false"
+    )
+    assert resp.status_code == 200
+    events, _ = parse_frames(resp.text)
+    assert all(event["id"] > 1 for event in events)
+
+
+async def test_a_store_error_at_a_keepalive_does_not_end_the_stream(
+    console: Console, workspace: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import localmelo.support.gateway.console.sse as sse_mod
+
+    monkeypatch.setattr(sse_mod, "SSE_KEEPALIVE_S", 0.01)
+    turn = await seed_turn(console.store, workspace)
+    stored = await console.store.list_events(turn.session_id)
+    after = stored[-1].id
+    assert after is not None
+
+    async def broken(session_id: str) -> Any:
+        raise RuntimeError("store unavailable")
+
+    monkeypatch.setattr(console.store, "get_session", broken)
+    stream = EventStream(
+        console.store, console.hub, console.shutdown, turn.session_id, after_id=after
+    )
+    assert await anext(stream) == "retry: 2000\n\n"
+    assert await anext(stream) == ": keepalive\n\n"
+    console.begin_shutdown()
+    with pytest.raises(StopAsyncIteration):
+        await anext(stream)
+    await stream.aclose()
+
+
 async def test_after_the_newest_event_yields_only_retry(
     client: TestClient, console: Console, workspace: str
 ) -> None:

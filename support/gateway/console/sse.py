@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 from collections.abc import AsyncIterator, Callable
 from typing import Any, Final
 
@@ -35,6 +36,8 @@ SSE_RETRY_MS: Final = 2000
 SSE_PAGE: Final = 1000
 _RETRY_FRAME: Final = f"retry: {SSE_RETRY_MS}\n\n"
 _KEEPALIVE_FRAME: Final = ": keepalive\n\n"
+
+logger = logging.getLogger(__name__)
 
 
 def event_data(event: StoredEvent) -> dict[str, Any]:
@@ -141,7 +144,15 @@ class EventStream:
         try:
             exists = await self._store.get_session(self._session_id) is not None
         except Exception:
-            exists = False
+            # A store error is not a deletion: keep the connection alive and
+            # try again at the next tick. A reconnect gets the 503 if the
+            # store is still unavailable then.
+            logger.warning(
+                "Could not check session %s during a keepalive",
+                self._session_id,
+                exc_info=True,
+            )
+            return _KEEPALIVE_FRAME
         if not exists:
             raise StopAsyncIteration
         return _KEEPALIVE_FRAME

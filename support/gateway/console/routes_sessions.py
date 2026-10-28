@@ -176,7 +176,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
     @app.get("/api/sessions/{session_id}/turns")
     async def list_turns(
         session_id: str,
-        before: int | None = Query(None, ge=1),
+        before: int | None = Query(None, ge=1, le=_EVENT_ID_MAX),
         limit: int = Query(10, ge=1, le=_TURN_LIMIT),
         events: bool = Query(False),
     ) -> JSONResponse:
@@ -314,15 +314,23 @@ def add_routes(app: FastAPI, console: Console) -> None:
 def _event_id(value: str, name: str) -> int:
     """A decimal event id in SQLite's range, or 400 ``invalid_request``."""
     # Decimal digits only: int() would also take "+1", "1_0" and non-ASCII
-    # digits, which are not an event id. More digits than a 64-bit integer
-    # can hold are refused before int() or SQLite sees them.
-    if len(value) > 19 or re.fullmatch(r"[0-9]+", value) is None:
+    # digits, which are not an event id. Leading zeros do not make a valid
+    # id too long; more significant digits than a 64-bit integer can hold
+    # are refused before int() or SQLite sees them.
+    if re.fullmatch(r"[0-9]+", value) is None:
         raise ApiError(
             400,
             "invalid_request",
             f"{name} must be an integer of at least 0.",
         )
-    number = int(value)
+    digits = value.lstrip("0") or "0"
+    if len(digits) > 19:
+        raise ApiError(
+            400,
+            "invalid_request",
+            f"{name} must be an integer of at least 0.",
+        )
+    number = int(digits)
     if number > _EVENT_ID_MAX:
         raise ApiError(
             400,

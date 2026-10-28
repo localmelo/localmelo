@@ -14,14 +14,16 @@ console and leave a request outside ``/api`` alone.
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any, Final
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.exception_handlers import (
     http_exception_handler,
     request_validation_exception_handler,
 )
 from fastapi.exceptions import RequestValidationError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -62,12 +64,19 @@ def error_body(
 
 
 def error_response(
-    status_code: int, code: str, message: str, details: dict[str, Any] | None = None
+    status_code: int,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
+    merged = {"Cache-Control": "no-store"}
+    if headers:
+        merged.update(headers)
     return JSONResponse(
         status_code=status_code,
         content=error_body(code, message, details),
-        headers={"Cache-Control": "no-store"},
+        headers=merged,
     )
 
 
@@ -136,13 +145,15 @@ async def _api_error_handler(request: Request, exc: Exception) -> Response:
 
 
 async def _http_exception_handler(request: Request, exc: Exception) -> Response:
-    assert isinstance(exc, HTTPException)
+    assert isinstance(exc, StarletteHTTPException)
     if not is_api_path(request.url.path):
         return await http_exception_handler(request, exc)
     if exc.status_code == 404:
         return error_response(404, "not_found", "Not found.")
     if exc.status_code == 405:
-        return error_response(405, "method_not_allowed", "Method not allowed.")
+        return error_response(
+            405, "method_not_allowed", "Method not allowed.", headers=exc.headers
+        )
     detail = exc.detail if isinstance(exc.detail, str) else "Invalid request"
     return error_response(exc.status_code, "invalid_request", detail)
 
@@ -157,6 +168,6 @@ async def _validation_handler(request: Request, exc: Exception) -> Response:
 def install(app: FastAPI) -> None:
     """Install the API v2 error handlers and middleware on *app*."""
     app.add_exception_handler(ApiError, _api_error_handler)
-    app.add_exception_handler(HTTPException, _http_exception_handler)
+    app.add_exception_handler(StarletteHTTPException, _http_exception_handler)
     app.add_exception_handler(RequestValidationError, _validation_handler)
     app.add_middleware(ApiMiddleware)

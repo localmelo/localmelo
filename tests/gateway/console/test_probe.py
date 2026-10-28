@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
+import localmelo.support.gateway.console.probe as probe_mod
+from localmelo.support.backends.discovery import DiscoveryError
 from localmelo.support.config import (
     CloudVendorConfig,
     Config,
     GatewayConfig,
     LocalBackendConfig,
 )
-from localmelo.support.gateway.console.probe import ModelServerProbe
+from localmelo.support.gateway.console.probe import ModelServerProbe, default_probe
 
 
 class Clock:
@@ -56,6 +59,40 @@ def test_a_malformed_or_relative_url_has_no_label() -> None:
     assert url_label("http://host:bad/v1") == ""
     assert url_label("user:secret@host:9/v1") == ""
     assert url_label("not a url") == ""
+
+
+async def test_a_malformed_url_is_not_probed() -> None:
+    calls = 0
+
+    async def fake(backend: str, url: str) -> tuple[bool, str]:
+        nonlocal calls
+        calls += 1
+        return True, ""
+
+    probe = ModelServerProbe(
+        local_cfg("http://user:secret@host:notaport/v1"), probe=fake
+    )
+    assert probe.model_server() == {
+        "url_label": "",
+        "reachable": False,
+        "error": "Not a valid http(s) URL.",
+        "checked_s_ago": 0,
+    }
+    assert calls == 0
+    await probe.aclose()
+
+
+async def test_a_probe_error_redacts_userinfo(
+    monkeypatch: Any,
+) -> None:
+    async def boom(*args: Any, **kwargs: Any) -> None:
+        raise DiscoveryError("not a URL: http://user:secret@host:9/v1", reachable=False)
+
+    monkeypatch.setattr(probe_mod, "discovery_list_models", boom)
+    reachable, error = await default_probe("vllm", "http://host:9/v1")
+    assert reachable is False
+    assert "secret" not in error
+    assert "user" not in error
 
 
 async def test_a_local_backend_without_a_url_is_unreachable() -> None:

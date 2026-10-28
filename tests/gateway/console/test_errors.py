@@ -71,6 +71,17 @@ def test_a_known_path_with_the_wrong_method_is_the_envelope(client: TestClient) 
             "details": {},
         }
     }
+    assert "GET" in resp.headers["allow"]
+
+
+@pytest.mark.parametrize("method", ["TRACE", "CONNECT"])
+def test_an_unusual_method_on_a_known_path_is_the_envelope(
+    client: TestClient, method: str
+) -> None:
+    resp = client.request(method, "/api/health")
+    assert resp.status_code == 405
+    assert resp.json()["error"]["code"] == "method_not_allowed"
+    assert "GET" in resp.headers["allow"]
 
 
 def test_an_unknown_path_with_any_method_is_404(client: TestClient) -> None:

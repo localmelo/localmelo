@@ -26,7 +26,7 @@ every route below:
 | 400 | `invalid_request` | a malformed query parameter, or a malformed `client_request_id` |
 | 403 | `foreign_origin` | a request under `/api/` from another site (`Sec-Fetch-Site` is neither `same-origin` nor `none`), or a state-changing request from another origin |
 | 404 | `not_found` | an unknown session, turn, blob or route |
-| 405 | `method_not_allowed` | a known path with a method it does not serve |
+| 405 | `method_not_allowed` | a known path with a method it does not serve; the `Allow` header names the methods it does |
 | 421 | `misdirected_request` | the `Host` header is not `127.0.0.1:<port>`, `localhost:<port>` or `[::1]:<port>` |
 | 500 | `internal_error` | an unexpected failure; the message is `Internal error; see the gateway log.` and never a traceback or a value from the request |
 | 503 | `store_unavailable` | the gateway's session store could not open, or stopped recording changes; restart the gateway in the second case |
@@ -74,6 +74,9 @@ curl http://127.0.0.1:8401/api/health
   first check ends, and `checked_s_ago` is the age of the result. The
   request never waits for the check; a stale result starts one in the
   background (after 30 s, or 5 s while the server does not answer).
+  `url_label` is empty and `reachable` is `false` when `chat_url` is not an
+  absolute `http` or `https` URL; such a value is never probed and its text,
+  user info included, is not echoed.
 - `limits` are the ingress text limit, the session text budget and the API
   body limit in bytes.
 - `sessions.store` is `ok`, `unavailable` (the store could not open and the
@@ -154,8 +157,8 @@ curl 'http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e/turns?limit=10&events=true
   turns and `replay_from` is the event id just before the oldest returned
   turn's `turn.started`, or 0 when the session has no turn. Pass it as the
   event stream's `after` to replay the page's events.
-- With `before=N`, the page is the newest turns numbered below `N`, and
-  there is no `replay_from`.
+- With `before=N` (1 to SQLite's largest integer), the page is the newest
+  turns numbered below `N`, and there is no `replay_from`.
 - `has_earlier` says that older turns exist beyond the page.
 - `events=true` adds each turn's stored events as `events`, in id order,
   exactly as the event stream's `data` frames them.

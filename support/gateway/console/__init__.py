@@ -283,7 +283,17 @@ class Console:
 
 def _add_not_found(app: FastAPI) -> None:
     """Answer an unknown ``/api`` path with the API v2 404 shape."""
-    methods = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    methods = [
+        "GET",
+        "HEAD",
+        "POST",
+        "PUT",
+        "PATCH",
+        "DELETE",
+        "OPTIONS",
+        "TRACE",
+        "CONNECT",
+    ]
 
     @app.api_route("/api", methods=methods)
     async def api_root_not_found() -> JSONResponse:
@@ -291,23 +301,30 @@ def _add_not_found(app: FastAPI) -> None:
 
     @app.api_route("/api/{rest:path}", methods=methods)
     async def api_not_found(request: Request, rest: str) -> JSONResponse:
-        if _serves_another_method(request.app, str(request.url.path), request.method):
-            raise HTTPException(status_code=405, detail="Method Not Allowed")
+        allowed = _allowed_methods(request.app, str(request.url.path))
+        if allowed:
+            raise HTTPException(
+                status_code=405,
+                detail="Method Not Allowed",
+                headers={"Allow": ", ".join(allowed)},
+            )
         raise ApiError(404, "not_found", "Not found.")
 
 
-def _serves_another_method(app: FastAPI, path: str, method: str) -> bool:
-    """Whether one of ``/api``'s real routes matches *path* for a method.
+def _allowed_methods(app: FastAPI, path: str) -> list[str]:
+    """The methods the real ``/api`` routes serve for *path*.
 
     The catch-all runs after every real route; Starlette's router would have
-    answered 405 for a known path with the wrong method, but the catch-all
-    matches the path first. A partial match on a real route is that 405.
+    answered 405 with an ``Allow`` header for a known path with the wrong
+    method, but the catch-all matches the path first. Any real route whose
+    path matches is that answer.
     """
+    methods: set[str] = set()
     scope = {
         "type": "http",
         "path": path,
         "root_path": "",
-        "method": method,
+        "method": "GET",
         "headers": [],
     }
     for route in app.router.routes:
@@ -318,9 +335,9 @@ def _serves_another_method(app: FastAPI, path: str, method: str) -> bool:
         }:
             continue
         match, _ = route.matches(scope)
-        if match == Match.PARTIAL:
-            return True
-    return False
+        if match in (Match.FULL, Match.PARTIAL):
+            methods.update(getattr(route, "methods", None) or ())
+    return sorted(methods)
 
 
 # Re-exported for the gateway and for tests: the path the console uses when

@@ -8,8 +8,8 @@ are open, closes idle Agents on a sweep, and closes everything on shutdown.
 
 No turn starts here in this PR: ``create``, ``start_turn``, ``retry`` and
 ``change_workspace`` are PR 3. :meth:`ConsoleSessions.open` is what the
-turn routes will call under the session's lock; it acquires the lock
-itself, so calling it from a route is safe.
+turn routes will call under the session's lock: the caller holds
+:meth:`ConsoleSessions.lock` and ``open`` refuses a call without it.
 """
 
 from __future__ import annotations
@@ -186,6 +186,10 @@ class ConsoleSessions:
         """
         if self._closed:
             raise RuntimeError("The console's sessions are closed")
+        if not self.lock(session_id).locked():
+            raise RuntimeError(
+                "ConsoleSessions.open() must be called with the session's lock held"
+            )
         return await self._open_locked(session_id)
 
     async def _open_locked(self, session_id: str) -> OpenSession:
@@ -196,7 +200,12 @@ class ConsoleSessions:
             entry.last_used = self._clock()
             return entry
 
-        info = await self._store.get_session(session_id)
+        try:
+            info = await self._store.get_session(session_id)
+        except SessionStoreError as exc:
+            raise ApiError(
+                503, "store_unavailable", display.home_label(str(exc))
+            ) from exc
         if info is None:
             raise ApiError(404, "not_found", "Session not found.")
         workspace = info.workspace
@@ -278,7 +287,7 @@ class ConsoleSessions:
 
         try:
             await self._load(entry)
-        except BaseException:
+        except BaseException as exc:
             # The registry must not keep a half-opened Agent. A new session
             # is dropped; a session that was merely paused keeps its runner,
             # policy and kept conversation for the next open.
@@ -288,6 +297,10 @@ class ConsoleSessions:
                 await agent.close()
             if is_new:
                 self._sessions.pop(session_id, None)
+            if isinstance(exc, SessionStoreError):
+                raise ApiError(
+                    503, "store_unavailable", display.home_label(str(exc))
+                ) from exc
             raise
         return entry
 
