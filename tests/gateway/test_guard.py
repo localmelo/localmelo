@@ -228,7 +228,10 @@ def _build_gateway(
     sessions = RecordingSessions()
     server.sessions = sessions
     client = TestClient(
-        server.app, base_url=f"http://127.0.0.1:{port}", raise_server_exceptions=False
+        server.app,
+        base_url=f"http://127.0.0.1:{port}",
+        raise_server_exceptions=False,
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
     )
     return Gateway(server, sessions, playground, client)
 
@@ -486,7 +489,11 @@ def test_a_foreign_origin_is_refused_on_any_path(
 def test_the_gateway_origin_and_no_origin_pass(
     gateway: Gateway, origin: str | None
 ) -> None:
-    headers = {} if origin is None else {"Origin": origin}
+    headers = (
+        {}
+        if origin is None
+        else {"Origin": origin, "Host": origin.removeprefix("http://")}
+    )
     resp = gateway.client.post("/v1/agent/run", json={"query": "hi"}, headers=headers)
     assert resp.status_code == 200
     assert gateway.sessions.runs == ["hi"]
@@ -497,12 +504,10 @@ def test_the_gateway_origin_and_no_origin_pass(
 
 
 @pytest.mark.parametrize("origin", [FOREIGN_ORIGIN, "null"])
-def test_a_get_with_a_foreign_origin_passes_the_origin_rule(
-    gateway: Gateway, origin: str
-) -> None:
+def test_a_get_with_a_foreign_origin_is_refused(gateway: Gateway, origin: str) -> None:
     for path in ("/", "/v1/health"):
         resp = gateway.client.get(path, headers={"Origin": origin})
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
 
 @pytest.mark.parametrize(
@@ -541,7 +546,9 @@ def test_port_80_accepts_an_origin_without_the_port(
     gateway = _build_gateway(monkeypatch, port=80)
     for origin in ("http://localhost", "http://127.0.0.1:80", "http://[::1]"):
         resp = gateway.client.post(
-            "/v1/agent/run", json={"query": "hi"}, headers={"Origin": origin}
+            "/v1/agent/run",
+            json={"query": "hi"},
+            headers={"Origin": origin, "Host": origin.removeprefix("http://")},
         )
         assert resp.status_code == 200
 
@@ -692,7 +699,7 @@ def test_every_response_forbids_framing(
     resp = gateway.client.get(path, headers=headers)
     assert resp.status_code == status
     assert resp.headers["x-frame-options"] == "DENY"
-    assert resp.headers["content-security-policy"] == "frame-ancestors 'none'"
+    assert "frame-ancestors 'none'" in resp.headers["content-security-policy"]
 
 
 # ---------------------------------------------------------------------------
@@ -734,28 +741,9 @@ def test_a_host_in_brackets_listens_without_them(
     assert gateway.server.uvicorn_server().config.host == "::1"
 
 
-def test_a_non_loopback_host_has_no_guard_and_logs_a_warning(
-    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-) -> None:
-    with caplog.at_level(logging.WARNING, logger="localmelo.gateway"):
-        gateway = _build_gateway(monkeypatch, host="0.0.0.0")
-
-    assert [r.levelno for r in caplog.records] == [logging.WARNING]
-    message = caplog.records[0].getMessage()
-    assert "0.0.0.0 is not localhost or a loopback IP address" in message
-    assert "no authentication" in message
-    assert "DNS rebinding" in message
-    assert 'host = "127.0.0.1"' in message
-
-    assert gateway.server.app.user_middleware == []
-    foreign = {
-        "Host": FOREIGN_HOST,
-        "Origin": FOREIGN_ORIGIN,
-        "Sec-Fetch-Site": "cross-site",
-    }
-    assert gateway.client.get("/v1/health", headers=foreign).status_code == 200
-    resp = gateway.client.post("/v1/agent/run", json={"query": "hi"}, headers=foreign)
-    assert resp.status_code == 200
+def test_a_non_loopback_host_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    with pytest.raises(ValueError, match="loopback"):
+        _build_gateway(monkeypatch, host="0.0.0.0")
 
 
 def test_the_guarded_gateway_starts_and_stops(gateway: Gateway) -> None:
@@ -934,7 +922,7 @@ def test_every_response_carries_the_console_security_headers(
             resp.headers["permissions-policy"]
             == "camera=(), microphone=(), geolocation=()"
         )
-        if path.startswith("/api"):
+        if path == "/" or path.startswith("/api"):
             assert resp.headers.get_list("content-security-policy") == [
                 expected_api_csp
             ]

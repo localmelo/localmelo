@@ -73,6 +73,26 @@ button {
 button:hover:not(:disabled) {
   filter: brightness(0.97);
 }
+.lock-screen {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px 16px;
+  background: var(--sidebar);
+}
+.lock-card {
+  width: min(100%, 440px);
+  padding: clamp(24px, 6vw, 40px);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.lock-brand { display: flex; align-items: center; gap: 10px; }
+.lock-card h1 { margin: 36px 0 12px; font-size: 30px; line-height: 1.2; }
+.lock-card p { overflow-wrap: anywhere; }
+.lock-card code { font-size: 0.95em; }
+#lock-status { color: var(--muted); }
 .app {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);

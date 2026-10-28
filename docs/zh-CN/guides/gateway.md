@@ -34,14 +34,18 @@ melo --serve
 ## 确保网关私密
 
 > [!WARNING]
-> 网关没有身份验证。任何能访问其端口的程序都能使用你的工具和账户权限运行任务，网页工作区还会让网关获取提供给它的任何 URL。请保留默认主机地址 `127.0.0.1`。
+> 网关只允许绑定回环地址，访问受保护的 API 需要 bearer 令牌或浏览器会话 cookie。持有令牌者可以使用你的权限执行操作。私有令牌文件无法防范以同一操作系统用户身份运行的恶意进程、浏览器扩展或被攻陷的同源代码。浏览器 cookie 不按端口隔离：针对特定端口的名称不能构成抵御同一主机上其他服务的安全边界。不要通过代理暴露网关。
+
+启动网关后，在终端中运行 `melo --gateway-login`，并在 60 秒内打开输出的一次性链接。如果使用非默认端口，请加上 `--port PORT`。不要分享该链接。页面会用链接的片段交换一个有效期最长为 30 天、具有 HttpOnly 和 SameSite=Strict 属性的 cookie，然后移除该片段。运行 `melo --gateway-rotate-token` 可替换私有令牌文件。所有使用该文件的网关都会拒绝旧凭证；对已打开的事件流撤销凭证约在 250 毫秒内生效。一个正在发送的事件仍可能发送完成。
+
+bearer 令牌在首次使用时生成，并存储于 `~/.cache/localmelo/gateway/auth/token`（目录权限为 0700，文件权限为 0600）。非浏览器客户端的每个 `/api/` 和 `/v1/` 请求都应发送 `Authorization: Bearer <token>`，包括健康检查、流和 blob 请求。凭证缺失或无效时返回 401。页面和静态资源仅作为公开的引导资源。不要将令牌放入 URL、日志或 shell 历史记录；在命令行中提供请求头可能使其暴露于本地进程检查。此令牌与模型服务器凭证相互独立。
 
 使用默认主机地址时，只有你电脑上的程序能访问网关。网页仍可通过你的浏览器向网关发送请求，因此网关会拒绝并非发往自身的请求：
 
 | HTTP 状态码 | `code` | 情况 |
 |---|---|---|
 | 421 | `misdirected_request` | `Host` 请求头不是 `127.0.0.1:<port>`、`localhost:<port>` 或 `[::1]:<port>`。这可以阻止其他网站上的页面使用自己的域名访问网关（DNS 重绑定）。 |
-| 403 | `foreign_origin` | 请求来自其他源的网页：`POST`、`PUT`、`PATCH`、`DELETE` 或 `OPTIONS` 请求的 `Origin` 不是 `http://127.0.0.1:<port>`、`http://localhost:<port>` 或 `http://[::1]:<port>`；或者 `/v1/` 或 `/api/` 下的请求的 `Sec-Fetch-Site` 为 `cross-site` 或 `same-site`。 |
+| 403 | `foreign_origin` | 提供的 `Origin` 与请求的 Host 不完全匹配，或者 `/v1/` 或 `/api/` 下的请求带有不允许的 `Sec-Fetch-Site`。登录交换要求提供 Origin。 |
 | 413 | `too_large` | 请求体超过 1 MiB（1,048,576 字节）。 |
 | 415 | `unsupported_media_type` | `/api/` 下的请求带有非空请求体，但没有 `Content-Type: application/json`。 |
 
@@ -54,11 +58,11 @@ melo --serve
 被拒绝的 `/api/` 请求则使用 [API v2](../../reference/api-v2.md)（英文）的响应封装：`{"error": {"code": "misdirected_request", "message": "...", "details": {}}}`。
 
 - 使用 `http://127.0.0.1:8401/` 或 `http://localhost:8401/` 打开网页工作区，并替换为你的端口；若设置了 `host = "::1"`，则使用 `http://localhost:8401/` 或 `http://[::1]:8401/`。其他能访问网关的地址，例如 `http://0.0.0.0:8401/`，会收到 421。
-- curl 和脚本不发送 `Origin` 请求头，因此只对它们进行 `Host` 检查。
+- curl 和脚本通常不发送 `Origin` 请求头；Host 和身份验证检查仍然适用。
 - 每个响应都会通过 `X-Frame-Options: DENY` 和以 `frame-ancestors 'none'` 结尾的 `Content-Security-Policy` 告诉浏览器不要在框架中显示该响应，以防其他网站的页面嵌入网页工作区并诱骗你在其中点击。带有自身策略的响应，例如使用 `default-src 'none'; sandbox` 的 blob，会保留一个包含两者的响应头。每个响应还带有 `X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer`、`Cross-Origin-Opener-Policy: same-origin`、`Cross-Origin-Resource-Policy: same-origin` 和 `Permissions-Policy: camera=(), microphone=(), geolocation=()`。
 - 当主机为 `localhost` 或回环 IP 地址时，这些检查会启用：包括 `127.0.0.1`、`::1` 或 `127.0.0.0/8` 中的其他地址。请求仍须以 `127.0.0.1`、`localhost` 或 `[::1]` 指定网关，因此请使用这三个主机地址之一：例如使用 `127.0.0.2` 时，浏览器也会收到 421。
-- 设置 `host = "0.0.0.0"` 或任何其他主机地址时，上述检查均不适用，网关启动时会记录警告。没有检查也没有身份验证，任何能访问该端口的对象，包括网页，都能使用你的工具运行任务。不建议这样做。
-- 在网关具备身份验证之前，不支持通过反向代理或 Tailscale Serve 等方式远程访问。
+- 非回环地址绑定（包括 `0.0.0.0`）会在启动时被拒绝。
+- 不支持通过反向代理或 Tailscale Serve 远程访问。
 
 <a id="sessions"></a>
 

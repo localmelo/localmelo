@@ -170,8 +170,9 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
       <section class="section" id="start-the-gateway">
         <h2>启动网关</h2>
         <p>如果你是用 <code>melo</code> 保存的配置，请用 <code>melo --serve</code> 启动网关；上面的向导会自己启动网关。在第二个终端中检查网关，并通过它运行一个任务：</p>
-        <pre><code>curl http://127.0.0.1:8401/v1/health
-curl -X POST http://127.0.0.1:8401/v1/agent/run \
+        <p>在终端运行 <code>melo --gateway-login</code>，在 60 秒内打开私密的一次性链接。API 示例通过管道把网关令牌传给 curl，不会将令牌放进命令行参数或 shell 历史记录。请勿启用 curl 的详细输出或记录请求头；同一用户的进程仍可读取令牌文件。</p>
+        <pre><code>{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
   -d '{"query": "What is 6*7?"}'</code></pre>
         <p>示例输出（具体数值会不同）：</p>

@@ -22,7 +22,7 @@ cat > queries.jsonl <<'EOF'
 EOF
 ```
 
-语料库包含一个任务 `demo` 的一条笔记、一份代码草稿和一个思维片段。每个查询在 `relevant` 中列出回答它的文档。由于 `q1` 的 `scope` 指定了任务，它可以用 `d2` 代表 `demo:d2`。
+语料库包含一个任务 `demo` 的一条笔记、一份代码草稿和一个思考片段。每个查询在 `relevant` 中列出回答它的文档。由于 `q1` 的 `scope` 指定了任务，它可以用 `d2` 代表 `demo:d2`。
 
 在这些数据上评测 `bm25`：
 
@@ -118,19 +118,19 @@ melo-retrieve: exported 6 documents (2 notes, 1 reflections, 1 drafts, 2 thought
 
 | 调用 `kind` | 文档 |
 |---|---|
-| `plan` | 一条笔记 `<task_id>:n<seq>`；当推理或回复包含代码块时，一份草稿 `<task_id>:d<seq>`；思维片段 `<task_id>:t<seq>.<i>`，其中 i 从 1 开始。 |
-| `reflect` | 当回复包含反思时，产生一条反思 `<task_id>:r<seq>`（即智能体读取的 `recommended_action` 为 `continue`、`stop`、`decompose` 或 `done` 的 JSON 对象），以及思维片段。不含反思的回复只产生思维片段。 |
+| `plan` | 一条笔记 `<task_id>:n<seq>`；当推理或回复包含代码块时，一份草稿 `<task_id>:d<seq>`；思考片段 `<task_id>:t<seq>.<i>`，其中 i 从 1 开始。 |
+| `reflect` | 当回复包含反思时，产生一条反思 `<task_id>:r<seq>`（即智能体读取的 `recommended_action` 为 `continue`、`stop`、`decompose` 或 `done` 的 JSON 对象），以及思考片段。不含反思的回复只产生思考片段。 |
 | `retrieve`、`estimate` | 无。 |
 
 - **笔记**在 `plan:`、`found:`、`decided:`、`hypotheses:` 和 `open:` 行中记录回复计划、发现、决定、怀疑和尚未解决的内容，在 `observed:` 和 `outcome:` 中记录其工具调用的返回结果。如果回复文本包含 `<note>` 块，笔记从该块中提取这些行（`meta.source` 为 `model`）。否则，根据中英文标记词从推理和回复中选取句子（`heuristic`）。
 - **反思**根据智能体读取的反思自身字段构建，而不是根据回复文本：`plan:` 是建议的操作和摘要，`found:` 是有用证据，`decided:` 是接下来有希望的方向（`next: …`），`hypotheses:` 是已被否定的假设（`refuted: …`）和应避免的内容（`avoid: …`）。`meta.source` 为 `model`。
 - **草稿**包含推理和回复中的代码块。`meta.target` 是第一个代码块之前最后提到的文件，否则是任务最近读取或写入的文件。当对该文件的一次写入包含草稿至少 60% 的行时，`meta.status` 为 `written`；后续草稿具有相同目标时为 `superseded`；其他情况下为 `pending`。
-- **思维片段**包含去掉代码块后的推理，按段落和句子切分，每片最多 1,500 个字符。
+- **思考片段**包含去掉代码块后的推理，按段落和句子切分，每片最多 1,500 个字符。
 - 每段文本和每个标题都会处理成可安全作为纯文本展示给模型的形式：`<|im_start|>` 等角色 token 和 `<tool_call>` 等标签会被转义，`<think>` 标签会被移除。处理后没有文本的文档会被跳过。
 - `meta` 包含 `task_id`、`step`、`attempt`、`seq` 和 `created_at`（调用的 `timestamp`）。其他键取决于类型：
   - 笔记和反思：`source`（`model` 或 `heuristic`；反思始终为 `model`）、`note_kind`（根据调用结果为 `step`、`answer` 或 `empty`，或者为 `reflection`），以及 `remember` 和 `remember_by`。`remember` 表示笔记看起来是否值得保留：若块中有 `remember:` 行，则使用该行的值（`model`）；否则，当笔记有 `found:` 或 `decided:` 行时为 `true`（`heuristic`）。反思的这两个值为 `false` 和 `""`；
   - 草稿：`target`、`status`、`lines`（非空行数）、`blocks` 和 `cut`；为将草稿限制在 8,000 个字符以内而省略代码时，该值为 `true`；
-  - 思维片段：`chunk`，即片段编号。
+  - 思考片段：`chunk`，即片段编号。
 
 ID 遵循 `seq`，因此你可以在导出前根据自己保存的调用记录编写带标注的查询。
 
@@ -151,7 +151,7 @@ melo-retrieve --export-run ~/.cache/localmelo/memory > run-corpus.jsonl
 melo-retrieve: exported 4 documents (2 notes, 0 reflections, 0 drafts, 2 thought chunks) from 1 tasks
 ```
 
-数字取决于具体运行。此例中，模型先列出目录然后回答，两次回复都有推理，因此两次调用各产生一条笔记和一个思维片段。
+数字取决于具体运行。此例中，模型先列出目录然后回答，两次回复都有推理，因此两次调用各产生一条笔记和一个思考片段。
 
 - 从未被支持模型调用记录的版本打开过的 `history.db` 没有该表，导出会以退出码 2 停止：
 
@@ -161,7 +161,7 @@ melo-retrieve: exported 4 documents (2 notes, 0 reflections, 0 drafts, 2 thought
 
   `<path>` 是数据库路径。要导出这样的运行，请根据 localmelo 之外的记录（例如代理记录的请求和回复）将其模型调用写为[原始调用](../../reference/retrieval.md#raw-calls)（英文）。
 - 旧版本的 `history.db` 被当前版本打开后会获得一张空表：之前的任务不会导出任何内容，结束行只统计有模型调用的任务。
-- 早于 `LOCALMELO_THINKING_RETENTION_DAYS` 的行（默认 30 天）没有 `thinking`，因此不会产生思维片段。
+- 早于 `LOCALMELO_THINKING_RETENTION_DAYS` 的行（默认 30 天）没有 `thinking`，因此不会产生思考片段。
 - `content` 和 `thinking` 在存储时经过脱敏，工具调用的参数则没有。如果草稿的代码中包含密钥，脱敏后可能不再匹配其 `file_write`；如果反思的 JSON 在代码关键词附近包含未加引号的 4 至 8 位数字，脱敏后可能不再能够解析。
 
 包含该表的数据库按以下方式读取：

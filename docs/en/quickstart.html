@@ -301,8 +301,9 @@ curl -sS http://127.0.0.1:8000/v1/embeddings \
           itself. From a second terminal, check the gateway and run a task
           through it:
         </p>
-        <pre><code>curl http://127.0.0.1:8401/v1/health
-curl -X POST http://127.0.0.1:8401/v1/agent/run \
+        <p>Run <code>melo --gateway-login</code> in a terminal and open the private one-use link within 60 seconds. API examples pipe the gateway token to curl, keeping it out of command-line arguments and shell history. Do not enable verbose curl output or log the header; same-user processes can still read the token file.</p>
+        <pre><code>{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
   -d '{"query": "What is 6*7?"}'</code></pre>
         <p>Example output (values vary):</p>

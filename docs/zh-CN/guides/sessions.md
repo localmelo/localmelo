@@ -66,7 +66,7 @@ resumed 1 turn(s)
 - **每个会话、每个智能体各用一个运行器。**运行器一次只运行一轮：有一轮正在运行时，`run_turn` 和 `start_turn` 会抛出 `SessionBusyError`。如果在 `runner.undo()` 或 `runner.resume()` 加载对话时开始一轮，它会等待加载完成。
 - **`run_turn`** 在你的任务中运行这一轮并返回其 `RunResult`；即使运行器停止了这一轮（通过 `cancel()`、`close()` 或接管），也会返回结果，此时状态为 `cancelled`，若在运行开始前停止则没有计数。运行器外部取消你的任务时，取消会在这一轮结束后传播；如果取消恰好在该轮结束时发生，则会立即传播，而该轮自行结束。**`start_turn`** 在存储该轮记录后返回其 `TurnInfo`，这一轮继续在运行器的任务中运行；`await runner.wait()` 返回其 `RunResult`，与 `run_turn` 返回的结果相同。
 - **`title`** 是传给 `run_turn` 和 `start_turn` 的用户输入文本。会话的第一轮以它设置标题；若未提供，则使用该轮文本，因此附带文件的消息也能获得简短标题。
-- **`routine`** 是传给 `run_turn` 和 `start_turn` 的运行过程例程名称（[`run_task` 的 `routine=`](python.md#follow-a-run-with-events)）；仅在提供时才会传给运行。
+- **`routine`** 是传给 `run_turn` 和 `start_turn` 的运行的例程名称（[`run_task` 的 `routine=`](python.md#follow-a-run-with-events)）；仅在提供时才会传给运行。
 - **进度。**以 `progress=True` 创建的运行器会向每轮运行请求 [`run.progress`](../../reference/events.md#runprogress)（英文）事件：这些事件与该轮一起存储，并像其他事件一样传给 `on_event`。该标志保留在运行器上，包括调用 `replace_agent` 后，因此之后每轮都会请求。不启用时，会话轮次和以前一样不报告此类事件；交互式界面始终请求进度事件。
 - **监听器。**`turn.started` 和 `turn.finished` 是存储器自身的事件，而非运行事件；当一轮结束时为尚未存储回答的请求写入 `approval.resolved`，该事件也是如此。`store.add_listener(fn)` 在事务提交后对每个已存储事件调用 `fn`，包括上述事件。
 - 使用 `None` 和 `new_session=NewSession(...)` 创建的运行器会在第一轮所在的同一事务中创建会话，因此第一轮被拒绝时不会留下空会话。该轮开始后，`runner.session_id` 即被设置。

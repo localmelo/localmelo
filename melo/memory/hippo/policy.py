@@ -16,7 +16,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from localmelo.melo.memory.bm25 import tokenize
-from localmelo.melo.memory.notes import is_meta_claim, path_spans
+from localmelo.melo.memory.notes import (
+    has_negative_assertion,
+    is_meta_claim,
+    path_spans,
+)
 
 ACTIONS = ("NEW", "UPDATE", "RELATED", "CONFLICT", "IGNORE")
 
@@ -588,8 +592,22 @@ def decide(
     target_id = None if target is None else _entry_id(target.entry)
 
     if target is not None:
-        if (
-            normalise(_entry_text(target.entry)) == folded
+        other_text = _entry_text(target.entry)
+        opposite = has_negative_assertion(text) != has_negative_assertion(other_text)
+        if opposite and (
+            target.same_subject or target.overlap >= 0.35 or target.cosine >= 0.75
+        ):
+            return PolicyDecision(
+                action="CONFLICT",
+                kind=kind,
+                subject=subject,
+                target_id=target_id,
+                reason=f"opposite polarity to entry {target_id}",
+                overlap=target.overlap,
+                cosine=target.cosine,
+            )
+        if not opposite and (
+            normalise(other_text) == folded
             or target.overlap >= 0.9
             or target.cosine >= 0.95
         ):
