@@ -145,7 +145,10 @@ async def list_models(
         if port is not None and not 0 < port < 65536:
             raise DiscoveryError(f"not a URL: {url} (port {port})", reachable=False)
         async with httpx.AsyncClient(
-            base_url=base_url, timeout=timeout_s, transport=transport
+            base_url=base_url,
+            timeout=timeout_s,
+            transport=transport,
+            follow_redirects=False,
         ) as client:
             response = await client.get("/models")
     except DiscoveryError:

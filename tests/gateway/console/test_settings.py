@@ -515,6 +515,128 @@ def test_models_endpoint_with_mock_transport(
     }
 
 
+@pytest.mark.parametrize(
+    "url", ["ftp://host.test/v1", "//host.test/v1", "host.test", "http:///missing"]
+)
+def test_probe_routes_reject_non_http_urls(client: TestClient, url: str) -> None:
+    with (
+        mock.patch.object(routes_settings, "list_models") as listing,
+        mock.patch.object(routes_settings, "probe_all") as probe,
+    ):
+        models = client.get("/api/models", params={"backend": "mlc", "url": url})
+        settings = client.post(
+            "/api/settings/test",
+            json={
+                "chat_backend": "mlc",
+                "embedding_backend": "none",
+                "sections": {"mlc": {"chat_url": url, "chat_model": "m"}},
+            },
+        )
+    assert models.status_code == settings.status_code == 400
+    listing.assert_not_called()
+    probe.assert_not_called()
+
+
+@pytest.mark.parametrize("field", ["chat_url", "embedding_url", "base_url"])
+def test_settings_rejects_each_active_probe_url(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    monkeypatch.setenv("TEST_KEY", "secret")
+    local = {
+        "chat_url": "http://chat.test",
+        "chat_model": "m",
+        "embedding_url": "http://embed.test",
+        "embedding_model": "e",
+    }
+    cloud = {
+        "base_url": "https://cloud.test",
+        "api_key_env": "TEST_KEY",
+        "chat_model": "m",
+    }
+    (cloud if field == "base_url" else local)[field] = "file:///tmp/bad"
+    body = {
+        "chat_backend": "openai" if field == "base_url" else "mlc",
+        "embedding_backend": "mlc" if field == "embedding_url" else "none",
+        "sections": {"mlc": local, "openai": cloud},
+    }
+    with mock.patch.object(routes_settings, "probe_all") as probe:
+        response = client.post("/api/settings/test", json=body)
+    assert response.status_code == 400
+    probe.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "backend,embedding",
+    [("mlc", False), ("ollama", False), ("mlc", True), ("openai", False)],
+)
+def test_settings_probe_never_follows_redirects(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, backend: str, embedding: bool
+) -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        if embedding and request.url.path.endswith("/chat/completions"):
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"role": "assistant", "content": "ok"}}]},
+            )
+        return httpx.Response(307, headers={"location": "http://other.test/target"})
+
+    class MockClient(httpx.AsyncClient):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            kwargs["transport"] = httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", MockClient)
+    monkeypatch.setenv("TEST_KEY", "secret")
+    local = {
+        "chat_url": "http://chat.test/v1",
+        "chat_model": "m",
+        "embedding_url": "https://embed.test/v1",
+        "embedding_model": "e",
+    }
+    cloud = {
+        "base_url": "https://cloud.test/v1",
+        "api_key_env": "TEST_KEY",
+        "chat_model": "m",
+    }
+    response = client.post(
+        "/api/settings/test",
+        json={
+            "chat_backend": backend,
+            "embedding_backend": "mlc" if embedding else "none",
+            "sections": {"mlc": local, "ollama": local, "openai": cloud},
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["ok"] is False
+    assert len(seen) == (2 if embedding else 1)
+    assert all("other.test" not in url for url in seen)
+
+
+def test_models_probe_never_follows_redirect(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(302, headers={"location": "http://other.test/models"})
+
+    async def listing(backend: str, url: str, *, timeout_s: float) -> list[str]:
+        return await routes_settings.discovery.list_models(
+            backend, url, timeout_s=timeout_s, transport=httpx.MockTransport(handler)
+        )
+
+    monkeypatch.setattr(routes_settings, "list_models", listing)
+    response = client.get(
+        "/api/models", params={"backend": "mlc", "url": "https://typed.test"}
+    )
+    assert response.status_code == 502
+    assert len(seen) == 1 and "typed.test" in seen[0]
+
+
 async def test_put_settings_resets_model_server_probe(
     tmp_path: Path, isolated_config: Path
 ) -> None:
@@ -607,7 +729,11 @@ def test_unconfigured_gateway_server_boots_and_onboards_over_api(
             probe=FakeProbe(),
         ),
     )
-    with TestClient(server.app, base_url="http://127.0.0.1:8401") as tc:
+    with TestClient(
+        server.app,
+        base_url="http://127.0.0.1:8401",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
+    ) as tc:
         h1 = tc.get("/api/health").json()
         assert h1["configured"] is False
         assert h1["config_errors"]

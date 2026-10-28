@@ -4,15 +4,17 @@ Use the web console to configure a localmelo gateway, work in chats, and inspect
 saved worker runs. This guide is for someone using the console in a browser.
 
 Before you start, install the gateway extra and have a model server ready; see
-[Start the gateway](gateway.md#start-the-gateway). The gateway has **no login**:
-keep it on loopback, not a network-accessible address. Tools run with your
+[Start the gateway](gateway.md#start-the-gateway). The gateway requires
+authentication and only binds to loopback. Tools run with your
 permissions and are not sandboxed; review a task before approving a tool call.
 
 ## Web workspace
 
 Open `http://127.0.0.1:8401/` in a browser for the web workspace. It is the
 console's page and talks only to `/api` ([API v2](../reference/api-v2.md)), so the gateway
-must be running to serve it: `melo --serve`, then open the address it prints.
+must be running to serve it: `melo --serve`. Run `melo --gateway-login` in a
+terminal and open its single-use link within 60 seconds (add `--port PORT`
+for a nondefault port). Keep the link private; see [gateway security](gateway.md#keep-the-gateway-private).
 
 1. Use **Connection settings** to choose the chat backend, model and workspace;
    local model discovery lists models without starting one. A cloud backend
@@ -104,8 +106,8 @@ save is done. Each message sees the earlier answers of its chat, as in a
 A tool call that needs approval shows a card below its `Needs approval` tool.
 Console sessions use `RememberingPolicy` and ask before `file_write` and
 `python_exec`; legacy `/v1` has no approval policy. Approvals are not a
-security boundary: any local process that reaches the unauthenticated API
-can answer them. When a request is present, choose
+security boundary against a bearer holder or a malicious process under the same
+OS account, which can answer them. When a request is present, choose
 `Allow once`, `Allow every …` for the session, or `Deny…` with an
 optional reason. The controls wait 500 ms before they can be used; arrival
 does not move focus and no single-key shortcut answers a request. When the
@@ -139,13 +141,34 @@ present, embeddings included. A chat request waits up to 300 seconds, and a
 turn is stopped after 600 seconds of active time: a call the scheduler holds,
 including a foreign-lock hold, does not count against that bound.
 
-The page uses API v2; the older `/v1/playground/` routes remain internal and
-are not its interface. See [API v2](../reference/api-v2.md) for its contract.
+Gateway security-1b is in progress. The internal `/v1/playground/` routes are
+disabled by default (404), and their manager is not started. Opt in with
+`melo --serve --enable-playground`; authentication and Host/Origin checks
+still apply. Playground discovery and sessions use the saved local chat
+backend and model, not endpoint or model overrides in a request. The page
+does not use these routes.
+They include `GET /v1/playground/sessions` for summaries,
+`GET /v1/playground/session/{id}` for a transcript,
+`POST /v1/playground/session/{id}/cancel` for cancellation,
+`POST /v1/playground/session/{id}/level` with `{"level": 1..4}` to set a
+chat's level, and `POST /v1/playground/presence` with `{"session_id": …}` for
+the page's typing heartbeat. The ordinary `/v1/agent/` API remains separate
+and ungated.
+
+For development, the following starts the authenticated gateway with the
+playground enabled, using the saved configuration:
+
+```bash
+uv run python -m localmelo.support.gateway._test_webapp
+```
+
+It starts the normal gateway, including `/api`, on its configured loopback
+address. It needs the gateway configuration and authentication.
 
 The workspace has these limits:
 
-- It is for loopback use only. Like the rest of the gateway, it has no
-  authentication: open it on this computer as `http://127.0.0.1:8401/` or
+- It is for loopback use only. Sign in as described above and open it on this
+  computer as `http://127.0.0.1:8401/` or
   `http://localhost:8401/`. Remote access, from another device or through a
   proxy, is not supported; see
   [Keep the gateway private](gateway.md#keep-the-gateway-private).

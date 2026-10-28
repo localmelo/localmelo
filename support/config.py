@@ -197,6 +197,7 @@ class Config:
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
     _allow_unconfigured: bool = field(default=False, repr=False, compare=False)
+    _enable_playground: bool = field(default=False, repr=False, compare=False)
 
     @property
     def is_configured(self) -> bool:

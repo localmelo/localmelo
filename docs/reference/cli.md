@@ -14,6 +14,7 @@ melo --base-url URL [--chat-model NAME]      # the interactive UI on this server
 melo [--base-url URL] [--chat-model NAME] "" # the plain conversation loop
 melo --reconfigure                           # run setup, then the interactive UI
 melo --serve [--host HOST] [--port PORT]     # start the gateway
+melo --serve --enable-playground             # opt in to legacy playground (in progress)
 melo --serve --reconfigure                   # run setup, then start the gateway
 melo --import-session dsh-jsonl FILE [--title TITLE] # import worker history
 melo --daemon install|uninstall|status       # macOS background service
@@ -31,7 +32,7 @@ lines, abbreviations and the `melo ""` loop keep their previous parsing.
 | `melo` (no task) | Opens the [interactive UI](../guides/terminal.md#the-interactive-ui) in a terminal, on the saved backend. With no saved backend it first asks for a model server and a model, and saves them; see [First run](../guides/terminal.md#first-run). Without a terminal it exits with code 2 and says what to run instead. |
 | `melo --base-url URL` (no task) | Opens the interactive UI on that server, with `--chat-model` or the first chat model the server lists. |
 | `melo --reconfigure` | Runs the setup wizard, then opens the interactive UI. Without a terminal it runs the wizard, reading the answers from stdin, and exits. |
-| `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). |
+| `melo --serve` | Starts the gateway. Runs the setup wizard first if there is no configuration (in a terminal; without one it exits with code 1). In the in-progress security-1b changes, `--enable-playground` opts into authenticated legacy playground routes and is only valid with `--serve`. |
 | `melo ""` (empty task) | Opens the plain conversation loop: each line you type is a task for the same agent, and only the answer prints. `/help` lists its commands; `/exit`, `/quit`, `exit`, `quit` or Ctrl-D exits. |
 | `melo --daemon …` | Manages the macOS background service that runs the gateway; see [Run the gateway at login](../guides/gateway.md#run-the-gateway-at-login-macos). |
 
@@ -296,8 +297,8 @@ These options apply to `melo` without a task.
 - The defaults of `--host` and `--port` come from the `[gateway]` table of
   the config file. The options change them for this run only.
 - `--host`, `--port` and `--reconfigure` are ignored when you give a task.
-- Without a task, `--host` and `--port` are usage errors; give `--serve`
-  to start the gateway.
+- Without a task, `--host` and `--port` require `--serve`, `--daemon`,
+  `--gateway-login` or `--gateway-rotate-token`.
 - Without a terminal and with no config file, `melo --serve` prints one
   line on stderr and exits with code 1, as under launchd:
   `melo: no backend is configured; run melo --reconfigure in a terminal`.
@@ -308,7 +309,9 @@ These options apply to `melo` without a task.
   cannot be combined with `--reconfigure` or used without `--serve`.
 - Ctrl-D at a wizard question prints `Setup cancelled.` and exits with
   code 0; Ctrl+C prints the same and exits with 130.
-- The gateway has no authentication. Keep it on `127.0.0.1`; see
+- `melo --gateway-login [--port PORT]` prints a one-use sign-in link to a terminal;
+  `melo --gateway-rotate-token` rotates the shared local gateway token.
+  The gateway refuses non-loopback binds and requires authentication; see
   [Keep the gateway private](../guides/gateway.md#keep-the-gateway-private).
 
 ## Usage errors
@@ -344,8 +347,8 @@ These are usage errors:
   `only for the interactive UI (melo without a query, --serve or --daemon): --yolo`;
 - `--base-url` or `--chat-model` with `--serve` or `--daemon`, reported as
   `--base-url and --chat-model are for a task or the interactive UI; --serve uses the config file (melo --reconfigure)`;
-- `--host` or `--port` without a task and without `--serve` or `--daemon`,
-  reported as
+- `--host` or `--port` without a task, `--serve`, `--daemon`, or a gateway
+  authentication command, reported as
   `--host and --port are for --serve and --daemon; bare melo opens the interactive UI`;
 - `--reconfigure` with `--base-url` and no task, reported as
   `--reconfigure sets up the config file, which --base-url does not use; give one of them`;

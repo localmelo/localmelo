@@ -953,6 +953,10 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             "--reconfigure sets up the config file, which --base-url does not use; "
             "give one of them"
         )
+    if getattr(args, "enable_playground", False) and (
+        not args.serve or args.daemon or args.query
+    ):
+        parser.error("--enable-playground is only for --serve")
     if getattr(args, "allow_unconfigured", False):
         if not args.serve:
             parser.error("--allow-unconfigured is only for --serve")
@@ -975,7 +979,14 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         and getattr(args, "resume", None) is not None
     ):
         parser.error("-c and -r cannot be combined")
-    if interactive and (args.host is not None or args.port is not None):
+    auth_command = getattr(args, "gateway_login", False) or getattr(
+        args, "gateway_rotate_token", False
+    )
+    if (
+        interactive
+        and not auth_command
+        and (args.host is not None or args.port is not None)
+    ):
         parser.error(
             "--host and --port are for --serve and --daemon; "
             "bare melo opens the interactive UI"
@@ -1398,6 +1409,25 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
             help="Resume a session, or open the session picker without a value",
         )
 
+    if not direct_only:
+        parser.add_argument(
+            "--gateway-login",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Print a one-use console sign-in link to the terminal",
+        )
+        parser.add_argument(
+            "--gateway-rotate-token",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Rotate the local gateway access token",
+        )
+        parser.add_argument(
+            "--enable-playground",
+            action="store_true",
+            default=argparse.SUPPRESS,
+            help="Enable authenticated development playground routes",
+        )
     # gateway mode
     parser.add_argument("--serve", action="store_true", help="Run as gateway server")
     parser.add_argument("--host", default=None, help="Gateway listen host")
@@ -1443,6 +1473,49 @@ def main() -> None:
     if args is None or unknown or not args.query or args.serve or args.daemon:
         args = parser.parse_args()
     _check_args(parser, args)
+
+    if getattr(args, "gateway_login", False) or getattr(
+        args, "gateway_rotate_token", False
+    ):
+        if (
+            args.query
+            or args.serve
+            or args.daemon
+            or (
+                getattr(args, "gateway_login", False)
+                and getattr(args, "gateway_rotate_token", False)
+            )
+        ):
+            parser.error(
+                "gateway authentication commands cannot be combined with a task or --serve"
+            )
+        from localmelo.support import config
+        from localmelo.support.gateway.auth import GatewayAuth
+
+        cfg = config.load()
+        auth_port = args.port or cfg.gateway.port
+        host = args.host or cfg.gateway.host
+        if host in ("::1", "[::1]"):
+            host = "[::1]"
+        elif host.lower() in ("localhost", "localhost."):
+            host = "localhost"
+        elif host != "127.0.0.1":
+            parser.error("gateway authentication requires a supported loopback host")
+        if getattr(args, "gateway_login", False) and not sys.stdout.isatty():
+            parser.exit(2, "melo: sign-in links are printed only to a terminal.\n")
+        auth = GatewayAuth(allow_corrupt=getattr(args, "gateway_rotate_token", False))
+        try:
+            if getattr(args, "gateway_login", False):
+                login_code = auth.issue_login(auth_port)
+                print(
+                    f"Open http://{host}:{auth_port}/#login={login_code} within 60 seconds. Do not share this link."
+                )
+            else:
+                auth.rotate()
+                print("Gateway token rotated; browser sessions were signed out.")
+        finally:
+            auth.close()
+        return
 
     if args.import_session is not None:
         from localmelo.support.sessions.dsh_import import import_dsh
@@ -1585,6 +1658,8 @@ def main() -> None:
             raise SystemExit(1) from e
 
     # start gateway
+    if getattr(args, "enable_playground", False):
+        cfg._enable_playground = True
     _start_gateway(cfg)
 
 
