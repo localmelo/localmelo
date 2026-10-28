@@ -214,7 +214,8 @@ the independent character guard still applies.
 `fixed-prefix-v1`; `--fixed-prefix on|off` overrides it for a direct or interactive
 run. It snapshots the local date and UTC offset at each run's start, including across
 midnight, and places changing recall and reflections in labelled user-side data.
-An explicit end delimiter leaves the task and reflection request outside that data.
+An explicit end delimiter leaves the task and reflection request outside that data;
+data lines starting with that delimiter are deterministically quoted.
 `all` freezes sorted tool definitions for that run; `retrieve` keeps selecting tools
 as before. The JSON result's `prefix_cache.schema_changes` counts changes to the
 offered planning schemas within the run, not actual cache misses; an optional

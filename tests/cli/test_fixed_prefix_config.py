@@ -37,6 +37,25 @@ def test_invalid_fixed_prefix_config() -> None:
         AgentOptions(fixed_prefix="on")  # type: ignore[arg-type]
 
 
+async def test_direct_cli_uses_config_when_flag_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("localmelo.support.config.CONFIG_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "localmelo.support.config.CONFIG_PATH", str(tmp_path / "config.toml")
+    )
+    save(Config(agent=AgentConfig(fixed_prefix=True)))
+    parser = cli._build_parser()
+    args = parser.parse_args(["--base-url", "http://127.0.0.1:1/v1", "task"])
+    agent = cli._build_direct_mode_agent(
+        args, parser=parser, options=cli._direct_options(parser, args)
+    )
+    try:
+        assert agent.options.fixed_prefix is True
+    finally:
+        await agent.close()
+
+
 @pytest.mark.parametrize("choice", ["on", "off"])
 async def test_direct_cli_overrides_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, choice: str
