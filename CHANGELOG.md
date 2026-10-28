@@ -19,7 +19,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   never reads it); `/mcp` lists the servers and their tools and says why
   MCP is off after a failure, `/status` shows the model and server, the
   session, the tools, memory, limits and files, and `/retry` runs the
-  newest turn again. The hints name them where they apply ([#NN]).
+  newest turn again. The hints name them where they apply ([#75]).
 - Setup can add the embedding model that long-term memory needs. The first
   run offers an embedding model the chat server already lists, the wizard
   appends such models as options `6+`, the banner names the configured
@@ -442,3 +442,4 @@ earlier milestones.
 [#71]: https://github.com/localmelo/localmelo/pull/71
 [#72]: https://github.com/localmelo/localmelo/pull/72
 [#74]: https://github.com/localmelo/localmelo/pull/74
+[#75]: https://github.com/localmelo/localmelo/pull/75
