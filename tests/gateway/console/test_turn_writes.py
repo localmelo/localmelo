@@ -218,6 +218,8 @@ async def test_a_builder_that_fails_is_agent_start_failed(tmp_path: Path) -> Non
         assert response.status_code == 502
         assert response.json()["error"]["code"] == "agent_start_failed"
         assert response.json()["error"]["message"] == "no model server"
+        # The row a create makes before its Agent is gone again.
+        assert await console.store.list_sessions() == []
     finally:
         await console.aclose()
 
@@ -788,3 +790,22 @@ async def test_retry_while_a_turn_runs_is_session_busy(tmp_path: Path) -> None:
             f"/api/approvals/{pending['request_id']}", json={"choice": "deny"}
         )
         await _wait_turn(client, session_id)
+
+
+async def test_a_creates_key_is_found_without_a_session_id(tmp_path: Path) -> None:
+    async with console_with(tmp_path, answer("hello")) as (_console, client, _):
+        body = await _create(
+            client, tmp_path, "Hi there", client_request_id="create-key-1"
+        )
+        session_id = body["session"]["id"]
+        await _wait_turn(client, session_id)
+
+        # The create makes its row before the Agent; the key still lands in
+        # the create scope, where a client without the id looks it up.
+        found = (await client.get("/api/submissions/create-key-1")).json()
+        assert found["submission"]["state"] == "accepted"
+        assert found["submission"]["session_id"] == session_id
+        by_session = (
+            await client.get(f"/api/sessions/{session_id}/submissions/create-key-1")
+        ).json()
+        assert by_session["submission"]["turn_id"] == body["turn_id"]

@@ -377,6 +377,21 @@ class ConsoleSessions:
             await entry.runner.resume()
             entry.resumed = entry.runner.last_resume
 
+    def forget_grant(self, session_id: str, tool_name: str | None = None) -> None:
+        """Take back one session grant, or every grant with ``None``.
+
+        The grant lives in the policy and its start time in the registry, so
+        both go; a session that is not open has neither.
+        """
+        entry = self._sessions.get(session_id)
+        if entry is None:
+            return
+        entry.policy.forget(tool_name)
+        if tool_name is None:
+            entry.granted_at.clear()
+        else:
+            entry.granted_at.pop(tool_name, None)
+
     async def keep(self, session_id: str) -> None:
         """Close *session_id*'s Agent, keeping its conversation.
 
