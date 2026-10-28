@@ -17,7 +17,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   held chat shows `Waiting: <reason>` in the page, and every call leaves one
   schema-1 line in `~/.cache/localmelo/scheduler/runs/<UTC>/calls.jsonl`.
   Direct runs, the CLI and `/v1/agent/run` are unchanged and gated nowhere
-  ([#NN]).
+  ([#69]).
 - Tools have a permission tier, and an approval policy asks by tier rather
   than by a fixed list of names. The built-ins keep their tiers (`file_read`
   read, `file_write` write, `shell_exec` and `python_exec` exec), and a
@@ -402,3 +402,4 @@ earlier milestones.
 [#66]: https://github.com/localmelo/localmelo/pull/66
 [#67]: https://github.com/localmelo/localmelo/pull/NN
 [#68]: https://github.com/localmelo/localmelo/pull/68
+[#69]: https://github.com/localmelo/localmelo/pull/69
