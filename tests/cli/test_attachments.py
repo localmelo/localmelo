@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import dataclasses
 import os
+from pathlib import Path
 
 import pytest
 
 from localmelo.support.cli import attachments as att
 
 
-def test_snapshot_is_immutable_and_redacted(tmp_path):
+def test_snapshot_is_immutable_and_redacted(tmp_path: Path) -> None:
     file = tmp_path / "note.txt"
     file.write_text("hello\x1b[31m sk-" + "x" * 24, encoding="utf-8")
     snapshot = att.load(str(tmp_path), "note.txt")
@@ -18,10 +19,10 @@ def test_snapshot_is_immutable_and_redacted(tmp_path):
     assert snapshot.characters == len(snapshot.content)
     assert snapshot.size_bytes > snapshot.characters
     with pytest.raises(dataclasses.FrozenInstanceError):
-        snapshot.content = "changed"
+        snapshot.content = "changed"  # type: ignore[misc]
 
 
-def test_plain_unicode_and_absolute_path(tmp_path):
+def test_plain_unicode_and_absolute_path(tmp_path: Path) -> None:
     file = tmp_path / "note.txt"
     file.write_text("你好\n", encoding="utf-8")
     snapshot = att.load(str(tmp_path), str(file))
@@ -34,12 +35,12 @@ def test_plain_unicode_and_absolute_path(tmp_path):
 
 
 @pytest.mark.parametrize("name", [".env", "credentials.json", "foo.key", ".ssh/id_rsa"])
-def test_secret_files_rejected(tmp_path, name):
+def test_secret_files_rejected(tmp_path: Path, name: str) -> None:
     with pytest.raises(att.AttachmentError):
         att.load(str(tmp_path), name)
 
 
-def test_traversal_links_and_special_files(tmp_path):
+def test_traversal_links_and_special_files(tmp_path: Path) -> None:
     root = tmp_path / "root"
     root.mkdir()
     outside = tmp_path / "secret.txt"
@@ -60,7 +61,7 @@ def test_traversal_links_and_special_files(tmp_path):
             att.load(str(root), path)
 
 
-def test_bad_text_and_limits(tmp_path):
+def test_bad_text_and_limits(tmp_path: Path) -> None:
     file = tmp_path / "note.txt"
     for data in (b"\xff", b"abc\x00def", b"x" * (att.MAX_FILE_BYTES + 1)):
         file.write_bytes(data)
@@ -79,12 +80,14 @@ def test_bad_text_and_limits(tmp_path):
         att.add(staged, empty)
 
 
-def test_file_mutated_during_read(tmp_path, monkeypatch):
+def test_file_mutated_during_read(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     file = tmp_path / "note.txt"
     file.write_text("initial")
     real_read = os.read
 
-    def read_and_mutate(fd, count):
+    def read_and_mutate(fd: int, count: int) -> bytes:
         result = real_read(fd, count)
         if result:
             file.write_text("changed contents")
