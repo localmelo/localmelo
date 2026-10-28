@@ -100,6 +100,12 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-worker-brief">
+          <h3>Worker briefs and event streams</h3>
+          <p class="update-date">Unreleased</p>
+          <p>Direct workers read a brief and return a versioned JSON result or stream events. Agent construction errors produce a startup result; output failure may prevent a final record. Inbox steering follows separately.</p>
+        </article>
+
         <article class="update-entry" id="u-attach">
           <h3>Attach a text file to a message</h3>
           <p class="update-date">
@@ -107,6 +113,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/155">#155</a>
           </p>
           <p>In the interactive UI, <code>/attach PATH</code> stages one UTF-8 text file from the workspace for the next message; <code>/attachments</code> lists the staged files and <code>/detach N|all</code> removes them. Only regular files within the workspace are accepted (no symlinks, devices, recognized secret files or binary data), at most 8 files, 256 KiB each and 512 KiB in total. Each file is read once into a versioned snapshot saved with the session, so <code>/retry</code> uses the snapshot without reopening the file and <code>/resume</code> replays it where the retained window holds it; a <code>pairs</code> resume can omit an attachment turn when its budget is exceeded, so reattach. Image attachments are not supported, and neither direct mode nor <code>melo ""</code> takes attachments. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#attach-text-files">the interactive UI</a>.</p>
+
         </article>
 
         <article class="update-entry" id="u-stream-release">
@@ -134,6 +141,12 @@
             <a href="https://github.com/localmelo/localmelo/pull/150">#150</a>
           </p>
           <p>The English and Chinese API client examples read the bearer token from its private file and send it on every request, the event stream included; they accept only loopback HTTP, ignore proxies and refuse redirects. The internal playground routes moved to the HTTP v1 reference.</p>
+        </article>
+
+        <article class="update-entry" id="u-task-cli">
+          <h3>Task command</h3>
+          <p class="update-date">Unreleased</p>
+          <p><code>melo-task</code> creates, inspects and controls gateway tasks, and follows their events as one readable line each; <code>list</code> prints a header. The terminal snapshot adds the event-completeness caveat only when follow reconnected or skipped events with <code>--after</code>.</p>
         </article>
 
         <article class="update-entry" id="u-python-check-labels">
@@ -170,6 +183,12 @@
             <a href="https://github.com/localmelo/localmelo/pull/145">#145</a>
           </p>
           <p>Providers gain an optional streaming method with typed fragments; the OpenAI-compatible adapter parses SSE incrementally and assembles tool calls only when complete. Display text is held until the reply ends, and no CLI or agent requests streaming yet.</p>
+        </article>
+
+        <article class="update-entry" id="u-typed-assertions">
+          <h3>Experimental typed facts</h3>
+          <p class="update-date">Unreleased</p>
+          <p>Python callers can opt into conservative same-task assertion updates and labelled historical recall. Unlinked facts stay unlinked, and recall is relevance-limited.</p>
         </article>
 
         <article class="update-entry" id="u-captured-history">

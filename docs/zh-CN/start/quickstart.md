@@ -188,9 +188,9 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 - melo 在当前文件夹中工作（`--workspace DIR` 可选择其他文件夹）：文件工具限制在该文件夹内；命令和 Python 可以访问其他文件，因此 melo 会先询问。
 - 对话可以使用推理和召回模式：`--reasoning`、`--reasoning-field`、`--replay-turns`、`--note-writer`、`--retriever`、`--recall-*` 和 `--retrieval-extra-body`，或已保存的 `[agent]` 和 `[retrieval]` 表。显式选项优先，检索选项在 `legacy` 中不起作用。
 
-[交互式界面](../../guides/terminal.md#the-interactive-ui)（英文）介绍了按键和其他内容。`melo ""` 打开早期版本的普通对话循环。没有终端时，单独运行 `melo` 会以退出码 2 退出；请使用 `melo --serve` 启动网关。
+[交互式界面](../guides/terminal.md#the-interactive-ui)介绍了按键和其他内容。`melo ""` 打开早期版本的普通对话循环。没有终端时，单独运行 `melo` 会以退出码 2 退出；请使用 `melo --serve` 启动网关。
 
-`http://127.0.0.1:8401/` 上的网页工作区是控制台的实时页面，只与 `/api` 通信：它使用网关配置的模型，因此 `melo --reconfigure` 会改变该模型。它按最新优先列出对话，支持搜索和每个对话各自的草稿，并像终端一样展示每一轮：你的消息、每次工具调用的工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 `Copy response` 的答案。停止操作会取消当前轮次，等待中的审批显示为 `Needs approval`，对话保存在网关的 `sessions.db` 中，因此重启后仍然存在。同一网关上的其他浏览器标签页可看到相同的对话。工作区提供审批卡片、连接设置和会话详情抽屉；见[网页工作区](../../guides/web-console.md#web-workspace)（英文）。
+`http://127.0.0.1:8401/` 上的网页工作区是控制台的实时页面，只与 `/api` 通信：它使用网关配置的模型，因此 `melo --reconfigure` 会改变该模型。它按最新优先列出对话，支持搜索和每个对话各自的草稿，并像终端一样展示每一轮：你的消息、每次工具调用的工作卡片、折叠的推理和反思、通知、实时进度行，以及带事实和 `Copy response` 的答案。停止操作会取消当前轮次，等待中的审批显示为 `Needs approval`，对话保存在网关的 `sessions.db` 中，因此重启后仍然存在。同一网关上的其他浏览器标签页可看到相同的对话。工作区提供审批卡片、连接设置和会话详情抽屉；见[网页工作区](../guides/web-console.md#web-workspace)。
 
 <a id="next-steps"></a>
 
@@ -198,7 +198,7 @@ melo --base-url http://127.0.0.1:8000/v1 --chat-model YOUR_MODEL_ID
 
 - [配置](../../reference/configuration.md)（英文）：后端、云端 API 密钥、超时。
 - [工具和 MCP](../../reference/tools.md)（英文）：选择内置工具并添加 MCP 服务器。
-- [网关和 HTTP API](../../guides/gateway.md)（英文）：会话、网页工作区、登录时运行。
+- [网关和 HTTP API](../guides/gateway.md)：会话、网页工作区、登录时运行。
 - [Python API](../../reference/python-api.md)（英文）：从 Python 运行任务、跟踪事件、审批工具调用。
 - [记忆](../../reference/memory.md)（英文）：跨运行保留记忆、检查和重置记忆。
 - [命令行参考](../../reference/cli.md)（英文）：所有选项、退出码和脚本编写。

@@ -89,6 +89,42 @@ comes from a note or from a digest. A `task:` line, a file, path or function
 name makes the text content instead. A final digest admitted by `outcome`
 for a completed run is exempt from this filter entirely.
 
+## Experimental typed assertions
+
+Python callers can opt in with `AgentOptions(typed_assertions=True)`; there is
+no CLI or config switch. The default remains off. In explicit reasoning modes,
+recognized short user assertions and supported sourced notes can carry versioned
+assertion metadata in `provenance`, alongside their original checked text.
+Recognition is deliberately narrow, not a general fact extractor. A sourced note
+needs an exact matching text field and record ID; an unsupported or unverified
+assertion is not automatically superseded. Source records and assertions still
+pass pattern-based redaction, which can miss secrets.
+
+Within the same task, an explicitly marked change to a verified typed key can
+supersede one older active assertion when its verified source time (`timestamp`
+or `date`) is later; a user statement is ordered by message and sentence
+position within its task. A user counter and a source timestamp are different
+clocks, and a restarted task does not link to earlier user statements (they stay
+conflicts). Missing or naive source times do not order; markers include Chinese
+`取消` and trailing `now`/`instead`. Multiple active candidates, missing ordering
+or a different value without a change marker retain conflicts. This does not
+link entities across tasks or sessions. An unlinked assertion is kept
+without claiming it names the same entity; a relative `tonight` gets an
+effective date only from a matching record's timezone-aware timestamp. Old rows
+have no inferred polarity.
+
+With the option on, BM25 long-term search can include superseded entries; recall
+labels those entries and unlinked assertions, dates their titles from a record's
+source date rather than the machine timezone, orders selected long-term hits
+newest first by source observation or the user entry's wall-clock time, and
+ignores only an exact normalized duplicate; a near-duplicate with different
+content is kept (`NEW`, unlinked). Search still has
+relevance and item limits and does not guarantee
+that every related fact will appear. `history_entries(task_id)` on the long-term
+store returns that task's active and superseded entries newest first; forget
+removes both. In a nonpersistent explicit-mode agent the option enables a RAM
+store; persistence requires `memory_dir` or the persistence environment.
+
 Nothing is written without a signal:
 
 | Signal | When | What it admits |

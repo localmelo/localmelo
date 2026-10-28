@@ -183,9 +183,10 @@
           <code>support/sessions/agents.py</code>.
         </p>
 
-        <p>Direct workers can read a brief file and report a versioned JSON result or NDJSON event stream. Inbox steering is not implemented yet.</p>
+        <p>Direct workers can read a brief file and report a versioned JSON result or NDJSON event stream. Startup failures report an error; output failures may prevent the final record. Inbox steering is not implemented yet.</p>
         <p>Direct runs can opt into a one-turn worker session with <code>--save-session</code>; dsh JSONL logs can be imported. The gateway reads worker history from the CLI file without allowing edits or live follow. The web workspace lists those runs with server-side filters and paging and opens each as a read-only snapshot with explicit refresh.</p>
         <h3 id="c-gateway">Gateway</h3>
+        <p><code>melo-task</code> is a separate authenticated loopback client for gateway tasks and their event streams; it does not change direct runs.</p>
         <p>
           The HTTP server that <code>melo --serve</code> starts. It serves the
           HTTP API (<code>/v1/health</code>, <code>/v1/agent/run</code>,
@@ -402,7 +403,7 @@
         </p>
 
         <h3 id="c-memory">Memory</h3>
-        <p>In compress modes, heuristic notes can extract up to 12 facts, including a bounded set of English negative and Chinese residence or cancellation statements, kept verbatim. Matching a negative assertion requires its full text in the record, and conflicting event times reject a match. Extraction and attribution are heuristic; similar assertions of opposite detected polarity are kept as conflicts, while structured supersession is not yet implemented. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">reasoning notes</a>.</p>
+        <p>In compress modes, heuristic notes can extract up to 12 facts, including a bounded set of English negative and Chinese residence or cancellation statements, kept verbatim. Matching a negative assertion requires its full text in the record, and conflicting event times reject a match. Extraction and attribution are heuristic; similar assertions of opposite detected polarity are kept as conflicts, while structured supersession is off by default and available experimentally through Python. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/concepts/memory.md#reasoning-notes">reasoning notes</a>.</p>
         <p>
           Working memory holds the conversation of a run or a gateway session:
           the last 20 messages, in RAM. History records every task and step
@@ -607,6 +608,7 @@
         <h2>What exists today</h2>
         <ul>
           <li>Direct mode with run options, including <code>--workspace DIR</code> for the folder a task works in and how a reply's reasoning is sent back or kept (<code>legacy</code>, <code>drop</code>, <code>replay</code>, <code>compress</code> or <code>compress+replay</code>), ten run statuses, text or JSON output, fixed exit codes, and <code>--brief FILE</code> to run one direct task as a worker and end with a versioned JSON result (<code>--output-format stream-json</code> adds redacted events).</li>
+          <li>Experimental Python-only typed assertions can retain verified same-task changes and label historical recall; ambiguous or unlinked assertions are not automatically linked.</li>
           <li>Opt-in context accounting (<code>[agent] context_window</code>, <code>output_reserve</code> and <code>safety_margin</code>) estimates planning and reflection requests; fitting shortens request copies when needed, but the output reserve is not enforced. An optional fixed prefix (<code>fixed_prefix</code>) freezes the local date and stable instructions per run; retrieved context and reflections remain data. Optional captured tool history (<code>captured_history</code>) is bounded and pattern-redacted separately from the model preview.</li>
           <li>An opt-in provider streaming contract: the OpenAI-compatible adapter parses SSE and assembles tool calls only when complete, and display text is released line by line after redaction with the rules frozen for each stream. No CLI or agent consumes a stream yet.</li>
           <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals with the diff a file write will make, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>, <code>/approvals</code>, <code>/status</code>, <code>/mcp</code> and <code>/retry</code>, an MCP servers file (<code>--mcp-config</code> or the config's <code>mcp_config</code>), saved chats that <code>melo -c</code>, <code>melo -r</code>, <code>/sessions</code> and <code>/resume</code> resume, <code>/title</code>, <code>/undo</code>, <code>/usage</code>, <code>/memory</code> and <code>/copy</code> to name, undo, inspect and copy a conversation, a reasoning and recall mode for the whole chat (<code>--reasoning</code>, <code>--reasoning-field</code>, <code>--replay-turns</code>, <code>--note-writer</code>, <code>--retriever</code>, and <code>--recall-*</code>, from flags or saved defaults; <code>--retrieval-extra-body</code> is flag-only), <code>/attach</code>, <code>/attachments</code> and <code>/detach N|all</code> to stage workspace text files (at most 8, 256 KiB each, 512 KiB in total) into the next message, whose snapshot <code>/retry</code> reuses, and the plain conversation loop (<code>melo ""</code>).</li>
