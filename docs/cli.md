@@ -735,7 +735,8 @@ ended with.
 
 SIGTERM and SIGHUP end a direct run cleanly, within 8 seconds:
 
-1. A running `shell_exec` command is killed together with its process group.
+1. A running `shell_exec` command or `python_exec` child is killed together
+   with its process group.
 2. MCP servers are closed. A server still running 6 seconds after the signal
    is killed.
 3. The task record is saved with status `crashed` and the error
@@ -744,10 +745,8 @@ SIGTERM and SIGHUP end a direct run cleanly, within 8 seconds:
 4. `melo` exits by the signal (a shell shows 143 or 129) and prints nothing on
    stdout: no result, status line or JSON line.
 
-There are two exceptions:
+One exception:
 
-- `python_exec` code runs inside `melo`, so the signal takes effect only when
-  that code returns.
 - A signal that was ignored when `melo` started stays ignored. For example,
   `nohup` ignores SIGHUP.
 

@@ -2710,14 +2710,10 @@ class Agent:
           ``setup_error`` too, before its first step;
         - ``timeout``: the run was still going after ``timeout_s``
           seconds. It is cancelled wherever it was: a request in flight
-          is abandoned (and counts in ``llm_errors``), a shell command is
-          killed with every process it started, and tool providers still
-          being set up are closed (so later runs end as ``setup_error``).
-          ``python_exec`` code without a ``workspace_root`` is the
-          exception: it runs on the event loop, so neither ``timeout_s``
-          nor the executor's timeout can interrupt it, and the run ends
-          only once that code returns. With a root it runs in a child
-          process, which is killed with every process it started.
+          is abandoned (and counts in ``llm_errors``), a shell command or
+          a ``python_exec`` child is killed with every process it
+          started, and tool providers still being set up are closed (so
+          later runs end as ``setup_error``).
           Closing the providers is not cut short, also when the deadline
           expires while a failed setup is closing them, so the run
           returns once they are closed, which can be after ``timeout_s``;

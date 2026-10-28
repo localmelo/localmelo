@@ -319,10 +319,11 @@
           MCP tool its server's <code>timeout</code>. In the interactive UI,
           <code>shell_exec</code> and <code>python_exec</code> get 10 minutes.
           A shell command's standard input is <code>/dev/null</code>, so it
-          never reads the terminal. Without a workspace root,
-          <code>python_exec</code> code runs inside localmelo and cannot be
-          interrupted. A refusal, a denial, a time-out or an error comes back
-          as the tool's error.
+          never reads the terminal. <code>python_exec</code> code always runs
+          in a child process, which a time limit or a cancellation kills: in
+          the current directory without a workspace root, in the root with
+          one. A refusal, a denial, a time-out or an error comes back as the
+          tool's error.
         </p>
         <p>
           The four built-in tools are <code>shell_exec</code>,

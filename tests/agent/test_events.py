@@ -1579,6 +1579,28 @@ class TestExitCode:
         assert recorder.of("tool.finished")[0].data["exit_code"] == 3
 
     @pytest.mark.asyncio
+    async def test_python_exit_code_reaches_tool_finished_without_a_root(
+        self,
+    ) -> None:
+        recorder = Recorder()
+        agent = _agent(
+            ScriptedLLM(
+                [
+                    _calls(("python_exec", {"code": "import sys\nsys.exit(3)"}, "c1")),
+                    _answer("done"),
+                ]
+            ),
+            builtins=frozenset({"python_exec"}),
+        )
+
+        result = await agent.run_task("run python", on_event=recorder)
+
+        assert result.status == "completed"
+        finished = recorder.of("tool.finished")[0].data
+        assert (finished["status"], finished["exit_code"]) == ("error", 3)
+        assert finished["error"] == "Python exited with code 3"
+
+    @pytest.mark.asyncio
     async def test_exit_code_reaches_tool_finished(self, tmp_path: Path) -> None:
         big = "head -c 60000 /dev/zero | tr '\\0' x; exit 1"
         llm = ScriptedLLM(

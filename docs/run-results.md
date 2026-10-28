@@ -61,10 +61,8 @@ Details:
   `MCP server 'notes' exited (code 1)`. An agent does not retry setup: its
   later runs end as `setup_error` too.
 - **`timeout`.** The error is `Timed out after <n> s`. A model request in
-  flight is abandoned, and a `shell_exec` command is killed with every
-  process it started. Without a workspace root, as in direct mode,
-  `python_exec` code cannot be interrupted: the run ends only when that code
-  returns. With one, the code runs in a child process, which is killed too.
+  flight is abandoned, and a `shell_exec` command or `python_exec` child is
+  killed with every process it started.
 - **`crashed`.** The error is `<ExceptionType>: <message>`, and the
   traceback is logged. Ctrl+C ends a run as `crashed` with the error
   `CancelledError`, and SIGTERM or SIGHUP with `Cancelled by SIGTERM` or
