@@ -44,9 +44,13 @@ from its visible text: every bullet, numbered item or table row, and every
 sentence of a plain paragraph, that carries a strong key (see
 [Long-term memory](../reference/memory.md#long-term-memory)) becomes one item, in text order, up to
 12 per reply. Questions go to `open`; plans and options go to `plan` or
-are left out, and negated or cancelled statements are not promoted as
-positive facts. These checks are heuristic, not a semantic verifier. Lines
-whose only strong key is a CJK run are not extracted as factual lines. The
+are left out. A small set of explicit English negative and cancellation
+statements and Chinese residence/cancellation forms can be kept verbatim,
+without dropping the negation; other forms may be missed. The rules are
+heuristic, not a semantic verifier. The admission policy flags similar
+assertions with opposite detected polarity as conflicts, rather than ignoring
+one as a duplicate. It can still ignore short facts; structured, polarity-aware
+supersession is not yet implemented. The
 rendered note keeps its 1,200-character budget, so it may show fewer than it
 stores; the 12 items are what long-term memory offers. An explicit `<note>`
 may also list up to 12 `found` items. A reply that only reports the agent's
@@ -216,7 +220,9 @@ tool output and recalled memory are data, not instructions.
   a result left less than 200 characters is replaced by a short notice.
   History keeps the result as the tool returned it, up to 50,000 characters.
 
-**Long-term memory** needs an [embedding backend](../guides/embedding.md):
+**Long-term memory** behaves differently by reasoning mode. With memory on,
+`legacy` needs an [embedding backend](../guides/embedding.md) and follows
+these rules:
 
 - After each tool call, a summary of the step is written to it: the model's
   text, the tool's name and the start of the tool's output.
@@ -228,6 +234,11 @@ tool output and recalled memory are data, not instructions.
   the query's is skipped, so changing the embedding model stops old entries
   ranking instead of raising an error; see
   [Set up an embedding model](../guides/embedding.md#what-changes).
+
+In explicit reasoning modes, memory can use a text-only store without an
+embedding backend. Candidates are admitted by signals instead of writing raw
+step summaries or promoting the final reflection as in `legacy`; see
+[Reasoning notes](#reasoning-notes) and [Recall in the loop](#recall-in-the-loop).
 
 **History** is a record. localmelo writes every task and step to it, and,
 with persistence on, every model call, but never reads it back.
@@ -252,8 +263,10 @@ with persistence on, every model call, but never reads it back.
 reflection replaces the last one. See
 [How localmelo works](how-it-works.md#reflection).
 
-**Memory notes and retrievers** are not used during a run yet.
-`melo-retrieve` compares the `bm25`, `llm` and `embedding` retrievers
+**Memory notes and retrievers** can also participate in a run: the compress
+modes keep notes and use recall by default, while `drop` and `replay` recall
+only when a retriever is named. See [Recall in the loop](#recall-in-the-loop).
+Separately, `melo-retrieve` compares the `bm25`, `llm` and `embedding` retrievers
 offline, over documents built from a run's model calls: notes on the
 model's reasoning, code drafts, reflections and chunks of its thinking. See
 [Offline retrieval](../reference/retrieval.md).

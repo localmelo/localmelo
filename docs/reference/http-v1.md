@@ -149,8 +149,9 @@ and the task goes on. `is_busy` in [GET /v1/sessions](#get-v1sessions)
 shows which sessions are busy.
 
 The `/v1/agent` API has no route that stops a run, so wait for it to finish
-and close the session after. The web workspace's cancel route,
-`POST /api/turns/{turn_id}/cancel`, stops a console turn
-only ([Web workspace](../guides/web-console.md#web-workspace)); it does not reach an `/v1/agent` run.
+and close the session after. When enabled, `POST /v1/playground/session/{id}/cancel`
+stops a legacy playground chat, not an `/v1/agent` run. The current
+[web workspace](../guides/web-console.md#web-workspace) instead stops its turns
+with [`POST /api/turns/{turn_id}/cancel`](api-v2.md#post-apiturnsturn_idcancel).
 Stopping the gateway still closes every session, a busy one included; see
 [Stop the gateway](../guides/gateway.md#stop-the-gateway).

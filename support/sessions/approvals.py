@@ -102,29 +102,42 @@ class ApprovalBroker:
         """
 
         async def ask(request: ApprovalRequest) -> ApprovalDecision:
-            answer: asyncio.Future[ApprovalDecision] = (
-                asyncio.get_running_loop().create_future()
-            )
-            self._pending[request.request_id] = _Pending(session_id, request, answer)
-            try:
-                if self._timeout_s is None:
-                    return await answer
-                try:
-                    async with asyncio.timeout(self._timeout_s):
-                        return await answer
-                except TimeoutError:
-                    if answer.done() and not answer.cancelled():
-                        return answer.result()
-                    return ApprovalDecision(
-                        False,
-                        f"No answer within {self._timeout_s:g} s",
-                        origin="timeout",
-                    )
-            finally:
-                if self._pending.pop(request.request_id, None) is not None:
-                    self._remember(request.request_id)
+            return await self.begin(session_id, request)
 
         return ask
+
+    def begin(
+        self, session_id: str, request: ApprovalRequest
+    ) -> asyncio.Task[ApprovalDecision]:
+        """Register synchronously and return a cancellable answer waiter."""
+        answer: asyncio.Future[ApprovalDecision] = (
+            asyncio.get_running_loop().create_future()
+        )
+        entry = _Pending(session_id, request, answer)
+        self._pending[request.request_id] = entry
+
+        async def wait() -> ApprovalDecision:
+            if self._timeout_s is None:
+                return await answer
+            try:
+                async with asyncio.timeout(self._timeout_s):
+                    return await answer
+            except TimeoutError:
+                if answer.done() and not answer.cancelled():
+                    return answer.result()
+                return ApprovalDecision(
+                    False, f"No answer within {self._timeout_s:g} s", origin="timeout"
+                )
+
+        task = asyncio.create_task(wait())
+
+        def cleanup(_: asyncio.Task[ApprovalDecision]) -> None:
+            if self._pending.get(request.request_id) is entry:
+                self._pending.pop(request.request_id)
+                self._remember(request.request_id)
+
+        task.add_done_callback(cleanup)
+        return task
 
     def _remember(self, request_id: str) -> None:
         if len(self._resolved) == self._resolved.maxlen:

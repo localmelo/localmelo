@@ -20,7 +20,9 @@ A console turn passes the same scheduler gate a workspace chat does: every
 model call waits for its slot under `[scheduler]`, and the call log records
 it under the session's id. See [Scheduler](../guides/scheduler.md#the-gate-on-chats-s2).
 
-Requests and responses are JSON in UTF-8. A request with a non-empty body
+JSON request bodies and JSON responses use UTF-8. Event streams use
+`text/event-stream`, image blobs use their image media type, and a successful
+204 response has no body. A request with a non-empty body
 needs `Content-Type: application/json`, and a body may have at most 1 MiB
 (1,048,576 bytes). Every string in a request must be valid UTF-8 without
 lone surrogates. Responses carry `Cache-Control: no-store`,
@@ -257,7 +259,10 @@ memory off. Tools run with the user's permissions, not in a sandbox.
   and defaults to a title derived from the objective. Level is an integer
   0–5 or `P0`–`P5`; omitted means computed P2. A supplied `deadline`, even
   null, is rejected; deadlines are not supported yet. Other fields are
-  rejected. Returns 202 `{"task": ...}` for a new task. A non-empty
+  rejected. A missing, blank or overlong objective, overlong title or
+  invalid level returns 400 `invalid_task`; schema/type errors return 400
+  `invalid_request`. Returns 202 `{"task": ...}` for a new task. An explicitly
+  empty `request_key` returns 400 `invalid_request`. A non-empty
   `request_key` makes a repeat of the same normalized request return 200
   `{"task": ..., "repeated": true}`; reusing it for a different request
   returns 409 `submission_conflict`. A repeat does not start a new worker.
@@ -272,15 +277,22 @@ memory off. Tools run with the user's permissions, not in a sandbox.
   audit-log retention. If there is no saved snapshot (for example, a task
   created or set at P5, or a v1 pause whose log was already missing), resume
   falls back to computed P2. `auto` selects computed P2.
-  Pause cannot be combined with a level. Resuming a task that is not paused
+  Pause cannot be combined with a level, and resume cannot be combined with
+  P5. An update with neither level nor state, or either invalid combination,
+  returns 400 `invalid_request`. Resuming a task that is not paused
   returns 409 `not_paused`. Stop cancels a running worker or cancels a queued
   task. Finished tasks cannot be changed (409 `invalid_transition`).
 
-Pause takes effect at the next model call: an already-running tool finishes,
-and an answered pending approval waits until resume before proceeding. If a
-task is paused before it starts, no worker starts until it resumes. S3b.1a
-does not change that worker pause behavior from #119 or ship a new API; its
-internal hold/park foundations are not integrated with workers. S3b.1b follows.
+Pause closes the worker fence and records pending pause while an already-running
+provider or tool finishes. At a held plan, reflection or undelivered approval,
+the worker parks, closes its resources and saves a card from persisted evidence.
+An undelivered approval is withdrawn; resume starts from the card and asks again.
+A task paused before it starts does not start a worker until resumed. If a park
+cannot be saved, the worker retries with its fence closed; after three failed
+attempts it saves an interrupted task and card. If the store cannot persist that
+outcome, resume and stop return 503 `store_unavailable` until finalization succeeds.
+A failed resource close quarantines the worker and keeps its slot counted; after
+retries, the interrupted task reports `cleanup failed; slot held until restart`.
 
 Task objects include the task id, normalized `spec`, `state`, priority and
 source, `wait_reason`, timestamps, workspace and `priority_events`, along
@@ -292,7 +304,7 @@ Invalid workspace requests return 400 `invalid_workspace`; a workspace that
 becomes invalid before a run or resume fails the task with
 `wait_reason="invalid_workspace"` instead of running it.
 
-At most four workers are resident at once, including paused running workers.
+At most four workers are resident at once, including quarantined workers.
 Task rows persist across gateway restarts. At startup, surviving nonterminal
 tasks are marked failed with `gateway restarted; recovery arrives in S3b`;
 full recovery is deferred to S3b. Retrying the same `request_key` returns the
@@ -338,10 +350,13 @@ The newest sessions first. Only `chat` sessions are listed by default.
   `tokens` is the integer total token count, and `meta.usage` holds
   the full usage map. Status falls back to the first turn's status; steps and
   tokens fall back to its stored result. Missing values are `null`, not zero.
-  The detail response's top-level `tokens` separately counts completion tokens.
+  The detail response's top-level `tokens` separately counts completion tokens;
+  for a worker it is `null` if no turn has an integer `completion_tokens`.
 - Worker sessions are read-only. Their session detail and turns (including
   `events=true`) and stored image blobs are available by id; write routes and the `/events` SSE
-  route return 404. If an id exists in both files, the gateway session wins.
+  route return 404. For a worker id found only in the CLI file, `/tools`,
+  `/memory`, `/runs` and the session-scoped submission lookup also return
+  404 `not_found`. If an id exists in both files, the gateway session wins.
   Worker session objects add `meta` with the stored provenance, and their
   `running_here` is always false. `busy` reflects an unexpired worker lease;
   the gateway does not recover stale turns or apply retention to the CLI file.
@@ -804,7 +819,7 @@ Every tool the session's Agent offers, with whether this session allows it.
 ```
 
 ```json
-{"tools": [{"name": "python_exec", "description": "Run Python code ...", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]}, "source": "builtin", "requires_approval": true, "granted": false}], "mcp_config_label": "", "mcp_error": ""}
+{"tools": [{"name": "python_exec", "description": "Run Python code ...", "parameters": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]}, "source": "builtin", "requires_approval": true, "granted": false}], "mcp_config_label": "", "mcp_error": "MCP is not built in the console yet"}
 ```
 
 - `source` is `builtin`, `provided` (an MCP server's tool) or `custom`.

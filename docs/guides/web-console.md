@@ -1,5 +1,13 @@
 # Guide: Web console
 
+Use the web console to configure a localmelo gateway, work in chats, and inspect
+saved worker runs. This guide is for someone using the console in a browser.
+
+Before you start, install the gateway extra and have a model server ready; see
+[Start the gateway](gateway.md#start-the-gateway). The gateway requires
+authentication and only binds to loopback. Tools run with your
+permissions and are not sandboxed; review a task before approving a tool call.
+
 ## Web workspace
 
 Open `http://127.0.0.1:8401/` in a browser for the web workspace. It is the
@@ -37,6 +45,8 @@ tab is visible, for changes from another browser. **Reconnect now** checks the
 chat before reopening its stream. Independent banners show store, model and
 connection problems without replacing other notices.
 
+## Inspect workers
+
 **Workers** opens read-only worker history from the CLI sessions file. Filter
 by status, source or exact parent run, load more with the server's cursor, and
 open a run to inspect its recorded brief, metadata, work and answer. An
@@ -46,11 +56,15 @@ close and level controls are disabled while Workers is open. Connection
 settings remain available separately. **Chats** returns to the open chat.
 Records are redacted by patterns, not guaranteed secret-free; review before sharing.
 
+## Inspect a chat
+
 **Details** opens a session drawer with its tools and session grants, working
 and long-term memory status, and finished runs with paging when a page supplies
 a turn cursor. Granted tools can be
 revoked there; the tools view may open a paused session. On narrow screens the
 drawer stacks below the composer.
+
+## Recover a send
 
 A send is named by a `client_request_id`. If its answer is lost the page asks
 the store whether the message was accepted, and offers `Retry` only when it
@@ -60,6 +74,8 @@ also kept in the tab's session storage, including its key, and a send that
 was in flight at reload is checked against the store before a retry. It says
 `Not sent` (or `Outcome unknown` when the store could not be asked), with
 `Retry` and `Cancel and keep draft`.
+
+## Scheduling and stopping
 
 A chat's header has a level chip (P1 to P4, P2 by default) that sets how the
 scheduler orders the chat's calls in front of other chats; it is kept in
@@ -85,6 +101,8 @@ with the status `cancelled`, and the chat takes the next message once that
 save is done. Each message sees the earlier answers of its chat, as in a
 [session](gateway.md#sessions).
 
+## Approvals and failures
+
 A tool call that needs approval shows a card below its `Needs approval` tool.
 Console sessions use `RememberingPolicy` and ask before `file_write` and
 `python_exec`; legacy `/v1` has no approval policy. Approvals are not a
@@ -99,6 +117,8 @@ allow is disabled; you can reload the details, deny, or stop the run.
 A failed turn shows its error and details; the newest finished turn can offer
 **Try again**, and **Continue** when it has run tools and its status permits
 continuation. Stopped or interrupted turns use a neutral line instead.
+
+## Persistence and limits
 
 The page's chats are sessions in the gateway's own session file,
 `~/.cache/localmelo/gateway/sessions.db`; the terminal keeps its own in
