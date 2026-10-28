@@ -424,6 +424,7 @@ def docs_from_entries(
         created = _number(meta.get("created_at"))
         entry_id = int(meta.get("id") or 0)
         title = _long_title(created)
+        order_time = created
         if include_history:
             provenance = meta.get("provenance")
             assertion = (
@@ -433,6 +434,10 @@ def docs_from_entries(
             if meta.get("status") == "superseded":
                 labels.append("superseded")
             if isinstance(assertion, dict):
+                observed = _number(assertion.get("observed_at"))
+                if observed > 0:
+                    order_time = observed
+                    title = _long_title(observed)
                 if not assertion.get("subject_key"):
                     labels.append("unlinked assertion")
                 effective = assertion.get("effective_date")
@@ -455,6 +460,7 @@ def docs_from_entries(
                     "entry_id": entry_id,
                     "origin_task_ids": origin,
                     "created_at": created,
+                    **({"assertion_order_time": order_time} if include_history else {}),
                     "origin": _long_origin(meta),
                 },
             )

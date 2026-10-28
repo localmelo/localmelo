@@ -27,7 +27,7 @@ async def apply(
         kind="semantic",
         source="user",
         admitted_by="user_statement",
-        provenance={"assertion": assertion.to_dict()},
+        provenance={"assertion": {**assertion.to_dict(), "observed_at": observed_at}},
         task_id=task,
         session_id="",
         created_at=observed_at,

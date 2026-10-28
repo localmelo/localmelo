@@ -29,6 +29,7 @@ from localmelo.melo.memory.long import (
     LongTerm,
     LongTermSchemaError,
     StoredEntry,
+    _history_order,
 )
 
 logger = logging.getLogger(__name__)
@@ -356,14 +357,14 @@ class SqliteLongTerm(LongTerm):
                     ) as cur:
                         existing = await cur.fetchall()
                     typed_rows = []
-                    for entry_id, raw, observed_at in existing:
+                    for existing_id, raw, observed_at in existing:
                         try:
                             other = json.loads(raw).get("assertion")
                         except (ValueError, AttributeError, TypeError):
                             continue
                         if isinstance(other, dict):
                             typed_rows.append(
-                                (int(entry_id), other, float(observed_at))
+                                (int(existing_id), other, float(observed_at))
                             )
                     actual, target_id, reason = decide_assertion(
                         assertion, typed_rows, created_at
@@ -587,7 +588,9 @@ class SqliteLongTerm(LongTerm):
             (task_id,),
         ) as cur:
             rows = [tuple(row) for row in await cur.fetchall()]
-        return [_stored(row) for row in rows]
+        entries = [_stored(row) for row in rows]
+        entries.sort(key=_history_order, reverse=True)
+        return entries
 
     async def decisions(self) -> list[dict[str, Any]]:
         conn = await self._ensure_ready()

@@ -126,11 +126,18 @@ def test_typed_relations_require_ordered_explicit_change() -> None:
     changed = parse_assertion("Mina now lives in Rome.")
     conflict = parse_assertion("Mina lives in Rome.")
     assert old and changed and conflict
-    rows = [(1, old.to_dict(), 10.0)]
-    assert decide_assertion(changed.to_dict(), rows, 20.0)[:2] == ("UPDATE", 1)
+    rows = [(1, {**old.to_dict(), "observed_at": 10.0}, 10.0)]
+    assert decide_assertion({**changed.to_dict(), "observed_at": 20.0}, rows, 20.0)[
+        :2
+    ] == ("UPDATE", 1)
     assert decide_assertion(conflict.to_dict(), rows, 20.0)[:2] == ("CONFLICT", 1)
-    assert decide_assertion(changed.to_dict(), rows, 9.0)[:2] == ("CONFLICT", 1)
-    assert decide_assertion(changed.to_dict(), rows, 10.0)[:2] == ("CONFLICT", 1)
+    assert decide_assertion({**changed.to_dict(), "observed_at": 9.0}, rows, 20.0)[
+        :2
+    ] == ("CONFLICT", 1)
+    assert decide_assertion({**changed.to_dict(), "observed_at": 10.0}, rows, 20.0)[
+        :2
+    ] == ("CONFLICT", 1)
+    assert decide_assertion(changed.to_dict(), rows, 20.0)[:2] == ("CONFLICT", 1)
     assert decide_assertion(old.to_dict(), rows, 20.0)[:2] == ("IGNORE", 1)
 
 

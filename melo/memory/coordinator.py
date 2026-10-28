@@ -9,7 +9,11 @@ from localmelo.melo.checker.checker import Checker
 from localmelo.melo.checker.payloads import MemoryCandidatePayload
 from localmelo.melo.checker.redaction import redact_secrets
 from localmelo.melo.contracts.providers import BaseEmbeddingProvider
-from localmelo.melo.memory.assertions import parse_assertion, verified_record
+from localmelo.melo.memory.assertions import (
+    parse_assertion,
+    record_observed_at,
+    verified_record,
+)
 from localmelo.melo.memory.hippo import (
     SIGNALS,
     CandidateItem,
@@ -395,6 +399,11 @@ class Hippo:
                 parsed = parse_assertion(checked, source_date=source_date)
                 if parsed is not None and verified:
                     typed = parsed.to_dict()
+                    typed["observed_at"] = (
+                        candidate.created_at
+                        if candidate.source == "user"
+                        else record_observed_at(item.evidence or "")
+                    )
                     item_provenance["assertion"] = typed
                     kind = "semantic"
             try:
@@ -452,6 +461,11 @@ class Hippo:
                     reason="unverified assertion; retained without a link",
                 )
             actual_decision: dict[str, Any] = {}
+            typed_options: dict[str, Any] = (
+                {"typed_assertion": True, "decision_details": actual_decision}
+                if typed is not None
+                else {}
+            )
             try:
                 entry_id, action = await self.long.apply(
                     text=checked,
@@ -471,11 +485,7 @@ class Hippo:
                     source_ids=source_ids,
                     keep_text=self.keep_decision_text,
                     candidate_id=candidate.candidate_id,
-                    **(
-                        {"typed_assertion": True, "decision_details": actual_decision}
-                        if typed is not None
-                        else {}
-                    ),
+                    **typed_options,
                 )
             except LongTermSchemaError as exc:
                 self._disable_store(exc)

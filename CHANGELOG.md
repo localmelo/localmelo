@@ -36,6 +36,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Experimental Python opt-in typed memory assertions: conservative evidence
+  checks, ordered same-task updates and labelled historical recall ([#NN]).
+
 - Scheduler component v3 adds dormant recovery provenance, guarded durable
   intents and receipts, and process identity records. Interrupted recovery
   retains pending pause intent; explicit legacy adoption records orphan-risk
@@ -54,7 +57,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   residence/cancellation assertions, and item attribution rejects conflicting
   event times, rejects opposing detected polarity and requires the full negative
   assertion ([#137]). Similar opposing assertions are retained as conflicts;
-  structured polarity-aware supersession is not yet implemented.
+  structured polarity-aware supersession remains off by default.
 
 - Worker park integration fences held provider and approval delivery, persists
   pause intent and evidence-based cards, releases cleanly parked worker slots,

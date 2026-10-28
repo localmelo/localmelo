@@ -77,7 +77,8 @@ async def test_verified_typed_updates_and_unverified_abstention() -> None:
     update = "Mina now lives in Rome."
     old_id = None
     for name, text, timestamp in [("a", old, 10), ("b", update, 20)]:
-        hippo.propose(candidate(name, text, record(name, text), timestamp))
+        source_time = f"2026-04-11T16:{timestamp:02}:00-04:00"
+        hippo.propose(candidate(name, text, record(name, text, source_time), timestamp))
         decisions = await hippo.admit(name, "rehearsal")
         assert decisions[0].action == ("NEW" if name == "a" else "UPDATE")
         if name == "a":
@@ -94,6 +95,20 @@ async def test_verified_typed_updates_and_unverified_abstention() -> None:
     decisions = await hippo.admit("c", "rehearsal")
     assert decisions[0].action != "UPDATE"
     assert any(entry.text == update for entry in await store.active_entries())
+
+
+async def test_late_ingestion_does_not_order_older_source_evidence() -> None:
+    store = LongTerm()
+    hippo = Hippo(long=store, typed_assertions=True)
+    old = "Mina lives in Paris."
+    update = "Mina now lives in Rome."
+    hippo.propose(candidate("a", old, record("a", old, "2026-04-11T16:30:00Z"), 10))
+    assert (await hippo.admit("a", "rehearsal"))[0].action == "NEW"
+    hippo.propose(
+        candidate("b", update, record("b", update, "2026-04-11T16:00:00Z"), 20)
+    )
+    assert (await hippo.admit("b", "rehearsal"))[0].action == "CONFLICT"
+    assert len(await store.active_entries()) == 2
 
 
 async def test_t4_reader_sees_newer_unlinked_doors_first(tmp_path: Path) -> None:
@@ -113,7 +128,10 @@ async def test_t4_reader_sees_newer_unlinked_doors_first(tmp_path: Path) -> None
     later = "Doors pushed to 9 tonight, the opener cancelled!"
     try:
         for name, text, observed in [("F1", first, 10), ("F3", later, 20)]:
-            agent.hippo.propose(candidate(name, text, record(name, text), observed))
+            stamp = f"2026-04-11T16:{observed:02}:00-04:00"
+            agent.hippo.propose(
+                candidate(name, text, record(name, text, stamp), observed)
+            )
             assert (await agent.hippo.admit(name, "rehearsal"))[0].action == "NEW"
         _, block, _ = await agent._run_recall(
             "start", "What time are the doors?", _RunState(task_id="reader")

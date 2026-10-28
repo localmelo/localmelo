@@ -52,6 +52,18 @@ class StoredEntry:
     vector: tuple[float, ...] | None
 
 
+def _history_order(entry: StoredEntry) -> tuple[float, int]:
+    assertion = entry.provenance.get("assertion")
+    observed = assertion.get("observed_at") if isinstance(assertion, dict) else None
+    if (
+        isinstance(observed, (int, float))
+        and not isinstance(observed, bool)
+        and observed > 0
+    ):
+        return float(observed), entry.id
+    return entry.created_at, entry.id
+
+
 @dataclass
 class _Entry:
     """The mutable in-memory twin of one store row."""
@@ -439,9 +451,9 @@ class LongTerm:
         """Return a task's entries, including superseded rows, newest first."""
         if not task_id:
             return []
-        rows = [entry for entry in self._entries if entry.task_id == task_id]
-        rows.sort(key=lambda entry: (entry.created_at, entry.id), reverse=True)
-        return [_stored(entry) for entry in rows]
+        rows = [_stored(entry) for entry in self._entries if entry.task_id == task_id]
+        rows.sort(key=_history_order, reverse=True)
+        return rows
 
     async def decisions(self) -> list[dict[str, Any]]:
         return list(self._decisions)

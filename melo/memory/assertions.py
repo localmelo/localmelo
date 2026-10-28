@@ -98,6 +98,21 @@ def verified_record(
     return True, None
 
 
+def record_observed_at(evidence: str) -> float | None:
+    """A timezone-aware source timestamp, not the later ingestion time."""
+    try:
+        record = json.loads(evidence)
+        stamp = record.get("timestamp")
+        if not isinstance(stamp, str):
+            return None
+        parsed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        if parsed.utcoffset() is None:
+            return None
+        return parsed.timestamp()
+    except (ValueError, TypeError, AttributeError, OverflowError, OSError):
+        return None
+
+
 def decide_assertion(
     incoming: dict[str, Any],
     rows: list[tuple[int, dict[str, Any], float]],
@@ -116,17 +131,23 @@ def decide_assertion(
     if not matching:
         return "NEW", None, "new typed assertion"
     matching.sort(key=lambda item: (item[2], item[0]), reverse=True)
-    entry_id, other, created_at = matching[0]
+    entry_id, other, _created_at = matching[0]
     same = all(
         str(incoming.get(name, "")).casefold() == str(other.get(name, "")).casefold()
         for name in ("value_text", "polarity", "state")
     )
     if same:
         return "IGNORE", entry_id, "duplicate typed assertion"
+    incoming_order = incoming.get("observed_at")
+    previous_order = other.get("observed_at")
     if (
         incoming.get("changed") is True
         and len(matching) == 1
-        and observed_at > created_at > 0
+        and isinstance(incoming_order, (int, float))
+        and not isinstance(incoming_order, bool)
+        and isinstance(previous_order, (int, float))
+        and not isinstance(previous_order, bool)
+        and incoming_order > previous_order > 0
     ):
         return "UPDATE", entry_id, "ordered explicit change"
     return "CONFLICT", entry_id, "different or unordered typed assertion"

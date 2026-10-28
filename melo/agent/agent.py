@@ -90,6 +90,7 @@ from localmelo.melo.memory.hippo import (
     request_candidates,
     user_candidates,
 )
+from localmelo.melo.memory.long import LongTerm
 from localmelo.melo.memory.notes import (
     NOTE_MAX_DECIDED,
     NOTE_MAX_FOUND,
@@ -1459,7 +1460,7 @@ class Agent:
         # long-term only when memory is on and an embedding provider exists.
         self._memory_dir = _resolve_memory_dir(self.options)
         history_backend = None
-        long_backend = None
+        long_backend: LongTerm | None = None
         procedures_backend = None
         if self._memory_dir is not None:
             from localmelo.melo.memory._sqlite import (
@@ -1506,8 +1507,6 @@ class Agent:
             and self.options.reasoning != "legacy"
             and self.options.typed_assertions
         ):
-            from localmelo.melo.memory.long import LongTerm
-
             long_backend = LongTerm()
 
         # memory=False runs Hippo in its no-embedding mode, which is exactly
@@ -1875,10 +1874,18 @@ class Agent:
         # time so an appended entry never renumbers an old one.
         docs.sort(key=lambda doc: float(doc.meta.get("score") or 0.0), reverse=True)
         docs = docs[:RECALL_LONG_K]
-        docs.sort(
-            key=lambda doc: (float(doc.meta.get("created_at") or 0.0), doc.doc_id),
-            reverse=self.options.typed_assertions,
-        )
+        if self.options.typed_assertions:
+            docs.sort(
+                key=lambda doc: (
+                    float(doc.meta.get("assertion_order_time") or 0.0),
+                    int(doc.meta.get("entry_id") or 0),
+                ),
+                reverse=True,
+            )
+        else:
+            docs.sort(
+                key=lambda doc: (float(doc.meta.get("created_at") or 0.0), doc.doc_id)
+            )
         return [
             dataclasses.replace(doc, meta={**doc.meta, "alias": f"m{index}"})
             for index, doc in enumerate(docs, start=1)
