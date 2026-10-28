@@ -24,6 +24,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Label Python checks in attempt digests with a recognizable runner and safe
+  target basename when available, rather than the first line of code. Unknown
+  checks use a neutral label. Results show counts, an exit code or `completed`
+  instead of arbitrary output. Hidden paths and agent scratch notes are omitted;
+  Python file writes are not inferred ([#149]).
+
 - Correct the API v2 response formats and tools example, and update the bilingual
   quickstart to reflect the shipped console settings and approvals ([#122], [#124]).
   Clarify task validation and read-only worker details ([#119], [#123], [#130], [#133]).
@@ -993,3 +999,4 @@ earlier milestones.
 [#144]: https://github.com/localmelo/localmelo/pull/144
 [#145]: https://github.com/localmelo/localmelo/pull/145
 [#147]: https://github.com/localmelo/localmelo/pull/147
+[#149]: https://github.com/localmelo/localmelo/pull/149
