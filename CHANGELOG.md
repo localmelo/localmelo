@@ -9,6 +9,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Workspace approval cards with a 500 ms guard, explicit allow/deny choices,
+  and a jump-to-approval control; failure and stopped states with retry,
+  continuation when eligible, copy-error and details; older-turn paging;
+  revision-checked connection settings; and per-tab outbox recovery. Session
+  update events also carry a display-safe workspace label. ([#122])
 - A documentation inventory, bilingual style guide and experimental offline
   preview builder lay the groundwork for a later site migration; published
   pages and existing URLs are unchanged ([#121]).
@@ -83,9 +88,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   both surfaces share, and a console turn sets the gate's turn facts as a
   chat's message does. The page is plain ES modules with no build step
   (`workspace.js`, the new `turns.mjs` holding the event reducer and the
-  terminal's wording, `markdown.mjs`). Approval cards, the failure block's
-  `Continue`/`Try again`/`Copy error` and the settings dialog follow in a
-  later update; a waiting approval shows as `Needs approval` until then.
+  terminal's wording, `markdown.mjs`). The follow-up adds approval cards,
+  the failure block's actions and the settings dialog.
   `/` and every `/v1/*` route keep their behaviour ([#111]).
 
 - API v2 settings, model listing, guard body limits and unconfigured gateway
@@ -767,7 +771,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - Gateway and console sessions no longer offer `shell_exec`: both run in the
   new `gateway` tool mode, which registers `file_read`, `file_write` and
-  `python_exec` only: `/v1` and the workspace have no approval policy, and
+  `python_exec` only: legacy `/v1` has no approval policy; the console asks for
+  `file_write` and `python_exec` using `RememberingPolicy`, and
   the console's approvals arrive over the same unauthenticated loopback API,
   so any local process could approve its own request. `AgentOptions` gains
   `mode` (`direct`, `interactive`, `gateway` or `python`; `python` is the
@@ -881,3 +886,4 @@ earlier milestones.
 [#119]: https://github.com/localmelo/localmelo/pull/119
 [#120]: https://github.com/localmelo/localmelo/pull/120
 [#121]: https://github.com/localmelo/localmelo/pull/121
+[#122]: https://github.com/localmelo/localmelo/pull/122

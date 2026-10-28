@@ -210,30 +210,23 @@
           <a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2</a>.
         </p>
         <p>
-          At <code>/</code> it serves the web workspace, the console's live
-          page, which talks only to <code>/api</code> and uses the gateway's
-          configured model (<code>melo --reconfigure</code> sets it;
-          connection settings in the page arrive in a later update). It lists
-          the console's sessions newest first, with search and each chat's
-          draft, and draws one chat's turns as the terminal does: the user's
-          message, a work card for each tool call, folded reasoning and
-          reflections, notices, the live progress row and the answer with its
-          facts and <code>Copy response</code>. Its event stream reopens from
-          the last stored event, a send carries a key the store is asked about
-          before <code>Retry</code> is offered, and Stop ends the turn as
-          <code>cancelled</code>. Each chat has its own agent, in the
-          <code>gateway</code> tool mode (<code>file_read</code>,
-          <code>file_write</code> and <code>python_exec</code>, no
-          <code>shell_exec</code>) and with its own working memory; its model
-          calls pass the scheduler gate, and the header shows the GPU lock and
-          the battery. The chats are sessions in
-          <code>~/.cache/localmelo/gateway/sessions.db</code>: they survive a
-          restart and reopen from their transcript, while an agent is opened
-          on demand (at most 8 at once, an idle one closed after 15 minutes,
-          its conversation kept). Approval cards, the failure block's
-          <code>Continue</code>/<code>Try again</code> and the settings dialog
-          follow in a later update; until then a waiting approval shows as
-          <code>Needs approval</code> and is answered over API v2.
+          At <code>/</code> the web workspace uses the console's API v2 and
+          persistent session store. It shows the turn's work and answer,
+          connection settings, earlier turns, stopped or failed runs and
+          approval cards when requests are present. Console sessions use
+          <code>RememberingPolicy</code> to ask before <code>file_write</code>
+          and <code>python_exec</code>; legacy <code>/v1</code> has no approval
+          policy. Each chat uses the configured model and the
+          built-in <code>file_read</code>, <code>file_write</code> and
+          <code>python_exec</code> tools (no <code>shell_exec</code>). Model
+          calls share the scheduler gate, and the header shows its GPU lock
+          and battery readings.
+          The page lists sessions newest first with search and per-chat drafts,
+          displays tool work, folded reasoning, notices, progress and answers,
+          and reopens its event stream from the last stored event. Sessions in
+          <code>~/.cache/localmelo/gateway/sessions.db</code> survive restart;
+          agents open on demand (at most eight, closed after 15 minutes idle
+          while their conversations are kept).
         </p>
         <p>
           The gateway has no authentication. When it listens on
@@ -309,10 +302,9 @@
           <code>AgentOptions(record_answers=True)</code>, working memory keeps
           each run's answer, and <code>conversation()</code> and
           <code>load_conversation()</code> carry a conversation to another
-          agent. Direct mode and the HTTP API pass no event sink and no
-          policy. A console turn passes both: its Stop ends the run as
-          <code>cancelled</code>, and a call of a tool whose tier is not
-          <code>read</code> waits for the answer given over API v2.
+          agent. Direct mode and legacy <code>/v1</code> pass no event sink and no
+          policy. The web workspace passes an event sink and an approval policy, so its Stop ends a
+          run as <code>cancelled</code>.
         </p>
         <p>
           Key files: <code>melo/agent/agent.py</code>,
@@ -373,7 +365,7 @@
           <code>SHELL</code>, <code>TERM</code>, <code>LANG</code>, every
           <code>LC_*</code> variable and <code>TMPDIR</code>, plus
           <code>AgentOptions(tool_env=…)</code>: an API key in melo's
-          environment reaches no tool, and <code>VIRTUAL_ENV</code>,
+          environment reaches no tool unless explicitly named in <code>tool_env</code>, and <code>VIRTUAL_ENV</code>,
           <code>PYTHONPATH</code>, <code>SSH_AUTH_SOCK</code> and the proxy
           variables pass only through <code>tool_env</code>. A refusal, a
           denial, a time-out or an error comes back as the

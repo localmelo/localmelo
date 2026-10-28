@@ -331,7 +331,7 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
 ```json
 {
   "session": {"id": "3f9c2a7b1d4e", "kind": "chat", "title": "Release notes", "created_at": 1761141600.0, "updated_at": 1761141612.4, "model": "stub-model", "workspace": "/home/me/demo-project", "workspace_label": "~/demo-project", "busy": false, "running_here": false, "pending_approvals": 0, "level": 2, "held": ""},
-  "pending_approvals": [{"request_id": "0d6c2a9e8f7b41c3a5e9d1b3f5a7c9e1", "call_id": "call_1", "tool_name": "file_write", "arguments": {"path": "/home/me/demo-project/todo.md"}, "preview": "~/demo-project/todo.md", "workspace_root": "/home/me/demo-project", "workspace_label": "~/demo-project", "target": {"path_label": "todo.md", "exists": false, "size_bytes": 0}}],
+  "pending_approvals": [{"request_id": "0d6c2a9e8f7b41c3a5e9d1b3f5a7c9e1", "call_id": "call_1", "tool_name": "file_write", "arguments": {"path": "/home/me/demo-project/todo.md"}, "arguments_complete": true, "preview": "~/demo-project/todo.md", "workspace_root": "/home/me/demo-project", "workspace_label": "~/demo-project", "target": {"path_label": "todo.md", "exists": false, "size_bytes": 0}}],
   "grants": ["file_write"],
   "granted_at": {"file_write": 1761141604.9},
   "mcp_error": "",
@@ -351,6 +351,11 @@ curl http://127.0.0.1:8401/api/sessions/3f9c2a7b1d4e
   first open since the gateway started, and a closed Agent reads `paused`.
 - `tokens` sums the `completion_tokens` of the session's finished turns,
   the same field the answers report.
+- A `pending_approvals` entry's `arguments_complete` is true only when the
+  JSON-safe `arguments` preserve the original values without clipping or
+  conversion. Clients should not allow a request when it is false or missing;
+  denial remains available. Approval event arguments alone may be truncated,
+  so fetch session details before allowing.
 - A `pending_approvals` entry's `target` is set for a `file_write`: the
   path `path_label` (relative to the workspace, else with the home folder
   as `~`), whether the file `exists`, and its `size_bytes`, read when the
