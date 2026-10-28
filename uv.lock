@@ -550,6 +550,7 @@ dependencies = [
 [package.optional-dependencies]
 dev = [
     { name = "black" },
+    { name = "markdown-it-py" },
     { name = "mypy" },
     { name = "pre-commit" },
     { name = "pyte" },
@@ -570,6 +571,7 @@ requires-dist = [
     { name = "black", marker = "extra == 'dev'" },
     { name = "fastapi", marker = "extra == 'gateway'", specifier = ">=0.110" },
     { name = "httpx", specifier = ">=0.27" },
+    { name = "markdown-it-py", marker = "extra == 'dev'", specifier = "==4.2.0" },
     { name = "mypy", marker = "extra == 'dev'" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pre-commit", marker = "extra == 'dev'" },

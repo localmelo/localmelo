@@ -1,0 +1,269 @@
+"""Inventory and offline link checks for the pre-migration documentation tree."""
+
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import unicodedata
+from collections import Counter
+from functools import cache
+from html.parser import HTMLParser
+from pathlib import Path, PurePosixPath
+from urllib.parse import unquote, urlsplit
+
+from markdown_it import MarkdownIt
+
+ROOT = Path(__file__).resolve().parents[2]
+MANIFEST = ROOT / "docs/manifest.json"
+MD = MarkdownIt("commonmark", {"html": True}).enable("table")
+# A specific broken link may be recorded here as (source, literal URL, reason).
+# Entries must disappear when the underlying issue is fixed.
+LINK_DEBT: dict[tuple[str, str], str] = {}
+
+
+class HTMLInventory(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.ids: list[str] = []
+        self.links: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if attributes.get("id"):
+            self.ids.append(attributes["id"] or "")
+        if tag == "a" and attributes.get("name"):
+            self.ids.append(attributes["name"] or "")
+        for key in ("href", "src"):
+            if attributes.get(key):
+                self.links.append(attributes[key] or "")
+
+    handle_startendtag = handle_starttag
+
+
+def slug(text: str) -> str:
+    """GitHub-style heading ID, including Unicode and repeated hyphens."""
+    text = text.lower().strip()
+    return "".join(
+        "-" if ch.isspace() else ch
+        for ch in text
+        if ch.isspace() or ch in "-_" or unicodedata.category(ch)[0] not in "PCS"
+    )
+
+
+def inline_text(children: list) -> str:
+    return "".join(
+        (
+            token.content
+            if token.type in {"text", "code_inline"}
+            else (
+                inline_text(token.children or [])
+                if token.type == "image"
+                else " " if token.type in {"softbreak", "hardbreak"} else ""
+            )
+        )
+        for token in children
+    )
+
+
+def inventory(text: str, suffix: str) -> tuple[list[str], list[str]]:
+    html = HTMLInventory()
+    if suffix in {".html", ".htm"}:
+        html.feed(text)
+        return html.ids, html.links
+    tokens = MD.parse(text)
+    headings: list[str] = []
+    counts: Counter[str] = Counter()
+    used: set[str] = set()
+    links: list[str] = []
+    for i, token in enumerate(tokens):
+        if token.type == "heading_open":
+            base = slug(inline_text(tokens[i + 1].children or []))
+            count = counts[base]
+            candidate = f"{base}-{count}" if count else base
+            while candidate in used:
+                count += 1
+                candidate = f"{base}-{count}"
+            counts[base] = count + 1
+            used.add(candidate)
+            headings.append(candidate)
+        if token.type in {"html_block", "html_inline"}:
+            html.feed(token.content)
+        for child in token.children or []:
+            if child.type in {"link_open", "image"}:
+                target = child.attrGet("href" if child.type == "link_open" else "src")
+                if isinstance(target, str) and target:
+                    links.append(target)
+            elif child.type == "html_inline":
+                html.feed(child.content)
+    return headings + html.ids, links + html.links
+
+
+STYLE = {"docs/STYLE.md", "docs/zh-CN/STYLE.md"}
+
+
+@cache
+def tracked_docs() -> set[str]:
+    output = subprocess.check_output(["git", "ls-files", "docs"], cwd=ROOT, text=True)
+    # The style pair is new in this worktree and may not be staged yet.
+    return {
+        p for p in output.splitlines() if p.endswith((".md", ".html", ".txt"))
+    } | STYLE
+
+
+def safe_path(path: str) -> bool:
+    p = PurePosixPath(path)
+    return (
+        bool(path)
+        and not p.is_absolute()
+        and ".." not in p.parts
+        and str(p) == path
+        and "\\" not in path
+    )
+
+
+def test_manifest_schema_and_inventory() -> None:
+    manifest = json.loads(MANIFEST.read_text())
+    assert set(manifest) == {"version", "sections", "pages"}
+    assert manifest["version"] == 1
+    sections = manifest["sections"]
+    assert all(set(s) == {"id", "title", "order"} for s in sections)
+    section_ids = [s["id"] for s in sections]
+    assert len(section_ids) == len(set(section_ids))
+    assert len({s["order"] for s in sections}) == len(sections)
+    assert all(isinstance(s["order"], int) and s["title"] for s in sections)
+    ids, outputs, aliases, orders = [], [], [], []
+    for page in manifest["pages"]:
+        assert set(page) == {
+            "id",
+            "section",
+            "order",
+            "en_source",
+            "zh_source",
+            "en_output",
+            "zh_output",
+            "aliases",
+            "fragments",
+        }
+        assert re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", page["id"])
+        assert page["section"] in section_ids
+        assert isinstance(page["order"], int)
+        ids.append(page["id"])
+        orders.append((page["section"], page["order"]))
+        assert page["en_source"] or page["zh_source"]
+        for lang in ("en", "zh"):
+            source, output = page[f"{lang}_source"], page[f"{lang}_output"]
+            if source is not None:
+                assert safe_path(source) and source in tracked_docs()
+                assert source in page["aliases"]
+                assert output is not None
+            if output is not None:
+                assert (
+                    safe_path(output)
+                    and output.startswith("en/" if lang == "en" else "zh-CN/")
+                    and output.endswith(".html")
+                )
+                outputs.append(output)
+        assert isinstance(page["aliases"], list)
+        assert set(page["fragments"]) == set(page["aliases"])
+        for alias in page["aliases"]:
+            assert safe_path(alias) and alias in tracked_docs()
+            aliases.append(alias)
+            expected, _ = inventory((ROOT / alias).read_text(), Path(alias).suffix)
+            assert set(page["fragments"][alias]) == set(expected), alias
+            for fragment, destination in page["fragments"][alias].items():
+                target, sep, anchor = destination.partition("#")
+                assert sep and fragment and anchor == fragment, (
+                    alias,
+                    fragment,
+                    destination,
+                )
+                assert safe_path(target) and target.endswith(".html")
+                assert target.startswith(
+                    "zh-CN/" if alias.startswith("docs/zh-CN/") else "en/"
+                )
+    assert len(ids) == len(set(ids))
+    assert len(orders) == len(set(orders))
+    assert len(outputs) == len(set(outputs))
+    assert len(aliases) == len(set(aliases))
+    assert set(aliases) == tracked_docs()
+
+
+def test_split_destinations_and_existing_language_pairs() -> None:
+    pages = {p["id"]: p for p in json.loads(MANIFEST.read_text())["pages"]}
+    assert (
+        pages["cli"]["fragments"]["docs/cli.md"]["the-interactive-ui"]
+        == "en/guides/terminal.html#the-interactive-ui"
+    )
+    assert (
+        pages["cli"]["fragments"]["docs/cli.md"]["options"]
+        == "en/reference/cli.html#options"
+    )
+    assert (
+        pages["quickstart"]["fragments"]["docs/quickstart.md"][
+            "serve-a-model-with-omlx"
+        ]
+        == "en/guides/model-servers.html#serve-a-model-with-omlx"
+    )
+    for name in (
+        "index",
+        "quickstart",
+        "architecture",
+        "memory-design",
+        "updates",
+        "developers",
+    ):
+        page = pages[f"site-{name}"]
+        assert page["en_source"] == f"docs/en/{name}.html"
+        assert page["zh_source"] == f"docs/zh-CN/{name}.html"
+        assert set(page["fragments"]) == {page["en_source"], page["zh_source"]}
+    style = pages["style"]
+    assert (style["en_source"], style["zh_source"]) == (
+        "docs/STYLE.md",
+        "docs/zh-CN/STYLE.md",
+    )
+    assert (
+        pages["site-quickstart"]["fragments"]["docs/en/quickstart.html"]["json-output"]
+        == "en/start/quickstart.html#json-output"
+    )
+
+
+def test_inventory_slug_and_code_fences() -> None:
+    anchors, links = inventory(
+        '# Hello, 世界!\n\n## Same `code`\n\n## Same `code`\n\n```md\n# Not a heading\n```\n\n<a id="explicit"></a>\n[ok](./x.md#same-code)\n',
+        ".md",
+    )
+    assert anchors == ["hello-世界", "same-code", "same-code-1", "explicit"]
+    assert links == ["./x.md#same-code"]
+
+
+def test_local_links_and_anchors() -> None:
+    broken = {}
+    for source in sorted(tracked_docs()):
+        source_path = ROOT / source
+        _, links = inventory(source_path.read_text(), source_path.suffix)
+        for link in links:
+            parsed = urlsplit(link)
+            if parsed.scheme or parsed.netloc or link.startswith("//"):
+                continue
+            path = unquote(parsed.path)
+            # Root-relative links denote a deployed web root, not a repository path.
+            if path.startswith("/"):
+                target = ROOT / "docs" / path.lstrip("/")
+            else:
+                target = source_path.parent / path if path else source_path
+            target = target.resolve()
+            if not target.is_relative_to(ROOT):
+                broken[(source, link)] = "outside repository"
+                continue
+            if target.is_dir():
+                target = target / "index.html"
+            if not target.is_file():
+                broken[(source, link)] = "missing file"
+            elif parsed.fragment and target.suffix in {".md", ".html", ".htm", ".txt"}:
+                anchors, _ = inventory(target.read_text(), target.suffix)
+                if unquote(parsed.fragment) not in anchors:
+                    broken[(source, link)] = "missing anchor"
+    assert broken == LINK_DEBT, "Link debt changed:\n" + "\n".join(
+        f"{k!r}: {v!r}," for k, v in sorted(broken.items())
+    )

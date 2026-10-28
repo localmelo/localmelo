@@ -9,6 +9,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- A documentation inventory, bilingual style guide and experimental offline
+  preview builder lay the groundwork for a later site migration; published
+  pages and existing URLs are unchanged ([#NN]).
+
 - Reasoning and recall options now work in the interactive UI, including
   `--reasoning-field` and `--retrieval-extra-body`; explicit flags override
   `[agent]`/`[retrieval]` defaults. Console sessions honor the configured
