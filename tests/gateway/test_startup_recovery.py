@@ -255,6 +255,267 @@ async def test_pending_pause_survives_startup_classification(
         await store.aclose()
 
 
+async def test_proven_queued_task_fences_launch_before_agent_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    gate, hub = ChatGate(policy="off"), SessionHub(store)
+    config = Config()
+    config.gateway.workspace = str(workspace)
+    workers = TaskWorkers(store, gate, lambda: config, hub)
+    entered, release = asyncio.Event(), asyncio.Event()
+    try:
+        await workers.tasks.open()
+        task, _ = await workers.tasks.create_task(
+            TaskSpec.from_payload({"objective": "work"}),
+            origin="user",
+            workspace=str(workspace),
+            _recovery_proof=True,
+        )
+
+        async def build(**kwargs: Any) -> Any:
+            provenance = await RecoveryStore(store).provenance(task.task_id)
+            assert provenance.first_start == "started" and provenance.execution_id
+            entered.set()
+            await release.wait()
+            raise RuntimeError("test agent stops here")
+
+        monkeypatch.setattr(
+            "localmelo.support.gateway.workers.build_session_agent", build
+        )
+        await workers.open()
+        await asyncio.wait_for(entered.wait(), 3)
+        assert (await workers.tasks.get_task(task.task_id)).state == "running"
+        assert (
+            await RecoveryStore(store).provenance(task.task_id)
+        ).first_start == "started"
+    finally:
+        release.set()
+        await workers.aclose()
+        await hub.aclose()
+        await gate.close()
+        await store.aclose()
+
+
+@pytest.mark.parametrize("pause_during_start", [False, True])
+async def test_first_launch_binds_actual_turn_to_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, pause_during_start: bool
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    gate, hub = ChatGate(policy="off"), SessionHub(store)
+    config = Config()
+    config.gateway.workspace = str(workspace)
+    workers = TaskWorkers(store, gate, lambda: config, hub)
+    entered = asyncio.Event()
+    starting, release = asyncio.Event(), asyncio.Event()
+    original_start = RecoveryStore.start
+
+    async def blocked_start(self: RecoveryStore, *args: Any, **kwargs: Any) -> Any:
+        if pause_during_start:
+            starting.set()
+            await release.wait()
+        return await original_start(self, *args, **kwargs)
+
+    monkeypatch.setattr(RecoveryStore, "start", blocked_start)
+
+    class FakeAgent:
+        async def close(self) -> None:
+            pass
+
+    class FakeRunner:
+        busy = False
+
+        def __init__(
+            self, agent: Any, store: SessionStore, task_id: str, **kwargs: Any
+        ) -> None:
+            self.store, self.task_id = store, task_id
+            self.finished = asyncio.Event()
+
+        def observe(self, callback: Any) -> Any:
+            return callback
+
+        async def start_turn(
+            self, text: str, *, approval: Any, client_request_id: str
+        ) -> None:
+            await self.store.begin_turn(
+                self.task_id, text, holder="worker", client_request_id=client_request_id
+            )
+            entered.set()
+
+        async def wait(self) -> None:
+            await self.finished.wait()
+
+        def cancel(self, **kwargs: Any) -> bool:
+            self.finished.set()
+            return True
+
+        async def close(self, **kwargs: Any) -> None:
+            pass
+
+    async def build(**kwargs: Any) -> FakeAgent:
+        return FakeAgent()
+
+    monkeypatch.setattr("localmelo.support.gateway.workers.build_session_agent", build)
+    monkeypatch.setattr("localmelo.support.gateway.workers.SessionRunner", FakeRunner)
+    try:
+        await workers.tasks.open()
+        task, _ = await workers.tasks.create_task(
+            TaskSpec.from_payload({"objective": "work"}),
+            origin="user",
+            workspace=str(workspace),
+            _recovery_proof=True,
+        )
+        await workers.open()
+        if pause_during_start:
+            await asyncio.wait_for(starting.wait(), 3)
+            pause = asyncio.create_task(workers.update(task.task_id, state="pause"))
+            async with asyncio.timeout(3):
+                while task.task_id not in workers._pause_requested:
+                    await asyncio.sleep(0.001)
+            release.set()
+            await asyncio.wait_for(pause, 3)
+            async with asyncio.timeout(3):
+                while task.task_id in workers._runs:
+                    await asyncio.sleep(0.001)
+            assert (await workers.get(task.task_id))["state"] == "parked"
+            await workers.update(task.task_id, state="resume")
+        await asyncio.wait_for(entered.wait(), 3)
+        provenance = await RecoveryStore(store).provenance(task.task_id)
+        (turn,) = await store.list_turns(task.task_id)
+        assert turn.client_request_id == provenance.execution_id
+    finally:
+        release.set()
+        await workers.aclose()
+        await hub.aclose()
+        await gate.close()
+        await store.aclose()
+
+
+async def test_stop_while_first_start_commits_prevents_agent_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    gate, hub = ChatGate(policy="off"), SessionHub(store)
+    config = Config()
+    config.gateway.workspace = str(workspace)
+    workers = TaskWorkers(store, gate, lambda: config, hub)
+    entered, release = asyncio.Event(), asyncio.Event()
+    calls = 0
+    stop = None
+    try:
+        await workers.tasks.open()
+        task, _ = await workers.tasks.create_task(
+            TaskSpec.from_payload({"objective": "work"}),
+            origin="user",
+            workspace=str(workspace),
+            _recovery_proof=True,
+        )
+        start = RecoveryStore.start
+
+        async def blocked(self: RecoveryStore, *args: Any, **kwargs: Any) -> Any:
+            entered.set()
+            await release.wait()
+            return await start(self, *args, **kwargs)
+
+        async def build(**kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise AssertionError("stop reached agent builder")
+
+        monkeypatch.setattr(RecoveryStore, "start", blocked)
+        monkeypatch.setattr(
+            "localmelo.support.gateway.workers.build_session_agent", build
+        )
+        await workers.open()
+        await asyncio.wait_for(entered.wait(), 3)
+        stop = asyncio.create_task(workers.update(task.task_id, state="stop"))
+        async with asyncio.timeout(3):
+            while task.task_id not in workers._stopping:
+                await asyncio.sleep(0.001)
+        release.set()
+        await asyncio.wait_for(stop, 3)
+        async with asyncio.timeout(3):
+            while (await workers.get(task.task_id))["state"] != "cancelled":
+                await asyncio.sleep(0.001)
+        assert calls == 0
+    finally:
+        release.set()
+        if stop is not None:
+            await asyncio.gather(stop, return_exceptions=True)
+        await workers.aclose()
+        await hub.aclose()
+        await gate.close()
+        await store.aclose()
+
+
+async def test_uncertain_first_start_never_builds_or_requeues(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    store = SessionStore(tmp_path / "sessions.db", writer="gateway")
+    await store.open()
+    gate, hub = ChatGate(policy="off"), SessionHub(store)
+    config = Config()
+    config.gateway.workspace = str(workspace)
+    workers = TaskWorkers(store, gate, lambda: config, hub)
+    calls = 0
+    try:
+        await workers.tasks.open()
+        task, _ = await workers.tasks.create_task(
+            TaskSpec.from_payload({"objective": "work"}),
+            origin="user",
+            workspace=str(workspace),
+            _recovery_proof=True,
+        )
+        original = store._commit
+
+        async def commit_then_cancel(conn: Any, events: Any, label: str) -> None:
+            await original(conn, events, label)
+            if label == "recovery_start":
+                raise asyncio.CancelledError()
+
+        async def build(**kwargs: Any) -> Any:
+            nonlocal calls
+            calls += 1
+            raise AssertionError("uncommitted launch reached builder")
+
+        monkeypatch.setattr(store, "_commit", commit_then_cancel)
+        monkeypatch.setattr(
+            "localmelo.support.gateway.workers.build_session_agent", build
+        )
+        await workers.open()
+        async with asyncio.timeout(3):
+            while (
+                task.task_id not in workers._unavailable
+                or task.task_id in workers._runs
+            ):
+                await asyncio.sleep(0.001)
+        assert calls == 0 and not workers.is_active(task.task_id)
+        assert (await workers.tasks.get_task(task.task_id)).state == "running"
+        assert (
+            await RecoveryStore(store).provenance(task.task_id)
+        ).first_start == "started"
+    finally:
+        await workers.aclose()
+        await hub.aclose()
+        await gate.close()
+        await store.aclose()
+
+
 async def test_worker_open_fences_recovered_tasks_but_allows_stop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -337,6 +598,54 @@ async def test_completed_outcome_requires_matching_execution(
         assert (await tasks.get_task(task.task_id)).crashes == (
             0 if same_execution else 1
         )
+    finally:
+        await reopened.aclose()
+
+
+async def test_terminal_outcome_uses_durable_submission_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    path = tmp_path / "sessions.db"
+    store = SessionStore(path, writer="gateway")
+    await store.open()
+    tasks = TaskStore(store)
+    await tasks.open()
+    task, _ = await tasks.create_task(
+        TaskSpec.from_payload({"objective": "work"}),
+        origin="user",
+        workspace=str(tmp_path),
+        _recovery_proof=True,
+    )
+    generation, previous = await tasks.park_identity(task.task_id)
+    await RecoveryStore(store).start(
+        task.task_id,
+        operation_id="start",
+        execution_id="launch-id",
+        expected_generation=generation,
+        expected_operation_id=previous,
+    )
+    turn = await store.begin_turn(
+        task.task_id, "work", holder="worker", client_request_id="launch-id"
+    )
+    await store.append_events(
+        task.task_id,
+        turn.turn,
+        [
+            core_event("run.started"),
+            core_event("run.finished", seq=2, result=run_result()),
+        ],
+        holder="worker",
+    )
+    await store.aclose()
+    reopened = SessionStore(path, writer="gateway")
+    await reopened.open()
+    try:
+        tasks = TaskStore(reopened)
+        await tasks.open()
+        await StartupRecovery(reopened, tasks).run()
+        assert (await tasks.get_task(task.task_id)).state == "done"
+        assert (await tasks.get_task(task.task_id)).crashes == 0
     finally:
         await reopened.aclose()
 

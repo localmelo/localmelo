@@ -30,6 +30,7 @@ from localmelo.support.gateway.chat_gate import (
 )
 from localmelo.support.gateway.park_card import build_park_card
 from localmelo.support.gateway.park_store import ParkStore
+from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_policy import (
     TaskSpec,
@@ -153,6 +154,8 @@ class TaskWorkers:
         self._lock = asyncio.Lock()
         self._eligible: set[str] = set()
         self._restart_fenced: set[str] = set()
+        self._restart_first: set[str] = set()
+        self._pending_execution: dict[str, str] = {}
         self._runs: dict[str, asyncio.Task[None]] = {}
         self._runners: dict[str, SessionRunner] = {}
         self._stopping: set[str] = set()
@@ -180,15 +183,30 @@ class TaskWorkers:
             await self.tasks.open()
             try:
                 await StartupRecovery(self.store, self.tasks).run()
-                self._restart_fenced = {
-                    record.task_id
-                    for record in await self.tasks.list_tasks()
-                    if record.state not in TERMINAL_PHASES
-                }
+                self._restart_fenced = set()
+                for record in await self.tasks.list_tasks():
+                    if record.state in TERMINAL_PHASES:
+                        continue
+                    provenance = await RecoveryStore(self.store).provenance(
+                        record.task_id
+                    )
+                    if (
+                        record.state == "queued"
+                        and record.level < 5
+                        and not record.card
+                        and provenance.first_start == "never_started"
+                    ):
+                        self._restart_first.add(record.task_id)
+                        self._register(record)
+                        self._eligible.add(record.task_id)
+                    else:
+                        self._restart_fenced.add(record.task_id)
             except Exception as exc:
                 raise SessionStoreError("startup recovery unavailable") from exc
             self.store.add_retention_hook(self._reconcile)
             self._opened = True
+            async with self._lock:
+                await self._schedule()
 
     async def create(self, payload: dict) -> tuple[dict, bool]:
         if not isinstance(payload, dict):
@@ -977,6 +995,8 @@ class TaskWorkers:
         phase = "failed"
         failure_reason = None
         deferred = False
+        launch_uncertain = False
+        execution_id: str | None = self._pending_execution.get(task_id)
         try:
             async with self._lock:
                 record = await self.tasks.get_task(task_id)
@@ -984,6 +1004,46 @@ class TaskWorkers:
                     deferred = True
                     return
             workspace = await self._workspace(task_id)
+            if task_id in self._restart_first:
+                async with self._lock:
+                    current = await self.tasks.get_task(task_id)
+                    if (
+                        current.state != "queued"
+                        or current.level >= 5
+                        or task_id in self._stopping
+                        or task_id in self._pause_requested
+                        or self._closed
+                    ):
+                        deferred = True
+                        return
+                    generation, previous = await self.tasks.park_identity(task_id)
+                    execution_id = uuid.uuid4().hex
+                    try:
+                        launch = await RecoveryStore(self.store).start(
+                            task_id,
+                            operation_id=uuid.uuid4().hex,
+                            execution_id=execution_id,
+                            expected_generation=generation,
+                            expected_operation_id=previous,
+                        )
+                        if not launch.acquired:
+                            raise TaskStoreError(
+                                "recovery launch did not acquire a permit"
+                            )
+                    except BaseException:
+                        launch_uncertain = True
+                        self._eligible.discard(task_id)
+                        self._store_unavailable(task_id)
+                        raise
+                    self._pending_execution[task_id] = execution_id
+                    self._restart_first.discard(task_id)
+                    if (
+                        task_id in self._stopping
+                        or task_id in self._pause_requested
+                        or self._closed
+                    ):
+                        deferred = True
+                        return
             client = self.gate.client(task_id)
             agent = await build_session_agent(
                 cfg=self.settings(),
@@ -1057,7 +1117,13 @@ class TaskWorkers:
                         await runner.start_turn(
                             record.card or str(record.spec["objective"]),
                             approval=policy,
+                            **(
+                                {"client_request_id": execution_id}
+                                if execution_id
+                                else {}
+                            ),
                         )
+                        self._pending_execution.pop(task_id, None)
             if phase != "cancelled" and not deferred:
                 result = await runner.wait()
                 while runner.busy:
@@ -1124,14 +1190,17 @@ class TaskWorkers:
                 if park:
                     self._park_winners.discard(task_id)
                     self._points.pop(task_id, None)
-                preserve = (deferred or park) and not (
-                    self._closed
-                    or task_id in self._stopping
-                    or task_id in self._invalid_workspace
+                preserve = launch_uncertain or (
+                    (deferred or park)
+                    and not (
+                        self._closed
+                        or task_id in self._stopping
+                        or task_id in self._invalid_workspace
+                    )
                 )
                 if preserve:
                     current = await self.tasks.get_task(task_id)
-                    if current.state == "running":
+                    if current.state == "running" and not launch_uncertain:
                         await self.tasks.change(
                             task_id, state="queued", actor="scheduler"
                         )
@@ -1160,6 +1229,8 @@ class TaskWorkers:
                     except TaskStoreError:
                         log.exception("Could not finish task %s", task_id)
                     self.gate.finish_task(task_id, phase)
+                    self._pending_execution.pop(task_id, None)
+                    self._restart_first.discard(task_id)
                     self._eligible.discard(task_id)
                     self._stopping.discard(task_id)
                     self._pause_requested.discard(task_id)

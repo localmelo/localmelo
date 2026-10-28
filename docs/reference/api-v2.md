@@ -284,10 +284,11 @@ becomes invalid before a run or resume fails the task with
 
 At most four workers are resident at once, including quarantined workers.
 Task rows persist across gateway restarts. Startup interrupts uncertain tasks,
-retains valid parked cards and preserves pending pause, without replay. Proved
-never-started queued tasks remain queued but are not automatically scheduled in
-this slice. Recovered nonterminal tasks reject resume and priority changes until
-controlled recovery is implemented; Stop remains available. A failure to persist
+retains valid parked cards and preserves pending pause, without replay. Runnable
+queued tasks durably proved never-started may run once after a start fence;
+ordinary creation does not yet establish that proof. Recovered tasks with
+uncertain history reject resume and priority changes until controlled recovery
+is implemented; Stop remains available. A failure to persist
 startup recovery keeps the store unavailable. Retrying the same `request_key`
 returns the existing task and does not restart it.
 

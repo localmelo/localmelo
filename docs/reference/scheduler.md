@@ -151,10 +151,11 @@ never-started queued or parked tasks, and interrupts uncertain tasks without
 replaying them. An already-started parked task retains its recorded card; an
 uncertain task without usable evidence stays without a card. An execution-linked
 committed run outcome can be reconciled without rerunning it. Pending pause intent
-and its priority snapshot survive interruption. Recovered nonterminal tasks are
-currently fenced from resume and priority changes; Stop remains available. Even
-proved-never-started queued tasks are not automatically scheduled in this slice.
-Controlled restart scheduling, orphan verification and informed Resume are later
+and its priority snapshot survive interruption. Recovered tasks with uncertain
+history are fenced from resume and priority changes; Stop remains available.
+Proved-never-started runnable queued tasks can start after a durable launch fence
+and workspace validation; ordinary creation does not yet enable this proof.
+Orphan verification and informed Resume are later
 work; a missing process record is not proof that a process has stopped.
 A repeat `request_key` only returns the existing task. Workspace
 validity is checked at creation and again at run or resume; a folder that

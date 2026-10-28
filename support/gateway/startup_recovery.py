@@ -74,6 +74,7 @@ class StartupRecovery:
                     "sched.resumed",
                     "sched.held",
                     "sched.priority_changed",
+                    "sched.state_changed",
                     "turn.started",
                 }
             ]
@@ -87,17 +88,20 @@ class StartupRecovery:
             finished = [
                 event
                 for event in events
-                if event.turn == turn.turn
-                and event.event.get("type") == "run.finished"
-                and event.event.get("run_id") == provenance.execution_id
+                if event.turn == turn.turn and event.event.get("type") == "run.finished"
             ]
             if (
-                turn.run_id == provenance.execution_id
+                (
+                    turn.client_request_id == provenance.execution_id
+                    or turn.run_id == provenance.execution_id
+                )
+                and bool(turn.run_id)
                 and not turn.undone
                 and turn.status in RUN_STATUSES
                 and turn.cause in {"run", "crash"}
                 and turn.result
                 and finished
+                and finished[-1].event.get("run_id") == turn.run_id
                 and isinstance(finished[-1].event.get("data"), dict)
                 and isinstance(finished[-1].event["data"].get("result"), dict)
                 and finished[-1].event["data"]["result"].get("status") == turn.status
