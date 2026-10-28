@@ -51,6 +51,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   checks (timezone-aware `timestamp`/`date` records), ordered same-task updates
   (record time or per-task user order), cancellation markers, exact-duplicate-only
   retention and wall-clock labelled recall with source-dated titles ([#NN]).
+- `melo-task` creates, inspects and controls gateway tasks, with authenticated
+  loopback requests and an optional event follow stream that prints one readable
+  line per event and a terminal snapshot. ([#159])
 - Scheduler component v4 adds dormant process capture state, identity checks
   and a gated subprocess primitive; worker behavior and Resume are unchanged. [#158]
 
@@ -1025,3 +1028,4 @@ earlier milestones.
 [#155]: https://github.com/localmelo/localmelo/pull/155
 [#157]: https://github.com/localmelo/localmelo/pull/157
 [#158]: https://github.com/localmelo/localmelo/pull/158
+[#159]: https://github.com/localmelo/localmelo/pull/159
