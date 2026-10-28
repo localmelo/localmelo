@@ -155,7 +155,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `uv run pytest -n auto -q` runs the offline suite in parallel before a
   pull request and `uv run pytest --testmon -q` runs only the tests a
   change affects while working. CONTRIBUTING and the agent docs name both,
-  and `.testmondata` is ignored ([#NN]).
+  and `.testmondata` is ignored ([#58]).
 - A plain `pytest` no longer opens sockets to local model servers while
   collecting `tests/smoke/test_backend_smoke.py`; its two real-backend tests
   are skipped unless `LOCALMELO_SMOKE=1` is set. With the switch on they probe
@@ -304,3 +304,4 @@ earlier milestones.
 [#55]: https://github.com/localmelo/localmelo/pull/55
 [#56]: https://github.com/localmelo/localmelo/pull/56
 [#57]: https://github.com/localmelo/localmelo/pull/57
+[#58]: https://github.com/localmelo/localmelo/pull/58
