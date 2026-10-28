@@ -115,6 +115,49 @@ async def test_terminal_result_requires_submission_binding(
     assert task.crashes == (0 if binding == "launch-id" else 1)
 
 
+async def test_committed_user_stop_reconciles_without_crash(
+    stores: tuple[SessionStore, TaskStore], tmp_path: Path
+) -> None:
+    store, tasks = stores
+    task, _ = await tasks.create_task(
+        TaskSpec.from_payload({"objective": "work"}),
+        origin="user",
+        workspace=str(tmp_path),
+        _recovery_proof=True,
+    )
+    generation, previous = await tasks.park_identity(task.task_id)
+    await RecoveryStore(store).start(
+        task.task_id,
+        operation_id="start",
+        execution_id="run-1",
+        expected_generation=generation,
+        expected_operation_id=previous,
+    )
+    turn = await store.begin_turn(
+        task.task_id, "work", holder="worker", client_request_id="run-1"
+    )
+    result = run_result(status="cancelled")
+    await store.append_events(
+        task.task_id,
+        turn.turn,
+        [core_event("run.started"), core_event("run.finished", seq=2, result=result)],
+        holder="worker",
+    )
+    await store.finish_turn(
+        task.task_id,
+        turn.turn,
+        holder="worker",
+        status="cancelled",
+        cause="user_stop",
+        answer="",
+        result=result,
+    )
+    await StartupRecovery(store, tasks).run()
+    await StartupRecovery(store, tasks).run()
+    current = await tasks.get_task(task.task_id)
+    assert current.state == "cancelled" and current.crashes == 0
+
+
 async def test_legacy_running_turn_counts_one_crash(
     stores: tuple[SessionStore, TaskStore], tmp_path: Path
 ) -> None:

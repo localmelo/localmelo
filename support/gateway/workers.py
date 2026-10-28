@@ -303,7 +303,7 @@ class TaskWorkers:
             isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 5
         ):
             raise ValueError("level must be P0-P5 or auto")
-        if task_id in self._unavailable and state != "stop":
+        if task_id in self._unavailable:
             raise SessionStoreError("store unavailable")
         if task_id in self._quarantined and state != "stop":
             raise TaskStoreError("worker cleanup failed; slot held until restart")
@@ -343,7 +343,7 @@ class TaskWorkers:
                 ):
                     raise SessionStoreError("store unavailable")
         async with self._lock:
-            if task_id in self._unavailable and state != "stop":
+            if task_id in self._unavailable:
                 raise SessionStoreError("store unavailable")
             if task_id in self._quarantined and state != "stop":
                 raise TaskStoreError("worker cleanup failed; slot held until restart")
