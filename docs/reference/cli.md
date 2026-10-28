@@ -286,12 +286,14 @@ These options apply to `melo` without a task.
   or `/detach all` removes them. Explicit selection from `@` file completion
   stages a file; typed `@file` prose alone does not. Workspace-only regular
   UTF-8 text, no symlinks, traversal, URLs, recognized secret files, binary or
-  images; up to 8 files, 256 KiB each and 512 KiB total in original bytes,
+  images; sanitized names are at most 200 characters. Hardlinks can refer to
+  files outside the workspace; this is not a sandbox. Up to 8 files, 256 KiB
+  each and 512 KiB total in original bytes,
   subject also to the composed prompt limit. Redaction is best effort; if
   cleaning or redaction changes a snapshot or path, review and confirm it.
   Snapshots persist unencrypted with the session and `/retry` uses the saved
   snapshot, not the live file. Pairs resume has a 32,000-character user/answer
-  budget and may omit a turn; window resume can omit it too. See
+  budget and may omit a turn; window resume can clip or omit it too. See
   [Attach text files](../guides/terminal.md#attach-text-files).
 - `--workspace` is expanded and resolved here too, and a path that is not a
   folder gives the same one-line usage error as with a task; see

@@ -240,7 +240,7 @@ def resume_recap(
                 (a.name, len(a.text.encode("utf-8")), "bytes") for a in turn.attachments
             ]
         else:
-            typed, attachment_labels = turn.user_text, []
+            typed, attachment_labels = turn.typed_text or turn.user_text, []
         lines.extend("  › " + text for text in clean_output(typed).splitlines()[:2])
         lines.extend(
             f"    └ attached {clean_output(name)} ({size:,} {unit})"

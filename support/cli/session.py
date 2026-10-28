@@ -260,7 +260,10 @@ class CliSession:
         self._pending_command = "attach"
         self._work = self.spawn(
             self._run_command(
-                "attach", shlex.quote(path), "/attach " + shlex.quote(path)
+                "attach",
+                shlex.quote(path),
+                "/attach " + shlex.quote(path),
+                restore=False,
             )
         )
         return None
@@ -536,7 +539,9 @@ class CliSession:
 
     # ── Commands ──
 
-    async def _run_command(self, name: str, arguments: str, text: str) -> None:
+    async def _run_command(
+        self, name: str, arguments: str, text: str, *, restore: bool = True
+    ) -> None:
         """Echo the command as a message is echoed, run it, then a blank line.
 
         ``/exit`` prints nothing.
@@ -554,7 +559,7 @@ class CliSession:
                 else BUSY if isinstance(exc, SessionBusyError) else str(exc)
             )
             self.out.print(self._text(f"✗ {message}", style="error"))
-            if self.app is not None:
+            if self.app is not None and restore:
                 self._give_back(text)
         finally:
             if self._work is asyncio.current_task():

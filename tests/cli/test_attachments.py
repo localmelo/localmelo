@@ -32,6 +32,10 @@ def test_plain_unicode_and_absolute_path(tmp_path: Path) -> None:
         7,
         False,
     )
+    name = "x" * 201
+    (tmp_path / name).write_text("text")
+    with pytest.raises(att.AttachmentError, match="200 characters"):
+        att.load(str(tmp_path), name)
 
 
 @pytest.mark.parametrize("name", [".env", "credentials.json", "foo.key", ".ssh/id_rsa"])

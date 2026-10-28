@@ -139,6 +139,8 @@ def load(workspace: str, path: str) -> Attachment:
     safe_path, _ = redact_secrets(
         _clean(relative).replace("\n", " ").replace("\t", " ")
     )
+    if not safe_path or len(safe_path) > 200:
+        raise AttachmentError("Attachment name must be at most 200 characters")
     return Attachment(
         safe_path,
         content,

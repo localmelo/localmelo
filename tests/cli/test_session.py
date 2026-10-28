@@ -182,6 +182,10 @@ async def test_text_attachment_snapshot_survives_retry(setup: Setup) -> None:
     path = setup.factory.root / "input.txt"
     path.write_text("café", encoding="utf-8")
     session = setup.session
+    setup.app.buffer.text = "draft @missing"
+    assert session.attach_path("missing") is None
+    await setup.idle()
+    assert setup.app.buffer.text == "draft @missing"
     assert session.enter("/attach input.txt") is None
     await setup.idle()
     assert "input.txt" in session.attachment_line

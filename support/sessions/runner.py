@@ -1307,6 +1307,8 @@ class SessionRunner:
                 answer_text(turn.status, split_thinking(turn.answer)[1])
             )
             if total + len(user) + len(answer) > RESUME_BUDGET_CHARS:
+                if turn.attachments:
+                    continue
                 break
             total += len(user) + len(answer)
             pairs.append((turn, user, answer))

@@ -188,7 +188,9 @@ turn, and staged files must be detached before switching sessions.
 Only regular UTF-8 text files within the current workspace are accepted;
 absolute paths inside it work too. URLs, `..` traversal, symlinks (including
 ones pointing inside the workspace), recognized secret files and binary data
-are refused. Image attachments are not supported. Limits are 8 files, 256 KiB per file and 512 KiB total,
+are refused. Names after sanitization must fit 200 characters. Hardlinks can
+refer to an inode outside the workspace; this is not a sandbox. Image attachments
+are not supported. Limits are 8 files, 256 KiB per file and 512 KiB total,
 measured in original bytes. The displayed byte count is the snapshot's UTF-8
 size after cleaning and redaction. The composed message is also subject to the
 agent's prompt limit, so files within these limits can still be rejected.
