@@ -110,7 +110,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">
             <strong>Tools and MCP</strong>
-            <span>Use four built-in tools and the tools of local MCP servers; each step offers the built-in tools, the ones the model has already called and the closest matches for the task, and runs only those; and a Python call runs in a child process that its time limit can stop.</span>
+            <span>Use four built-in tools and the tools of local MCP servers; each step offers the built-in tools, the ones the model has already called and the closest matches for the task, and runs only those; their children get a minimal environment plus <code>tool_env</code>, and a Python call runs in a child process that its time limit can stop.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#backends">
             <strong>Model servers</strong>
@@ -120,9 +120,13 @@ source .venv/bin/activate</code></pre>
             <strong>Gateway and web workspace</strong>
             <span>Serve the agent over HTTP with sessions, and use it from a web workspace with your server's models.</span>
           </a>
+          <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">
+            <strong>API v2</strong>
+            <span>Read the web console's sessions, turns, stored events (a Server-Sent Events stream too), image blobs and submission lookups over <code>/api</code>; it is loopback-only and only grows.</span>
+          </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">
             <strong>Memory</strong>
-            <span>Keep working memory, a history of tasks and steps, and long-term memory with an embedding server, saved to SQLite when you turn persistence on, and forget a task's memory or all of it from Python.</span>
+            <span>Keep working memory, a history of tasks and steps, and long-term memory with an embedding server, saved to SQLite when you turn persistence on; the saved text is redacted, the compress reasoning modes keep a short note of each reply in RAM, and you can forget a task's memory or all of it from Python.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">
             <strong>Embedding setup</strong>
@@ -138,7 +142,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#use-melo-in-scripts">
             <strong>Scripts and benchmarks</strong>
-            <span>Read one JSON line per run and a fixed exit code, so scripts can rely on the outcome, and choose how a reply's reasoning is sent back on later turns (<code>--reasoning legacy</code>, <code>drop</code> or <code>replay</code>).</span>
+            <span>Read one JSON line per run and a fixed exit code, so scripts can rely on the outcome, and choose how a reply's reasoning is sent back or kept on later turns (<code>--reasoning legacy</code>, <code>drop</code>, <code>replay</code>, <code>compress</code> or <code>compress+replay</code>).</span>
           </a>
         </div>
       </section>
@@ -150,7 +154,7 @@ source .venv/bin/activate</code></pre>
         <ul>
           <li>the interactive CLI's next parts: sessions you can resume (<code>melo -c</code>, <code>melo -r</code>), attached files and shell commands;</li>
           <li>conversations that survive a gateway restart, with the agent's work shown live in the web workspace;</li>
-          <li>keeping the model's reasoning as memory notes, with switchable retrieval (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
+          <li>switchable retrieval over the reasoning notes, so a later run can recall them (<code>bm25</code>, <code>llm</code>, <code>embedding</code>);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
           <li>a percent bar on the progress line for tasks you run again and again, off until their repeated runs pass the replay.</li>
         </ul>
