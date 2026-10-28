@@ -122,7 +122,7 @@ kill -TERM $GW; wait $GW   # exit 143 once runs in flight end; SIGKILL after you
 - 200 means the run finished, not that it completed; there is no status field (an empty answer is `"result": "[STATUS] ERROR"`). For the status, use the CLI with `--output-format json`.
 - Sessions: one request at a time each (the next waits); RAM only; at most 50 (more only while all are busy); idle TTL 3600 s, checked when a session is created. Each has all four built-ins, no approval policy, workspace root, MCP or time limit, `max_steps` 30, `record_answers=True`.
 - Loopback guard (loopback host only): a `Host` other than `127.0.0.1:PORT`, `localhost:PORT` or `[::1]:PORT` gets 421 `{"error", "code": "misdirected_request"}`; a foreign `Origin` on POST, PUT, PATCH, DELETE or OPTIONS, or a `Sec-Fetch-Site` other than `same-origin` or `none` under `/v1/`, gets 403 `{"error", "code": "foreign_origin"}`. curl passes.
-- `/` is the web workspace (`/v1/playground/*` is internal). Starting the gateway creates `~/.cache/localmelo/playground/`, its history, always on disk, even if `/` is never opened. No `/v1/models`; health never contacts the model server.
+- `/` is the web workspace (`/v1/playground/*` is internal). Starting the gateway creates `~/.cache/localmelo/playground/`, its history, always on disk, even if `/` is never opened. `POST /v1/playground/presence` `{"session_id"}` and `POST /v1/playground/session/{id}/level` `{"level": 1..4}` are page traffic; a gateway run also writes `~/.cache/localmelo/scheduler/runs/<UTC>/calls.jsonl` (0600, pruned after 30 days) unless `[scheduler] call_log = false`. No `/v1/models`; health never contacts the model server.
 
 ## Output and results
 
@@ -148,6 +148,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 - Local table (`[mlc]`, `[ollama]`, `[vllm]`, `[sglang]`): `chat_url`, `chat_model`, `embedding_url`, `embedding_model`, `extra_body` (a table merged into every chat request). `mlc`, `vllm`, `sglang` add a missing `/v1`; `ollama` chat uses native `/api/chat`. `vllm` fits any OpenAI-compatible server.
 - Cloud table (`[openai]`, `[anthropic]`, `[gemini]`, `[nvidia]`): `api_key_env` (the NAME of the env var holding the key; export it where `melo` runs), `chat_model`, `base_url` (used as given), `extra_body`. No cloud embeddings.
 - `[gateway]`: `host` (`127.0.0.1`), `port` (`8401`); `--host` and `--port` override them for one run.
+- `[scheduler]`: `policy` (`off`, `fcfs` or `class`; default `off`), `n_srv` (`8`), `r_f` (`1`; forced to 0 when `n_srv <= 2`), `n_fg` (`1`), `call_log` (`true`), `call_log_dir` (`""`, meaning `~/.cache/localmelo/scheduler`). Only the web workspace reads it; direct runs and the CLI are ungated.
 - Errors exit 1: `Configuration errors:` on stderr, or for invalid TOML a raw `TOMLDecodeError` traceback.
 - `LOCALMELO_PERSIST_MEMORY` (any non-empty value, `0` included) saves memory as SQLite in `LOCALMELO_MEMORY_DIR` (default `~/.cache/localmelo/memory`; `~` not expanded).
 - `LOCALMELO_THINKING_RETENTION_DAYS` (default 30; a number above 0, such as `7` or `0.5`): days of model reasoning kept in `history.db` and `sessions.db`. Any other value: exit 2 with one line before the run.

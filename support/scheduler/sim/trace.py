@@ -177,10 +177,16 @@ def read_trace(path: Path) -> tuple[TaskTrace, ...]:
     JSON object of schema 1, a field of the wrong type, ``source``,
     ``harness`` or ``overlapping`` that differ within one task, or a
     repeated ``(task_key, call_index)``.
+
+    A truncated final line, which a crash mid-write leaves, is ignored: it
+    is not a complete record, and the lines before it are intact (decision
+    3a). A final line that parses is read, newline or not.
     """
     tasks: dict[str, tuple[tuple[str, str, bool], list[TraceCall]]] = {}
     seen: set[tuple[str, int]] = set()
-    lines = Path(path).read_bytes().split(b"\n")
+    data = Path(path).read_bytes()
+    lines = data.split(b"\n")
+    partial_final = bool(data) and not data.endswith(b"\n")
     for n, raw in enumerate(lines, start=1):
         if not raw.strip():
             continue
@@ -188,6 +194,8 @@ def read_trace(path: Path) -> tuple[TaskTrace, ...]:
         try:  # bad UTF-8 is a ValueError too
             obj = json.loads(raw.decode("utf-8"), parse_constant=_non_finite)
         except ValueError as exc:
+            if partial_final and n == len(lines):
+                break
             raise TraceFormatError(f"{where}: not JSON: {exc}") from None
         if not isinstance(obj, dict):
             raise TraceFormatError(f"{where}: not a JSON object")

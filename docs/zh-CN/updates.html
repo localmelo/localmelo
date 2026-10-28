@@ -77,6 +77,16 @@
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
 
+        <article class="update-entry" id="u-2026-10-27-scheduler-gate">
+          <h3>网页工作区的聊天开始经过调度器</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/69">#69</a>
+          </p>
+          <ul>
+            <li>网页工作区里每个聊天发出的规划、反思和向量调用现在都经过调度器的策略：聊天调用要么立刻发出，要么等一个槽位；向量调用从不被扣住，但会计入在途数量；等待时页面显示 <code>Waiting: Resources</code>（或策略给出的其他原因）。</li>
+            <li>标题栏的等级按钮（P1 到 P4，默认 P2）决定这个聊天相对其他聊天的顺序；你正在输入的聊天就是快车道，在不超出服务器槽位的前提下优先放行。</li>
+            <li><code>[scheduler] policy</code> 默认是 <code>off</code>：只把每次调用记录到 <code>~/.cache/localmelo/scheduler/</code>，不扣住任何调用。<code>fcfs</code> 和 <code>class</code> 会真正执行策略。直接运行、命令行和 <code>/v1/agent/run</code> 都不变。</li>
         <article class="update-entry" id="u-2026-10-27-turn-work">
           <h3>回合的工作实时可见</h3>
           <p class="update-date">
@@ -274,7 +284,7 @@
           <ul>
             <li>调度器将让你的对话、后台任务和聊天共用一个本地模型服务器。它的策略决定下一个发给模型的调用，说明每个任务为什么在等，并让你的对话优先得到回答。</li>
             <li>模拟器用这个策略重放工作负载，可以离线比较策略的几种变体，用合成的工作负载或基准测试的记录都行。</li>
-            <li>现在还没有任何地方使用调度器：运行和网关都和以前一样。下一步会把它放到模型服务器前面。</li>
+            <li>目前只有网页工作区的聊天经过这道门；直接运行和命令行仍然和以前一样。下一步会把它们的调用也放进来。</li>
           </ul>
         </article>
 
