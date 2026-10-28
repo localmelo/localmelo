@@ -6,8 +6,9 @@ settings you can change.
 
 ## First run
 
-In a terminal with no config file, `melo` asks two questions, saves the
-answers and opens the interactive UI:
+In a terminal with no config file, `melo` asks for a model server's URL and
+a chat model, saves the answers and opens the interactive UI. When the
+server also lists an embedding model, it asks once whether to use it:
 
 ```text
 $ melo
@@ -19,16 +20,22 @@ Models on http://127.0.0.1:8080/v1:
   [3] Qwen3-32B-4bit
 Model [2]:
 ✓ http://127.0.0.1:8080/v1 lists 3 models; using Qwen3-8B-4bit.
+Use nomic-embed-text for long-term memory? [Y/n]:
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ```
 
 - A server on this computer that lists a model on port 8000, 8400, 11434 or
   30000 fills in the URL; one with a chat model comes first. Listing a
-  server's models sends `GET /v1/models` only, and saving the choice asks
-  `GET /api/version` once, to tell an Ollama server apart: no chat request.
+  server's models sends `GET /v1/models` only. Saving the choice asks
+  `GET /api/version` once, to tell an Ollama server apart, and a `y` sends
+  one `POST /v1/embeddings` probe of the offered model.
+- The embedding question is asked only when the list holds an embedding
+  model other than the chat model. `y` saves three embedding values: the
+  chat backend's key, its URL and the offered model. A failed probe, `n`, or
+  no candidate saves `embedding_backend = "none"` as before.
 - It saves an Ollama server (one that answers `GET /api/version`) as the
-  `ollama` backend, and any other OpenAI-compatible server as `vllm`, with
-  `embedding_backend = "none"`, and keeps the file's other settings:
+  `ollama` backend, and any other OpenAI-compatible server as `vllm`, and
+  keeps the file's other settings. With no embedding it writes:
 
   ```toml
   # an Ollama server
@@ -50,6 +57,19 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   chat_model = "Qwen3-8B-4bit"
   ```
 
+  A `y` writes the chat backend's embedding fields instead of `"none"`:
+
+  ```toml
+  chat_backend = "vllm"
+  embedding_backend = "vllm"
+
+  [vllm]
+  chat_url = "http://127.0.0.1:8080/v1"
+  chat_model = "Qwen3-8B-4bit"
+  embedding_url = "http://127.0.0.1:8080/v1"
+  embedding_model = "nomic-embed-text"
+  ```
+
   The `ollama` backend chats on Ollama's native API with a 300 s request
   timeout; `vllm` uses 120 s. A `chat_url` with or without `/v1` works for
   Ollama: its version endpoint is asked at the root, and chat requests drop
@@ -62,7 +82,8 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 - The [command-line reference](cli.md#first-run) has every prompt and
   reason.
 
-For embeddings, a cloud API or another backend, use the wizard.
+For an embedding model, see [Set up an embedding model](embedding.md). For a
+cloud API or another backend, use the wizard.
 
 ## Set up with the wizard
 
@@ -80,6 +101,14 @@ gateway. Press Ctrl+C to stop the gateway.
 - Each question offers the config file's current value in brackets: press
   Enter to keep it. The embedding question offers `None` when no embedding
   backend is set.
+- When no embedding is saved, the wizard lists the chat server's models
+  once (only for a local chat backend) and appends each embedding model it
+  finds as options `6`, `7`, … after the fixed five. The first candidate is
+  the default; choosing one saves the chat backend's URL and model and asks
+  no endpoint question. The fixed `1`–`4` options still ask for another
+  server's URL and model, and `5` is `None`. A server whose list cannot be
+  read falls back to those five silently; the end-of-wizard check reports a
+  dead server.
 - When the chat server's check fails, the wizard prints `Probe failed: …`
   and asks `[r]etry, [s]ave anyway, [N]o [N]:`. `r` asks for the URL and
   model again, with what you typed as the defaults; `s` saves anyway;
@@ -191,9 +220,11 @@ enable_thinking = false
 
 - `chat_model` is the model's id in oMLX's `GET /v1/models`: its folder
   name, or the alias set for it in oMLX.
-- [First run](#first-run) writes the `chat_backend`, `embedding_backend`,
-  `chat_url` and `chat_model` lines: run `melo` in a terminal with no
-  config file, while oMLX runs. Add the other lines by hand.
+- [First run](#first-run) writes the `chat_backend`, `chat_url` and
+  `chat_model` lines: run `melo` in a terminal with no config file, while
+  oMLX runs. When it offers an embedding model it also writes
+  `embedding_backend = "vllm"` with that table's `embedding_url` and
+  `embedding_model`. Add the other lines by hand.
 - `request_timeout_s = 600` gives oMLX time to load the model when a
   request finds it unloaded; see [Chat request timeout](#chat-request-timeout).
 - The `extra_body` table turns off a Qwen3 model's thinking, which makes
@@ -202,9 +233,10 @@ enable_thinking = false
 - For long-term memory, oMLX can also serve an embedding model from the
   same directory: set `embedding_backend = "vllm"` and add
   `embedding_url = "http://127.0.0.1:8000/v1"` and
-  `embedding_model = "<its folder name>"` to `[vllm]`. Keep `embedding` in
-  the folder name of a Qwen3-Embedding model, as in its repository name:
-  oMLX tells it from a chat model by that name.
+  `embedding_model = "<its id>"` to `[vllm]`. oMLX's `GET /v1/models`
+  gives ids but no type, so it cannot tell an embedding model from a chat
+  model: the id and one `POST /v1/embeddings` are the check. See
+  [Set up an embedding model](embedding.md#omlx).
 
 ### Ollama with embeddings
 
@@ -216,11 +248,12 @@ embedding_backend = "ollama"
 chat_url = "http://127.0.0.1:11434"
 chat_model = "qwen3:8b"
 embedding_url = "http://127.0.0.1:11434"
-embedding_model = "nomic-embed-text"
+embedding_model = "qwen3-embedding:0.6b"
 ```
 
 Pull both models first: `ollama pull qwen3:8b` and
-`ollama pull nomic-embed-text`.
+`ollama pull qwen3-embedding:0.6b`. `nomic-embed-text` is a smaller
+English-only alternative.
 
 ### MLC LLM, vLLM or SGLang
 
@@ -279,12 +312,13 @@ chat_model = "gpt-4o"
 
 [ollama]
 embedding_url = "http://127.0.0.1:11434"
-embedding_model = "nomic-embed-text"
+embedding_model = "qwen3-embedding:0.6b"
 ```
 
 ## Embedding and long-term memory
 
-Long-term memory needs an embedding backend. With
+Long-term memory needs an embedding backend; see
+[Set up an embedding model](embedding.md). With
 `embedding_backend = "none"`:
 
 - nothing is recalled from long-term memory, and nothing is written to it;

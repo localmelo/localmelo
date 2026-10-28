@@ -59,7 +59,7 @@ input box and a status bar stay at the bottom.
 │ model      Qwen3-8B · vLLM · http://127.0.0.1:8000/v1                    │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
-│ memory     no long-term memory (no embedding backend)                    │
+│ memory     no long-term memory · melo --reconfigure adds one             │
 │ session    new                                                           │
 ╰──────────────────────────────────────────────────────────────────────────╯
   / commands · esc stop · ctrl+d quit
@@ -327,7 +327,8 @@ for a task.
 ### First run
 
 In a terminal with no config file, `melo` asks for a model server and a
-model, saves them, and opens the UI. Later runs go straight in.
+model, saves them, and opens the UI. When the server lists an embedding
+model, it asks once more whether to use it. Later runs go straight in.
 
 ```text
 $ melo
@@ -335,6 +336,12 @@ Found a model server at http://127.0.0.1:8000/v1 (1 model).
 Model server URL [http://127.0.0.1:8000/v1]:
 ✓ http://127.0.0.1:8000/v1 lists 1 model; using Qwen3-8B-4bit.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
+```
+
+With a server that lists an embedding model too:
+
+```text
+Use nomic-embed-text for long-term memory? [Y/n]:
 ```
 
 - melo looks for a server on this computer with `GET /v1/models` on
@@ -361,10 +368,16 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   Ollama, and chat requests use Ollama's native API with its 300 s timeout.
   Any other OpenAI-compatible server is saved as `chat_backend = "vllm"`
   (the key for any OpenAI-compatible server), with its `[vllm]` table's
-  `chat_url` and `chat_model`. Either way the file gets
-  `embedding_backend = "none"` and its other settings are kept. For
-  embeddings, a cloud API or another backend key, run
-  `melo --reconfigure`.
+  `chat_url` and `chat_model`. The file's other settings are kept.
+- When the server lists an embedding model other than the chosen chat model,
+  melo asks `Use <model> for long-term memory? [Y/n]:`, recommending
+  Qwen3-Embedding first. `y` sends one `POST /v1/embeddings` probe and saves
+  `embedding_backend = "<chat key>"` with that table's `embedding_url` (the
+  chat URL) and `embedding_model`. `n`, a failed probe, or no candidate
+  saves `embedding_backend = "none"` and says why; the no-candidate line
+  names `ollama pull qwen3-embedding:0.6b` for an Ollama server and
+  `Serve Qwen3-Embedding-0.6B on it` otherwise. See
+  [Set up an embedding model](embedding.md).
 - When the server cannot be used, melo says why, as
   `✗ URL: connection refused.`, and asks
   `[r]etry, [s]tart anyway, [q]uit [r]:`. `r` asks for the URL again, with
@@ -420,7 +433,7 @@ These options apply to a task run without `--serve`.
 | `--timeout SECONDS` | not set | End the run with status `timeout` after this many seconds. |
 | `--request-timeout SECONDS` | `120` | How long each chat request may wait for the server. |
 | `--output-format text\|json` | `text` | Print the result as text, or the run record as one JSON line. |
-| `--embedding-base-url URL` | not set | An OpenAI-compatible embedding server for long-term memory. |
+| `--embedding-base-url URL` | not set | An OpenAI-compatible embedding server for long-term memory; see [Set up an embedding model](embedding.md). |
 | `--embedding-model NAME` | `default` | The model to request from the `--embedding-base-url` server. |
 | `--progress auto\|off` | `auto` | Draw a [progress line](#progress-line) on stderr while the task runs: `auto` when stderr is a terminal and the output is text, `off` never. |
 | `--routine NAME` | not set | Learn and recall this task's steps as the routine `NAME`, in any folder and whatever the task's wording. |

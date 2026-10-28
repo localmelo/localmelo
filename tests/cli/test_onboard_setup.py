@@ -7,6 +7,8 @@ temporary directory.
 
 from __future__ import annotations
 
+import re
+import tomllib
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -902,3 +904,18 @@ async def test_another_server_is_saved_as_vllm(
         "m",
     )
     assert (saved.ollama.chat_url, saved.ollama.chat_model) == ("", "")
+
+
+def test_the_embedding_guides_toml_examples_load(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Every TOML block in docs/embedding.md is a file config.load() reads."""
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")  # the cloud example names it
+    guide = Path(__file__).resolve().parents[2] / "docs" / "embedding.md"
+    blocks = re.findall(r"```toml\n(.*?)```", guide.read_text(), re.S)
+    assert len(blocks) == 4
+    for block in blocks:
+        config_path.write_text(block)
+        cfg = config.load()
+        if "chat_backend" in tomllib.loads(block):
+            assert cfg.validate() == []

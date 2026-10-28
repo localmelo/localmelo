@@ -19,6 +19,7 @@
 - [Tools and MCP](https://localmelo.github.io/localmelo/tools.md): the built-in tools, the MCP config file, permission tiers, which tools each step offers, and what the checks do.
 - [Memory](https://localmelo.github.io/localmelo/memory.md): working memory, history, long-term and procedural memory, and how to keep, inspect and reset them.
 - [Configuration](https://localmelo.github.io/localmelo/configuration.md): the setup wizard, `config.toml`, backends, API keys, timeouts and environment variables.
+- [Set up an embedding model](https://localmelo.github.io/localmelo/embedding.md): long-term memory's embedding backend, the probe that proves one works, and server commands for Ollama, oMLX, vLLM, SGLang and MLC.
 - [Troubleshooting](https://localmelo.github.io/localmelo/troubleshooting.md): error messages and how to fix them.
 
 ## Optional
