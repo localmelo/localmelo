@@ -86,7 +86,7 @@ def _write_v0(path: Path) -> None:
 def _check(path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(path)
     assert connection.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
-    assert connection.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 2
     return connection
 
 

@@ -42,6 +42,18 @@ R2A_DEFAULTS = {
     for key in ("reasoning", "reasoning_field", "replay_turns")
 }
 R4_DEFAULTS = GOLDEN["upstream_namespace_defaults"]  # recorded from upstream #85
+# R5 (#94) added seven direct-mode options, all None unless given.
+R5_DEFAULTS = dict.fromkeys(
+    (
+        "retriever",
+        "recall_at",
+        "recall_k",
+        "recall_kinds",
+        "recall_placement",
+        "recall_min_score",
+        "retrieval_extra_body",
+    )
+)
 
 
 @pytest.fixture
@@ -105,6 +117,7 @@ def test_historical_dispatch(
         **SOURCES[source]["namespace_defaults"],
         **R2A_DEFAULTS,
         **R4_DEFAULTS,
+        **R5_DEFAULTS,
         **case["namespace"],
     }
     for field in UI_FIELDS:

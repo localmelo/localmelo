@@ -17,8 +17,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
 
 from localmelo.melo.agent import Agent, AgentOptions
-from localmelo.melo.agent.options import NoteWriter, ReasoningMode, reasoning_refusal
+from localmelo.melo.agent.options import (
+    NoteWriter,
+    ReasoningMode,
+    reasoning_refusal,
+)
 from localmelo.melo.executor import builtin_names
+from localmelo.melo.memory.recall import (
+    RECALL_K_MAX,
+    parse_kinds,
+    parse_triggers,
+)
 from localmelo.melo.schema import RunResult
 
 if TYPE_CHECKING:
@@ -72,6 +81,13 @@ _DIRECT_FLAGS = {
     "reasoning_field": "--reasoning-field",
     "replay_turns": "--replay-turns",
     "note_writer": "--note-writer",
+    "retriever": "--retriever",
+    "recall_at": "--recall-at",
+    "recall_k": "--recall-k",
+    "recall_kinds": "--recall-kinds",
+    "recall_placement": "--recall-placement",
+    "recall_min_score": "--recall-min-score",
+    "retrieval_extra_body": "--retrieval-extra-body",
 }
 
 # Flags of the interactive UI (bare melo), by dest.
@@ -84,8 +100,9 @@ _UI_FLAGS = {
 
 # Direct-mode flags the interactive UI refuses: its Agents offer every tool,
 # an approval's wait would count toward a timeout, it has no machine output,
-# it draws its own progress, and it does not wire the reasoning field yet
-# (that one has its own message below; R2b wires it).
+# it draws its own progress, and it does not wire the reasoning field or the
+# retrieval extra body yet (each has its own message below; R2b wires the
+# first, a later change the second).
 _UI_REFUSED = (
     "tool_exposure",
     "timeout",
@@ -93,6 +110,7 @@ _UI_REFUSED = (
     "progress",
     "routine",
     "reasoning_field",
+    "retrieval_extra_body",
 )
 
 
@@ -641,7 +659,7 @@ def _parse_builtins(
             "argument --builtins: expected all, none or built-in tool names "
             f"separated by commas, got {text!r}"
         )
-    known = builtin_names()
+    known = builtin_names() | {"recall"}
     unknown = sorted(set(names) - known)
     if unknown:
         parser.error(
@@ -649,6 +667,174 @@ def _parse_builtins(
             f"known: {', '.join(sorted(known))}"
         )
     return frozenset(names)
+
+
+def _recall_triggers(text: str) -> frozenset[str]:
+    try:
+        return parse_triggers(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+
+
+def _recall_kinds(text: str) -> frozenset[str]:
+    try:
+        return parse_kinds(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+
+
+def _recall_k(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {text!r}") from None
+    if not 1 <= value <= RECALL_K_MAX:
+        raise argparse.ArgumentTypeError(
+            f"must be an integer from 1 to {RECALL_K_MAX}, got {value}"
+        )
+    return value
+
+
+def _unit_score(text: str) -> float:
+    try:
+        value = float(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a number: {text!r}") from None
+    if not math.isfinite(value) or not 0 <= value <= 1:
+        raise argparse.ArgumentTypeError(f"must be a number from 0 to 1, got {text}")
+    return value
+
+
+def _json_object(text: str) -> dict[str, Any]:
+    try:
+        value = json.loads(text)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"not JSON: {exc}") from None
+    if not isinstance(value, dict):
+        raise argparse.ArgumentTypeError("must be a JSON object")
+    # Validate here, not in the provider: a reserved field is a usage
+    # error (exit 2, one line), never a traceback from OpenAICompatLLM.
+    from localmelo.support.providers.llm._protocol import prepare_extra_body
+
+    try:
+        prepare_extra_body(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+    return value
+
+
+def _recall_flag_given(args: argparse.Namespace) -> bool:
+    return any(
+        getattr(args, dest, None) is not None
+        for dest in (
+            "retriever",
+            "recall_at",
+            "recall_k",
+            "recall_kinds",
+            "recall_placement",
+            "recall_min_score",
+            "retrieval_extra_body",
+        )
+    )
+
+
+def _check_recall_args(
+    parser: argparse.ArgumentParser, args: argparse.Namespace
+) -> None:
+    """Reject R5's flag combinations before anything runs."""
+    effective_legacy = getattr(args, "reasoning", None) == "legacy" or (
+        args.base_url and not (args.serve or args.daemon) and args.reasoning is None
+    )
+    if effective_legacy and _recall_flag_given(args):
+        parser.error(
+            "argument --retriever/--recall-*/--retrieval-*: retrieval is not "
+            "available in legacy; use --reasoning compress, compress+replay, "
+            "drop or replay"
+        )
+    recall_flags = [
+        flag
+        for dest, flag in _DIRECT_FLAGS.items()
+        if dest
+        in (
+            "recall_at",
+            "recall_k",
+            "recall_kinds",
+            "recall_placement",
+            "recall_min_score",
+        )
+        and getattr(args, dest) is not None
+    ]
+    retriever = getattr(args, "retriever", None)
+    if retriever == "off" and recall_flags:
+        parser.error("argument --retriever off: do not give " + ", ".join(recall_flags))
+    recall_at = getattr(args, "recall_at", None)
+    if recall_at and "tool" in recall_at:
+        if args.mcp_only:
+            parser.error("argument --recall-at: tool is not available with --mcp-only")
+        if args.builtins is not None:
+            names = _parse_builtins(parser, args.builtins)
+            if names is not None and "recall" not in names:
+                parser.error(
+                    "argument --recall-at tool: --builtins must include recall"
+                )
+        if retriever == "off":
+            parser.error(
+                "argument --recall-at tool: it needs a retriever other than off"
+            )
+    if getattr(args, "recall_placement", None) == "message" and args.reasoning in (
+        "replay",
+        "compress+replay",
+    ):
+        parser.error(
+            "argument --recall-placement: message is not available in replay modes"
+        )
+    if getattr(args, "retrieval_extra_body", None) is not None and retriever in (
+        "off",
+        "bm25",
+        "embedding",
+    ):
+        parser.error("argument --retrieval-extra-body: it needs --retriever llm")
+
+
+def _check_effective_recall(
+    parser: argparse.ArgumentParser,
+    args: argparse.Namespace,
+    options: AgentOptions,
+) -> None:
+    """Reject a recall combination that flags or the config table built."""
+    if options.reasoning in ("replay", "compress+replay") and (
+        options.recall_placement == "message"
+    ):
+        parser.error(
+            "argument --recall-placement: message is not available in replay modes"
+        )
+    if options.retriever == "off" and (
+        options.recall_at
+        or options.recall_k != 3
+        or options.recall_kinds is not None
+        or options.recall_placement != "tool"
+        or options.recall_min_score != 0.35
+    ):
+        parser.error("argument --retriever off: do not give the --recall-* flags")
+    if (
+        options.builtins is not None
+        and "recall" in options.builtins
+        and "tool" not in (options.recall_at or ())
+    ):
+        parser.error("argument --builtins: recall needs --recall-at tool")
+    if options.recall_at and "tool" in options.recall_at:
+        if getattr(args, "mcp_only", False):
+            parser.error("argument --recall-at: tool is not available with --mcp-only")
+        if options.builtins is not None and "recall" not in options.builtins:
+            parser.error("argument --recall-at tool: --builtins must include recall")
+        if options.retriever == "off":
+            parser.error(
+                "argument --recall-at tool: it needs a retriever other than off"
+            )
+    if getattr(
+        args, "retrieval_extra_body", None
+    ) is not None and options.retriever in ("off", "bm25", "embedding"):
+        parser.error("argument --retrieval-extra-body: it needs --retriever llm")
 
 
 def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -659,6 +845,7 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         for dest in ("builtins", "tool_exposure"):
             if getattr(args, dest) is not None:
                 parser.error(f"--mcp-only sets {_DIRECT_FLAGS[dest]}; do not give both")
+    _check_recall_args(parser, args)
     if args.embedding_model is not None and args.embedding_base_url is None:
         parser.error("--embedding-model requires --embedding-base-url")
     if args.embedding_base_url is not None and not args.base_url:
@@ -714,6 +901,11 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             "--reasoning-field is not in the interactive UI yet; "
             'give it with a task (melo -- "<task>")'
         )
+    if interactive and args.retrieval_extra_body is not None:
+        parser.error(
+            "--retrieval-extra-body is not in the interactive UI yet; "
+            'give it with a task (melo -- "<task>")'
+        )
     # main() joins the words into the query, and an empty one (`melo ""`)
     # runs no task, so the direct-mode flags would have nothing to apply to.
     direct = bool(" ".join(args.query)) and not args.serve
@@ -763,6 +955,24 @@ def _direct_options(
     note_writer = getattr(args, "note_writer", None)
     if note_writer is not None:
         fields["note_writer"] = note_writer
+    retriever = getattr(args, "retriever", None)
+    if retriever is not None:
+        fields["retriever"] = retriever
+    recall_at = getattr(args, "recall_at", None)
+    if recall_at is not None:
+        fields["recall_at"] = recall_at
+    recall_k = getattr(args, "recall_k", None)
+    if recall_k is not None:
+        fields["recall_k"] = recall_k
+    recall_kinds = getattr(args, "recall_kinds", None)
+    if recall_kinds is not None:
+        fields["recall_kinds"] = recall_kinds
+    recall_placement = getattr(args, "recall_placement", None)
+    if recall_placement is not None:
+        fields["recall_placement"] = recall_placement
+    recall_min_score = getattr(args, "recall_min_score", None)
+    if recall_min_score is not None:
+        fields["recall_min_score"] = recall_min_score
     try:
         return AgentOptions(**fields)
     except ValueError as exc:  # the flag types should have caught it
@@ -954,6 +1164,53 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         "heuristic (always from the reply's text and thinking). Accepted and "
         "inert in the other modes",
     )
+    direct.add_argument(
+        "--retriever",
+        choices=["auto", "off", "bm25", "llm", "embedding"],
+        help="How recall ranks documents: auto (default: embedding when "
+        "configured; else llm at start/attempt and bm25 at step/tool), or "
+        "one named retriever for every trigger",
+    )
+    direct.add_argument(
+        "--recall-at",
+        type=_recall_triggers,
+        metavar="LIST",
+        help="Comma list of recall triggers: start, attempt, step, tool "
+        "(default start,attempt,step; tool is never on unless named)",
+    )
+    direct.add_argument(
+        "--recall-k",
+        type=_recall_k,
+        metavar="N",
+        help=f"Task-local hits per recall, 1-{RECALL_K_MAX} (default 3)",
+    )
+    direct.add_argument(
+        "--recall-kinds",
+        type=_recall_kinds,
+        metavar="LIST",
+        help="Comma list of document kinds: note, draft, thought, digest, "
+        "reflection, long (default all but thought)",
+    )
+    direct.add_argument(
+        "--recall-placement",
+        choices=["tool", "message"],
+        help="Where a step block goes: the last tool result (tool, default), "
+        "or its own user message (message; not in replay modes)",
+    )
+    direct.add_argument(
+        "--recall-min-score",
+        type=_unit_score,
+        metavar="F",
+        help="Cosine floor for the long-term leg and embedding hits, 0-1 "
+        "(default 0.35; inert only for the task-local bm25/llm ranking)",
+    )
+    direct.add_argument(
+        "--retrieval-extra-body",
+        type=_json_object,
+        metavar="JSON",
+        help="Extra top-level fields for retrieve requests only (llm; a JSON "
+        "object, in memory only)",
+    )
 
     if not direct_only:
         interactive = parser.add_argument_group(
@@ -961,9 +1218,10 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
             "Options for bare melo, which opens the interactive UI on a terminal. "
             "It also takes --base-url, --chat-model, --max-steps, --attempt-policy, "
             "--reflection-gate, --builtins, --memory, --memory-dir, "
-            "--request-timeout, --reasoning, --replay-turns, --note-writer "
-            "and the --embedding-* options. It refuses --reasoning-field until a "
-            "later release wires it.",
+            "--request-timeout, --reasoning, --replay-turns, --note-writer, "
+            "--retriever, --recall-*, --retrieval-extra-body and the "
+            "--embedding-* options. It refuses --reasoning-field and "
+            "--retrieval-extra-body until a later release wires them.",
         )
         interactive.add_argument(
             "--workspace",
@@ -1256,6 +1514,20 @@ def _build_direct_mode_agent(
         mode = options.reasoning if options is not None else "legacy"
         if reasoning_field is not None and mode in ("replay", "compress+replay"):
             llm_options["reasoning_field"] = reasoning_field
+        extra_body = getattr(args, "retrieval_extra_body", None)
+        if extra_body is not None:
+            llm_options["extra_body_by_kind"] = {"retrieve": extra_body}
+        if options is not None:
+            _check_effective_recall(parser, args, options)
+            if options.retriever == "embedding" and not getattr(
+                args, "embedding_base_url", None
+            ):
+                parser.error(
+                    "argument --retriever: embedding needs an embedding provider "
+                    "(--embedding-base-url with --base-url)"
+                )
+            if options.retriever == "embedding" and not options.memory:
+                parser.error("argument --retriever: embedding needs --memory on")
         llm = OpenAICompatLLM(base_url=base_url, model=model, **llm_options)
         if options is not None and options.memory_dir is not None:
             _make_memory_dir(options.memory_dir)
@@ -1320,6 +1592,51 @@ def _build_direct_mode_agent(
             options, note_writer=cast(NoteWriter, cfg.agent.note_writer)
         )
 
+    # R5's [retrieval]: a value applies only when its flag is absent, and
+    # the table is inert in legacy (decision 10).
+    if options.reasoning != "legacy":
+        retrieval = cfg.retrieval
+        if getattr(args, "retriever", None) is None and retrieval.retriever != "auto":
+            options = dataclasses.replace(
+                options, retriever=cast(Any, retrieval.retriever)
+            )
+        if getattr(args, "recall_at", None) is None and retrieval.recall_at:
+            options = dataclasses.replace(
+                options, recall_at=frozenset(retrieval.recall_at)
+            )
+        if getattr(args, "recall_k", None) is None and retrieval.k != 3:
+            options = dataclasses.replace(options, recall_k=retrieval.k)
+        if getattr(args, "recall_kinds", None) is None and retrieval.kinds:
+            options = dataclasses.replace(
+                options, recall_kinds=frozenset(retrieval.kinds)
+            )
+        if (
+            getattr(args, "recall_placement", None) is None
+            and retrieval.placement != "tool"
+        ):
+            options = dataclasses.replace(
+                options, recall_placement=cast(Any, retrieval.placement)
+            )
+        if (
+            getattr(args, "recall_min_score", None) is None
+            and retrieval.min_score != 0.35
+        ):
+            options = dataclasses.replace(options, recall_min_score=retrieval.min_score)
+    elif _recall_flag_given(args):
+        parser.error(
+            "argument --retriever/--recall-*/--retrieval-*: retrieval is not "
+            "available in legacy; use --reasoning compress, compress+replay, "
+            "drop or replay"
+        )
+
+    if options.retriever == "embedding":
+        if not cfg.has_embedding:
+            parser.error(
+                "argument --retriever: embedding needs an embedding provider "
+                "in the config"
+            )
+        if not options.memory:
+            parser.error("argument --retriever: embedding needs --memory on")
     requires_replay = bool(getattr(section, "requires_reasoning_replay", False))
     if options.reasoning == "compress" and requires_replay:
         # A provider that requires replay runs compress as compress+replay;
@@ -1330,6 +1647,9 @@ def _build_direct_mode_agent(
             replay_turns=None,
             replay_scope="task",
         )
+    # After the conversion above: a recall placement that the effective
+    # mode refuses must be a usage error, not a traceback from Agent.
+    _check_effective_recall(parser, args, options)
 
     # The field only has meaning in replay; legacy keeps the provider's own
     # behavior (OpenAI-compatible sends none) even if the file names one.
@@ -1353,7 +1673,26 @@ def _build_direct_mode_agent(
 
     if options.memory_dir is not None:
         _make_memory_dir(options.memory_dir)
-    return Agent(config=cfg, options=options, tool_providers=tool_providers)
+    agent = Agent(config=cfg, options=options, tool_providers=tool_providers)
+    extra_body = getattr(args, "retrieval_extra_body", None)
+    if extra_body is not None:
+        _set_retrieval_extra_body(parser, agent, extra_body)
+    return agent
+
+
+def _set_retrieval_extra_body(
+    parser: argparse.ArgumentParser, agent: Agent, body: dict[str, Any]
+) -> None:
+    """Put *body* on the agent's provider for retrieve requests only."""
+    from localmelo.support.providers.llm._protocol import prepare_extra_body
+
+    provider = getattr(agent, "_llm", None)
+    if provider is None or not hasattr(provider, "extra_body_by_kind"):
+        parser.error(
+            "argument --retrieval-extra-body: this backend does not support "
+            "per-kind extra body fields"
+        )
+    provider.extra_body_by_kind = {"retrieve": prepare_extra_body(body)}
 
 
 def _start_gateway(cfg: Config) -> None:
