@@ -29,6 +29,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Heuristic notes retain a bounded set of explicit English negative and Chinese
+  residence/cancellation assertions, and item attribution rejects conflicting
+  event times, rejects opposing detected polarity and requires the full negative
+  assertion ([#137]). Similar opposing assertions are retained as conflicts;
+  structured polarity-aware supersession is not yet implemented.
+
 - Worker park integration fences held provider and approval delivery, persists
   pause intent and evidence-based cards, releases cleanly parked worker slots,
   and re-asks withdrawn approvals on resume. Failed park writes retry and can
@@ -955,3 +961,4 @@ earlier milestones.
 [#133]: https://github.com/localmelo/localmelo/pull/133
 [#135]: https://github.com/localmelo/localmelo/pull/135
 [#136]: https://github.com/localmelo/localmelo/pull/136
+[#137]: https://github.com/localmelo/localmelo/pull/137
