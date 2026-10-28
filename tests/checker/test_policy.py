@@ -70,12 +70,35 @@ def test_a_bad_checker_mode_raises_value_error() -> None:
         Checker(mode="bogus")  # type: ignore[arg-type]
 
 
-@pytest.mark.parametrize("mode", ["direct", "python", "gateway"])
+@pytest.mark.parametrize("mode", ["direct", "python"])
 def test_a_non_approving_mode_refuses_an_unnamed_shell_exec(mode: ToolMode) -> None:
     reason = exec_refusal("shell_exec", "exec", mode)
     assert reason is not None
     assert mode in reason
-    assert "--builtins all" in reason
+    assert "AgentOptions(builtins=...)" in reason or "--builtins all" in reason
+
+
+def test_the_gateway_refusal_names_no_false_remedy() -> None:
+    reason = exec_refusal("shell_exec", "exec", "gateway")
+    assert reason is not None
+    assert "gateway mode has no approval policy" in reason
+    assert "does not offer" in reason
+    assert "--builtins" not in reason
+
+
+def test_the_blocklist_symbols_are_gone() -> None:
+    import localmelo.melo.checker as checker_pkg
+    import localmelo.melo.checker.payloads as payloads
+    import localmelo.melo.checker.validators as validators
+
+    for module in (checker_pkg, payloads, validators):
+        for name in (
+            "BLOCKED_COMMANDS",
+            "_BLOCKED_RE",
+            "validate_executor_request",
+            "ExecutorRequest",
+        ):
+            assert not hasattr(module, name), f"{module.__name__}.{name}"
 
 
 @pytest.mark.parametrize("mode", ["direct", "python"])

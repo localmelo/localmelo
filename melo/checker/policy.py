@@ -99,9 +99,14 @@ def exec_refusal(
         return None
     if tool_name in DEFAULT_BUILTINS[mode]:
         return None
+    remedy = {
+        "direct": "Use --builtins all to enable it.",
+        "python": "Name it in AgentOptions(builtins=...) to enable it.",
+        "gateway": "The gateway does not offer it.",
+    }[mode]
     return (
         f"{tool_name} is not available in this mode ({mode} mode has no "
-        "approval policy). Use --builtins all to enable it."
+        f"approval policy). {remedy}"
     )
 
 

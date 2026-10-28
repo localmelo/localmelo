@@ -317,7 +317,7 @@
         <ul>
           <li>before a planning request: the prompt may hold at most 100,000 characters, and the list of offered tools must be valid;</li>
           <li>after it: each tool call in the reply needs a name and an id of its own;</li>
-          <li>before a tool runs: the tool's tier and the mode decide. A mode with an approver (the <code>interactive</code> UI) offers <code>shell_exec</code> and asks about each <code>exec</code> call; a mode without one (<code>direct</code>, <code>gateway</code>, and the library's default <code>python</code>) does not offer it, and refuses an <code>exec</code> call that was registered anyway unless the caller named it in <code>builtins</code>. No command is refused by its spelling;</li>
+          <li>before a tool runs: the tool's tier and the mode decide. A mode with an approver (the <code>interactive</code> UI) offers <code>shell_exec</code> and asks about each <code>exec</code> call; a mode without one (<code>direct</code>, <code>gateway</code>, and the library's default <code>python</code>) does not offer it, and refuses an <code>exec</code> call that was registered anyway unless a <code>direct</code> or <code>python</code> caller named it in <code>builtins</code>; the gateway refuses it even when named. No command is refused by its spelling;</li>
           <li>after a tool runs: output longer than 50,000 characters is cut;</li>
           <li>before a memory write: its size is limited;</li>
           <li>before an event reaches Python code: API keys of well-known shapes, bearer tokens and one-time codes in a model reply's text are replaced with <code>[redacted]</code>;</li>
@@ -377,7 +377,9 @@
           <code>shell_exec</code> out: direct mode has no approval policy,
           the gateway has none, and the console's approvals arrive over the
           same unauthenticated loopback API. <code>--builtins all</code> (or
-          naming <code>shell_exec</code>) is the caller's opt-in. Direct
+          naming <code>shell_exec</code>) is a <code>direct</code> or
+          <code>python</code> caller's opt-in; the gateway and console refuse it
+          even when named. Direct
           mode gives the tools no workspace root, and the gateway never does,
           so file tools reach any file you can; a direct run's
           <code>--workspace DIR</code> sets the same root as the Python API

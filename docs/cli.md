@@ -39,11 +39,10 @@ keeps each answer, so a turn sees the earlier ones. A turn that does not
 complete prints its status line on stderr, and the loop asks for the next task.
 `/exit`, `/quit`, `exit` or `quit` (in any letter case), or Ctrl-D, ends the
 loop with exit code 0; Ctrl+C ends it at once (a shell shows 130). At start
-it prints one line saying that `shell_exec` is off in direct mode and that a
-task run with `--builtins all` turns it on (the line is absent when the tool
-is already on). The loop takes
-`--base-url` and `--chat-model`; the direct-mode options are usage errors
-with it. Its conversation is separate from the web workspace's chats.
+it prints one line saying that `shell_exec` is off in direct mode and that
+restarting with `--builtins all` turns it on (the line is absent when the tool
+is already on). The loop takes `--base-url`, `--chat-model` and `--builtins`;
+the other direct-mode options are usage errors with it. Its conversation is separate from the web workspace's chats.
 On a terminal the prompt is edited with readline: Backspace deletes a whole
 character, Chinese and other wide characters included, and the Up arrow
 recalls earlier lines of this loop. A line that is not valid UTF-8 prints

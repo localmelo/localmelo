@@ -490,8 +490,8 @@ async def _run(
             agent.options.mode, agent.options.builtins
         ):
             print(
-                "shell_exec is off in this loop (direct mode); a task run with "
-                "--builtins all turns it on."
+                "shell_exec is off in this loop (direct mode); restart melo "
+                "with --builtins all to turn it on."
             )
         while True:
             try:
@@ -930,6 +930,9 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             for dest, flag in _DIRECT_FLAGS.items()
             if getattr(args, dest) not in (None, False)
             and (not interactive or dest in _UI_REFUSED)
+            # `melo ""` runs turns in the loop, so --builtins applies to
+            # them even though the other direct-mode flags have no task.
+            and not (dest == "builtins" and args.query)
         ]
         if given:
             parser.error(
@@ -1104,7 +1107,7 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     direct.add_argument(
         "--builtins",
         metavar="all|none|NAME,...",
-        help="Built-in tools to register (default all)",
+        help="Built-in tools to register (default: the mode's set)",
     )
     direct.add_argument(
         "--mcp-config",

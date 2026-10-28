@@ -240,6 +240,45 @@ class TestBlockedToolCall:
         assert steps[0].tool_result.error == ("Tool not found in registry: shell_exec")
 
     @pytest.mark.asyncio
+    async def test_a_registered_shell_is_blocked_in_gateway_mode(
+        self, tmp_path: Any
+    ) -> None:
+        """A named shell in gateway mode is registered, offered, and refused."""
+        marker = tmp_path / "keep.txt"
+        marker.write_text("keep", encoding="utf-8")
+        llm = FakeLLM()
+        llm.enqueue(
+            Message(
+                role="assistant",
+                content="deleting",
+                tool_call=ToolCall(
+                    tool_name="shell_exec",
+                    arguments={"command": f"rm -f {marker}"},
+                ),
+            )
+        )
+        llm.enqueue(Message(role="assistant", content="aborted"))
+
+        agent = Agent(
+            llm=llm,
+            embedding=FakeEmbedding(),
+            options=AgentOptions(
+                mode="gateway",
+                builtins=frozenset({"shell_exec"}),
+                tool_exposure="all",
+            ),
+        )
+        result = await agent.run("delete the marker")
+
+        assert result == "aborted"
+        tasks = list(agent.hippo.history._tasks.values())
+        steps = await agent.hippo.history.get_steps(tasks[0].task_id)
+        assert steps[0].tool_result is not None
+        assert steps[0].tool_result.error.startswith("Blocked:")
+        assert "gateway" in steps[0].tool_result.error
+        assert marker.exists()
+
+    @pytest.mark.asyncio
     async def test_unknown_tool_returns_error(self) -> None:
         """Calling an unregistered tool must return an error result."""
         llm = FakeLLM()

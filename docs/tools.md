@@ -7,7 +7,7 @@ from MCP servers, which tools each step offers, and what the checks do.
 
 | Tool | What it does | Limits |
 |---|---|---|
-| `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. Only `interactive` mode offers it by default: a direct run and a Python caller need an explicit `builtins` set that names it, and a gateway or console session never offers it. |
+| `shell_exec` | Runs a shell command with `/dev/null` as standard input and returns its output. | Killed with every process it started after 30 seconds. Only `interactive` mode offers it by default: a direct run and a Python caller need an explicit `builtins` set that names it; a gateway or console session does not offer it by default and refuses it even when named. |
 | `python_exec` | Runs Python code in a child process and returns what it prints. | Killed with every process it started after 60 seconds. `sys.exit()` ends only the child. |
 | `file_read` | Reads a text file. | Any file your account can read. |
 | `file_write` | Writes text to a file, creating or replacing it. | Any file your account can write. |

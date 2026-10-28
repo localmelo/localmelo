@@ -723,7 +723,7 @@ def _timeout() -> Scenario:
     return Scenario(
         status="timeout",
         query="Wait for the build to finish.",
-        options={"timeout_s": 1.0, "builtins": frozenset({"shell_exec"})},
+        options={"timeout_s": 1.0, "builtins": ALL_BUILTINS},
         replies=[_tool_calls(("shell_exec", {"command": "sleep 30"}))],
     )
 

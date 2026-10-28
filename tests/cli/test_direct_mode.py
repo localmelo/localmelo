@@ -179,6 +179,15 @@ class TestFlags:
     ) -> None:
         assert _main("--builtins", value, "q").options.builtins == builtins
 
+    def test_builtins_is_the_one_direct_flag_the_loop_takes(self) -> None:
+        # `melo ""` runs turns, so --builtins can apply to them; the other
+        # direct-mode flags stay usage errors (see test_rejected_before_the_run).
+        with mock.patch.object(cli, "_run_direct", return_value=0):
+            ran = _main("--builtins", "all", "")
+        assert ran.code == 0
+        assert ran.options.mode == "direct"
+        assert ran.options.builtins == frozenset(builtin_names())
+
     def test_memory_on(self) -> None:
         assert _main("--memory", "on", "q").options.memory is True
 
@@ -881,8 +890,8 @@ class TestInteractive:
         assert out == (
             "localmelo · local agent\n"
             "Enter a task to begin. Type /help for commands or /exit to quit.\n"
-            "shell_exec is off in this loop (direct mode); a task run with "
-            "--builtins all turns it on.\n"
+            "shell_exec is off in this loop (direct mode); restart melo "
+            "with --builtins all to turn it on.\n"
             "\nsecond answer\n"
         )
         assert err == "melo: run ended with status provider_error: HTTP 500\n"
@@ -903,7 +912,7 @@ class TestInteractive:
         with mock.patch("builtins.input", side_effect=EOFError):
             assert asyncio.run(cli._run(agent, None)) == cli.EXIT_COMPLETED
         out, _ = capsys.readouterr()
-        assert "shell_exec is off" not in out
+        assert "shell_exec" not in out
 
 
 # ── SIGTERM and SIGHUP ──────────────────────────────────────────────────────

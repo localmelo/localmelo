@@ -704,6 +704,11 @@ class TestStructuredExecutorInAgentLoop:
         agent = Agent(llm=llm, embedding=FakeEmbedding())
         result = await agent.run("delete everything with shell_exec")
         assert result == "aborted"
+        tasks = list(agent.hippo.history._tasks.values())
+        steps = await agent.hippo.history.get_steps(tasks[0].task_id)
+        assert steps[0].tool_result is not None
+        assert "shell_exec" in steps[0].tool_result.error
+        assert "not found in registry" in steps[0].tool_result.error
         await agent.close()
 
     @pytest.mark.asyncio

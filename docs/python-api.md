@@ -72,7 +72,7 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `memory` | `True` | `False` turns long-term memory off. |
 | `memory_dir` | `None` | A directory for SQLite memory, with `~` expanded. `None` follows the environment variables; see [Memory](memory.md#keep-memory-between-runs). |
 | `timeout_s` | `None` | A time limit for each run, in seconds. `None` means no limit. It also interrupts a `python_exec` call, whose child process it kills. |
-| `mode` | `"python"` | The surface the run belongs to: `"direct"`, `"interactive"`, `"gateway"` or `"python"`. It decides what `builtins=None` registers: only `"interactive"` offers `shell_exec`; the other three register `file_read`, `file_write` and `python_exec`. Naming `shell_exec` in `builtins` is a `direct` or `python` caller's opt-in and lets the run use it; the checker refuses an unnamed one there, and refuses it in `gateway` mode even when named, with a reason naming the mode and `--builtins all`. An explicit `builtins` wins over the default registration. |
+| `mode` | `"python"` | The surface the run belongs to: `"direct"`, `"interactive"`, `"gateway"` or `"python"`. It decides what `builtins=None` registers: only `"interactive"` offers `shell_exec`; the other three register `file_read`, `file_write` and `python_exec`. Naming `shell_exec` in `builtins` is a `direct` or `python` caller's opt-in and lets the run use it; the checker refuses an unnamed one there, and refuses it in `gateway` mode even when named; the refusal names the mode and, in direct or python mode, the way to enable it. An explicit `builtins` wins over the default registration. |
 | `workspace_root` | `None` | The directory the built-in tools work in, and the only one the file tools reach; see [Work in a directory](#work-in-a-directory). |
 | `tool_timeout_s` | `None` | The time limit of `shell_exec` and `python_exec`, in seconds. Needs a `workspace_root`. `None` keeps 30 seconds for a shell command and 60 seconds for Python. |
 | `tool_env` | `None` | Extra variables for the `shell_exec` and `python_exec` children, on top of the minimal environment; see [Work in a directory](#work-in-a-directory). |
@@ -244,8 +244,9 @@ tool (`readOnlyHint: true`) does not ask either, unless `require_approval`
 names it. A tool registered directly with `agent.executor.register` keeps
 its explicit `requires_approval`; its tier is a label only. Without a
 policy, a tool that would ask runs like any other, as in direct mode, which
-never sets a policy. A caller who names `shell_exec` in `builtins` asks for
-it explicitly, and without a policy it runs unapproved.
+never sets a policy. A `direct` or `python` caller who names `shell_exec`
+in `builtins` asks for it explicitly, and without a policy it runs
+unapproved; `gateway` still refuses it.
 
 A policy is any object with an `async def decide(request)` method that
 returns an `ApprovalDecision`. This one asks in the terminal:

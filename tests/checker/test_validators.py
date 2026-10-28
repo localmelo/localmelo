@@ -474,14 +474,15 @@ class TestPreExecuteByMode:
     ]
 
     @pytest.mark.asyncio
-    async def test_a_gateway_refuses_shell_exec_by_name_and_flag(self) -> None:
-        checker = Checker(mode="gateway")
+    async def test_a_gateway_refuses_a_named_shell_exec_too(self) -> None:
+        checker = Checker(mode="gateway", builtins={"shell_exec"})
         td = ToolDef(name="shell_exec", description="", parameters={})
         tc = ToolCall(tool_name="shell_exec", arguments={"command": "ls -la"})
         result = await checker.pre_execute(tc, td)
         assert not result.allowed
         assert "gateway" in result.reason
-        assert "--builtins all" in result.reason
+        assert "does not offer" in result.reason
+        assert "--builtins" not in result.reason
 
     @pytest.mark.asyncio
     async def test_a_gateway_keeps_python_exec(self) -> None:
@@ -514,7 +515,7 @@ class TestPreExecuteByMode:
             assert "no approval policy" in result.reason, command
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("command", BYPASSES)
+    @pytest.mark.parametrize("command", [*BYPASSES, "rm -rf /tmp/build-cache"])
     async def test_the_interactive_mode_asks_about_every_spelling(
         self, command: str
     ) -> None:
@@ -526,7 +527,7 @@ class TestPreExecuteByMode:
         assert (await checker.pre_execute(tc, td)).allowed
 
     @pytest.mark.asyncio
-    async def test_a_named_shell_exec_runs_in_a_non_approving_mode(self) -> None:
+    async def test_a_named_shell_exec_passes_the_checker(self) -> None:
         checker = Checker(mode="python", builtins={"shell_exec"})
         td = ToolDef(name="shell_exec", description="", parameters={})
         tc = ToolCall(tool_name="shell_exec", arguments={"command": "rm -rf /"})
