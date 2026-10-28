@@ -50,7 +50,8 @@ without dropping the negation; other forms may be missed. The rules are
 heuristic, not a semantic verifier. The admission policy flags similar
 assertions with opposite detected polarity as conflicts, rather than ignoring
 one as a duplicate. It can still ignore short facts; structured, polarity-aware
-supersession is not yet implemented. The
+supersession is off by default; Python callers can opt into the experimental
+[typed assertion path](../reference/memory.md#experimental-typed-assertions). The
 rendered note keeps its 1,200-character budget, so it may show fewer than it
 stores; the 12 items are what long-term memory offers. An explicit `<note>`
 may also list up to 12 `found` items. A reply that only reports the agent's

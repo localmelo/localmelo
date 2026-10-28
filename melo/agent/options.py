@@ -172,6 +172,9 @@ class AgentOptions:
       back to the heuristic, ``"heuristic"`` always writes it from the
       reply's text and thinking. It is accepted and inert in the other
       modes.
+    - ``typed_assertions``: opt into conservative, evidence-checked typed
+      memory updates and historical recall in explicit reasoning modes. The
+      default is false; this experimental option is available through Python.
     """
 
     context_window: int | None = None
@@ -215,6 +218,7 @@ class AgentOptions:
     mode: ToolMode = "python"
     fixed_prefix: bool = False
     captured_history: bool = False
+    typed_assertions: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.fixed_prefix, bool):
@@ -303,7 +307,12 @@ class AgentOptions:
         if not isinstance(self.memory, bool):
             raise ValueError(f"memory must be a bool, got {self.memory!r}")
 
-        for name in ("admit_on_outcome", "keep_decision_text", "captured_history"):
+        for name in (
+            "admit_on_outcome",
+            "keep_decision_text",
+            "captured_history",
+            "typed_assertions",
+        ):
             if not isinstance(getattr(self, name), bool):
                 raise ValueError(f"{name} must be a bool, got {getattr(self, name)!r}")
 
