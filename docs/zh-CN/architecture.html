@@ -127,7 +127,7 @@
 
         <h3 id="c-cli">命令行</h3>
         <p><code>melo</code> 命令。给出任务时，它以直接模式运行：创建一个智能体，运行这个任务，以文本或一行 JSON 输出结果，并用退出码表示运行是如何结束的。在终端中不带任务时，它打开交互式界面：输入框和状态栏固定在底部，每一轮边运行边输出到终端的滚动区：模型的思考、每个工具调用一个块、重试、通知和反思，答案按 Markdown 输出；输入框上方的实时区域显示步数、阶段、正在运行的工具和本回合的进度事实，会话的第一个回合还会显示上次运行的步骤。界面在会话上运行每一轮（保存在 <code>~/.cache/localmelo/cli/sessions.db</code>），运行 <code>shell_exec</code>、<code>python_exec</code> 和 <code>file_write</code> 之前会在面板中询问，把文件工具限制在工作区内，并把 <code>/model</code> 和 <code>/backend</code> 选择的模型和服务器保存到配置文件（用 <code>--base-url</code> 打开的界面不保存）。没有终端时，单独的 <code>melo</code> 以退出码 2 结束。任务为空字符串（<code>melo ""</code>）时，它打开简单的对话循环，每一轮都能看到之前的回答。<code>--serve</code> 启动网关；<code>--daemon</code> 用来管理 macOS 后台服务。使用 <code>--base-url</code> 时，智能体直接连接该服务器，不读取配置文件；不使用它时，使用配置中的后端。无论是否使用 <code>--base-url</code>，<code>--chat-model</code> 和 <code>--request-timeout</code> 都会设置对话模型和对话请求的超时，并且都不会修改配置文件。</p>
-        <p>关键文件：<code>__main__.py</code>；交互式界面在 <code>support/cli/</code> 中：<code>launch.py</code>（终端检查、工作区和模型服务器）、<code>app.py</code>（输入框和按键）、<code>session.py</code>（每一轮和命令）、<code>render.py</code>（工具块、旋转指示和答案）和 <code>approvals.py</code>；以及 <code>support/sessions/agents.py</code>。</p>
+        <p>关键文件：<code>__main__.py</code>；交互式界面在 <code>support/cli/</code> 中：<code>launch.py</code>（终端检查、工作区和模型服务器）、<code>app.py</code>（输入框和按键）、<code>session.py</code>（每一轮和命令）、<code>render.py</code>（思考、通知、反思、工具块、实时区域和答案）和 <code>approvals.py</code>；以及 <code>support/sessions/agents.py</code>。</p>
 
         <h3 id="c-gateway">网关</h3>
         <p><code>melo --serve</code> 启动的 HTTP 服务器。它提供 HTTP API（<code>/v1/health</code>、<code>/v1/agent/run</code>、<code>/v1/sessions</code>），最多保留 50 个会话，每个会话都有一个根据配置文件创建的智能体。会话的智能体会保留自己的回答，所以每个请求都能看到之前的回答。每个请求在运行前都要通过检查：任务的长度和会话 ID。</p>

@@ -80,8 +80,7 @@
 
     make: *** [check] Error 1
 ⚠ The same tool calls or errors repeated; the attempt ends.
-✻ Reflected after attempt 1: continue · Run it once more, then report the
-result. (0.4s)
+✻ Reflected after attempt 1: continue · Run it once more, then report the resul…
   make check still fails on the false recipe.
   Run it once more, then report the result.
 ● The build still fails: make check exits 2.
