@@ -141,7 +141,7 @@ curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" -X DE
 ```
 
 The answer is HTTP 200 with `{"closed": "demo123"}`, or HTTP 404 with
-`{"error": "session not found"}`. A session whose task is still running is
+`{"error": "session not found"}`. In the in-progress security-1b changes, a session with a running task or queued start is
 left alone: the answer is HTTP 409 with the same error body as a refused run,
 `{"error": "Session demo123 is running a task; wait for it to finish before closing it.", "session_id": "demo123"}`,
 and the task goes on. `is_busy` in [GET /v1/sessions](#get-v1sessions)
@@ -149,7 +149,7 @@ shows which sessions are busy.
 
 The `/v1/agent` API has no route that stops a run, so wait for it to finish
 and close the session after. The web workspace's cancel route,
-`POST /v1/playground/session/{id}/cancel`, stops a chat of the web workspace
+`POST /api/turns/{turn_id}/cancel`, stops a console turn
 only ([Web workspace](../guides/web-console.md#web-workspace)); it does not reach an `/v1/agent` run.
 Stopping the gateway still closes every session, a busy one included; see
 [Stop the gateway](../guides/gateway.md#stop-the-gateway).

@@ -121,8 +121,12 @@ present, embeddings included. A chat request waits up to 300 seconds, and a
 turn is stopped after 600 seconds of active time: a call the scheduler holds,
 including a foreign-lock hold, does not count against that bound.
 
-The web workspace's earlier routes under `/v1/playground/` are kept as they
-were for compatibility and are still internal; the page no longer uses them.
+Gateway security-1b is in progress. The internal `/v1/playground/` routes are
+disabled by default (404), and their manager is not started. Opt in with
+`melo --serve --enable-playground`; authentication and Host/Origin checks
+still apply. Playground discovery and sessions use the saved local chat
+backend and model, not endpoint or model overrides in a request. The page
+does not use these routes.
 They include `GET /v1/playground/sessions` for summaries,
 `GET /v1/playground/session/{id}` for a transcript,
 `POST /v1/playground/session/{id}/cancel` for cancellation,
@@ -131,18 +135,15 @@ chat's level, and `POST /v1/playground/presence` with `{"session_id": …}` for
 the page's typing heartbeat. The ordinary `/v1/agent/` API remains separate
 and ungated.
 
-To serve the page's files and the legacy playground routes without the
-configuration wizard:
+For development, the following starts the authenticated gateway with the
+playground enabled, using the saved configuration:
 
 ```bash
 uv run python -m localmelo.support.gateway._test_webapp
 ```
 
-It always listens on `http://127.0.0.1:8401/`, so it cannot run while the
-gateway uses that port. It mounts no `/api`, so the page itself needs the
-gateway; this server only reaches the `/v1/playground/` routes. This standalone
-test server does not use gateway authentication; run it only in a trusted
-local environment and do not expose it.
+It starts the normal gateway, including `/api`, on its configured loopback
+address. It needs the gateway configuration and authentication.
 
 The workspace has these limits:
 

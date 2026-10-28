@@ -176,13 +176,16 @@ async def test_delete_a_running_session_is_409(
 ) -> None:
     turn = await seed_turn(console.store, workspace, status="running")
     reg = registry(console, builder)
-    await open_session(reg, turn.session_id)
+    entry = await open_session(reg, turn.session_id)
+    assert entry is not None
     lock = reg.lock(turn.session_id)
     with pytest.raises(ApiError) as info:
         await reg.delete(turn.session_id)
     assert info.value.status_code == 409
     assert info.value.code == "session_busy"
-    assert reg.get(turn.session_id) is None
+    assert reg.get(turn.session_id) is entry
+    assert entry is not None
+    assert not cast(FakeAgent, entry.agent).closed
     # The row survives, so its lock must survive as the same object.
     assert reg.lock(turn.session_id) is lock
 
@@ -478,3 +481,51 @@ async def test_a_workspace_move_whose_save_fails_changes_nothing(
     assert not old.closed
     # The Agent it built for the new folder went away again.
     assert builder.agents[-1] is not old and builder.agents[-1].closed
+
+
+async def test_delete_rejects_queued_start(console: Console, workspace: str) -> None:
+    turn = await seed_turn(console.store, workspace)
+    reg = console.sessions
+    entry = await open_session(reg, turn.session_id)
+    assert entry is not None
+    lock = reg.lock(turn.session_id)
+    await lock.acquire()
+    queued = asyncio.Event()
+
+    async def start() -> None:
+        queued.set()
+        await reg.start_turn(turn.session_id, "hello", "hello")
+
+    task = asyncio.create_task(start())
+    await queued.wait()
+    await asyncio.sleep(0)
+    try:
+        with pytest.raises(ApiError) as exc:
+            await reg.delete(turn.session_id)
+        assert exc.value.code == "session_busy"
+        assert reg.get(turn.session_id) is entry
+        assert entry is not None
+        assert not cast(FakeAgent, entry.agent).closed
+    finally:
+        lock.release()
+        await task
+
+
+async def test_delete_store_failure_keeps_open_session(
+    console: Console, workspace: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    turn = await seed_turn(console.store, workspace)
+    entry = await open_session(console.sessions, turn.session_id)
+    assert entry is not None
+    agent = cast(FakeAgent, entry.agent)
+
+    async def broken(session_id: str) -> bool:
+        raise SessionStoreError("write failed")
+
+    monkeypatch.setattr(console.store, "delete_session", broken)
+    with pytest.raises(SessionStoreError):
+        await console.sessions.delete(turn.session_id)
+    assert console.sessions.get(turn.session_id) is entry
+    assert entry is not None
+    assert entry.agent is agent and not agent.closed
+    assert await console.store.get_session(turn.session_id) is not None

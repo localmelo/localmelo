@@ -71,7 +71,11 @@ class GatewayServer:
 
         from localmelo.support.gateway.webapp import mount as mount_webapp
 
-        mount_webapp(self.app, self.cfg)
+        mount_webapp(
+            self.app,
+            self.cfg,
+            enable_playground=getattr(cfg, "_enable_playground", False),
+        )
 
         # The guard stays outermost, before console error middleware, so it
         # rejects foreign and unauthenticated requests before any route runs.
@@ -226,7 +230,12 @@ class GatewayServer:
             query = sanitized.query
             session_id = sanitized.session_id
 
-            session = await self.sessions.get_or_create(session_id)
+            try:
+                session = await self.sessions.get_or_create(session_id)
+            except SessionBusyError as exc:
+                return JSONResponse(
+                    status_code=409, content={"error": str(exc), "code": "session_busy"}
+                )
 
             # Per-session serialization: only one run at a time per session
             async with session._lock:
@@ -300,7 +309,11 @@ class GatewayServer:
             except SessionBusyError as e:
                 return JSONResponse(
                     status_code=409,
-                    content={"error": str(e), "session_id": session_id},
+                    content={
+                        "error": str(e),
+                        "code": "session_busy",
+                        "session_id": session_id,
+                    },
                 )
             if not closed:
                 return JSONResponse(
