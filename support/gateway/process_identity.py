@@ -143,5 +143,5 @@ def gone(record: tuple[int, int, str, str]) -> bool:
                 return True
             return current != token
         return False
-    except (OSError, ValueError):
+    except (OSError, OverflowError, ValueError):
         return False

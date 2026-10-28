@@ -248,6 +248,11 @@ def test_invalid_record_never_proves_absence(record: tuple[int, int, str, str]) 
     assert not identity.gone(record)
 
 
+def test_huge_pid_never_proves_absence(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(identity, "_boot", lambda: "boot")
+    assert not identity.gone((2**63, 2**63, "boot", "start"))
+
+
 def test_absent_group_with_unknown_birth_is_not_gone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
