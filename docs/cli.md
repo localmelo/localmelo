@@ -38,9 +38,12 @@ In the `melo ""` loop, turns share one agent and its working memory, which
 keeps each answer, so a turn sees the earlier ones. A turn that does not
 complete prints its status line on stderr, and the loop asks for the next task.
 `/exit`, `/quit`, `exit` or `quit` (in any letter case), or Ctrl-D, ends the
-loop with exit code 0; Ctrl+C ends it at once (a shell shows 130). The loop
-takes `--base-url` and `--chat-model`; the direct-mode options are usage
-errors with it. Its conversation is separate from the web workspace's chats.
+loop with exit code 0; Ctrl+C ends it at once (a shell shows 130). At start
+it prints one line saying that `shell_exec` is off in direct mode and that a
+task run with `--builtins all` turns it on (the line is absent when the tool
+is already on). The loop takes
+`--base-url` and `--chat-model`; the direct-mode options are usage errors
+with it. Its conversation is separate from the web workspace's chats.
 On a terminal the prompt is edited with readline: Backspace deletes a whole
 character, Chinese and other wide characters included, and the Up arrow
 recalls earlier lines of this loop. A line that is not valid UTF-8 prints
@@ -518,7 +521,7 @@ These options apply to a task run without `--serve`.
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
 | `--reflection-gate flags\|utility` | `flags` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option). |
 | `--tool-exposure retrieve\|all` | `retrieve` | Which tools each step offers the model. |
-| `--builtins all\|none\|NAME,...` | `all` | The built-in tools to register. |
+| `--builtins all\|none\|NAME,...` | the mode's set | The built-in tools to register. Without the flag, a direct run gets `file_read`, `file_write` and `python_exec`; `all` adds `shell_exec` (the interactive UI keeps all four by default). |
 | `--mcp-config PATH` | not set | Add the tools of the MCP servers listed in this JSON file. |
 | `--mcp-only` | off | Use only the MCP tools: the same as `--builtins none --tool-exposure all`. |
 | `--memory on\|off` | `on` | `off` turns long-term memory off for this run. |
@@ -558,9 +561,11 @@ These options apply to a task run without `--serve`.
   no effect with `--attempt-policy none`.
 - `--tool-exposure`: see [How tools are offered](tools.md#how-tools-are-offered).
 - `--builtins`: `all`, `none`, or a comma-separated list of `file_read`,
-  `file_write`, `python_exec` and `shell_exec`. `recall` is accepted only
-  with `--recall-at tool`, which registers it; without that trigger it is a
-  usage error.
+  `file_write`, `python_exec` and `shell_exec`. A direct run's default set
+  leaves `shell_exec` out: `--builtins all` (or naming `shell_exec`) turns
+  it back on, and it then runs without an approval, because direct mode has
+  no policy. `recall` is accepted only with `--recall-at tool`, which
+  registers it; without that trigger it is a usage error.
 - `--mcp-only` needs `--mcp-config` and cannot be combined with `--builtins`
   or `--tool-exposure`. See [Tools and MCP](tools.md#add-tools-from-mcp-servers).
 - `--memory-dir` turns persistence on for this run, whatever the environment

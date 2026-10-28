@@ -72,7 +72,7 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `memory` | `True` | `False` turns long-term memory off. |
 | `memory_dir` | `None` | A directory for SQLite memory, with `~` expanded. `None` follows the environment variables; see [Memory](memory.md#keep-memory-between-runs). |
 | `timeout_s` | `None` | A time limit for each run, in seconds. `None` means no limit. It also interrupts a `python_exec` call, whose child process it kills. |
-| `mode` | `"python"` | The surface the run belongs to: `"direct"`, `"interactive"`, `"gateway"` or `"python"`. It decides what `builtins=None` registers; `"gateway"` does not offer `shell_exec`, and the checker refuses an explicitly named one there. `"python"` keeps the six-pattern command blocklist, as `"direct"` does, whether or not the run has an approval policy. An explicit `builtins` wins over the default registration. |
+| `mode` | `"python"` | The surface the run belongs to: `"direct"`, `"interactive"`, `"gateway"` or `"python"`. It decides what `builtins=None` registers: only `"interactive"` offers `shell_exec`; the other three register `file_read`, `file_write` and `python_exec`. Naming `shell_exec` in `builtins` is a `direct` or `python` caller's opt-in and lets the run use it; the checker refuses an unnamed one there, and refuses it in `gateway` mode even when named, with a reason naming the mode and `--builtins all`. An explicit `builtins` wins over the default registration. |
 | `workspace_root` | `None` | The directory the built-in tools work in, and the only one the file tools reach; see [Work in a directory](#work-in-a-directory). |
 | `tool_timeout_s` | `None` | The time limit of `shell_exec` and `python_exec`, in seconds. Needs a `workspace_root`. `None` keeps 30 seconds for a shell command and 60 seconds for Python. |
 | `tool_env` | `None` | Extra variables for the `shell_exec` and `python_exec` children, on top of the minimal environment; see [Work in a directory](#work-in-a-directory). |
@@ -224,9 +224,10 @@ An approval policy decides whether a tool call may run. Pass one as
 about when its permission tier is not `read` (see
 [Permission tiers](tools.md#permission-tiers)):
 
-- the built-ins the run offers: `shell_exec` and `python_exec` (`exec`) and
-  `file_write` (`write`) with the default `python` mode, and no
-  `shell_exec` with `mode="gateway"`;
+- the built-ins the run offers: `python_exec` (`exec`) and `file_write`
+  (`write`) with the default `python` mode; `shell_exec` (`exec`) too when
+  the caller names it in `builtins`. No mode offers `shell_exec` by default
+  except `interactive`;
 - a provided tool with no annotations, or with annotations that make it
   `write` or `network`;
 - a provided tool whose `ProvidedTool.requires_approval` is `True`, which
@@ -235,16 +236,16 @@ about when its permission tier is not `read` (see
   [MCP config file](tools.md#mcp-config-file).
 
 The interactive UI always has a policy (unless `--yolo`); direct mode, the
-gateway and a Python run without `approval=` have none, which is why a
-gateway run does not offer `shell_exec` at all and `python` mode keeps the
-six-pattern blocklist. `file_read` is `read` and does not ask: a
+gateway and a Python run without `approval=` have none, which is why those
+modes do not offer `shell_exec` by default. `file_read` is `read` and does
+not ask: a
 [workspace root](#work-in-a-directory) limits it instead. A read-only MCP
 tool (`readOnlyHint: true`) does not ask either, unless `require_approval`
 names it. A tool registered directly with `agent.executor.register` keeps
 its explicit `requires_approval`; its tier is a label only. Without a
 policy, a tool that would ask runs like any other, as in direct mode, which
-never sets a policy; the one exception is `shell_exec` in `python` mode,
-which still passes the blocklist.
+never sets a policy. A caller who names `shell_exec` in `builtins` asks for
+it explicitly, and without a policy it runs unapproved.
 
 A policy is any object with an `async def decide(request)` method that
 returns an `ApprovalDecision`. This one asks in the terminal:
@@ -291,9 +292,9 @@ it can take down, such as a dialog, must take it down.
 When the policy is asked:
 
 - After every check that refuses a call by itself: the step must have
-  offered the tool, the arguments must be valid, in `direct` and `python`
-  mode a shell command must pass the blocklist, and a file path must be
-  inside the workspace root. So the
+  offered the tool, the arguments must be valid, an `exec` tool the mode
+  does not offer must have been named in `builtins`, and a file path must
+  be inside the workspace root. So the
   policy is asked only about a call that would otherwise run.
 - Only when the arguments match the tool's parameters. A missing argument,
   or one the tool does not take, is refused with
@@ -378,7 +379,12 @@ from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
 async def main() -> None:
     os.makedirs(os.path.expanduser("~/melo-work"), exist_ok=True)
     llm = OpenAICompatLLM(base_url="http://127.0.0.1:11434/v1", model="qwen3:8b")
-    options = AgentOptions(workspace_root="~/melo-work", tool_timeout_s=600)
+    options = AgentOptions(
+        workspace_root="~/melo-work",
+        tool_timeout_s=600,
+        # P13b: a Python run's default set leaves shell_exec out.
+        builtins=["file_read", "file_write", "python_exec", "shell_exec"],
+    )
     agent = Agent(llm=llm, options=options)
     try:
         print(agent.workspace_root)
@@ -522,8 +528,8 @@ To keep a conversation in a file, across processes and restarts, see
   cancellation while the tool providers start fails their setup for the
   agent's life, and later runs end as `setup_error`.
 - **`run_tool`** passes the call through the same checks as a model's call,
-  except that any registered tool may run: the arguments, the blocklist of
-  `direct` and `python` mode, the workspace root, the approval policy, the
+  except that any registered tool may run: the arguments, the mode's
+  `exec` refusal, the workspace root, the approval policy, the
   tool's time limit and the output limit. A refused or failed call returns
   its reason as `error`. The
   call writes nothing to working memory or history and emits no event. For
@@ -564,7 +570,6 @@ It prints:
 file_read builtin False
 file_write builtin True
 python_exec builtin True
-shell_exec builtin True
 ```
 
 ## Tool providers and MCP
