@@ -71,12 +71,11 @@
         <p>Website sync landed in <a href="https://github.com/localmelo/localmelo/pull/118">#118</a>; Task scheduler-2: task API and workers (S3a.2) landed in <a href="https://github.com/localmelo/localmelo/pull/119">#119</a>.</p>
         <p>In flight, landing in this order:</p>
         <ul>
-          <li>Web console-3: settings and details drawer (U3 PR 6); approvals, errors, history and settings landed in <a href="https://github.com/localmelo/localmelo/pull/122">#122</a>; worker session recording and import landed in <a href="https://github.com/localmelo/localmelo/pull/123">#123</a>.</li>
+          <li>Headless worker support-3: read-only worker history on the web (<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>); the details drawer landed in <a href="https://github.com/localmelo/localmelo/pull/124">#124</a>.</li>
         </ul>
         <p>Next, in order:</p>
         <ul>
           <li>Headless worker support-2: dogfood trial (#107 W1);</li>
-          <li>Headless worker support-3: worker history on the web (<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>);</li>
           <li>Web console-4: API and console docs (U3 PR 7);</li>
           <li>macOS app-1: desktop app (A1);</li>
           <li>Task scheduler-3: pause, park and restart recovery (S3b);</li>
@@ -108,6 +107,12 @@
           <p>Heuristic notes can retain some English negative and Chinese residence or cancellation assertions verbatim; source matching is more conservative for negatives and conflicting event times. Coverage is limited; similar assertions with opposite detected polarity are kept as conflicts, not silently deduplicated.</p>
         </article>
 
+        <article class="update-entry" id="u-worker-view">
+          <h3>Worker history in the workspace</h3>
+          <p class="update-date">Unreleased</p>
+          <p>Workers lists saved and imported runs with filters and paging. Each run opens as a read-only snapshot; refresh unfinished runs manually. Review redacted records before sharing.</p>
+        </article>
+
         <article class="update-entry" id="u-2026-10-28-context-accounting">
           <h3>Opt-in context accounting</h3>
           <p class="update-date"><time datetime="2026-10-28">2026-10-28</time></p>
@@ -116,7 +121,7 @@
 
         <article class="update-entry" id="u-console-drawer">
           <h3>Session details and appearance</h3>
-          <p class="update-date">Unreleased</p>
+          <p class="update-date">2026-10-28 · #124</p>
           <p>The workspace adds a details drawer for tools, grants, memory and runs, plus connection testing and a saved theme preference. Store, model and reconnect banners remain visible alongside other notices.</p>
         </article>
 
