@@ -3,16 +3,21 @@
 A session's Agent works in a workspace, keeps each turn's answer for the
 next one, offers every tool (no retrieval of tools per step) and lets a
 shell or Python command run for :data:`SESSION_TOOL_TIMEOUT_S`. The model
-comes from a URL given on the command line or from the config file.
+comes from a URL given on the command line or from the config file, and a
+surface may wrap the providers it builds (:func:`build_session_agent`), so
+that a gate in front of every model call is the one the Agent's ``Chat``
+was made with.
 """
 
 from __future__ import annotations
 
 import copy
 import dataclasses
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Final
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.contracts.providers import BaseEmbeddingProvider, BaseLLMProvider
 
 if TYPE_CHECKING:
     from localmelo.support.config import Config
@@ -20,6 +25,12 @@ if TYPE_CHECKING:
 # Shell and Python commands of a session stop after this many seconds: test
 # suites, installs and builds take longer than a task's 30 s and 60 s.
 SESSION_TOOL_TIMEOUT_S: Final = 600.0
+
+# What a surface may do to a provider the builder built, before the Agent
+# is made from it: the console puts its scheduler gate in front of every
+# call this way.
+LLMWrapper = Callable[[BaseLLMProvider], BaseLLMProvider]
+EmbeddingWrapper = Callable[[BaseEmbeddingProvider], BaseEmbeddingProvider]
 
 
 def session_options(options: AgentOptions, workspace: str) -> AgentOptions:
@@ -43,6 +54,8 @@ async def build_session_agent(
     embedding_base_url: str | None = None,
     embedding_model: str | None = None,
     request_timeout_s: float | None = None,
+    wrap_llm: LLMWrapper | None = None,
+    wrap_embedding: EmbeddingWrapper | None = None,
 ) -> Agent:
     """A started Agent for a session in *workspace*.
 
@@ -53,8 +66,17 @@ async def build_session_agent(
     ``request_timeout_s`` is *request_timeout_s* when that is set; *cfg*
     itself is not changed. ``agent.start()`` is awaited; when it raises, the
     Agent is closed and the exception propagates.
+
+    *wrap_llm* and *wrap_embedding* are called with the provider the builder
+    made, and the Agent is made with what they return, so the provider its
+    ``Chat`` holds is the wrapped one. None, the default, passes the provider
+    through as this builder always did. An embedding that was not built is
+    not wrapped.
     """
     agent_options = session_options(options, workspace)
+    llm: BaseLLMProvider | None = None
+    embedding: BaseEmbeddingProvider | None = None
+    from_config = False
     if base_url:
         from localmelo.support.providers.embedding.openai_compat import (
             OpenAICompatEmbedding,
@@ -73,7 +95,6 @@ async def build_session_agent(
             if embedding_base_url
             else None
         )
-        agent = Agent(llm=llm, embedding=embedding, options=agent_options)
     else:
         if cfg is None:
             raise ValueError("build_session_agent needs a cfg or a base_url")
@@ -83,6 +104,25 @@ async def build_session_agent(
             section.chat_model = model
         if request_timeout_s is not None:
             cfg.request_timeout_s = request_timeout_s
+        if wrap_llm is None and wrap_embedding is None:
+            # No hook: the Agent builds the config's providers itself, as it
+            # did before the hook existed.
+            from_config = True
+        else:
+            # The providers must exist before the Agent's Chat is made, so
+            # build them here exactly as Agent(config=...) would.
+            from localmelo.melo.agent.agent import _providers_from_config
+
+            llm, embedding = _providers_from_config(cfg)
+    if not from_config:
+        assert llm is not None
+        if wrap_llm is not None:
+            llm = wrap_llm(llm)
+        if wrap_embedding is not None and embedding is not None:
+            embedding = wrap_embedding(embedding)
+        agent = Agent(llm=llm, embedding=embedding, options=agent_options)
+    else:
+        assert cfg is not None
         agent = Agent(config=cfg, options=agent_options)
     try:
         await agent.start()
