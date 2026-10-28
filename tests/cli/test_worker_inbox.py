@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from localmelo.melo.contracts.events import AgentEvent
 from localmelo.support.cli.worker_inbox import MAX_INBOX_BYTES, Inbox, InboxError
 
 
@@ -104,7 +105,7 @@ async def test_agent_accepts_at_boundaries_without_adjacent_users(
     path = tmp_path / "inbox"
     path.write_text("first instruction\n", encoding="utf-8")
     requests = []
-    events = []
+    events: list[AgentEvent] = []
 
     def reply(request: httpx.Request) -> httpx.Response:
         requests.append(json.loads(request.content))
@@ -221,7 +222,7 @@ async def test_inbox_batch_that_cannot_fit_is_not_acknowledged(
     monkeypatch.setenv("HOME", str(tmp_path))
     path = tmp_path / "inbox"
     path.write_bytes((b"x" * 11000 + b"\n") * 10)
-    events = []
+    events: list[AgentEvent] = []
     transport = httpx.MockTransport(lambda request: pytest.fail("model must not run"))
     agent = Agent(
         llm=OpenAICompatLLM(
@@ -243,7 +244,6 @@ def test_external_stream_omits_inbox_text(tmp_path: Path) -> None:
     import io
     import json
 
-    from localmelo.melo.contracts.events import AgentEvent
     from localmelo.support.cli.worker_contract import WorkerObserver
 
     out = io.StringIO()
