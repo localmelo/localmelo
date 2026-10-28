@@ -15,6 +15,7 @@ PROCESS_RECORD: contextvars.ContextVar[Callable[[int], Awaitable[None]] | None] 
     contextvars.ContextVar("PROCESS_RECORD", default=None)
 )
 
+
 class UnsupportedProcessGate(RuntimeError):
     """The platform cannot spawn the gated bootstrap."""
 

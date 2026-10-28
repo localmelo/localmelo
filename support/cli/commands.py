@@ -44,6 +44,9 @@ class Command:
 
 COMMANDS: Final[tuple[Command, ...]] = (
     Command("help", (), "[command]", "Show commands and keys", True),
+    Command("attach", (), "PATH", "Stage a text file from the workspace", False),
+    Command("attachments", (), "", "List staged text files", False),
+    Command("detach", (), "N|all", "Remove a staged text file", False),
     Command("new", ("clear",), "", "Start a new session", False),
     Command("sessions", (), "[filter]", "Pick a session to resume", False),
     Command("resume", (), "[id|title]", "Resume a session", False),

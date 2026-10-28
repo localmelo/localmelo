@@ -13,6 +13,48 @@ traces.
 > defaults to `off`, which only records; `fcfs` and `class` are the two
 > enforcing arms. Direct runs and the terminal CLI are not gated.
 
+## Task command
+
+`melo-task` is a separate gateway client; it never starts the gateway or a
+model server. It connects to the configured gateway or an explicit loopback
+`--gateway` URL, uses the private gateway bearer file and refuses redirects
+and environment proxies. Start the gateway first. A missing or unsafe token,
+unreachable gateway or rejected request is an error, not a reason to fall
+back to unauthenticated requests. The token is not accepted as an argument.
+An explicit `--gateway` bypasses gateway configuration loading. Loopback names
+and numeric spellings accepted by the gateway are supported without DNS lookup.
+
+- `new TEXT`, `new --brief FILE` or `new --stdin` submits one objective;
+  optional `--title`, `--workspace`, `--level P0` through `P5` and
+  `--request-key` set fields explicitly. A file or stdin is task content,
+  not a trusted urgency signal. Input is nonempty UTF-8, at most 1 MiB and
+  100,000 characters. A generated request key allows safe retry; on an
+  ambiguous network error it is printed to stderr. Keep the same text,
+  options and key when retrying. `new` reports admission, not completion.
+- `list [--state STATE] [--level Pn]` lists matching tasks, not their admission
+  order, as a table whose header row names the ID, level, state and title columns; every column but the title is padded so the rows line up.
+  `show ID` inspects one. `pause ID`, `resume ID [--level Pn]`,
+  `stop ID` and `level ID Pn|auto` control tasks. `first` and deadlines are
+  not supported. Pause does not interrupt a running tool.
+- `follow ID [--after EVENT_ID] [--wait]` streams stored session events and
+  rechecks task state. By default each event prints one readable line: local
+  time, event type and a short summary, never raw JSON. It reconnects using
+  durable event IDs, not run-local sequence numbers. A terminal state is a
+  snapshot; the terminal line adds the event-completeness caveat only when this
+  follow reconnected or `--after` skipped earlier events. Retention and
+  finalization races still mean a quiet follow is not proof of complete replay.
+  Repeated disconnects or invalid events are errors; Ctrl-C exits 130 without
+  stopping the task. Without `--wait`, a terminal observation exits 0; with
+  `--wait`, done exits 0, failed 1, and cancelled or expired 2. Other successful
+  operations exit 0; usage errors exit 2 and network, authentication or output
+  failures exit 1.
+- `--json` emits one versioned JSON object per non-stream command, or NDJSON
+  for follow; the follow NDJSON records are unchanged by the human format.
+  Follow diagnostics and argument parser errors go to stderr, not
+  JSON stdout. Check the terminal record and process exit; EOF alone is not success. Error
+  details and terminal output may contain sensitive task data;
+  review output before sharing. This is not the direct worker result schema.
+
 ## What is here
 
 - **The policy core** (`localmelo.support.scheduler`). `decide()` is a pure
@@ -54,7 +96,7 @@ the lane by code.
 ## Tasks, workers and the scheduler store (S3a)
 
 The gateway's `sessions.db` has a `scheduler` component beside the session
-tables. `support/gateway/task_store.py` creates version 3 with `tasks`,
+tables. `support/gateway/task_store.py` creates version 4 with `tasks`,
 `task_deps`, `priority_events`, `questions`, `sched_rules`, `sched_log`,
 `idle_windows`, `park_priority` and recovery storage, with indexes on `tasks(state, level_eff)`,
 `priority_events(task_id, ts)` and `sched_log(ts)`, in one `BEGIN IMMEDIATE`

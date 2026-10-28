@@ -230,11 +230,21 @@ def resume_recap(
     if len(finished) > 3:
         lines.append(f"  … {len(finished) - 3} earlier turns")
     for turn in finished[-3:]:
-        typed, attachments = parse_user_text(turn.user_text)
-        typed = turn.typed_text or typed
+        if turn.attachments is None:
+            typed, legacy = parse_user_text(turn.user_text)
+            typed = turn.typed_text or typed
+            attachment_labels = [(a.name, a.chars, "chars") for a in legacy]
+        elif turn.attachments:
+            typed = turn.typed_text
+            attachment_labels = [
+                (a.name, len(a.text.encode("utf-8")), "bytes") for a in turn.attachments
+            ]
+        else:
+            typed, attachment_labels = turn.typed_text or turn.user_text, []
         lines.extend("  › " + text for text in clean_output(typed).splitlines()[:2])
         lines.extend(
-            f"    └ attached {a.name} ({a.chars:,} chars)" for a in attachments
+            f"    └ attached {clean_output(name)} ({size:,} {unit})"
+            for name, size, unit in attachment_labels
         )
         answer = split_thinking(turn.answer)[1]
         mark = symbols.assistant

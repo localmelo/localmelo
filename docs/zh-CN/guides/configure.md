@@ -62,7 +62,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   `ollama` 后端通过 Ollama 原生 API 对话，请求超时为 300 秒；`vllm` 使用 120 秒。Ollama 的 `chat_url` 带不带 `/v1` 都可以：版本端点在根路径查询，对话请求会去掉末尾的 `/v1`。
 
 - 服务器无响应、因没有 API 密钥而拒绝请求，或没有列出模型时，会指出是哪个服务器，并给出原因；你可以重试、不保存直接启动或退出。localmelo 从不询问本地服务器的 API 密钥。
-- [命令行参考](../../guides/terminal.md#first-run)（英文）列出了所有提示和原因。
+- [命令行参考](terminal.md#first-run)列出了所有提示和原因。
 
 嵌入模型请参阅[配置嵌入模型](embedding.md)。如需云端 API 或其他后端，请使用向导。
 

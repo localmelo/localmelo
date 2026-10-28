@@ -101,7 +101,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/guides/gateway.md">
             <strong>网关和网页工作区</strong>
-            <span>通过 HTTP 提供智能体服务，会话在重启后仍然保留；网页控制台的实时页面在 <code>http://127.0.0.1:8401/</code>：会话列表、每个回合为每个工具调用显示一张工作卡片、进度行、Stop 和优先级标签；页面只访问 <code>/api</code>。</span>
+            <span>通过 HTTP 提供智能体服务，会话在重启后仍然保留；网页控制台的实时页面在 <code>http://127.0.0.1:8401/</code>：会话列表、每一轮为每个工具调用显示一张工作卡片、进度行、Stop 和优先级标签；页面只访问 <code>/api</code>。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">
             <strong>Worker 历史</strong>
@@ -109,7 +109,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">
             <strong>API v2</strong>
-            <span>通过 <code>/api</code> 读取网页控制台的会话、回合、已存事件（也有 Server-Sent Events 流）、图片 blob、提交查询、工具、授权、记忆和运行记录，也可以创建会话，开始、重试、停止和审批它的回合；只在回环地址上提供，并且只增不改。</span>
+            <span>通过 <code>/api</code> 读取网页控制台的会话、轮次、已存事件（也有 Server-Sent Events 流）、图片 blob、提交查询、工具、授权、记忆和运行记录，也可以创建会话，开始、重试、停止和审批它的轮次；只在回环地址上提供，并且只增不改。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/memory.md">
             <strong>记忆</strong>
@@ -129,7 +129,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#use-melo-in-scripts">
             <strong>脚本和基准测试</strong>
-            <span>每次运行输出一行 JSON 和固定的退出码，脚本可以放心依赖运行结果；还可以选择后续回合如何发送或保留回复的推理（<code>--reasoning legacy</code>、<code>drop</code>、<code>replay</code>、<code>compress</code> 或 <code>compress+replay</code>）。</span>
+            <span>每次运行输出一行 JSON 和固定的退出码，脚本可以放心依赖运行结果；还可以选择后续轮次如何发送或保留回复的推理（<code>--reasoning legacy</code>、<code>drop</code>、<code>replay</code>、<code>compress</code> 或 <code>compress+replay</code>）。</span>
           </a>
         </div>
       </section>
@@ -138,15 +138,24 @@ source .venv/bin/activate</code></pre>
         <h2>路线图</h2>
         <p>v0.1.0 里程碑计划于 2026-12-20 完成。</p>
         <p>2026-10-28 落地了：工具安全-1：直接运行不提供 shell（P13b，<a href="https://github.com/localmelo/localmelo/pull/110">#110</a>）、网页控制台-1：实时对话页（U3 PR 5a，<a href="https://github.com/localmelo/localmelo/pull/111">#111</a>）、终端界面-1：显示模型的推理（R2b，<a href="https://github.com/localmelo/localmelo/pull/115">#115</a>）、记忆事实-1：可靠的事实笔记（T68，<a href="https://github.com/localmelo/localmelo/pull/114">#114</a>）、任务调度器-1：任务库和优先级（S3a.1，<a href="https://github.com/localmelo/localmelo/pull/113">#113</a>）、记忆事实-1b：摘要说明这次尝试做了什么（<a href="https://github.com/localmelo/localmelo/pull/116">#116</a>）、网站同步（<a href="https://github.com/localmelo/localmelo/pull/118">#118</a>）和任务调度器-2：任务 API 和 workers（S3a.2，<a href="https://github.com/localmelo/localmelo/pull/119">#119</a>）。</p>
-        <p>可选的上下文统计现可按估算预算裁剪请求副本；强制限制输出仍是后续工作。可选的固定前缀在每次运行中固定本地日期和稳定指令。 工具结果的捕获历史记录也是可选且有上限的。</p>
-        <p>尝试摘要会标记可识别的 Python 测试运行器，不再引用代码的第一行；系统不会推测 Python 写入的文件。</p>
+        <p>自 <a href="https://github.com/localmelo/localmelo/pull/130">#130</a> 以来，本队列落地了核心循环-1b：请求裁剪、固定前缀和捕获历史（全部为可选功能，<a href="https://github.com/localmelo/localmelo/pull/131">#131</a>、<a href="https://github.com/localmelo/localmelo/pull/142">#142</a> 和 <a href="https://github.com/localmelo/localmelo/pull/144">#144</a>）；任务调度器-3 的停放、恢复存储和重启核对（<a href="https://github.com/localmelo/localmelo/pull/135">#135</a>、<a href="https://github.com/localmelo/localmelo/pull/147">#147</a> 和 <a href="https://github.com/localmelo/localmelo/pull/152">#152</a>）；worker 契约的任务说明和 JSON 结果（<a href="https://github.com/localmelo/localmelo/pull/143">#143</a>）；网关访问令牌、playground 默认关闭和 API 客户端指南（<a href="https://github.com/localmelo/localmelo/pull/136">#136</a>、<a href="https://github.com/localmelo/localmelo/pull/141">#141</a> 和 <a href="https://github.com/localmelo/localmelo/pull/150">#150</a>）；否定和中文笔记（<a href="https://github.com/localmelo/localmelo/pull/137">#137</a>）和更清晰的摘要标签（<a href="https://github.com/localmelo/localmelo/pull/149">#149</a>）；可选流式输出（<a href="https://github.com/localmelo/localmelo/pull/145">#145</a> 和 <a href="https://github.com/localmelo/localmelo/pull/153">#153</a>）；文本附件（<a href="https://github.com/localmelo/localmelo/pull/155">#155</a>）；以及文档线（<a href="https://github.com/localmelo/localmelo/pull/132">#132</a>、<a href="https://github.com/localmelo/localmelo/pull/133">#133</a>、<a href="https://github.com/localmelo/localmelo/pull/134">#134</a>、<a href="https://github.com/localmelo/localmelo/pull/140">#140</a> 和 <a href="https://github.com/localmelo/localmelo/pull/146">#146</a>）。</p>
+        <p>独立的 <code>melo-task</code> 客户端可创建、查看和控制网关任务，跟随事件时每个事件输出一行可读文本，列表会输出表头。</p>
         <p>进行中，按顺序落地：</p>
         <ul>
-          <li>Worker 契约第一部分：任务说明和事件流；网页 worker 历史已在 <a href="https://github.com/localmelo/localmelo/pull/130">#130</a> 落地。</li>
+          <li>macOS 应用-1：桌面应用（A1）——审查修复进行中；</li>
+          <li>任务调度器-3：暂停、停放和重启恢复（S3b）——进程捕获和受控 Resume 在审查中；</li>
+          <li>任务调度器-4：<code>melo-task</code> 命令（S3c）——S3c.1 在审查中；</li>
+          <li>无头工作进程支持-4：worker 契约（#107 W2）——启动结果在审查中，收件箱随后；</li>
+          <li>终端界面-2：shell 命令、流式输出和图片附件（U2c、U4）——文本附件和流式输出已落地；shell 命令随后；</li>
+          <li>记忆事实-2：中文和否定事实——第二切片（更新和取代）在审查中；</li>
+          <li>记忆召回-2：同任务召回门控（<a href="https://github.com/localmelo/localmelo/issues/148">#148</a>）——进行中，可选；</li>
+          <li>文档-1：下一批双语页面（<a href="https://github.com/localmelo/localmelo/issues/117">#117</a>）。</li>
         </ul>
         <p>接下来，按顺序：</p>
         <ul>
           <li>无头工作进程支持-2：内部试用（dogfood，#107 W1）；</li>
+          <li>无头工作进程支持-5：任务 API 的 workers 和 Claude Code（#107 W3-W4）；</li>
+          <li>之后：更多调度器阶段、睡眠流水线（<a href="https://github.com/localmelo/localmelo/issues/14">#14</a>）和 Track 6 的其余部分（<a href="https://github.com/localmelo/localmelo/issues/29">#29</a>）。</li>
         </ul>
         <p>各阶段、相关议题、完整队列和更新记录见<a href="./updates.html#roadmap">路线图和更新</a>。</p>
       </section>
@@ -154,7 +163,7 @@ source .venv/bin/activate</code></pre>
       <section class="section" id="security">
         <h2>安全</h2>
         <div class="callout warning">
-          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。新建的记忆文件只有你能读取（权限 0600）。网关要求令牌或浏览器会话，并拒绝非回环监听。在终端运行 <code>melo --gateway-login</code> 获取一次性登录链接。持有令牌者可以你的权限操作；令牌无法隔离同一用户的进程，浏览器 cookie 也不按 localhost 端口隔离。</p>
+          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。新建的记忆文件只有你能读取（权限 0600）。网关要求 bearer 令牌或浏览器会话，并拒绝非回环监听。在终端运行 <code>melo --gateway-login</code> 获取一次性登录链接。持有令牌者能以你的权限操作；同一用户的进程之间没有隔离，浏览器 cookie 也不按 localhost 端口隔离。</p>
         </div>
         <p>请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/tools-mcp.md#what-the-checks-do">检查能做什么（英文）</a>。</p>
       </section>

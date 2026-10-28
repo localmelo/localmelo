@@ -185,6 +185,22 @@ async def test_capture_writes_cannot_cross_execution_or_recovery_fence(
                 expected_generation=generation,
                 expected_operation_id=previous,
             )
+            assert not await recovery.capture_complete(task.task_id, execution_id="old")
+            async with store.component_transaction("stale_capture") as conn:
+                row = await (
+                    await conn.execute(
+                        "SELECT complete, trusted, active FROM recovery_capture "
+                        "WHERE task_id = ? AND execution_id = 'old'",
+                        (task.task_id,),
+                    )
+                ).fetchone()
+                assert row is not None and tuple(row) == (0, 1, 0)
+                await conn.execute(
+                    "UPDATE recovery_capture SET complete = 1, trusted = 1 "
+                    "WHERE task_id = ? AND execution_id = 'old'",
+                    (task.task_id,),
+                )
+            assert not await recovery.capture_complete(task.task_id, execution_id="old")
         elif scenario == "ordinary_launch":
             await tasks.change(task.task_id, state="queued")
             await tasks.change(task.task_id, state="running")

@@ -49,6 +49,7 @@ dev = [
 melo = "localmelo.__main__:main"
 melo-retrieve = "localmelo.support.retrieve:main"
 melo-procedures = "localmelo.support.procedures:main"
+melo-task = "localmelo.support.task_cli:main"
 
 # ── black ──
 [tool.black]
