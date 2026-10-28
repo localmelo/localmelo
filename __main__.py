@@ -14,9 +14,10 @@ import sys
 import threading
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NoReturn, TextIO
+from typing import TYPE_CHECKING, Any, NoReturn, TextIO, cast
 
 from localmelo.melo.agent import Agent, AgentOptions
+from localmelo.melo.agent.options import ReasoningMode, reasoning_refusal
 from localmelo.melo.executor import builtin_names
 from localmelo.melo.schema import RunResult
 
@@ -67,6 +68,9 @@ _DIRECT_FLAGS = {
     "embedding_model": "--embedding-model",
     "progress": "--progress",
     "routine": "--routine",
+    "reasoning": "--reasoning",
+    "reasoning_field": "--reasoning-field",
+    "replay_turns": "--replay-turns",
 }
 
 # Flags of the interactive UI (bare melo), by dest.
@@ -645,6 +649,14 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         parser.error("--embedding-model requires --embedding-base-url")
     if args.embedding_base_url is not None and not args.base_url:
         parser.error("--embedding-base-url requires --base-url")
+    reasoning = getattr(args, "reasoning", None)
+    reasoning_field = getattr(args, "reasoning_field", None)
+    if args.base_url and reasoning == "replay" and reasoning_field is None:
+        parser.error(
+            "argument --reasoning: replay needs a reasoning field: give "
+            "--reasoning-field (auto, reasoning_content or reasoning) with "
+            "--base-url, or set reasoning_field in the backend's config"
+        )
     if (args.serve or args.daemon) and (args.base_url or args.chat_model):
         parser.error(
             "--base-url and --chat-model are for a task or the interactive UI; "
@@ -717,6 +729,12 @@ def _direct_options(
         fields["memory_dir"] = args.memory_dir
     if args.timeout is not None:
         fields["timeout_s"] = args.timeout
+    reasoning = getattr(args, "reasoning", None)
+    if reasoning is not None:
+        fields["reasoning"] = reasoning
+    replay_turns = getattr(args, "replay_turns", None)
+    if replay_turns is not None:
+        fields["replay_turns"] = replay_turns
     try:
         return AgentOptions(**fields)
     except ValueError as exc:  # the flag types should have caught it
@@ -848,13 +866,34 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Learn and recall the task's steps as the routine NAME, in any "
         "folder and whatever the task's wording",
     )
+    direct.add_argument(
+        "--reasoning",
+        choices=["legacy", "drop", "replay"],
+        help="How a reply's reasoning is sent back: legacy (default, the "
+        "provider's own behavior), drop (never), or replay (on assistant "
+        "turns in scope, under one key)",
+    )
+    direct.add_argument(
+        "--reasoning-field",
+        choices=["auto", "reasoning_content", "reasoning"],
+        help="The request key replay uses (with --base-url, or a backend's "
+        "reasoning_field); auto follows the key the last reply came from",
+    )
+    direct.add_argument(
+        "--replay-turns",
+        type=_positive_int,
+        metavar="N",
+        help="With replay, keep the newest N assistant turns' reasoning "
+        "(default: every turn in scope)",
+    )
 
     interactive = parser.add_argument_group(
         "interactive mode",
         "Options for bare melo, which opens the interactive UI on a terminal. "
         "It also takes --base-url, --chat-model, --max-steps, --attempt-policy, "
         "--reflection-gate, --builtins, --memory, --memory-dir, "
-        "--request-timeout and the --embedding-* options.",
+        "--request-timeout, --reasoning, --reasoning-field, --replay-turns "
+        "and the --embedding-* options.",
     )
     interactive.add_argument(
         "--workspace",
@@ -1080,6 +1119,7 @@ def _direct_embedding(args: argparse.Namespace) -> BaseEmbeddingProvider | None:
 def _build_direct_mode_agent(
     args: argparse.Namespace,
     *,
+    parser: argparse.ArgumentParser | None = None,
     options: AgentOptions | None = None,
     tool_providers: Sequence[BaseToolProvider] = (),
 ) -> Agent:
@@ -1101,6 +1141,8 @@ def _build_direct_mode_agent(
     memory directory that *options* name is created first (see
     :func:`_make_memory_dir`).
     """
+    if parser is None:
+        parser = _build_parser()
     if options is not None and options.memory_dir is not None:
         _make_memory_dir(options.memory_dir)
     base_url = args.base_url
@@ -1116,6 +1158,9 @@ def _build_direct_mode_agent(
         llm_options: dict[str, Any] = (
             {} if request_timeout is None else {"timeout": request_timeout}
         )
+        reasoning_field = getattr(args, "reasoning_field", None)
+        if reasoning_field is not None:
+            llm_options["reasoning_field"] = reasoning_field
         llm = OpenAICompatLLM(base_url=base_url, model=model, **llm_options)
         return Agent(
             llm=llm,
@@ -1151,6 +1196,43 @@ def _build_direct_mode_agent(
     except config.ConfigError as e:
         print(f"\n  {e}\n", file=sys.stderr)
         raise SystemExit(1) from e
+
+    section = getattr(cfg, cfg.chat_backend, None)
+    if section is None:
+        parser.error(f"chat_backend {cfg.chat_backend!r}: no registered adapter found")
+    reasoning_field = getattr(args, "reasoning_field", None)
+    if reasoning_field is not None:
+        if cfg.chat_backend == "ollama":
+            parser.error(
+                "argument --reasoning-field: the ollama backend always reads "
+                "and sends the thinking field"
+            )
+        section.reasoning_field = reasoning_field
+
+    if options is None:
+        options = AgentOptions()
+    if getattr(args, "reasoning", None) is None and cfg.agent.reasoning != "legacy":
+        options = dataclasses.replace(
+            options, reasoning=cast(ReasoningMode, cfg.agent.reasoning)
+        )
+    if (
+        getattr(args, "replay_turns", None) is None
+        and cfg.agent.replay_turns is not None
+    ):
+        options = dataclasses.replace(options, replay_turns=cfg.agent.replay_turns)
+
+    field = getattr(section, "reasoning_field", "") or (
+        "thinking" if cfg.chat_backend == "ollama" else None
+    )
+    requires_replay = bool(getattr(section, "requires_reasoning_replay", False))
+    if options.reasoning == "replay" and not field:
+        parser.error(
+            "argument --reasoning: replay needs a reasoning field: set "
+            "reasoning_field in the chat backend's config section"
+        )
+    refusal = reasoning_refusal(options.reasoning, field, requires_replay)
+    if refusal is not None:
+        parser.error(f"argument --reasoning: {refusal}")
 
     return Agent(config=cfg, options=options, tool_providers=tool_providers)
 

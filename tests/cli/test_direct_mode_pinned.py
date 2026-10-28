@@ -2,7 +2,9 @@
 
 Each function's source is hashed as main had it before the UI (``d232b9e``,
 after #50 and P3). A change to one of them changes what the benchmark runs,
-so it must come with its own review and a new hash here.
+so it must come with its own review and a new hash here. R2a added the three
+reasoning flags and their refusals, so ``_direct_options`` and
+``_build_direct_mode_agent`` have new hashes; no other function changed.
 """
 
 from __future__ import annotations
@@ -24,12 +26,12 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "fdf5189f640450dc78a4ca4ba5d9653a173fdccc00acb4b3c2c5298836b22d56",
+    "_build_direct_mode_agent": "ba68d6c11012f64f025e6ea4caa9516d50979bb141df54514b651fc2a8ffa7b0",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
-    "_direct_options": "d5257e2fc3b2b03e72965dc5a5bc09c4408afa494ff6bb0bb4b2e379c9149fc8",
+    "_direct_options": "931fc7ceaa3e2b6a382969da5d49d1569bf9d160c42ced913f337f7c0f1c4fd6",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",
     "_enable_line_editing": "dbabe09864704ee4e435380ce32e19234ce0a3cafb072a7cc39cf053a9904b07",
