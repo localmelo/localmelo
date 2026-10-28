@@ -220,3 +220,27 @@ async def test_the_shell_loads_the_same_assets_as_before(
         "/assets/workspace.css",
         "/assets/workspace.js",
     }
+
+
+async def test_the_shell_has_a_machine_state_span_with_an_accessible_name(
+    client: httpx.AsyncClient,
+) -> None:
+    page = await client.get("/")
+    span = _shell_attributes(page.text, "span", "machine-state")
+    assert span.get("role") == "status"
+    assert span.get("aria-label")
+    assert re.search(r'<span\b[^>]*\bid="machine-state"[^>]*\bhidden\b', page.text)
+    assert re.search(
+        r'<span\b[^>]*\bid="machine-state"[^>]*\baria-live="polite"', page.text
+    )
+
+
+async def test_the_shell_keeps_the_machine_line_between_the_title_and_the_level(
+    client: httpx.AsyncClient,
+) -> None:
+    page = await client.get("/")
+    header = re.search(r"<header\b.*?</header>", page.text, re.S)
+    assert header is not None
+    text = header.group(0)
+    assert text.index('id="machine-state"') > text.index('id="header-model"')
+    assert text.index('id="machine-state"') < text.index('id="level-btn"')

@@ -288,6 +288,14 @@ button:hover:not(:disabled) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.machine-chip {
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
 .connection-chip {
   display: flex;
   align-items: center;
@@ -944,6 +952,10 @@ dialog::backdrop {
     max-width: 48vw;
   }
   .connection-chip {
+    font-size: 10px;
+  }
+  .machine-chip {
+    max-width: 120px;
     font-size: 10px;
   }
   .scroll {

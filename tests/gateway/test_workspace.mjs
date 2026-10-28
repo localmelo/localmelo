@@ -455,3 +455,92 @@ test('the sidebar and the bubble follow a change of held', () => {
   rows = h.element('messages').children;
   assert.equal(rows[rows.length - 1].children[1].textContent, 'Working on your request…');
 });
+
+test('the machine line shows a foreign lock and hides on ac', () => {
+  const h = harness(async () => ({}));
+  h.state.machine = {
+    lock: 'foreign', holder: 'agent-benchmark session (personal-agent-bench)',
+    purpose: 'real-web UI eval', stale: false, readable: true,
+    on_ac: true, battery_pct: 100, battery_state: 'charged', band: 4, gate: 'record',
+  };
+  h.run('syncUI()');
+  const line = h.element('machine-state');
+  assert.equal(line.hidden, false);
+  assert.match(line.textContent, /GPU lock: agent-benchmark session/);
+  assert.match(line.textContent, /\(recorded\)/);
+  assert.match(line.attributes['aria-label'], /real-web UI eval/);
+  h.state.machine = {
+    lock: 'none', holder: '', purpose: '', stale: false, readable: true,
+    on_ac: true, battery_pct: 100, battery_state: 'charged', band: 4, gate: 'record',
+  };
+  h.run('syncUI()');
+  assert.equal(line.hidden, true, 'AC with no lock says nothing');
+  assert.equal(line.textContent, '');
+});
+
+test('the machine line says recorded or chats wait', () => {
+  const h = harness(async () => ({}));
+  const foreign = {
+    lock: 'foreign', holder: 'bench', purpose: 'a run', stale: false, readable: true,
+    on_ac: true, battery_pct: null, battery_state: '', band: 4, gate: 'record',
+  };
+  h.state.machine = foreign;
+  h.run('syncUI()');
+  assert.match(h.element('machine-state').textContent, /\(recorded\)/);
+  h.state.machine = {...foreign, gate: 'wait'};
+  h.run('syncUI()');
+  assert.match(h.element('machine-state').textContent, /\(chats wait\)/);
+  h.state.machine = {...foreign, stale: true};
+  h.run('syncUI()');
+  assert.match(h.element('machine-state').textContent, /· ETA passed/);
+  h.state.machine = {...foreign, readable: false};
+  h.run('syncUI()');
+  assert.equal(h.element('machine-state').textContent, 'GPU lock unreadable');
+});
+
+test('the machine line shows the battery on battery power', () => {
+  const h = harness(async () => ({}));
+  h.state.machine = {
+    lock: 'none', holder: '', purpose: '', stale: false, readable: true,
+    on_ac: false, battery_pct: 55, battery_state: 'discharging', band: 2, gate: 'record',
+  };
+  h.run('syncUI()');
+  assert.equal(h.element('machine-state').textContent, 'Battery 55% · discharging');
+  assert.equal(h.element('machine-state').hidden, false);
+});
+
+test('a reservation hold uses the waiting label and sidebar marker', () => {
+  const h = harness(async () => ({}), {renderMessages: true});
+  h.state.sessions = [session('a', {
+    is_busy: true, held: 'Reservation', messages: [{role: 'user', content: 'Hi'}],
+  })];
+  h.state.activeId = 'a';
+  h.renderSessions();
+  const info = h.element('session-list').children[0].children[0];
+  assert.match(info.innerHTML, /● Waiting · /);
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('run-status').textContent, 'Waiting: Reservation');
+  const rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Waiting: Reservation…');
+});
+
+test('the machine payload does not add a request', async () => {
+  const paths = [];
+  const h = harness(async path => {
+    paths.push(path);
+    if (path === '/sessions')
+      return {
+        sessions: [],
+        machine: {
+          lock: 'foreign', holder: 'bench', purpose: 'a run', stale: false,
+          readable: true, on_ac: false, battery_pct: 55,
+          battery_state: 'discharging', band: 2, gate: 'wait',
+        },
+      };
+    throw new Error('unexpected request');
+  });
+  await h.run('poll()');
+  assert.deepEqual(paths, ['/sessions']);
+  assert.equal(h.state.machine.lock, 'foreign');
+  assert.match(h.element('machine-state').textContent, /\(chats wait\)/);
+});

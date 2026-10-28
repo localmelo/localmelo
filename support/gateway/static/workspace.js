@@ -16,6 +16,7 @@ const S = {
   detailVersions: new Map(),
   levelsOpen: false,
   lastPresenceAt: 0,
+  machine: null,
 };
 const dialog = $("settings-dialog");
 const input = $("input");
@@ -179,9 +180,42 @@ function presence(force = false) {
     /* A browser may refuse fetch, or a test may not allow it. */
   }
 }
+function machineLine(machine) {
+  if (!machine) return {text: "", label: ""};
+  const parts = [];
+  let label = "";
+  if (machine.readable === false) {
+    parts.push("GPU lock unreadable");
+    label = "GPU lock unreadable";
+  } else if (machine.lock === "foreign") {
+    const holder = machine.holder || "another session";
+    const purpose = machine.purpose || "";
+    const short = purpose.length > 48 ? purpose.slice(0, 47) + "…" : purpose;
+    const mode = machine.gate === "wait" ? "(chats wait)" : "(recorded)";
+    const stale = machine.stale ? " · ETA passed" : "";
+    parts.push(
+      `GPU lock: ${holder}${short ? ` · ${short}` : ""} ${mode}${stale}`,
+    );
+    label = `GPU lock: ${holder}${purpose ? ` · ${purpose}` : ""} ${mode}${stale}`;
+  } else if (machine.lock === "self") {
+    const stale = machine.stale ? " · ETA passed" : "";
+    parts.push(`GPU lock: yours${stale}`);
+    label = parts[parts.length - 1];
+  }
+  if (machine.on_ac === false && typeof machine.battery_pct === "number") {
+    const state = machine.battery_state ? ` · ${machine.battery_state}` : "";
+    parts.push(`Battery ${Math.round(machine.battery_pct)}%${state}`);
+  }
+  return {text: parts.join(" · "), label: label || parts.join(" · ")};
+}
 function syncUI() {
   const s = active();
   const busy = !!s && (s.is_busy || S.pending.has(s.session_id));
+  const machine = machineLine(S.machine);
+  $("machine-state").textContent = machine.text;
+  $("machine-state").hidden = !machine.text;
+  $("machine-state").setAttribute("aria-label", machine.label || "Machine status");
+  $("machine-state").title = machine.label;
   $("header-title").textContent = s ? title(s) : "New chat";
   $("header-model").textContent = s ? s.chat_model : "Connect your model to get started";
   $("connection-label").textContent = !S.online
@@ -605,6 +639,7 @@ async function poll() {
   try {
     const data = await api("/sessions");
     S.online = true;
+    S.machine = data.machine || null;
     const old = new Map(S.sessions.map((s) => [s.session_id, s]));
     S.sessions = data.sessions.map((s) => ({ ...old.get(s.session_id), ...s }));
     renderSessions();
@@ -648,6 +683,7 @@ async function init() {
   }
   if (results[1].status === "fulfilled") {
     S.sessions = results[1].value.sessions;
+    S.machine = results[1].value.machine || null;
     const saved = stored(KEY + "-view").id;
     const id = S.sessions.some((s) => s.session_id === saved) ? saved : S.sessions[0]?.session_id;
     if (id) await selectSession(id);
