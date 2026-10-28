@@ -274,6 +274,7 @@ def execute(
             flush=True,
         )
     elif cmd == "list":
+        print("ID  LEVEL  STATE  TITLE", file=out)
         for task in data["tasks"]:
             if not isinstance(task, dict):
                 raise ClientError("gateway returned an invalid task response")

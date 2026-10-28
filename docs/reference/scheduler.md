@@ -32,19 +32,25 @@ and numeric spellings accepted by the gateway are supported without DNS lookup.
   ambiguous network error it is printed to stderr. Keep the same text,
   options and key when retrying. `new` reports admission, not completion.
 - `list [--state STATE] [--level Pn]` lists matching tasks, not their admission
-  order. `show ID` inspects one. `pause ID`, `resume ID [--level Pn]`,
+  order, with a header row naming the ID, level, state and title columns.
+  `show ID` inspects one. `pause ID`, `resume ID [--level Pn]`,
   `stop ID` and `level ID Pn|auto` control tasks. `first` and deadlines are
   not supported. Pause does not interrupt a running tool.
 - `follow ID [--after EVENT_ID] [--wait]` streams stored session events and
-  rechecks task state. It reconnects using durable event IDs, not run-local
-  sequence numbers. A terminal state is a snapshot; retention and finalization
-  races mean event completeness is not guaranteed. Repeated disconnects or
-  invalid events are errors; Ctrl-C exits 130 without stopping the task. Without `--wait`, a
-  terminal observation exits 0; with `--wait`, done exits 0, failed 1, and
-  cancelled or expired 2. Other successful operations exit 0; usage errors
-  exit 2 and network, authentication or output failures exit 1.
+  rechecks task state. By default each event prints one readable line: local
+  time, event type and a short summary, never raw JSON. It reconnects using
+  durable event IDs, not run-local sequence numbers. A terminal state is a
+  snapshot; the terminal line adds the event-completeness caveat only when this
+  follow reconnected or `--after` skipped earlier events. Retention and
+  finalization races still mean a quiet follow is not proof of complete replay.
+  Repeated disconnects or invalid events are errors; Ctrl-C exits 130 without
+  stopping the task. Without `--wait`, a terminal observation exits 0; with
+  `--wait`, done exits 0, failed 1, and cancelled or expired 2. Other successful
+  operations exit 0; usage errors exit 2 and network, authentication or output
+  failures exit 1.
 - `--json` emits one versioned JSON object per non-stream command, or NDJSON
-  for follow. Follow diagnostics and argument parser errors go to stderr, not
+  for follow; the follow NDJSON records are unchanged by the human format.
+  Follow diagnostics and argument parser errors go to stderr, not
   JSON stdout. Check the terminal record and process exit; EOF alone is not success. Error
   details and terminal output may contain sensitive task data;
   review output before sharing. This is not the direct worker result schema.

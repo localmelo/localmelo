@@ -234,7 +234,27 @@ def test_human_output_strips_terminal_control_sequences() -> None:
             )
             == 0
         )
+    assert output.getvalue() == (
+        "ID  LEVEL  STATE  TITLE\n" "abc  not recorded  queued  ?[2JTask\n"
+    )
     assert chr(27) not in output.getvalue()
+
+
+def test_list_human_header_is_printed_for_an_empty_list() -> None:
+    with httpx.Client(
+        base_url="http://127.0.0.1:8901",
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"tasks": []})
+        ),
+    ) as client:
+        output = io.StringIO()
+        assert (
+            execute(
+                parser().parse_args(["list"]), client, out=output, stdin=io.StringIO()
+            )
+            == 0
+        )
+    assert output.getvalue() == "ID  LEVEL  STATE  TITLE\n"
 
 
 @pytest.mark.parametrize(

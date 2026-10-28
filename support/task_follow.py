@@ -8,9 +8,10 @@ done/failed/cancelled-or-expired return 0/1/2; otherwise terminal returns 0.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any, TextIO
 from urllib.parse import quote
 
@@ -48,15 +49,183 @@ def _detail(client: httpx.Client, path: str) -> str:
         raise FollowError("Invalid task detail; follow incomplete") from None
 
 
+_SUMMARY_CHARS = 120
+
+
+def _clean(value: object, limit: int = _SUMMARY_CHARS) -> str:
+    """One terminal-safe line from *value*, at most *limit* characters."""
+    try:
+        text = " ".join(str(value).split())
+    except Exception:
+        return ""
+    text = "".join(c if c.isprintable() else "?" for c in text)
+    return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+
+def _field(data: Mapping[str, Any], name: str, limit: int = _SUMMARY_CHARS) -> str:
+    value = data.get(name)
+    if isinstance(value, (str, int, float)) and not isinstance(value, bool):
+        return _clean(value, limit)
+    return ""
+
+
+def _clock(ts: object) -> str:
+    if isinstance(ts, (int, float)) and not isinstance(ts, bool):
+        value = float(ts)
+        if math.isfinite(value):
+            try:
+                return time.strftime("%H:%M:%S", time.localtime(value))
+            except (OSError, OverflowError, ValueError):
+                pass
+    return "--:--:--"
+
+
+def _summary(kind: str, data: Mapping[str, Any]) -> str:
+    """A short, plain-text summary of one event's data."""
+    if kind == "run.started":
+        return _field(data, "query")
+    if kind == "step.started":
+        parts = []
+        if step := _field(data, "step"):
+            parts.append(f"step {step}")
+        if attempt := _field(data, "attempt"):
+            parts.append(f"attempt {attempt}")
+        return ", ".join(parts)
+    if kind == "assistant.message":
+        if content := _field(data, "content"):
+            return content
+        if thinking := _field(data, "thinking"):
+            return f"thinking: {thinking}"
+        calls = data.get("tool_calls")
+        if isinstance(calls, list) and calls:
+            return f"{len(calls)} tool call" + ("s" if len(calls) != 1 else "")
+        return ""
+    if kind == "tool.started":
+        name = _field(data, "name", 60)
+        preview = _field(data, "preview", 80)
+        return f"{name}: {preview}" if name and preview else name
+    if kind == "tool.finished":
+        base = " ".join(
+            part
+            for part in (
+                _field(data, "name", 60),
+                _field(data, "status", 40),
+            )
+            if part
+        )
+        duration = data.get("duration_s")
+        if isinstance(duration, (int, float)) and not isinstance(duration, bool):
+            base = f"{base} in {float(duration):.1f}s".strip()
+        if error := _field(data, "error", 80):
+            base = f"{base}: {error}".strip(": ")
+        return base
+    if kind == "note":
+        return _field(data, "text") or _field(data, "message")
+    if kind == "notice":
+        return _field(data, "message") or _field(data, "kind", 60)
+    if kind == "memory":
+        return " ".join(
+            part
+            for part in (_field(data, "action", 40), _field(data, "kind", 40))
+            if part
+        )
+    if kind == "recall":
+        hits = data.get("hits")
+        parts = []
+        if isinstance(hits, list):
+            parts.append(f"{len(hits)} hit" + ("" if len(hits) == 1 else "s"))
+        elif count := _field(data, "hits"):
+            parts.append(f"{count} hits")
+        if ms := _field(data, "ms"):
+            parts.append(f"{ms} ms")
+        return ", ".join(parts)
+    if kind == "reflection.started":
+        attempt = _field(data, "attempt")
+        return f"attempt {attempt}" if attempt else ""
+    if kind == "reflection":
+        return _field(data, "action", 60) or _field(data, "summary")
+    if kind == "run.progress":
+        return ", ".join(
+            part
+            for part in (
+                _field(data, "phase", 40),
+                _field(data, "state", 40),
+                _field(data, "step", 20),
+            )
+            if part
+        )
+    if kind == "context_budget":
+        return _field(data, "kind", 60)
+    if kind == "run.finished":
+        result = data.get("result")
+        if isinstance(result, Mapping):
+            status = _field(result, "status", 40)
+            error = _field(result, "error", 80)
+            return f"{status}: {error}" if status and error else status
+        return ""
+    if kind == "task.created":
+        level = _field(data, "level")
+        return f"P{level}" if level else ""
+    if kind == "task.level":
+        before, after = _field(data, "from", 40), _field(data, "to", 40)
+        if before and after:
+            return f"P{before} -> P{after}"
+        return f"P{after}" if after else ""
+    if kind == "task.state":
+        before, after = _field(data, "from", 40), _field(data, "to", 40)
+        return f"{before} -> {after}" if before and after else before or after
+    if kind == "task.resume":
+        level = _field(data, "level")
+        return f"P{level}" if level else ""
+    if kind == "approval.requested":
+        return _field(data, "tool_name", 60) or _field(data, "preview", 100)
+    if kind == "approval.resolved":
+        tool = _field(data, "tool_name", 60)
+        outcome = _field(data, "outcome", 40) or _field(data, "origin", 40)
+        return f"{tool}: {outcome}" if tool and outcome else tool or outcome
+    if kind == "turn.started":
+        return _field(data, "user_text", 80) or (
+            f"turn {_field(data, 'turn')}" if _field(data, "turn") else ""
+        )
+    if kind == "turn.finished":
+        turn = _field(data, "turn")
+        status = _field(data, "status", 40)
+        return " ".join(
+            part for part in (f"turn {turn}" if turn else "", status) if part
+        )
+    if kind == "session.title":
+        return _field(data, "title", 80)
+    before, after = _field(data, "from", 40), _field(data, "to", 40)
+    if before or after:
+        return f"{before} -> {after}" if before and after else before or after
+    for key in ("message", "text", "summary", "reason", "name", "state", "status"):
+        if value := _field(data, key):
+            return value
+    if level := _field(data, "level", 20):
+        return f"P{level}"
+    return ""
+
+
+def _human_event(event: object) -> str:
+    if not isinstance(event, Mapping):
+        return "Event"
+    kind = _clean(event.get("type") or "unknown", 60)
+    data = event.get("data")
+    summary = _summary(kind, data if isinstance(data, Mapping) else {})
+    line = f"{_clock(event.get('ts'))}  {kind}"
+    return f"{line}  {summary}" if summary else line
+
+
 def _emit(out: TextIO, record: dict[str, Any], json_mode: bool) -> None:
     # JSON escaping also renders C0/C1 and terminal escape sequences safe.
     if json_mode:
         line = json.dumps(record, ensure_ascii=True, separators=(",", ":"))
     elif "event" in record:
-        event = json.dumps(record["event"], ensure_ascii=True, separators=(",", ":"))
-        line = f"Event {record['id']}: {event}"
+        line = _human_event(record["event"])
     else:
-        line = f"Terminal state: {record['state']}. {_CAVEAT}"
+        line = f"Terminal state: {record['state']}"
+        if record.get("reconnected") or record.get("gap"):
+            line += f". {_CAVEAT}"
     try:
         written = out.write(line + "\n")
         if written is not None and written != len(line) + 1:
@@ -154,6 +323,10 @@ def follow(
         raise FollowError("Invalid event cursor")
     cursor = after
     failures = 0
+    reconnected = False
+    # An --after cursor skips the stored events before it; this output alone
+    # is not a complete record, and the server exposes no retention floor.
+    gap = after > 0
     try:
         state = _detail(client, task_path)
         while True:
@@ -220,6 +393,9 @@ def follow(
                                     "state": state,
                                     "event_completeness": _CAVEAT,
                                 }
+                                if not json_mode:
+                                    record["reconnected"] = reconnected
+                                    record["gap"] = gap
                                 _emit(out, record, json_mode)
                                 return _TERMINAL[state] if wait else 0
                             continue
@@ -232,6 +408,7 @@ def follow(
                         "SSE catch-up transport failed; follow incomplete"
                     ) from None
                 # An idle stream is not a failed task; poll state and reconnect.
+                reconnected = True
                 failures = 0
                 state = _detail(client, task_path)
                 continue
@@ -240,6 +417,7 @@ def follow(
                     raise FollowError(
                         "SSE catch-up transport failed; follow incomplete"
                     ) from None
+            reconnected = True
             state = _detail(client, task_path)
             if state in _TERMINAL:
                 failures = 0
