@@ -11,8 +11,8 @@ code.
 S2 wires the web workspace's chats: ``support/gateway/chat_gate.py`` runs
 ``dispatch()`` for every plan, reflect and embed call a chat sends, with
 ``[scheduler] policy`` (default ``off``, which only records). The CLI, the
-legacy route and direct mode are still ungated, and only tests import
-this package directly. The design is ``.melo/scheduler_design.md``
+legacy route and direct mode are still ungated; outside the gate, only
+tests import this package directly. The design is ``.melo/scheduler_design.md``
 (sections 2-3) in the workspace, outside the repository.
 """
 

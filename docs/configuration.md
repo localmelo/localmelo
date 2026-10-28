@@ -140,9 +140,9 @@ tables of the chosen backends.
 | `call_log` | `[scheduler]` | `true` | Write one JSONL call log per gateway run. |
 | `call_log_dir` | `[scheduler]` | `""` | The log's parent directory; the default is `~/.cache/localmelo/scheduler`. |
 
-Only a `[scheduler]` table that differs from these defaults is written, so an
-existing config file keeps its exact bytes and the wizard keeps a
-non-default policy.
+A `[scheduler]` table that is all defaults is not written, and unknown
+scheduler keys are dropped, so a config file without such a table keeps its
+exact bytes; the wizard keeps a non-default policy.
 
 Top-level keys must come before the first `[table]` line. How URLs are used:
 

@@ -95,7 +95,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/NN">#NN</a>
           </p>
           <ul>
-            <li>Every model call a chat in the web workspace makes now passes through the scheduler's policy: it is sent at once or waits for a slot, and the page says <code>Waiting: Resources</code> (or the policy's other reason) while it waits.</li>
+            <li>Every planning, reflection and embedding call a chat in the web workspace makes now passes through the scheduler's policy: a chat call is sent at once or waits for a slot, embeddings are never held but count in flight, and the page says <code>Waiting: Resources</code> (or the policy's other reason) while a call waits.</li>
             <li>A level chip (P1 to P4, P2 by default) sets how the chat ranks against other chats; the chat you are typing in is the lane and is admitted first, up to the server's slots.</li>
             <li><code>[scheduler] policy</code> is <code>off</code> by default: it records each call under <code>~/.cache/localmelo/scheduler/</code> and holds nothing. <code>fcfs</code> and <code>class</code> enforce. Direct runs, the CLI and <code>/v1/agent/run</code> are unchanged.</li>
           </ul>

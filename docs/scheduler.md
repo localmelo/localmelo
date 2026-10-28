@@ -81,9 +81,9 @@ The lane is the chat being typed in: `POST /v1/playground/presence` sets it
 while you type, and every run sets it too. Its next call is admitted before
 the background calls and bypasses their limit, but never the server's
 `n_srv`. The non-lane limit is `max(1, n_srv - 1 - r_f)`; embedding,
-`retrieve` and `estimate` calls are never held, but they count in flight, so
-a trailing embedding of a finished turn cannot make the lane wait behind a
-stale task.
+`retrieve` and `estimate` calls are never held and never orderable, but they
+count in flight: a foreground embedding can fill the last `n_srv` slot, and
+the lane then waits for it.
 
 A level is P1-P4 per chat, P2 by default; the chip in the chat header sets
 it, and `fcfs` records it and ignores it. A level lives in the gateway's
@@ -98,10 +98,16 @@ tokens and the charge. Read a file back with `read_trace()`:
 
 ```bash
 uv run python -c '
+import sys
+from pathlib import Path
 from localmelo.support.scheduler.sim.trace import read_trace
-for task in read_trace("/Users/you/.cache/localmelo/scheduler/runs/20261028T120000/calls.jsonl"):
+for task in read_trace(Path(sys.argv[1])):
     print(task.task_key, len(task.calls))
-'
+' "$(ls -t ~/.cache/localmelo/scheduler/runs/*/calls.jsonl | head -1)"
+```
+
+```text
+84dd6b2355c5 1
 ```
 
 Not gated, exactly as before: direct mode (`melo --base-url … -- <task>` and

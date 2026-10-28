@@ -9,9 +9,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
-- The web workspace's chats go through the scheduler: each chat and embedding
-  call is admitted at once or held according to `[scheduler] policy` (`off`
-  by default, which only records), a chat's level chip (P1-P4), the focused
+- The web workspace's chats go through the scheduler: each chat call is
+  admitted at once or held according to `[scheduler] policy` (`off`
+  by default, which only records), each embedding call is recorded and counts
+  in flight but is never held, a chat's level chip (P1-P4), the focused
   chat's lane, the server's `n_srv` slots and the `r_f`/`n_fg` reserves. A
   held chat shows `Waiting: <reason>` in the page, and every call leaves one
   schema-1 line in `~/.cache/localmelo/scheduler/runs/<UTC>/calls.jsonl`.
