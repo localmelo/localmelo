@@ -126,6 +126,29 @@ def test_each_stream_starts_and_ends_with_its_turn(name: str) -> None:
 
 
 @pytest.mark.parametrize("name", SCENARIOS)
+def test_each_run_belongs_to_a_run_started_in_its_turn(name: str) -> None:
+    # A real recording opens every run with run.started and fixes that one
+    # run_id for the run's events (melo/contracts/events.py), so a consumer
+    # that takes the turn's run id from run.started still sees every event
+    # of the run. A step under an id that never started is a phantom run.
+    started: dict[int, list[str]] = {}
+    seen: dict[int, set[str]] = {}
+    for record in records(name):
+        event = record["event"]
+        run_id = event["run_id"]
+        if not run_id:
+            continue
+        if event["type"] == "run.started":
+            started.setdefault(record["turn"], []).append(run_id)
+        else:
+            seen.setdefault(record["turn"], set()).add(run_id)
+    for turn, ids in started.items():
+        assert len(ids) == len(set(ids)), (name, turn, ids)
+    for turn, seen_ids in seen.items():
+        assert seen_ids <= set(started.get(turn, [])), (name, turn, sorted(seen_ids))
+
+
+@pytest.mark.parametrize("name", SCENARIOS)
 def test_no_stream_holds_a_path_of_this_machine_or_a_secret(
     name: str, home: Path
 ) -> None:

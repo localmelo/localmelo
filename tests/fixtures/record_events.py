@@ -958,7 +958,7 @@ async def scenario_stale(env: Env) -> list[StoredEvent]:
                 workspace_root=env.workspace,
                 approval=False,
             ),
-            core_event("step.started", step=1, attempt=1),
+            core_event("step.started", run_id="task-1", seq=2, step=1, attempt=1),
         ],
         holder=holder,
     )
