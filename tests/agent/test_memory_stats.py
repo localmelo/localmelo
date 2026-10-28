@@ -174,6 +174,7 @@ async def test_replay_usage_adds_reasoning_and_reported_details() -> None:
         "recall_fallbacks": 0,
         "recall_skipped": 0,
         "recall_refused": 0,
+        "recall_empty": 0,
         "aux_retrieve_calls": 0,
         "retrieve_errors": 0,
         "retrieve_prompt_tokens": 0,

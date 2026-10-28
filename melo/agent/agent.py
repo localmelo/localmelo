@@ -1040,6 +1040,7 @@ class _RunState:
     recall_fallbacks: int = 0
     recall_skipped: int = 0
     recall_refused: int = 0
+    recall_empty: int = 0
     aux_retrieve_calls: int = 0
     retrieve_errors: int = 0
     retrieve_prompt_tokens: int = 0
@@ -1883,6 +1884,7 @@ class Agent:
                 if hit_from_doc(doc, score=0.0, rank=1).text not in shown
             ]
         if not task_docs and not long_docs:
+            run.recall_empty += 1
             return None, "", []
         hits: list[RecallHit] = []
         retriever = name
@@ -1919,6 +1921,7 @@ class Agent:
         if trigger == "start":
             hits = [hit for hit in hits if hit.kind == "long"][:RECALL_LONG_K]
         if not hits:
+            run.recall_empty += 1
             return None, "", []
         candidates = len(task_docs) + len(long_docs)
         checked_hits: list[RecallHit] = []
@@ -2052,7 +2055,14 @@ class Agent:
         fallback: str,
         exclude: Iterable[str] = (),
     ) -> tuple[str, list[RecallHit]]:
-        """The step trigger's block for the next planning call, and its hits."""
+        """The step trigger's block for the next planning call, and its hits.
+
+        A note from an earlier attempt is ``superseded`` at that attempt's
+        boundary, but its turn can still be evicted from the window, and
+        R5's step trigger is what makes an evicted turn reachable again;
+        step recall therefore ranks superseded notes too. The window's
+        aliases still exclude what the request already shows.
+        """
         if self._plan.step is None:
             return "", []
         note_text = "" if note_entry is None else note_entry.text
@@ -2061,7 +2071,12 @@ class Agent:
             outcome = note_entry.note.outcome
         query = build_step_query(note_text, calls, fallback=fallback, outcome=outcome)
         _record, block, hits = await self._run_recall(
-            "step", query, run, placement=self.options.recall_placement, exclude=exclude
+            "step",
+            query,
+            run,
+            placement=self.options.recall_placement,
+            exclude=exclude,
+            include_superseded=True,
         )
         if block:
             run.pending_shown.update(hit.alias for hit in hits if hit.kind != "long")
@@ -5076,6 +5091,7 @@ class Agent:
                 "recall_fallbacks": run.recall_fallbacks,
                 "recall_skipped": run.recall_skipped,
                 "recall_refused": run.recall_refused,
+                "recall_empty": run.recall_empty,
                 "aux_retrieve_calls": run.aux_retrieve_calls,
                 "retrieve_errors": run.retrieve_errors,
                 "retrieve_prompt_tokens": run.retrieve_prompt_tokens,

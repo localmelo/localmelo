@@ -281,16 +281,22 @@ def build_step_query(
 ) -> str:
     """The step trigger's query, at most :data:`RECALL_QUERY_CHARS`.
 
-    The checked note's ``plan:`` line, its ``open:`` items and its
-    ``outcome:`` line (or *outcome* when the note has none), then the paths
-    and names of *calls* in call order. A note with none of those falls
-    back to *fallback*. The text is cut at a word boundary after the note
-    parts and before the names when it does not fit.
+    The checked note's ``plan:`` line, its ``found:`` items, its ``open:``
+    items and its ``outcome:`` line (or *outcome* when the note has none),
+    then the paths and names of *calls* in call order. The ``found:`` items
+    are what the latest step established, so they are the recall query's
+    only content terms when the heuristic writer put the step's plan in
+    the call form alone. A note with none of those falls back to
+    *fallback*. The text is cut at a word boundary after the note parts and
+    before the names when it does not fit.
     """
     parts: list[str] = []
     plan = _note_line(note_text, "plan")
     if plan:
         parts.append(plan)
+    found = _note_items(note_text, "found")
+    if found:
+        parts.append("found: " + "; ".join(found))
     opened = _note_items(note_text, "open")
     if opened:
         parts.append("open: " + "; ".join(opened))

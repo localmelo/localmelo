@@ -160,6 +160,19 @@ def test_build_step_query_uses_the_checked_note_and_the_calls() -> None:
     assert len(query) <= RECALL_QUERY_CHARS
 
 
+def test_build_step_query_includes_what_the_step_found() -> None:
+    # A heuristic note whose plan is only the call form keeps its content in
+    # ``found:``; the query needs it, or bm25 has nothing to rank.
+    query = build_step_query(
+        "plan: read a.py\nfound: the parser module error is in build.log\n"
+        "outcome: ok",
+        [],
+    )
+    assert query.startswith(
+        "read a.py · found: the parser module error is in build.log · outcome: ok"
+    )
+
+
 def test_build_step_query_falls_back_when_the_note_is_empty() -> None:
     assert build_step_query("", [], fallback="  the clean reply ") == "the clean reply"
     query = build_step_query("", [], fallback="x" * 2_000)

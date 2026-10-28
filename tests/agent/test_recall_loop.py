@@ -826,3 +826,76 @@ async def test_long_candidates_are_the_two_best_not_the_two_oldest() -> None:
     assert any(doc.text == "the best new memory" for doc in docs)
     assert len(docs) == 2
     assert [doc.meta["alias"] for doc in docs] == ["m1", "m2"]
+
+
+# ── the silent returns ──
+
+
+async def test_recall_empty_counts_a_trigger_with_no_candidates() -> None:
+    # The start trigger has no long entry, and the step trigger's only note
+    # is the turn just appended, which the window already shows: neither has
+    # anything to rank, and both used to return without a trace.
+    llm = FakeLLM(
+        _call("<note>\nplan: read a.py\n</note>", arguments={"text": "a"}),
+        _answer(),
+    )
+    agent = _agent(llm, _options(reasoning="compress", retriever="bm25", max_steps=2))
+    try:
+        result = await agent.run_task("q")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    assert result.memory_stats is not None
+    assert result.memory_stats["recalls"] == 0
+    assert result.memory_stats["recall_empty"] == 2
+
+
+async def test_recall_empty_counts_a_search_with_no_hits() -> None:
+    # A note the window never showed is a candidate, but the step's query
+    # shares no floor unit with it, so bm25 returns nothing.
+    llm = FakeLLM(
+        _call(
+            "<note>\nplan: investigate widget alpha\n</note>",
+            arguments={"text": "a"},
+        ),
+        _answer(),
+    )
+    agent = _agent(llm, _options(reasoning="compress", retriever="bm25", max_steps=2))
+    assert agent.load_notes([_entry("n1", "plan: unrelated thing")]) == 1
+    try:
+        result = await agent.run_task("q")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    assert result.memory_stats is not None
+    assert result.memory_stats["recalls"] == 0
+    assert result.memory_stats["recall_empty"] == 2
+
+
+async def test_a_superseded_note_the_window_left_is_recalled_at_step() -> None:
+    # R4 marks an attempt's notes superseded at the attempt boundary; their
+    # turns can still be evicted, and the step trigger is what makes an
+    # evicted turn reachable again.
+    note = _entry(
+        "n1",
+        "plan: parser module error\nfound: build.log says the parser module is wrong",
+    )
+    note.stage = "superseded"
+    llm = FakeLLM(
+        _call("<note>\nplan: read a.py\n</note>", arguments={"text": "a"}),
+        _call(
+            "<note>\nplan: review the parser module error\n</note>",
+            arguments={"text": "b"},
+        ),
+        _answer(),
+    )
+    agent = _agent(llm, _options(reasoning="compress", retriever="bm25", max_steps=3))
+    assert agent.load_notes([note]) == 1
+    try:
+        result = await agent.run_task("q")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    assert result.memory_stats is not None
+    assert result.memory_stats["recalls_by_trigger"]["step"] >= 1
+    assert any("[n1]" in message.content for message in llm.requests[2])
