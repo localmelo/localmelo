@@ -917,6 +917,12 @@ def test_a_foreign_host_is_refused_on_the_health_route(gateway: Gateway) -> None
 def test_every_response_carries_the_console_security_headers(
     gateway: Gateway,
 ) -> None:
+    expected_api_csp = (
+        "default-src 'none'; script-src 'self'; style-src 'self'; "
+        "img-src 'self'; connect-src 'self'; font-src 'self'; "
+        "manifest-src 'self'; base-uri 'none'; form-action 'none'; "
+        "frame-ancestors 'none'"
+    )
     for path in ("/", "/v1/health", "/api/health", "/no/such/route", "/api/nope"):
         resp = gateway.client.get(path)
         assert resp.headers["x-frame-options"] == "DENY"
@@ -928,6 +934,17 @@ def test_every_response_carries_the_console_security_headers(
             resp.headers["permissions-policy"]
             == "camera=(), microphone=(), geolocation=()"
         )
+        if path.startswith("/api"):
+            assert resp.headers.get_list("content-security-policy") == [
+                expected_api_csp
+            ]
+        else:
+            assert resp.headers.get_list("content-security-policy") == [
+                "frame-ancestors 'none'"
+            ]
+    refused = gateway.client.get("/api/health", headers={"Host": FOREIGN_HOST})
+    assert refused.status_code == 421
+    assert refused.headers.get_list("content-security-policy") == [expected_api_csp]
 
 
 def test_a_body_over_1_mib_is_refused_with_413(gateway: Gateway) -> None:
@@ -1002,3 +1019,16 @@ def test_an_empty_api_body_needs_no_content_type(gateway: Gateway) -> None:
     resp = gateway.client.post("/api/no/such/route")
     assert resp.status_code == 404
     assert resp.json()["error"]["code"] == "not_found"
+
+
+def test_a_non_json_v1_body_reaches_fastapi_as_422_not_415(
+    gateway: Gateway,
+) -> None:
+    resp = gateway.client.post(
+        "/v1/agent/run",
+        content=b"not json",
+        headers={"Content-Type": "text/plain"},
+    )
+    assert resp.status_code == 422
+    assert "detail" in resp.json()
+    assert gateway.ran_nothing()

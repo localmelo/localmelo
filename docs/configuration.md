@@ -127,7 +127,9 @@ gateway. Press Ctrl+C to stop the gateway.
   gateway anyway and configure it over `/api/settings`.
 - Run the wizard again to change backends. It keeps the other settings it
   knows, such as `request_timeout_s` and `extra_body`, and rewrites the file
-  atomically in the current format; comments and unknown keys are dropped.
+  atomically in the current format (following a symlink when `config.toml`
+  is one, keeping an existing file's permissions, and creating a new file
+  with mode `0600`); comments and unknown keys are dropped.
 
 ## The config file
 

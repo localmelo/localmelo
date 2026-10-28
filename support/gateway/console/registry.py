@@ -70,8 +70,8 @@ CLOSE_ALL_TIMEOUT_S: Final = 10.0
 EXIT_SAVE_RESERVE_S: Final = 1.0
 # Seconds between idle sweeps.
 SWEEP_INTERVAL_S: Final = 60.0
-# Where a session whose row has no workspace starts, until the settings
-# gain their [gateway] workspace key (PR 4).
+# Where a session starts when neither the request nor [gateway] workspace
+# names a folder.
 DEFAULT_WORKSPACE: Final = "~/localmelo-workspace"
 
 SettingsSource = Callable[[], "Config"]
@@ -186,7 +186,6 @@ class ConsoleSessions:
         self._idle_close_s = idle_close_s
         self._max_open = max_open
         self._clock = clock
-        self._default_workspace = os.path.expanduser(DEFAULT_WORKSPACE)
         self._holder = process_holder("gateway")
         self._sessions: dict[str, OpenSession] = {}
         self._locks: dict[str, SessionLock] = {}
@@ -293,7 +292,7 @@ class ConsoleSessions:
             raise ApiError(404, "not_found", "Session not found.")
         workspace = info.workspace
         if workspace is None:
-            workspace = self._default_workspace
+            workspace = self._default_workspace()
             try:
                 os.makedirs(workspace, mode=0o700, exist_ok=True)
                 # The real path, as a create stores it: the row and the
@@ -538,6 +537,26 @@ class ConsoleSessions:
                 "Change it in the header.",
             )
 
+    def _default_workspace(self) -> str:
+        """The configured ``[gateway] workspace``, or :data:`DEFAULT_WORKSPACE`."""
+        settings = self._settings()
+        gateway = getattr(settings, "gateway", None)
+        raw = getattr(gateway, "workspace", "") if gateway is not None else ""
+        if (
+            isinstance(raw, str)
+            and raw
+            and (os.path.isabs(raw) or raw.startswith("~/"))
+            and not any(
+                ord(ch) < 0x20
+                or 0x7F <= ord(ch) <= 0x9F
+                or ch in (" ", " ")
+                or 0xD800 <= ord(ch) <= 0xDFFF
+                for ch in raw
+            )
+        ):
+            return os.path.expanduser(raw)
+        return os.path.expanduser(DEFAULT_WORKSPACE)
+
     def _resolve_workspace(self, workspace: str | None) -> str:
         """The folder a new session gets: the default, or a checked path.
 
@@ -546,7 +565,7 @@ class ConsoleSessions:
         a session that a later open reads as a different folder.
         """
         if workspace is None:
-            path = self._default_workspace
+            path = self._default_workspace()
             try:
                 os.makedirs(path, mode=0o700, exist_ok=True)
             except OSError as exc:

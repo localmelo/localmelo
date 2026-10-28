@@ -547,6 +547,7 @@ These options apply to `melo` without a task.
 | `--serve` | off | Start the gateway: the HTTP API and the web workspace. |
 | `--host HOST` | `127.0.0.1` | The address the gateway listens on. |
 | `--port PORT` | `8401` | The port the gateway listens on. |
+| `--allow-unconfigured` | off | With `--serve`, start the gateway even when no backend is configured or the config file has validation errors, so it can be configured over `/api/settings`. |
 | `--reconfigure` | off | Run the setup wizard, then start the gateway (with `--serve`) or open the interactive UI (without). Without a terminal it reads the answers from stdin; without `--serve` it then exits. |
 | `--daemon install\|uninstall\|status` | not set | Manage the macOS background service; `install` also takes `--port`. |
 
@@ -560,6 +561,9 @@ These options apply to `melo` without a task.
   `melo: no backend is configured; run melo --reconfigure in a terminal`.
   `--reconfigure` still runs the wizard without a terminal and reads its
   answers from stdin, so a script can pipe them in.
+  `--allow-unconfigured` skips both the wizard and startup validation so
+  `melo --serve --allow-unconfigured` starts without a config file; it
+  cannot be combined with `--reconfigure` or used without `--serve`.
 - Ctrl-D at a wizard question prints `Setup cancelled.` and exits with
   code 0; Ctrl+C prints the same and exits with 130.
 - The gateway has no authentication. Keep it on `127.0.0.1`; see

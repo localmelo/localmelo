@@ -66,18 +66,21 @@ _CLOUD_FIELDS: Final = (
 )
 
 
-class SettingsTestBody(BaseModel):
-    """Request body of ``POST /api/settings/test``."""
-
+class _SettingsBaseBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     chat_backend: StrictStr
     embedding_backend: StrictStr
-    workspace: StrictStr = DEFAULT_WORKSPACE
     sections: dict[StrictStr, Any] = Field(default_factory=dict)
 
 
-class SettingsPutBody(SettingsTestBody):
+class SettingsTestBody(_SettingsBaseBody):
+    """Request body of ``POST /api/settings/test``."""
+
+    workspace: StrictStr = DEFAULT_WORKSPACE
+
+
+class SettingsPutBody(_SettingsBaseBody):
     """Request body of ``PUT /api/settings``."""
 
     workspace: StrictStr
@@ -127,6 +130,7 @@ def _file_revision() -> str:
 def _redact(text: str) -> str:
     """Return *text* with any secret shapes replaced by ``[redacted]``."""
     return redact_secrets(text)[0]
+
 
 def model_json(cfg: Any) -> dict[str, Any]:
     """The settings' chat model, with the registry's label for its backend."""
@@ -198,10 +202,20 @@ def settings_json() -> dict[str, Any]:
             "chat_model": str(sec.chat_model),
             "base_url": str(sec.base_url),
         }
+    ws = (
+        cfg.gateway.workspace
+        if isinstance(cfg.gateway.workspace, str)
+        and not _has_control_or_surrogate(cfg.gateway.workspace)
+        and (
+            os.path.isabs(cfg.gateway.workspace)
+            or cfg.gateway.workspace.startswith("~/")
+        )
+        else ""
+    )
     return {
         "chat_backend": cfg.chat_backend,
         "embedding_backend": cfg.embedding_backend,
-        "workspace": cfg.gateway.workspace or DEFAULT_WORKSPACE,
+        "workspace": ws or DEFAULT_WORKSPACE,
         "sections": sections,
         "defaults": onboard.backend_defaults(),
         "errors": [_redact(err) for err in cfg.validate()],
@@ -219,7 +233,7 @@ def settings_json() -> dict[str, Any]:
                 for key, label in onboard.EMBEDDING_BACKENDS
             ],
         },
-        "file_label": display.home_label(config.CONFIG_PATH),
+        "file_label": display.home_label(config.config_path()),
         "revision": revision,
     }
 
@@ -261,7 +275,7 @@ def _validate_sections(sections: dict[str, Any]) -> None:
                 sec_name in config._CLOUD_SECTIONS
                 and field_name == "api_key_env"
                 and field_val
-                and not _ENV_NAME_RE.match(field_val)
+                and not _ENV_NAME_RE.fullmatch(field_val)
             ):
                 raise ApiError(
                     400,
@@ -271,7 +285,7 @@ def _validate_sections(sections: dict[str, Any]) -> None:
 
 
 def _build_candidate(
-    body: SettingsTestBody,
+    body: SettingsTestBody | SettingsPutBody,
     *,
     check_revision: str | None = None,
 ) -> tuple[config.Config, config.Config]:
@@ -337,20 +351,12 @@ def _changed_fields(before: config.Config, after: config.Config) -> list[str]:
 
 
 async def _call_probe_all(cfg: config.Config) -> None:
-    fn = (
-        probe_all
-        if probe_all is not onboard_probe.probe_all
-        else onboard_probe.probe_all
-    )
+    fn = probe_all if probe_all is not _ORIG_PROBE_ALL else onboard_probe.probe_all
     await fn(cfg)
 
 
 async def _call_list_models(backend: str, url: str) -> list[str]:
-    fn = (
-        list_models
-        if list_models is not discovery.list_models
-        else discovery.list_models
-    )
+    fn = list_models if list_models is not _ORIG_LIST_MODELS else discovery.list_models
     return await fn(backend, url, timeout_s=DISCOVERY_TIMEOUT_S)
 
 
@@ -367,7 +373,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
 
     @app.get("/api/settings/key-status")
     async def api_key_status(name: str | None = None) -> JSONResponse:
-        if not name or not _ENV_NAME_RE.match(name):
+        if not name or not _ENV_NAME_RE.fullmatch(name):
             raise ApiError(
                 400,
                 "invalid_request",
@@ -424,7 +430,7 @@ def add_routes(app: FastAPI, console: Console) -> None:
         if url is not None:
             _check_single_line("url", url)
 
-        saved = config.load() if os.path.isfile(config.CONFIG_PATH) else console.cfg
+        saved = config.load() if os.path.isfile(config.config_path()) else console.cfg
         resolved_backend = backend if backend else saved.chat_backend
         if resolved_backend in config._CLOUD_SECTIONS:
             raise ApiError(

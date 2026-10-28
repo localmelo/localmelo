@@ -1254,3 +1254,56 @@ class TestGatewayWorkspaceAndAtomicSave:
             save(changed)
         assert config_path.read_bytes() == before
         assert list(config_path.parent.glob("*.tmp")) == []
+
+    def test_save_preserves_existing_file_mode_and_follows_symlink(
+        self, tmp_path: Path
+    ) -> None:
+        real_dir = tmp_path / "dotfiles"
+        real_dir.mkdir()
+        real_file = real_dir / "config.toml"
+        real_file.write_text('chat_backend = "vllm"\n', encoding="utf-8")
+        os.chmod(real_file, 0o644)
+
+        cache_dir = tmp_path / "cache"
+        cache_dir.mkdir()
+        link_path = cache_dir / "config.toml"
+        os.symlink(real_file, link_path)
+
+        with (
+            mock.patch("localmelo.support.config.CONFIG_PATH", str(link_path)),
+            mock.patch("localmelo.support.config.CONFIG_DIR", str(cache_dir)),
+        ):
+            save(_timeout_cfg())
+            loaded = load()
+
+        assert link_path.is_symlink()
+        assert os.path.realpath(link_path) == str(real_file.resolve())
+        assert (real_file.stat().st_mode & 0o777) == 0o644
+        assert loaded.chat_backend == "vllm"
+
+    @pytest.mark.parametrize(
+        "bad_ws",
+        [5, "relative/path", "~/bad\nline", "~/bad\x85line", "~/bad\x00"],
+        ids=["int", "relative", "newline", "nel-c1", "nul"],
+    )
+    def test_validate_rejects_invalid_gateway_workspace(
+        self, config_path: Path, bad_ws: Any
+    ) -> None:
+        cfg = _timeout_cfg()
+        cfg.gateway.workspace = bad_ws
+        errors = cfg.validate()
+        assert any(err.startswith("[gateway] workspace") for err in errors)
+        with pytest.raises(ConfigError, match=r"\[gateway\] workspace"):
+            cfg.validate_or_raise()
+
+        if isinstance(bad_ws, int):
+            config_path.write_text(
+                'chat_backend = "vllm"\nembedding_backend = "none"\n\n'
+                '[vllm]\nchat_url = "http://127.0.0.1:8000/v1"\nchat_model = "m"\n\n'
+                f"[gateway]\nworkspace = {bad_ws}\n",
+                encoding="utf-8",
+            )
+            loaded = load()
+            assert any(
+                err.startswith("[gateway] workspace") for err in loaded.validate()
+            )

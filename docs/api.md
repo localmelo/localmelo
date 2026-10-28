@@ -157,10 +157,13 @@ curl -X PUT http://127.0.0.1:8401/api/settings \
 ```
 
 - Every string must be a single line with no control characters, and
-  `workspace` must be an absolute path or start with `~/`; otherwise 400
-  `invalid_request`. `api_key_set` is not accepted in `sections`.
+  `workspace` is required and must be an absolute path or start with `~/`;
+  otherwise 400 `invalid_request`. `api_key_set` is not accepted in
+  `sections`.
 - A `revision` that does not match the file on disk returns 409
-  `settings_changed`.
+  `settings_changed`. Two concurrent `PUT` requests that read the same
+  `revision` can both pass the check; the last writer wins, and `os.replace`
+  keeps the file from being torn.
 - The server loads `config.toml` fresh so CLI `--host` and `--port`
   overrides are never written to disk, preserves other sections,
   `extra_body`, `mcp_config`, `request_timeout_s`, `[agent]` and

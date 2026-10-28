@@ -33,6 +33,7 @@ from localmelo.support.gateway.guard import (
     _SECURITY_HEADERS,
     _TOO_LARGE_ERROR,
     _UNSUPPORTED_MEDIA_TYPE_ERROR,
+    API_CSP,
     BODY_BYTES_LIMIT,
     _content_length_too_large,
     is_json_content_type,
@@ -113,15 +114,26 @@ def validation_message(exc: RequestValidationError) -> str:
     return f"{field}: {error.get('msg', 'Invalid request')}"
 
 
-def _has_surrogate(value: Any) -> bool:
-    """Whether *value* or any string inside it holds a UTF-16 lone surrogate."""
+def _utf8_problem(value: Any, path: str) -> str | None:
+    """``field: problem`` for the first string with a lone surrogate, else ``None``."""
     if isinstance(value, str):
-        return any(0xD800 <= ord(ch) <= 0xDFFF for ch in value)
+        if any(0xD800 <= ord(ch) <= 0xDFFF for ch in value):
+            return f"{path or 'request'}: the text must be valid UTF-8"
+        return None
     if isinstance(value, Mapping):
-        return any(_has_surrogate(k) or _has_surrogate(v) for k, v in value.items())
+        for key, inner in value.items():
+            if isinstance(key, str) and any(0xD800 <= ord(ch) <= 0xDFFF for ch in key):
+                return f"{path or 'request'}: the text must be valid UTF-8"
+            found = _utf8_problem(inner, f"{path}.{key}" if path else str(key))
+            if found is not None:
+                return found
+        return None
     if isinstance(value, list | tuple):
-        return any(_has_surrogate(item) for item in value)
-    return False
+        for index, inner in enumerate(value):
+            found = _utf8_problem(inner, f"{path}.{index}" if path else str(index))
+            if found is not None:
+                return found
+    return None
 
 
 def _query_is_valid_utf8(scope: Scope) -> bool:
@@ -133,7 +145,7 @@ def _query_is_valid_utf8(scope: Scope) -> bool:
         decoded = unquote_to_bytes(raw).decode("utf-8")
     except UnicodeDecodeError:
         return False
-    return not _has_surrogate(decoded)
+    return _utf8_problem(decoded, "query") is None
 
 
 class ApiMiddleware:
@@ -163,6 +175,8 @@ class ApiMiddleware:
                 present = {key.lower() for key, _ in headers}
                 if b"cache-control" not in present:
                     headers.append((b"cache-control", b"no-store"))
+                if b"content-security-policy" not in present:
+                    headers.append((b"content-security-policy", API_CSP))
                 for name, header_value in _SECURITY_HEADERS:
                     if name not in present:
                         headers.append((name, header_value))
@@ -237,10 +251,9 @@ class ApiMiddleware:
                 )
                 await response(scope, receive, send_with_headers)
                 return
-            if _has_surrogate(parsed):
-                response = error_response(
-                    400, "invalid_request", "Request strings must be valid UTF-8."
-                )
+            problem = _utf8_problem(parsed, "")
+            if problem is not None:
+                response = error_response(400, "invalid_request", problem)
                 await response(scope, receive, send_with_headers)
                 return
 

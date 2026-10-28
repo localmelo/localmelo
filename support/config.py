@@ -7,6 +7,7 @@ import json
 import math
 import os
 import re
+import stat
 import tempfile
 import tomllib
 from collections.abc import Mapping
@@ -180,6 +181,7 @@ class Config:
         errors: list[str] = []
         errors.extend(self._validate_agent())
         errors.extend(self._validate_scheduler())
+        errors.extend(self._validate_gateway_workspace())
 
         # -- chat_backend validation --
         if not self.chat_backend:
@@ -226,6 +228,29 @@ class Config:
             )
 
         return errors
+
+    def _validate_gateway_workspace(self) -> list[str]:
+        """``[gateway] workspace`` is empty or an absolute/``~/`` single-line path."""
+        ws: object = self.gateway.workspace
+        if not isinstance(ws, str):
+            return [f"[gateway] workspace must be a string, got {ws!r}"]
+        if not ws:
+            return []
+        if any(
+            ord(ch) < 0x20
+            or 0x7F <= ord(ch) <= 0x9F
+            or ch in (" ", " ")
+            or 0xD800 <= ord(ch) <= 0xDFFF
+            for ch in ws
+        ):
+            return [
+                "[gateway] workspace must be a single line with no control characters"
+            ]
+        if not (os.path.isabs(ws) or ws.startswith("~/")):
+            return [
+                f"[gateway] workspace {ws!r} must be an absolute path or start with ~/"
+            ]
+        return []
 
     def _validate_scheduler(self) -> list[str]:
         """``[scheduler]`` values are inside their documented ranges."""
@@ -711,14 +736,18 @@ def save(cfg: Config) -> None:
     target_path = os.path.realpath(config_path())
     target_dir = os.path.dirname(target_path) or "."
     os.makedirs(target_dir, exist_ok=True)
+    old_mode: int | None = None
+    with contextlib.suppress(OSError):
+        old_mode = stat.S_IMODE(os.stat(target_path).st_mode)
     fd, tmp_path = tempfile.mkstemp(
         prefix=".config.toml.", suffix=".tmp", dir=target_dir
     )
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
-        with contextlib.suppress(OSError):
-            os.chmod(tmp_path, os.stat(target_path).st_mode & 0o777)
+        if old_mode is not None:
+            with contextlib.suppress(OSError):
+                os.chmod(tmp_path, old_mode)
         os.replace(tmp_path, target_path)
     except BaseException:
         with contextlib.suppress(OSError):

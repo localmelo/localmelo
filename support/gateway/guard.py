@@ -57,6 +57,12 @@ _SECURITY_HEADERS = (
     (b"permissions-policy", b"camera=(), microphone=(), geolocation=()"),
 )
 _FRAMING_CSP = b"frame-ancestors 'none'"
+API_CSP = (
+    b"default-src 'none'; script-src 'self'; style-src 'self'; "
+    b"img-src 'self'; connect-src 'self'; font-src 'self'; "
+    b"manifest-src 'self'; base-uri 'none'; form-action 'none'; "
+    b"frame-ancestors 'none'"
+)
 
 
 def is_loopback(host: str) -> bool:
@@ -94,7 +100,7 @@ def _is_loopback_ip(address: str) -> bool:
     return ip.is_loopback
 
 
-def _forbid_framing(send: Send) -> Send:
+def _forbid_framing(send: Send, *, is_api: bool = False) -> Send:
     """Wrap *send* so that the response carries the headers that forbid framing."""
 
     async def send_forbidding_framing(message: Message) -> None:
@@ -114,7 +120,13 @@ def _forbid_framing(send: Send) -> Send:
                 for name, value in headers
                 if name.lower() != b"content-security-policy"
             ]
-            value = b"; ".join([*policies, _FRAMING_CSP]) if policies else _FRAMING_CSP
+            if policies:
+                if any(_FRAMING_CSP in policy for policy in policies):
+                    value = b"; ".join(policies)
+                else:
+                    value = b"; ".join([*policies, _FRAMING_CSP])
+            else:
+                value = API_CSP if is_api else _FRAMING_CSP
             headers.append((b"content-security-policy", value))
             present = {name.lower() for name, _ in headers}
             for name, header_value in _SECURITY_HEADERS:
@@ -223,7 +235,7 @@ class LoopbackGuard:
             await self.app(scope, receive, send)
             return
         if scope["type"] == "http":
-            send = _forbid_framing(send)
+            send = _forbid_framing(send, is_api=_is_api_path(scope))
 
         refusal = self._refusal(scope)
         if refusal is None and scope["type"] == "http":

@@ -177,7 +177,7 @@ def test_api_key_value_never_leaves(
 
 @pytest.mark.parametrize(
     "bad_name",
-    ["", "123ABC", "OPENAI-KEY", "KEY WITH SPACE", "A" * 129],
+    ["", "123ABC", "OPENAI-KEY", "KEY WITH SPACE", "FOO\n", "A" * 129],
 )
 def test_key_status_bad_name_is_400(client: TestClient, bad_name: str) -> None:
     resp = client.get("/api/settings/key-status", params={"name": bad_name})
@@ -311,6 +311,14 @@ def test_put_settings_conflict_on_stale_revision(
             "invalid_request",
         ),
         (
+            {"sections": {"mlc": {"chat_model": "bad\x85model"}}},
+            "invalid_request",
+        ),
+        (
+            {"sections": {"openai": {"api_key_env": "FOO\n", "chat_model": "m"}}},
+            "invalid_request",
+        ),
+        (
             {"sections": {"openai": {"api_key_set": True}}},
             "invalid_request",
         ),
@@ -349,6 +357,33 @@ def test_put_settings_validation_and_field_checks(
     assert resp.json()["error"]["code"] == expected_code
     if expected_code == "invalid_settings":
         assert resp.json()["error"]["details"]["errors"]
+
+
+def test_put_settings_requires_workspace_field(
+    client: TestClient, isolated_config: Path
+) -> None:
+    cfg = Config(
+        chat_backend="mlc",
+        embedding_backend="none",
+        mlc=LocalBackendConfig(chat_url="http://127.0.0.1:9/v1", chat_model="m"),
+        gateway=GatewayConfig(port=8401, host="127.0.0.1", workspace="~/keep-me"),
+    )
+    config.save(cfg)
+    rev = client.get("/api/settings").json()["revision"]
+
+    resp = client.put(
+        "/api/settings",
+        json={
+            "chat_backend": "mlc",
+            "embedding_backend": "none",
+            "sections": {},
+            "revision": rev,
+        },
+    )
+    assert resp.status_code == 400
+    assert resp.json()["error"]["code"] == "invalid_request"
+    assert "workspace" in resp.json()["error"]["message"]
+    assert config.load().gateway.workspace == "~/keep-me"
 
 
 def test_put_settings_rejects_lone_surrogate_in_json(client: TestClient) -> None:
@@ -435,6 +470,25 @@ def test_models_endpoint_with_mock_transport(
     assert ok.status_code == 200
     assert ok.json() == {"models": ["qwen3-8b", "nomic-embed"]}
 
+    # Without parameters, GET /api/models uses the saved chat backend and URL,
+    # and patching discovery.list_models directly is honored too.
+    config.save(
+        Config(
+            chat_backend="mlc",
+            embedding_backend="none",
+            mlc=LocalBackendConfig(
+                chat_url="http://ok.test:8000/v1", chat_model="qwen3-8b"
+            ),
+        )
+    )
+    monkeypatch.setattr(
+        routes_settings, "list_models", routes_settings._ORIG_LIST_MODELS
+    )
+    monkeypatch.setattr(routes_settings.discovery, "list_models", mocked_list)
+    default_ok = client.get("/api/models")
+    assert default_ok.status_code == 200
+    assert default_ok.json() == {"models": ["qwen3-8b", "nomic-embed"]}
+
     empty = client.get("/api/models?backend=mlc&url=http://empty.test:8000/v1")
     assert empty.status_code == 502
     assert empty.json()["error"] == {
@@ -462,6 +516,12 @@ def test_models_endpoint_with_mock_transport(
 async def test_put_settings_resets_model_server_probe(
     tmp_path: Path, isolated_config: Path
 ) -> None:
+    from fastapi import FastAPI
+
+    from localmelo.support.gateway.console import ConsoleOptions
+
+    from .conftest import FakeBuilder
+
     calls: list[tuple[str, str]] = []
 
     async def fake_probe_fn(backend: str, url: str) -> tuple[bool, str]:
@@ -476,12 +536,103 @@ async def test_put_settings_resets_model_server_probe(
     config.save(cfg)
     probe = ModelServerProbe(cfg, probe=fake_probe_fn)
     probe._result = (True, "", 1000.0)
-    probe.reset(
-        Config(
-            chat_backend="vllm",
-            embedding_backend="none",
-            vllm=LocalBackendConfig(chat_url="http://127.0.0.1:10/v1", chat_model="m2"),
-        )
+    c = Console(
+        cfg,
+        port=8401,
+        options=ConsoleOptions(
+            store_path=str(tmp_path / "s.db"),
+            builder=FakeBuilder(),
+            probe=probe,
+        ),
     )
-    assert probe._result is None
-    await probe.aclose()
+    await c.start()
+    try:
+        app = FastAPI()
+        c.mount(app)
+        tc = TestClient(app, base_url="http://127.0.0.1:8401")
+        rev = tc.get("/api/settings").json()["revision"]
+        resp = tc.put(
+            "/api/settings",
+            json={
+                "chat_backend": "vllm",
+                "embedding_backend": "none",
+                "workspace": "~/ws",
+                "sections": {
+                    "vllm": {
+                        "chat_url": "http://127.0.0.1:10/v1",
+                        "chat_model": "m2",
+                    }
+                },
+                "revision": rev,
+            },
+        )
+        assert resp.status_code == 200
+        assert probe._result is None
+    finally:
+        await c.aclose()
+
+
+def test_unconfigured_gateway_server_boots_and_onboards_over_api(
+    tmp_path: Path, isolated_config: Path
+) -> None:
+    from localmelo.support.gateway import GatewayServer, start_gateway
+    from localmelo.support.gateway.console import ConsoleOptions
+
+    from .conftest import FakeBuilder, FakeProbe
+
+    empty_cfg = Config(
+        chat_backend="",
+        embedding_backend="",
+        scheduler=SchedulerConfig(call_log=False),
+    )
+
+    # 1. start_gateway(empty_cfg, allow_unconfigured=True) runs GatewayServer.run()
+    # without raising ConfigError, whereas allow_unconfigured=False raises.
+    with pytest.raises(config.ConfigError):
+        start_gateway(empty_cfg)
+    with mock.patch.object(GatewayServer, "run") as mock_run:
+        start_gateway(empty_cfg, allow_unconfigured=True)
+    mock_run.assert_called_once()
+
+    # 2. A real GatewayServer booted with an empty config serves /api/health
+    # (configured: false) and /api/settings, accepts an onboarding PUT, and
+    # then reports configured: true.
+    server = GatewayServer(
+        empty_cfg,
+        console_options=ConsoleOptions(
+            store_path=str(tmp_path / "gw.db"),
+            builder=FakeBuilder(),
+            probe=FakeProbe(),
+        ),
+    )
+    with TestClient(server.app, base_url="http://127.0.0.1:8401") as tc:
+        h1 = tc.get("/api/health").json()
+        assert h1["configured"] is False
+        assert h1["config_errors"]
+
+        s1 = tc.get("/api/settings").json()
+        assert s1["chat_backend"] == ""
+        assert s1["revision"] == ""
+
+        put = tc.put(
+            "/api/settings",
+            json={
+                "chat_backend": "mlc",
+                "embedding_backend": "none",
+                "workspace": str(tmp_path / "onboard-ws"),
+                "sections": {
+                    "mlc": {
+                        "chat_url": "http://127.0.0.1:9/v1",
+                        "chat_model": "stub-model",
+                    }
+                },
+                "revision": "",
+            },
+        )
+        assert put.status_code == 200
+        assert put.json()["errors"] == []
+
+        h2 = tc.get("/api/health").json()
+        assert h2["configured"] is True
+        assert h2["config_errors"] == []
+        assert h2["model"]["name"] == "stub-model"
