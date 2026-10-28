@@ -24,6 +24,12 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Label Python checks in attempt digests with a recognizable runner and safe
+  target basename when available, rather than the first line of code. Unknown
+  checks use a neutral label. Results show counts, an exit code or `completed`
+  instead of arbitrary output. Hidden paths and agent scratch notes are omitted;
+  Python file writes are not inferred ([#149]).
+
 - Direct workers report agent construction failures, including refused
   config-file values and invalid TOML, as `startup_error` with a redacted
   cause (`$HOME` shown as `~`), and attempt a `transport_error` result on
@@ -41,13 +47,25 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Interactive terminal text attachments: `/attach PATH`, `/attachments`,
+  `/detach N|all`, and explicit `@` file-completion selection stage bounded
+  workspace snapshots. Best-effort redaction and cleaning require confirmation
+  when they change a snapshot; saved snapshots support retry without rereading
+  files, but resume budgets and retained windows can omit a turn. No image
+  attachments; direct mode is unchanged ([#155]).
+- Startup recovery classifies task rows without replay, retains pending pause
+  and reconciles execution-linked terminal results. Recovered tasks with
+  uncertain history remain fenced until controlled recovery is wired; Stop is
+  available. Ordinary task creation does not yet establish first-start proof. [#152]
+
 - Scheduler component v3 adds dormant recovery provenance, guarded durable
   intents and receipts, and process identity records. Interrupted recovery
   retains pending pause intent; explicit legacy adoption records orphan-risk
-  acceptance. Startup behavior remains unchanged; process capture completeness
-  and runtime recovery are deferred. [#147]
+  acceptance. Process capture completeness and controlled Resume are deferred. [#147]
 - Experimental opt-in provider streaming and OpenAI-compatible SSE assembly;
-  display filtering buffers complete replies, and no CLI or agent uses it yet ([#145]).
+  no CLI or agent uses it yet ([#145]).
+- With a trusted reasoning-framing declaration, the streaming display policy can
+  release redacted complete lines; unknown framing still buffers the reply ([#153]).
 - Direct workers can read a brief file and emit a versioned JSON result or an
   NDJSON event stream; inbox steering remains future work. ([#143])
 
@@ -994,3 +1012,7 @@ earlier milestones.
 [#144]: https://github.com/localmelo/localmelo/pull/144
 [#145]: https://github.com/localmelo/localmelo/pull/145
 [#147]: https://github.com/localmelo/localmelo/pull/147
+[#149]: https://github.com/localmelo/localmelo/pull/149
+[#152]: https://github.com/localmelo/localmelo/pull/152
+[#153]: https://github.com/localmelo/localmelo/pull/153
+[#155]: https://github.com/localmelo/localmelo/pull/155
