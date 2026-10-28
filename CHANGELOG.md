@@ -36,6 +36,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Opt-in fixed system prefix with a local-date snapshot and schema-change telemetry;
+  dynamic recall and reflection remain labelled data ([#142]).
 - Heuristic notes retain a bounded set of explicit English negative and Chinese
   residence/cancellation assertions, and item attribution rejects conflicting
   event times, rejects opposing detected polarity and requires the full negative
@@ -970,3 +972,4 @@ earlier milestones.
 [#136]: https://github.com/localmelo/localmelo/pull/136
 [#137]: https://github.com/localmelo/localmelo/pull/137
 [#141]: https://github.com/localmelo/localmelo/pull/141
+[#142]: https://github.com/localmelo/localmelo/pull/142
