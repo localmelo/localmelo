@@ -377,3 +377,49 @@ async def test_hippo_forget_all_forgets_both_stores_not_working_memory(
         assert [msg.content for msg in hippo.working.get_window()] == ["keep me"]
     finally:
         await hippo.aclose()
+
+
+async def test_sqlite_long_term_forget_removes_the_task_s_decisions(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "long_term.db"
+    long = SqliteLongTerm(path)
+    try:
+        await long.apply(
+            text="I live in Berlin",
+            kind="profile",
+            source="user",
+            admitted_by="user_statement",
+            provenance={"source_ids": ["r1"]},
+            task_id="t1",
+            session_id="",
+            created_at=1.0,
+            embedding=None,
+            action="NEW",
+            target_id=None,
+            reason="new",
+            source_ids=["r1"],
+            keep_text=False,
+            candidate_id="c1",
+        )
+        await long.apply(
+            text="I live in Paris",
+            kind="profile",
+            source="user",
+            admitted_by="user_statement",
+            provenance={"source_ids": ["r2"]},
+            task_id="t2",
+            session_id="",
+            created_at=2.0,
+            embedding=None,
+            action="NEW",
+            target_id=None,
+            reason="new",
+            source_ids=["r2"],
+            keep_text=False,
+            candidate_id="c2",
+        )
+        await long.forget("t1")
+        assert [row["task_id"] for row in await long.decisions()] == ["t2"]
+    finally:
+        await long.aclose()
