@@ -34,13 +34,15 @@ own environment therefore reaches no tool; `VIRTUAL_ENV`, `PYTHONPATH`,
 `SSH_AUTH_SOCK` and the proxy variables pass only through `tool_env` (see
 [The Python API](python-api.md#work-in-a-directory)).
 
-This is how the built-in tools work in direct mode and the gateway. In the
-Python API, an agent with a workspace root keeps the file tools inside a
-directory and starts `shell_exec` and `python_exec` there (see
+This is how the built-in tools work in a direct run without `--workspace`
+and in the gateway. A direct run with `--workspace DIR` and a Python agent
+with `workspace_root` keep the file tools inside a directory and start
+`shell_exec` and `python_exec` there (see
 [With a workspace root](#with-a-workspace-root)). The interactive UI (bare
-`melo`) runs with its workspace as the root and asks before each
+`melo`) runs with its workspace as the root too, and asks before each
 `shell_exec`, `python_exec` and `file_write` call, unless `--yolo` (see
-[Permission tiers](#permission-tiers)). The interactive UI loads the MCP
+[Permission tiers](#permission-tiers)); direct mode has no approval policy,
+with or without a root. The interactive UI loads the MCP
 servers of `--mcp-config`, else of the top-level `mcp_config` key; a server
 that fails to start turns MCP off for that session (`/mcp` says why). A
 Python run with an approval policy asks its own policy about an MCP tool by
@@ -211,9 +213,9 @@ and can try something else.
 The checks are guardrails, not a sandbox:
 
 - Tools run with your account's permissions.
-- Without a workspace root, as in direct mode and the gateway, file tools
-  reach any file you can. `python_exec` runs in a child process of melo, not
-  in a sandbox: it reaches any file you can too.
+- Without a workspace root, as in a direct run without `--workspace` and in
+  the gateway, file tools reach any file you can. `python_exec` runs in a
+  child process of melo, not in a sandbox: it reaches any file you can too.
 - With a workspace root, `shell_exec` and `python_exec` still reach any
   file you can: only the file tools are kept inside the root.
 - Approvals apply only to a run with an approval policy, and in the
@@ -266,9 +268,10 @@ extra mark; it cannot stop a `write`, `exec` or `network` tool from asking.
 
 ### With a workspace root
 
-An agent built in Python with `AgentOptions(workspace_root=DIR)` changes the
-built-in tools (see [Work in a directory](python-api.md#work-in-a-directory)).
-Direct mode and the gateway never set a workspace root.
+A direct run with `--workspace DIR` and an agent built in Python with
+`AgentOptions(workspace_root=DIR)` change the built-in tools (see
+[Work in a directory](python-api.md#work-in-a-directory)). A direct run
+without the flag and the gateway never set a workspace root.
 
 - **The fence.** `file_read` and `file_write` resolve a relative path against
   the root and reach only files whose real path is inside it, after `..` and

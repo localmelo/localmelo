@@ -29,6 +29,8 @@ class Out(Protocol):
 
     def print(self, *renderables: RenderableType) -> None: ...
 
+    def write_control(self, sequence: str) -> bool: ...
+
 
 def _console(file: io.StringIO, width: int, *, no_color: bool) -> Console:
     return Console(
@@ -110,6 +112,17 @@ class TerminalOut:
             self._output.write_raw(text.replace("\r\n", "\n").replace("\n", "\r\n"))
             self._output.flush()
 
+    def write_control(self, sequence: str) -> bool:
+        """Write a trusted zero-width control request, never model-provided escapes."""
+        if self._detached:
+            return False
+        try:
+            self._output.write_raw(sequence)
+            self._output.flush()
+        except (OSError, ValueError):
+            return False
+        return True
+
     def detach(self) -> None:
         """Drop all output from now on: the terminal is gone."""
         self._detached = True
@@ -121,6 +134,7 @@ class RecordingOut:
 
     def __init__(self, width: int = 80) -> None:
         self._width = width
+        self.controls: list[str] = []
         self.console = Console(
             file=io.StringIO(),
             record=True,
@@ -140,6 +154,10 @@ class RecordingOut:
     def print(self, *renderables: RenderableType) -> None:
         for renderable in renderables:
             self.console.print(renderable)
+
+    def write_control(self, sequence: str) -> bool:
+        self.controls.append(sequence)
+        return True
 
     def text(self) -> str:
         """What was printed, with each line's trailing spaces removed."""

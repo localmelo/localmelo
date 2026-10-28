@@ -118,6 +118,22 @@ class TestFlags:
         assert ran.tool_providers == []
         ran.agent.run_task.assert_awaited_once_with("what is 6*7")
 
+    def test_workspace_sets_the_root(self, tmp_path: Path) -> None:
+        ran = _main("--workspace", str(tmp_path), "q")
+        assert ran.code == 0
+        assert ran.options == AgentOptions(workspace_root=os.path.realpath(tmp_path))
+
+    def test_workspace_is_resolved_like_the_ui(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        root = _main("--workspace", ".", "q").options.workspace_root
+        assert root == os.path.realpath(tmp_path)
+
+    def test_no_workspace_keeps_the_current_directory(self) -> None:
+        # Q10: without the flag a direct run stays where it always ran.
+        assert _main("q").options.workspace_root is None
+
     def test_each_flag_sets_its_option(self) -> None:
         ran = _main(
             "--max-steps",
@@ -403,6 +419,15 @@ class TestUsageErrors:
                 "only for direct mode (a query without --serve): --attempt-policy, "
                 "--reflection-gate",
             ),
+            (
+                ["--serve", "--workspace", "/tmp"],
+                "only for direct mode (a query without --serve): --workspace",
+            ),
+            (
+                # `melo ""` runs no task, so the folder would apply to nothing.
+                ["--workspace", "/tmp", ""],
+                "only for direct mode (a query without --serve): --workspace",
+            ),
         ],
     )
     def test_rejected_before_the_run(
@@ -414,6 +439,20 @@ class TestUsageErrors:
         out, err = capsys.readouterr()
         assert out == ""
         assert f"melo: error: {message}" in err
+
+    @pytest.mark.parametrize("kind", ["missing", "file"])
+    def test_a_workspace_that_is_not_a_directory_exits_2(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], kind: str
+    ) -> None:
+        target = tmp_path / kind
+        if kind == "file":
+            target.write_text("", encoding="utf-8")
+        ran = _main("--workspace", str(target), "q")
+        assert ran.code == 2
+        ran.build.assert_not_called()
+        assert capsys.readouterr().err == (
+            f"melo: --workspace: not a directory: {target}\n"
+        )
 
     def test_an_unknown_builtin_lists_the_known_ones(
         self, capsys: pytest.CaptureFixture[str]

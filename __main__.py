@@ -59,8 +59,10 @@ EXIT_SIGNALS = tuple(
 # Characters of the error that the text-mode status line shows at most.
 STATUS_LINE_ERROR_CHARS = 500
 
-# Flags that apply to direct mode only (a query without --serve), by dest.
+# Flags that apply to direct mode (a query without --serve), by dest. The
+# interactive UI also takes --workspace.
 _DIRECT_FLAGS = {
+    "workspace": "--workspace",
     "max_steps": "--max-steps",
     "attempt_policy": "--attempt-policy",
     "reflection_gate": "--reflection-gate",
@@ -94,7 +96,6 @@ _DIRECT_FLAGS = {
 
 # Flags of the interactive UI (bare melo), by dest.
 _UI_FLAGS = {
-    "workspace": "--workspace",
     "yolo": "--yolo",
     "continue_session": "-c",
     "resume": "-r",
@@ -931,6 +932,16 @@ def _direct_options(
 ) -> AgentOptions:
     """The AgentOptions the direct-mode flags ask for; defaults otherwise."""
     fields: dict[str, Any] = {}
+    if args.workspace is not None and args.query:
+        # Direct mode only: bare melo resolves the folder itself (launch.py),
+        # and `melo ""` refuses the flag in _check_args.
+        root = os.path.realpath(os.path.expanduser(args.workspace))
+        if not os.path.isdir(root):
+            parser.exit(
+                EXIT_NOT_COMPLETED,
+                f"{parser.prog}: --workspace: not a directory: {args.workspace}\n",
+            )
+        fields["workspace_root"] = root
     if args.max_steps is not None:
         fields["max_steps"] = args.max_steps
     if args.attempt_policy is not None:
@@ -1050,6 +1061,11 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
 
     direct = parser.add_argument_group(
         "direct mode", "Options for a query run without --serve."
+    )
+    direct.add_argument(
+        "--workspace",
+        metavar="DIR",
+        help="The folder melo works in (default: the current directory)",
     )
     direct.add_argument(
         "--max-steps",
@@ -1238,17 +1254,12 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
         interactive = parser.add_argument_group(
             "interactive mode",
             "Options for bare melo, which opens the interactive UI on a terminal. "
-            "It also takes --base-url, --chat-model, --max-steps, --attempt-policy, "
-            "--reflection-gate, --builtins, --memory, --memory-dir, "
-            "--request-timeout, --reasoning, --replay-turns, --note-writer, "
-            "--retriever, --recall-*, --retrieval-extra-body and the "
-            "--embedding-* options. It refuses --reasoning-field and "
+            "It also takes --base-url, --chat-model, --workspace, --max-steps, "
+            "--attempt-policy, --reflection-gate, --builtins, --memory, "
+            "--memory-dir, --request-timeout, --reasoning, --replay-turns, "
+            "--note-writer, --retriever, --recall-*, --retrieval-extra-body and "
+            "the --embedding-* options. It refuses --reasoning-field and "
             "--retrieval-extra-body until a later release wires them.",
-        )
-        interactive.add_argument(
-            "--workspace",
-            metavar="DIR",
-            help="The folder melo works in (default: the current directory)",
         )
         interactive.add_argument(
             "--yolo",

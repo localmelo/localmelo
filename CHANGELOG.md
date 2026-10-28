@@ -9,6 +9,31 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Terminal session commands: `/title [text]` shows or sets a title, including
+  before the first message; `/undo` forgets the latest finished turn and
+  keeps its typed history without reversing file changes (a committed undo
+  reports success even after Esc, and `/retry` re-runs that undone turn
+  without removing the previous live one); `/usage` shows
+  recorded work and totals including undone turns, with missing counters
+  left unknown and a narrow-terminal layout; `/memory` inspects the copied working window and explains
+  its actual restore mode. `/copy [turn]` copies stored, redacted Markdown
+  without thinking, preserving indentation and newlines, via bounded turn
+  reads and macOS `pbcopy` or an OSC 52 request when
+  remote, unsupported locally or on other platforms. Clipboard requests
+  only happen on an explicit command; direct runs are unchanged ([#101]).
+
+- `--workspace DIR` in direct mode: a task run keeps its file tools inside
+  the folder and starts `shell_exec` and `python_exec` there. Without the
+  flag a run keeps the current folder, exactly as before; `~` is expanded
+  and the path is resolved like the interactive UI's. `melo ""` and
+  `--serve` refuse it, and a path that is not a folder exits 2 with one
+  line ([#98]).
+- A remember request (`Remember that …`, `记住…`) now also stores the fact
+  it carries after the marker, admitted by `user_request` beside the run's
+  episodic digest, instead of only the digest. The fact is classified as
+  `semantic` unless it is first-person (`profile`), and the redaction,
+  meta-noun and question rules apply to it; a to-do such as "remember to
+  buy milk" still stores no fact ([#100]).
 - R6-lite's typed long-term store: `long_term.db` migrates in place to
   `user_version` 1 with `kind`, `source`, `status`, `admitted_by`,
   provenance, task/session ids, links and uses beside the text and vector,
@@ -489,6 +514,14 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A thought chunk of an attempt is now superseded at the attempt boundary
+  together with that attempt's notes, so a chunk recalled later renders
+  with the `(superseded)` marker and names its attempt instead of passing
+  for the current attempt's thinking ([#100]).
+- `melo-retrieve --export-store DIR` and `--export-decisions DIR` print
+  zero entries and exit 0 when the directory has no `long_term.db` yet,
+  instead of failing with "No such file"; a path that is not a directory
+  keeps the missing-file usage error ([#100]).
 - A thought chunk recalled with `--recall-kinds thought` no longer replays
   the reply that produced it: its alias stays with that step's turn, so
   step recall and the `recall` tool return it only after the turn left the
@@ -672,3 +705,5 @@ earlier milestones.
 [#96]: https://github.com/localmelo/localmelo/pull/96
 [#90]: https://github.com/localmelo/localmelo/pull/90
 [#97]: https://github.com/localmelo/localmelo/pull/97
+[#100]: https://github.com/localmelo/localmelo/pull/100
+[#101]: https://github.com/localmelo/localmelo/pull/101

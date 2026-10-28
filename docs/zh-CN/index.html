@@ -89,7 +89,7 @@ source .venv/bin/activate</code></pre>
         <div class="link-grid">
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">
             <strong>运行任务</strong>
-            <span>一条命令完成一个任务：在步数上限内运行，两次尝试之间会进行反思，还可以设置运行时限；也可以运行 <code>melo</code> 在终端里对话：模型的思考、每个工具调用和运行进度都会实时显示；批准写文件之前，还会显示这次写入将做出的改动；运行命令或写文件之前会先询问。</span>
+            <span>一条命令完成一个任务：在步数上限内运行，两次尝试之间会进行反思，还可以设置运行时限；也可以运行 <code>melo</code> 在终端里对话：模型的思考、每个工具调用和运行进度都会实时显示；批准写文件之前，还会显示这次写入将做出的改动；运行命令或写文件之前会先询问；还可以用 <code>melo -c</code> 或 <code>melo -r</code> 恢复该文件夹里已保存的对话；<code>/title</code>、<code>/undo</code>、<code>/usage</code>、<code>/memory</code> 和 <code>/copy</code> 可以命名、撤销、查看和复制对话。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">
             <strong>工具和 MCP</strong>
@@ -109,7 +109,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">
             <strong>记忆</strong>
-            <span>工作记忆、任务和步骤的历史记录，以及配置了嵌入服务器时的长期记忆；开启持久化后会保存到 SQLite，保存的文字会先做脱敏，compress 推理模式会在内存中为每条回复保留一条简短的笔记；在 Python 中还可以忘掉一个任务或全部记忆。</span>
+            <span>工作记忆、任务和步骤的历史记录，以及配置了嵌入服务器时的长期记忆；开启持久化后会保存到 SQLite，保存的文字会先做脱敏，长期记忆记录带类型、只有排练、用户陈述或可选的结果摘要才能写入，compress 推理模式会在内存中为每条回复保留一条简短的笔记，并在起始、尝试和步骤召回它；在 Python 中还可以忘掉一个任务或全部记忆。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">
             <strong>嵌入模型设置</strong>
@@ -120,8 +120,8 @@ source .venv/bin/activate</code></pre>
             <span>在 Python 代码中运行任务：以事件形式跟踪每一步，停止运行，审批工具调用，并把文件工具限制在一个目录内。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">
-            <strong>离线检索 <span class="tag note">仅离线</span></strong>
-            <span>用 <code>melo-retrieve</code> 在带标注的查询上比较 <code>bm25</code>、<code>llm</code> 和 <code>embedding</code> 三种记忆检索器。运行目前还不使用它们。</span>
+            <strong>记忆检索</strong>
+            <span>用 <code>melo-retrieve</code> 在带标注的查询上比较 <code>bm25</code>、<code>llm</code> 和 <code>embedding</code> 三种记忆检索器；compress 推理模式在循环中使用同一组检索器，由 <code>auto</code> 选择。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#use-melo-in-scripts">
             <strong>脚本和基准测试</strong>
@@ -135,9 +135,8 @@ source .venv/bin/activate</code></pre>
         <p>v0.1.0 里程碑计划于 2026-12-20 完成。</p>
         <p>计划中：</p>
         <ul>
-          <li>交互式命令行的后续部分：可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
+          <li>交互式命令行剩下的部分：附加文件和 shell 命令；</li>
           <li>一个实时显示智能体工作的控制台页面，以及网关重启后仍然保留的网页工作区对话（控制台的会话已经可以持久保存并在重启后恢复）；</li>
-          <li>让后续运行可以检索推理笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
           <li>进度行上的百分比进度条，用于反复运行的任务；在重放证明它可靠之前保持关闭。</li>
         </ul>

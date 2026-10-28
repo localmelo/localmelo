@@ -103,7 +103,7 @@ _THINK_OPENING = re.compile(r"\s*<think>", re.IGNORECASE)
 _THINK_CLOSING = re.compile(r"</think>", re.IGNORECASE)
 
 
-def split_thinking(text: str) -> tuple[str, str]:
+def split_thinking(text: str, *, strip_answer: bool = True) -> tuple[str, str]:
     """Split the reasoning in a ``<think>`` block off *text*: ``(thinking, text)``.
 
     - The first ``<think>...</think>`` block, in any letter case and
@@ -116,7 +116,8 @@ def split_thinking(text: str) -> tuple[str, str]:
       prompt (DeepSeek-R1 and Qwen3 thinking models) leave only the closing
       tag in the reply, and vLLM's R1 reasoning parser reads it the same way.
     - The rest, stripped, is the text. Without a block the result is
-      ``("", text.strip())``.
+      ``("", text.strip())``. With ``strip_answer=False``, preserve the
+      answer's surrounding whitespace, including Markdown code indentation.
 
     The thinking is returned stripped too. Ollama's provider, and an
     OpenAI-compatible server without a reasoning parser, put the reasoning
@@ -125,14 +126,15 @@ def split_thinking(text: str) -> tuple[str, str]:
     block = _THINK_BLOCK.search(text)
     if block is not None:
         rest = text[: block.start()] + text[block.end() :]
-        return block.group(1).strip(), rest.strip()
+        return block.group(1).strip(), rest.strip() if strip_answer else rest
     opening = _THINK_OPENING.match(text)
     if opening is not None:
         return text[opening.end() :].strip(), ""
     closing = _THINK_CLOSING.search(text)
     if closing is not None:
-        return text[: closing.start()].strip(), text[closing.end() :].strip()
-    return "", text.strip()
+        rest = text[closing.end() :]
+        return text[: closing.start()].strip(), rest.strip() if strip_answer else rest
+    return "", text.strip() if strip_answer else text
 
 
 # ── Data types ──

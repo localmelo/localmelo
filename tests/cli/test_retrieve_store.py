@@ -202,6 +202,37 @@ def test_a_missing_file_is_one_line_and_exit_2(
     assert "No such file" in capsys.readouterr().err
 
 
+def test_a_directory_without_a_store_exports_zero_and_exit_0(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # T59: a directory with no long_term.db is an empty store, not a usage
+    # error; the normal output shape is zero lines plus the count on stderr.
+    directory = tmp_path / "no-store"
+    directory.mkdir()
+    assert retrieve.main(["--export-store", str(directory)]) == 0
+    out = capsys.readouterr()
+    assert out.out == ""
+    assert f"exported 0 active entries from {directory / 'long_term.db'}" in out.err
+    assert retrieve.main(["--export-decisions", str(directory)]) == 0
+    out = capsys.readouterr()
+    assert out.out == ""
+    assert f"exported 0 decisions from {directory / 'long_term.db'}" in out.err
+    # A path that is not a directory keeps the usage error.
+    assert retrieve.main(["--export-store", str(tmp_path / "no-store.db")]) == 2
+    assert "No such file" in capsys.readouterr().err
+
+
+def test_a_directory_with_a_store_still_exports_its_rows(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    directory = tmp_path / "m"
+    candidates = _candidates(tmp_path / "c.jsonl", CANDIDATES[:1])
+    assert retrieve.main(["--route", candidates, "--memory-dir", str(directory)]) == 0
+    capsys.readouterr()
+    assert retrieve.main(["--export-store", str(directory)]) == 0
+    assert len(_lines(capsys)) == 1
+
+
 def test_the_three_modes_are_mutually_exclusive(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
