@@ -130,6 +130,41 @@ def test_control_and_list_use_expected_api() -> None:
     assert json.loads(calls[2].content) == {"level": "auto"}
 
 
+@pytest.mark.parametrize(
+    "args,method,body",
+    [
+        (["show", "abc"], "GET", None),
+        (
+            ["resume", "abc", "--level", "P2"],
+            "PATCH",
+            {"state": "resume", "level": "P2"},
+        ),
+        (["stop", "abc"], "PATCH", {"state": "stop"}),
+    ],
+)
+def test_show_resume_stop_requests(args: list[str], method: str, body: object) -> None:
+    calls: list[httpx.Request] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return httpx.Response(200, json={"task": {"task_id": "abc", "state": "queued"}})
+
+    with httpx.Client(
+        base_url="http://127.0.0.1:8901", transport=httpx.MockTransport(reply)
+    ) as client:
+        assert (
+            execute(
+                parser().parse_args(args),
+                client,
+                out=io.StringIO(),
+                stdin=io.StringIO(),
+            )
+            == 0
+        )
+    assert calls[0].method == method and calls[0].url.path == "/api/tasks/abc"
+    assert (json.loads(calls[0].content) if calls[0].content else None) == body
+
+
 def test_invalid_mode_and_non_utf8_brief(tmp_path: Path) -> None:
     brief = tmp_path / "brief"
     brief.write_bytes(b"\xff")
@@ -202,9 +237,20 @@ def test_human_output_strips_terminal_control_sequences() -> None:
     assert chr(27) not in output.getvalue()
 
 
-@pytest.mark.parametrize("host", ["::1", "127.0.0.2"])
+@pytest.mark.parametrize(
+    "host,expected",
+    [
+        ("::1", "::1"),
+        ("[::1]", "::1"),
+        ("127.0.0.2", "127.0.0.2"),
+        ("127.1", "127.0.0.1"),
+        ("2130706433", "127.0.0.1"),
+        ("localhost.", "127.0.0.1"),
+        ("0:0:0:0:0:0:0:1", "::1"),
+    ],
+)
 def test_main_configured_loopback_uses_guard_compatible_host(
-    host: str, monkeypatch: pytest.MonkeyPatch
+    host: str, expected: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import localmelo.support.config as config
     import localmelo.support.task_cli as cli
@@ -227,8 +273,91 @@ def test_main_configured_loopback_uses_guard_compatible_host(
 
     monkeypatch.setattr(cli.httpx, "Client", client)
     assert cli.main(["list"]) == 0
-    assert requests[0].url.host == host
-    assert requests[0].headers["Host"] == "127.0.0.1:8901"
+    assert requests[0].url.host == expected
+    host_header = "[::1]:8901" if expected == "::1" else "127.0.0.1:8901"
+    assert requests[0].headers["Host"] == host_header
+
+
+def test_explicit_gateway_ignores_invalid_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import localmelo.support.task_cli as cli
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config = tmp_path / ".cache/localmelo/config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text("not valid = [", encoding="utf-8")
+    monkeypatch.setattr(cli, "read_token", lambda path: "a" * 64)
+    factory = httpx.Client
+    monkeypatch.setattr(
+        cli.httpx,
+        "Client",
+        lambda **kw: factory(
+            **kw,
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json={"tasks": []})
+            ),
+        ),
+    )
+    assert cli.main(["--gateway", "http://127.0.0.1:8901", "list"]) == 0
+    assert cli.main(["--gateway", "", "list"]) == 2
+
+
+@pytest.mark.parametrize("cursor", ["-1", "9223372036854775808"])
+def test_bad_cursor_is_usage_error(
+    cursor: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import localmelo.support.task_cli as cli
+
+    assert cli.main(["follow", "abc", "--after", cursor]) == 2
+    assert "cursor" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("status", [401, 404, 409])
+def test_main_follow_error_is_stderr_only(
+    status: int, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import localmelo.support.task_cli as cli
+
+    monkeypatch.setattr(cli, "read_token", lambda path: "a" * 64)
+    factory = httpx.Client
+    monkeypatch.setattr(
+        cli.httpx,
+        "Client",
+        lambda **kw: factory(
+            **kw, transport=httpx.MockTransport(lambda request: httpx.Response(status))
+        ),
+    )
+    assert (
+        cli.main(["--gateway", "http://127.0.0.1:8901", "--json", "follow", "abc"]) == 1
+    )
+    captured = capsys.readouterr()
+    assert captured.out == "" and str(status) in captured.err
+
+
+def test_gateway_down_names_address_and_interrupt_is_quiet(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import localmelo.support.task_cli as cli
+
+    monkeypatch.setattr(cli, "read_token", lambda path: "a" * 64)
+    factory = httpx.Client
+
+    def fail(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("down", request=request)
+
+    monkeypatch.setattr(
+        cli.httpx,
+        "Client",
+        lambda **kw: factory(**kw, transport=httpx.MockTransport(fail)),
+    )
+    assert cli.main(["--gateway", "http://127.0.0.1:8901", "list"]) == 1
+    assert "http://127.0.0.1:8901" in capsys.readouterr().err
+    monkeypatch.setattr(
+        cli, "execute", lambda *a, **kw: (_ for _ in ()).throw(KeyboardInterrupt())
+    )
+    assert cli.main(["--gateway", "http://127.0.0.1:8901", "follow", "abc"]) == 130
+    assert capsys.readouterr().err == ""
 
 
 def test_main_sends_bearer_without_proxy_or_redirects(

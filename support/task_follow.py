@@ -191,7 +191,7 @@ def follow(
                         item = _event(frame, task_id)
                         if item is not None:
                             event_id, event = item
-                            if stream_floor < event_id <= cursor:
+                            if stream_floor < event_id < cursor:
                                 raise FollowError(
                                     "Out-of-order SSE event; follow incomplete"
                                 )

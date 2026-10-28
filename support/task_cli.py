@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import json
 import os
 import re
+import socket
 import stat
 import sys
 import uuid
@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 
 import httpx
 
+from localmelo.support.loopback import is_loopback
 from localmelo.support.task_follow import FollowError, follow
 
 MAX_BRIEF_BYTES = 1024 * 1024
@@ -45,14 +46,17 @@ def address(url: str) -> str:
             or parsed.fragment
         ):
             raise ValueError
-        if host == "localhost":
-            host = "127.0.0.1"
-        ip = ipaddress.ip_address(host)
-        if not ip.is_loopback:
+        if not is_loopback(host):
             raise ValueError
-        rendered = f"[{ip}]" if ip.version == 6 else str(ip)
+        if host.lower() in ("localhost", "localhost."):
+            host = "127.0.0.1"
+        else:
+            host = socket.getaddrinfo(
+                host, None, type=socket.SOCK_STREAM, flags=socket.AI_NUMERICHOST
+            )[0][4][0]
+        rendered = f"[{host}]" if ":" in host else host
         return f"{parsed.scheme}://{rendered}:{port}"
-    except ValueError:
+    except (OSError, UnicodeError, ValueError):
         raise ValueError(
             "gateway must be a loopback HTTP(S) address with a port"
         ) from None
@@ -175,6 +179,8 @@ def execute(
     """Run a parsed operation using an already authenticated client."""
     cmd = args.command
     if cmd == "follow":
+        if not 0 <= args.after <= 2**63 - 1:
+            raise ValueError("invalid event cursor")
         return follow(
             client,
             _identifier(args.id),
@@ -224,7 +230,8 @@ def execute(
     except httpx.RequestError as exc:
         suffix = f"; retry with --request-key {request_key}" if request_key else ""
         raise ClientError(
-            "gateway connection failed; start melo --serve or check --gateway" + suffix
+            f"gateway connection failed at {client.base_url}; "
+            "start melo --serve or check --gateway" + suffix
         ) from exc
     if response.is_redirect or response.status_code >= 400:
         suffix = (
@@ -299,11 +306,19 @@ def execute(
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
-        from localmelo.support.config import load
+        if args.command == "follow" and not 0 <= args.after <= 2**63 - 1:
+            raise ValueError("invalid event cursor")
+        explicit = getattr(args, "gateway", None)
+        if explicit is not None:
+            url = address(explicit)
+        else:
+            from localmelo.support.config import load
 
-        cfg = load().gateway
-        host = f"[{cfg.host}]" if ":" in cfg.host else cfg.host
-        url = address(getattr(args, "gateway", None) or f"http://{host}:{cfg.port}")
+            cfg = load().gateway
+            host = cfg.host
+            if ":" in host and not (host.startswith("[") and host.endswith("]")):
+                host = f"[{host}]"
+            url = address(f"http://{host}:{cfg.port}")
         try:
             token = read_token(
                 Path.home() / ".cache" / "localmelo" / "gateway" / "auth"
@@ -316,18 +331,24 @@ def main(argv: list[str] | None = None) -> int:
             base_url=url,
             headers={
                 "Authorization": f"Bearer {token}",
-                "Host": f"127.0.0.1:{urlsplit(url).port}",
+                "Host": f"{'[::1]' if urlsplit(url).hostname == '::1' else '127.0.0.1'}:{urlsplit(url).port}",
             },
             timeout=10,
             follow_redirects=False,
             trust_env=False,
         ) as client:
             return execute(args, client, out=sys.stdout, stdin=sys.stdin)
+    except KeyboardInterrupt:
+        return 130
     except (ValueError, ClientError, FollowError, OSError, httpx.HTTPError) as exc:
         code = 2 if isinstance(exc, ValueError) else 1
         message = _safe(exc)
         print(f"melo-task: {message}", file=sys.stderr)
-        if getattr(args, "json", False) and not isinstance(exc, BrokenPipeError):
+        if (
+            getattr(args, "json", False)
+            and args.command != "follow"
+            and not isinstance(exc, BrokenPipeError)
+        ):
             try:
                 print(
                     json.dumps({"v": 1, "command": args.command, "error": message}),

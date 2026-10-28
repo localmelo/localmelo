@@ -94,6 +94,23 @@ def test_bad_frames_fail(body: bytes) -> None:
         follow(c, "abc", json_mode=False, wait=False, out=io.StringIO())
 
 
+def test_duplicate_event_within_stream_is_emitted_once() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/events"):
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content=frame(1) + frame(1) + frame(2),
+            )
+        return httpx.Response(200, json={"task": {"state": "done"}})
+
+    out = io.StringIO()
+    with client(handler) as c:
+        assert follow(c, "abc", json_mode=True, wait=False, out=out) == 0
+    records = [json.loads(line) for line in out.getvalue().splitlines()]
+    assert [record["id"] for record in records if "id" in record] == [1, 2]
+
+
 def test_after_cursor_and_out_of_order_events() -> None:
     requests: list[httpx.Request] = []
 
