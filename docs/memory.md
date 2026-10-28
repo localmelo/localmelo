@@ -59,6 +59,26 @@ returned) and `outcome`. The model's own
 `<note>` block stays in the working-memory copy of its reply, so the next
 step reads it; a reply with no text gets the checked note as its copy instead.
 
+A reply with no block that answers with a factual summary now fills `found`
+from its visible text: every bullet, numbered item or table row, and every
+sentence of a plain paragraph, that carries a strong key (see
+[Long-term memory](#long-term-memory)) becomes one item, in text order, up to
+12 per reply. Questions go to `open`; plans and options go to `plan` or
+are left out, and negated or cancelled statements are not promoted as
+positive facts. These checks are heuristic, not a semantic verifier. Lines
+whose only strong key is a CJK run are not extracted as factual lines. The
+rendered note keeps its 1,200-character budget, so it may show fewer than it
+stores; the 12 items are what long-term memory offers. An explicit `<note>`
+may also list up to 12 `found` items. A reply that only reports the agent's
+own work ("The session is complete.", "I've read and remembered all of the
+records…") is not stored as a fact: the policy ignores it with the reason
+`meta claim about the agent's own work`. Dates, people, times and amounts
+inside the work frame do not make it content; a keyed clause after `that`,
+`says`, `said`, `shows`, `reads`, a colon or a dash does. A `task:` line,
+or a file, path or function name, marks a text as content and is never
+filtered this way, so an Aider-style final digest ("task: Implement
+transpose in transpose.py … outcome: completed") is kept.
+
 - The notes, drafts and digests live in a **note store** beside the
   conversation window, in RAM, as long as the agent: one direct run, one
   `melo ""` loop, one interactive UI session or one Python-API `Agent`.
@@ -212,20 +232,36 @@ search returns the legacy metadata merged with these columns, so an older
 reader still sees the same text and metadata.
 
 The source of a fact is the observation that established it, which may be
-earlier in the task than the note that states it. An item matches records
-in this order, and the first match wins: the records of this reply's own
-tool results; then those of results still in the working-memory window,
-newest first; then the rest of the same task's results, newest first. Only
-the task's last 200 records are kept, and another task's records are never
-used. A record matches only when it shares with the item a strong key (a
-number, a date or time, an identifier containing a digit, or a capitalised
-name that does not start its sentence) or at least two distinctive words
-(not a stopword, four or more characters). Fillers such as `done`, `ok`,
-`good`, `thanks`, `好的`, `完成` and `可以` are stopwords, so an item that
-says only "Done." takes no source. When the note has no record text at
-all, the item keeps the note's own `source_ids`; when it has records and
-none matches, the item gets none. A digest's ids are the union of its
-notes' ids and the records behind their items.
+earlier in the task than the note that states it. The candidate records are
+this reply's tool results, the results still in the working-memory window,
+and the rest of the same task's results. Only the task's last 200 records are
+kept, and another task's records are never used. A record matches when it
+shares a strong key or at least two distinctive non-stopwords of four or more
+characters. The uniquely best score wins; equal top scores cite nothing.
+Each matching typed key adds to the score, and conflicting dates, years when
+both are present, currencies or phone numbers reject a record. Amounts retain
+their unit or currency. A strong key is a date, a time with a colon or am/pm,
+an amount with a currency or unit (or an amount field), a phone number, an
+identifier of three or more characters containing a digit, a number of three
+or more digits, or a capitalised name that does not start its sentence.
+Dates include ISO, `April 9`, `9 April` and bare slash dates such as `4/9`.
+Ambiguous slash dates use US month-first order; unambiguous `13/4` is
+day-first. Thus `offsite 4/9` matches `2026-04-09`. A slash pair is not a
+date when followed by a quantity or count word, or preceded by a number and
+space (a mixed number such as `2 1/2`); `24/7`, invalid dates and lowercase
+`may`/`march` are not dates either. These are heuristic rules, so other
+fraction formats can still be ambiguous. Bare one- or two-digit numbers and
+ordinals are not keys. Fillers such
+as `done`, `ok`, `good`, `thanks`, `好的`, `完成` and `可以` are stopwords,
+so an item that says only "Done." takes no source. When the note has no record
+text at all, the item keeps the note's own `source_ids`; when it has records
+and none matches, the item gets none, including after admission.
+A digest's ids are the union of its notes' ids and the records behind their
+items. A completion or self-work claim with no fact beyond its frame is
+`IGNORE`d with the reason `meta claim about the agent's own work`, whether it
+comes from a note or from a digest. A `task:` line, a file, path or function
+name makes the text content instead. A final digest admitted by `outcome`
+for a completed run is exempt from this filter entirely.
 
 Nothing is written without a signal:
 
@@ -234,7 +270,7 @@ Nothing is written without a signal:
 | `rehearsal` | A restatement, a successful call that acted on the note's path or command, or a reflection's `used_notes`. | That candidate, at once. A second admission of the unchanged candidate writes nothing. |
 | `user_request` | The user's message asks to remember (`remember that …`, `记住…`). | The fact the request carries after its marker, this run's `remember` notes and its final digest at the run's end; never the final reflection. The fact is classified by `classify_kind`, so it is `semantic` unless it is first-person (`profile`), and the meta-noun and question rules below apply to it. |
 | `user_statement` | A declarative sentence of the user's message states a stable fact without a remember request, or corrects one and carries the corrected value. A question (`?`/`？`) never counts, and `my … is`/`我的…是` refuses a meta noun (task, question, request, goal, plan, problem, issue, job, point; 任务, 问题, 请求, 目标, 计划). | That sentence, at once. |
-| `outcome` | The end of the run, only with `--admit-on-outcome on`. | The final attempt digest, with the terminal status in its provenance; never the final reflection. |
+| `outcome` | The end of the run, only with `--admit-on-outcome on`. | The final attempt digest, with the terminal status in its provenance; never the final reflection. For a completed run the digest is exempt from the meta-claim filter. |
 | `sleep` | Reserved for the sleep pipeline's probe gate. | Nothing in v1. |
 
 Only the user's own text gives a user signal: a tool result, a note, a recall
@@ -249,7 +285,7 @@ one action:
 
 | Action | Rule | Write |
 |---|---|---|
-| `IGNORE` | A short fact (under 20 normalised characters), a fact that names only this task's files, or a duplicate (normalised equality, text overlap >= 0.9, or cosine >= 0.95). | No entry; a duplicate target's `uses` grows. |
+| `IGNORE` | A short fact (under 20 normalised characters), a fact that names only this task's files, a completion or self-work claim with no fact beyond its frame, or a duplicate (normalised equality, text overlap >= 0.9, or cosine >= 0.95). | No entry; a duplicate target's `uses` grows. |
 
 An episodic item's subject is its candidate plus its item index, so two
 different items of one note are two entries; a restatement re-proposes the

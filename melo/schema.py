@@ -540,10 +540,10 @@ class ReflectionDecision:
 
 @dataclass(frozen=True)
 class CandidateItem:
-    """One item of a note or user message: its text and the records behind it."""
+    """One item's text and records; None means no per-item attribution supplied."""
 
     text: str
-    source_ids: tuple[str, ...] = ()
+    source_ids: tuple[str, ...] | None = None
 
 
 @dataclass
