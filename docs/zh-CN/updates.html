@@ -65,7 +65,7 @@
         <p>计划中：</p>
         <ul>
           <li>交互式命令行的后续部分：可以恢复的会话（<code>melo -c</code>、<code>melo -r</code>）、附加文件和 shell 命令；</li>
-          <li>网关重启后仍然保留的对话，并在网页工作区里实时显示智能体的工作；</li>
+          <li>一个实时显示智能体工作的控制台页面，以及网关重启后仍然保留的网页工作区对话（控制台的会话已经可以持久保存并在重启后恢复）；</li>
           <li>让后续运行可以检索推理笔记，并可切换检索方式（<code>bm25</code>、<code>llm</code>、<code>embedding</code>）；</li>
           <li>在一个本地模型服务器上同时运行多个任务，并优先回答你的对话；</li>
           <li>进度行上的百分比进度条，用于反复运行的任务；在重放证明它可靠之前保持关闭。</li>
@@ -76,6 +76,43 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-2026-10-28-console-details">
+          <h3>控制台会话的工具、授权、记忆和运行记录，以及调度器门</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/92">#92</a>
+          </p>
+          <ul>
+            <li><code>GET /api/sessions/{id}/tools</code> 列出每个工具的来源（<code>builtin</code>、<code>provided</code> 或 <code>custom</code>）、是否先询问，以及该会话是否已授权；<code>GET /api/sessions/{id}/memory</code> 显示网关保留的对话（去掉思考，所有文字先脱敏，并截到 2,000 个字符）；<code>GET /api/sessions/{id}/runs</code> 给出每个已完成回合的 <code>RunResult</code>（不含回答）；<code>DELETE /api/sessions/{id}/grants/{tool}</code>（或 <code>/grants</code>）会收回会话授权，下次调用该工具时重新询问。</li>
+            <li>控制台回合的每次模型调用现在都会像工作区聊天一样，在 <code>[scheduler]</code> 下等待自己的名额：网关只创建一个门，两个界面共用同一个 <code>n_srv</code> 预算和同一份 <code>calls.jsonl</code>（控制台调用会记录会话 ID），也共用同一个 GPU 锁和电池监视器；<code>lock_gate = "wait"</code> 时，外部 GPU 锁会暂停控制台回合。控制台的 runner 还会为每个回合请求 <code>run.progress</code> 事件。<code>/</code>、工作区页面和所有 <code>/v1</code> 路由不变。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/scheduler.md#the-gate-on-chats-s2">调度器（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-api-v2-turns">
+          <h3>通过 API v2 运行回合和审批</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/91">#91</a>
+          </p>
+          <ul>
+            <li><code>POST /api/sessions</code> 创建会话，可带也可不带第一个回合；<code>POST /api/sessions/{id}/turns</code>、<code>/retry</code> 和 <code>/turns/{id}/cancel</code> 分别开始、重试和停止回合，按 key 取消的路由可以停止一条消息，<code>POST /api/approvals/{request_id}</code> 回答审批请求，<code>PATCH</code> 和 <code>DELETE</code> 可以重命名、移动或删除会话。</li>
+            <li>回合在后台开始，事件通过会话的事件流送达：<code>approval.requested</code> 等待通过 API 给出的回答，回合以 <code>turn.finished</code> 结束，再从该回合的记录里读取结果。<code>client_request_id</code> 让创建会话或回合可以安全重复；每个会话同时只运行一个回合（409 <code>session_busy</code>）；在等待审批时停止，会撤回审批卡片。</li>
+            <li>每个请求字符串都必须是合法的 UTF-8（孤立代理项会得到 400 <code>invalid_request</code>）。参考文档新增了这些路由，以及一个经过测试的 Python 脚本：创建会话、跟随事件流、回答审批并读回答案。<code>/</code>、工作区页面和所有 <code>/v1</code> 路由不变。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/api.md">API v2（英文）</a>。</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-v1-run-input">
+          <h3><code>/v1/agent/run</code> 的无效请求返回更清晰的 400</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/89">#89</a>
+          </p>
+          <ul>
+            <li><code>session_id</code> 不是字符串（数字、列表）时，现在会得到该路由自己的 400 <code>{"error": "Invalid session_id format: …"}</code>，与其他无效 ID 相同，而不是 FastAPI 的纯文本 500。</li>
+            <li>100,000 字符的上限改为在去掉首尾空白之后计算——也就是智能体实际运行的文本——所以去掉空白后不超长的带空白查询会被接受；空查询仍然是 400。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/gateway.md#post-v1agentrun">网关和 HTTP API（英文）</a>。</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-reasoning-notes">
           <h3>保留笔记而不是思考的推理模式</h3>
