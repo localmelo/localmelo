@@ -67,7 +67,6 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   is 400 `invalid_request`), a session's workspace is stored as its real
   path, and `/`, the workspace page and every `/v1/*` route are unchanged
   ([#91]).
->>>>>>> upstream/main
 - Reasoning notes for the compress modes: `--reasoning compress` and
   `compress+replay`, `--note-writer auto|heuristic`, and the `[agent]`
   `note_writer` key. `compress` sends no reasoning; instead each reply is
