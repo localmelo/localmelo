@@ -15,7 +15,7 @@ from localmelo.support.gateway.task_store import (
     COMPONENT,
     SCHEDULER_VERSION,
     TaskConflictError,
-    TaskNotFoundError,
+    TaskRecord,
     TaskStore,
     TaskStoreError,
 )
@@ -66,10 +66,21 @@ async def tasks(store: SessionStore, clock: Clock) -> AsyncIterator[TaskStore]:
     yield opened
 
 
+async def create_task(
+    tasks: TaskStore,
+    task_spec: TaskSpec,
+    *,
+    workspace: str | None = None,
+    **kwargs: Any,
+) -> tuple[TaskRecord, bool]:
+    validated = workspace or str(Path(tasks.store.path).parent.resolve())
+    return await tasks.create_task(task_spec, workspace=validated, **kwargs)
+
+
 async def rows(store: SessionStore, sql: str, params: Sequence[Any] = ()) -> list[Any]:
-    async with store.component_read() as conn:
-        cursor = await conn.execute(sql, tuple(params))
-        return list(await cursor.fetchall())
+    uri = Path(store.path).as_uri() + "?mode=ro"
+    with sqlite3.connect(uri, uri=True) as conn:
+        return list(conn.execute(sql, tuple(params)).fetchall())
 
 
 async def one(store: SessionStore, sql: str, params: Sequence[Any] = ()) -> Any:
@@ -77,9 +88,16 @@ async def one(store: SessionStore, sql: str, params: Sequence[Any] = ()) -> Any:
     return found[0] if found else None
 
 
-async def get_task(tasks: TaskStore, task_id: str) -> Any:
-    async with tasks.store.component_read() as conn:
-        return await tasks._get(conn, task_id)
+async def get_task(tasks: TaskStore, task_id: str) -> TaskRecord | None:
+    row = await one(tasks.store, "SELECT * FROM tasks WHERE task_id = ?", (task_id,))
+    return TaskRecord.from_row(row) if row is not None else None
+
+
+async def component_version(store: SessionStore, name: str) -> int | None:
+    row = await one(
+        store, "SELECT version FROM schema_components WHERE name = ?", (name,)
+    )
+    return row[0] if row else None
 
 
 async def priority_events(tasks: TaskStore, task_id: str) -> list[Any]:
@@ -105,13 +123,13 @@ async def recent_log(tasks: TaskStore, task_id: str) -> list[Any]:
 async def test_open_creates_seven_tables_and_leaves_user_version_alone(
     store: SessionStore, clock: Clock
 ) -> None:
-    assert await store.component_version(COMPONENT) is None
+    assert await component_version(store, COMPONENT) is None
     assert await one(store, "PRAGMA user_version") == (1,)
 
     tasks = TaskStore(store, clock=clock)
     assert await tasks.open() == SCHEDULER_VERSION
     assert tasks.version == SCHEDULER_VERSION
-    assert await store.component_version(COMPONENT) == SCHEDULER_VERSION
+    assert await component_version(store, COMPONENT) == SCHEDULER_VERSION
     # A second open is a no-op, not a second migration.
     assert await tasks.open() == SCHEDULER_VERSION
     assert await one(store, "PRAGMA user_version") == (1,)
@@ -246,7 +264,7 @@ async def test_a_failed_migration_writes_no_table_and_no_version(
         await one(store, "SELECT name FROM sqlite_master WHERE name='broken_ok'")
         is None
     )
-    assert await store.component_version("broken") is None
+    assert await component_version(store, "broken") is None
 
 
 async def test_an_older_component_is_refused_without_migrating(
@@ -270,8 +288,8 @@ async def test_a_closed_and_reopened_file_keeps_the_component_and_tasks(
     await first.open()
     tasks = TaskStore(first, clock=clock)
     await tasks.open()
-    record, _ = await tasks.create_task(
-        spec("stays"), origin="user", request_key="stays"
+    record, _ = await create_task(
+        tasks, spec("stays"), origin="user", request_key="stays"
     )
     await first.aclose()
 
@@ -281,8 +299,8 @@ async def test_a_closed_and_reopened_file_keeps_the_component_and_tasks(
         reopened = TaskStore(second, clock=clock)
         assert await reopened.open() == SCHEDULER_VERSION
         assert (await get_task(reopened, record.task_id)) is not None
-        again, repeated = await reopened.create_task(
-            spec("stays"), origin="user", request_key="stays"
+        again, repeated = await create_task(
+            reopened, spec("stays"), origin="user", request_key="stays"
         )
         assert repeated is True and again.task_id == record.task_id
     finally:
@@ -297,7 +315,7 @@ async def test_the_cli_file_never_gets_the_component(tmp_path: Path) -> None:
             TaskStore(cli)
         with pytest.raises(SessionStoreError, match="gateway"):
             await cli.ensure_component(COMPONENT, SCHEDULER_VERSION, ("SELECT 1",))
-        assert await cli.component_version(COMPONENT) is None
+        assert await component_version(cli, COMPONENT) is None
     finally:
         await cli.aclose()
 
@@ -305,13 +323,13 @@ async def test_the_cli_file_never_gets_the_component(tmp_path: Path) -> None:
 async def test_create_writes_the_task_session_and_its_first_rows(
     store: SessionStore, tasks: TaskStore
 ) -> None:
-    record, repeated = await tasks.create_task(
+    record, repeated = await create_task(
+        tasks,
         spec(
             "Make six slides",
-            done_when=["slides.pdf exists"],
-            user_words="make slides",
             workspace="/tmp/talk",
             level=1,
+            level_source="user",
             reason="P1 · due today",
         ),
         origin="user",
@@ -324,7 +342,7 @@ async def test_create_writes_the_task_session_and_its_first_rows(
     assert record.request_key == "req-1"
     assert record.state == "queued"
     assert record.level == 1
-    assert record.level_source == "computed"
+    assert record.level_source == "user"
     assert record.spec["objective"] == "Make six slides"
     assert record.spec["task_id"] == record.task_id
     session = await one(
@@ -332,16 +350,88 @@ async def test_create_writes_the_task_session_and_its_first_rows(
         "SELECT kind, title, workspace FROM sessions WHERE id = ?",
         (record.task_id,),
     )
-    assert session == ("task", "Make six slides", "/tmp/talk")
+    assert session == (
+        "task",
+        "Make six slides",
+        str(Path(store.path).parent.resolve()),
+    )
     event = await one(
         store,
         "SELECT actor, from_level, to_level, reason, quote FROM priority_events "
         "WHERE task_id = ?",
         (record.task_id,),
     )
-    assert event == ("user", None, 1, "P1 · due today", "make slides")
+    assert event == ("user", None, 1, "P1 · due today", "")
     logged = await recent_log(tasks, record.task_id)
     assert [row[1] for row in logged] == ["task.created"]
+
+
+async def test_create_persists_validated_workspace_separately_from_request(
+    store: SessionStore,
+    tasks: TaskStore,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from localmelo.support.gateway.task_policy import validate_task_workspace
+
+    home = tmp_path / "home"
+    home.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    root = home / "workspace"
+    root.mkdir()
+    cfg = SimpleNamespace(gateway=SimpleNamespace(workspace=str(root)))
+    validated = validate_task_workspace(None, cfg, origin="agent", task_id="worker1")
+    requested = spec("agent")
+    agent, _ = await create_task(
+        tasks, requested, origin="agent", task_id="worker1", workspace=validated
+    )
+    assert agent.spec["workspace"] == ""
+    assert await one(
+        store, "SELECT workspace FROM sessions WHERE id = ?", (agent.task_id,)
+    ) == (validated,)
+
+    explicit = home / "project"
+    explicit.mkdir()
+    validated_user = validate_task_workspace("~/project", cfg, origin="user")
+    user, _ = await create_task(
+        tasks,
+        spec("user", workspace="~/project"),
+        origin="user",
+        workspace=validated_user,
+    )
+    assert user.spec["workspace"] == "~/project"
+    assert await one(
+        store, "SELECT workspace FROM sessions WHERE id = ?", (user.task_id,)
+    ) == (validated_user,)
+
+
+async def test_retry_keeps_the_original_validated_workspace(
+    store: SessionStore, tasks: TaskStore, tmp_path: Path
+) -> None:
+    first_workspace = str(tmp_path.resolve())
+    first, _ = await create_task(
+        tasks,
+        spec("same"),
+        origin="user",
+        request_key="repeat",
+        workspace=first_workspace,
+    )
+    second_workspace = str((tmp_path / "new-root").resolve())
+    repeated, is_repeated = await create_task(
+        tasks,
+        spec("same"),
+        origin="user",
+        request_key="repeat",
+        workspace=second_workspace,
+    )
+    assert is_repeated and repeated.task_id == first.task_id
+    assert await one(
+        store, "SELECT workspace FROM sessions WHERE id = ?", (first.task_id,)
+    ) == (first_workspace,)
+    with pytest.raises(ValueError, match="validated absolute"):
+        await tasks.create_task(spec(), origin="user", workspace="relative")
 
 
 async def test_create_rolls_back_the_session_task_and_events_together(
@@ -353,7 +443,7 @@ async def test_create_rolls_back_the_session_task_and_events_together(
 
     monkeypatch.setattr(store, "_before_commit", fail)
     with pytest.raises(RuntimeError, match="stop before commit"):
-        await tasks.create_task(spec(), origin="user", request_key="rollback")
+        await create_task(tasks, spec(), origin="user", request_key="rollback")
     assert await one(store, "SELECT COUNT(*) FROM sessions") == (0,)
     assert await one(store, "SELECT COUNT(*) FROM tasks") == (0,)
     assert await one(store, "SELECT COUNT(*) FROM priority_events") == (0,)
@@ -363,19 +453,36 @@ async def test_create_rolls_back_the_session_task_and_events_together(
 async def test_a_request_key_is_idempotent_and_a_reuse_conflicts(
     tasks: TaskStore,
 ) -> None:
-    first, repeated = await tasks.create_task(
-        spec("one"), origin="user", request_key="same"
+    first, repeated = await create_task(
+        tasks, spec("one"), origin="user", request_key="same"
     )
     assert repeated is False
-    again, repeated = await tasks.create_task(
-        spec("one"), origin="user", request_key="same"
+    again, repeated = await create_task(
+        tasks, spec("one"), origin="user", request_key="same"
     )
     assert repeated is True
     assert again.task_id == first.task_id
     with pytest.raises(TaskConflictError, match="different task"):
-        await tasks.create_task(spec("two"), origin="user", request_key="same")
-    other, _ = await tasks.create_task(spec("one"), origin="user")
+        await create_task(tasks, spec("two"), origin="user", request_key="same")
+    other, _ = await create_task(tasks, spec("one"), origin="user")
     assert other.task_id != first.task_id
+
+
+async def test_deferred_input_is_rejected_before_request_key_lookup(
+    tasks: TaskStore,
+) -> None:
+    from localmelo.support.gateway.task_policy import TaskSpecError
+
+    first, _ = await create_task(
+        tasks,
+        TaskSpec.from_user_payload({"objective": "same"}),
+        origin="user",
+        request_key="request-1",
+    )
+    with pytest.raises(TaskSpecError, match="inputs"):
+        request = TaskSpec.from_user_payload({"objective": "same", "inputs": ["file"]})
+        await create_task(tasks, request, origin="user", request_key="request-1")
+    assert await get_task(tasks, first.task_id) == first
 
 
 async def test_trusted_create_pins_a_user_level(tasks: TaskStore) -> None:
@@ -383,7 +490,7 @@ async def test_trusted_create_pins_a_user_level(tasks: TaskStore) -> None:
         request = TaskSpec.from_user_payload(
             {"objective": f"level {level}", "level": level}
         )
-        record, _ = await tasks.create_task(request, origin="user")
+        record, _ = await create_task(tasks, request, origin="user")
         assert (record.level, record.level_source, record.level_pinned) == (
             level,
             "user",
@@ -393,22 +500,11 @@ async def test_trusted_create_pins_a_user_level(tasks: TaskStore) -> None:
             await tasks.set_level(record.task_id, 3, source="computed")
 
 
-async def test_request_key_compares_json_canonical_values(tasks: TaskStore) -> None:
-    request = spec("canonical", features={1: {"items": (1, 2)}})
-    first, repeated = await tasks.create_task(
-        request, origin="user", request_key="json"
-    )
-    again, repeated = await tasks.create_task(
-        request, origin="user", request_key="json"
-    )
-    assert repeated is True and again.task_id == first.task_id
-
-
 async def test_a_second_user_p0_on_create_demotes_the_first(tasks: TaskStore) -> None:
     spec_p0 = spec("first", level=0, level_source="user")
-    first, _ = await tasks.create_task(spec_p0, origin="user")
-    second, _ = await tasks.create_task(
-        spec("second", level=0, level_source="user"), origin="user"
+    first, _ = await create_task(tasks, spec_p0, origin="user")
+    second, _ = await create_task(
+        tasks, spec("second", level=0, level_source="user"), origin="user"
     )
     demoted = await get_task(tasks, first.task_id)
     assert demoted is not None
@@ -420,7 +516,7 @@ async def test_a_second_user_p0_on_create_demotes_the_first(tasks: TaskStore) ->
 
 
 async def test_user_can_set_priority_on_a_non_user_origin(tasks: TaskStore) -> None:
-    record, _ = await tasks.create_task(spec("front task"), origin="front")
+    record, _ = await create_task(tasks, spec("front task"), origin="front")
     changed = await tasks.set_priority(record.task_id, "P0")
     assert (changed.origin, changed.level, changed.level_source) == ("front", 0, "user")
 
@@ -443,7 +539,7 @@ async def test_user_can_set_priority_on_a_non_user_origin(tasks: TaskStore) -> N
 
 
 async def test_a_pinned_level_needs_force_to_become_computed(tasks: TaskStore) -> None:
-    record, _ = await tasks.create_task(spec(), origin="user")
+    record, _ = await create_task(tasks, spec(), origin="user")
     await tasks.set_level(record.task_id, 1, source="user")
     with pytest.raises(TaskStoreError, match="set by the user"):
         await tasks.set_level(record.task_id, 3, source="computed")
@@ -455,27 +551,11 @@ async def test_a_pinned_level_needs_force_to_become_computed(tasks: TaskStore) -
     )
 
 
-async def test_a_terminal_state_clears_its_wait_and_cannot_resume(
-    tasks: TaskStore,
-) -> None:
-    record, _ = await tasks.create_task(spec(), origin="user")
-    await tasks.set_state(record.task_id, "waiting")
-    async with tasks.store.component_transaction("seed_wait") as conn:
-        await conn.execute(
-            "UPDATE tasks SET wait_reason = ?, hold_site = ? WHERE task_id = ?",
-            ("input", "plan/step1", record.task_id),
-        )
-    done = await tasks.set_state(record.task_id, "done")
-    assert (done.wait_reason, done.hold_site) == ("", "")
-    with pytest.raises(TaskStoreError, match="cannot become"):
-        await tasks.set_state(record.task_id, "running")
-
-
 async def test_a_user_p0_demotes_the_prior_p0_and_first_sets_a_rank(
     tasks: TaskStore, clock: Clock
 ) -> None:
-    first, _ = await tasks.create_task(spec("first"), origin="user")
-    second, _ = await tasks.create_task(spec("second"), origin="user")
+    first, _ = await create_task(tasks, spec("first"), origin="user")
+    second, _ = await create_task(tasks, spec("second"), origin="user")
     assert (await tasks.set_priority(first.task_id, "P0")).level == 0
     assert (await tasks.set_priority(second.task_id, "p0")).level == 0
     demoted = await get_task(tasks, first.task_id)
@@ -512,30 +592,16 @@ async def test_a_user_p0_demotes_the_prior_p0_and_first_sets_a_rank(
     assert later is not None and later.level == 5
 
 
-async def test_state_changes_log_and_time_the_task(tasks: TaskStore) -> None:
-    record, _ = await tasks.create_task(spec(), origin="user")
-    running = await tasks.set_state(record.task_id, "running")
-    assert running.started_at is not None and running.finished_at is None
-    cancelled = await tasks.set_state(record.task_id, "cancelled", reason="user_stop")
-    assert cancelled.finished_at is not None
-    assert [row[1] for row in await recent_log(tasks, record.task_id)] == [
-        "task.created",
-        "task.state",
-        "task.state",
-    ]
-    with pytest.raises(ValueError, match="unknown task state"):
-        await tasks.set_state(record.task_id, "paused")
-    with pytest.raises(TaskNotFoundError):
-        await tasks.set_state("nope", "running")
-
-
 async def test_terminal_priority_change_does_not_demote_the_live_p0(
     tasks: TaskStore,
 ) -> None:
-    live, _ = await tasks.create_task(spec("live"), origin="user")
-    finished, _ = await tasks.create_task(spec("finished"), origin="agent")
+    live, _ = await create_task(tasks, spec("live"), origin="user")
+    finished, _ = await create_task(tasks, spec("finished"), origin="agent")
     await tasks.set_level(live.task_id, 0)
-    await tasks.set_state(finished.task_id, "done")
+    async with tasks.store.component_transaction("seed_terminal") as conn:
+        await conn.execute(
+            "UPDATE tasks SET state = 'done' WHERE task_id = ?", (finished.task_id,)
+        )
     with pytest.raises(TaskStoreError, match="finished"):
         await tasks.set_level(finished.task_id, 0)
     current = await get_task(tasks, live.task_id)
@@ -545,7 +611,7 @@ async def test_terminal_priority_change_does_not_demote_the_live_p0(
 async def test_level_reason_and_session_timestamp_follow_changes(
     store: SessionStore, tasks: TaskStore, clock: Clock
 ) -> None:
-    record, _ = await tasks.create_task(spec(reason="old"), origin="agent")
+    record, _ = await create_task(tasks, spec(reason="old"), origin="agent")
     clock.advance(60)
     changed = await tasks.set_level(record.task_id, 1, reason="new")
     assert changed.reason == "new"
@@ -554,31 +620,11 @@ async def test_level_reason_and_session_timestamp_follow_changes(
     ) == (clock.now,)
 
 
-async def test_state_change_has_no_priority_label(
-    store: SessionStore, tasks: TaskStore
-) -> None:
-    record, _ = await tasks.create_task(spec(), origin="user")
-    before = await one(
-        store,
-        "SELECT COUNT(*) FROM priority_events WHERE task_id = ?",
-        (record.task_id,),
-    )
-    await tasks.set_state(record.task_id, "running")
-    assert (
-        await one(
-            store,
-            "SELECT COUNT(*) FROM priority_events WHERE task_id = ?",
-            (record.task_id,),
-        )
-        == before
-    )
-
-
 async def test_p0_demotion_touches_the_prior_task_session(
     store: SessionStore, tasks: TaskStore, clock: Clock
 ) -> None:
-    first, _ = await tasks.create_task(spec("first"), origin="user")
-    second, _ = await tasks.create_task(spec("second"), origin="agent")
+    first, _ = await create_task(tasks, spec("first"), origin="user")
+    second, _ = await create_task(tasks, spec("second"), origin="agent")
     await tasks.set_level(first.task_id, 0, reason="urgent")
     clock.advance(60)
     await tasks.set_level(second.task_id, 0)
@@ -592,7 +638,7 @@ async def test_p0_demotion_touches_the_prior_task_session(
 async def test_unchanged_level_and_first_are_not_priority_labels(
     store: SessionStore, tasks: TaskStore
 ) -> None:
-    record, _ = await tasks.create_task(spec(), origin="user")
+    record, _ = await create_task(tasks, spec(), origin="user")
     await tasks.set_level(record.task_id, 2, source="user")
     await tasks.set_priority(record.task_id, "first")
     events = await rows(
@@ -604,7 +650,7 @@ async def test_unchanged_level_and_first_are_not_priority_labels(
 
 
 async def test_a_pinned_level_is_a_priority_event(tasks: TaskStore) -> None:
-    record, _ = await tasks.create_task(spec(), origin="user")
+    record, _ = await create_task(tasks, spec(), origin="user")
     changed = await tasks.set_level(
         record.task_id, 3, source="user", actor="user", reason="later today"
     )
@@ -621,9 +667,9 @@ async def test_a_pinned_level_is_a_priority_event(tasks: TaskStore) -> None:
 async def test_stored_tasks_support_filters_and_ordering(
     tasks: TaskStore, clock: Clock
 ) -> None:
-    first, _ = await tasks.create_task(spec("first"), origin="user")
+    first, _ = await create_task(tasks, spec("first"), origin="user")
     clock.advance(1)
-    second, _ = await tasks.create_task(spec("second"), origin="agent")
+    second, _ = await create_task(tasks, spec("second"), origin="agent")
     await tasks.set_priority(first.task_id, "P1")
     assert await rows(
         tasks.store, "SELECT task_id FROM tasks ORDER BY created_at DESC, task_id"
@@ -668,7 +714,7 @@ async def test_retention_clears_old_logs_and_closed_idle_windows(
 async def test_the_clock_keeps_rows_inside_the_retention_window(
     tasks: TaskStore, clock: Clock
 ) -> None:
-    record, _ = await tasks.create_task(spec(), origin="user")
+    record, _ = await create_task(tasks, spec(), origin="user")
     assert await tasks.apply_retention() == 0
     clock.advance(30 * 86_400.0 + 1)
     assert await tasks.apply_retention() == 1
@@ -678,7 +724,7 @@ async def test_the_clock_keeps_rows_inside_the_retention_window(
 async def test_the_gateway_sweep_runs_the_scheduler_retention(
     store: SessionStore, tasks: TaskStore, clock: Clock
 ) -> None:
-    record, _ = await tasks.create_task(spec(), origin="user")
+    record, _ = await create_task(tasks, spec(), origin="user")
     clock.advance(31 * 86_400.0)
     assert await store.apply_retention() >= 1
     assert await recent_log(tasks, record.task_id) == []

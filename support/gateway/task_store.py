@@ -26,6 +26,7 @@ yet; S3a.2 does (design decision 4).
 from __future__ import annotations
 
 import json
+import os
 import time
 import uuid
 from collections.abc import Mapping, Sequence
@@ -33,15 +34,12 @@ from dataclasses import dataclass
 from typing import Any, Final, get_args
 
 from localmelo.support.gateway.task_policy import TaskSpec
-from localmelo.support.scheduler.model import TERMINAL_PHASES, Origin, Phase
+from localmelo.support.scheduler.model import TERMINAL_PHASES, Origin
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 COMPONENT: Final = "scheduler"
 SCHEDULER_VERSION: Final = 1
 
-# The states a task row may hold (design 2.1 and model.Phase). "paused" is
-# not one: Later is level 5, and a pause is that level plus its reason.
-TASK_STATES: Final = frozenset(get_args(Phase))
 TASK_ORIGINS: Final = frozenset(get_args(Origin))
 _TERMINAL_STATES: Final = TERMINAL_PHASES
 
@@ -251,6 +249,7 @@ class TaskStore:
         spec: TaskSpec,
         *,
         origin: str,
+        workspace: str,
         front_id: str | None = None,
         request_key: str | None = None,
         task_id: str | None = None,
@@ -261,8 +260,12 @@ class TaskStore:
         Returns ``(record, repeated)``: with *request_key*, the same
         ``(origin, request_key)`` and the same payload returns the stored
         row with ``repeated=True``; a different payload raises
-        :class:`TaskConflictError`. The session shares the task's id.
+        :class:`TaskConflictError`. The session shares the task's id and stores
+        *workspace*, the real path already validated by trusted code; the
+        original workspace request remains in ``tasks.spec``.
         """
+        if not isinstance(workspace, str) or not os.path.isabs(workspace):
+            raise ValueError("workspace must be a validated absolute path")
         if origin not in TASK_ORIGINS:
             raise ValueError(f"unknown origin {origin!r}")
         if request_key is not None and not isinstance(request_key, str):
@@ -314,7 +317,7 @@ class TaskStore:
                     spec.title,
                     now,
                     now,
-                    spec.workspace or None,
+                    workspace,
                     meta_text,
                 ),
             )
@@ -322,9 +325,9 @@ class TaskStore:
                 "INSERT INTO tasks (task_id, front_id, root_id, origin, "
                 "request_key, title, spec, state, wait_reason, hold_site, level, "
                 "level_source, level_pinned, level_eff, peak_level, reason, "
-                "user_rank, features, deadline, budget_s, created_at, updated_at) "
+                "user_rank, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', '', '', ?, ?, ?, ?, ?, ?, "
-                "NULL, ?, ?, ?, ?, ?)",
+                "NULL, ?, ?)",
                 (
                     identifier,
                     front_id,
@@ -339,9 +342,6 @@ class TaskStore:
                     spec.level,
                     spec.level,
                     spec.reason,
-                    json.dumps(dict(spec.features), sort_keys=True),
-                    spec.deadline,
-                    spec.budget_s,
                     now,
                     now,
                 ),
@@ -353,7 +353,7 @@ class TaskStore:
                 to_level=spec.level,
                 actor=origin,
                 reason=spec.reason,
-                quote=spec.user_words,
+                quote="",
                 pinned=_pinned(spec.level_source),
                 ts=now,
             )
@@ -482,50 +482,6 @@ class TaskStore:
         return await self.set_level(
             task_id, choice, source="user", actor=actor, reason=reason, quote=quote
         )
-
-    async def set_state(
-        self,
-        task_id: str,
-        state: str,
-        *,
-        actor: str = "user",
-        reason: str = "",
-    ) -> TaskRecord:
-        """Move a task to *state*; a terminal state also sets ``finished_at``."""
-        if state not in TASK_STATES:
-            raise ValueError(f"unknown task state {state!r}")
-        now = self._clock()
-        async with self._store.component_transaction("task_set_state") as conn:
-            current = await self._get(conn, task_id)
-            if current is None:
-                raise TaskNotFoundError(f"No task has id {task_id}")
-            if current.state in _TERMINAL_STATES and state not in _TERMINAL_STATES:
-                raise TaskStoreError(
-                    f"Task {task_id} is {current.state}; a finished task cannot "
-                    f"become {state}"
-                )
-            started = current.started_at
-            if state == "running" and started is None:
-                started = now
-            finished = now if state in _TERMINAL_STATES else None
-            wait_reason = "" if state in _TERMINAL_STATES else current.wait_reason
-            hold_site = "" if state in _TERMINAL_STATES else current.hold_site
-            await conn.execute(
-                "UPDATE tasks SET state = ?, wait_reason = ?, hold_site = ?, "
-                "started_at = ?, finished_at = ?, updated_at = ? WHERE task_id = ?",
-                (state, wait_reason, hold_site, started, finished, now, task_id),
-            )
-            await self._touch_session(conn, task_id, now)
-            await self._log(
-                conn,
-                "task.state",
-                task_id,
-                {"from": current.state, "to": state, "actor": actor, "reason": reason},
-                ts=now,
-            )
-            record = await self._get(conn, task_id)
-        assert record is not None
-        return record
 
     # ── Retention ──
 
@@ -728,7 +684,6 @@ __all__ = [
     "COMPONENT",
     "SCHEDULER_VERSION",
     "TASK_ORIGINS",
-    "TASK_STATES",
     "TaskConflictError",
     "TaskNotFoundError",
     "TaskRecord",

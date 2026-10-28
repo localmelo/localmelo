@@ -1080,12 +1080,6 @@ class SessionStore:
 
     # ── Components ──
 
-    async def component_version(self, name: str) -> int | None:
-        """The version of a named component in ``schema_components``, or ``None``."""
-        async with self._lock:
-            conn = await self._ready()
-            return await self._component_version(conn, name)
-
     @staticmethod
     async def _component_version(conn: aiosqlite.Connection, name: str) -> int | None:
         rows = await _rows(
@@ -1160,17 +1154,6 @@ class SessionStore:
             self._check_writable()
             async with self._transaction(conn, label):
                 yield conn
-
-    @contextlib.asynccontextmanager
-    async def component_read(self) -> AsyncIterator[aiosqlite.Connection]:
-        """A committed view of the file for a component's reads.
-
-        The store's lock is held, so no session write can interleave with a
-        multi-statement read; the caller must not write on this connection.
-        """
-        async with self._lock:
-            conn = await self._ready()
-            yield conn
 
     # ── Transactions ──
 

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -151,52 +152,37 @@ def test_allowlists_separate_principals_from_derived_tasks() -> None:
         worker_tool_allowlist("robot")
 
 
-def test_spec_normalizes_the_prompt_alias_and_defaults() -> None:
+def test_spec_normalizes_retained_fields_and_defaults() -> None:
     task = TaskSpec.from_payload({"prompt": "  Do the thing  "})
-    assert task.objective == "Do the thing"
-    assert task.title == "Do the thing"
-    assert task.level == 2
-    assert task.level_source == "computed"
-    assert task.workspace_mode == "shared"
-    assert task.deadline is None
-    assert task.features == {}
-
-
-def test_spec_keeps_every_field_and_parses_a_local_deadline() -> None:
-    task = TaskSpec.from_payload(
+    assert task.to_dict() == {
+        "title": "Do the thing",
+        "objective": "Do the thing",
+        "workspace": "",
+        "level": 2,
+        "level_source": "computed",
+        "reason": "",
+    }
+    task = TaskSpec.from_user_payload(
         {
-            "objective": "Make slides",
-            "title": "Slides",
-            "done_when": ["slides.pdf exists"],
-            "user_words": "make slides",
-            "context": "notes.md",
-            "inputs": ["notes.md", {"kind": "file", "ref": "outline.md"}],
-            "workspace": "~/work",
-            "workspace_mode": "worktree",
-            "budget_s": 1200,
-            "deadline": "2026-10-26T15:00",
-            "features": {"deadline": {"quote": "for 3pm", "trusted": True}},
+            "objective": "  Make slides  ",
+            "title": " Slides ",
+            "workspace": " ~/work ",
             "level": 1,
-            "reason": "due today",
-            "report": "a 3-line summary",
+            "reason": " due today ",
         }
     )
-    assert task.done_when == ("slides.pdf exists",)
-    assert task.inputs[0] == {"kind": "file", "ref": "notes.md"}
-    assert task.workspace == "~/work"
-    assert task.workspace_mode == "worktree"
-    assert task.budget_s == 1200.0
-    assert task.deadline == datetime.fromisoformat("2026-10-26T15:00").timestamp()
-    assert task.features["deadline"] == {"quote": "for 3pm", "trusted": True}
-    assert task.level == 1
-    assert TaskSpec.from_payload({"objective": "x", "deadline": 12.5}).deadline == 12.5
-    assert (
-        TaskSpec.from_payload(
-            {"objective": "x", "deadline": "2026-10-26T15:00 (local)"}
-        ).deadline
-        == datetime.fromisoformat("2026-10-26T15:00").timestamp()
+    assert task.to_dict() == {
+        "title": "Slides",
+        "objective": "Make slides",
+        "workspace": "~/work",
+        "level": 1,
+        "level_source": "user",
+        "reason": "due today",
+    }
+    assert TaskSpec.from_payload({"objective": "  First  line \n second"}).title == (
+        "First line"
     )
-    assert task.to_dict()["title"] == "Slides"
+    assert len(TaskSpec.from_payload({"objective": "x" * 80}).title) == 60
 
 
 @pytest.mark.parametrize(
@@ -204,29 +190,51 @@ def test_spec_keeps_every_field_and_parses_a_local_deadline() -> None:
     [
         ({}, "objective"),
         ({"objective": "x" * 100_001}, "at most 100000"),
-        ({"objective": "x", "context": "x" * 1_501}, "at most 1500"),
-        ({"objective": "x", "level": 0}, "P0 is the user"),
-        ({"objective": "x", "level": 6}, "level must be"),
-        ({"objective": "x", "level": True}, "level must be"),
-        ({"objective": "x", "workspace_mode": "readonly"}, "workspace_mode"),
-        ({"objective": "x", "workspace_mode": []}, "workspace_mode"),
-        ({"objective": "x", "workspace_mode": {}}, "workspace_mode"),
-        ({"objective": "x", "budget_s": 0}, "budget_s"),
-        ({"objective": "x", "budget_s": True}, "budget_s"),
-        ({"objective": "x", "done_when": [""]}, "done_when"),
-        ({"objective": "x", "inputs": [3]}, "inputs"),
-        ({"objective": "x", "features": {"when": object()}}, "features"),
-        ({"objective": "x", "features": {"blob": "x" * 20_000}}, "features"),
-        (
-            {"objective": "x", "inputs": [{"kind": "file", "ref": "x" * 5_000}]},
-            "inputs",
-        ),
-        ({"objective": "x", "deadline": "tomorrow"}, "deadline"),
+        ({"objective": "x", "title": "x" * 201}, "title"),
+        ({"objective": "x", "workspace": 123}, "workspace"),
+        ({"objective": "x", "workspace": "x" * 4097}, "workspace"),
+        ({"objective": "x", "reason": "x" * 501}, "reason"),
     ],
 )
 def test_a_bad_spec_names_the_field(payload: dict[str, object], message: str) -> None:
     with pytest.raises(TaskSpecError, match=message):
         TaskSpec.from_payload(payload)
+
+
+@pytest.mark.parametrize("level", [-1, 6, True, None, "1"])
+def test_trusted_invalid_level_is_rejected(level: object) -> None:
+    with pytest.raises(TaskSpecError, match="level must be"):
+        TaskSpec.from_user_payload({"objective": "x", "level": level})
+
+
+@pytest.mark.parametrize("level", [*range(6), -1, 6, True, None, "1"])
+def test_untrusted_level_is_ignored(level: object) -> None:
+    task = TaskSpec.from_payload({"objective": "x", "level": level})
+    assert (task.level, task.level_source) == (2, "computed")
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "done_when",
+        "user_words",
+        "context",
+        "inputs",
+        "workspace_mode",
+        "budget_s",
+        "deadline",
+        "features",
+        "report",
+    ],
+)
+@pytest.mark.parametrize(
+    "constructor", [TaskSpec.from_payload, TaskSpec.from_user_payload]
+)
+def test_deferred_fields_are_rejected(
+    constructor: Callable[[Mapping[str, Any]], TaskSpec], field: str
+) -> None:
+    with pytest.raises(TaskSpecError, match=field):
+        constructor({"objective": "x", field: None})
 
 
 @pytest.mark.parametrize("level", range(6))
@@ -237,15 +245,17 @@ def test_trusted_user_level_is_pinned(level: int) -> None:
 
 @pytest.mark.parametrize("level", [0, 1])
 async def test_trusted_create_stays_pinned_against_computed_updates(
-    level: int, tmp_path: Path
+    level: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    workspace = validate_task_workspace(None, cfg(str(tmp_path / "workspace")))
     sessions = SessionStore(tmp_path / "sessions.db", writer="gateway")
     await sessions.open()
     try:
         tasks = TaskStore(sessions)
         await tasks.open()
         spec = TaskSpec.from_user_payload({"objective": "urgent", "level": level})
-        record, _ = await tasks.create_task(spec, origin="user")
+        record, _ = await tasks.create_task(spec, origin="user", workspace=workspace)
         assert (record.level, record.level_source, record.level_pinned) == (
             level,
             "user",
@@ -257,23 +267,13 @@ async def test_trusted_create_stays_pinned_against_computed_updates(
         await sessions.aclose()
 
 
-def test_user_default_and_untrusted_levels_are_computed() -> None:
-    assert TaskSpec.from_user_payload({"objective": "x"}).level_source == "computed"
-    assert (
-        TaskSpec.from_payload({"objective": "x", "level": 1}).level_source == "computed"
-    )
+def test_user_default_and_reserved_level_source() -> None:
+    task = TaskSpec.from_user_payload({"objective": "x"})
+    assert (task.level, task.level_source) == (2, "computed")
     for source in ("user", "user_rule", "computed"):
         for constructor in (TaskSpec.from_payload, TaskSpec.from_user_payload):
             with pytest.raises(TaskSpecError, match="reserved"):
                 constructor({"objective": "x", "level": 0, "level_source": source})
-
-
-def test_spec_normalizes_json_for_idempotent_repeats() -> None:
-    task = TaskSpec.from_payload(
-        {"objective": "x", "features": {1: ("x", "y")}, "inputs": [{2: (3, 4)}]}
-    )
-    assert task.features == {"1": ["x", "y"]}
-    assert task.inputs == ({"2": [3, 4]},)
 
 
 @pytest.mark.parametrize("root", ["/", "~", "~/", "relative"])

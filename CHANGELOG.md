@@ -16,8 +16,8 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   schema's, and a newer component is refused. A task and its `kind="task"`
   session are created together behind `UNIQUE(origin, request_key)`, so a
   repeated request returns its task and a reused key with a different
-  payload is a conflict; level changes write `priority_events`, state changes
-  are logged separately, and 30-day retention clears the log and idle windows.
+  payload is a conflict; actual level changes write `priority_events` and
+  30-day retention clears the log and idle windows.
   The task boundary normalizes the `TaskSpec`, pins a user-selected level
   only through a trusted adapter, and resolves a worker's folder under the
   user's home or `[gateway] workspace`; a non-user task with no folder gets

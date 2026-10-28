@@ -733,6 +733,11 @@ class ChatGate:
             call.future.cancel()
             self._calls.pop(meta.call_id, None)
             call.done = True
+            self._last_end[session_id] = now.mono_us
+            try:
+                self._write_line(meta, "refused", now, 0.0, "unknown", None, None, None)
+            except Exception:
+                logger.warning("Call log line could not be written", exc_info=True)
             return call
         if (
             self.lock_gate == "wait"
@@ -982,13 +987,19 @@ class ChatGate:
             raise ValueError("P0 is the user's setting; level 0 needs a user source")
         registered = self._task_registry.get(task.task_id)
         if registered is not None:
-            if is_terminal(registered.phase) and not is_terminal(task.phase):
-                raise ValueError("a finished task cannot return to a live phase")
-            if (
-                registered.level_source in ("user", "user_rule")
-                and task.level_source == "computed"
-            ):
-                raise ValueError("the task's level is pinned; use set_task_level auto")
+            if is_terminal(registered.phase):
+                if task.phase != registered.phase:
+                    raise ValueError("a finished task cannot change phase")
+            elif is_terminal(task.phase):
+                raise ValueError("use finish_task to end a live task")
+            # A refresh is not a priority change, even when its snapshot is stale.
+            task = replace(
+                task,
+                level=registered.level,
+                level_source=registered.level_source,
+                user_rank=registered.user_rank,
+                paused=registered.paused,
+            )
         current = self._task(task.task_id) if self.policy != "off" else None
         if current is not None and current.kind != "task":
             raise ValueError(
@@ -1051,12 +1062,11 @@ class ChatGate:
             raise ValueError(f"task fields that may not change: {', '.join(unknown)}")
         if "phase" in changes and changes["phase"] not in get_args(Phase):
             raise ValueError(f"unknown task phase {changes['phase']!r}")
-        if (
-            "phase" in changes
-            and is_terminal(current.phase)
-            and not is_terminal(cast(Phase, changes["phase"]))
-        ):
-            raise ValueError("a finished task cannot return to a live phase")
+        if "phase" in changes:
+            if is_terminal(current.phase):
+                raise ValueError("a finished task cannot change phase")
+            if is_terminal(cast(Phase, changes["phase"])):
+                raise ValueError("use finish_task to end a live task")
         if "size" in changes and changes["size"] not in (
             "",
             "small",
@@ -1135,7 +1145,13 @@ class ChatGate:
             raise ValueError(
                 "a finished task's phase must be done, failed, cancelled or expired"
             )
-        task = self.update_task(task_id, phase=phase, wait_reason="")
+        current = self._task_registry.get(task_id)
+        if current is None:
+            raise ValueError(f"No task is registered with id {task_id}")
+        if is_terminal(current.phase):
+            return current
+        task = replace(current, phase=cast(Phase, phase), wait_reason="")
+        self._apply_task_update(task, {"phase", "wait_reason"})
         # A call parked at the gate must not wait for a task that is over:
         # the policy skips a terminal task's calls, so its future would never
         # resolve (a stop while a worker's call is held).
@@ -1181,16 +1197,15 @@ class ChatGate:
     def forget(self, session_id: str) -> None:
         """Drop a closed chat's bookkeeping once it has no live call.
 
-        The policy's ``State`` has no event that removes a task, and a
-        finished task would otherwise be cleaned and scanned on every later
-        transition of a long-running gateway. Closing is only allowed while
-        the chat is idle, so its task is terminal and its calls are gone.
+        A registered worker keeps its identity and call sequence until its
+        task row is removed. A live worker also needs its policy state intact.
         """
+        if any(c.meta.session_id == session_id for c in self._calls.values()):
+            return
+        registered = self._task_registry.get(session_id)
+        if registered is not None and not is_terminal(registered.phase):
+            return
         for mapping in (
-            self._levels,
-            self._counts,
-            self._first_submit,
-            self._last_end,
             self._turn_start,
             self._held_total_us,
             self._hold_start,
@@ -1198,10 +1213,15 @@ class ChatGate:
             self._reason_by_task,
         ):
             mapping.pop(session_id, None)
-        self._task_registry.pop(session_id, None)
+        if registered is None:
+            for book in (
+                self._levels,
+                self._counts,
+                self._first_submit,
+                self._last_end,
+            ):
+                book.pop(session_id, None)
         if self._closed or self.policy == "off":
-            return
-        if any(c.meta.session_id == session_id for c in self._calls.values()):
             return
         self._state = replace(
             self._state,

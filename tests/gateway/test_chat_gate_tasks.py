@@ -110,8 +110,8 @@ async def test_registering_again_updates_the_task_instead_of_adding_it() -> None
     gate.register_task(task(phase="running", level=1, level_source="user"))
     tasks = [t for t in gate._state.tasks if t.task_id == "worker"]
     assert len(tasks) == 1
-    assert (tasks[0].phase, tasks[0].level) == ("running", 1)
-    assert gate.level("worker") == 1
+    assert (tasks[0].phase, tasks[0].level) == ("running", 2)
+    assert gate.level("worker") == 2
     await gate.close()
 
 
@@ -243,12 +243,11 @@ async def test_reregistration_cannot_replace_a_pinned_level_with_computed(
 ) -> None:
     gate = ChatGate(policy="class")
     gate.register_task(task(level=1, level_source=source))
-    with pytest.raises(ValueError, match="pinned|set by"):
-        gate.register_task(task(level=3, level_source="computed"))
+    gate.register_task(task(level=3, level_source="computed"))
     assert (gate.level("worker"), gate.level_source("worker")) == (1, source)
     assert gate.set_task_level("worker", "auto") == 2
     gate.register_task(task(level=3, level_source="computed"))
-    assert gate.level("worker") == 3
+    assert (gate.level("worker"), gate.level_source("worker")) == (2, "computed")
     await gate.close()
 
 
@@ -307,7 +306,7 @@ async def test_update_task_rejects_identifying_fields_and_a_computed_p0() -> Non
     await gate.close()
 
 
-async def test_off_still_tags_the_call_and_forget_drops_the_task() -> None:
+async def test_off_still_tags_the_call_and_forget_keeps_the_terminal_task() -> None:
     gate = ChatGate(policy="off")
     gate.register_task(task())
     call = gate.submit("worker")
@@ -317,7 +316,7 @@ async def test_off_still_tags_the_call_and_forget_drops_the_task() -> None:
     gate.finish_task("worker", "cancelled")
     assert [t.task_id for t in gate.registered_tasks] == ["worker"]
     gate.forget("worker")
-    assert gate.registered_tasks == ()
+    assert gate.registered_tasks[0].phase == "cancelled"
     await gate.close()
 
 
@@ -412,6 +411,159 @@ async def test_finish_task_does_not_release_a_blocked_provider_slot() -> None:
     assert gate._inflight() == 1
     gate.finish(second)
     await gate.close()
+
+
+@pytest.mark.parametrize("method", ["update", "register"])
+@pytest.mark.parametrize("phase", ["done", "failed", "cancelled", "expired"])
+@pytest.mark.parametrize("parked", [False, True])
+async def test_terminal_snapshots_cannot_strand_live_calls(
+    method: str, phase: str, parked: bool
+) -> None:
+    gate = ChatGate(policy="class", n_srv=1, r_f=0, lock_gate="wait")
+    gate.register_task(task(phase="running"))
+    admitted = gate.submit("worker")
+    await gate.acquire(admitted)
+    if parked:
+        gate.set_machine(Machine(lock="foreign"))
+    waiting = gate.submit("worker")
+    assert waiting.future is not None and not waiting.future.done()
+    assert waiting.lock_waiting is parked
+    with pytest.raises(ValueError, match="finish_task"):
+        if method == "update":
+            gate.update_task("worker", phase=phase)
+        else:
+            gate.register_task(task(phase=phase))
+    assert gate.registered_tasks[0].phase == "running"
+    assert not waiting.future.done()
+    gate.finish_task("worker", phase)
+    assert waiting.done and waiting.future.cancelled()
+    gate.finish(admitted)
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "fcfs", "class"])
+async def test_terminal_recovery_cannot_rewrite_final_phase(policy: str) -> None:
+    gate = ChatGate(policy=policy)
+    recovered = task(phase="failed", level=1, level_source="user")
+    gate.register_task(recovered)
+    assert gate.finish_task("worker", "cancelled").phase == "failed"
+    with pytest.raises(ValueError, match="finished"):
+        gate.register_task(task(phase="done"))
+    with pytest.raises(ValueError, match="finished"):
+        gate.update_task("worker", phase="done")
+    gate.register_task(recovered)
+    assert gate.registered_tasks[0].phase == "failed"
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "fcfs", "class"])
+async def test_forget_with_live_call_does_not_mutate_worker(policy: str) -> None:
+    gate = ChatGate(policy=policy, n_srv=1, r_f=0)
+    gate.register_task(task(phase="running", level=1, level_source="user"))
+    first = gate.submit("worker")
+    await gate.acquire(first)
+    registry, state = gate.registered_tasks, gate._state
+    counts, levels = dict(gate._counts), dict(gate._levels)
+    gate.forget("worker")
+    assert gate.registered_tasks == registry and gate._state == state
+    assert gate._counts == counts and gate._levels == levels
+    second = gate.submit("worker", kind="embed")
+    assert first.meta.call_id != second.meta.call_id
+    assert second.meta.session_kind == "task"
+    assert gate._calls[first.meta.call_id] is first
+    assert not any(a.startswith("sched_transition_failed") for a in gate.alarms)
+    gate.finish(second)
+    gate.finish(first)
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "fcfs", "class"])
+async def test_forget_idle_live_worker_preserves_policy_state(policy: str) -> None:
+    gate = ChatGate(policy=policy)
+    gate.register_task(task(phase="running"))
+    gate.forget("worker")
+    call = gate.submit("worker")
+    await gate.acquire(call)
+    assert call.meta.session_kind == "task"
+    assert not any(a.startswith("sched_transition_failed") for a in gate.alarms)
+    if policy != "off":
+        assert state_task(gate) is not None
+    gate.finish(call)
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "fcfs", "class"])
+async def test_forget_finished_task_keeps_refusing_and_unique_ids(policy: str) -> None:
+    gate = ChatGate(policy=policy)
+    gate.register_task(task(phase="running"))
+    active = gate.submit("worker")
+    await gate.acquire(active)
+    gate.finish_task("worker", "done")
+    gate.forget("worker")  # admitted calls still own their slot
+    assert gate.registered_tasks[0].phase == "done"
+    refused_while_active = gate.submit("worker")
+    assert refused_while_active.meta.call_id != active.meta.call_id
+    assert refused_while_active.future is not None
+    assert refused_while_active.future.cancelled()
+    assert gate._calls[active.meta.call_id] is active
+    gate.finish(active)
+    gate.forget("worker")
+    refused = gate.submit("worker")
+    assert refused.meta.session_kind == "task"
+    assert refused.meta.call_id != active.meta.call_id
+    assert refused.future is not None and refused.future.cancelled()
+    with pytest.raises(asyncio.CancelledError):
+        await gate.acquire(refused)
+    with pytest.raises(ValueError, match="finished"):
+        gate.register_task(task(phase="running"))
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "fcfs", "class"])
+async def test_stale_reregistration_does_not_steal_priority(policy: str) -> None:
+    gate = ChatGate(policy=policy)
+    stale = task("a", level=0, level_source="user")
+    gate.register_task(stale)
+    gate.register_task(task("b", level=0, level_source="user"))
+    gate.register_task(replace(stale, phase="running", user_rank=42, paused=True))
+    a, b = gate.registered_tasks
+    assert (a.phase, a.level, a.level_source, a.user_rank, a.paused) == (
+        "running",
+        1,
+        "user",
+        None,
+        False,
+    )
+    assert (b.level, b.level_source) == (0, "user")
+    assert gate.level("a") == 1 and gate.level("b") == 0
+    if policy != "off":
+        assert state_task(gate, "a").level == 1  # type: ignore[union-attr]
+        assert state_task(gate, "b").level == 0  # type: ignore[union-attr]
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "fcfs", "class"])
+@pytest.mark.parametrize("lock", ["record", "wait"])
+async def test_terminal_refusals_are_logged_once(
+    tmp_path: Path, policy: str, lock: str
+) -> None:
+    gate = ChatGate(policy=policy, lock_gate=lock, call_log_dir=tmp_path)
+    gate.register_task(task(phase="done"))
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("worker")
+    with pytest.raises(asyncio.CancelledError):
+        await gate.acquire(call)
+    gate.finish(call, "refused")
+    gate.finish(call, "refused")
+    path = gate.call_log_path
+    await gate.close()
+    assert path is not None
+    lines = [json.loads(line) for line in path.read_text().splitlines()]
+    assert len(lines) == 1
+    assert lines[0]["status"] == "refused"
+    assert lines[0]["session_kind"] == "task"
+    assert lines[0]["admit_s"] is None
+    assert lines[0]["call_index"] == call.meta.call_index
 
 
 def test_the_gate_s_p0_is_the_user_s_task_p0() -> None:
