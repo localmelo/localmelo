@@ -64,9 +64,18 @@ def test_import_mode_runs_without_configuration(
 def test_main_save_session_records_worker_with_fake_provider(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import httpx
+
     import localmelo.__main__ as cli
     from localmelo.melo.agent import Agent, AgentOptions
-    from tests.sessions.helpers import ScriptedLLM, answer
+    from localmelo.support.providers.llm.openai_compat import OpenAICompatLLM
+
+    transport = httpx.MockTransport(
+        lambda request: httpx.Response(
+            200,
+            json={"choices": [{"message": {"role": "assistant", "content": "Done"}}]},
+        )
+    )
 
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
@@ -74,7 +83,10 @@ def test_main_save_session_records_worker_with_fake_provider(
         cli,
         "_build_direct_mode_agent",
         lambda *args, **kwargs: Agent(
-            llm=ScriptedLLM([answer("Done")]), options=AgentOptions(memory=False)
+            llm=OpenAICompatLLM(
+                base_url="http://llm.test/v1", model="stub", transport=transport
+            ),
+            options=AgentOptions(memory=False),
         ),
     )
     monkeypatch.setattr(
