@@ -13,6 +13,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     denial_text,
 )
+from localmelo.melo.contracts.tool_capture import _ENTRY_MARKED, TOOL_ENTRY
 from localmelo.melo.executor.builtins import builtin_names
 from localmelo.melo.executor.models import (
     ArtifactMeta,
@@ -53,6 +54,7 @@ class Executor:
         self.hippo = hippo
         self.checker = checker
         self._callables: dict[str, ToolCallable] = {}
+        self._process_free: set[str] = set()
         self._timeouts_ms: dict[str, float] = {}
         # The tools registered as requiring approval.
         self._marked_for_approval: set[str] = set()
@@ -71,6 +73,7 @@ class Executor:
         *,
         timeout_ms: float | None = None,
         requires_approval: bool = False,
+        process_free: bool = False,
     ) -> None:
         """Register *fn* as the callable for tool *name*.
 
@@ -82,6 +85,10 @@ class Executor:
         passes, so a call without *requires_approval* clears the mark.
         """
         self._callables[name] = fn
+        if process_free:
+            self._process_free.add(name)
+        else:
+            self._process_free.discard(name)
         if timeout_ms is not None:
             self._timeouts_ms[name] = timeout_ms
         else:
@@ -337,7 +344,33 @@ class Executor:
         deadline = asyncio.timeout(timeout_s)
         try:
             async with deadline:
-                output = await fn(**request.arguments)
+                capture = TOOL_ENTRY.get()
+                # Only a captured task execution is checked: direct mode and
+                # chat turns call the tool exactly as they did before.
+                if capture is not None:
+                    mismatch = _parameter_mismatch(fn, request.arguments)
+                    if mismatch:
+                        return ExecutionOutcome(
+                            tool_name=request.tool_name,
+                            status=ExecutionStatus.ERROR,
+                            error=(
+                                f"Arguments for {request.tool_name} do not match "
+                                f"its parameters: {mismatch}"
+                            ),
+                            error_category=ErrorCategory.INVALID_ARGUMENTS,
+                        )
+                marked = False
+                if capture is not None and request.tool_name not in self._process_free:
+                    await capture()
+                    task = asyncio.current_task()
+                    if task is not None and task.cancelling():
+                        raise asyncio.CancelledError()
+                    marked = True
+                token = _ENTRY_MARKED.set(marked)
+                try:
+                    output = await fn(**request.arguments)
+                finally:
+                    _ENTRY_MARKED.reset(token)
         except TimeoutError as exc:
             duration = (time.perf_counter() - start) * 1000
             if deadline.expired():

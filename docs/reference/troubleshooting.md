@@ -358,13 +358,17 @@ ERROR:    [Errno 48] error while attempting to bind on address ('127.0.0.1', 840
   opened as `http://0.0.0.0:8401/`, through a proxy that sends its own host
   name, or as `http://127.0.0.2:8401/` because the gateway listens on another
   loopback address. The gateway refuses these requests so that a web page on
-  another site cannot reach it through DNS rebinding.
+  another site cannot reach it through DNS rebinding. A gateway started by the
+  macOS app also returns it for `/api/auth/login` without the app's matching
+  `X-LocalMelo-Instance`; its login codes are bound to that launch.
 - **Fix:** open `http://127.0.0.1:8401/` or `http://localhost:8401/`, with the
   gateway's port. If the gateway listens on another loopback address, start
   it on `127.0.0.1`: set `host = "127.0.0.1"` in `[gateway]`, or run
   `melo --serve --host 127.0.0.1`. Proxies and remote access are not
   supported; see
   [Keep the gateway private](../guides/gateway.md#keep-the-gateway-private).
+  In the macOS app, use **Sign In Again** rather than posting a code minted
+  elsewhere.
 
 ### HTTP 403 foreign_origin
 

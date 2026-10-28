@@ -182,22 +182,29 @@ class GatewayAuth:
             with contextlib.suppress(FileNotFoundError):
                 os.unlink(name, dir_fd=self._directory)
 
-    def issue_login(self, port: int, *, now: int | None = None) -> str:
+    # A code minted for the macOS app carries the app's per-launch instance.
+    # The signature covers it, so only a gateway started with that instance
+    # accepts the code: a process that takes the app's port receives a code it
+    # cannot use. Other gateways use an empty instance.
+    def issue_login(
+        self, port: int, *, instance: str = "", now: int | None = None
+    ) -> str:
         timestamp = int(time.time()) if now is None else now
-        payload = f"{timestamp}.{port}.{secrets.token_hex(16)}"
+        payload = f"{timestamp}.{port}.{instance}.{secrets.token_hex(16)}"
         return payload + "." + _mac(self.read_token(), "login", payload)
 
     def consume_login(
-        self, code: str, port: int, *, now: int | None = None
+        self, code: str, port: int, *, instance: str = "", now: int | None = None
     ) -> str | None:
         if len(code) > 256 or not code.isascii():
             return None
         parts = code.split(".")
         if (
-            len(parts) != 4
+            len(parts) != 5
             or not parts[0].isdigit()
             or parts[1] != str(port)
-            or len(parts[2]) != 32
+            or parts[2] != instance
+            or len(parts[3]) != 32
         ):
             return None
         timestamp = int(parts[0])
@@ -205,8 +212,8 @@ class GatewayAuth:
         if timestamp > current or current - timestamp >= LOGIN_TTL:
             return None
         key = self.read_token()
-        payload = ".".join(parts[:3])
-        if not hmac.compare_digest(parts[3], _mac(key, "login", payload)):
+        payload = ".".join(parts[:4])
+        if not hmac.compare_digest(parts[4], _mac(key, "login", payload)):
             return None
         marker = "used-" + hashlib.sha256(code.encode()).hexdigest()
         try:

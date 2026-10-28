@@ -1984,10 +1984,16 @@ async function init() {
       return;
     }
     try {
-      const code = new URLSearchParams(fragment.slice(1)).get("login") || "";
+      const params = new URLSearchParams(fragment.slice(1));
+      const code = params.get("login") || "";
+      // The macOS app passes its launch identifier, which the gateway checks
+      // when the app started it. It is a collision check, not authentication.
+      const instance = params.get("instance") || "";
+      const headers = { "Content-Type": "application/json" };
+      if (/^[0-9a-f]{32}$/.test(instance)) headers["X-LocalMelo-Instance"] = instance;
       const response = await fetch("/api/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({code}),
       });
       if (response.status !== 204) {
