@@ -37,6 +37,7 @@ from localmelo.melo.memory.history.sqlite import (
     HistorySchemaError,
     SqliteHistory,
 )
+from localmelo.melo.memory.long.sqlite import SqliteLongTerm
 from localmelo.melo.schema import (
     LLMCallRecord,
     Message,
@@ -392,6 +393,31 @@ async def test_an_existing_history_file_keeps_its_mode(tmp_path: Path) -> None:
     _write_v0(path)
     path.chmod(0o644)
     await _open(path)
+    assert _mode(path) == 0o644
+
+
+async def test_a_new_long_term_file_is_0600(tmp_path: Path) -> None:
+    path = tmp_path / "long_term.db"
+    long_term = SqliteLongTerm(path)
+    try:
+        with _umask(0o022):
+            await long_term.add("remember this", [1.0, 0.0])
+        wal, shm = Path(f"{path}-wal"), Path(f"{path}-shm")
+        assert wal.exists() and shm.exists()
+        assert (_mode(path), _mode(wal), _mode(shm)) == (0o600, 0o600, 0o600)
+    finally:
+        await long_term.aclose()
+
+
+async def test_an_existing_long_term_file_keeps_its_mode(tmp_path: Path) -> None:
+    path = tmp_path / "long_term.db"
+    path.write_bytes(b"")
+    path.chmod(0o644)
+    long_term = SqliteLongTerm(path)
+    try:
+        await long_term.count_entries()
+    finally:
+        await long_term.aclose()
     assert _mode(path) == 0o644
 
 

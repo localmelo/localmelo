@@ -100,6 +100,88 @@
           </ul>
         </article>
 
+        <article class="update-entry" id="u-2026-10-27-forget">
+          <h3>Forget a task's memory</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/64">#64</a>
+          </p>
+          <ul>
+            <li>Python code can forget one task's memory or all of it: <code>await hippo.forget(task_id)</code> removes the task's rows from <code>tasks</code>, <code>steps</code> and <code>llm_calls</code>, and the long-term entries whose metadata names it (its reflections); <code>await hippo.forget_all()</code> empties history and long-term memory, step summaries included. Working memory, procedural memory and sessions are left alone.</li>
+            <li>A forget overwrites what it deletes and truncates the WAL, so the text does not stay in the database or its <code>-wal</code> file. There is no command or page for it yet. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#reset-memory">Reset memory</a>.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-session-close">
+          <h3>A session that is running a task is not closed</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/63">#63</a>
+          </p>
+          <ul>
+            <li><code>DELETE /v1/sessions/&lt;id&gt;</code> leaves a session whose task is still running alone and answers HTTP 409 with the gateway's error body, <code>error</code> and <code>session_id</code>; idle sessions close as before. The task keeps running, and the session can be closed after it ends.</li>
+            <li>Stopping the gateway still closes every session, a busy one included; a task still running then ends as <code>crashed</code>. The <code>/v1/agent</code> API still has no route that stops a run.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-memory-files">
+          <h3>New memory files are private to you</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/62">#62</a>
+          </p>
+          <ul>
+            <li>A new <code>long_term.db</code>, with its <code>-wal</code> and <code>-shm</code>, is created with mode 0600, as <code>history.db</code> and <code>procedures.db</code> already were. Before, it usually got 0644, so other users of the computer could read the step summaries and reflections in it. An existing file keeps its mode; a memory directory localmelo creates is still 0700.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-session-progress">
+          <h3>Session turns can report their progress</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/60">#60</a>
+          </p>
+          <ul>
+            <li><code>SessionRunner(..., progress=True)</code> asks each turn's run for its <code>run.progress</code> events and stores them with the turn; the flag stays on the runner, <code>replace_agent</code> included. <code>run_turn</code> and <code>start_turn</code> take <code>routine=NAME</code> and pass it to the run only when given.</li>
+            <li><code>localmelo.support.progress_line.format_past(payload, width)</code> gives the progress line's past facts and items alone, with the same wording and widths. The interactive UI does not ask for progress yet, and the line itself is unchanged.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-shell-stdin">
+          <h3>Shell commands no longer take over the terminal</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/59">#59</a>
+          </p>
+          <ul>
+            <li><code>shell_exec</code> now gives every command <code>/dev/null</code> as its standard input, in every mode. A command whose standard input was a pty that was not melo's controlling terminal could take that pty as its controlling terminal and hang it up when it exited, which made a completed <code>melo</code> run end with exit code 120 instead of 0.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-progress-names">
+          <h3>The progress line names the task it borrows from</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/56">#56</a>
+          </p>
+          <ul>
+            <li>A similar task's past steps now say <code>like &lt;routine title&gt;:</code> instead of <code>like a similar task:</code>, naming the routine (its <code>--routine</code> name, else the start of its query).</li>
+            <li>A <code>shell_exec</code> command that arrived as an array of strings, which the tool refuses, is labelled and classified by its words, so <code>["ls", "-la"]</code> reads as a read command instead of <code>{command:</code>. Procedural memory stores the same label.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-ollama-save">
+          <h3>A picked Ollama server is saved as Ollama</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/55">#55</a>
+          </p>
+          <ul>
+            <li>The first run, the <code>Save URL · MODEL as the default backend?</code> question after <code>--base-url</code>, and <code>/backend</code> used to save every server as <code>vllm</code>. Saving now asks the server <code>GET /api/version</code> once: one that answers like Ollama is saved as the <code>ollama</code> backend, with Ollama's own API and a 300 s chat timeout; any other OpenAI-compatible server is still saved as <code>vllm</code>.</li>
+            <li>A saved Ollama server used to run with vLLM's 120 s chat timeout, and the banner called it vLLM.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-27-interactive-ui">
           <h3>An interactive UI in the terminal</h3>
           <p class="update-date">

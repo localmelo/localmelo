@@ -116,17 +116,23 @@ def panel_text(
         return out
 
     tool = request.tool_name
+    # A caller that built the request itself can leave the tier out; an
+    # agent always fills it, and the header then shows one more word.
+    mark = "" if request.tier is None else f" · {shown(request.tier)}"
     if tool == "shell_exec":
         command = shown(_command_text(arguments.get("command")))
         body = _wrapped(command.split("\n"), width)
         return PanelText(
-            "Run a shell command?", f"shell_exec · in {workspace}", body, escaped_any
+            "Run a shell command?",
+            f"shell_exec{mark} · in {workspace}",
+            body,
+            escaped_any,
         )
     if tool == "python_exec":
         code = shown(str(arguments.get("code") or ""))
         return PanelText(
             "Run Python code?",
-            f"python_exec · in {workspace}",
+            f"python_exec{mark} · in {workspace}",
             _numbered(_lines(code), width),
             escaped_any,
         )
@@ -136,18 +142,18 @@ def panel_text(
         lines = _lines(shown(content))
         where = shown(display_path(path, root))
         if exists:
-            header = f"file_write  {where} · overwrites the file; no diff shown"
+            header = f"file_write  {where}{mark} · overwrites the file; no diff shown"
             body = _numbered(lines, width)
             return PanelText("Change a file?", header, body, escaped_any)
         count = len(lines)
-        header = f"file_write  {where} · new file, {count} line" + (
+        header = f"file_write  {where}{mark} · new file, {count} line" + (
             "" if count == 1 else "s"
         )
         body = _numbered(lines, width)
         return PanelText("Write a new file?", header, body, escaped_any)
     text = json.dumps(dict(arguments), indent=2, ensure_ascii=False, default=str)
     body = _wrapped(shown(text).split("\n"), width)
-    return PanelText(f"Call {shown(tool)}?", shown(tool), body, escaped_any)
+    return PanelText(f"Call {shown(tool)}?", f"{shown(tool)}{mark}", body, escaped_any)
 
 
 def session_warning(tool: str, workspace: str) -> list[str]:

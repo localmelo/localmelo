@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
+from localmelo.melo.schema import ToolTier
 from localmelo.support.cli.approvals import (
     APPROVAL_KEY_GUARD_S,
     Approvals,
@@ -30,7 +31,9 @@ from localmelo.tests.cli.ui_helpers import (
 WORKSPACE = "/home/me/demo-project"
 
 
-def _request(tool: str = "shell_exec", **arguments: Any) -> ApprovalRequest:
+def _request(
+    tool: str = "shell_exec", *, tier: ToolTier | None = None, **arguments: Any
+) -> ApprovalRequest:
     if not arguments:
         arguments = {"command": "ls -1"}
     return ApprovalRequest(
@@ -41,6 +44,7 @@ def _request(tool: str = "shell_exec", **arguments: Any) -> ApprovalRequest:
         arguments=arguments,
         preview="",
         workspace_root=WORKSPACE,
+        tier=tier,
     )
 
 
@@ -88,6 +92,55 @@ def test_another_tool_shows_its_arguments_as_json() -> None:
     )
     assert text.title == "Call mcp__web__fetch?"
     assert text.body == ["{", '  "url": "http://x",', '  "n": 2', "}"]
+
+
+def test_the_header_names_the_tier() -> None:
+    shell = panel_text(_request(tier="exec"), exists=None, width=60)
+    assert shell.header == f"shell_exec · exec · in {WORKSPACE}"
+    python = panel_text(
+        _request("python_exec", tier="exec", code="print(1)"), exists=None, width=60
+    )
+    assert python.header == f"python_exec · exec · in {WORKSPACE}"
+
+
+def test_a_file_write_header_names_the_tier_after_the_path() -> None:
+    path = f"{WORKSPACE}/todo.md"
+    new = panel_text(
+        _request("file_write", tier="write", path=path, content="a\nb\n"),
+        exists=False,
+        width=60,
+    )
+    assert new.header == "file_write  todo.md · write · new file, 2 lines"
+    old = panel_text(
+        _request("file_write", tier="write", path=path, content="a"),
+        exists=True,
+        width=60,
+    )
+    assert old.header == (
+        "file_write  todo.md · write · overwrites the file; no diff shown"
+    )
+
+
+def test_an_mcp_header_names_the_tier() -> None:
+    network = panel_text(
+        _request("mcp__cua__click", tier="network", x=1), exists=None, width=60
+    )
+    assert network.header == "mcp__cua__click · network"
+    # A read-only tool only reaches the panel when it is forced to ask.
+    forced_read = panel_text(
+        _request("mcp__notes__search", tier="read", q="x"), exists=None, width=60
+    )
+    assert forced_read.header == "mcp__notes__search · read"
+
+
+def test_a_request_without_a_tier_keeps_the_old_header() -> None:
+    # A caller that builds its own ApprovalRequest leaves tier out.
+    assert panel_text(_request(), exists=None, width=60).header == (
+        f"shell_exec · in {WORKSPACE}"
+    )
+    assert panel_text(
+        _request("mcp__cua__click", x=1), exists=None, width=60
+    ).header == ("mcp__cua__click")
 
 
 @pytest.mark.parametrize(

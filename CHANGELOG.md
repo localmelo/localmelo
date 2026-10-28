@@ -9,6 +9,26 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Tools have a permission tier, and an approval policy asks by tier rather
+  than by a fixed list of names. The built-ins keep their tiers (`file_read`
+  read, `file_write` write, `shell_exec` and `python_exec` exec), and a
+  provided tool's raw MCP `annotations` are kept on `ToolDef.annotations`
+  and read cautiously: `openWorldHint` gives network, `readOnlyHint` gives
+  read unless `destructiveHint` contradicts it, and anything else gives
+  write. So an unannotated MCP tool now asks in a run with a policy, while
+  `require_approval` only adds caution. The terminal approval panel names
+  the tier in its header, `ToolInfo.tier` and `ApprovalRequest.tier` report
+  it, and `--yolo` still means no policy, not read-only ([#66]).
+- Memory can be forgotten from the Python API. `await hippo.forget(task_id)`
+  deletes that task's `tasks`, `steps` and `llm_calls` rows and the
+  long-term entries whose metadata names it (its reflections), and
+  `await hippo.forget_all()` empties history and long-term memory, step
+  summaries included. `Hippo` has the facade; `SqliteHistory`,
+  `SqliteLongTerm`, `History` and `LongTerm` have the two methods. A forget
+  runs in one `BEGIN IMMEDIATE` transaction under the write lock, overwrites
+  what it deletes and truncates the WAL, and leaves working memory,
+  procedural memory and sessions alone. There is no command or UI yet
+  ([#64]).
 - A session runner can ask its turns for progress events, and the progress
   line's past facts are available alone. `SessionRunner(..., progress=True)`
   asks each turn's run for `run.progress` and stores it with the turn; the
@@ -230,6 +250,20 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- The scheduler simulator's importer reads a chat call's kind from the
+  `X-Localmelo-Call-Kind` header that localmelo sends, in the headers side
+  file a proxy record names with `bodies.headers`. Retrieval and
+  step-estimate calls, which have no tools, no longer replay as `reflect`;
+  pre-R1 records and records without `--log-bodies` keep the old guess, an
+  unknown header value keeps the guess and is counted, and the import
+  report counts the records of each kind source ([#61]).
+- `DELETE /v1/sessions/{id}` no longer closes a session whose task is still
+  running: it answers 409 with the gateway's error body
+  (`{"error", "session_id"}`) and leaves the task and the session alone;
+  idle sessions close as before. The `/v1/agent` API still has no cancel
+  route, so a caller waits for the task. Stopping the gateway still closes
+  every session, a busy one included, and a task still running then ends as
+  `crashed` ([#63]).
 - A `shell_exec` command no longer inherits melo's standard input: it reads
   `/dev/null` in every mode. A shell whose stdin was a pty that was not
   melo's controlling terminal took that pty as its controlling terminal at
@@ -300,6 +334,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `Content-Security-Policy: frame-ancestors 'none'` ([#36]).
 - On any other host, such as `0.0.0.0`, the gateway makes none of these
   checks and logs a warning when it starts ([#36]).
+- A new `long_term.db` is created with mode 0600, like `history.db` and
+  `procedures.db`, with its `-wal` and `-shm`; it got the default mode
+  before, usually 0644, so other users of the computer could read the step
+  summaries and reflections it holds. An existing file keeps its mode
+  ([#62]).
 
 Changes before these are not listed here. See the
 [updates page](https://localmelo.github.io/localmelo/en/updates.html) for
@@ -334,3 +373,8 @@ earlier milestones.
 [#58]: https://github.com/localmelo/localmelo/pull/58
 [#59]: https://github.com/localmelo/localmelo/pull/59
 [#60]: https://github.com/localmelo/localmelo/pull/60
+[#61]: https://github.com/localmelo/localmelo/pull/61
+[#62]: https://github.com/localmelo/localmelo/pull/62
+[#63]: https://github.com/localmelo/localmelo/pull/63
+[#64]: https://github.com/localmelo/localmelo/pull/64
+[#66]: https://github.com/localmelo/localmelo/pull/66

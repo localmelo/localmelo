@@ -15,6 +15,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger("localmelo.gateway.session")
 
 
+class SessionBusyError(RuntimeError):
+    """The requested action would interrupt an active session."""
+
+
 class AgentLike(Protocol):
     async def run(self, query: str) -> str: ...
 
@@ -90,6 +94,11 @@ class SessionManager:
         s = self._sessions.get(session_id)
         if not s:
             return False
+        if s.is_busy:
+            raise SessionBusyError(
+                f"Session {session_id} is running a task; wait for it to finish "
+                "before closing it."
+            )
         s.status = "closed"
         try:
             await s.agent.close()

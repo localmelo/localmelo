@@ -7,6 +7,16 @@ Every bad line or row is dropped and counted, never fatal, except a file
 of another schema version, which is rejected whole. History is opened
 read-only and only ``duration_ms`` leaves a tool result's JSON.
 
+A chat call's kind is the ``X-Localmelo-Call-Kind`` header localmelo sends
+(R1). The proxy keeps a request's headers only with ``--log-bodies``, in
+the side file that the record names in ``bodies.headers``; a record
+without one keeps the endpoint/role guess, as every pre-R1 record does.
+``history.db`` is not a kind source: no ``llm_calls`` column names the
+proxy record it answered (both sides see only the run directory, and
+timestamps, durations and token counts are not keys), and a retrieval
+request bypasses the agent's call log, so it makes no row at all. No
+sound join exists and the guess stands.
+
 ``ttfb_s`` and ``ttft_s`` are never read (design 8.1; decision D22). The
 bench's answer (2026-10-26): for a non-streamed call ``ttfb_s`` is
 min(``duration_s``, about 2.0 s), because oMLX 0.7.1rc1 sends the whole
@@ -42,6 +52,30 @@ RETRY_WINDOW_S = 5.0
 
 # The proxy record schema this importer reads.
 CALLS_SCHEMA_VERSION = 2
+
+# The request header that names a chat call's kind (R1). support/providers
+# spells it with capitals; header names are case-insensitive.
+CALL_KIND_HEADER = "x-localmelo-call-kind"
+
+# The kinds localmelo puts in that header (melo/contracts/providers.py),
+# each mapped to the simulator's CallKind of the same name. It is repeated
+# here because S1 imports nothing from melo/ (spec Requirement 8); a test
+# pins it against LLM_REQUEST_KINDS.
+REQUEST_KIND_TO_CALL_KIND: dict[str, CallKind] = {
+    "plan": "plan",
+    "reflect": "reflect",
+    "retrieve": "retrieve",
+    "estimate": "estimate",
+}
+
+# The kind sources of ImportReport.kind_sources, in report order. A
+# "history" source has no sound join today (see the module docstring), so
+# its count is 0; it stays in the report for a later reader of history.db.
+KIND_SOURCES = ("header", "history", "guess")
+
+# A headers side file larger than this is not read: the proxy writes a few
+# KB, and a record that names a response body by mistake stays a guess.
+MAX_HEADERS_BYTES = 1 << 20
 
 # The first bytes of every SQLite database file.
 SQLITE_HEADER = b"SQLite format 3\x00"
@@ -86,7 +120,14 @@ class ImportReport:
     For ``import_calls()``, ``lines == records_kept + Σ dropped`` over the
     files not rejected, and the distinct tasks among kept records number
     ``tasks + tasks_without_chat`` plus ``tasks_overlapping`` when those
-    are left out.
+    are left out. ``kind_sources`` gives one entry per source in
+    :data:`KIND_SOURCES` (zeros included) and sums to ``records_kept``:
+    every kept record's call kind came from a headers side file
+    (``header``), from a ``history.db`` row (``history``, 0 today), or from
+    the endpoint/role guess (``guess``). ``kind_unknown`` counts the
+    records whose header named a value the importer does not know; each
+    keeps its guess and still counts as ``guess``. ``import_history()``
+    leaves both at their defaults.
     """
 
     files: int
@@ -99,6 +140,8 @@ class ImportReport:
     tasks_without_chat: int = 0
     wall_time_tasks: int = 0
     service_sources: tuple[tuple[str, int], ...] = ()
+    kind_sources: tuple[tuple[str, int], ...] = ()
+    kind_unknown: int = 0
     has_llm_calls: bool = False
     errors: tuple[str, ...] = ()
 
@@ -177,11 +220,16 @@ def _parse(line: bytes) -> dict[str, Any] | str:
     return value if isinstance(value, dict) else "not_object"
 
 
-def _kind(r: dict[str, Any]) -> CallKind | None:
-    """The call kind of a model call record, ``None`` for any other record."""
+def _guess_kind(r: dict[str, Any]) -> CallKind | None:
+    """The endpoint/role guess at a model call's kind, ``None`` for any other record.
+
+    This is what a record without a kind header gets, and what every
+    pre-R1 record has: the reflection request has no tools, so the proxy
+    says aux, but retrieval and step-estimate requests have no tools
+    either, which is the misread a header fixes.
+    """
     endpoint = r.get("endpoint")
     if endpoint in ("chat_completions", "messages"):
-        # localmelo's reflection request has no tools, so the proxy says aux.
         return "reflect" if r.get("role") == "aux" else "plan"
     if (endpoint, r.get("method"), r.get("path")) == (
         "other",
@@ -190,6 +238,81 @@ def _kind(r: dict[str, Any]) -> CallKind | None:
     ):
         return "embed"
     return None
+
+
+def _headers_path(r: dict[str, Any], base: Path) -> Path | None:
+    """The readable headers side file *r* names, if it is inside *base*.
+
+    The proxy writes it only with ``--log-bodies`` and names it in the
+    record's ``bodies.headers``. A path that is not a relative path inside
+    the calls file's directory, is not a file, or is too large is not
+    read: a record from an untrusted file must not reach another file.
+    """
+    bodies = r.get("bodies")
+    if not isinstance(bodies, dict):
+        return None
+    rel = bodies.get("headers")
+    if not isinstance(rel, str) or not rel or "\x00" in rel:
+        return None
+    try:
+        root = base.resolve()
+        path = (base / rel).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            return None
+        if path.stat().st_size > MAX_HEADERS_BYTES:
+            return None
+    except (OSError, RuntimeError):
+        return None
+    return path
+
+
+def _header_kind(r: dict[str, Any], base: Path) -> str | None:
+    """The ``X-Localmelo-Call-Kind`` value in *r*'s headers file, or ``None``.
+
+    A missing or unreadable file, or one without the header, is no header
+    (the guess stands); an empty value is a value and counts as unknown.
+    """
+    path = _headers_path(r, base)
+    if path is None:
+        return None
+    try:
+        data = json.loads(path.read_bytes())
+    except (OSError, ValueError, RecursionError):
+        return None
+    request = data.get("request") if isinstance(data, dict) else None
+    if not isinstance(request, list):
+        return None
+    value = None
+    for item in request:
+        if not isinstance(item, list) or len(item) != 2:
+            continue
+        name, header = item
+        if (
+            isinstance(name, str)
+            and name.lower() == CALL_KIND_HEADER
+            and isinstance(header, str)
+        ):
+            value = header.strip()
+    return value
+
+
+def _kind_with_source(
+    r: dict[str, Any], base: Path, guess: CallKind
+) -> tuple[CallKind, str, bool]:
+    """The call kind of *r*, its source, and whether its header was unknown.
+
+    localmelo sends the header on chat requests only, so an embeddings
+    record keeps ``embed`` even if a crafted headers file names a kind.
+    """
+    if guess == "embed":
+        return guess, "guess", False
+    value = _header_kind(r, base)
+    if value is None:
+        return guess, "guess", False
+    kind = REQUEST_KIND_TO_CALL_KIND.get(value)
+    if kind is None:
+        return guess, "guess", True
+    return kind, "header", False
 
 
 def _version_ok(r: dict[str, Any]) -> bool:
@@ -203,7 +326,7 @@ def _check(r: dict[str, Any], harnesses: Sequence[str]) -> str | None:
         return "no_run_id"
     if _count(r.get("call_index")) is None:
         return "bad_call_index"
-    if _kind(r) is None:
+    if _guess_kind(r) is None:
         return "not_a_model_call"
     if r.get("harness") not in harnesses:
         return "harness"
@@ -251,14 +374,28 @@ def _times(
 
 
 def _trace_calls(
-    key: str, kept: list[tuple[dict[str, Any], float, float, float]], rates: Rates
-) -> list[TraceCall]:
-    """The calls of one task, sorted by ``(start_s, call_index)``."""
-    base = min(start for _, start, _, _ in kept)
+    key: str,
+    kept: list[tuple[dict[str, Any], float, float, float]],
+    rates: Rates,
+    base: Path,
+) -> tuple[list[TraceCall], Counter[str], int]:
+    """The calls of one task, sorted by ``(start_s, call_index)``, and kind counts.
+
+    Returns the calls, the number of them each kind source named, and the
+    number whose header held an unknown value. *base* is the directory of
+    the task's ``calls.jsonl``, where the headers side files live.
+    """
+    t0 = min(start for _, start, _, _ in kept)
     rows = sorted(kept, key=lambda k: (k[1], k[0]["call_index"]))
     out: list[TraceCall] = []
+    sources: Counter[str] = Counter()
+    unknown_kinds = 0
     for r, start, end, duration in rows:
-        kind, status = _kind(r) or "plan", _status(r)
+        guess = _guess_kind(r) or "plan"
+        kind, kind_source, bad_value = _kind_with_source(r, base, guess)
+        sources[kind_source] += 1
+        unknown_kinds += int(bad_value)
+        status = _status(r)
         usage, raw = _obj(r.get("usage")), _obj(r.get("usage_raw"))
         prompt = _count(usage.get("prompt_tokens"))
         completion = _count(usage.get("completion_tokens"))
@@ -279,7 +416,7 @@ def _trace_calls(
         else:
             service, source = duration, "wall"
         prev = out[-1] if out else None
-        start_s, end_s = start - base, end - base
+        start_s, end_s = start - t0, end - t0
         attempt = 1
         if (
             prev is not None
@@ -312,7 +449,7 @@ def _trace_calls(
                 tokens_unknown=kind in CHAT_KINDS and status == "ok" and unknown,
             )
         )
-    return out
+    return out, sources, unknown_kinds
 
 
 def import_calls(
@@ -330,7 +467,11 @@ def import_calls(
     whole, or raises ``CallsFormatError`` with *strict*. A call index that
     repeats within a task drops the later record (``bad_call_index``).
     *rates* serve only the ``"tokens"`` service fallback
-    (``RATES_REC_FLINT`` for rec).
+    (``RATES_REC_FLINT`` for rec). A chat call's kind is the request's
+    ``X-Localmelo-Call-Kind`` header, read from the headers side file the
+    record names (see :func:`_header_kind`); without one, the endpoint and
+    role guess stands. ``ImportReport.kind_sources`` counts every kept
+    record by that source.
     """
     root = Path(root)
     files = sorted(
@@ -340,7 +481,7 @@ def import_calls(
     drops: Counter[str] = Counter()
     errors: list[str] = []
     lines = rejected = 0
-    by_task: dict[str, tuple[str, list[dict[str, Any]]]] = {}
+    by_task: dict[str, tuple[str, Path, list[dict[str, Any]]]] = {}
     seen: set[tuple[str, int]] = set()
     for path in files:
         rel = path.relative_to(root).as_posix()
@@ -366,19 +507,23 @@ def import_calls(
                     drops["bad_call_index"] += 1
                     continue
                 seen.add((key, r["call_index"]))
-                by_task.setdefault(key, (rel, []))[1].append(r)
+                by_task.setdefault(key, (rel, path.parent, []))[2].append(r)
 
     traces: list[TaskTrace] = []
     kept_n = wall_tasks = overlapping_n = no_chat = 0
     sources: Counter[str] = Counter()
+    kind_counts: Counter[str] = Counter()
+    kind_unknown = 0
     for key in sorted(by_task):
-        source, recs = by_task[key]
+        source, calls_dir, recs = by_task[key]
         kept, use_wall = _times(recs, drops)
         if not kept:
             continue
         kept_n += len(kept)
         wall_tasks += int(use_wall)
-        calls = _trace_calls(key, kept, rates)
+        calls, task_kinds, task_unknown = _trace_calls(key, kept, rates, calls_dir)
+        kind_counts.update(task_kinds)
+        kind_unknown += task_unknown
         if not any(c.kind in CHAT_KINDS for c in calls):
             no_chat += 1
             continue
@@ -400,6 +545,8 @@ def import_calls(
         tasks_without_chat=no_chat,
         wall_time_tasks=wall_tasks,
         service_sources=tuple(sorted(sources.items())),
+        kind_sources=tuple((name, kind_counts[name]) for name in KIND_SOURCES),
+        kind_unknown=kind_unknown,
         errors=tuple(sorted(errors)),
     )
     return tuple(traces), report

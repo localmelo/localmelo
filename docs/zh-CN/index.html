@@ -104,7 +104,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md">
             <strong>记忆</strong>
-            <span>工作记忆、任务和步骤的历史记录，以及配置了嵌入服务器时的长期记忆；开启持久化后会保存到 SQLite。</span>
+            <span>工作记忆、任务和步骤的历史记录，以及配置了嵌入服务器时的长期记忆；开启持久化后会保存到 SQLite。在 Python 中还可以忘掉一个任务或全部记忆。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/python-api.md">
             <strong>Python API <span class="tag experimental">实验性</span></strong>
@@ -138,7 +138,7 @@ source .venv/bin/activate</code></pre>
       <section class="section" id="security">
         <h2>安全</h2>
         <div class="callout warning">
-          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。网关没有身份验证，所以请让它只监听 <code>127.0.0.1</code>（默认值）：在这个地址上，它会拒绝其他网站的网页通过浏览器向它的 API 发来的请求。</p>
+          <p><strong>工具以你的账户权限运行，并且没有沙箱。</strong>模型可以运行 shell 命令和 Python 代码，也可以读写你能访问的任何文件。新建的记忆文件只有你能读取（权限 0600）。网关没有身份验证，所以请让它只监听 <code>127.0.0.1</code>（默认值）：在这个地址上，它会拒绝其他网站的网页通过浏览器向它的 API 发来的请求。</p>
         </div>
         <p>请阅读<a href="https://github.com/localmelo/localmelo/blob/main/SECURITY.md">安全策略（英文）</a>和<a href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md#what-the-checks-do">检查能做什么（英文）</a>。</p>
       </section>
