@@ -25,7 +25,7 @@ from localmelo.support.gateway.chat_gate import (
     _trace_source,
 )
 from localmelo.support.gateway.playground import SmokePlayground
-from localmelo.support.scheduler import REASONS, Clock, Params
+from localmelo.support.scheduler import REASONS, Clock, Machine, Params
 from localmelo.support.scheduler.sim.trace import SCHEMA, read_trace
 
 # ── Fakes ──
@@ -1040,3 +1040,189 @@ async def test_the_gate_survives_a_failed_provider_and_stays_usable() -> None:
     assert (await wrapper.chat(messages(1))).content == "ok"
     await gate.close()
     assert inner.closed is False  # close_all owns the inner provider
+
+
+# ── The machine and the lock (S2b, R5/R9-R12) ──
+
+
+async def test_set_machine_under_off_updates_the_band_and_the_page_without_a_decision() -> (
+    None
+):
+    def spy(*args: object, **kwargs: object) -> Any:
+        raise AssertionError("off must not decide")
+
+    gate = ChatGate(policy="off", decide_fn=spy, lock_gate="wait")
+    gate.set_machine(Machine(lock="foreign", on_ac=False, battery_pct=55.0))
+    assert gate.machine_payload()["band"] == 2
+    assert gate.machine_payload()["lock"] == "foreign"
+    gate.set_machine(Machine(lock="foreign", on_ac=False, battery_pct=45.0))
+    assert gate.machine_payload()["band"] == 1
+    gate.set_machine(Machine(lock="foreign", on_ac=False, battery_pct=10.0))
+    assert gate.machine_payload()["band"] == 0
+    gate.set_machine(Machine(lock="none", on_ac=True, battery_pct=10.0))
+    assert gate.machine_payload()["band"] == 4
+    await gate.close()
+
+
+async def test_record_never_sees_the_lock() -> None:
+    gate = ChatGate(policy="fcfs", n_srv=2, lock_gate="record")
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("a")
+    assert admitted(call)
+    assert gate.held("a") == ""
+    assert gate.machine_payload()["lock"] == "foreign"
+    finish(gate, call)
+    await gate.close()
+
+
+@pytest.mark.parametrize("policy", ["off", "fcfs"])
+async def test_wait_holds_plan_reflect_and_embed_before_the_policy(
+    policy: str,
+) -> None:
+    gate = ChatGate(policy=policy, n_srv=8, lock_gate="wait")
+    gate.set_machine(Machine(lock="foreign"))
+    calls = [
+        gate.submit("a", kind="plan"),
+        gate.submit("a", kind="reflect"),
+        gate.submit("a", kind="embed"),
+    ]
+    for call in calls:
+        assert not admitted(call)
+        assert gate.held("a") == "Reservation"
+        assert gate.held_since("a") is not None
+    assert gate._state.calls == ()  # the policy never saw them
+    gate.set_machine(Machine(lock="none"))
+    assert all(admitted(call) for call in calls)
+    assert gate.held("a") == ""
+    for call in calls:
+        finish(gate, call)
+    await gate.close()
+
+
+async def test_a_lock_wait_is_one_hold_and_one_log_line(tmp_path: Path) -> None:
+    gate = ChatGate(policy="fcfs", n_srv=2, call_log_dir=tmp_path, lock_gate="wait")
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("a")
+    assert gate.held("a") == "Reservation"
+    finish(gate, call, "refused")
+    assert gate.held("a") == ""
+    assert gate._state.calls == ()
+    path = gate.call_log_path
+    assert path is not None
+    await gate.close()
+    traces = read_trace(path)
+    assert traces[0].calls[0].status == "refused"
+    assert traces[0].calls[0].admit_s is None
+
+
+@pytest.mark.parametrize("policy", ["off", "fcfs"])
+async def test_a_lock_wait_released_in_submit_order(policy: str) -> None:
+    gate = ChatGate(policy=policy, n_srv=1, lock_gate="wait")
+    gate.set_machine(Machine(lock="foreign"))
+    first = gate.submit("a", kind="plan")
+    second = gate.submit("b", kind="plan")
+    gate.set_machine(Machine(lock="none"))
+    if policy == "fcfs":
+        assert admitted(first)
+        assert not admitted(second)
+        finish(gate, first)
+        assert admitted(second)
+    else:
+        assert admitted(first) and admitted(second)
+    finish(gate, first)
+    finish(gate, second)
+    await gate.close()
+
+
+async def test_a_pending_call_was_not_orphaned_by_the_lock() -> None:
+    gate = ChatGate(policy="fcfs", n_srv=1, lock_gate="wait")
+    holder = gate.submit("holder", kind="plan")
+    assert admitted(holder)
+    pending = gate.submit("a", kind="plan")
+    assert not admitted(pending)
+    gate.set_machine(Machine(lock="foreign"))
+    assert gate.held("a") == "Reservation"
+    finish(gate, holder)
+    gate.set_machine(Machine(lock="none"))
+    assert admitted(pending)
+    assert not any(alarm.startswith("no_pending_call") for alarm in gate.alarms)
+    finish(gate, pending)
+    await gate.close()
+
+
+async def test_the_lane_waits_under_respect() -> None:
+    gate = ChatGate(policy="fcfs", n_srv=1, lock_gate="wait")
+    holder = gate.submit("holder", kind="plan")
+    assert admitted(holder)
+    gate.focus("a")
+    lane = gate.submit("a", kind="plan")
+    assert not admitted(lane)
+    gate.set_machine(Machine(lock="foreign"))
+    assert not any(alarm.startswith("lane_answer") for alarm in gate.alarms)
+    assert gate.held("a") == "Reservation"
+    finish(gate, holder)
+    gate.set_machine(Machine(lock="none"))
+    assert admitted(lane)
+    finish(gate, lane)
+    await gate.close()
+
+
+async def test_a_lock_hold_does_not_flap() -> None:
+    decisions: list[object] = []
+
+    def spy(state: Any, now: Any, params: Any) -> Any:
+        from localmelo.support.scheduler import decide
+
+        decisions.append(object())
+        return decide(state, now, params)
+
+    gate = ChatGate(policy="fcfs", n_srv=2, lock_gate="wait", decide_fn=spy)
+    gate.set_machine(Machine(lock="foreign"))
+    assert len(decisions) == 1
+    call = gate.submit("a", kind="plan")
+    start = gate.held_since("a")
+    for _ in range(10):
+        gate.set_machine(Machine(lock="foreign"))
+    assert len(decisions) == 1
+    assert gate.held_since("a") == start
+    assert gate.held_seconds("a") == 0.0
+    gate.set_machine(Machine(lock="none"))
+    finish(gate, call)
+    await gate.close()
+
+
+async def test_stop_during_a_lock_wait_cancels_the_future_and_keeps_the_gate_usable() -> (
+    None
+):
+    gate = ChatGate(policy="fcfs", n_srv=2, lock_gate="wait")
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("a", kind="plan")
+    assert call.future is not None and not call.future.done()
+    call.future.cancel()
+    finish(gate, call, "refused")
+    assert gate.held("a") == ""
+    gate.set_machine(Machine(lock="none"))
+    later = gate.submit("a", kind="plan")
+    assert admitted(later)
+    finish(gate, later)
+    await gate.close()
+
+
+async def test_close_cancels_lock_waiters_and_logs_them_refused(
+    tmp_path: Path,
+) -> None:
+    gate = ChatGate(policy="fcfs", n_srv=2, call_log_dir=tmp_path, lock_gate="wait")
+    gate.set_machine(Machine(lock="foreign"))
+    call = gate.submit("a", kind="plan")
+    path = gate.call_log_path
+    assert path is not None
+    await gate.close()
+    assert call.future is not None and call.future.cancelled()
+    traces = read_trace(path)
+    assert traces[0].calls[0].status == "refused"
+
+
+def test_enforces_holds_is_true_for_fcfs_or_wait_and_false_for_off_record() -> None:
+    assert ChatGate(policy="fcfs", lock_gate="record").enforces_holds is True
+    assert ChatGate(policy="off", lock_gate="wait").enforces_holds is True
+    assert ChatGate(policy="off", lock_gate="record").enforces_holds is False

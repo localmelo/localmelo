@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import stat
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -17,7 +18,10 @@ pytest.importorskip("uvicorn")
 
 from fastapi import FastAPI  # noqa: E402
 
-from localmelo.melo.contracts.providers import BaseLLMProvider  # noqa: E402
+from localmelo.melo.contracts.providers import (  # noqa: E402
+    BaseEmbeddingProvider,
+    BaseLLMProvider,
+)
 from localmelo.melo.schema import Message, RunResult, ToolDef  # noqa: E402
 from localmelo.support.config import (  # noqa: E402
     Config,
@@ -53,6 +57,19 @@ class FakeLLM(BaseLLMProvider):
         if self.delay:
             await asyncio.sleep(self.delay)
         return Message(role="assistant", content="Hello")
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class FakeEmbedding(BaseEmbeddingProvider):
+    def __init__(self) -> None:
+        self.calls = 0
+        self.closed = False
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        return [[float(len(text))] for text in texts]
 
     async def close(self) -> None:
         self.closed = True
@@ -527,3 +544,347 @@ async def test_the_call_log_is_under_the_configured_dir_and_is_pruned(
         assert path.read_text(encoding="utf-8").strip()
     finally:
         await gate.close()
+
+
+# ── The machine monitor and the lock gate (S2b) ──
+
+BATTERY_AC = (
+    "Now drawing from 'AC Power'\n"
+    " -InternalBattery-0 (id=1)\t100%; charged; 0:00 remaining present: true\n"
+)
+
+
+def fake_battery() -> str:
+    return BATTERY_AC
+
+
+def lock_text(holder: str = "agent-benchmark session (personal-agent-bench)") -> str:
+    return f"holder: {holder}\npurpose: a timed run\neta: 330 min\n"
+
+
+async def test_the_sessions_route_publishes_machine_and_keeps_the_session_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager, _ = make_manager(
+        tmp_path, monkeypatch, policy="off", battery_runner=fake_battery
+    )
+    await manager.start()
+    try:
+        session_id = await create(manager)
+        app = make_app(manager)
+        async with client_for(app) as client:
+            response = await client.get("/v1/playground/sessions")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["machine"]["lock"] == "none"
+        assert data["machine"]["on_ac"] is True
+        assert data["machine"]["band"] == 4
+        assert data["machine"]["gate"] == "record"
+        assert set(data["sessions"][0]) == {
+            "session_id",
+            "adapter",
+            "chat_url",
+            "chat_model",
+            "embedding_url",
+            "embedding_model",
+            "scenario_id",
+            "scenario",
+            "created_at",
+            "last_active",
+            "title",
+            "is_busy",
+            "level",
+            "held",
+        }
+        assert data["sessions"][0]["session_id"] == session_id
+    finally:
+        await manager.close_all()
+
+
+async def test_a_lock_hold_does_not_trip_the_run_timeout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "gpu.lock"
+    manager, provider = make_manager(
+        tmp_path,
+        monkeypatch,
+        policy="off",
+        lock_gate="wait",
+        lock_path=lock,
+        battery_runner=fake_battery,
+        lock_poll_s=0.01,
+        battery_poll_s=0.01,
+        settle_s=0.01,
+    )
+    await manager.start()
+    try:
+        session_id = await create(manager)
+        lock.write_text(lock_text(), encoding="utf-8")
+        await wait_until(
+            lambda: (manager.machine_payload() or {}).get("lock") == "foreign"
+        )
+
+        async def remove_later() -> None:
+            await asyncio.sleep(0.4)
+            lock.unlink()
+
+        remover = asyncio.create_task(remove_later())
+        try:
+            response = await manager.run(session_id, "hello", timeout=0.2)
+        finally:
+            await remover
+        assert response["answer"] == "Hello"
+        assert provider.requests >= 1
+        assert manager._gate.held_seconds(session_id) >= 0.3
+    finally:
+        await manager.close_all()
+
+
+async def test_the_timeout_still_fires_under_wait_when_nothing_holds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager, provider = make_manager(
+        tmp_path,
+        monkeypatch,
+        llm=FakeLLM(delay=0.3),
+        policy="off",
+        lock_gate="wait",
+        battery_runner=fake_battery,
+    )
+    await manager.start()
+    try:
+        session_id = await create(manager)
+        with pytest.raises(TimeoutError):
+            await manager.run(session_id, "hello", timeout=0.1)
+        assert provider.requests == 1
+    finally:
+        await manager.close_all()
+
+
+async def test_a_stop_during_a_lock_hold_ends_the_turn_and_keeps_the_chat_usable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "gpu.lock"
+    manager, provider = make_manager(
+        tmp_path,
+        monkeypatch,
+        policy="off",
+        lock_gate="wait",
+        lock_path=lock,
+        battery_runner=fake_battery,
+        call_log_dir=tmp_path / "scheduler",
+        lock_poll_s=0.01,
+        battery_poll_s=0.01,
+        settle_s=0.01,
+    )
+    await manager.start()
+    try:
+        session_id = await create(manager)
+        lock.write_text(lock_text(), encoding="utf-8")
+        await wait_until(
+            lambda: (manager.machine_payload() or {}).get("lock") == "foreign"
+        )
+        task = asyncio.create_task(manager.run(session_id, "hello", timeout=10.0))
+        await wait_until(lambda: manager._gate.held(session_id) == "Reservation")
+        assert await manager.cancel(session_id)
+        response = await task
+        assert response["cancelled"] is True
+        log = manager._gate.call_log_path
+        lock.unlink()
+        await wait_until(
+            lambda: (manager.machine_payload() or {}).get("lock") == "none"
+        )
+        second = await manager.run(session_id, "again", timeout=2.0)
+        assert second["answer"] == "Hello"
+        assert provider.requests >= 1
+        assert log is not None
+        from localmelo.support.scheduler.sim.trace import read_trace
+
+        assert any(call.calls[0].status == "refused" for call in read_trace(log))
+    finally:
+        await manager.close_all()
+
+
+async def test_the_playground_reads_lock_settings_and_starts_the_monitor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "gpu.lock"
+    lock.write_text(lock_text("local_ai-benchmark session"), encoding="utf-8")
+    cfg = Config(
+        chat_backend="vllm",
+        embedding_backend="none",
+        vllm=LocalBackendConfig(chat_url=CHAT_URL, chat_model="Qwen-27B"),
+        scheduler=SchedulerConfig(
+            gpu_lock_file=str(lock),
+            lock_self="local_ai-benchmark session",
+            lock_gate="wait",
+        ),
+    )
+    monkeypatch.setattr(webapp, "read_pmset", fake_battery)
+    app = FastAPI()
+    webapp.mount(app, cfg)
+    manager = app.state.smoke_playground
+    await manager.start()
+    try:
+        assert manager.machine_payload() is not None
+        assert manager.machine_payload()["lock"] == "self"
+        assert manager._gate.lock_gate == "wait"
+        assert manager._monitor is not None
+        assert manager._monitor._watcher is not None
+        assert manager._monitor._reader is not None
+    finally:
+        await manager.close_all()
+    assert manager._monitor._watcher is None
+    assert manager._monitor._reader is None
+
+
+async def test_the_machine_log_is_under_the_configured_dir_and_pruned(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    base = tmp_path / "scheduler"
+    old = base / "runs" / "20200101T000000"
+    old.mkdir(parents=True)
+    (old / "calls.jsonl").write_text("", encoding="utf-8")
+    os.utime(old, (0, 0))
+    manager, _ = make_manager(
+        tmp_path,
+        monkeypatch,
+        policy="off",
+        call_log_dir=base,
+        battery_runner=fake_battery,
+    )
+    await manager.start()
+    try:
+        assert not old.exists()
+        calls = manager._gate.call_log_path
+        machine = manager._gate.machine_log_path
+        assert calls is not None and machine is not None
+        assert calls.parent == machine.parent
+        assert calls.parent.parent == base / "runs"
+        assert stat.S_IMODE(calls.stat().st_mode) == 0o600
+        assert stat.S_IMODE(machine.stat().st_mode) == 0o600
+    finally:
+        await manager.close_all()
+
+
+async def test_record_is_the_default_and_holds_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "gpu.lock"
+    manager, _ = make_manager(
+        tmp_path,
+        monkeypatch,
+        policy="off",
+        lock_path=lock,
+        battery_runner=fake_battery,
+        lock_poll_s=0.01,
+        battery_poll_s=0.01,
+        settle_s=0.01,
+    )
+    await manager.start()
+    try:
+        session_id = await create(manager)
+        lock.write_text(lock_text(), encoding="utf-8")
+        await wait_until(
+            lambda: (manager.machine_payload() or {}).get("lock") == "foreign"
+        )
+        response = await manager.run(session_id, "hello", timeout=1.0)
+        assert response["answer"] == "Hello"
+        assert manager._gate.held(session_id) == ""
+        assert manager._gate.held_seconds(session_id) == 0.0
+        assert manager._gate.machine_payload()["lock"] == "foreign"
+    finally:
+        await manager.close_all()
+
+
+async def test_the_machine_payload_is_none_without_a_monitor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manager, _ = make_manager(tmp_path, monkeypatch)
+    try:
+        assert manager.machine_payload() is None
+        assert manager._monitor is None
+        await manager.start()
+        assert manager.machine_payload() is None
+    finally:
+        await manager.close_all()
+
+
+async def test_a_create_that_would_seed_under_a_foreign_lock_returns_409_and_sends_no_embedding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "gpu.lock"
+    manager, _ = make_manager(
+        tmp_path,
+        monkeypatch,
+        policy="off",
+        lock_gate="wait",
+        lock_path=lock,
+        battery_runner=fake_battery,
+        lock_poll_s=0.01,
+        battery_poll_s=0.01,
+        settle_s=0.01,
+    )
+    provider = FakeEmbedding()
+    monkeypatch.setattr(manager, "_build_embedding_provider", lambda *args: provider)
+    await manager.start()
+    try:
+        lock.write_text(lock_text(), encoding="utf-8")
+        await wait_until(
+            lambda: (manager.machine_payload() or {}).get("lock") == "foreign"
+        )
+        from localmelo.support.gateway.playground import LockHeldError
+
+        with pytest.raises(LockHeldError, match="agent-benchmark session"):
+            await manager.create_session(
+                chat_url=CHAT_URL,
+                chat_model="Qwen-27B",
+                embedding_model="embed",
+                scenario_id="personal_preference",
+            )
+        assert provider.calls == 0
+        assert manager.list_sessions() == []
+        app = make_app(manager)
+        async with client_for(app) as client:
+            response = await client.post(
+                "/v1/playground/session",
+                json={
+                    "chat_url": CHAT_URL,
+                    "chat_model": "Qwen-27B",
+                    "embedding_model": "embed",
+                    "scenario_id": "personal_preference",
+                },
+            )
+        assert response.status_code == 409
+        assert "agent-benchmark session" in response.json()["error"]
+    finally:
+        await manager.close_all()
+
+
+async def test_a_create_without_seeding_under_a_foreign_lock_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lock = tmp_path / "gpu.lock"
+    manager, provider = make_manager(
+        tmp_path,
+        monkeypatch,
+        policy="off",
+        lock_gate="wait",
+        lock_path=lock,
+        battery_runner=fake_battery,
+        lock_poll_s=0.01,
+        battery_poll_s=0.01,
+        settle_s=0.01,
+    )
+    await manager.start()
+    try:
+        lock.write_text(lock_text(), encoding="utf-8")
+        await wait_until(
+            lambda: (manager.machine_payload() or {}).get("lock") == "foreign"
+        )
+        session_id = await create(manager)
+        assert session_id
+        assert provider.requests == 0
+        assert len(manager.list_sessions()) == 1
+    finally:
+        await manager.close_all()

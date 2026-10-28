@@ -76,8 +76,9 @@ class GatewayServer:
         # The web workspace's machine monitor starts before the gateway
         # reports ready, so a lock present at startup is observed at once.
         playground = getattr(app.state, "smoke_playground", None)
-        if playground is not None:
-            await playground.start()
+        starter = getattr(playground, "start", None)
+        if starter is not None:
+            await starter()
         logger.info("gateway ready on %s:%d", self.host, self.port)
         try:
             yield
