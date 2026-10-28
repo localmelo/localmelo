@@ -6,6 +6,8 @@ output is text: the CLI runs the task with ``observe=`` and
 one line, redrawn on each event and once a second. :func:`format_line`
 builds that line from the latest ``run.progress`` payload; it is pure, so
 every level and state can be tested on synthetic payloads.
+:func:`format_past` gives just that line's past facts and items, for the
+interactive UI's own row (U2).
 
 What the line shows follows the honesty rules of the progress spec
 (sections 6 and 7):
@@ -252,7 +254,7 @@ class _Parts:
         return SEPARATOR.join(parts)
 
 
-def _items_text(items: Any, level: int) -> str | None:
+def items_text(items: Any, level: int) -> str | None:
     """The steps of past runs, each with its mark; None when there are none."""
     if not isinstance(items, list) or not items:
         return None
@@ -285,7 +287,7 @@ def _similar_hint(title: Any) -> str:
     return f"like {text}:" if text else SIMILAR_HINT
 
 
-def _past_facts(
+def past_facts(
     past: Any, level: int, *, hint: str | None = None
 ) -> tuple[str | None, str | None, bool]:
     """(steps text, times text, a single past run) from the payload's ``past``.
@@ -367,6 +369,34 @@ def _head(payload: Mapping[str, Any], level: int, step: int) -> list[str]:
     return [f"{bar} {percent}", step_text]
 
 
+def _past_parts(
+    payload: Mapping[str, Any], level: int
+) -> tuple[str | None, str | None, str | None, str | None, bool]:
+    """(steps, times, items, items title, merge) of a payload's past runs.
+
+    The items title names what their steps are (spec section 5.4); the
+    merge says a single past run's items follow its facts after a colon.
+    """
+    basis = payload.get("basis")
+    title = basis.get("title") if isinstance(basis, Mapping) else None
+    similar = isinstance(basis, Mapping) and basis.get("match") == "similar"
+    hint = _similar_hint(title) if similar else None
+    past_steps, past_times, single = (
+        past_facts(payload.get("past"), level, hint=hint)
+        if level >= 1
+        else (None, None, False)
+    )
+    items = items_text(payload.get("items"), level) if level >= 1 else None
+    items_title = None
+    if level == 1:
+        # A similar task's steps follow its facts, or carry the hint.
+        if not similar:
+            items_title = "last time:"
+        else:
+            items_title = "its steps:" if past_steps else hint
+    return past_steps, past_times, items, items_title, single and level == 1
+
+
 def _parts(
     payload: Mapping[str, Any] | None,
     tool: RunningTool | None,
@@ -395,23 +425,7 @@ def _parts(
         if passed is not None and total is not None:
             tests_text = f"tests {passed}/{total}"
 
-    basis = payload.get("basis")
-    title = basis.get("title") if isinstance(basis, Mapping) else None
-    similar = isinstance(basis, Mapping) and basis.get("match") == "similar"
-    hint = _similar_hint(title) if similar else None
-    past_steps, past_times, single = (
-        _past_facts(payload.get("past"), level, hint=hint)
-        if level >= 1
-        else (None, None, False)
-    )
-    items = _items_text(payload.get("items"), level) if level >= 1 else None
-    items_title = None
-    if level == 1:
-        # A similar task's steps follow its facts, or carry the hint.
-        if not similar:
-            items_title = "last time:"
-        else:
-            items_title = "its steps:" if past_steps else hint
+    past_steps, past_times, items, items_title, merge_past = _past_parts(payload, level)
     return _Parts(
         head=head,
         attempt=f"attempt {attempt}" if attempt >= 2 else None,
@@ -422,7 +436,7 @@ def _parts(
         past_times=past_times,
         items=items,
         items_title=items_title,
-        merge_past=single and level == 1,
+        merge_past=merge_past,
     )
 
 
@@ -457,6 +471,55 @@ def format_line(
         line = parts.compose(dropped)
     line = cut_to_width(line, budget, wide_ambiguous=wide_ambiguous)
     return f"{DIM}{line}{RESET}" if color else line
+
+
+def format_past(
+    payload: Mapping[str, Any] | None,
+    width: int,
+    *,
+    wide_ambiguous: bool = False,
+) -> str:
+    """The past facts and past runs' items of *payload*, as level 1 draws them.
+
+    This is the segment :func:`format_line` composes at level 1 after its
+    facts and elapsed time: ``last time 6 steps, 2m10s: Read …``, ``past
+    5-8 steps, 2-3 min · last time: Read …``, or, for a similar match,
+    ``like <routine title>: …`` and ``its steps: …`` (spec section 5.4).
+    A single past run's items follow its facts after a colon. It is empty
+    below level 1, or when the payload has neither past facts nor items.
+    It fits *width* cells, counted as :func:`char_width` says with
+    *wide_ambiguous*: past times go first, then the items, and what still
+    does not fit is cut with ``…``.
+    """
+    payload = payload if isinstance(payload, Mapping) else {}
+    level = _int(payload.get("level")) or 0
+    if level < 1:
+        return ""
+    past_steps, past_times, items, items_title, merge_past = _past_parts(payload, level)
+
+    def compose(dropped: Sequence[str]) -> str:
+        parts: list[str] = []
+        past = past_steps or ""
+        if past_times and "past_times" not in dropped:
+            past = f"{past}, {past_times}" if past else past_times
+        shown = items if "items" not in dropped else None
+        if shown and merge_past and past:
+            return f"{past}: {shown}"
+        if past:
+            parts.append(past)
+        if shown:
+            parts.append(f"{items_title} {shown}" if items_title else shown)
+        return SEPARATOR.join(parts)
+
+    budget = max(1, width)
+    dropped: list[str] = []
+    text = compose(dropped)
+    for part in ("past_times", "items"):
+        if display_width(text, wide_ambiguous=wide_ambiguous) <= budget:
+            break
+        dropped.append(part)
+        text = compose(dropped)
+    return cut_to_width(text, budget, wide_ambiguous=wide_ambiguous)
 
 
 # ── When to draw ──
