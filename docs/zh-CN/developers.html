@@ -233,7 +233,7 @@ uv run mypy .</code></pre>
         </p>
         <ol>
           <li>
-            在 <code>melo/executor/builtins.py</code> 中添加 <code>ToolDef</code> 和函数，并用 <code>@_builtin(...)</code> 装饰。语义标签是任务里可能用来称呼这个工具的词。每个已注册的内置工具在每一步都会提供；任务的提示词和 BM25 搜索只在其他提供方工具之间排序。
+            在 <code>melo/executor/builtins.py</code> 中添加 <code>ToolDef</code> 和函数，并用 <code>@_builtin(...)</code> 装饰。语义标签是 BM25 搜索用来匹配任务的词。每个已注册的内置工具在每一步都会提供；在其他提供方工具中，retrieve 模式提供模型已经调用过的工具和与任务最匹配的三个。
           </li>
           <li>
             为它指定权限级别：把名字加入 <code>melo/checker/tiers.py</code> 的 <code>BUILTIN_TIERS</code>（<code>read</code>、<code>write</code>、<code>exec</code> 或 <code>network</code>）。有一个测试保证这张表和内置工具名一致，所以新增内置工具必须同时指定级别。运行有审批策略时，级别不是 <code>read</code> 的调用都会先询问；<code>APPROVAL_BUILTINS</code> 由这张表推导得出。
