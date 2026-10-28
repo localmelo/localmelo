@@ -45,7 +45,9 @@ class FakeRunner:
     def observe(self, ask: Any) -> Any:
         return ask
 
-    async def start_turn(self, text: str, *, approval: Any) -> None:
+    async def start_turn(
+        self, text: str, *, approval: Any, client_request_id: str | None = None
+    ) -> None:
         self.busy = True
         assert approval is not None
 

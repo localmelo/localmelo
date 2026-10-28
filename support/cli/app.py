@@ -69,6 +69,7 @@ from localmelo.support.cli.approvals import (
     panel_text,
     session_warning,
 )
+from localmelo.support.cli.completion import AttachmentCompletion, SlashCompleter
 from localmelo.support.cli.picker import SessionPicker
 from localmelo.support.cli.render import TurnRenderer, live_rows
 from localmelo.support.cli.text import (
@@ -368,6 +369,10 @@ class InteractiveApp:
     ) -> None:
         self.controller = controller
         self._completer = completer
+        if isinstance(completer, SlashCompleter):
+            completer.workspace = lambda: getattr(
+                getattr(controller, "agent", None), "workspace_root", None
+            )
         self.renderer = renderer
         self.symbols = symbols
         self.approver = approver
@@ -439,6 +444,12 @@ class InteractiveApp:
                 ConditionalContainer(
                     Window(FormattedTextControl(self._queued_fragments), height=1),
                     filter=Condition(lambda: self.controller.queued is not None),
+                ),
+                ConditionalContainer(
+                    Window(FormattedTextControl(self._attachments_fragments), height=1),
+                    filter=Condition(
+                        lambda: bool(getattr(self.controller, "attachment_line", ""))
+                    ),
                 ),
                 *self._panels(),
                 ConditionalContainer(
@@ -611,6 +622,7 @@ class InteractiveApp:
             (
                 self._live_rows(),
                 self.controller.queued is not None,
+                bool(getattr(self.controller, "attachment_line", "")),
                 self._hint_visible(),
                 self.app.layout.is_searching,
             )
@@ -674,6 +686,15 @@ class InteractiveApp:
         width = self.app.output.get_size().columns
         text = f"{self.symbols.queued} Queued for the next turn: {shown(first)}"
         return [("class:muted", cut_cells(text, width, self.symbols.ellipsis))]
+
+    def _attachments_fragments(self) -> StyleAndTextTuples:
+        line = cut_cells(
+            "  " + shown(str(getattr(self.controller, "attachment_line", ""))),
+            self.app.output.get_size().columns,
+            self.symbols.ellipsis,
+        )
+        label, separator, names = line.partition(": ")
+        return [("class:muted", label + separator), ("", names)]
 
     def _hint_visible(self) -> bool:
         return bool(self._hint) and self._clock() < self._hint_until
@@ -797,6 +818,7 @@ class InteractiveApp:
             (
                 self._live_visible(),
                 self.controller.queued is not None,
+                bool(getattr(self.controller, "attachment_line", "")),
                 self._hint_visible(),
                 pending.reason,
             )
@@ -1045,7 +1067,7 @@ class InteractiveApp:
                 buffer.document, CompleteEvent(completion_requested=True)
             )
         )
-        if len(found) == 1:
+        if len(found) == 1 and not isinstance(found[0], AttachmentCompletion):
             buffer.apply_completion(found[0])
         elif found:
             buffer.complete_state = CompletionState(buffer.document, found)
@@ -1060,6 +1082,15 @@ class InteractiveApp:
             return
         state = buffer.complete_state
         if state is not None and state.current_completion is not None:
+            selected = state.current_completion
+            if isinstance(selected, AttachmentCompletion) and self._question is None:
+                buffer.complete_state = None
+                attach = getattr(self.controller, "attach_path", None)
+                if attach is not None:
+                    hint = attach(selected.path)
+                    if hint:
+                        self.hint(hint)
+                return
             # Tab or the arrows picked one: the draft holds it. (Cancelling
             # the completion would put back what was typed.)
             buffer.complete_state = None

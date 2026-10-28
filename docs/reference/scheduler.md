@@ -54,7 +54,7 @@ the lane by code.
 ## Tasks, workers and the scheduler store (S3a)
 
 The gateway's `sessions.db` has a `scheduler` component beside the session
-tables. `support/gateway/task_store.py` creates version 3 with `tasks`,
+tables. `support/gateway/task_store.py` creates version 4 with `tasks`,
 `task_deps`, `priority_events`, `questions`, `sched_rules`, `sched_log`,
 `idle_windows`, `park_priority` and recovery storage, with indexes on `tasks(state, level_eff)`,
 `priority_events(task_id, ts)` and `sched_log(ts)`, in one `BEGIN IMMEDIATE`
