@@ -175,6 +175,58 @@ def _onboard_embedding_local(cfg: config.Config, key: str) -> None:
 # ── Main setup flow ──
 
 
+@dataclass(frozen=True)
+class EmbeddingChoice:
+    """An embedding model the chat server already lists.
+
+    *key* is the chat backend's key (and so the embedding backend's),
+    *url* the chat server's URL, *model* the listed id, and *label* the
+    wizard's line for it.
+    """
+
+    key: str
+    url: str
+    model: str
+    label: str
+
+
+def _recommended_order(candidates: list[str]) -> list[str]:
+    """*candidates* in :func:`discovery.recommend_embedding` order."""
+    remaining = list(candidates)
+    ordered: list[str] = []
+    while remaining:
+        candidate = discovery.recommend_embedding(remaining)
+        assert candidate is not None  # remaining is not empty
+        ordered.append(candidate)
+        remaining.remove(candidate)
+    return ordered
+
+
+def _embedding_choices(cfg: config.Config, models: list[str]) -> list[EmbeddingChoice]:
+    """The chat server's embedding models, as wizard options; pure.
+
+    Only a local chat backend with a URL can be listed. The order is the
+    recommendation order, and the label names the server so a candidate is
+    clear next to the generic local-endpoint options.
+    """
+    key = cfg.chat_backend
+    if key not in _EMBEDDING_DEFAULTS:
+        return []
+    section = getattr(cfg, key, None)
+    url = getattr(section, "chat_url", "")
+    if not url:
+        return []
+    return [
+        EmbeddingChoice(
+            key=key,
+            url=url,
+            model=model,
+            label=f"{model} on this server ({url})",
+        )
+        for model in _recommended_order(discovery.embedding_models(models))
+    ]
+
+
 def run_backend_setup() -> config.Config | None:
     """Run the split backend setup flow.
 
@@ -214,20 +266,48 @@ def run_backend_setup() -> config.Config | None:
         return None
 
     # ── 2. Embedding backend ──
-    emb_keys = [key for key, _ in EMBEDDING_BACKENDS]
-    emb_display = [name for _, name in EMBEDDING_BACKENDS]
-    current_emb = cfg.embedding_backend if cfg.embedding_backend in emb_keys else "none"
-    emb_choice = _ask_choice(
-        "Embedding backend", emb_display, default=emb_keys.index(current_emb) + 1
-    )
-    selected_emb_key = EMBEDDING_BACKENDS[emb_choice - 1][0]
-
-    if selected_emb_key != "none":
-        _onboard_embedding_local(cfg, selected_emb_key)
-    else:
-        print("\n  No embedding: agent will not have long-term memory.")
-
+    # The chat backend is needed before the embedding question: its own
+    # server's listed models become extra options.
     cfg.chat_backend = selected_chat_key
+    emb_keys = [key for key, _ in EMBEDDING_BACKENDS]
+    choices: list[EmbeddingChoice] = []
+    if cfg.has_embedding:
+        # A working embedding setup keeps today's menu and defaults, and
+        # sends no listing: the saved model may not be on the chat server.
+        current_emb = (
+            cfg.embedding_backend if cfg.embedding_backend in emb_keys else "none"
+        )
+        default_emb = emb_keys.index(current_emb) + 1
+    else:
+        models: list[str] = []
+        chat_section = getattr(cfg, selected_chat_key, None)
+        chat_url = getattr(chat_section, "chat_url", "")
+        if selected_chat_key in _EMBEDDING_DEFAULTS and chat_url:
+            try:
+                models = asyncio.run(discovery.list_models(selected_chat_key, chat_url))
+            except discovery.DiscoveryError:
+                models = []  # the end-of-wizard probe still reports the problem
+        choices = _embedding_choices(cfg, models)
+        default_emb = len(emb_keys) + 1 if choices else emb_keys.index("none") + 1
+    emb_display = [name for _, name in EMBEDDING_BACKENDS] + [
+        choice.label for choice in choices
+    ]
+    emb_choice = _ask_choice("Embedding backend", emb_display, default=default_emb)
+
+    if emb_choice > len(emb_keys):
+        picked = choices[emb_choice - len(emb_keys) - 1]
+        selected_emb_key = picked.key
+        cfg.embedding_backend = selected_emb_key
+        section = getattr(cfg, selected_emb_key)
+        section.embedding_url = picked.url
+        section.embedding_model = picked.model
+    else:
+        selected_emb_key = EMBEDDING_BACKENDS[emb_choice - 1][0]
+        if selected_emb_key != "none":
+            _onboard_embedding_local(cfg, selected_emb_key)
+        else:
+            print("\n  No embedding: agent will not have long-term memory.")
+
     cfg.embedding_backend = selected_emb_key
 
     if not _run_probes(cfg, retry=lambda: handler(cfg)):

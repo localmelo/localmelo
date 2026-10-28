@@ -40,6 +40,16 @@ def _server_is_not_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(discovery, "is_ollama", is_ollama)
 
 
+@pytest.fixture(autouse=True)
+def _no_models_for_the_wizard(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The wizard lists nothing unless a test overrides this (the first run fakes it)."""
+
+    async def list_models(key: str, url: str, **kwargs: object) -> list[str]:
+        return []
+
+    monkeypatch.setattr(discovery, "list_models", list_models)
+
+
 @pytest.fixture
 def config_path(tmp_path: Path) -> Iterator[Path]:
     path = tmp_path / "config.toml"
@@ -417,6 +427,113 @@ def test_enter_at_every_wizard_question_keeps_the_config(config_path: Path) -> N
         "  Embedding backend [5]: ",
     ]
     assert not any("key" in prompt.lower() for prompt in answers.prompts)
+
+
+def test_the_wizard_offers_the_chat_servers_embedding_model(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    listing = mock.AsyncMock(
+        return_value=["Qwen3-8B", "nomic-embed-text", "Qwen3-Embedding-0.6B"]
+    )
+    config.save(_configured())
+    answers = _Answers("", "", "", "", "6")
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+        mock.patch.object(discovery, "list_models", listing),
+    ):
+        cfg = run_backend_setup()
+    assert cfg is not None
+    assert answers.prompts == [
+        "  Chat backend [3]: ",
+        f"  Base URL [{URL}]: ",
+        "  Chat model name [Qwen3-8B]: ",
+        "  Start? [Y]: ",
+        "  Embedding backend [6]: ",
+    ]
+    listing.assert_awaited_once_with("vllm", URL)
+    assert (cfg.embedding_backend, cfg.vllm.embedding_url) == ("vllm", URL)
+    assert cfg.vllm.embedding_model == "Qwen3-Embedding-0.6B"
+    out = capsys.readouterr().out
+    assert (
+        f"    [6] Qwen3-Embedding-0.6B on this server ({URL})\n"
+        f"    [7] nomic-embed-text on this server ({URL})\n"
+    ) in out
+
+
+def test_embedding_choices_are_pure_and_in_recommendation_order() -> None:
+    cfg = _configured()
+    choices = onboard._embedding_choices(
+        cfg, ["bge-m3", "Qwen3-Embedding-0.6B", "chat-a", "nomic-embed-text"]
+    )
+    assert [(choice.key, choice.url, choice.model) for choice in choices] == [
+        ("vllm", URL, "Qwen3-Embedding-0.6B"),
+        ("vllm", URL, "nomic-embed-text"),
+        ("vllm", URL, "bge-m3"),
+    ]
+    assert cfg.embedding_backend == "none"  # nothing was written
+
+
+def test_the_wizard_default_without_a_candidate_is_none(
+    config_path: Path,
+) -> None:
+    config.save(_configured())
+    answers = _Answers(*[""] * 10)
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+        mock.patch.object(discovery, "list_models", mock.AsyncMock(return_value=[])),
+    ):
+        assert run_backend_setup() is not None
+    assert answers.prompts[4] == "  Embedding backend [5]: "
+
+
+def test_the_wizard_falls_back_when_the_listing_fails(
+    config_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    listing = mock.AsyncMock(
+        side_effect=DiscoveryError("connection refused", reachable=False)
+    )
+    config.save(_configured())
+    answers = _Answers(*[""] * 10)
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+        mock.patch.object(discovery, "list_models", listing),
+    ):
+        cfg = run_backend_setup()
+    assert cfg is not None and cfg.embedding_backend == "none"
+    assert answers.prompts == [
+        "  Chat backend [3]: ",
+        f"  Base URL [{URL}]: ",
+        "  Chat model name [Qwen3-8B]: ",
+        "  Start? [Y]: ",
+        "  Embedding backend [5]: ",
+    ]
+    assert "Traceback" not in capsys.readouterr().out
+
+
+def test_the_wizard_keeps_a_saved_embedding(config_path: Path) -> None:
+    cfg = _configured()
+    cfg.embedding_backend = "ollama"
+    cfg.ollama.embedding_url = "http://127.0.0.1:11434"
+    cfg.ollama.embedding_model = "bge-m3"
+    config.save(cfg)
+    listing = mock.AsyncMock(return_value=["Qwen3-Embedding-0.6B"])
+    answers = _Answers(*[""] * 10)
+    with (
+        mock.patch("builtins.input", answers),
+        mock.patch.object(onboard, "_run_probes", return_value=True),
+        mock.patch.object(discovery, "list_models", listing),
+    ):
+        result = run_backend_setup()
+    assert result is not None and result.embedding_backend == "ollama"
+    listing.assert_not_called()
+    assert answers.prompts[4:] == [
+        "  Embedding backend [2]: ",
+        "  Embedding endpoint URL [http://127.0.0.1:11434]: ",
+        "  Embedding model name [bge-m3]: ",
+    ]
 
 
 def test_the_embedding_question_defaults_to_the_configs_backend(
