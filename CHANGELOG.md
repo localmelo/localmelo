@@ -278,6 +278,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   `Content-Security-Policy: frame-ancestors 'none'` ([#36]).
 - On any other host, such as `0.0.0.0`, the gateway makes none of these
   checks and logs a warning when it starts ([#36]).
+- A new `long_term.db` is created with mode 0600, like `history.db` and
+  `procedures.db`, with its `-wal` and `-shm`; it got the default mode
+  before, usually 0644, so other users of the computer could read the step
+  summaries and reflections it holds. An existing file keeps its mode
+  ([#NN]).
 
 Changes before these are not listed here. See the
 [updates page](https://localmelo.github.io/localmelo/en/updates.html) for
