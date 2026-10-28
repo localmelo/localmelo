@@ -227,6 +227,9 @@ STATUS_TEXT: Final[Mapping[str | tuple[str, str], StatusText]] = {
         "Stopped after reflection", "warn", "Stopped after reflection"
     ),
     "budget_exhausted": StatusText("Out of steps", "warn", "Ran out of steps"),
+    "context_budget_exceeded": StatusText(
+        "Context too large", "warn", "Context budget exceeded"
+    ),
     "timeout": StatusText("Timed out", "warn", "Timed out"),
     "provider_error": StatusText(
         "Model server error", "error", "Could not get an answer from the model server"

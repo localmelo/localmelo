@@ -9,11 +9,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- Correct the API v2 response formats and tools example, and update the bilingual
+  quickstart to reflect the shipped console settings and approvals ([#122], [#124]).
+  Clarify task validation and read-only worker details ([#119], [#123], [#130], [#133]).
+- Clarify that explicit reasoning modes can use text-only long-term memory
+  without an embedding backend, in the embedding guide and Chinese architecture
+  boundary ([#132]).
+
 - Attempt digests skip task headings and report verification only for passing
   checks, rather than treating trivial Python imports as tests ([#128]).
 
 ### Added
 
+- Opt-in context fitting shortens request copies and retries one classified overflow without rerunning tools; impossible requests end with a specific status ([#131]).
 - Read-only worker history in the web workspace, with server-side filters,
   paging, recorded transcripts and explicit refresh for unfinished runs. ([#130])
 
@@ -927,3 +935,6 @@ earlier milestones.
 [#128]: https://github.com/localmelo/localmelo/pull/128
 [#129]: https://github.com/localmelo/localmelo/pull/129
 [#130]: https://github.com/localmelo/localmelo/pull/130
+[#131]: https://github.com/localmelo/localmelo/pull/131
+[#132]: https://github.com/localmelo/localmelo/pull/132
+[#133]: https://github.com/localmelo/localmelo/pull/133
