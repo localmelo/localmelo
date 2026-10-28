@@ -11,7 +11,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 - Workspace settings gain connection testing and an immediately applied theme;
   a session details drawer shows tools, grant revocation, memory and runs.
-  Store, model and stream banners no longer replace other notices. ([#NN])
+  Store, model and stream banners no longer replace other notices. ([#124])
 
 - Optional direct worker-session recording and dsh JSONL import, with a
   read-only, filterable and paginated gateway worker-history API. [#123]
@@ -894,3 +894,4 @@ earlier milestones.
 [#121]: https://github.com/localmelo/localmelo/pull/121
 [#122]: https://github.com/localmelo/localmelo/pull/122
 [#123]: https://github.com/localmelo/localmelo/pull/123
+[#124]: https://github.com/localmelo/localmelo/pull/124
