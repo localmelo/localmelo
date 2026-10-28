@@ -226,7 +226,7 @@
         <ul>
           <li>直接模式：运行选项（包括用 <code>--workspace DIR</code> 指定任务工作的文件夹，以及如何把回复的推理发回或保留：<code>legacy</code>、<code>drop</code>、<code>replay</code>、<code>compress</code> 或 <code>compress+replay</code>）、九种运行状态、文本或 JSON 输出，以及固定的退出码。</li>
           <li>终端中的交互式界面（单独的 <code>melo</code>，<code>support/cli/</code>）：实时的工具块和旋转指示、审批（写文件时显示将要做出的改动）、带补全的 <code>/</code> 命令、<code>/model</code> 和 <code>/backend</code>、<code>/approvals</code>、<code>/status</code>、<code>/mcp</code> 和 <code>/retry</code>、MCP 服务器文件（<code>--mcp-config</code> 或配置文件的 <code>mcp_config</code>）、可以用 <code>melo -c</code>、<code>melo -r</code>、<code>/sessions</code> 和 <code>/resume</code> 恢复的已保存对话，以及用 <code>/title</code>、<code>/undo</code>、<code>/usage</code>、<code>/memory</code> 和 <code>/copy</code> 命名、撤销、查看和复制对话；以及简单的对话循环（<code>melo ""</code>）。</li>
-          <li>四个内置工具（其中 <code>python_exec</code> 在所有模式下都在子进程中运行），以及本地 MCP 服务器提供的工具（在直接模式、Python API 和交互式界面中）。</li>
+          <li>四个内置工具（其中 <code>python_exec</code> 在所有模式下都在子进程中运行；网关和控制台会话只拿到三个，没有 <code>shell_exec</code>），以及本地 MCP 服务器提供的工具（在直接模式、Python API 和交互式界面中）。</li>
           <li>工具子进程和 MCP 服务器只拿到最小环境（<code>PATH</code>、<code>HOME</code>、<code>USER</code>、<code>LOGNAME</code>、<code>SHELL</code>、<code>TERM</code>、<code>LANG</code>、<code>LC_*</code>、<code>TMPDIR</code>），再加上 <code>AgentOptions(tool_env)</code> 或服务器条目里的 <code>env</code>；其他变量都不继承。</li>
           <li>每一步提供内置工具、模型在这次对话中已经调用过的工具，以及与任务最接近的三个匹配（默认的 <code>retrieve</code> 模式）；<code>all</code> 在每一步提供所有工具。</li>
           <li>Python API（实验性）：运行事件、停止运行、工具调用的审批策略、限制文件工具的工作区根目录，以及可以在多次运行之间延续的对话。</li>
