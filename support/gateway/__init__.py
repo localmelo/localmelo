@@ -51,7 +51,7 @@ class GatewayServer:
 
         from localmelo.support.gateway.webapp import mount as mount_webapp
 
-        mount_webapp(self.app)
+        mount_webapp(self.app, self.cfg)
 
         # The guard sees each request before routing, so it covers every
         # route, error responses and routes added later. Middleware added

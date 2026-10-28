@@ -90,7 +90,7 @@ def _build_server(
 
     cfg = _test_cfg()
 
-    with patch("localmelo.support.gateway.webapp.mount", lambda app: None):
+    with patch("localmelo.support.gateway.webapp.mount", lambda app, cfg=None: None):
         server = GatewayServer(cfg)
 
     # Replace the real SessionManager with our fake

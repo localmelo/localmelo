@@ -20,6 +20,15 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   MCP is off after a failure, `/status` shows the model and server, the
   session, the tools, memory, limits and files, and `/retry` runs the
   newest turn again. The hints name them where they apply ([#NN]).
+- The web workspace's chats go through the scheduler: each chat call is
+  admitted at once or held according to `[scheduler] policy` (`off`
+  by default, which only records), each embedding call is recorded and counts
+  in flight but is never held, a chat's level chip (P1-P4), the focused
+  chat's lane, the server's `n_srv` slots and the `r_f`/`n_fg` reserves. A
+  held chat shows `Waiting: <reason>` in the page, and every call leaves one
+  schema-1 line in `~/.cache/localmelo/scheduler/runs/<UTC>/calls.jsonl`.
+  Direct runs, the CLI and `/v1/agent/run` are unchanged and gated nowhere
+  ([#69]).
 - Tools have a permission tier, and an approval policy asks by tier rather
   than by a fixed list of names. The built-ins keep their tiers (`file_read`
   read, `file_write` write, `shell_exec` and `python_exec` exec), and a
@@ -274,6 +283,13 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A held chat's header still said `● Working` while the sidebar, status
+  label and message area said it was waiting, and a chat that had just sent
+  kept `Working on your request…` in the message area for the whole hold
+  (the poll skipped the detail refresh while the send was pending). The
+  header's status pill now says `Waiting: <reason>`, and while the send is
+  pending the message area follows the polled hold as it changes; both
+  return to Working when the hold ends ([#71]).
 - The scheduler simulator's importer reads a chat call's kind from the
   `X-Localmelo-Call-Kind` header that localmelo sends, in the headers side
   file a proxy record names with `bodies.headers`. Retrieval and
@@ -402,5 +418,7 @@ earlier milestones.
 [#63]: https://github.com/localmelo/localmelo/pull/63
 [#64]: https://github.com/localmelo/localmelo/pull/64
 [#66]: https://github.com/localmelo/localmelo/pull/66
-[#67]: https://github.com/localmelo/localmelo/pull/NN
+[#67]: https://github.com/localmelo/localmelo/pull/67
 [#68]: https://github.com/localmelo/localmelo/pull/68
+[#69]: https://github.com/localmelo/localmelo/pull/69
+[#71]: https://github.com/localmelo/localmelo/pull/71

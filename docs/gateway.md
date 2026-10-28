@@ -215,6 +215,13 @@ The sidebar supports chat search and switching. Drafts stay with each chat in
 the current browser tab. The workspace restores live chats after a page reload
 and polls for changes from other browser clients every 2.5 seconds while visible.
 
+A chat's header has a level chip (P1 to P4, P2 by default) that sets how the
+scheduler orders the chat's calls in front of other chats; it is kept in
+memory and is not saved. While a call waits (for a slot or for the
+background cap), the header's status pill and the status label say
+`Waiting: <reason>`, the sidebar says `● Waiting` and the chat's bubble says
+the same; the reason is the scheduler's own code (`Resources`, `Priority`, …).
+
 Stop cancels the run. A model request in flight is abandoned, although the
 model server may finish computing it, and a running `shell_exec` command is
 killed with its process group. `python_exec` code runs inside the gateway
@@ -227,9 +234,12 @@ message sees the earlier answers of its chat, as in a [session](#sessions).
 
 The web workspace works apart from the HTTP API above:
 
-- It does not use the config file. It talks to the URL you enter, so
-  `extra_body` and `request_timeout_s` do not apply. Chat requests wait up to
-  300 seconds, and a task is stopped after 600 seconds.
+- It does not use the config file's backend settings. It talks to the URL you
+  enter, so `extra_body` and `request_timeout_s` do not apply. It does read
+  the `[scheduler]` table: `policy` (default `off`), `n_srv`, `r_f`, `n_fg`
+  and the call log; see [Scheduler](scheduler.md#the-gate-on-chats-s2). Chat
+  requests wait up to 300 seconds, and a task is stopped after 600 seconds of
+  active time: a call the scheduler holds does not count against that bound.
 - Each chat's agent uses the default run options (all four built-in tools
   and no MCP tools), except that it keeps its answers. A chat can therefore
   run shell commands and Python code, and read and write files.
@@ -242,9 +252,15 @@ The web workspace works apart from the HTTP API above:
 - Its routes under `/v1/playground/` are internal and may change.
 
 The workspace routes include `GET /v1/playground/sessions` for summaries,
-`GET /v1/playground/session/{id}` for a transcript, and
-`POST /v1/playground/session/{id}/cancel` for cancellation. Running or deleting
-a busy chat returns HTTP 409. The ordinary `/v1/agent/` API remains separate.
+`GET /v1/playground/session/{id}` for a transcript,
+`POST /v1/playground/session/{id}/cancel` for cancellation,
+`POST /v1/playground/session/{id}/level` with `{"level": 1..4}` to set a
+chat's level, and `POST /v1/playground/presence` with `{"session_id": …}` for
+the page's typing heartbeat (the focused chat is the scheduler's lane). A
+session summary and transcript also carry `level` and `held`, the scheduler's
+reason while one of the chat's calls waits (`""` otherwise). Running or
+deleting a busy chat returns HTTP 409. The ordinary `/v1/agent/` API remains
+separate.
 
 To start only the workspace without the configuration wizard:
 
