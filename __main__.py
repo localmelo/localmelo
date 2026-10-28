@@ -78,8 +78,16 @@ _UI_FLAGS = {"workspace": "--workspace", "yolo": "--yolo"}
 
 # Direct-mode flags the interactive UI refuses: its Agents offer every tool,
 # an approval's wait would count toward a timeout, it has no machine output,
-# and it draws its own progress.
-_UI_REFUSED = ("tool_exposure", "timeout", "output_format", "progress", "routine")
+# it draws its own progress, and it does not wire the reasoning field yet
+# (which has its own message; R2b wires it).
+_UI_REFUSED = (
+    "tool_exposure",
+    "timeout",
+    "output_format",
+    "progress",
+    "routine",
+    "reasoning_field",
+)
 
 
 def _register_backends() -> None:
@@ -651,7 +659,12 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         parser.error("--embedding-base-url requires --base-url")
     reasoning = getattr(args, "reasoning", None)
     reasoning_field = getattr(args, "reasoning_field", None)
-    if args.base_url and reasoning == "replay" and reasoning_field is None:
+    if (
+        args.base_url
+        and not (args.serve or args.daemon)
+        and reasoning == "replay"
+        and reasoning_field is None
+    ):
         parser.error(
             "argument --reasoning: replay needs a reasoning field: give "
             "--reasoning-field (auto, reasoning_content or reasoning) with "
@@ -688,6 +701,11 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
         parser.error(
             "--mcp-config and --mcp-only are not in the interactive UI yet; "
             'give them with a task (melo -- "<task>")'
+        )
+    if interactive and args.reasoning_field is not None:
+        parser.error(
+            "--reasoning-field is not in the interactive UI yet; "
+            'give it with a task (melo -- "<task>")'
         )
     # main() joins the words into the query, and an empty one (`melo ""`)
     # runs no task, so the direct-mode flags would have nothing to apply to.
@@ -892,8 +910,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "Options for bare melo, which opens the interactive UI on a terminal. "
         "It also takes --base-url, --chat-model, --max-steps, --attempt-policy, "
         "--reflection-gate, --builtins, --memory, --memory-dir, "
-        "--request-timeout, --reasoning, --reasoning-field, --replay-turns "
-        "and the --embedding-* options.",
+        "--request-timeout, --reasoning, --replay-turns "
+        "and the --embedding-* options. It refuses --reasoning-field until a "
+        "later release wires it.",
     )
     interactive.add_argument(
         "--workspace",
@@ -1138,13 +1157,12 @@ def _build_direct_mode_agent(
        chat model; the file is not written.
 
     *options* and *tool_providers* go to the Agent in both cases. The
-    memory directory that *options* name is created first (see
-    :func:`_make_memory_dir`).
+    memory directory that *options* name is created just before the Agent is
+    built, after every refusal, so a refused run leaves no directory behind
+    (see :func:`_make_memory_dir`).
     """
     if parser is None:
         parser = _build_parser()
-    if options is not None and options.memory_dir is not None:
-        _make_memory_dir(options.memory_dir)
     base_url = args.base_url
     request_timeout = getattr(args, "request_timeout", None)
 
@@ -1163,6 +1181,8 @@ def _build_direct_mode_agent(
         if reasoning_field is not None and mode == "replay":
             llm_options["reasoning_field"] = reasoning_field
         llm = OpenAICompatLLM(base_url=base_url, model=model, **llm_options)
+        if options is not None and options.memory_dir is not None:
+            _make_memory_dir(options.memory_dir)
         return Agent(
             llm=llm,
             embedding=_direct_embedding(args),
@@ -1241,6 +1261,8 @@ def _build_direct_mode_agent(
     if refusal is not None:
         parser.error(f"argument --reasoning: {refusal}")
 
+    if options.memory_dir is not None:
+        _make_memory_dir(options.memory_dir)
     return Agent(config=cfg, options=options, tool_providers=tool_providers)
 
 

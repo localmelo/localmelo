@@ -444,14 +444,19 @@ These options apply to a task run without `--serve`.
   its reasoning cut, and `drop` is refused there. `legacy` is never
   refused, even on such a backend, where it can still draw an HTTP 400.
   `--replay-turns` counts assistant turns that carry reasoning; tool results
-  do not consume a turn. `--base-url` runs use these flags and do not read
-  the config file.
+  do not consume a turn. The default task scope is the current task's
+  turns only: earlier turns of a `melo ""` loop or of a session are not
+  replayed. On a backend whose `requires_reasoning_replay` is true, every
+  assistant turn in the window is replayed, and neither the task scope nor
+  `--replay-turns` applies. `--base-url` runs use these flags and do not
+  read the config file.
 - `--reasoning-field`: `auto` resolves to the key the last reply's
   reasoning came from, and sends no key before the first such reply. The
   flag, and a backend's `reasoning_field`, are used only in `replay`; in
   `legacy` and `drop` the wire is as if no field were set. The `ollama`
   backend fixes its field to `thinking`, so the flag is a usage error
-  there.
+  there. The interactive UI refuses the flag until it applies it (R2b);
+  direct mode is the only place it works now.
 
 ### Interactive UI
 
@@ -465,11 +470,11 @@ These options apply to `melo` without a task.
 - The UI also takes `--max-steps`, `--attempt-policy`, `--reflection-gate`,
   `--builtins`, `--memory`, `--memory-dir`, `--request-timeout`,
   `--reasoning`, `--replay-turns` and the `--embedding-*` options, for
-  every turn of the session. The UI does not yet apply `[agent]` or a
-  `--base-url` `--reasoning-field`; use direct mode for those. `--tool-exposure`
-  (the UI offers every tool), `--timeout`, `--output-format`, `--progress`
-  and `--routine` are usage errors there, and so, for now, are
-  `--mcp-config` and `--mcp-only`.
+  every turn of the session. The UI does not yet apply `[agent]`; use
+  direct mode for that. `--tool-exposure`
+  (the UI offers every tool), `--timeout`, `--output-format`, `--progress`,
+  `--routine` and `--reasoning-field` are usage errors there, and so, for
+  now, are `--mcp-config` and `--mcp-only`.
 - `--workspace` that is not a folder exits with code 2:
   `melo: --workspace: not a directory: DIR`.
 
@@ -543,6 +548,9 @@ These are usage errors:
   `argument --reasoning: this backend requires reasoning replay, so drop is not possible: use replay`;
 - `--reasoning-field` with the `ollama` backend, reported as
   `argument --reasoning-field: the ollama backend always reads and sends the thinking field`;
+- `--reasoning-field` with bare `melo`, whose interactive UI does not apply it
+  yet, reported as
+  `--reasoning-field is not in the interactive UI yet; give it with a task (melo -- "<task>")`;
 - an MCP config file that cannot be read or is not valid;
 - an invalid `LOCALMELO_THINKING_RETENTION_DAYS`, also with `--serve` or
   `melo ""`, which prints its one `melo: error:` line without the usage

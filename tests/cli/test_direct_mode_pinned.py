@@ -4,7 +4,10 @@ Each function's source is hashed as main had it before the UI (``d232b9e``,
 after #50 and P3). A change to one of them changes what the benchmark runs,
 so it must come with its own review and a new hash here. R2a added the three
 reasoning flags and their refusals, so ``_direct_options`` and
-``_build_direct_mode_agent`` have new hashes; no other function changed.
+``_build_direct_mode_agent`` have new hashes; R2a's review fixes also moved
+``_build_direct_mode_agent``'s memory-directory creation after the refusals.
+The other pinned functions are unchanged. ``_check_args``, which carries the
+refusals, is not pinned.
 """
 
 from __future__ import annotations
@@ -26,7 +29,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "006a76d5c3cd592a727da5db23eecc2a056b756264269d594f3a55d749d918ba",
+    "_build_direct_mode_agent": "04367b5172539085f1c78a22f96e32956865f5cd3e61300a076b7a99cc8edef8",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",

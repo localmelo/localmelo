@@ -243,6 +243,38 @@ def test_a_config_reasoning_field_is_inert_without_replay(
     assert built_cfg.vllm.reasoning_field == ""
 
 
+def test_replay_passes_the_section_field_to_the_provider(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "config.toml"
+    _write_config(
+        path,
+        extra='reasoning_field = "reasoning_content"\n',
+        agent='\n[agent]\nreasoning = "replay"\n',
+    )
+    monkeypatch.setattr(config, "CONFIG_PATH", str(path))
+    parser, args = _parse(["q"])
+    options = cli._direct_options(parser, args)
+    with mock.patch(
+        "localmelo.support.backends.openai_compat.OpenAICompatLLM"
+    ) as provider:
+        cli._build_direct_mode_agent(args, options=options)
+    # The table's mode applies (legacy would have cleared the section's key)
+    # and the section's key reaches the builder.
+    assert provider.call_args.kwargs["reasoning_field"] == "reasoning_content"
+
+    parser, args = _parse(
+        ["--reasoning", "replay", "--reasoning-field", "reasoning", "q"]
+    )
+    options = cli._direct_options(parser, args)
+    with mock.patch(
+        "localmelo.support.backends.openai_compat.OpenAICompatLLM"
+    ) as provider:
+        cli._build_direct_mode_agent(args, options=options)
+    # The flag wins over the section's value for this run.
+    assert provider.call_args.kwargs["reasoning_field"] == "reasoning"
+
+
 def test_the_agent_table_round_trips_and_is_dropped_at_defaults(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     cfg = Config(chat_backend="vllm", embedding_backend="none")
@@ -262,6 +294,12 @@ def test_the_agent_table_round_trips_and_is_dropped_at_defaults(tmp_path: Path) 
         text = path.read_text(encoding="utf-8")
         assert 'reasoning = "legacy"' in text
         assert "replay_turns = 3" in text
+        loaded.agent = AgentConfig(reasoning="replay")
+        save(loaded)
+        text = path.read_text(encoding="utf-8")
+        assert 'reasoning = "replay"' in text
+        # TOML has no null: the cap is written only when it is set.
+        assert "replay_turns" not in text
         loaded.agent = AgentConfig()
         save(loaded)
         assert "[agent]" not in path.read_text(encoding="utf-8")
@@ -420,3 +458,55 @@ def test_the_interactive_help_lists_the_flags() -> None:
     assert "--reasoning {legacy,drop,replay}" in text
     assert "--reasoning-field {auto,reasoning_content,reasoning}" in text
     assert "--replay-turns N" in text
+
+
+def test_a_config_refusal_leaves_no_memory_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = tmp_path / "config.toml"
+    _write_config(path)
+    monkeypatch.setattr(config, "CONFIG_PATH", str(path))
+    memory_dir = tmp_path / "memory"
+    assert (
+        _main(
+            ["--memory-dir", str(memory_dir), "--reasoning", "replay", "q"],
+            monkeypatch,
+        )
+        == 2
+    )
+    assert "replay needs a reasoning field" in _error_line(capsys)
+    assert not memory_dir.exists()
+
+
+def test_a_serve_conflict_wins_over_the_reasoning_field(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = cli._build_parser()
+    with pytest.raises(SystemExit) as exc:
+        cli._check_args(
+            parser,
+            parser.parse_args(
+                [
+                    "--serve",
+                    "--base-url",
+                    "http://127.0.0.1:1/v1",
+                    "--reasoning",
+                    "replay",
+                ]
+            ),
+        )
+    assert exc.value.code == 2
+    assert "are for a task or the interactive UI" in _error_line(capsys)
+
+
+def test_the_interactive_ui_refuses_the_reasoning_field(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = cli._build_parser()
+    with pytest.raises(SystemExit) as exc:
+        cli._check_args(parser, parser.parse_args(["--reasoning-field", "auto"]))
+    assert exc.value.code == 2
+    assert _error_line(capsys) == (
+        "melo: error: --reasoning-field is not in the interactive UI yet; "
+        'give it with a task (melo -- "<task>")'
+    )

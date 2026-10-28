@@ -180,10 +180,16 @@ requires_reasoning_replay = false     # true for a server that rejects a
 `auto` follows the key the last reply's reasoning came from, so a backend
 that emits either `reasoning_content` or `reasoning` works as it is; it
 sends no key before the first reply. The field is used only by `replay`:
-`legacy` and `drop` ignore it. The `[ollama]` backend fixes its field
+`legacy` and `drop` ignore it, also when the gateway, a configured
+interactive session or a Python caller builds its provider from this file
+(direct mode with `--base-url` does not read the file). `replay` uses the
+current task's assistant turns by default; earlier turns of a `melo ""`
+loop or a session are not replayed. The `[ollama]` backend fixes its field
 to `thinking` (it may still write `"thinking"` or `"auto"`). With
-`requires_reasoning_replay = true`, `--reasoning drop` is refused and the
-agent evicts whole working-memory units instead of cutting reasoning.
+`requires_reasoning_replay = true`, `--reasoning drop` is refused, every
+assistant turn in the window is replayed (the task scope and
+`replay_turns` do not apply), and the agent evicts whole working-memory
+units instead of cutting reasoning.
 
 ## Backends
 
