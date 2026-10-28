@@ -9,6 +9,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Optional direct worker-session recording and dsh JSONL import, with a
+  read-only, filterable and paginated gateway worker-history API. [#NN]
+
 - The workspace page on API v2. `http://127.0.0.1:8401/` now talks only to
   `/api`: the session list with its machine snapshot, one chat's turns, its
   event stream (SSE, reopened from the last applied event id), keyed sends

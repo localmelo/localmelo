@@ -461,6 +461,8 @@ async def _run(
     out: TextIO | None = None,
     progress: ProgressLine | None = None,
     routine: str | None = None,
+    save_session: str | None = None,
+    parent_run: str | None = None,
 ) -> int:
     """Run *query*, or with no query the interactive loop; return the exit code.
 
@@ -477,7 +479,27 @@ async def _run(
         exit_signals.install()
     try:
         if query:
-            outcome = await _run_one(agent, query, progress=progress, routine=routine)
+            if save_session is None:
+                outcome = await _run_one(
+                    agent, query, progress=progress, routine=routine
+                )
+            else:
+                from localmelo.support.sessions.worker import run_worker
+
+                if progress is not None:
+                    progress.start()
+                try:
+                    outcome = await run_worker(
+                        agent,
+                        query,
+                        title=save_session,
+                        parent_run=parent_run,
+                        observe=None if progress is None else progress.observe,
+                        routine=routine,
+                    )
+                finally:
+                    if progress is not None:
+                        progress.close()
             if exit_signals is not None and exit_signals.received is not None:
                 return EXIT_CRASHED  # not used: the process exits by the signal
             _report(outcome, output_format, version, out)
@@ -557,6 +579,8 @@ def _run_direct(
     *,
     progress: str | None = None,
     routine: str | None = None,
+    save_session: str | None = None,
+    parent_run: str | None = None,
 ) -> int:
     """Run *query*, or for an empty one the interactive loop; return the exit code.
 
@@ -593,6 +617,8 @@ def _run_direct(
                     out=out,
                     progress=line,
                     routine=routine,
+                    save_session=save_session,
+                    parent_run=parent_run,
                 )
             )
     except BaseException as exc:
@@ -844,6 +870,32 @@ def _check_effective_recall(
 
 def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     """Reject flag combinations before anything runs (argparse exit code 2)."""
+    if args.import_session is not None:
+        if args.import_session[0] != "dsh-jsonl":
+            parser.error("--import-session format must be dsh-jsonl")
+        if (
+            args.query
+            or args.serve
+            or args.daemon
+            or args.reconfigure
+            or args.save_session is not None
+            or args.parent_run
+        ):
+            parser.error(
+                "--import-session cannot be combined with a task or another mode"
+            )
+    elif args.title is not None:
+        parser.error("--title requires --import-session")
+    if args.parent_run is not None and args.save_session is None:
+        parser.error("--parent-run requires --save-session")
+    if args.save_session is not None and (
+        not args.query
+        or not " ".join(args.query).strip()
+        or args.serve
+        or args.daemon
+        or args.reconfigure
+    ):
+        parser.error("--save-session is only for a direct task")
     if args.mcp_only and args.mcp_config is None:
         parser.error("--mcp-only requires --mcp-config")
     if args.mcp_only:
@@ -1066,6 +1118,16 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
 
     direct = parser.add_argument_group(
         "direct mode", "Options for a query run without --serve."
+    )
+    direct.add_argument(
+        "--save-session",
+        nargs="?",
+        const="",
+        metavar="TITLE",
+        help="Save this direct run as a worker session",
+    )
+    direct.add_argument(
+        "--parent-run", metavar="ID", help="Launcher run ID (with --save-session)"
     )
     direct.add_argument(
         "--workspace",
@@ -1299,6 +1361,13 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
 
     # setup
     parser.add_argument(
+        "--import-session",
+        nargs=2,
+        metavar=("FORMAT", "FILE"),
+        help="Import a worker history (format: dsh-jsonl)",
+    )
+    parser.add_argument("--title", help="Title for an imported worker history")
+    parser.add_argument(
         "--reconfigure", action="store_true", help="Re-run backend setup"
     )
     parser.add_argument(
@@ -1325,6 +1394,21 @@ def main() -> None:
     if args is None or unknown or not args.query or args.serve or args.daemon:
         args = parser.parse_args()
     _check_args(parser, args)
+
+    if args.import_session is not None:
+        from localmelo.support.sessions.dsh_import import import_dsh
+
+        try:
+            imported = asyncio.run(import_dsh(args.import_session[1], title=args.title))
+        except (OSError, ValueError) as exc:
+            parser.exit(
+                EXIT_NOT_COMPLETED,
+                f"{parser.prog}: import failed: {_one_line(str(exc))}\n",
+            )
+        print(
+            f"Worker session {imported.session_id}: {'imported' if imported.imported else 'already imported'}; {imported.skipped} records skipped"
+        )
+        return
 
     # daemon commands
     if args.daemon:
@@ -1379,6 +1463,11 @@ def main() -> None:
             tool_providers,
             progress=args.progress,
             routine=args.routine,
+            **(
+                {"save_session": args.save_session, "parent_run": args.parent_run}
+                if args.save_session is not None
+                else {}
+            ),
         )
         if code != EXIT_COMPLETED:
             raise SystemExit(code)
