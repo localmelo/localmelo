@@ -33,8 +33,14 @@ def session_json(
     *,
     pending_approvals: int = 0,
     running_here: bool | None = None,
+    level: int = 2,
+    held: str = "",
 ) -> dict[str, Any]:
-    """One session as ``GET /api/sessions`` and ``GET /api/sessions/{id}`` give it."""
+    """One session as ``GET /api/sessions`` and ``GET /api/sessions/{id}`` give it.
+
+    *level* and *held* are the scheduler's view of the chat (S2): the chip's
+    P1-P4 and why a model call waits, from the one gate both surfaces use.
+    """
     busy = info.busy
     return {
         "id": info.id,
@@ -48,6 +54,8 @@ def session_json(
         "busy": busy,
         "running_here": busy if running_here is None else running_here,
         "pending_approvals": pending_approvals,
+        "level": level,
+        "held": held,
     }
 
 

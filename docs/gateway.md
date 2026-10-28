@@ -257,17 +257,37 @@ makes larger requests: leave out `session_id` for an unrelated task.
 
 ## Web workspace
 
-Open `http://127.0.0.1:8401/` in a browser for the web workspace:
+Open `http://127.0.0.1:8401/` in a browser for the web workspace. It is the
+console's page and talks only to `/api` ([API v2](api.md)), so the gateway
+must be running to serve it: `melo --serve`, then open the address it prints.
 
-1. Enter the URL of a chat server, and optionally of an embedding server.
-2. Discover models, pick a chat model, and optionally select an embedding model
-   or seed memory set. Embeddings and seed memories are disabled by default.
-3. Create a chat, then send a message. Creating a chat never sends your draft.
-   Answers are rendered as Markdown, with code blocks.
+1. The page uses the gateway's configured model; `melo --reconfigure` sets it.
+   Connection settings inside the page arrive in a later update.
+2. Type a message and send. The first message creates the chat: the page
+   answers your draft with the chat's first turn, and never creates a chat on
+   its own. Answers are rendered as Markdown, with code blocks.
+3. A turn reads like the terminal's: your message, a work group with the
+   tool cards it ran, its reasoning, its notices and reflections, the live
+   row while it runs, and the final answer with `Copy response`. Output that
+   a tool printed is cleaned of escape sequences, and its images (PNG, JPEG,
+   GIF, WebP) show inline.
 
-The sidebar supports chat search and switching. Drafts stay with each chat in
-the current browser tab. The workspace restores live chats after a page reload
-and polls for changes from other browser clients every 2.5 seconds while visible.
+The sidebar lists chats newest first, with search and switching, and closes a
+chat. Drafts stay with each chat in the current browser tab. The open chat's
+turns arrive on its event stream (SSE); after a page reload the page restores
+the chat, reads its last ten turns, and replays the stored events from there,
+so nothing is lost or drawn twice. A stream the browser gives up on reopens
+after 1, 2, 4, 8, 16 and then 30 seconds from the page's own cursor, and only
+after the chat is read again: one that is gone leaves the page on a new chat
+rather than retrying for ever. The list is re-read every 4 seconds while the
+tab is visible, for changes from another browser.
+
+A send is named by a `client_request_id`. If its answer is lost the page asks
+the store whether the message was accepted, and offers `Retry` only when it
+was not; a retry repeats the same key, so one message makes one turn. A
+message that was never accepted goes back to that chat's draft, so a reload
+keeps it: the outbox says `Not sent` (or `Outcome unknown` when the store
+could not be asked), with `Retry` and `Cancel and keep draft`.
 
 A chat's header has a level chip (P1 to P4, P2 by default) that sets how the
 scheduler orders the chat's calls in front of other chats; it is kept in
@@ -277,79 +297,72 @@ shows a foreign GPU lock (`GPU lock: <holder> · <purpose>`, with
 `· ETA passed`, and the battery (`Battery 55% · discharging`). AC power with
 no lock shows nothing. While a call waits (for a slot, the background cap or
 a foreign lock), the header's status pill and the status label say
-`Waiting: <reason>`, the sidebar says `● Waiting` and the chat's bubble says
-the same; the reason is the scheduler's own code (`Resources`, `Priority`,
-`Reservation`, …). A lock hold uses `Reservation` and, in `wait` mode, does
-not count against the 600-second active-time bound.
+`Waiting: <reason>`, the sidebar says `● Waiting` and the live row says the
+same; the reason is the scheduler's own code (`Resources`, `Priority`,
+`Reservation`, …). These are the same facts the terminal shows, read from and
+written to the one gate the gateway shares:
+`level` and `held` on a session, `machine` on the list, and
+`POST /api/sessions/{id}/level` and `POST /api/presence` to set them.
 
 Stop cancels the run. A model request in flight is abandoned, although the
 model server may finish computing it, and a running `python_exec` child is
 killed with its process group. `python_exec` code runs
 in a child process, so the gateway keeps answering other requests while it
-runs. See [Tools and MCP](tools.md) for the tools' limits. The task is saved
+runs. See [Tools and MCP](tools.md) for the tools' limits. The turn is saved
 with the status `cancelled`, and the chat takes the next message once that
-save is done. A Stop that comes after the answer, while the task is being
-saved, leaves the answer in the chat. Each message sees the earlier answers
-of its chat, as in a [session](#sessions).
+save is done. Each message sees the earlier answers of its chat, as in a
+[session](#sessions).
 
-The web workspace works apart from the HTTP API above:
+A tool call that needs approval shows as a card in its tool's `Needs approval`
+state and the turn waits there. The approval cards themselves (`Allow once`,
+`Allow every …`, `Deny…`) arrive in a later update; until then, answer a
+waiting request with `POST /api/approvals/{request_id}` (see
+[API v2](api.md#post-apiapprovalsrequest_id)).
 
-- It does not use the config file's backend settings. It talks to the URL you
-  enter, so `extra_body` and `request_timeout_s` do not apply. It does read
-  the `[scheduler]` table: `policy` (default `off`), `n_srv`, `r_f`, `n_fg`,
-  the call log, and the lock and battery keys (`gpu_lock_file`, `lock_self`,
-  `lock_gate`); see [Scheduler](scheduler.md#the-gate-on-chats-s2) and
-  [The GPU lock and the battery](scheduler.md#the-gpu-lock-and-the-battery-s2b).
-  Chat requests wait up to 300 seconds, and a task is stopped after 600
-  seconds of active time: a call the scheduler holds, including a foreign-lock
-  hold, does not count against that bound.
-- In `lock_gate = "record"` (the default) a foreign lock is shown and logged
-  but nothing waits. In `wait`, every call a chat makes waits while a foreign
-  lock is present, embeddings included, and a create that would seed memories
-  answers HTTP 409 `{"error": "GPU lock held by <holder>; …"}` without sending
-  an embedding or keeping a half-built chat. A create without seeding makes no
-  model call and proceeds.
-- Each chat's agent uses the gateway's default run options (the three
-  built-in tools `file_read`, `file_write` and `python_exec`, and no MCP
-  tools), except that it keeps its answers. A chat can therefore run Python
-  code and read and write files; the `shell_exec` tool is not offered, so
-  there is no direct shell command (Python code can still start a process).
-- It keeps up to 12 chats and closes those idle for 2 hours when creating a
-  chat. At capacity, an idle chat is replaced only after preparation succeeds;
-  if all chats are busy, creation fails with HTTP 409.
-- Each chat has its own working memory. All chats save to one history and,
-  when an embedding model is selected, one long-term memory, in
-  `~/.cache/localmelo/playground/`; this is always on.
-- Its routes under `/v1/playground/` are internal and may change.
+The page's chats are sessions in the gateway's own session file,
+`~/.cache/localmelo/gateway/sessions.db`; the terminal keeps its own in
+`~/.cache/localmelo/cli/sessions.db`. They last until you close them: a
+gateway restart keeps them, and a chat reopens with its transcript read from
+the file, no Agent built yet (`not_loaded`); its Agent is built on the
+conversation the file holds when the next turn or retry starts.
 
-The workspace routes include `GET /v1/playground/sessions` for summaries,
+A chat runs in gateway mode: its Agent gets the gateway's default run options,
+the three built-in tools `file_read`, `file_write` and `python_exec`, and no
+MCP tools, except that it keeps its answers. It can read and write files and
+run Python code; `shell_exec` is not offered, so there is no direct shell
+command (Python code can still start a process). Its model is the gateway's
+own, from the config file, and the page reads that file's `[scheduler]` table
+too — `policy`, the lane sizes, the call log and the lock and battery keys.
+
+In `lock_gate = "record"` (the default) a foreign lock is shown and logged but
+nothing waits. In `wait`, every call a chat makes waits while a foreign lock is
+present, embeddings included. A chat request waits up to 300 seconds, and a
+turn is stopped after 600 seconds of active time: a call the scheduler holds,
+including a foreign-lock hold, does not count against that bound.
+
+The web workspace's earlier routes under `/v1/playground/` are kept as they
+were for compatibility and are still internal; the page no longer uses them.
+They include `GET /v1/playground/sessions` for summaries,
 `GET /v1/playground/session/{id}` for a transcript,
 `POST /v1/playground/session/{id}/cancel` for cancellation,
 `POST /v1/playground/session/{id}/level` with `{"level": 1..4}` to set a
 chat's level, and `POST /v1/playground/presence` with `{"session_id": …}` for
-the page's typing heartbeat (the focused chat is the scheduler's lane). A
-session summary and transcript also carry `level` and `held`, the scheduler's
-reason while one of the chat's calls waits (`""` otherwise). The
-`GET /v1/playground/sessions` response adds a top-level `machine` object
-(`lock`, `holder`, `purpose`, `run`, `eta`, `stale`, `readable`, `on_ac`,
-`battery_pct`, `battery_state`, `band`, `gate`), or `null` when the playground
-has no monitor; the per-session keys do not change. Running or deleting a busy
-chat returns HTTP 409. The ordinary `/v1/agent/` API remains separate and
-ungated.
+the page's typing heartbeat. The ordinary `/v1/agent/` API remains separate
+and ungated.
 
-To start only the workspace without the configuration wizard:
+To serve the page's files and the legacy playground routes without the
+configuration wizard:
 
 ```bash
 uv run python -m localmelo.support.gateway._test_webapp
 ```
 
 It always listens on `http://127.0.0.1:8401/`, so it cannot run while the
-gateway uses that port.
+gateway uses that port. It mounts no `/api`, so the page itself needs the
+gateway; this server only reaches the `/v1/playground/` routes.
 
 The workspace has these limits:
 
-- Chats last as long as the gateway process. They are kept in memory and are
-  not restored after a gateway restart.
 - It is for loopback use only. Like the rest of the gateway, it has no
   authentication: open it on this computer as `http://127.0.0.1:8401/` or
   `http://localhost:8401/`. Remote access, from another device or through a

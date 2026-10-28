@@ -699,6 +699,10 @@ class ConsoleSessions:
         )
         turn: TurnInfo | None = None
         if has_turn:
+            # The first turn is a turn of this chat, so the gate hears it as
+            # the page's later sends make it heard: the hold clock restarts
+            # and this chat becomes the lane's focus before its first call.
+            self._note_turn_start(info.id)
             try:
                 turn = await runner.start_turn(
                     composed or "",
@@ -784,6 +788,7 @@ class ConsoleSessions:
             resumed = entry.resumed
             entry.resumed = None
             await self._reconcile(entry)
+            self._note_turn_start(session_id)
             turn = await entry.runner.start_turn(
                 composed,
                 approval=entry.policy,
@@ -827,6 +832,7 @@ class ConsoleSessions:
                 )
             resumed = entry.runner.last_resume
             await self._reconcile(entry)
+            self._note_turn_start(session_id)
             turn = await entry.runner.start_turn(
                 undone.user_text, approval=entry.policy
             )
@@ -889,6 +895,17 @@ class ConsoleSessions:
             entry.granted_at.clear()
             entry.last_used = self._clock()
             return info
+
+    def _note_turn_start(self, session_id: str) -> None:
+        """The gate's turn facts, as the page's chats set them (S2).
+
+        The hold clock restarts for the new turn and this chat becomes the
+        lane's focus. A console built without a gate (a unit test) has none.
+        """
+        if self._gate is None:
+            return
+        self._gate.turn_start(session_id)
+        self._gate.focus(session_id)
 
     async def _reconcile(self, entry: OpenSession) -> None:
         """Record the settings' chat model on the session, when it changed."""
