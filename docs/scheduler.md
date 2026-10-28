@@ -55,9 +55,8 @@ the lane by code.
 
 Every model call a web workspace chat makes passes through one in-process
 gate (`support/gateway/chat_gate.py`). A web console session's calls pass
-through a gate of its own, built from the same `[scheduler]` table, so
-each surface enforces `n_srv` and writes its own `calls.jsonl`: with both
-in use the model server can see up to twice `n_srv` calls. The gate submits the call to the
+through the same gate, which the gateway builds once from that table: both
+surfaces share one `n_srv` budget and write one `calls.jsonl`. The gate submits the call to the
 policy and either sends it at once or holds it until the policy admits it.
 The page polls its chats every 2.5 seconds, so a held chat shows
 `Waiting: <reason>` in the header's status pill and the status label, and

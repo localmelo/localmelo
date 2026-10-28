@@ -103,6 +103,9 @@ curl 'http://127.0.0.1:8401/api/sessions?query=notes&limit=50'
 - `limit` is 1 to 200 (default 50). `query` is at most 200 characters and
   matches a session's title or any turn's user text. `has_more` says that
   older sessions exist beyond the page.
+- A session is listed once it has a turn: a row made by a create that
+  never sent its message (a shutdown in the middle, say) is left out, and
+  `GET /api/sessions/{id}` still shows it.
 - `kind` is `chat` (default), `front`, `front_bg` or `task`; any other
   value is 400 `invalid_request`.
 - `workspace_label` is the workspace with the home folder written as `~`.

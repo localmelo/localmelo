@@ -12,7 +12,7 @@ from localmelo.melo.contracts.approvals import ApprovalDecision, ApprovalRequest
 from localmelo.support.gateway.console import Console
 from localmelo.support.sessions.store import SessionStore
 
-from .conftest import FakeBuilder, open_session, seed_turn
+from .conftest import HOLDER, FakeBuilder, open_session, run_result, seed_turn
 
 SESSION_KEYS = {
     "id",
@@ -94,10 +94,26 @@ async def test_the_kind_filters_the_list(
     task = await console.store.create_session(
         model="stub-model", workspace=workspace, kind="task"
     )
+    started = await console.store.begin_turn(task.id, "a task", holder=HOLDER)
+    await console.store.finish_turn(
+        task.id,
+        started.turn,
+        holder=HOLDER,
+        status="completed",
+        cause="run",
+        result=run_result(),
+        answer="a task",
+    )
+    # A row with no turn is a create that never sent its message: the list
+    # leaves it out, though its own route still shows it.
+    empty = await console.store.create_session(
+        model="stub-model", workspace=workspace, kind="task"
+    )
     chats = client.get("/api/sessions").json()["sessions"]
     assert all(s["kind"] == "chat" for s in chats)
     tasks = client.get("/api/sessions?kind=task").json()["sessions"]
     assert [s["id"] for s in tasks] == [task.id]
+    assert client.get(f"/api/sessions/{empty.id}").status_code == 200
     assert client.get("/api/sessions?kind=everything").status_code == 400
 
 

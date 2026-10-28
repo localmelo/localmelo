@@ -113,11 +113,12 @@ least recently used idle one is closed with its conversation kept.
 Approvals wait in the gateway's memory with no timeout until a client
 answers them or the turn stops, and stopping the gateway ends a waiting
 turn `cancelled` with cause `shutdown`. A console turn passes the
-scheduler gate like a workspace chat: every model call waits for its slot
-under `[scheduler]`, and with `lock_gate = "wait"` a monitor watches the
-GPU lock for it too. The console builds its own gate from the same table,
-so each surface enforces `n_srv` on its own; the battery is read for the
-workspace page, not for the console.
+scheduler gate like a workspace chat: the gateway builds one gate from the
+`[scheduler]` table and both surfaces use it, so their calls share one
+`n_srv` budget and one call log, and the monitor the workspace page runs
+feeds both (a foreign GPU lock holds a console turn under
+`lock_gate = "wait"`; the battery is read for the page's chip and never
+holds a call).
 
 ### GET /v1/health
 

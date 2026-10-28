@@ -17,7 +17,7 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   answer, while `DELETE /api/sessions/{id}/grants/{tool}` and `/grants`
   take a session grant back. Every model call of a console turn now waits
   for its slot under `[scheduler]`, like a workspace chat's: the console
-  builds a `ChatGate` from the same table and wraps the Agent's providers
+  shares the gateway's one `ChatGate` and wraps the Agent's providers
   with `GatedLLM`/`GatedEmbedding` through `build_session_agent`'s hooks,
   so the call log records the session's id and `lock_gate = "wait"` holds
   a turn while a foreign GPU lock is present. A create now makes its

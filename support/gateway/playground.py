@@ -245,6 +245,11 @@ class SmokePlayground:
                 guard_poll_s=guard_poll_s,
             )
 
+    @property
+    def gate(self) -> ChatGate:
+        """The one gate this process schedules every model call on."""
+        return self._gate
+
     def _on_machine(self, snapshot: MachineSnapshot) -> None:
         """Feed one observed snapshot to the gate; no await between the two."""
         self._gate.set_machine(snapshot.machine, payload=snapshot.payload())

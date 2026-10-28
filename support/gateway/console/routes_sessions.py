@@ -126,9 +126,13 @@ def add_routes(app: FastAPI, console: Console) -> None:
                 "invalid_request",
                 f"kind must be one of {', '.join(sorted(SESSION_KINDS))}",
             )
+        # A row with no turn is a create that never got its message (a
+        # shutdown in the middle of one); the list starts at one turn.
         sessions = await _store_call(
             console,
-            console.store.list_sessions(limit=limit + 1, query=query, kinds=(kind,)),
+            console.store.list_sessions(
+                limit=limit + 1, query=query, kinds=(kind,), min_turns=1
+            ),
         )
         has_more = len(sessions) > limit
         return JSONResponse(
