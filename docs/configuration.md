@@ -23,12 +23,25 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ```
 
 - A server on this computer that lists a model on port 8000, 8400, 11434 or
-  30000 fills in the URL; one with a chat model comes first. Only `GET /v1/models` is sent, to find servers and
-  to list the models: no chat request.
-- It saves an OpenAI-compatible server as the `vllm` backend, with
+  30000 fills in the URL; one with a chat model comes first. Listing a
+  server's models sends `GET /v1/models` only, and saving the choice asks
+  `GET /api/version` once, to tell an Ollama server apart: no chat request.
+- It saves an Ollama server (one that answers `GET /api/version`) as the
+  `ollama` backend, and any other OpenAI-compatible server as `vllm`, with
   `embedding_backend = "none"`, and keeps the file's other settings:
 
   ```toml
+  # an Ollama server
+  chat_backend = "ollama"
+  embedding_backend = "none"
+
+  [ollama]
+  chat_url = "http://127.0.0.1:11434/v1"
+  chat_model = "qwen3:8b"
+  ```
+
+  ```toml
+  # any other OpenAI-compatible server
   chat_backend = "vllm"
   embedding_backend = "none"
 
@@ -36,6 +49,11 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   chat_url = "http://127.0.0.1:8080/v1"
   chat_model = "Qwen3-8B-4bit"
   ```
+
+  The `ollama` backend chats on Ollama's native API with a 300 s request
+  timeout; `vllm` uses 120 s. A `chat_url` with or without `/v1` works for
+  Ollama: its version endpoint is asked at the root, and chat requests drop
+  a trailing `/v1`.
 
 - A server that does not answer, refuses the request without an API key,
   or lists no models is named with the reason, and you can retry, start

@@ -144,6 +144,79 @@ async def test_a_value_that_is_not_a_url_is_named() -> None:
     assert not exc.value.reachable
 
 
+# ── Telling Ollama apart ──
+
+
+def _version(version: object = "0.12.3") -> httpx.MockTransport:
+    return httpx.MockTransport(
+        lambda request: httpx.Response(200, json={"version": version})
+    )
+
+
+async def test_an_ollama_server_is_asked_for_its_version_at_the_root() -> None:
+    seen: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, json={"version": "0.12.3"})
+
+    assert await discovery.is_ollama(URL, transport=httpx.MockTransport(handle))
+    # The chat URL ends in /v1; the version endpoint does not.
+    assert seen == ["http://127.0.0.1:8500/api/version"]
+
+
+@pytest.mark.parametrize(
+    ("url", "asked"),
+    [
+        ("http://127.0.0.1:11434/v1", "http://127.0.0.1:11434/api/version"),
+        ("http://127.0.0.1:11434/v1/", "http://127.0.0.1:11434/api/version"),
+        ("http://127.0.0.1:11434", "http://127.0.0.1:11434/api/version"),
+    ],
+)
+async def test_a_url_with_or_without_v1_is_asked_at_the_root(
+    url: str, asked: str
+) -> None:
+    seen: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, json={"version": "0.12.3"})
+
+    assert await discovery.is_ollama(url, transport=httpx.MockTransport(handle))
+    assert seen == [asked]
+
+
+@pytest.mark.parametrize(
+    "transport",
+    [
+        _status(404),
+        _status(302),
+        _status(200, b"<html>"),
+        _listing(),
+        _version(12),
+        _version(""),
+        _version(None),
+        _raising(httpx.ReadTimeout("timed out")),
+        _raising(httpx.ConnectError("Connection refused")),
+    ],
+    ids=[
+        "404",
+        "redirect",
+        "not-json",
+        "a-model-list",
+        "a-number",
+        "empty",
+        "null",
+        "timeout",
+        "refused",
+    ],
+)
+async def test_a_server_that_does_not_answer_like_ollama_is_not_one(
+    transport: httpx.MockTransport,
+) -> None:
+    assert not await discovery.is_ollama(URL, transport=transport)
+
+
 @pytest.mark.parametrize(
     ("models", "picked"),
     [
