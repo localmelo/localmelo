@@ -152,6 +152,8 @@ def test_reasoning_note_has_the_sketch_fields_in_order() -> None:
         "hypotheses",
         "open_questions",
         "observed",
+        "files",
+        "verified",
         "outcome",
         "drafts",
         "reasoning_chars",
@@ -712,11 +714,11 @@ def test_observed_pytest_summary_is_the_last_one() -> None:
 
 
 @pytest.mark.parametrize("output", ["", "---\n===\n", "  \n"])
-def test_observed_without_output(output: str) -> None:
+def test_observed_without_output_is_not_recorded(output: str) -> None:
+    # T76: an empty or trivial result is no observation for a digest, so
+    # it is not kept as one (the note used to say "(no output)").
     call = ToolCall("shell_exec", {"command": "true"})
-    assert _note([call], [ToolResult("shell_exec", output)]).observed == [
-        "ran `true`: (no output)"
-    ]
+    assert _note([call], [ToolResult("shell_exec", output)]).observed == []
 
 
 def test_observed_summary_line_is_shortened_to_80() -> None:
@@ -1282,15 +1284,15 @@ def test_digest_note_uses_rehearsed_notes_only() -> None:
     assert "not rehearsed" not in render_digest(digest)
 
 
-def test_digest_deduplicates_facts_and_observed_by_path() -> None:
+def test_digest_deduplicates_facts_observed_and_decisions() -> None:
     one = _rehearsed(found=["a.py has one function", "the tests need a fix"])
     two = _rehearsed(found=["A.PY has one function"], decided=["use the fix"])
     digest = digest_note("q", "stuck", [one, two])
     assert digest.found == [
         "a.py has one function",
         "the tests need a fix",
-        "use the fix",
     ]
+    assert digest.decided == ["use the fix"]
     assert digest.observed == ["read a.py: 10 chars, sha abcd1234"]
 
 
@@ -1348,6 +1350,141 @@ def test_render_digest_lines() -> None:
         "observed: read b.py: 3 chars, sha abcd\n"
         "open: why?"
     )
+
+
+def test_render_digest_lines_for_files_verified_and_decisions() -> None:
+    digest = ReasoningNote(
+        plan="Fix it",
+        outcome="completed",
+        files=["transpose.py"],
+        verified="python -m pytest -> 1 passed",
+        found=["a"],
+        decided=["use zip"],
+        observed=["read b.py: 3 chars, sha abcd"],
+        open_questions=["why?"],
+    )
+    assert render_digest(digest) == (
+        "task: Fix it\n"
+        "outcome: completed\n"
+        "files: transpose.py\n"
+        "verified: python -m pytest -> 1 passed\n"
+        "facts: a\n"
+        "decided: use zip\n"
+        "observed: read b.py: 3 chars, sha abcd\n"
+        "open: why?"
+    )
+
+
+def test_digest_task_line_is_the_first_sentence_or_heading() -> None:
+    first = digest_note("Implement transpose.py. Then run its tests.", "completed")
+    assert first.plan == "Implement transpose.py."
+    heading = digest_note("# Fix the parser\n\nThe body follows.", "completed")
+    assert heading.plan == "Fix the parser"
+    long = digest_note("x " * 300, "completed")
+    assert len(long.plan) <= notes.DIGEST_TASK_CHARS
+
+
+@pytest.mark.parametrize(
+    "output", ["True", "False\nNone", "[exit code 0]", "'' True.", "---\n==="]
+)
+def test_a_trivial_result_is_not_observed(output: str) -> None:
+    call = ToolCall("python_exec", {"code": "print(True)"})
+    assert _note([call], [ToolResult("python_exec", output)]).observed == []
+
+
+def test_a_digest_skips_a_trivial_observed_line() -> None:
+    note = _rehearsed(found=["a.py has one function"])
+    note.observed = ["ran `python`: True"]
+    assert "observed:" not in render_digest(digest_note("q", "completed", [note]))
+
+
+def test_digest_names_the_files_written_and_the_last_check(tmp_path: Path) -> None:
+    root = str(tmp_path)
+    write = ToolCall(
+        "file_write",
+        {"path": str(tmp_path / "transpose.py"), "content": "x"},
+    )
+    wrote = ToolResult("file_write", "Wrote 1 characters to transpose.py")
+    check = ToolCall("shell_exec", {"command": "python -m pytest -q transpose_test.py"})
+    passed = ToolResult("shell_exec", "1 passed in 0.01s")
+    failed = ToolResult("shell_exec", "2 failed, 1 passed in 0.02s")
+    digest = digest_note(
+        "Implement transpose.py.",
+        "completed",
+        [],
+        calls=[(write, wrote), (check, passed), (check, failed)],
+        root=root,
+    )
+    assert digest.files == ["transpose.py"]
+    assert digest.verified == (
+        "python -m pytest -q transpose_test.py -> 2 failed, 1 passed"
+    )
+
+
+def test_digest_has_no_verified_without_a_check() -> None:
+    write = ToolCall("file_write", {"path": "a.py", "content": "x"})
+    digest = digest_note(
+        "q",
+        "completed",
+        [],
+        calls=[(write, ToolResult("file_write", "Wrote 1 characters to a.py"))],
+    )
+    assert digest.files == ["a.py"]
+    assert digest.verified == ""
+
+
+def test_digest_files_stop_at_six_then_count_the_rest() -> None:
+    calls = [
+        (
+            ToolCall("file_write", {"path": f"f{index}.py", "content": "x"}),
+            ToolResult("file_write", "Wrote 1 characters"),
+        )
+        for index in range(8)
+    ]
+    digest = digest_note("q", "completed", [], calls=calls)
+    assert digest.files == [
+        "f0.py",
+        "f1.py",
+        "f2.py",
+        "f3.py",
+        "f4.py",
+        "f5.py",
+        "+2",
+    ]
+
+
+def test_render_digest_drop_order_covers_the_new_lines() -> None:
+    digest = ReasoningNote(
+        plan="task",
+        outcome="completed",
+        files=["file"],
+        verified="check -> ok",
+        found=["fact"],
+        decided=["decision"],
+        observed=["obs"],
+        open_questions=["open"],
+    )
+    full = render_digest(digest)
+    without_open = "\n".join(full.splitlines()[:-1])
+    text = render_digest(digest, limit=len(full) - 1)
+    assert "open:" not in text
+    assert "decided: decision" in text
+    text = render_digest(digest, limit=len(without_open) - 1)
+    assert "observed:" not in text
+    assert "decided: decision" in text
+    without_observed = "\n".join(without_open.splitlines()[:-1])
+    text = render_digest(digest, limit=len(without_observed) - 1)
+    assert "decided:" not in text
+    assert "facts: fact" in text
+    without_decided = "\n".join(without_observed.splitlines()[:-1])
+    text = render_digest(digest, limit=len(without_decided) - 1)
+    assert "facts:" not in text
+    assert "files: file" in text
+    without_facts = "\n".join(without_decided.splitlines()[:-1])
+    text = render_digest(digest, limit=len(without_facts) - 1)
+    assert "files:" not in text
+    assert "outcome: completed" in text
+    assert "verified: check -> ok" in text
 
 
 # ── R4: drafts ──

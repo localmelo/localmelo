@@ -470,6 +470,16 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Changed
 
+- An attempt's `compress` digest now says what the attempt did: the paths its
+  successful `file_write` calls wrote (at most six, workspace-relative, then
+  `+N`), the last `shell_exec` or `python_exec` check and its result (test
+  counts, exit code or last output line), up to three decisions, and the
+  task's first sentence or heading instead of a fixed 300-character cut.
+  Empty or trivial observations (a bare boolean, `None`, an exit code or
+  punctuation) no longer enter a digest or make one a rehearsal candidate.
+  Over the limit, open questions drop first, then observed lines, decisions,
+  facts and files, then the task shortens; the outcome and the verification
+  stay. `legacy` and direct mode without memory are unchanged ([#NN]).
 - Direct mode and the Python API's default `python` mode no longer offer
   `shell_exec`: their default built-ins are `file_read`, `file_write` and
   `python_exec`, and an `exec` call that was registered anyway is refused

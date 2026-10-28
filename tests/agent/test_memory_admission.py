@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import shlex
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -510,3 +512,144 @@ async def test_twenty_runs_through_the_agent_keep_the_growth_bound(
     deltas = [counts[0], *(counts[i] - counts[i - 1] for i in range(1, len(counts)))]
     assert max(deltas) <= 8
     assert sum(deltas) / len(deltas) <= 3
+
+
+def _write_note_reply(content: str, path: str, text: str) -> Message:
+    return Message(
+        role="assistant",
+        content=f"<note>{content}</note>",
+        tool_calls=[
+            ToolCall(
+                tool_name="file_write",
+                arguments={"path": path, "content": text},
+                id=CALL_ID,
+            )
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_aider_style_run_names_files_checks_and_decisions(
+    tmp_path: Path,
+) -> None:
+    # T76: the digest is built from the attempt's own calls and results, not
+    # only from its notes' keyed facts.
+    (tmp_path / "transpose_test.py").write_text(
+        "from transpose import transpose\n\n\n"
+        "def test_transpose():\n"
+        "    assert transpose([[1, 2], [3, 4]]) == [[1, 3], [2, 4]]\n"
+    )
+    source = "def transpose(matrix):\n    return [list(row) for row in zip(*matrix)]\n"
+    check = f"{shlex.quote(sys.executable)} -m pytest -q transpose_test.py"
+    server = FakeLLM(
+        _write_note_reply(
+            "plan: write transpose.py\n"
+            "found: transpose.py and transpose_test.py need the transpose function\n"
+            "decided: use zip(*matrix) for transpose\nremember: no",
+            "transpose.py",
+            source,
+        ),
+        Message(
+            role="assistant",
+            tool_calls=[
+                ToolCall(
+                    tool_name="shell_exec",
+                    arguments={"command": check},
+                    id="call_2",
+                )
+            ],
+        ),
+        _answer("done"),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_write", "shell_exec"}),
+            max_steps=3,
+            admit_on_outcome=True,
+        ),
+    )
+    result = await agent.run_task(
+        "Implement the transpose function in transpose.py so the tests pass."
+    )
+    await agent.close()
+
+    assert result.status == "completed"
+    entries = await _entries(tmp_path)
+    digests = [entry for entry in entries if entry["source"] == "digest"]
+    assert len(digests) == 1
+    text = digests[0]["text"]
+    assert "files: transpose.py" in text
+    assert "verified: " in text
+    assert " -> 1 passed" in text
+    assert "decided: use zip(*matrix) for transpose" in text
+
+
+@pytest.mark.asyncio
+async def test_a_run_without_a_check_has_no_verified_line(tmp_path: Path) -> None:
+    server = FakeLLM(
+        _write_note_reply(
+            "plan: write a.py\nfound: a.py needs a helper",
+            "a.py",
+            "def helper():\n    return 1\n",
+        ),
+        _answer("done"),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            workspace_root=str(tmp_path),
+            builtins=frozenset({"file_write"}),
+            max_steps=2,
+            admit_on_outcome=True,
+        ),
+    )
+    await agent.run_task("Write a.py.")
+    await agent.close()
+
+    entries = await _entries(tmp_path)
+    digests = [entry for entry in entries if entry["source"] == "digest"]
+    assert len(digests) == 1
+    assert "files: a.py" in digests[0]["text"]
+    assert "verified:" not in digests[0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_a_trivial_observation_is_not_admitted(tmp_path: Path) -> None:
+    server = FakeLLM(
+        Message(
+            role="assistant",
+            content="<note>plan: check the value</note>",
+            tool_calls=[
+                ToolCall(
+                    tool_name="python_exec",
+                    arguments={"code": "print(True)"},
+                    id=CALL_ID,
+                )
+            ],
+        ),
+        _answer("done"),
+    )
+    agent = _agent(
+        server,
+        _options(
+            reasoning="compress",
+            memory_dir=str(tmp_path / "memory"),
+            builtins=frozenset({"python_exec"}),
+            max_steps=2,
+            admit_on_outcome=True,
+        ),
+    )
+    await agent.run_task("Check the value.")
+    await agent.close()
+
+    entries = await _entries(tmp_path)
+    digests = [entry for entry in entries if entry["source"] == "digest"]
+    assert len(digests) == 1
+    assert "observed:" not in digests[0]["text"]
+    assert "True" not in digests[0]["text"]
