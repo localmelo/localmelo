@@ -97,13 +97,23 @@ gateway listens on a loopback address, and it is documented separately in
 [API v2](api.md). API v2 only grows: endpoints, optional request fields and
 response keys are added, never renamed or removed.
 
-This version serves `GET /api/health`, the sessions list and one session,
-a session's turns, its Server-Sent Events stream, its blobs and a
-submission lookup. A turn cannot be started, stopped or retried through
-`/api` yet, and settings and model listing come later. The `/api` routes
-answer the same 421 and 403 as `/v1/`, and add
-`Cache-Control: no-store` and the error shape
-`{"error": {"code", "message", "details"}}` to every response.
+This version serves the reads — `GET /api/health`, the sessions list and
+one session, a session's turns, its Server-Sent Events stream, its blobs
+and a submission lookup — and the writes that run a session: create it,
+with or without a first turn, start, retry and stop its turns, cancel a
+message by its key, answer an approval, rename or move it, and delete it.
+Settings and model listing come later. The `/api` routes answer the same
+421 and 403 as `/v1/`, and add `Cache-Control: no-store` and the error
+shape `{"error": {"code", "message", "details"}}` to every response.
+
+A console session runs its turns in the gateway process, one at a time: a
+second turn while one runs is 409 `session_busy`. Its Agent is built when
+the session is first used and kept; when a ninth Agent would open, the
+least recently used idle one is closed with its conversation kept.
+Approvals wait in the gateway's memory with no timeout until a client
+answers them or the turn stops, and stopping the gateway ends a waiting
+turn `cancelled` with cause `shutdown`. A console turn does not pass the
+scheduler gate yet: it calls the model without waiting for a slot.
 
 ### GET /v1/health
 

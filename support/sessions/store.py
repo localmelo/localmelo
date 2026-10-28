@@ -401,6 +401,21 @@ class StoredEvent:
 # ── Helpers ──
 
 
+def _encodable(value: str | None, name: str) -> None:
+    """Refuse a string SQLite cannot store, before it fails mid-turn.
+
+    Python carries a lone surrogate (a JSON body can escape one into a
+    request) and sqlite cannot write it. The API refuses it at the body;
+    this is the store's own assertion, so no other surface can wedge a turn.
+    """
+    if value is None:
+        return
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{name} must be valid UTF-8") from exc
+
+
 def title_from_text(text: str) -> str:
     """*text* with its whitespace collapsed, in at most 60 characters.
 
@@ -410,6 +425,19 @@ def title_from_text(text: str) -> str:
     if len(collapsed) <= _TITLE_CHARS:
         return collapsed
     return collapsed[: _TITLE_CHARS - 1] + "…"
+
+
+def check_title(title: object) -> str:
+    """*title* stripped, or ``ValueError`` unless it is 1 to 200 characters.
+
+    A surface checks a title with this before it writes anything else, so a
+    refused rename changes nothing.
+    """
+    stripped = title.strip() if isinstance(title, str) else ""
+    if not 1 <= len(stripped) <= _MAX_TITLE_CHARS:
+        raise ValueError(f"title must be 1 to {_MAX_TITLE_CHARS} characters")
+    _encodable(stripped, "title")
+    return stripped
 
 
 def default_path(writer: Writer) -> str:
@@ -1482,9 +1510,7 @@ class SessionStore:
         writes ``session.title`` and is never replaced by the automatic
         title (T-12).
         """
-        title = title.strip() if isinstance(title, str) else ""
-        if not 1 <= len(title) <= _MAX_TITLE_CHARS:
-            raise ValueError("title must be 1 to 200 characters")
+        title = check_title(title)
         async with self._lock:
             conn = await self._ready()
             self._check_writable()
@@ -1607,6 +1633,7 @@ class SessionStore:
             raise ValueError("begin_turn takes a session_id or a new_session, not both")
         if not isinstance(user_text, str) or not user_text.strip():
             raise ValueError("text must not be blank")
+        _encodable(user_text, "text")
         if len(user_text) > MAX_QUERY_LEN:
             raise ValueError(f"text must be at most {MAX_QUERY_LEN} characters")
         if client_request_id is not None:
@@ -1616,6 +1643,7 @@ class SessionStore:
         kind = None if new_session is None else _check_kind(new_session.kind)
         meta_text = None if new_session is None else _meta_text(new_session.meta)
         typed = title if isinstance(title, str) and title.strip() else ""
+        _encodable(typed, "title")
         async with self._lock:
             conn = await self._ready()
             self._check_writable()

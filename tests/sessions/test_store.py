@@ -1053,6 +1053,10 @@ async def test_begin_turn_checks_its_arguments(tmp_path: Path) -> None:
         await store.begin_turn(info.id, "x", holder=HOLDER, new_session=NewSession())
     with pytest.raises(ValueError, match="text must be at most 100000 characters"):
         await store.begin_turn(info.id, "x" * 100_001, holder=HOLDER)
+    with pytest.raises(ValueError, match="text must be valid UTF-8"):
+        await store.begin_turn(info.id, "x\ud800", holder=HOLDER)
+    with pytest.raises(ValueError, match="title must be valid UTF-8"):
+        await store.begin_turn(info.id, "x", holder=HOLDER, title="y\ud800")
     with pytest.raises(ValueError, match="client_request_id must be 1 to 128"):
         await store.begin_turn(info.id, "x", holder=HOLDER, client_request_id="-x")
     with pytest.raises(SessionStoreError, match="Unknown session: nope"):
