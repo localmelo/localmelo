@@ -188,7 +188,7 @@ The CLI example's JSON line (field order fixed; `RunResult.to_dict()` is the sam
 - One `Agent` per concurrent task: `run_task` has no overlap guard (runs share working memory and counters).
 - `ollama` backend: `result` can start with a `<think>...</think>` block.
 - Gateway: `python_exec` runs in a child process, so the gateway keeps answering while the code runs, and Stop kills it. `DELETE` on a session running a task: 409 `{"error", "session_id"}`, and the run goes on; `/v1/agent` has no cancel route (the web workspace's cancel is for its own chats). At shutdown every session is closed, a busy one included, and a task still running then ends as `crashed`.
-- Stopping: `&` jobs from a non-interactive shell ignore SIGINT; send SIGTERM. Direct mode exits 143 within 8 s; the gateway exits 143 only after its runs in flight finish (no time limit): SIGKILL it after your own deadline.
+- Stopping: `&` jobs from a non-interactive shell ignore SIGINT; send SIGTERM. Direct mode exits 143 within 8 s. The gateway waits up to 3 seconds for runs in flight, cancels a longer one (its client gets a 500 and the run ends `crashed`), and exits 143.
 - Under `uv run`, `$!` is uv: SIGTERM reaches melo, SIGKILL does not (the gateway keeps listening). In scripts start `.venv/bin/melo`, or SIGKILL the child (`pkill -KILL -f 'melo --serve --port PORT'`).
 - `--daemon install` takes `--port` but not `--host`, gets no shell env vars (no cloud keys), and its KeepAlive restarts a killed gateway: use `--daemon uninstall`.
 
