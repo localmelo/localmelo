@@ -70,7 +70,7 @@
         </div>
         <p>Planned:</p>
         <ul>
-          <li>the interactive CLI's next parts: attached files and shell commands;</li>
+          <li>the interactive CLI's remaining parts: attached files and shell commands;</li>
           <li>a console page that shows the agent's work live, and web-workspace chats that survive a gateway restart (the console's sessions already persist and reopen after one);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
           <li>a percent bar on the progress line for tasks you run again and again, off until their repeated runs pass the replay.</li>
@@ -87,6 +87,33 @@
           The <a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">changelog</a>
           lists each change since 2026-10-22 in detail.
         </p>
+
+        <article class="update-entry" id="u-2026-10-28-session-commands">
+          <h3>Name, undo, inspect and copy a terminal chat</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/101">#101</a>
+          </p>
+          <ul>
+            <li><code>/title [text]</code> shows or sets a 1–200-character title, including before the first message: it is kept until the session is created, and <code>/new</code> or a successful resume clears an unsaved one.</li>
+            <li><code>/undo</code> forgets the newest finished turn and keeps its typed message in the ↑ history; files and commands it ran stay changed. A committed undo reports success even after Esc, and <code>/retry</code> re-runs that undone turn without removing the previous live one.</li>
+            <li><code>/usage</code> shows the recorded steps, tool calls, tokens and time of each turn, undone work included, with <code>?</code> for a missing counter, <code>+?</code> on a partial total and labeled rows below 72 columns; <code>/memory</code> inspects a copy of the working window, its counts, the long-term backend and the restore mode actually used, without a model call or a memory write.</li>
+            <li><code>/copy [turn]</code> copies a stored, redacted answer's Markdown instead of the wrapped display, keeping indentation and trailing newlines; an explicit turn number may pick an undone answer. On macOS it uses <code>pbcopy</code>, and under SSH, elsewhere or when that fails it sends an OSC 52 request and says so; nothing touches the clipboard without the command. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md#inspect-undo-or-copy-a-conversation">Inspect, undo or copy a conversation</a>.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-28-memory-followups">
+          <h3>A remember request stores the fact it carries</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/100">#100</a>
+          </p>
+          <ul>
+            <li>A request such as <code>Remember that …</code> or <code>记住…</code> now also stores the fact it carries after the marker, admitted by <code>user_request</code> beside the run's episodic digest, instead of storing only the digest. The fact is <code>semantic</code> unless it is first-person (<code>profile</code>), the redaction, meta-noun and question rules apply to it, and a to-do such as <code>remember to buy milk</code> still stores no fact.</li>
+            <li>A thought chunk is now superseded at its attempt's boundary together with that attempt's notes, so a later recall renders it with the <code>(superseded)</code> marker and names its attempt instead of passing for the current attempt's thinking.</li>
+            <li><code>melo-retrieve --export-store DIR</code> and <code>--export-decisions DIR</code> print zero entries and exit 0 when the directory has no <code>long_term.db</code> yet, instead of failing with “No such file”; a path that is not a directory keeps the missing-file usage error. See <a href="https://github.com/localmelo/localmelo/blob/main/docs/memory.md#long-term-memory">long-term memory</a> and <a href="https://github.com/localmelo/localmelo/blob/main/docs/retrieval.md">offline retrieval</a>.</li>
+          </ul>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-direct-workspace">
           <h3>A task run can work in <code>--workspace DIR</code></h3>

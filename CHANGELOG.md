@@ -9,6 +9,19 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Terminal session commands: `/title [text]` shows or sets a title, including
+  before the first message; `/undo` forgets the latest finished turn and
+  keeps its typed history without reversing file changes (a committed undo
+  reports success even after Esc, and `/retry` re-runs that undone turn
+  without removing the previous live one); `/usage` shows
+  recorded work and totals including undone turns, with missing counters
+  left unknown and a narrow-terminal layout; `/memory` inspects the copied working window and explains
+  its actual restore mode. `/copy [turn]` copies stored, redacted Markdown
+  without thinking, preserving indentation and newlines, via bounded turn
+  reads and macOS `pbcopy` or an OSC 52 request when
+  remote, unsupported locally or on other platforms. Clipboard requests
+  only happen on an explicit command; direct runs are unchanged ([#101]).
+
 - `--workspace DIR` in direct mode: a task run keeps its file tools inside
   the folder and starts `shell_exec` and `python_exec` there. Without the
   flag a run keeps the current folder, exactly as before; `~` is expanded
@@ -700,3 +713,4 @@ earlier milestones.
 [#90]: https://github.com/localmelo/localmelo/pull/90
 [#97]: https://github.com/localmelo/localmelo/pull/97
 [#100]: https://github.com/localmelo/localmelo/pull/100
+[#101]: https://github.com/localmelo/localmelo/pull/101

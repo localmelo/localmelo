@@ -37,6 +37,7 @@ from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import Approvals, Mode, TerminalApprover
 from localmelo.support.cli.output import Out
 from localmelo.support.cli.render import EXPAND_LINES, ToolOutput, TurnRenderer
+from localmelo.support.cli.session_tools import SessionTools
 from localmelo.support.cli.sessions import BUSY, DELETED, SessionNavigation
 from localmelo.support.cli.text import expand_tabs, wrap_cells
 from localmelo.support.cli.theme import ASCII, in_symbols
@@ -47,12 +48,13 @@ from localmelo.support.sessions.display import (
     format_tokens,
     home_label,
 )
-from localmelo.support.sessions.runner import ResumeMode, SessionRunner
+from localmelo.support.sessions.runner import ResumeLoader, ResumeMode, SessionRunner
 from localmelo.support.sessions.store import (
     NewSession,
     SessionBusyError,
     SessionStore,
     SessionStoreError,
+    TurnInfo,
     UnknownSessionError,
     title_from_text,
 )
@@ -154,6 +156,7 @@ def _progress_lines(payload: dict[str, Any], symbols: Any) -> list[str]:
 
 # A turn that ran this long rings the bell when it ends.
 BELL_AFTER_S: Final = 30.0
+UNDO_HINT: Final = "Undoing the last turn; wait for it to finish."
 
 State = Literal["idle", "running", "stopping", "switching"]
 
@@ -195,11 +198,13 @@ class CliSession:
         self._clock = clock
         self._state: State = "idle"
         self._work: asyncio.Task[Any] | None = None
+        self._pending_command: str | None = None
         self._tasks: set[asyncio.Task[Any]] = set()
         self._stop_wanted = False
         self._stop_landed = False
         self._closed = False
         self.navigation = SessionNavigation(self, resume_mode)
+        self.session_tools = SessionTools(self)
         self.exit_code = 0
         self.saved_resume_hint = ""
 
@@ -253,9 +258,16 @@ class CliSession:
                 command.during_turn == "show" and not arguments
             )
             if self._state != "idle" and not allowed:
+                if self._pending_command == "undo":
+                    return UNDO_HINT
                 return f"/{command.name} is not available while a turn runs (esc stops it)."
-            if command.name in ("sessions", "resume", "retry"):
+            if command.name == "title" and arguments and self._state == "switching":
+                return (
+                    "Wait for the session switch to finish before changing its title."
+                )
+            if command.name in ("sessions", "resume", "retry", "undo", "new"):
                 self._state = "switching"
+                self._pending_command = command.name
                 self._work = self.spawn(
                     self._run_command(command.name, arguments, text)
                 )
@@ -271,7 +283,9 @@ class CliSession:
             self.queued = text
             self._hint("Sent when this turn completes · ↑ edits it · ctrl+c clears it")
             return None
-        return _STATE_HINTS[self._state]
+        return (
+            UNDO_HINT if self._pending_command == "undo" else _STATE_HINTS[self._state]
+        )
 
     def take_queued(self) -> str | None:
         text, self.queued = self.queued, None
@@ -293,6 +307,11 @@ class CliSession:
     def _task_done(self, task: asyncio.Task[Any]) -> None:
         self._tasks.discard(task)
         if task.cancelled():
+            if self._work is task and self._state == "switching":
+                self._work, self._state = None, "idle"
+                self._pending_command = None
+                if self.app is not None:
+                    self.app.invalidate()
             return
         exc = task.exception()
         if exc is not None:
@@ -312,7 +331,7 @@ class CliSession:
         self._state = "running"
         self._stop_wanted = self._stop_landed = False
         if self.runner is None or self.runner.session_id is None:
-            self.title = title_from_text(text)  # no session row yet
+            self.title = self.session_tools.pending_title or title_from_text(text)
         first_turn = self.runner is None or self.runner.session_id is None
         self.renderer.begin_turn(text, first_turn=first_turn)
         self._work = self.spawn(self._turn(text))
@@ -322,6 +341,10 @@ class CliSession:
         if self.runner is None:
             return await self.approver.ask(request)
         return await self.runner.observe(self.approver.ask)(request)
+
+    async def _prepare_turn(self, reload: ResumeLoader) -> None:
+        await self.navigation.synchronize(reload)
+        await self.session_tools.apply_title()
 
     async def _turn(self, text: str, *, typed_text: str | None = None) -> None:
         started = self._clock()
@@ -337,7 +360,7 @@ class CliSession:
                 on_event=self.renderer.on_event,
                 progress=True,
                 resume_mode=self.navigation.mode,
-                before_turn=self.navigation.synchronize,
+                before_turn=self._prepare_turn,
             )
         runner = self.runner
         result: RunResult | None = None
@@ -360,6 +383,8 @@ class CliSession:
         # finishes the turn: the next message must not meet it.
         while runner.busy:
             await asyncio.sleep(0.05)
+        with contextlib.suppress(SessionStoreError):
+            await self.session_tools.apply_title()
         cause = "user_stop" if self._stop_wanted else ""
         self.renderer.end_turn(result, error, cause=cause)
         with contextlib.suppress(SessionStoreError):
@@ -452,13 +477,19 @@ class CliSession:
         try:
             await self._command(name, arguments)
         except (ValueError, SessionStoreError, SessionBusyError) as exc:
-            message = DELETED if isinstance(exc, UnknownSessionError) else str(exc)
+            message = (
+                DELETED
+                if isinstance(exc, UnknownSessionError)
+                else BUSY if isinstance(exc, SessionBusyError) else str(exc)
+            )
             self.out.print(self._text(f"✗ {message}", style="error"))
             if self.app is not None:
                 self._give_back(text)
         finally:
             if self._work is asyncio.current_task():
                 self._work, self._state = None, "idle"
+            if self._pending_command == name:
+                self._pending_command = None
             self.out.print(Text(""))
 
     async def _command(self, name: str, arguments: str) -> None:
@@ -473,6 +504,8 @@ class CliSession:
             await self.model(arguments)
         elif name == "backend":
             await self.backend(arguments)
+        elif name in ("title", "undo", "usage", "memory", "copy"):
+            await self.session_tools.run(name, arguments)
         elif name == "verbose":
             self.toggle_verbose(arguments)
         elif name == "thinking":
@@ -689,34 +722,45 @@ class CliSession:
         self.out.print(self._text(f"version    melo {localmelo_version()}"))
 
     async def retry(self) -> None:
-        """``/retry``: undo the newest turn and run it again, keeping its title."""
+        """``/retry``: re-run the newest turn, undoing it only when still live."""
         if self.runner is None:
             self.out.print(self._text("✗ Nothing to retry.", style="error"))
             return
         self._state = "switching"
+        did_undo = False
+        turn: TurnInfo | None
         try:
             await self.navigation.synchronize()
-            undo = asyncio.ensure_future(self.runner.undo())
-            try:
-                turn = await asyncio.shield(undo)
-            except asyncio.CancelledError:
-                turn = await undo
-                if turn is not None:
-                    mark = self.navigation.mark
-                    self.navigation.mark = SessionMark(
-                        mark.foreign_newest, mark.undone + 1
-                    )
-                    if self.app is not None:
-                        self._give_back(turn.user_text)
-                raise
+            sid = self.runner.session_id
+            newest = (
+                await self.store.list_turns(sid, limit=1) if sid is not None else []
+            )
+            if newest and newest[0].undone:
+                turn = newest[0]
+            else:
+                did_undo = True
+                undo = asyncio.ensure_future(self.runner.undo())
+                try:
+                    turn = await asyncio.shield(undo)
+                except asyncio.CancelledError:
+                    turn = await undo
+                    if turn is not None:
+                        mark = self.navigation.mark
+                        self.navigation.mark = SessionMark(
+                            mark.foreign_newest, mark.undone + 1
+                        )
+                        if self.app is not None:
+                            self._give_back(turn.user_text)
+                    raise
         except SessionBusyError:
             self.out.print(self._text("✗ Nothing to retry.", style="error"))
             return
         if turn is None:
             self.out.print(self._text("✗ Nothing to retry.", style="error"))
             return
-        mark = self.navigation.mark
-        self.navigation.mark = SessionMark(mark.foreign_newest, mark.undone + 1)
+        if did_undo:
+            mark = self.navigation.mark
+            self.navigation.mark = SessionMark(mark.foreign_newest, mark.undone + 1)
         first = " ".join(turn.typed_text.split())[:60]
         self.out.print(self._text(f"↻ Retrying turn {turn.turn}: {first}"))
         self._state = "running"
@@ -814,6 +858,7 @@ class CliSession:
         if self.runner is not None:
             await self.runner.close()
         self.runner = None
+        self.session_tools.reset()
         self.navigation.mark = SessionMark(0, 0)
         self.agent.load_conversation([])
         self.approvals.reset()

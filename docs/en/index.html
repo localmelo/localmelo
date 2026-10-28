@@ -106,7 +106,7 @@ source .venv/bin/activate</code></pre>
         <div class="link-grid">
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/cli.md">
             <strong>Run tasks</strong>
-            <span>Run one task per command, within a step budget, with reflection between attempts and an optional time limit, or chat in the terminal with <code>melo</code>: it shows the model's thinking, each tool call and the run's progress as they happen, shows the diff a file write will make before you approve it, asks before it runs a command or writes a file, and resumes a saved chat in the folder with <code>melo -c</code> or <code>melo -r</code>.</span>
+            <span>Run one task per command, within a step budget, with reflection between attempts and an optional time limit, or chat in the terminal with <code>melo</code>: it shows the model's thinking, each tool call and the run's progress as they happen, shows the diff a file write will make before you approve it, asks before it runs a command or writes a file, and resumes a saved chat in the folder with <code>melo -c</code> or <code>melo -r</code>; <code>/title</code>, <code>/undo</code>, <code>/usage</code>, <code>/memory</code> and <code>/copy</code> name, undo, inspect and copy the conversation.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/tools.md">
             <strong>Tools and MCP</strong>
@@ -152,7 +152,7 @@ source .venv/bin/activate</code></pre>
         <p>The v0.1.0 milestone is due 2026-12-20.</p>
         <p>Planned:</p>
         <ul>
-          <li>the interactive CLI's next parts: attached files and shell commands;</li>
+          <li>the interactive CLI's remaining parts: attached files and shell commands;</li>
           <li>a console page that shows the agent's work live, and web-workspace chats that survive a gateway restart (the console's sessions already persist and reopen after one);</li>
           <li>running several tasks at once on one local model server, with your conversation answered first;</li>
           <li>a percent bar on the progress line for tasks you run again and again, off until their repeated runs pass the replay.</li>
