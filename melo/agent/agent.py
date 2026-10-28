@@ -27,6 +27,8 @@ from typing import TYPE_CHECKING, Any, Literal, TypeGuard
 
 from localmelo.melo.agent._call_log import CallHistory, CallLog
 from localmelo.melo.agent._chat import (
+    BUDGET_ACCOUNTING,
+    BUDGET_HOOK,
     CALL_RECORDER,
     RETRY_HOOK,
     Chat,
@@ -1551,7 +1553,8 @@ class Agent:
             assert self.options.output_reserve is not None
             assert self.options.safety_margin is not None
             budget = ContextBudget(
-                self.options.context_window, self.options.output_reserve,
+                self.options.context_window,
+                self.options.output_reserve,
                 self.options.safety_margin,
             )
         self.chat = Chat(
@@ -4671,8 +4674,12 @@ class Agent:
             limits=self._limits() if progress else None,
         )
         stats = self.chat.reset_stats()
-        if self.options.context_window is not None:
-            self.chat.on_context_budget = run.events.context_budget
+        budget_accounting = BUDGET_ACCOUNTING.set(self.chat._accounting)
+        budget_hook = BUDGET_HOOK.set(
+            run.events.context_budget
+            if self.options.context_window is not None
+            else None
+        )
         timeout_s = self.options.timeout_s
         deadline = asyncio.timeout(timeout_s)  # never expires when None
         # The retry notices of this run's model requests; only with a sink.
@@ -4829,7 +4836,8 @@ class Agent:
             await self._learn(run, query, outcome)
             return outcome
         finally:
-            self.chat.on_context_budget = None
+            BUDGET_HOOK.reset(budget_hook)
+            BUDGET_ACCOUNTING.reset(budget_accounting)
             if run.finalizer is None:
                 # Else the finalizer counts the run out when it ends.
                 self._active_runs -= 1

@@ -164,6 +164,7 @@ tables of the chosen backends.
 | `extra_body` | local or cloud backend | not set | Extra fields for every chat request; see [Extra request fields](#extra-request-fields-extra_body). |
 | `reasoning_field` | local or cloud backend | not set | The request key reasoning is sent back under: `auto`, `reasoning_content` or `reasoning`; `[ollama]` takes `auto` or `thinking` instead. See [Reasoning](#reasoning). |
 | `requires_reasoning_replay` | local or cloud backend | `false` | `true` when the server rejects a request that omits a reply's reasoning. See [Reasoning](#reasoning). |
+| `context_window`, `output_reserve`, `safety_margin` | `[agent]` | not set | Opt-in context request accounting; all three positive integers must resolve, with a positive input limit. See [Context accounting](#context-accounting). |
 | `reasoning` | `[agent]` | `"legacy"` | `legacy`, `drop`, `replay`, `compress` or `compress+replay`; the saved default for direct runs, the interactive UI and API v2 console sessions. See [Reasoning](#reasoning). |
 | `replay_turns` | `[agent]` | not set | With `replay` or `compress+replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
 | `note_writer` | `[agent]` | `"auto"` | In the compress modes, `auto` (the model's `<note>`, else the heuristic) or `heuristic`. |
@@ -312,6 +313,21 @@ its address and credentials. Tools run with your permissions and can print,
 copy or transmit variables they receive; filtering the environment is not a
 sandbox. Leave the list empty unless a tool needs the capability, and never
 put secret values in TOML.
+
+## Context accounting
+
+Set `[agent] context_window`, `output_reserve` and `safety_margin` to positive integers; the window
+must be greater than their sum. Direct and interactive flags override individual values; API v2
+console sessions use the config. Legacy `/v1` is unchanged. When unset, no accounting is recorded.
+
+For each planning or reflection attempt, `utf8-bytes-v1` estimates the assembled message and tool
+schema representation at UTF-8 bytes divided by three, rounded up, plus 16,384 tokens for each
+attached image. The last positive prompt-token count for the same model and request kind calibrates
+the proxy upward; missing or zero usage resets that calibration. This is an estimate, not an exact
+provider wire count or a bound: templates and vision models differ. Events and JSON results record
+the estimate, source, measured count, input limit and over-limit flag without storing prompt text.
+This release neither prunes nor refuses over-limit requests and does not enforce the output reserve
+as a provider generation cap. The existing independent character guard still applies.
 
 ## Backends
 

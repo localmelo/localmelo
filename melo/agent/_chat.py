@@ -41,6 +41,14 @@ RETRY_HOOK: contextvars.ContextVar[
 ] = contextvars.ContextVar("RETRY_HOOK", default=None)
 
 
+BUDGET_ACCOUNTING: contextvars.ContextVar[RequestAccounting | None] = (
+    contextvars.ContextVar("BUDGET_ACCOUNTING", default=None)
+)
+BUDGET_HOOK: contextvars.ContextVar[Callable[[dict[str, Any]], None] | None] = (
+    contextvars.ContextVar("BUDGET_HOOK", default=None)
+)
+
+
 class CallRecorder(Protocol):
     """Keeps the model calls of a run (see :data:`CALL_RECORDER`)."""
 
@@ -384,9 +392,10 @@ class Chat:
 
     def _emit_context_budget(self, record: dict[str, Any] | None) -> None:
         """Notify the run sink once per attempted request, without exposing state."""
-        if record is not None and self.on_context_budget is not None:
+        hook = BUDGET_HOOK.get() or self.on_context_budget
+        if record is not None and hook is not None:
             try:
-                self.on_context_budget(dict(record))
+                hook(dict(record))
             except (Exception, asyncio.CancelledError):
                 logger.warning("Context budget callback failed", exc_info=True)
 
@@ -423,7 +432,11 @@ class Chat:
         """
         attempt = 1
         while True:
-            accounting = self._accounting if kind in ("plan", "reflect") else None
+            accounting = (
+                (BUDGET_ACCOUNTING.get() or self._accounting)
+                if kind in ("plan", "reflect")
+                else None
+            )
             record = None
             proxy = 0
             if accounting is not None:
@@ -441,6 +454,8 @@ class Chat:
                 break
             except ProviderError as exc:
                 self.stats.llm_errors += 1
+                if accounting is not None and record is not None:
+                    accounting.finish(record, proxy, None)
                 self._emit_context_budget(record)
                 if not retry or not exc.retryable or attempt > len(self.retry_delays):
                     raise
@@ -457,6 +472,8 @@ class Chat:
                     hook(attempt, delay, exc)
             except BaseException:
                 self.stats.llm_errors += 1
+                if accounting is not None and record is not None:
+                    accounting.finish(record, proxy, None)
                 self._emit_context_budget(record)
                 raise
             await self.sleep(delay)

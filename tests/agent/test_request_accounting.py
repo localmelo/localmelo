@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from localmelo.melo.agent import Agent, AgentOptions
 from localmelo.melo.agent._chat import Chat
 from localmelo.melo.agent._request_accounting import (
     IMAGE_TOKENS,
@@ -91,7 +92,7 @@ async def test_opt_in_calibration_kind_model_and_reset():
         "proxy",
         "calibrated",
         "proxy",
-        "calibrated",
+        "proxy",
         "proxy",
     ]
     assert records[0]["measured_prompt_tokens"] == 9000
@@ -138,3 +139,34 @@ async def test_default_disabled():
     chat = Chat(FakeLLM([None]))
     await chat.plan_step([], [Message(role="user", content="q")], [], "q")
     assert chat.stats.context_budget is None
+
+
+async def test_agent_reports_budget_in_result_and_event():
+    agent = Agent(
+        llm=FakeLLM([{"prompt_tokens": 9999}]),
+        options=AgentOptions(
+            context_window=100,
+            output_reserve=10,
+            safety_margin=10,
+            memory=False,
+            builtins=frozenset(),
+        ),
+    )
+    events = []
+    try:
+        result = await agent.run_task("answer", on_event=events.append)
+    finally:
+        await agent.close()
+    records = result.to_dict()["context_budget"]
+    assert len(records) == 1 and records[0]["over_limit"]
+    assert records[0]["measured_prompt_tokens"] == 9999
+    assert [dict(e.data) for e in events if e.type == "context_budget"] == records
+    assert events[-1].to_dict()["data"]["result"]["context_budget"] == records
+
+
+@pytest.mark.parametrize("values", [(1, None, None), (10, 5, 5), (True, 1, 1)])
+def test_agent_options_reject_invalid_budget(values):
+    with pytest.raises(ValueError):
+        AgentOptions(
+            context_window=values[0], output_reserve=values[1], safety_margin=values[2]
+        )

@@ -20,7 +20,8 @@ default options stay unchanged. P13b's loop notice (``shell_exec`` is off;
 is pinned for the first time: it returns every built-in explicitly for
 ``--builtins all``. T65b's review fixes name ``melo "" --builtins all`` in
 the notice, so ``_run`` has a new hash again. The other pinned functions are
-unchanged. ``_check_args``, which carries the refusals, is not pinned.
+unchanged. Context accounting resolves the opt-in budget before Agent construction,
+so ``_build_direct_mode_agent`` has a new hash. ``_check_args``, which carries the refusals, is not pinned.
 """
 
 from __future__ import annotations
@@ -42,7 +43,7 @@ PINNED = {
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "99852a989998a7ef7b9094fde8902b881a06673873821454745d780c5de7c791",
+    "_build_direct_mode_agent": "fd3cc1dc9eaf214d5680fc4b97110c13b2a9e0df5c91a0aca1a6bab20667db8d",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",

@@ -517,6 +517,7 @@ These options apply to a task run without `--serve`.
 | Option | Default | Description |
 |---|---|---|
 | `--workspace DIR` | the current folder | The folder the run works in: the file tools stay inside it and `shell_exec` and `python_exec` start there; see [With a workspace root](tools.md#with-a-workspace-root). |
+| `--context-window N`, `--output-reserve N`, `--safety-margin N` | not set | Opt in to per-request context accounting; all three must resolve to positive integers and the window must exceed the other two combined. |
 | `--max-steps N` | `30` | The most planning steps the whole run may take. |
 | `--attempt-policy reflect\|none` | `reflect` | `reflect`: attempts with a reflection after each. `none`: one attempt, no reflection. |
 | `--reflection-gate flags\|utility` | `flags` | After a reflection, start the next attempt when it chooses `continue` and its three checks hold (`flags`), or also require its utility score to reach 0.1 (`utility`, the behavior before this option). |
@@ -554,6 +555,9 @@ These options apply to a task run without `--serve`.
   approvals (see [With a workspace root](tools.md#with-a-workspace-root)).
   A path that is not a folder is a usage error (exit 2, one line); see
   [Usage errors](#usage-errors). `melo ""` and `--serve` refuse the flag.
+- The three context flags override the matching `[agent]` keys independently, in direct mode and the
+  interactive UI. They measure, but do not truncate or reject, planning and reflection requests; the
+  output reserve is not a generation cap. See [context accounting](configuration.md#context-accounting).
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
   [How localmelo works](how-it-works.md#the-run-loop).
@@ -664,7 +668,8 @@ These options apply to `melo` without a task.
 | `-r`, `--resume [ID\|TITLE]` | off | Resume the named chat; without a value open the session picker. |
 | `--yolo` | off | Run every tool without asking for approval. |
 
-- The UI also takes `--workspace`, `--max-steps`, `--attempt-policy`,
+- The UI also takes `--context-window`, `--output-reserve`, `--safety-margin`,
+  `--workspace`, `--max-steps`, `--attempt-policy`,
   `--reflection-gate`, `--builtins`, `--memory`, `--memory-dir`,
   `--request-timeout`, `--reasoning`, `--reasoning-field`, `--replay-turns`,
   `--note-writer`, `--retriever`, `--recall-*`, `--retrieval-extra-body` and

@@ -436,5 +436,16 @@ async def test_legacy_run_matches_its_golden(
     check_golden(GOLDEN_DIR / f"{name}.json", document)
 
 
+async def test_default_two_step_wire_and_result_remain_golden(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result, document = await record_run(
+        "openai", _usage_details(), tmp_path, monkeypatch
+    )
+    assert len(document["requests"]) == 2
+    assert "context_budget" not in result.to_dict()
+    check_golden(GOLDEN_DIR / "openai_usage_details.json", document)
+
+
 def test_every_legacy_golden_file_has_its_run() -> None:
     assert sorted(path.stem for path in GOLDEN_DIR.glob("*.json")) == sorted(SCENARIOS)

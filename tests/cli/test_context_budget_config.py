@@ -7,7 +7,10 @@ from typing import Any
 
 import pytest
 
+from localmelo import __main__ as cli
+from localmelo.melo.agent import AgentOptions
 from localmelo.support.config import AgentConfig, Config, ConfigError, load, save
+from localmelo.support.sessions.agents import configured_session_options
 
 
 @pytest.fixture
@@ -99,3 +102,43 @@ def test_invalid_toml_value_is_loaded_for_validation(
     cfg = load()
     assert cfg.agent.context_window == "123"
     assert any("[agent] context_window" in e for e in cfg.validate())
+
+
+async def test_base_url_uses_config_and_per_flag_override(config_path: Path) -> None:
+    save(
+        Config(
+            agent=AgentConfig(context_window=100, output_reserve=80, safety_margin=30)
+        )
+    )
+    parser = cli._build_parser()
+    args = parser.parse_args(
+        ["--base-url", "http://127.0.0.1:1/v1", "--output-reserve", "20", "task"]
+    )
+    agent = cli._build_direct_mode_agent(args, parser=parser, options=AgentOptions())
+    try:
+        assert (
+            agent.options.context_window,
+            agent.options.output_reserve,
+            agent.options.safety_margin,
+        ) == (100, 20, 30)
+    finally:
+        await agent.close()
+
+
+def test_session_budget_overrides_invalid_config() -> None:
+    cfg = Config(
+        agent=AgentConfig(context_window=100, output_reserve=80, safety_margin=30)
+    )
+    opts = configured_session_options(cfg, budget_overrides={"output_reserve": 20})
+    assert (opts.context_window, opts.output_reserve, opts.safety_margin) == (
+        100,
+        20,
+        30,
+    )
+    assert cfg.agent.output_reserve == 80
+
+
+def test_partial_budget_is_refused_before_session() -> None:
+    cfg = Config(agent=AgentConfig(context_window=100))
+    with pytest.raises(ValueError, match="positive integers"):
+        configured_session_options(cfg)

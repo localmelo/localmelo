@@ -9,6 +9,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Opt-in context-window request accounting reports estimated and measured planning/reflection
+  tokens in events and run results; it does not prune or enforce an output cap ([#NN]).
+
 - S3a.2 adds `/api/tasks` creation, inspection and control and in-process
   workers sharing the console's scheduler gate. Creation is idempotent with
   `request_key`; workers disable memory, omit `shell_exec`, and have at most

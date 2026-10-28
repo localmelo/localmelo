@@ -41,12 +41,20 @@ def configured_context_options(
 ) -> AgentOptions:
     """Resolve context settings together so flags may override individual keys."""
     names = ("context_window", "output_reserve", "safety_margin")
-    fields = {
-        name: overrides.get(name)
-        if overrides.get(name) is not None
-        else getattr(cfg.agent, name, None) if cfg is not None else getattr(options, name)
+    fields: dict[str, Any] = {
+        name: (
+            overrides.get(name)
+            if overrides.get(name) is not None
+            else (
+                getattr(cfg.agent, name, None)
+                if cfg is not None
+                else getattr(options, name)
+            )
+        )
         for name in names
     }
+    if all(getattr(options, name) == value for name, value in fields.items()):
+        return options
     return dataclasses.replace(options, **fields)
 
 
@@ -62,6 +70,10 @@ def configured_session_options(
     options = configured_context_options(cfg, options, budget_overrides or {})
     if cfg is None:
         return options
+    if budget_overrides:
+        cfg = copy.deepcopy(cfg)
+        for name in ("context_window", "output_reserve", "safety_margin"):
+            setattr(cfg.agent, name, getattr(options, name))
     fields: dict[str, Any] = {
         name: getattr(cfg.agent, name)
         for name in ("reasoning", "replay_turns", "note_writer")

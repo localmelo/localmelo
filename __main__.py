@@ -1584,13 +1584,20 @@ def _build_direct_mode_agent(
     from localmelo.support import config
     from localmelo.support.sessions.agents import configured_context_options
 
-    budget_cfg = config.load()
+    try:
+        budget_cfg = config.load()
+    except (OSError, ValueError):
+        if not base_url:
+            raise
+        budget_cfg = config.Config()
     try:
         options = configured_context_options(
-            budget_cfg, options or AgentOptions(),
-            {name: getattr(args, name, None) for name in (
-                "context_window", "output_reserve", "safety_margin"
-            )},
+            budget_cfg,
+            options or AgentOptions(),
+            {
+                name: getattr(args, name, None)
+                for name in ("context_window", "output_reserve", "safety_margin")
+            },
         )
     except ValueError as exc:
         parser.error(str(exc))
@@ -1636,7 +1643,9 @@ def _build_direct_mode_agent(
     # No --base-url: use configured backends from config file
     from localmelo.support import config
 
-    cfg = config.load()
+    cfg = budget_cfg
+    for name in ("context_window", "output_reserve", "safety_margin"):
+        setattr(cfg.agent, name, getattr(options, name))
     if not cfg.is_configured:
         print(
             "No backend configured. Run 'melo --serve --reconfigure' to set up,\n"

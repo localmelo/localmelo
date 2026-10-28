@@ -68,7 +68,9 @@ def request_proxy(
         {"messages": entries, "tools": schemas}, ensure_ascii=False, default=str
     )
     image_allowance = image_count * IMAGE_TOKENS
-    return (len(wire.encode("utf-8")) + 2) // 3 + image_allowance, image_allowance
+    return (
+        len(wire.encode("utf-8", errors="surrogatepass")) + 2
+    ) // 3 + image_allowance, image_allowance
 
 
 class RequestAccounting:
@@ -112,3 +114,5 @@ class RequestAccounting:
         if type(measured) is int and measured > 0:
             record["measured_prompt_tokens"] = measured
             self.ratios[(record["model"], record["kind"])] = measured / proxy
+        else:
+            self.ratios.pop((record["model"], record["kind"]), None)
