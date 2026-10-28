@@ -74,7 +74,7 @@ U3_PR4_DEFAULTS = {"allow_unconfigured": False}
 # Fixed prefix is opt-in; historical invocations leave it unset.
 FIXED_PREFIX_DEFAULTS = {"fixed_prefix": None}
 WORKER_DEFAULTS = dict.fromkeys(
-    ("save_session", "parent_run", "import_session", "title")
+    ("save_session", "parent_run", "import_session", "title", "brief")
 )
 
 

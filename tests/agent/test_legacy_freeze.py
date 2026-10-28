@@ -103,6 +103,7 @@ LATER_OPTIONS = [
     "--keep-decision-text",
     "--allow-unconfigured",
     "--save-session",
+    "--brief",
     "--parent-run",
     "--import-session",
     "--title",

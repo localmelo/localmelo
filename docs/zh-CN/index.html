@@ -105,7 +105,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">
             <strong>Worker 历史</strong>
-            <span>可以选择保存直接运行或导入 dsh 日志，再在网页工作区或通过本地网关 API 只读查询和筛选。</span>
+            <span>用任务说明文件启动 worker 并获得 JSON 结果或事件流；也可保存或导入运行，在网页工作区或网关 API 中只读查看。</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">
             <strong>API v2</strong>
@@ -141,7 +141,7 @@ source .venv/bin/activate</code></pre>
         <p>可选的上下文统计现可按估算预算裁剪请求副本；强制限制输出仍是后续工作。可选的固定前缀在每次运行中固定本地日期和稳定指令。</p>
         <p>进行中，按顺序落地：</p>
         <ul>
-          <li>无头工作进程支持-3：网页上的只读 worker 历史（<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>）；详情抽屉已在 <a href="https://github.com/localmelo/localmelo/pull/124">#124</a> 落地。</li>
+          <li>Worker 契约第一部分：任务说明和事件流；网页 worker 历史已在 <a href="https://github.com/localmelo/localmelo/pull/130">#130</a> 落地。</li>
         </ul>
         <p>接下来，按顺序：</p>
         <ul>

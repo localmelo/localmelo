@@ -36,6 +36,9 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Added
 
+- Direct workers can read a brief file and emit a versioned JSON result or an
+  NDJSON event stream; inbox steering remains future work. ([#143])
+
 - Opt-in fixed system prefix with a local-date snapshot and schema-change telemetry;
   dynamic recall and reflection remain labelled data ([#142]).
 - Heuristic notes retain a bounded set of explicit English negative and Chinese
@@ -973,3 +976,4 @@ earlier milestones.
 [#137]: https://github.com/localmelo/localmelo/pull/137
 [#141]: https://github.com/localmelo/localmelo/pull/141
 [#142]: https://github.com/localmelo/localmelo/pull/142
+[#143]: https://github.com/localmelo/localmelo/pull/143

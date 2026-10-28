@@ -71,8 +71,7 @@
         <p>Website sync landed in <a href="https://github.com/localmelo/localmelo/pull/118">#118</a>; Task scheduler-2: task API and workers (S3a.2) landed in <a href="https://github.com/localmelo/localmelo/pull/119">#119</a>.</p>
         <p>In flight, landing in this order:</p>
         <ul>
-          <li>Gateway authentication is in progress: loopback-only binding, bearer credentials and a one-use browser login link. Same-user processes and other localhost ports are not isolated.</li>
-          <li>Headless worker support-3: read-only worker history on the web (<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>); the details drawer landed in <a href="https://github.com/localmelo/localmelo/pull/124">#124</a>.</li>
+          <li>Worker contract PR 1: brief files and event streams; worker history landed in <a href="https://github.com/localmelo/localmelo/pull/130">#130</a>.</li>
         </ul>
         <p>Next, in order:</p>
         <ul>
@@ -102,6 +101,12 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-worker-brief">
+          <h3>Worker briefs and event streams</h3>
+          <p class="update-date">Unreleased</p>
+          <p>Direct workers read a brief and return a versioned JSON result or stream events; inbox steering follows separately.</p>
+        </article>
+
         <article class="update-entry" id="u-facts2-extraction">
           <h3>Negative and Chinese notes</h3>
           <p class="update-date">Unreleased</p>
@@ -110,7 +115,7 @@
 
         <article class="update-entry" id="u-worker-view">
           <h3>Worker history in the workspace</h3>
-          <p class="update-date">Unreleased</p>
+          <p class="update-date">2026-10-28 · #130</p>
           <p>Workers lists saved and imported runs with filters and paging. Each run opens as a read-only snapshot; refresh unfinished runs manually. Review redacted records before sharing.</p>
         </article>
 
