@@ -581,9 +581,9 @@ async def test_uncertain_first_start_never_builds_or_requeues(
         assert (
             await RecoveryStore(store).provenance(task.task_id)
         ).first_start == "started"
-        assert (await workers.update(task.task_id, state="stop"))[
-            "state"
-        ] == "cancelled"
+        with pytest.raises(SessionStoreError, match="store unavailable"):
+            await workers.update(task.task_id, state="stop")
+        assert (await workers.tasks.get_task(task.task_id)).state == "running"
     finally:
         await workers.aclose()
         await hub.aclose()
