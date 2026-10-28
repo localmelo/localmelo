@@ -92,6 +92,12 @@
           <h3>优先召回同一任务的摘要</h3>
           <p class="update-date">尚未发布</p>
           <p>召回优先使用同一任务的情景摘要，并限制跨任务摘要；普通记忆仍可召回。没有文件或检查证据的摘要不会写入长期记忆。冷启动时召回跨任务摘要需要显式开启。</p>
+        <article class="update-entry" id="u-worker-brief">
+          <h3>Worker 任务说明与事件流</h3>
+          <p class="update-date">尚未发布</p>
+          <p>直接运行的 worker 可读取任务说明，返回版本化 JSON 结果或事件流。智能体构建失败会产生启动错误结果；输出故障可能阻止最终记录送达。收件箱引导将在后续实现。</p>
+        </article>
+
         <article class="update-entry" id="u-attach">
           <h3>把文本文件附加到消息</h3>
           <p class="update-date">
@@ -99,6 +105,7 @@
             <a href="https://github.com/localmelo/localmelo/pull/155">#155</a>
           </p>
           <p>在交互式界面中，<code>/attach PATH</code> 把一个工作区内的 UTF-8 文本文件暂存到下一条消息；<code>/attachments</code> 列出已暂存的文件，<code>/detach N|all</code> 移除一个或全部。只接受工作区内的普通文件（不接受符号链接、设备、已识别的密钥文件和二进制数据），最多 8 个文件，每个 256 KiB，合计 512 KiB。每个文件只读取一次并保存为带版本的快照，随会话保存：<code>/retry</code> 使用快照而不再读取文件，<code>/resume</code> 在保留窗口包含它时重放；<code>pairs</code> 恢复在预算超出时可能整轮省略附件，需要重新附加。不支持图片附件，直接模式和 <code>melo ""</code> 也不接受附件。详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/guides/terminal.md#attach-text-files">交互式界面（英文）</a>。</p>
+
         </article>
 
         <article class="update-entry" id="u-stream-release">

@@ -8,6 +8,7 @@ import importlib.metadata
 import json
 import math
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -161,6 +162,48 @@ def _one_line(text: str) -> str:
 def _exception_text(exc: BaseException) -> str:
     """``"<type>: <message>"``, or the type alone when the message is empty."""
     return f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+
+
+class _StartupConfigError(Exception):
+    """A config-file value that stops a direct worker from starting.
+
+    It reaches the worker's ``startup_error`` result with its message, while
+    the same failure without ``--brief`` stays a usage error or the old
+    printed refusal.
+    """
+
+
+def _home_relative(text: str) -> str:
+    """Show paths under the user's home directory as ``~/...``."""
+    home = os.path.expanduser("~")
+    if not home or home == os.sep:
+        return text
+    return re.sub(re.escape(home) + r"(?=/|$)", "~", text)
+
+
+def _discard_stdout() -> None:
+    """Point fd 1 at the null device, so shutdown cannot fail on a broken pipe.
+
+    A failed ``print`` can leave the record in ``sys.stdout``'s buffer, and
+    the interpreter's last flush would then fail again and exit 120 (see the
+    worker startup path).
+    """
+    try:
+        fd = sys.stdout.fileno()
+    except (AttributeError, OSError, ValueError):
+        return
+    if fd != 1:
+        return
+    try:
+        null = os.open(os.devnull, os.O_WRONLY)
+    except OSError:
+        return
+    try:
+        os.dup2(null, fd)
+    except OSError:
+        pass
+    finally:
+        os.close(null)
 
 
 def _status_line(outcome: RunResult) -> str:
@@ -463,7 +506,11 @@ async def _run_worker_brief(
     routine: str | None,
 ) -> int:
     """Run one opt-in worker and write its versioned report."""
-    from localmelo.support.cli.worker_contract import WorkerObserver, result_record
+    from localmelo.support.cli.worker_contract import (
+        WorkerObserver,
+        failure_record,
+        result_record,
+    )
 
     loop = asyncio.get_running_loop()
     task = asyncio.current_task()
@@ -489,6 +536,17 @@ async def _run_worker_brief(
                 observe=observer,
                 routine=routine,
             )
+        if observer.error is not None:
+            record = await asyncio.to_thread(
+                failure_record,
+                "transport_error",
+                workspace,
+                "Worker event output failed",
+            )
+            await asyncio.to_thread(observer.transport_result, record)
+            await asyncio.to_thread(observer.close)
+            print("melo: worker event output failed", file=sys.stderr)
+            return EXIT_CRASHED
         code = _exit_code(outcome.status)
         record = await asyncio.to_thread(
             result_record, outcome, observer, workspace, code
@@ -512,6 +570,10 @@ async def _run_worker_brief(
     except asyncio.CancelledError:
         if observer.error is None:
             raise
+        record = await asyncio.to_thread(
+            failure_record, "transport_error", workspace, "Worker event output failed"
+        )
+        await asyncio.to_thread(observer.transport_result, record)
         print(
             f"melo: worker output failed: {_one_line(str(observer.error))}",
             file=sys.stderr,
@@ -1697,18 +1759,44 @@ def main() -> None:
     # direct mode (no gateway): exit code 0 completed, 1 crashed, 2 otherwise
     if args.query and not args.serve:
         query = " ".join(args.query)
-        options = _direct_options(parser, args)
-        # The surface is known here: direct mode has no approver, so its
-        # default set leaves shell_exec out (--builtins all names it).
-        options = dataclasses.replace(options, mode="direct")
-        if not query:
-            # The loop keeps its answers, so each turn sees the earlier ones; a
-            # single task's options stay as they were.
-            options = dataclasses.replace(options, record_answers=True)
-        tool_providers = _direct_tool_providers(parser, args)
-        agent = _build_direct_mode_agent(
-            args, options=options, tool_providers=tool_providers
-        )
+        try:
+            options = _direct_options(parser, args)
+            # The surface is known here: direct mode has no approver, so its
+            # default set leaves shell_exec out (--builtins all names it).
+            options = dataclasses.replace(options, mode="direct")
+            if not query:
+                # The loop keeps its answers, so each turn sees the earlier ones; a
+                # single task's options stay as they were.
+                options = dataclasses.replace(options, record_answers=True)
+            tool_providers = _direct_tool_providers(parser, args)
+            agent = _build_direct_mode_agent(
+                args, options=options, tool_providers=tool_providers
+            )
+        except (Exception, SystemExit) as exc:
+            if args.brief is None or (isinstance(exc, SystemExit) and exc.code != 1):
+                raise
+            from localmelo.support.cli.worker_contract import failure_record
+
+            error = (
+                "Worker startup failed"
+                if isinstance(exc, SystemExit)
+                else _one_line(_home_relative(str(exc)))
+            )
+            workspace = os.path.realpath(
+                os.path.expanduser(args.workspace or os.getcwd())
+            )
+            record = failure_record("startup_error", workspace, error)
+            print(f"melo: worker startup failed: {record['error']}", file=sys.stderr)
+            if args.output_format == "stream-json":
+                record = {"v": 1, "type": "result", "result": record}
+            try:
+                print(
+                    json.dumps(record, ensure_ascii=True, allow_nan=False), flush=True
+                )
+            except BrokenPipeError:
+                print("melo: worker output failed: broken pipe", file=sys.stderr)
+                _discard_stdout()
+            raise SystemExit(EXIT_CRASHED) from None
         worker_args: dict[str, Any] = (
             {"worker_brief": True} if args.brief is not None else {}
         )
@@ -1914,6 +2002,17 @@ def _build_direct_mode_agent(
     from localmelo.support import config
     from localmelo.support.sessions.agents import configured_context_options
 
+    def config_value_error(message: str) -> NoReturn:
+        """Refuse a bad config value as a usage error, or a worker result.
+
+        With ``--brief`` a config-file value is a startup failure, not an
+        argv misuse, so it becomes a ``startup_error`` record instead of
+        ``parser.error``'s resultless exit 2.
+        """
+        if getattr(args, "brief", None) is None:
+            parser.error(message)
+        raise _StartupConfigError(message)
+
     try:
         budget_cfg = config.load()
     except (OSError, ValueError):
@@ -1930,14 +2029,14 @@ def _build_direct_mode_agent(
             },
         )
     except ValueError as exc:
-        parser.error(str(exc))
+        config_value_error(str(exc))
     if not isinstance(budget_cfg.agent.fixed_prefix, bool):
-        parser.error("[agent] fixed_prefix must be a boolean")
+        config_value_error("[agent] fixed_prefix must be a boolean")
     if getattr(args, "fixed_prefix", None) is None and budget_cfg.agent.fixed_prefix:
         options = dataclasses.replace(options, fixed_prefix=True)
 
     if not isinstance(budget_cfg.agent.captured_history, bool):
-        parser.error("[agent] captured_history must be a boolean")
+        config_value_error("[agent] captured_history must be a boolean")
     if (
         getattr(args, "captured_history", None) is None
         and budget_cfg.agent.captured_history
@@ -1989,6 +2088,11 @@ def _build_direct_mode_agent(
     for name in ("context_window", "output_reserve", "safety_margin"):
         setattr(cfg.agent, name, getattr(options, name))
     if not cfg.is_configured:
+        if getattr(args, "brief", None) is not None:
+            raise _StartupConfigError(
+                "No backend configured. Run 'melo --serve --reconfigure' to set up, "
+                "or use --base-url to connect to an OpenAI-compatible endpoint."
+            )
         print(
             "No backend configured. Run 'melo --serve --reconfigure' to set up,\n"
             "or use --base-url to connect to an OpenAI-compatible endpoint.",
@@ -2009,6 +2113,8 @@ def _build_direct_mode_agent(
     try:
         cfg.validate_or_raise()
     except config.ConfigError as e:
+        if getattr(args, "brief", None) is not None:
+            raise _StartupConfigError(str(e)) from e
         print(f"\n  {e}\n", file=sys.stderr)
         raise SystemExit(1) from e
 

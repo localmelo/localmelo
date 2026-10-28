@@ -79,13 +79,21 @@ async def test_distinct_task_digests_keep_separate_provenance() -> None:
     store = LongTerm()
     hippo = Hippo(long=store)
     for key in ("one", "two"):
-        hippo.propose(_candidate(
-            "task: migrate data\nfiles: migration.py\nfacts: migration completed",
-            candidate_id=key, source="digest", task_id=key, provenance={"task_key": key},
-        ))
+        hippo.propose(
+            _candidate(
+                "task: migrate data\nfiles: migration.py\nfacts: migration completed",
+                candidate_id=key,
+                source="digest",
+                task_id=key,
+                provenance={"task_key": key},
+            )
+        )
         decisions = await hippo.admit(key, "user_request")
         assert [decision.action for decision in decisions] == ["NEW"]
-    assert {entry.provenance["task_key"] for entry in await store.active_entries()} == {"one", "two"}
+    assert {entry.provenance["task_key"] for entry in await store.active_entries()} == {
+        "one",
+        "two",
+    }
 
 
 async def test_an_unknown_signal_is_a_value_error() -> None:
