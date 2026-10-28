@@ -610,6 +610,40 @@ async def test_thought_chunks_are_off_by_default_and_capped_at_six() -> None:
     assert [e for e in agent.notes() if e.kind == "thought"] == []
 
 
+async def test_a_thought_chunk_is_recalled_only_after_its_turn_left() -> None:
+    from localmelo.melo.memory.short import WorkingMemory
+
+    thought = "echo parser build failure"
+    llm = FakeLLM(
+        _call("plan: echo parser build failure", thinking=thought),
+        _call("plan: echo parser build failure", arguments={"text": "b"}),
+        _call("plan: echo parser build failure", arguments={"text": "c"}),
+        _answer(),
+    )
+    agent = _agent(
+        llm,
+        _options(
+            reasoning="compress",
+            retriever="bm25",
+            recall_kinds=frozenset({"note", "draft", "thought"}),
+            max_steps=4,
+        ),
+    )
+    # The query and the first turn fit; the second turn evicts the first.
+    agent.hippo.working = WorkingMemory(max_len=3)
+    try:
+        result = await agent.run_task("q")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    assert [e.alias for e in agent.notes() if e.kind == "thought"] == ["t1"]
+    # The turn that holds t1 is still in the window for the next two
+    # requests; once it is evicted, the step block reaches the chunk.
+    assert "[t1]" not in "\n".join(m.content for m in llm.requests[1])
+    assert "[t1]" not in "\n".join(m.content for m in llm.requests[2])
+    assert "[t1]" in "\n".join(m.content for m in llm.requests[3])
+
+
 # ── legacy ──
 
 

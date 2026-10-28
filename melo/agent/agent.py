@@ -934,6 +934,10 @@ class _InflightStep:
     # and whether it carried a model note.
     rest: str = ""
     has_model_note: bool = False
+    # The aliases of the thought chunks stored from this reply. They count
+    # as shown while the reply's turn is in the window, so they leave with
+    # it (see _do_memorize).
+    thought_aliases: list[str] = dataclasses.field(default_factory=list)
     # The task's most recent successful read or write before this reply, a
     # draft target when the reply names none. The exporter takes the same
     # value: a path used in this reply is not the fallback for it.
@@ -2119,10 +2123,16 @@ class Agent:
             run.pending_shown.update(hit.alias for hit in hits if hit.kind != "long")
         return block, hits
 
-    async def _store_thought_chunks(self, response: Message, run: _RunState) -> None:
-        """Store up to the task's remaining thought chunks from *response*."""
+    async def _store_thought_chunks(
+        self, response: Message, run: _RunState
+    ) -> list[str]:
+        """Store up to the task's remaining thought chunks from *response*.
+
+        Returns the aliases of the chunks stored, so the caller can mark
+        them shown with the reply's turn.
+        """
         if "thought" not in self._effective_kinds or not self._notes_mode:
-            return
+            return []
         stored = sum(
             1
             for entry in self.hippo.working.notes.of_kind("thought")
@@ -2130,7 +2140,8 @@ class Agent:
         )
         remaining = RECALL_THOUGHT_PER_TASK - max(run.thought_chunks, stored)
         if remaining <= 0 or not response.thinking:
-            return
+            return []
+        aliases: list[str] = []
         for chunk in thought_chunks(response.thinking)[:remaining]:
             checked = self._check_candidate(chunk.text, "thought", run)
             if checked is None:
@@ -2145,6 +2156,8 @@ class Agent:
             )
             if entry is not None:
                 run.thought_chunks += 1
+                aliases.append(entry.alias)
+        return aliases
 
     async def _recall_tool(self, query: str, k: int | None = None) -> str:
         """The ``recall`` tool: rank the task's documents for *query*."""
@@ -3558,6 +3571,7 @@ class Agent:
             )
             pinned = self._pin_pending_draft(tool_msgs, draft_entry, run)
             recall_aliases = set(run.pending_shown)
+            thought_aliases = set(step.thought_aliases)
             if note_entry is not None:
                 # The note belongs to the turn now in the window; its full
                 # checked text need not be in the content (the model's block
@@ -3566,6 +3580,10 @@ class Agent:
                 recall_aliases.add(note_entry.alias)
             if pinned and draft_entry is not None:
                 recall_aliases.add(draft_entry.alias)
+            # A thought chunk counts as shown while its step's turn is in the
+            # window: its alias leaves with the same message, and recall
+            # reaches the chunk only once that turn was evicted.
+            recall_aliases.update(thought_aliases)
             block, _hits = await self._step_recall(
                 run,
                 note_entry,
@@ -3579,6 +3597,7 @@ class Agent:
                         if pinned and draft_entry is not None
                         else set()
                     ),
+                    *thought_aliases,
                 },
             )
             if block:
@@ -4267,8 +4286,9 @@ class Agent:
                 has_model_note = (
                     block is not None and self.options.note_writer == "auto"
                 )
+            thought_aliases: list[str] = []
             if self._notes_mode and "thought" in self._effective_kinds:
-                await self._store_thought_chunks(response, run)
+                thought_aliases = await self._store_thought_chunks(response, run)
             if rest.strip():
                 run.last_text = rest
                 run.last_text_thinking = response.thinking
@@ -4317,7 +4337,7 @@ class Agent:
                 if self.options.reasoning not in ("legacy", "compress"):
                     label = dataclasses.replace(label, thinking=response.thinking)
                 nudge = EMPTY_REPLY_NUDGE
-                aliases: set[str] = set()
+                aliases: set[str] = set(thought_aliases)
                 block, _hits = await self._step_recall(
                     run,
                     entry,
@@ -4326,6 +4346,7 @@ class Agent:
                     exclude={
                         *self.hippo.working.shown_aliases(),
                         *({entry.alias} if entry is not None else set()),
+                        *thought_aliases,
                     },
                 )
                 if block:
@@ -4353,6 +4374,7 @@ class Agent:
                 rest=rest,
                 has_model_note=has_model_note,
                 recent_path=run.recent_path,
+                thought_aliases=thought_aliases,
             )
             for call in calls:
                 # Counted when handed over, so a call that timeout_s cuts
@@ -5112,12 +5134,18 @@ class Agent:
                 thinking=thinking,
             )
             self._pin_pending_draft(tool_msgs, draft_entry, run)
-            self.hippo.working.append_turn(assistant_msg, tool_msgs)
+            # The step's thought chunks still count as shown with this turn,
+            # as in _do_memorize.
+            self.hippo.working.append_turn(
+                assistant_msg, tool_msgs, aliases=step.thought_aliases
+            )
             return
         assistant_msg, tool_msgs = self._checked_tool_turn(
             step.response, closed, cut_before
         )
-        self.hippo.working.append_turn(assistant_msg, tool_msgs)
+        self.hippo.working.append_turn(
+            assistant_msg, tool_msgs, aliases=step.thought_aliases
+        )
 
     async def _finalize_in_task(
         self, task: TaskRecord, run: _RunState, stats: RequestStats, started: float

@@ -15,6 +15,7 @@ from .test_recall_loop import (
     FakeLLM,
     _agent,
     _answer,
+    _call,
     _entry,
     _options,
 )
@@ -149,6 +150,60 @@ async def test_the_tool_adds_a_steps_row_only_when_it_is_called(
     assert result.steps == 2
     used_calls = _step_calls(tmp_path / "used" / "history.db")
     assert sum(call["tool_name"] == "recall" for call in used_calls) == 1
+
+
+async def test_the_recall_tool_reaches_a_thought_only_after_its_turn_left() -> None:
+    from localmelo.melo.memory.short import WorkingMemory
+
+    thought = "echo parser build failure"
+    llm = FakeLLM(
+        _call("plan: echo parser build failure", thinking=thought),
+        Message(
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(
+                    tool_name="recall",
+                    arguments={"query": "echo parser build failure"},
+                    id="r1",
+                )
+            ],
+        ),
+        Message(
+            role="assistant",
+            content="",
+            tool_calls=[
+                ToolCall(
+                    tool_name="recall",
+                    arguments={"query": "echo parser build failure"},
+                    id="r2",
+                )
+            ],
+        ),
+        _answer(),
+    )
+    agent = _agent(
+        llm,
+        _options(
+            reasoning="compress",
+            retriever="bm25",
+            recall_at=frozenset({"tool"}),
+            recall_kinds=frozenset({"note", "draft", "thought"}),
+            max_steps=4,
+        ),
+    )
+    # The query and the first turn fit; the second turn evicts the first.
+    agent.hippo.working = WorkingMemory(max_len=3)
+    try:
+        result = await agent.run_task("q")
+    finally:
+        await agent.close()
+    assert result.status == "completed"
+    assert [e.alias for e in agent.notes() if e.kind == "thought"] == ["t1"]
+    # The first recall call still sees turn 1, so it refuses t1; the second
+    # runs after eviction and returns it.
+    assert "[t1]" not in "\n".join(m.content for m in llm.requests[2])
+    assert "[t1]" in "\n".join(m.content for m in llm.requests[3])
 
 
 async def test_the_tools_k_is_clamped_to_ten() -> None:
