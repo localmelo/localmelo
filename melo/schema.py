@@ -6,7 +6,7 @@ import hashlib
 import re
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
@@ -269,12 +269,26 @@ class Message:
         self.tool_calls = [value] if value is not None else []
 
 
+# The permission tier of a tool: what a call can reach, not whether it is
+# allowed. The table and the decision live in melo.checker.tiers; the type
+# lives here so ToolDef, ToolInfo and ApprovalRequest can name it without
+# importing the checker.
+ToolTier = Literal["read", "write", "exec", "network"]
+
+
 @dataclass
 class ToolDef:
     name: str
     description: str
     parameters: dict[str, Any]  # JSON Schema
     semantic_tags: list[str] = field(default_factory=list)
+    # MCP annotations exactly as the server gave them, raw and unused by a
+    # provider: melo.checker.tiers derives the tier. A shallow copy is kept
+    # here, made in __post_init__, and nothing in melo or support mutates it.
+    annotations: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        self.annotations = dict(self.annotations)
 
 
 @dataclass(frozen=True)
@@ -285,7 +299,8 @@ class ToolInfo:
     ``"provided"`` for a tool of a tool provider (an MCP server, say), and
     ``"custom"`` for one registered with the agent's executor and tool
     registry directly. ``requires_approval`` says whether an approval
-    policy is asked before a call of it runs.
+    policy is asked before a call of it runs; ``tier`` is the permission
+    tier the checker derives for it (see ``melo.checker.tiers``).
     """
 
     name: str
@@ -293,6 +308,9 @@ class ToolInfo:
     parameters: dict[str, Any]  # JSON Schema
     source: Literal["builtin", "provided", "custom"]
     requires_approval: bool
+    # The agent always fills this; "write" is the cautious default for a
+    # caller that builds a ToolInfo itself.
+    tier: ToolTier = "write"
 
 
 def new_tool_call_id() -> str:
