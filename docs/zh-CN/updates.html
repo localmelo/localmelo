@@ -65,7 +65,7 @@
         <p>网站同步已在 <a href="https://github.com/localmelo/localmelo/pull/118">#118</a> 落地；任务调度器-2：任务 API 和 workers（S3a.2）已在 <a href="https://github.com/localmelo/localmelo/pull/119">#119</a> 落地。</p>
         <p>进行中，按顺序落地：</p>
         <ul>
-          <li>无头工作进程支持-3：网页上的只读 worker 历史（<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>）；详情抽屉已在 <a href="https://github.com/localmelo/localmelo/pull/124">#124</a> 落地。</li>
+          <li>Worker 契约第一部分：任务说明和事件流；网页 worker 历史已在 <a href="https://github.com/localmelo/localmelo/pull/130">#130</a> 落地。</li>
         </ul>
         <p>接下来，按顺序：</p>
         <ul>
@@ -89,6 +89,12 @@
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
 
+        <article class="update-entry" id="u-worker-brief">
+          <h3>Worker 任务说明与事件流</h3>
+          <p class="update-date">尚未发布</p>
+          <p>直接运行的 worker 可读取任务说明，返回版本化 JSON 结果或事件流；收件箱引导将在后续实现。</p>
+        </article>
+
         <article class="update-entry" id="u-facts2-extraction">
           <h3>否定和中文笔记</h3>
           <p class="update-date">尚未发布</p>
@@ -97,8 +103,20 @@
 
         <article class="update-entry" id="u-worker-view">
           <h3>工作区中的 worker 历史</h3>
-          <p class="update-date">尚未发布</p>
+          <p class="update-date">2026-10-28 · #130</p>
           <p>Workers 可筛选和分页查看保存或导入的运行记录。每次运行以只读快照打开；未完成的运行需手动刷新。脱敏记录分享前仍需检查。</p>
+        </article>
+
+        <article class="update-entry" id="u-fixed-prefix">
+          <h3>可选的固定前缀</h3>
+          <p class="update-date">尚未发布</p>
+          <p>带版本的前缀在每次运行中固定本地日期和稳定指令。工具模式变化报告为预期的缓存失效，并非实际测得的缓存未命中。</p>
+        </article>
+
+        <article class="update-entry" id="u-captured-history">
+          <h3>可选的捕获历史记录</h3>
+          <p class="update-date">尚未发布</p>
+          <p>独立于模型预览保存有上限、经过模式脱敏的工具结果副本。工具获取时遗漏的数量可能未知，脱敏也可能漏掉密钥。</p>
         </article>
 
         <article class="update-entry" id="u-2026-10-28-context-accounting">
@@ -770,7 +788,7 @@
           <ul>
             <li>监听 <code>localhost</code> 或回环 IP 地址（例如默认的 <code>127.0.0.1</code>）时，网关会拒绝 <code>Host</code> 不是 <code>127.0.0.1</code>、<code>localhost</code> 或 <code>[::1]</code> 加端口的请求（HTTP 421），也会拒绝其他来源的网页通过浏览器发来的请求（HTTP 403）。网页不能再通过 DNS 重绑定访问网关、用你的工具执行任务。</li>
             <li>任何网页都不能在 frame 里显示网关的页面。</li>
-            <li>如果监听地址不是 <code>localhost</code> 或回环 IP 地址（例如 <code>0.0.0.0</code>），网关不做这些检查，并在启动时记录一条警告：网关没有身份验证。</li>
+            <li>当时非回环监听不受保护；当前版本拒绝非回环监听。</li>
           </ul>
         </article>
 

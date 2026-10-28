@@ -220,7 +220,9 @@ tool output and recalled memory are data, not instructions.
   a result left less than 200 characters is replaced by a short notice.
   History keeps the result as the tool returned it, up to 50,000 characters.
 
-**Long-term memory** needs an [embedding backend](../guides/embedding.md):
+**Long-term memory** behaves differently by reasoning mode. With memory on,
+`legacy` needs an [embedding backend](../guides/embedding.md) and follows
+these rules:
 
 - After each tool call, a summary of the step is written to it: the model's
   text, the tool's name and the start of the tool's output.
@@ -232,6 +234,11 @@ tool output and recalled memory are data, not instructions.
   the query's is skipped, so changing the embedding model stops old entries
   ranking instead of raising an error; see
   [Set up an embedding model](../guides/embedding.md#what-changes).
+
+In explicit reasoning modes, memory can use a text-only store without an
+embedding backend. Candidates are admitted by signals instead of writing raw
+step summaries or promoting the final reflection as in `legacy`; see
+[Reasoning notes](#reasoning-notes) and [Recall in the loop](#recall-in-the-loop).
 
 **History** is a record. localmelo writes every task and step to it, and,
 with persistence on, every model call, but never reads it back.
@@ -256,8 +263,10 @@ with persistence on, every model call, but never reads it back.
 reflection replaces the last one. See
 [How localmelo works](how-it-works.md#reflection).
 
-**Memory notes and retrievers** are not used during a run yet.
-`melo-retrieve` compares the `bm25`, `llm` and `embedding` retrievers
+**Memory notes and retrievers** can also participate in a run: the compress
+modes keep notes and use recall by default, while `drop` and `replay` recall
+only when a retriever is named. See [Recall in the loop](#recall-in-the-loop).
+Separately, `melo-retrieve` compares the `bm25`, `llm` and `embedding` retrievers
 offline, over documents built from a run's model calls: notes on the
 model's reasoning, code drafts, reflections and chunks of its thinking. See
 [Offline retrieval](../reference/retrieval.md).

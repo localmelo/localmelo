@@ -99,7 +99,9 @@ def _build_server(
         # ~/.cache/localmelo/scheduler.
         gate=ChatGate(policy="off", call_log_dir=None),
     )
-    with patch("localmelo.support.gateway.webapp.mount", lambda app, cfg=None: None):
+    with patch(
+        "localmelo.support.gateway.webapp.mount", lambda app, cfg=None, **kwargs: None
+    ):
         server = GatewayServer(cfg, console_options=options)
 
     # Replace the real SessionManager with our fake
@@ -115,6 +117,7 @@ def _client(server: GatewayServer) -> TestClient:
     return TestClient(
         server.app,
         base_url=f"http://127.0.0.1:{server.port}",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
         raise_server_exceptions=False,
     )
 
@@ -339,6 +342,7 @@ async def test_delete_busy_session_returns_409_and_keeps_it() -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=server.app),
         base_url=f"http://127.0.0.1:{server.port}",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
     ) as client:
         run = asyncio.create_task(
             client.post(
@@ -350,6 +354,7 @@ async def test_delete_busy_session_returns_409_and_keeps_it() -> None:
         assert resp.status_code == 409
         body = resp.json()
         assert "busy-delete" in body["error"]
+        assert body["code"] == "session_busy"
         assert body["session_id"] == "busy-delete"
         # The session and its run are untouched.
         assert sessions.get("busy-delete") is session
@@ -494,6 +499,7 @@ async def test_cancelled_request_returns_session_to_idle() -> None:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=server.app),
         base_url=f"http://127.0.0.1:{server.port}",
+        headers={"Authorization": "Bearer " + server.auth.read_token().decode("ascii")},
     ) as client:
         request = asyncio.create_task(
             client.post(

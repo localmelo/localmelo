@@ -122,7 +122,7 @@ source .venv/bin/activate</code></pre>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/cli.md#worker-histories">
             <strong>Worker history</strong>
-            <span>Optionally save direct runs or import dsh logs, then filter and inspect their read-only history in the web workspace or through the local gateway API.</span>
+            <span>Run a worker from a brief file with a JSON result or event stream; save or import runs and inspect read-only history in the workspace or gateway API.</span>
           </a>
           <a class="link-card" href="https://github.com/localmelo/localmelo/blob/main/docs/reference/api-v2.md">
             <strong>API v2</strong>
@@ -155,10 +155,10 @@ source .venv/bin/activate</code></pre>
         <h2>Roadmap</h2>
         <p>The v0.1.0 milestone is due 2026-12-20.</p>
         <p>On 2026-10-28 the queue landed Tool safety-1: no shell in direct runs (P13b, <a href="https://github.com/localmelo/localmelo/pull/110">#110</a>), Web console-1: live chat page (U3 PR 5a, <a href="https://github.com/localmelo/localmelo/pull/111">#111</a>), Terminal UI-1: show the model's reasoning (R2b, <a href="https://github.com/localmelo/localmelo/pull/115">#115</a>), Memory facts-1: reliable fact notes (T68, <a href="https://github.com/localmelo/localmelo/pull/114">#114</a>), Task scheduler-1: task store and priorities (S3a.1, <a href="https://github.com/localmelo/localmelo/pull/113">#113</a>), Memory facts-1b: digests say what the attempt did (<a href="https://github.com/localmelo/localmelo/pull/116">#116</a>), website sync (<a href="https://github.com/localmelo/localmelo/pull/118">#118</a>) and Task scheduler-2: task API and workers (S3a.2, <a href="https://github.com/localmelo/localmelo/pull/119">#119</a>).</p>
-        <p>Opt-in context accounting also fits request copies to the estimated budget; output-cap enforcement remains future work.</p>
+        <p>Opt-in context accounting fits request copies to the estimated budget; output-cap enforcement remains future work. An optional fixed prefix freezes the local date and stable instructions for each run. Captured tool history is also optional and bounded.</p>
         <p>In flight, landing in this order:</p>
         <ul>
-          <li>Headless worker support-3: read-only worker history on the web (<a href="https://github.com/localmelo/localmelo/issues/109">#109</a>); the details drawer landed in <a href="https://github.com/localmelo/localmelo/pull/124">#124</a>.</li>
+          <li>Worker contract PR 1: brief files and event streams; worker history landed in <a href="https://github.com/localmelo/localmelo/pull/130">#130</a>.</li>
         </ul>
         <p>Next, in order:</p>
         <ul>
@@ -174,10 +174,7 @@ source .venv/bin/activate</code></pre>
             <strong>Tools run with your account's permissions, and there is no
             sandbox.</strong> The model can run shell commands and Python code,
             and read or write any file you can. New memory files are created
-            readable only by you (mode 0600). The gateway has no
-            authentication, so keep it on <code>127.0.0.1</code> (the default):
-            there it refuses requests to its API that web pages at other
-            sites send through your browser.
+            readable only by you (mode 0600). The gateway requires a bearer token or browser session and refuses non-loopback binds. Run <code>melo --gateway-login</code> in a terminal for a one-use link. A token holder can act as you; same-user processes are not isolated, and browser cookies are not isolated by localhost port.
           </p>
         </div>
         <p>
