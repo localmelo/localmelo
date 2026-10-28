@@ -15,6 +15,8 @@ from urllib.parse import unquote, urlsplit
 import pytest
 from markdown_it import MarkdownIt
 
+from localmelo.scripts import build_docs
+
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "docs/manifest.json"
 MD = MarkdownIt("commonmark", {"html": True}).enable("table")
@@ -473,3 +475,46 @@ def test_local_links_and_anchors() -> None:
     assert broken == LINK_DEBT, "Link debt changed:\n" + "\n".join(
         f"{k!r}: {v!r}," for k, v in sorted(broken.items())
     )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "docs/start/quickstart.md",
+        "docs/guides/configure.md",
+        "docs/guides/model-servers.md",
+        "docs/guides/embedding.md",
+        "docs/guides/api-client.md",
+        "docs/guides/python.md",
+        "docs/guides/tools-mcp.md",
+    ],
+)
+def test_chinese_twin_keeps_anchors_and_examples(source: str) -> None:
+    pages = json.loads(MANIFEST.read_text())["pages"]
+    page = next(p for p in pages if p["en_source"] == source)
+    expected = source.replace("docs/", "docs/zh-CN/", 1)
+    assert page["zh_source"] == expected
+    en = (ROOT / source).read_text()
+    zh = (ROOT / expected).read_text()
+    en_ids, _ = inventory(en, ".md")
+    zh_ids, _ = inventory(zh, ".md")
+    assert set(en_ids) <= set(zh_ids)
+    assert len(zh_ids) == len(set(zh_ids)), expected
+    rendered_ids, _ = inventory(build_docs.render_markdown(zh), ".html")
+    assert set(en_ids) <= set(rendered_ids), expected
+    assert len(rendered_ids) == len(set(rendered_ids)), expected
+
+    def fences(text: str) -> list[tuple[str, str]]:
+        return [(t.info, t.content) for t in MD.parse(text) if t.type == "fence"]
+
+    assert fences(en) == fences(zh), expected
+
+    def inline_code(text: str) -> Counter[str]:
+        return Counter(
+            " ".join(child.content.split())
+            for token in MD.parse(text)
+            for child in (token.children or [])
+            if child.type == "code_inline"
+        )
+
+    assert inline_code(en) == inline_code(zh), expected

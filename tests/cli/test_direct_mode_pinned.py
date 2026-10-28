@@ -22,9 +22,13 @@ is pinned for the first time: it returns every built-in explicitly for
 the notice, so ``_run`` has a new hash again. Worker history adds opt-in
 ``--save-session`` and import dispatch to ``_run_direct`` and ``_run``.
 Context accounting resolves its opt-in budget before Agent construction, so
-``_build_direct_mode_agent`` has a new hash. Captured history adds an opt-in
-flag and config fallback to ``_direct_options`` and ``_build_direct_mode_agent``;
-the default wire remains covered by the legacy golden. ``_check_args`` is not pinned.
+``_build_direct_mode_agent`` has a new hash. The opt-in worker brief routes
+through ``_run_direct`` and ``_run``; review fixes handle broken worker pipes
+in ``_run_direct``. The ordinary direct path remains unchanged. Fixed prefix
+adds an opt-in flag and config fallback to ``_direct_options`` and
+``_build_direct_mode_agent``; the default output and provider wire remain
+covered by the legacy golden. Captured history also adds an opt-in flag and
+config fallback to those two functions. ``_check_args`` is not pinned.
 """
 
 from __future__ import annotations
@@ -38,20 +42,20 @@ import pytest
 MAIN = Path(__file__).resolve().parents[2] / "__main__.py"
 
 PINNED = {
-    "_run_direct": "2d5eef84c5db1ed4b9e9708bfe911ab6ac1e2a17b63024d34073456cce110d7c",
-    "_run": "8c672aa79afb44802dc599e32f0d2f1b078d510c69048d031fd9bd7f763d745a",
+    "_run_direct": "fd5741d695df24913667c1cbb76c3764b562cf19b34e9c13ec2090bdd3a7eec2",
+    "_run": "634122524cec011fa1fbfbe42306c07aee69e63ded84d8bcecb71916b8a5f455",
     "_run_one": "0c323f5d879739c205efe3ac0c71d651be2496721b68437ac30c93c6b6f70f31",
     "_report": "5ce2d43919e8bea8c5cfdb9689acd104e4bf65d2a8c377d9913f25b2cd909ecf",
     "_status_line": "51cf6b34fa09e121214b0a06e29e74d3d7d38d68b8e19ba5c68b0809abc1821b",
     "_exit_code": "bacf133c2381454b95644b216daebd09f279e75ff0496a319ef3c98c554432a5",
     "_one_line": "4dc03ea8c7f5f5896d9fd58887f5290dfbe1faf4e6286d272ef354567e8f7ef7",
     "_localmelo_version": "7c4a81e650ed6d8cc5ad1f6227b4ce75fe56028ebc7fa27ce5377fda6445db5d",
-    "_build_direct_mode_agent": "eaf5c45b3526573628add001e1ed5dd7110608055c988daa66873a37d762f5dd",
+    "_build_direct_mode_agent": "9700100dff92ba73643c499483ed608d4a20cca87ffbcb20e3f02f01920b1554",
     "_direct_embedding": "67275e465432460acbb15d5b30649502641de4b37f1758723f066428662c6a7d",
     "_ExitSignals": "7859cea6c228917546ac80014d4745b789ca9c6d732f38aa949de9156f3ff34d",
     "_exit_by_signal": "d889130f2eb811f91d0a9134073847d7226adaa0b7b319499058f3c7d71f7f3b",
     "_direct_tool_providers": "be7d50021417d3f0c8ed549aa93ffbf400cd7aea2a3aa33c62987f5a008a3b8a",
-    "_direct_options": "bfc1b40bda69886d0262b6f417dafe043d164fecc3f9e9113afd7877d98743a6",
+    "_direct_options": "3a228a27542384b8bc78f57fb33b3c7b0dc109e66850c40247218c9373ace26c",
     "_parse_builtins": "fe4a7f24ab1f970fc094ebb737d29a9bec9de742165ae68743a312496dd98877",
     "_progress_line": "0c09c6422345a998c72b4c76c76ed8f69913ef7e7537427a7b687a4d98256d59",
     "_routine_name": "2e8cc3333e1b71fc20a3b3247fbe1c8af5b2101fa0448200ce50f46421bb6ea9",

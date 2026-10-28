@@ -95,10 +95,18 @@ class SessionLock(asyncio.Lock):
 
     owner: asyncio.Task[object] | None = None
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.pending = 0
+
     async def acquire(self) -> Literal[True]:
-        await super().acquire()
-        self.owner = asyncio.current_task()
-        return True
+        self.pending += 1
+        try:
+            await super().acquire()
+            self.owner = asyncio.current_task()
+            return True
+        finally:
+            self.pending -= 1
 
     def release(self) -> None:
         self.owner = None
@@ -497,14 +505,24 @@ class ConsoleSessions:
                 if entry.agent is not None
                 and not entry.runner.busy
                 and not entry.lock.locked()
+                and not entry.lock.pending
+                and not self._broker.pending(entry.session_id)
                 and entry.session_id != session_id
             ]
             if not candidates:
                 return
             oldest = min(candidates, key=lambda entry: entry.last_used)
             async with oldest.lock:
-                if oldest.agent is not None and not oldest.runner.busy:
+                if (
+                    self._sessions.get(oldest.session_id) is oldest
+                    and oldest.agent is not None
+                    and not oldest.runner.busy
+                    and not oldest.lock.pending
+                    and not self._broker.pending(oldest.session_id)
+                ):
                     await self._keep_locked(oldest)
+                else:
+                    return
 
     # ── Turns ──
 
@@ -960,8 +978,11 @@ class ConsoleSessions:
                 continue
             async with entry.lock:
                 if (
-                    entry.agent is not None
+                    self._sessions.get(entry.session_id) is entry
+                    and entry.agent is not None
                     and not entry.runner.busy
+                    and not entry.lock.pending
+                    and self._clock() - entry.last_used >= self._idle_close_s
                     and not self._broker.pending(entry.session_id)
                 ):
                     await self._keep_locked(entry)
@@ -978,8 +999,10 @@ class ConsoleSessions:
                 continue
             async with entry.lock:
                 if (
-                    entry.agent is not None
+                    self._sessions.get(entry.session_id) is entry
+                    and entry.agent is not None
                     and not entry.runner.busy
+                    and not entry.lock.pending
                     and not self._broker.pending(entry.session_id)
                 ):
                     await self._keep_locked(entry)
@@ -988,7 +1011,14 @@ class ConsoleSessions:
 
     async def delete(self, session_id: str) -> None:
         """Close the session's runner and delete its row; 404 when unknown."""
-        async with self.lock(session_id):
+        lock = self.lock(session_id)
+        # Do not wait behind an opening or queued start: it has already claimed
+        # the session, even if the runner has not registered a turn yet.
+        if lock.locked() or lock.pending:
+            raise ApiError(
+                409, "session_busy", "A turn is already running in this session."
+            )
+        async with lock:
             info = await self._store.get_session(session_id)
             if info is not None and info.kind == "task":
                 raise ApiError(
@@ -997,6 +1027,20 @@ class ConsoleSessions:
                     "A task session cannot be deleted as a chat.",
                 )
             entry = self._sessions.get(session_id)
+            if entry is not None and (
+                entry.runner.busy or self._broker.pending(session_id)
+            ):
+                raise ApiError(
+                    409, "session_busy", "A turn is already running in this session."
+                )
+            try:
+                deleted = await self._store.delete_session(session_id)
+            except SessionBusyError as exc:
+                raise ApiError(
+                    409, "session_busy", "A turn is already running in this session."
+                ) from exc
+            if not deleted:
+                raise ApiError(404, "not_found", "Session not found.")
             if entry is not None:
                 await entry.runner.close(cause="closed")
                 if entry.agent is not None:
@@ -1004,17 +1048,6 @@ class ConsoleSessions:
                     with contextlib.suppress(Exception):
                         await agent.close()
                 self._sessions.pop(session_id, None)
-            try:
-                deleted = await self._store.delete_session(session_id)
-            except SessionBusyError as exc:
-                self._sessions.pop(session_id, None)
-                # The standard message (2.2): the store's text names the
-                # id and carries its own wording.
-                raise ApiError(
-                    409, "session_busy", "A turn is already running in this session."
-                ) from exc
-            if not deleted:
-                raise ApiError(404, "not_found", "Session not found.")
         # The lock stays: a turn that queued on it before the delete holds
         # this object, and ``open`` checks that the lock it is under is the
         # session's. The dict keeps one small lock per session this process

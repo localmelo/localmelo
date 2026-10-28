@@ -475,6 +475,7 @@ class RunResult:
     config: dict[str, Any] = field(default_factory=dict)
     memory_stats: dict[str, Any] | None = None
     context_budget: list[dict[str, Any]] | None = None
+    prefix_cache: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """A deep copy as a plain dict, with keys in field order.
@@ -487,6 +488,8 @@ class RunResult:
             del data["memory_stats"]
         if data.get("context_budget") is None:
             del data["context_budget"]
+        if data.get("prefix_cache") is None:
+            del data["prefix_cache"]
         return data
 
 

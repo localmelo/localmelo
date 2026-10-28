@@ -78,8 +78,10 @@ def _cfg(*, host: str = "127.0.0.1", policy: str = "off", n_srv: int = 8) -> Con
 
 
 def test_the_console_uses_the_workspace_pages_gate(tmp_path: Path) -> None:
+    cfg = _cfg()
+    cfg._enable_playground = True
     server = GatewayServer(
-        _cfg(),
+        cfg,
         console_options=ConsoleOptions(
             store_path=str(tmp_path / "sessions.db"), probe=QuietProbe()
         ),
@@ -256,8 +258,10 @@ async def test_a_turn_waiting_for_a_slot_ends_cancelled_at_shutdown(
             Path(workspace), GatedLLM(inner, holder["gate"].client(session_id))
         )
 
+    cfg = _cfg(policy="fcfs", n_srv=1)
+    cfg._enable_playground = True
     server = GatewayServer(
-        _cfg(policy="fcfs", n_srv=1),
+        cfg,
         console_options=ConsoleOptions(
             store_path=str(tmp_path / "sessions.db"),
             builder=build,

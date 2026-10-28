@@ -210,9 +210,12 @@ class AgentOptions:
     keep_decision_text: bool = False
     # The surface the run belongs to; it decides the default built-ins.
     mode: ToolMode = "python"
+    fixed_prefix: bool = False
     captured_history: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.fixed_prefix, bool):
+            raise ValueError("fixed_prefix must be a bool")
         budget = (self.context_window, self.output_reserve, self.safety_margin)
         if any(value is not None for value in budget):
             if not all(_is_positive_int(value) for value in budget):

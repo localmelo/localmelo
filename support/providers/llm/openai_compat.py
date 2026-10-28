@@ -344,6 +344,7 @@ class OpenAICompatLLM(BaseLLMProvider):
             timeout=timeout,
             headers=headers,
             transport=transport,
+            follow_redirects=False,
         )
 
     async def chat(

@@ -210,6 +210,19 @@ retry policy. Events and JSON results report the estimate, actual prompt count i
 pruning counts without storing prompt text. The output reserve is not a provider generation cap;
 the independent character guard still applies.
 
+`[agent] fixed_prefix = true` opts direct, interactive and API v2 console runs into
+`fixed-prefix-v1`; `--fixed-prefix on|off` overrides it for a direct or interactive
+run. It snapshots the local date and UTC offset at each run's start, including across
+midnight, and places changing recall and reflections in labelled user-side data.
+An explicit end delimiter leaves the task and reflection request outside that data;
+data lines starting with that delimiter are deterministically quoted.
+`all` freezes sorted tool definitions for that run; `retrieve` keeps selecting tools
+as before. The JSON result's `prefix_cache.schema_changes` counts changes to the
+offered planning schemas within the run, not actual cache misses; an optional
+`reported_cached_tokens` is the server-reported total for planning and reflection responses only. Providers
+may not report caching, and byte-stable prefixes do not guarantee a cache hit.
+The legacy `/v1` API and the default-off request bytes remain unchanged.
+
 Opt in to separate captured tool history with `[agent] captured_history = true` or
 `--captured-history on`; `off` overrides the setting. The checked preview uses a 50,000-character
 ceiling including truncation and image notices. History stores a distinct, pattern-redacted copy of
@@ -340,7 +353,7 @@ See [Keep memory between runs](../guides/memory.md#keep-memory-between-runs).
 | `~/.cache/localmelo/config.toml` | The configuration. | By the setup wizard. |
 | `~/.cache/localmelo/memory/` | `history.db`, `procedures.db` (procedural memory, written at the end of every run), and `long_term.db` with an embedding backend. | When an agent starts with `LOCALMELO_PERSIST_MEMORY` set, with mode 0700. An existing one that is open to group or others is set to 0700. |
 | The `--memory-dir` directory | The same files, for that run. | When the run starts, with mode 0700 when it is new. |
-| `~/.cache/localmelo/playground/` | The web workspace's memory. | When the gateway starts. |
+| `~/.cache/localmelo/playground/` | Legacy playground memory. | When the opt-in playground starts (security-1b in progress). |
 | `~/.localmelo/logs/` | The background service's logs. | By `melo --daemon install`. |
 | `~/Library/LaunchAgents/ai.localmelo.gateway.plist` | The background service's definition. | By `melo --daemon install`. |
 

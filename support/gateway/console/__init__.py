@@ -9,9 +9,8 @@ retries the open every :data:`STORE_RETRY_S` seconds. Health is served
 either way. The console page itself arrives in PR 5; this PR mounts only
 ``/api``.
 
-The gateway mounts the console only when it listens on a loopback address
-(see :class:`~localmelo.support.gateway.guard.LoopbackGuard`); API v2 has
-no login.
+The gateway serves the console on loopback behind its authentication and
+origin guard (see :class:`~localmelo.support.gateway.guard.LoopbackGuard`).
 """
 
 from __future__ import annotations
@@ -28,7 +27,7 @@ from fastapi.responses import JSONResponse
 from starlette.routing import Match
 
 from localmelo.support.gateway.chat_gate import ChatGate, call_log_dir
-from localmelo.support.gateway.machine_monitor import MachineMonitor
+from localmelo.support.gateway.machine_monitor import MachineMonitor, read_pmset
 from localmelo.support.gateway.workers import TaskWorkers
 from localmelo.support.sessions import display
 from localmelo.support.sessions.approvals import ApprovalBroker
@@ -173,20 +172,15 @@ class Console:
         )
 
     def _build_monitor(self) -> MachineMonitor | None:
-        """The GPU-lock watcher a ``lock_gate = "wait"`` needs.
-
-        Only ``wait`` holds a call, so only ``wait`` needs to know the
-        machine; the battery is not read here: no console route shows it.
-        """
+        """Watch machine state without depending on the optional playground."""
         scheduler = self.cfg.scheduler
-        if scheduler.lock_gate != "wait" or not scheduler.gpu_lock_file:
-            return None
         return MachineMonitor(
-            lock_path=scheduler.gpu_lock_file,
+            lock_path=scheduler.gpu_lock_file or None,
             lock_self=scheduler.lock_self,
             lock_gate=scheduler.lock_gate,
             write=self.gate.write_machine,
             on_change=self._on_machine,
+            battery_runner=read_pmset,
         )
 
     def _on_machine(self, snapshot: Any) -> None:
