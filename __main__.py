@@ -889,6 +889,11 @@ def _check_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> No
             "--reconfigure sets up the config file, which --base-url does not use; "
             "give one of them"
         )
+    if getattr(args, "allow_unconfigured", False):
+        if not args.serve:
+            parser.error("--allow-unconfigured is only for --serve")
+        if args.reconfigure:
+            parser.error("--allow-unconfigured cannot be used with --reconfigure")
     # Bare melo, which opens the interactive UI; `melo ""` is direct mode.
     interactive = not args.query and not args.serve and not args.daemon
     ui_given = [
@@ -1302,6 +1307,11 @@ def _build_parser(*, direct_only: bool = False) -> argparse.ArgumentParser:
     parser.add_argument("--serve", action="store_true", help="Run as gateway server")
     parser.add_argument("--host", default=None, help="Gateway listen host")
     parser.add_argument("--port", type=int, default=None, help="Gateway listen port")
+    parser.add_argument(
+        "--allow-unconfigured",
+        action="store_true",
+        help="Start the gateway even when no backend is configured or the config has errors",
+    )
 
     # setup
     parser.add_argument(
@@ -1411,8 +1421,9 @@ def main() -> None:
     from localmelo.support.onboard import run_backend_setup
 
     cfg = config.load()
+    allow_unconfigured = bool(getattr(args, "allow_unconfigured", False))
 
-    if args.reconfigure or not cfg.is_configured:
+    if args.reconfigure or (not cfg.is_configured and not allow_unconfigured):
         if not args.reconfigure and not _on_a_terminal():
             _exit_without_setup()
         with _setup_questions():
@@ -1430,11 +1441,21 @@ def main() -> None:
     # validate before anything else — fail fast with actionable errors
     from localmelo.support.config import ConfigError
 
-    try:
-        cfg.validate_or_raise()
-    except ConfigError as e:
-        print(f"\n  {e}\n", file=sys.stderr)
-        raise SystemExit(1) from e
+    if allow_unconfigured:
+        if cfg.gateway.port <= 0 or cfg.gateway.port > 65535:
+            print(
+                "\n  Configuration errors:\n"
+                f"  - [gateway] port={cfg.gateway.port} is out of range (1-65535)\n",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        cfg._allow_unconfigured = True
+    else:
+        try:
+            cfg.validate_or_raise()
+        except ConfigError as e:
+            print(f"\n  {e}\n", file=sys.stderr)
+            raise SystemExit(1) from e
 
     # start gateway
     _start_gateway(cfg)
@@ -1765,7 +1786,10 @@ def _start_gateway(cfg: Config) -> None:
     print(f"  Web UI:  http://{host}:{cfg.gateway.port}/")
     print()
 
-    start_gateway(cfg)
+    if getattr(cfg, "_allow_unconfigured", False):
+        start_gateway(cfg, allow_unconfigured=True)
+    else:
+        start_gateway(cfg)
 
 
 if __name__ == "__main__":

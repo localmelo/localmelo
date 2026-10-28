@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import os
 import re
+import stat
+import tempfile
 import tomllib
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -92,6 +95,7 @@ class CloudVendorConfig:
 class GatewayConfig:
     port: int = 8401
     host: str = "127.0.0.1"
+    workspace: str = ""
 
 
 @dataclass
@@ -187,6 +191,7 @@ class Config:
     retrieval: RetrievalConfig = field(default_factory=RetrievalConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
+    _allow_unconfigured: bool = field(default=False, repr=False, compare=False)
 
     @property
     def is_configured(self) -> bool:
@@ -211,6 +216,7 @@ class Config:
         errors.extend(self._validate_retrieval())
         errors.extend(self._validate_memory())
         errors.extend(self._validate_scheduler())
+        errors.extend(self._validate_gateway_workspace())
 
         # -- chat_backend validation --
         if not self.chat_backend:
@@ -257,6 +263,11 @@ class Config:
             )
 
         return errors
+
+    def _validate_gateway_workspace(self) -> list[str]:
+        """``[gateway] workspace`` is empty or an absolute/``~/`` single-line path."""
+        problem = gateway_workspace_problem(self.gateway.workspace)
+        return [] if problem is None else [f"[gateway] workspace: {problem}"]
 
     def _validate_memory(self) -> list[str]:
         """``[memory]`` holds a bool."""
@@ -434,6 +445,30 @@ class Config:
         if errors:
             msg = "Configuration errors:\n" + "\n".join(f"  - {e}" for e in errors)
             raise ConfigError(msg)
+
+
+def has_control_or_surrogate(text: str) -> bool:
+    """Whether *text* holds a control character, newline or lone surrogate."""
+    return any(
+        ord(ch) < 0x20
+        or 0x7F <= ord(ch) <= 0x9F
+        or ch in ("\\u2028", "\\u2029")
+        or 0xD800 <= ord(ch) <= 0xDFFF
+        for ch in text
+    )
+
+
+def gateway_workspace_problem(value: object, *, allow_empty: bool = True) -> str | None:
+    """Why *value* is not a valid ``[gateway] workspace``, or ``None``."""
+    if not isinstance(value, str):
+        return f"must be a string, got {value!r}"
+    if not value:
+        return None if allow_empty else "Must be an absolute path or start with ~/."
+    if has_control_or_surrogate(value):
+        return "Must be a single line with no control characters."
+    if not (os.path.isabs(value) or value.startswith("~/")):
+        return "Must be an absolute path or start with ~/."
+    return None
 
 
 def _is_positive_seconds(value: object) -> bool:
@@ -757,6 +792,8 @@ def save(cfg: Config) -> None:
     lines.append("[gateway]")
     lines.append(f"port = {cfg.gateway.port}")
     lines.append(f"host = {_toml_string(cfg.gateway.host)}")
+    if cfg.gateway.workspace:
+        lines.append(f"workspace = {_toml_string(cfg.gateway.workspace)}")
     lines.append("")
 
     if (
@@ -818,12 +855,32 @@ def save(cfg: Config) -> None:
 
     # TOML files are UTF-8. Encode before opening the file, so text that
     # cannot be encoded (a str holding a lone surrogate) fails the save
-    # without truncating the existing config.
+    # without truncating the existing config. Write a temporary file in
+    # CONFIG_DIR and move it into place with os.replace so a concurrent
+    # load() never reads half a file and a failed write leaves the old file.
     text = "\n".join(lines)
     try:
         data = text.encode("utf-8")
     except UnicodeEncodeError as exc:
         bad = exc.object[exc.start : exc.end]
         raise ConfigError(f"Cannot write {bad!r} to TOML: {exc.reason}") from exc
-    with open(config_path(), "wb") as f:
-        f.write(data)
+    target_path = os.path.realpath(config_path())
+    target_dir = os.path.dirname(target_path) or "."
+    os.makedirs(target_dir, exist_ok=True)
+    old_mode: int | None = None
+    with contextlib.suppress(OSError):
+        old_mode = stat.S_IMODE(os.stat(target_path).st_mode)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".config.toml.", suffix=".tmp", dir=target_dir
+    )
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        if old_mode is not None:
+            with contextlib.suppress(OSError):
+                os.chmod(tmp_path, old_mode)
+        os.replace(tmp_path, target_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp_path)
+        raise

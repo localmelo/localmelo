@@ -290,8 +290,14 @@ class GatewayServer:
         self.uvicorn_server().run()
 
 
-def start_gateway(cfg: config.Config) -> None:
-    cfg.validate_or_raise()
+def start_gateway(cfg: config.Config, *, allow_unconfigured: bool = False) -> None:
+    if not allow_unconfigured:
+        cfg.validate_or_raise()
+    elif cfg.gateway.port <= 0 or cfg.gateway.port > 65535:
+        raise config.ConfigError(
+            "Configuration errors:\n"
+            f"  - [gateway] port={cfg.gateway.port} is out of range (1-65535)"
+        )
     server = GatewayServer(cfg)
     server.run()
 

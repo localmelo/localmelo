@@ -12,7 +12,7 @@
     },
     "d232b9e05ce74a2dd0c24807aedf6d16e769881a": {
       "prefix-rec": {"result": "error", "error": "ambiguous option: --rec could match --recall-at, --recall-k, --recall-kinds, --recall-placement, --recall-min-score, --reconfigure"},
-      "prefix-a": {"result": "error", "error": "ambiguous option: --a could match --attempt-policy, --admit-on-outcome"}
+      "prefix-a": {"result": "error", "error": "ambiguous option: --a could match --attempt-policy, --admit-on-outcome, --allow-unconfigured"}
     }
   },
   "provenance": "git show snapshots; AST-extracted parser, checks, types and builtin validation. All unambiguous historical long-option prefixes plus B6 cases. Benchmark argv from recorded harness runs; URLs and workspace paths scrubbed. Capability argv uses a public stub task because the raw prompt was unavailable. Error spelling variants were captured from the same historical snapshots on Python 3.12.14 and 3.14.7.",
