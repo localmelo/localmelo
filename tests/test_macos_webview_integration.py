@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import signal
 import socket
 import subprocess
 import sys
@@ -217,7 +218,6 @@ def launch(app: Path, home: Path, port: int, mode: str) -> subprocess.Popen[byte
 
 def stop(process: subprocess.Popen[bytes], home: Path) -> None:
     # Foundation Process starts the gateway in a separate process group.
-    import signal
 
     with contextlib.suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGKILL)
@@ -255,7 +255,8 @@ def test_child_exit_removes_loaded_webview(app: Path, tmp_path: Path) -> None:
     process = launch(app, tmp_path, port, "correct")
     try:
         wait_for(tmp_path / "events", "loaded", process)
-        (tmp_path / "exit-child").touch()
+        child_pid = int((tmp_path / "gateway-pid").read_text())
+        os.kill(child_pid, signal.SIGKILL)
         events = wait_for(tmp_path / "events", "alert ", process)
         assert "removed" in events
         assert "The gateway exited" in events
