@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 
 from localmelo.melo.agent import Agent, AgentOptions
@@ -9,6 +11,7 @@ from localmelo.melo.agent._request_accounting import (
     ContextBudget,
     request_proxy,
 )
+from localmelo.melo.contracts.events import AgentEvent
 from localmelo.melo.contracts.providers import BaseLLMProvider, ProviderError
 from localmelo.melo.schema import ImagePart, Message, ToolCall, ToolDef
 
@@ -17,28 +20,30 @@ class FakeLLM(BaseLLMProvider):
     model = "model-a"
     reasoning_field = "reasoning"
 
-    def __init__(self, replies):
+    def __init__(self, replies: list[Any]) -> None:
         self.replies = iter(replies)
-        self.sent = []
+        self.sent: list[Any] = []
 
-    async def chat(self, messages, tools=None):
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
         self.sent.append((messages, tools))
         reply = next(self.replies)
         if isinstance(reply, Exception):
             raise reply
         return Message(role="assistant", content="ok", usage=reply)
 
-    async def close(self):
+    async def close(self) -> None:
         pass
 
 
 @pytest.mark.parametrize("values", [(0, 1, 1), (10, 0, 1), (10, 1, True), (2, 1, 1)])
-def test_budget_validation(values):
+def test_budget_validation(values: tuple[int, int, int]) -> None:
     with pytest.raises(ValueError):
         ContextBudget(*values)
 
 
-def test_proxy_counts_utf8_schema_replay_and_images():
+def test_proxy_counts_utf8_schema_replay_and_images() -> None:
     base = [Message(role="assistant", content="a")]
     plain, _ = request_proxy(base, [], replay=True)
     rich = [
@@ -62,7 +67,7 @@ def test_proxy_counts_utf8_schema_replay_and_images():
     assert request_proxy(rich, tools, replay=True)[1] == 0
 
 
-async def test_opt_in_calibration_kind_model_and_reset():
+async def test_opt_in_calibration_kind_model_and_reset() -> None:
     llm = FakeLLM(
         [
             {"prompt_tokens": 9000},
@@ -75,7 +80,7 @@ async def test_opt_in_calibration_kind_model_and_reset():
     )
     chat = Chat(llm, context_budget=ContextBudget(100, 10, 10))
 
-    async def plan():
+    async def plan() -> None:
         await chat.plan_step(
             [], [Message(role="user", content="question")], [], "question"
         )
@@ -102,11 +107,12 @@ async def test_opt_in_calibration_kind_model_and_reset():
     assert len(llm.sent) == 5  # over-limit requests are still sent
     chat.reset_stats()
     await plan()
+    assert chat.stats.context_budget is not None
     assert chat.stats.context_budget[0]["source"] == "proxy"
 
 
-async def test_failed_attempts_and_other_kinds():
-    async def no_sleep(_):
+async def test_failed_attempts_and_other_kinds() -> None:
+    async def no_sleep(_: float) -> None:
         pass
 
     llm = FakeLLM(
@@ -122,11 +128,12 @@ async def test_failed_attempts_and_other_kinds():
         sleep=no_sleep,
         context_budget=ContextBudget(1000, 100, 100),
     )
-    emitted = []
+    emitted: list[dict[str, Any]] = []
     chat.on_context_budget = emitted.append
     await chat.plan_step([], [Message(role="user", content="q")], [], "q")
     await chat.estimate_steps("q")
     records = chat.stats.context_budget
+    assert records is not None
     assert emitted == records
     assert emitted[0]["measured_prompt_tokens"] is None
     assert emitted[1]["measured_prompt_tokens"] == 200
@@ -135,13 +142,13 @@ async def test_failed_attempts_and_other_kinds():
     assert records[1]["measured_prompt_tokens"] == 200
 
 
-async def test_default_disabled():
+async def test_default_disabled() -> None:
     chat = Chat(FakeLLM([None]))
     await chat.plan_step([], [Message(role="user", content="q")], [], "q")
     assert chat.stats.context_budget is None
 
 
-async def test_agent_reports_budget_in_result_and_event():
+async def test_agent_reports_budget_in_result_and_event() -> None:
     agent = Agent(
         llm=FakeLLM([{"prompt_tokens": 9999}]),
         options=AgentOptions(
@@ -152,7 +159,7 @@ async def test_agent_reports_budget_in_result_and_event():
             builtins=frozenset(),
         ),
     )
-    events = []
+    events: list[AgentEvent] = []
     try:
         result = await agent.run_task("answer", on_event=events.append)
     finally:
@@ -164,10 +171,10 @@ async def test_agent_reports_budget_in_result_and_event():
     assert events[-1].to_dict()["data"]["result"]["context_budget"] == records
 
 
-async def test_nested_chat_does_not_use_outer_accounting_or_sink():
+async def test_nested_chat_does_not_use_outer_accounting_or_sink() -> None:
     outer = Chat(FakeLLM([]), context_budget=ContextBudget(1000, 100, 100))
     inner = Chat(FakeLLM([None]), context_budget=ContextBudget(300, 10, 10))
-    emitted = []
+    emitted: list[dict[str, Any]] = []
     token = BUDGET_ACCOUNTING.set((outer, outer._accounting))
     hook = BUDGET_HOOK.set((outer, emitted.append))
     try:
@@ -176,11 +183,14 @@ async def test_nested_chat_does_not_use_outer_accounting_or_sink():
         BUDGET_HOOK.reset(hook)
         BUDGET_ACCOUNTING.reset(token)
     assert outer.stats.context_budget == [] and emitted == []
+    assert inner.stats.context_budget is not None
     assert inner.stats.context_budget[0]["input_limit"] == 280
 
 
 @pytest.mark.parametrize("values", [(1, None, None), (10, 5, 5), (True, 1, 1)])
-def test_agent_options_reject_invalid_budget(values):
+def test_agent_options_reject_invalid_budget(
+    values: tuple[int | None, int | None, int | None],
+) -> None:
     with pytest.raises(ValueError):
         AgentOptions(
             context_window=values[0], output_reserve=values[1], safety_margin=values[2]

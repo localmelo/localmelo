@@ -57,7 +57,7 @@ def test_defaults_and_existing_agent_serialization(config_path: Path) -> None:
 def test_full_and_partial_budgets_round_trip(
     config_path: Path, values: dict[str, int]
 ) -> None:
-    cfg = Config(agent=AgentConfig(**values))
+    cfg = Config(agent=AgentConfig(**values))  # type: ignore[arg-type]
     assert bool(cfg._validate_agent()) == (len(values) != 3)
     save(cfg)
     text = config_path.read_text(encoding="utf-8")
@@ -155,6 +155,7 @@ def test_invalid_ui_budget_flag_is_usage_error(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     from argparse import Namespace
+
     from localmelo.support.cli.launch import _configured
 
     cfg = Config(
