@@ -477,7 +477,7 @@ def test_a_base_url_with_an_embedding_server_shows_long_term_memory() -> None:
     assert plain.backend.embedding == ""
 
 
-def test_a_new_server_keeps_the_sessions_embedding_server() -> None:
+async def test_a_new_server_keeps_the_sessions_embedding_server() -> None:
     from localmelo.support.cli.agents import AgentFactory, url_backend
 
     factory = AgentFactory(
@@ -488,5 +488,5 @@ def test_a_new_server_keeps_the_sessions_embedding_server() -> None:
         embedding_base_url=URL,
         embedding_model="e",
     )
-    factory.use_url("http://127.0.0.1:19/v1", "n")
+    await factory.use_url("http://127.0.0.1:19/v1", "n")
     assert factory.backend.embedding == "E · e"

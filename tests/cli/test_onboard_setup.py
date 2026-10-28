@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
+import httpx
 import pytest
 
 import localmelo.support.onboard as onboard
@@ -24,6 +26,19 @@ from localmelo.support.onboard_probe import ProbeError
 
 URL = "http://127.0.0.1:8500/v1"
 
+# The real function, kept for tests that answer over an httpx.MockTransport.
+_REAL_IS_OLLAMA = discovery.is_ollama
+
+
+@pytest.fixture(autouse=True)
+def _server_is_not_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Saving asks whether the server is Ollama; these fake servers are not."""
+
+    async def is_ollama(url: str, **kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr(discovery, "is_ollama", is_ollama)
+
 
 @pytest.fixture
 def config_path(tmp_path: Path) -> Iterator[Path]:
@@ -33,6 +48,15 @@ def config_path(tmp_path: Path) -> Iterator[Path]:
         mock.patch("localmelo.support.config.CONFIG_DIR", str(tmp_path)),
     ):
         yield path
+
+
+def _answered_by(transport: httpx.MockTransport) -> Any:
+    """discovery.is_ollama over *transport*: the real question, no network."""
+
+    async def is_ollama(url: str, **kwargs: object) -> bool:
+        return await _REAL_IS_OLLAMA(url, transport=transport)
+
+    return is_ollama
 
 
 class _Answers:
@@ -232,6 +256,21 @@ def test_the_first_run_keeps_the_configs_other_values(config_path: Path) -> None
     assert saved.request_timeout_s == 600
     assert saved.ollama.chat_url == "http://127.0.0.1:11434"
     assert (saved.chat_backend, saved.vllm.chat_model) == ("vllm", "m")
+
+
+def test_the_first_run_saves_an_ollama_server_as_ollama(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def is_ollama(url: str, **kwargs: object) -> bool:
+        return True
+
+    monkeypatch.setattr(discovery, "is_ollama", is_ollama)
+    result, _, _ = _first_setup(_Answers(URL), lists={URL: ["qwen3:8b"]})
+    assert result == FirstSetup(url=URL, model="qwen3:8b", saved=True)
+    saved = config.load()
+    assert (saved.chat_backend, saved.embedding_backend) == ("ollama", "none")
+    assert (saved.ollama.chat_url, saved.ollama.chat_model) == (URL, "qwen3:8b")
+    assert (saved.vllm.chat_url, saved.vllm.chat_model) == ("", "")
 
 
 @pytest.mark.parametrize(("answer", "saved"), [("", True), ("y", True), ("n", False)])
@@ -552,15 +591,15 @@ def test_the_cloud_wizard_offers_the_configs_key_and_model(config_path: Path) ->
 @pytest.mark.parametrize(
     "model", ["C:\\models\\a", 'quote " inside', "two \\\\ slashes", "tab\tand ünïcode"]
 )
-def test_a_listed_model_id_survives_the_config_file(
+async def test_a_listed_model_id_survives_the_config_file(
     config_path: Path, model: str
 ) -> None:
-    assert onboard.save_chat_server('http://h/v1?x="y"', model)
+    assert await onboard.save_chat_server('http://h/v1?x="y"', model)
     saved = config.load()
     assert (saved.vllm.chat_url, saved.vllm.chat_model) == ('http://h/v1?x="y"', model)
 
 
-def test_a_server_saved_from_a_session_keeps_embedding_and_the_rest(
+async def test_a_server_saved_from_a_session_keeps_embedding_and_the_rest(
     config_path: Path,
 ) -> None:
     cfg = config.Config(
@@ -577,7 +616,7 @@ def test_a_server_saved_from_a_session_keeps_embedding_and_the_rest(
         vllm=config.LocalBackendConfig(extra_body={"top_k": 20}),
     )
     config.save(cfg)
-    assert onboard.save_chat_server("http://h:9/v1", "new", keep_embedding=True)
+    assert await onboard.save_chat_server("http://h:9/v1", "new", keep_embedding=True)
     saved = config.load()
     assert (saved.chat_backend, saved.vllm.chat_url, saved.vllm.chat_model) == (
         "vllm",
@@ -589,5 +628,55 @@ def test_a_server_saved_from_a_session_keeps_embedding_and_the_rest(
     assert saved.vllm.extra_body == {"top_k": 20}
     assert saved.validate() == []
     # The first run's save still turns embedding off.
-    assert onboard.save_chat_server("http://h:9/v1", "new")
+    assert await onboard.save_chat_server("http://h:9/v1", "new")
     assert config.load().embedding_backend == "none"
+
+
+# ── Telling an Ollama server from any other ──
+
+
+async def test_saving_an_ollama_server_writes_the_ollama_table(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[str] = []
+
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(str(request.url))
+        return httpx.Response(200, json={"version": "0.12.3"})
+
+    monkeypatch.setattr(
+        discovery, "is_ollama", _answered_by(httpx.MockTransport(handle))
+    )
+    assert await onboard.save_chat_server(URL, "qwen3:8b")
+    saved = config.load()
+    assert (saved.chat_backend, saved.embedding_backend) == ("ollama", "none")
+    assert (saved.ollama.chat_url, saved.ollama.chat_model) == (URL, "qwen3:8b")
+    assert (saved.vllm.chat_url, saved.vllm.chat_model) == ("", "")
+    # Asked once, at the root: the chat URL ends in /v1, this one does not.
+    assert seen == ["http://127.0.0.1:8500/api/version"]
+
+
+def _refusing(request: httpx.Request) -> httpx.Response:
+    raise httpx.ReadTimeout("timed out")
+
+
+@pytest.mark.parametrize(
+    "transport",
+    [
+        httpx.MockTransport(lambda request: httpx.Response(404)),
+        httpx.MockTransport(_refusing),
+    ],
+    ids=["no-version-endpoint", "timeout"],
+)
+async def test_another_server_is_saved_as_vllm(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch, transport: httpx.MockTransport
+) -> None:
+    monkeypatch.setattr(discovery, "is_ollama", _answered_by(transport))
+    assert await onboard.save_chat_server(URL, "m")
+    saved = config.load()
+    assert (saved.chat_backend, saved.vllm.chat_url, saved.vllm.chat_model) == (
+        "vllm",
+        URL,
+        "m",
+    )
+    assert (saved.ollama.chat_url, saved.ollama.chat_model) == ("", "")

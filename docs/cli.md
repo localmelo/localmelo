@@ -156,7 +156,7 @@ type more letters to narrow them, Tab or Enter to take one.
 | `/help [command]` | The commands and keys, or one command's details. |
 | `/new` (also `/clear`) | Start a new session: the model forgets the conversation, and session grants end. |
 | `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
-| `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default. |
+| `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default (as `ollama` when the server answers like Ollama, else `vllm`). |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
 
 - A command that runs is echoed in the scrollback as a message is
@@ -175,10 +175,11 @@ type more letters to narrow them, Tab or Enter to take one.
   `⚠ Could not list the models (REASON); switching anyway.` when the
   server did not answer.
 - Saving: `/model` keeps the configured backend and changes its model.
-  `/backend` saves the server as the `vllm` backend (`chat_backend`,
-  `[vllm] chat_url` and `chat_model`) and keeps the rest of the config:
-  embedding, `request_timeout_s` and `extra_body`; the session runs on
-  the config as saved. In a `melo --base-url URL` session they switch for
+  `/backend` saves the server as the `ollama` backend when it answers like
+  Ollama (`GET /api/version`), else as `vllm`; it writes `chat_backend` and
+  that table's `chat_url` and `chat_model`, and keeps the rest of the
+  config: embedding, `request_timeout_s` and `extra_body`; the session runs
+  on the config as saved. In a `melo --base-url URL` session they switch for
   this session only, unless melo asked `Save URL · MODEL as the default
   backend?` (only when there is no config file yet) and you answered yes.
   After `s` (start anyway) at the first run's questions, `/model` and
@@ -309,9 +310,10 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 - melo looks for a server on this computer with `GET /v1/models` on
   `127.0.0.1` ports 8000 (vLLM, oMLX), 8400 (MLC), 11434 (Ollama) and 30000
   (SGLang), and offers the first that lists a model. Press Enter to accept
-  the URL, or type another. Only the model list is requested: no chat
-  request, so a server does not load a model for it. A server that lists
-  a chat model comes first; one that lists only embedding or reranking
+  the URL, or type another. Only the model list is requested; saving the
+  choice asks `GET /api/version` once to tell an Ollama server apart. No
+  chat request is sent, so a server does not load a model for it. A server that
+  lists a chat model comes first; one that lists only embedding or reranking
   models comes next. A server that answered without a list is named, as
   `A model server at URL answered, but HTTP 401: …`, and offered. When none
   answers, it prints
@@ -323,10 +325,15 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
   `Model [N]:`; type a number or an id. The default skips embedding and
   reranking models. A server that lists only such models is shown the same
   way, with a line saying that chat needs a chat model.
-- The config file gets `chat_backend = "vllm"` (the key for any
-  OpenAI-compatible server), its `[vllm]` table's `chat_url` and
-  `chat_model`, and `embedding_backend = "none"`. Its other settings are
-  kept. For embeddings, a cloud API or another backend key, run
+- An Ollama server, one that answers `GET /api/version` with
+  `{"version": "…"}`, is saved as `chat_backend = "ollama"` with its
+  `[ollama]` table's `chat_url` and `chat_model`; the banner then says
+  Ollama, and chat requests use Ollama's native API with its 300 s timeout.
+  Any other OpenAI-compatible server is saved as `chat_backend = "vllm"`
+  (the key for any OpenAI-compatible server), with its `[vllm]` table's
+  `chat_url` and `chat_model`. Either way the file gets
+  `embedding_backend = "none"` and its other settings are kept. For
+  embeddings, a cloud API or another backend key, run
   `melo --reconfigure`.
 - When the server cannot be used, melo says why, as
   `✗ URL: connection refused.`, and asks

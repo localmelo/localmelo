@@ -33,6 +33,16 @@ from localmelo.tests.sessions.helpers import ScriptedLLM, answer, started_agent
 URL = "http://127.0.0.1:9/v1"
 
 
+@pytest.fixture(autouse=True)
+def _server_is_not_ollama(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A real factory asks each new server whether it is Ollama; these are not."""
+
+    async def is_ollama(url: str, **kwargs: object) -> bool:
+        return False
+
+    monkeypatch.setattr("localmelo.support.backends.discovery.is_ollama", is_ollama)
+
+
 class FakeFactory(AgentFactory):
     """Builds Agents on scripted models; lists and saves without a server."""
 
@@ -63,7 +73,7 @@ class FakeFactory(AgentFactory):
             raise self.listed
         return list(self.listed)
 
-    def save(self) -> str:
+    async def save(self) -> str:
         self.saved.append((self.backend.base_url, self.backend.model))
         return ""
 
@@ -633,7 +643,7 @@ def _config_factory(tmp_path: Path) -> AgentFactory:
         ),
     ],
 )
-def test_a_config_file_edited_during_the_session_is_not_written_over(
+async def test_a_config_file_edited_during_the_session_is_not_written_over(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, edited: str, problem: str
 ) -> None:
     path = tmp_path / "config.toml"
@@ -642,7 +652,7 @@ def test_a_config_file_edited_during_the_session_is_not_written_over(
     factory = _config_factory(tmp_path)
     path.write_text(edited, encoding="utf-8")
     factory.use_model("m2")
-    assert factory.save().startswith(problem)
+    assert (await factory.save()).startswith(problem)
     assert path.read_text(encoding="utf-8") == edited
     assert factory._cfg is not None and factory._cfg.vllm.chat_url == URL
 
@@ -731,8 +741,8 @@ async def test_a_new_server_keeps_the_configs_embedding_and_timeout(
     )
     new_url = "http://127.0.0.1:19/v1"
     await factory.build("m2", url=new_url)
-    factory.use_url(new_url, "m2")
-    assert factory.save() == ""
+    await factory.use_url(new_url, "m2")
+    assert await factory.save() == ""
     # The session's Agent runs on the config as it is saved.
     [kwargs] = built
     running = kwargs["cfg"]
@@ -758,10 +768,72 @@ async def test_a_new_server_keeps_the_configs_embedding_and_timeout(
     built.clear()
     await factory.build("m3")
     factory.use_model("m3")
-    assert factory.save() == ""
+    assert await factory.save() == ""
     assert built[0]["cfg"].vllm.chat_url == new_url
     assert config.load().vllm.chat_model == "m3"
     assert config.load().embedding_backend == "sglang"
+
+
+async def test_backend_saves_an_ollama_server_as_the_ollama_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from localmelo.support import config
+    from localmelo.support.cli import agents as agents_module
+    from localmelo.support.cli.agents import config_backend
+
+    path = tmp_path / "config.toml"
+    monkeypatch.setattr("localmelo.support.config.CONFIG_PATH", str(path))
+    monkeypatch.setattr("localmelo.support.config.CONFIG_DIR", str(tmp_path))
+    cfg = config.Config(
+        chat_backend="sglang",
+        embedding_backend="sglang",
+        sglang=config.LocalBackendConfig(
+            chat_url=URL,
+            chat_model="m1",
+            embedding_url=URL,
+            embedding_model="embed-x",
+        ),
+    )
+    config.save(cfg)
+    asked: list[str] = []
+
+    async def is_ollama(url: str, **kwargs: object) -> bool:
+        asked.append(url)
+        return True
+
+    monkeypatch.setattr("localmelo.support.backends.discovery.is_ollama", is_ollama)
+    built: list[dict[str, Any]] = []
+
+    async def build_session_agent(**kwargs: Any) -> Any:
+        built.append(kwargs)
+        return object()
+
+    monkeypatch.setattr(agents_module, "build_session_agent", build_session_agent)
+    factory = AgentFactory(
+        backend=config_backend(cfg, None),
+        cfg=cfg,
+        options=AgentOptions(),
+        workspace=str(tmp_path),
+    )
+    new_url = "http://127.0.0.1:11434/v1"
+    await factory.build("qwen3:8b", url=new_url)
+    await factory.use_url(new_url, "qwen3:8b")
+    # The switch names the server Ollama, and the Agent runs on that backend.
+    assert (factory.backend.key, factory.backend.label) == ("ollama", "Ollama")
+    assert await factory.save() == ""
+    [kwargs] = built
+    running = kwargs["cfg"]
+    assert (
+        running.chat_backend,
+        running.ollama.chat_url,
+        running.ollama.chat_model,
+    ) == ("ollama", new_url, "qwen3:8b")
+    saved = config.load()
+    assert (saved.chat_backend, saved.embedding_backend) == ("ollama", "sglang")
+    assert (saved.ollama.chat_url, saved.ollama.chat_model) == (new_url, "qwen3:8b")
+    assert saved.sglang.embedding_model == "embed-x" and saved.sglang.chat_model == "m1"
+    # Asked once for the switch and the save, not again for each.
+    assert asked == [new_url]
 
 
 # ── Text given back to the input box ──

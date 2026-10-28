@@ -357,18 +357,34 @@ def _choose_model(url: str, models: list[str]) -> str:
         print(f"  Type a number from 1 to {len(models)}, or a model id.")
 
 
-def save_chat_server(url: str, model: str, *, keep_embedding: bool = False) -> bool:
+async def save_chat_server(
+    url: str,
+    model: str,
+    *,
+    keep_embedding: bool = False,
+    ollama: bool | None = None,
+) -> bool:
     """Save *url* and *model* as the default chat backend; False if it failed.
 
-    Any OpenAI-compatible server is saved as the ``vllm`` backend. The
-    first run turns embedding off; with *keep_embedding* (a server chosen
-    in a configured session) the embedding backend stays. The config's
-    other values are kept.
+    An Ollama server (it answers ``GET /api/version``) is saved as the
+    ``ollama`` backend in the ``[ollama]`` table; the backend chats on
+    Ollama's native API with its 300 s timeout. Any other OpenAI-compatible
+    server is saved as ``vllm``. *ollama* is the answer to that question
+    when the caller asked it already. The first run turns embedding off;
+    with *keep_embedding* (a server chosen in a configured session) the
+    embedding backend stays. The config's other values are kept.
     """
     cfg = config.load()
-    cfg.chat_backend = "vllm"
-    cfg.vllm.chat_url = url
-    cfg.vllm.chat_model = model
+    if ollama is None:
+        ollama = await discovery.is_ollama(url)
+    if ollama:
+        cfg.chat_backend = "ollama"
+        cfg.ollama.chat_url = url
+        cfg.ollama.chat_model = model
+    else:
+        cfg.chat_backend = "vllm"
+        cfg.vllm.chat_url = url
+        cfg.vllm.chat_model = model
     if not keep_embedding:
         cfg.embedding_backend = "none"
     try:
@@ -384,7 +400,8 @@ def run_first_setup() -> FirstSetup | None:
     """Ask for a model server's URL and model, check them, and save them.
 
     A server found on this machine prefills the URL; the model is chosen
-    from the server's list. Only ``GET <url>/models`` is sent. When the
+    from the server's list. Only ``GET <url>/models`` is sent, and
+    ``GET /api/version`` once when saving, to tell Ollama apart. When the
     check fails the user may retry, start anyway without saving, or quit
     (None). EOFError and KeyboardInterrupt reach the caller.
     """
@@ -435,7 +452,8 @@ def run_first_setup() -> FirstSetup | None:
     model = _choose_model(url, models)
     count = len(models)
     print(f"✓ {url} lists {count} model{'' if count == 1 else 's'}; using {model}.")
-    return FirstSetup(url=url, model=model, saved=save_chat_server(url, model))
+    saved = asyncio.run(save_chat_server(url, model))
+    return FirstSetup(url=url, model=model, saved=saved)
 
 
 def offer_to_save(url: str, model: str) -> bool:
@@ -445,4 +463,4 @@ def offer_to_save(url: str, model: str) -> bool:
         == "n"
     ):
         return False
-    return save_chat_server(url, model)
+    return asyncio.run(save_chat_server(url, model))

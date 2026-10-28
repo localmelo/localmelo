@@ -1,8 +1,9 @@
 """Ask a local model server which models it serves, and find one.
 
-Every request here is ``GET <url>/models``. Nothing is generated, so
-listing neither waits for a server to load a model nor competes with runs
-on it. Cloud vendors are not listed.
+The requests here are ``GET <url>/models``, and ``GET <root>/api/version``
+to tell an Ollama server apart. Nothing is generated, so listing neither
+waits for a server to load a model nor competes with runs on it. Cloud
+vendors are not listed.
 """
 
 from __future__ import annotations
@@ -184,6 +185,39 @@ async def list_models(
             "the reply is not a model list", reachable=True, status_code=status
         ) from exc
     return parse_model_ids(payload)
+
+
+def _ollama_root(url: str) -> str:
+    """The server root of *url*: the URL without a trailing slash or ``/v1``."""
+    root = url.rstrip("/")
+    if root.endswith("/v1"):
+        root = root[: -len("/v1")].rstrip("/")
+    return root
+
+
+async def is_ollama(
+    url: str,
+    *,
+    timeout_s: float = DISCOVERY_TIMEOUT_S,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> bool:
+    """Whether the server at *url* answers like Ollama.
+
+    Ollama answers ``GET <root>/api/version`` with ``{"version": "…"}``;
+    *url* may end in ``/v1`` or not. Any other answer -- an HTTP error, a
+    redirect, a body without a version, no answer at all -- means no.
+    *transport* replaces the network in tests.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=timeout_s, transport=transport) as client:
+            response = await client.get(f"{_ollama_root(url)}/api/version")
+        if response.status_code >= 300:  # not followed, as chat requests are not
+            return False
+        payload = response.json()
+    except Exception:  # no answer, a malformed URL, a body that is not JSON
+        return False
+    version = payload.get("version") if isinstance(payload, dict) else None
+    return isinstance(version, str) and bool(version.strip())
 
 
 def is_chat_model(model: str) -> bool:

@@ -113,7 +113,7 @@ Model server URL [http://127.0.0.1:11434/v1]:
 ✓ http://127.0.0.1:11434/v1 lists 1 model; using qwen3:8b.
 Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 ╭─ melo 0.1.0 ─────────────────────────────────────────────────────────────╮
-│ model      qwen3:8b · vLLM · http://127.0.0.1:11434/v1                   │
+│ model      qwen3:8b · Ollama · http://127.0.0.1:11434/v1                 │
 │            saved as the default                                          │
 │ workspace  ~/demo-project                                                │
 │ tools      4 built-in (3 ask first)                                      │
@@ -121,7 +121,7 @@ Saved to ~/.cache/localmelo/config.toml (melo --reconfigure changes it).
 │ session    new                                                           │
 ╰──────────────────────────────────────────────────────────────────────────╯
   / commands · esc stop · ctrl+d quit</code></pre>
-        <p>输入一条消息后按回车，或用 <code>/exit</code> 退出。以后运行 <code>melo</code> 会直接进入，<code>melo "&lt;task&gt;"</code> 也会使用保存的服务器。它被保存为 <code>vllm</code> 后端（任何兼容 OpenAI 接口的服务器都用这个键），不带嵌入；详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#first-run">首次运行（英文）</a>。</p>
+        <p>输入一条消息后按回车，或用 <code>/exit</code> 退出。以后运行 <code>melo</code> 会直接进入，<code>melo "&lt;task&gt;"</code> 也会使用保存的服务器。这里用的是 Ollama，所以它被保存为 <code>ollama</code> 后端；其他兼容 OpenAI 接口的服务器保存为 <code>vllm</code>，不带嵌入；详见<a href="https://github.com/localmelo/localmelo/blob/main/docs/configuration.md#first-run">首次运行（英文）</a>。</p>
         <h3 id="with-the-setup-wizard">使用配置向导</h3>
         <p>配置向导还可以设置嵌入服务器或云端 API，并在完成后启动网关。使用云端 API 时，请先在这个终端中运行 <code>export OPENAI_API_KEY="&lt;your key&gt;"</code>（或你所用服务商对应的变量）：向导的测试请求会用到这个密钥。</p>
         <pre><code>melo --serve --reconfigure</code></pre>

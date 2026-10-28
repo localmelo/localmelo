@@ -27,9 +27,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   resuming them comes later ([#53]).
 - A first run in a terminal: `melo` with no config file looks for a model
   server on this computer, asks for its URL and for a model from the
-  server's list, saves them and opens the chat. It sends only
-  `GET /v1/models`, to ports 8000, 8400, 11434 and 30000 of `127.0.0.1`
-  (`LOCALMELO_DETECT_URLS` replaces them); a server that cannot be used is
+  server's list, saves them and opens the chat. It looks with
+  `GET /v1/models` on ports 8000, 8400, 11434 and 30000 of `127.0.0.1`
+  (`LOCALMELO_DETECT_URLS` replaces them), and sends the chosen server one
+  `GET /api/version` when saving, to tell Ollama apart; a server that cannot be used is
   named with the reason, and you can retry, start without saving or quit
   ([#52]).
 - A progress line in the terminal. While `melo "<task>"` runs with stderr
@@ -196,15 +197,22 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A server picked at the first run, at
+  `Save URL · MODEL as the default backend?` or with `/backend` was always
+  saved as the `vllm` backend. An Ollama server, saved that way, ran with
+  vLLM's 120 s chat timeout instead of Ollama's 300 s, and the banner said
+  vLLM. A server that answers `GET /api/version` like Ollama is saved as the
+  `ollama` backend now; any other OpenAI-compatible server is still saved as
+  `vllm` ([#55]).
 - A similar task's past steps on the progress line said `like a similar
   task:`; they name the task they are from, `like <routine title>:` (the
-  routine's name, else the start of its query) ([#NN]).
+  routine's name, else the start of its query) ([#56]).
 - A `shell_exec` call whose `command` arrived as an argv array (a list of
   strings, which the tool refuses) was labelled `{command:` on the
   progress line, and procedural memory stored that label; the call is now
   classified and labelled by the command's words, joined with
   `shlex.join`, so a read command such as `["ls", "-la"]` is R rather
-  than X ([#NN]).
+  than X ([#56]).
 - `melo --serve` with no config file and no terminal, as under launchd,
   ended in an `EOFError` traceback, again every few seconds; it prints one
   line and exits with code 1. Ctrl-D or Ctrl+C in the setup wizard prints
@@ -282,3 +290,5 @@ earlier milestones.
 [#51]: https://github.com/localmelo/localmelo/pull/51
 [#52]: https://github.com/localmelo/localmelo/pull/52
 [#53]: https://github.com/localmelo/localmelo/pull/53
+[#55]: https://github.com/localmelo/localmelo/pull/55
+[#56]: https://github.com/localmelo/localmelo/pull/56
