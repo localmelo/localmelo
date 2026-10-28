@@ -309,10 +309,49 @@ Task rows persist across gateway restarts. Startup interrupts uncertain tasks,
 retains valid parked cards and preserves pending pause, without replay. Runnable
 queued tasks durably proved never-started may run once after a start fence;
 ordinary creation does not yet establish that proof. Recovered tasks with
-uncertain history reject resume and priority changes until controlled recovery
-is implemented; Stop remains available. A failure to persist
+uncertain history reject `PATCH` resume and priority changes until controlled
+Resume is used; Stop remains available. A failure to persist
 startup recovery keeps the store unavailable. Retrying the same `request_key`
 returns the existing task and does not restart it.
+
+### Controlled Resume
+
+`POST /api/tasks/{task_id}/resume` accepts `operation_id` (required, non-empty,
+at most 200 characters) and an optional `confirmation_token`. It is the only
+route that resumes a task recovered by startup; `PATCH` stays fenced for that
+work. It returns 202 `{"task": ..., "operation_id": ...}` when the transition
+is committed.
+
+The route consumes evidence, never absence of evidence:
+
+- A task the store proves never started is queued for its first launch through
+  the durable launch fence, with no card and no confirmation.
+- A started task needs a card and a valid workspace. It resumes without
+  confirmation only when its trusted, complete capture covers the whole
+  execution and every recorded process group is verifiably gone; a verified
+  boot change also counts as gone.
+- Anything else, including missing, untrusted or incomplete capture or a group
+  whose liveness cannot be checked, returns 409 `confirmation_required` with
+  `details.confirmation_token`, `details.expires_in_s` (300), a
+  `details.warning`, and `details.reason`. Present the token with the same
+  `operation_id` to accept the recorded risk and resume. That accepted
+  transition writes one `sched.resume_confirmed` event; a preview writes
+  nothing. The token is single use, held in memory only, and bound to the task,
+  source execution, evidence identity and CAS generation. A restart drops it,
+  and Stop invalidates it.
+- A terminal task, invalid workspace, missing card for a started task, or stale
+  execution identity returns 409 `invalid_transition` with a `details.reason`;
+  a missing card says to start again as a new task. An unresolved earlier
+  recovery operation returns 409 `recovery_unknown`.
+
+A matching retry with the same `operation_id` returns 202 with the current task
+and never starts a second turn; a token is consumed at most once. Stop always
+wins: it invalidates pending tokens and cancels a queued resumed turn before a
+worker starts a provider or tool. Neither a free Resume nor a confirmation
+proves that an older process stopped or that its effects happened only once.
+
+The route is also reachable at `/api/v2/tasks/{task_id}/resume` for clients
+that address API v2 by its version; other task routes use the `/api` prefix.
 
 ## GET /api/sessions
 

@@ -33,8 +33,18 @@ from localmelo.support.gateway.chat_gate import (
 )
 from localmelo.support.gateway.park_card import build_park_card
 from localmelo.support.gateway.park_store import ParkStore
+from localmelo.support.gateway.process_identity import gone as process_gone
 from localmelo.support.gateway.process_identity import identity as process_identity
 from localmelo.support.gateway.recovery_store import RecoveryStore
+from localmelo.support.gateway.resume_evidence import (
+    ConfirmationRequiredError,
+    RecoveryUnknownError,
+    ResumeRefusedError,
+    StaleConfirmationError,
+    collect_evidence,
+    decide,
+)
+from localmelo.support.gateway.resume_tokens import ResumeBinding, ResumeTokens
 from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_policy import (
     TaskSpec,
@@ -161,6 +171,10 @@ class TaskWorkers:
         self._eligible: set[str] = set()
         self._restart_fenced: set[str] = set()
         self._restart_first: set[str] = set()
+        self._resume_tokens = ResumeTokens()
+        self._process_verifier: Callable[[tuple[int, int, str, str]], bool] = (
+            process_gone
+        )
         self._pending_execution: dict[str, str] = {}
         self._runs: dict[str, asyncio.Task[None]] = {}
         self._runners: dict[str, SessionRunner] = {}
@@ -343,6 +357,10 @@ class TaskWorkers:
                 ):
                     raise SessionStoreError("store unavailable")
         async with self._lock:
+            if state == "stop":
+                # Stop wins: an old confirmation may not resume a task it
+                # previewed before this transition.
+                self._resume_tokens.invalidate(task_id)
             if task_id in self._unavailable:
                 raise SessionStoreError("store unavailable")
             if task_id in self._quarantined and state != "stop":
@@ -567,6 +585,132 @@ class TaskWorkers:
                 self._ready[task_id].set()
             await self._schedule()
             return await self._body(record)
+
+    async def resume(
+        self,
+        task_id: str,
+        *,
+        operation_id: str,
+        confirmation_token: str | None = None,
+    ) -> dict:
+        """Resume one recovered task through the evidence decision table.
+
+        Without a token, an unverifiable execution raises
+        :class:`ConfirmationRequiredError` and changes nothing. A token authorizes
+        exactly the previewed evidence and CAS generation; an accepted
+        transition consumes it once. Stop invalidates it and wins without
+        replaying a delayed retry.
+        """
+        if (
+            not isinstance(operation_id, str)
+            or not operation_id.strip()
+            or len(operation_id) > 200
+        ):
+            raise ValueError("operation_id must be a non-empty string")
+        if confirmation_token is not None and (
+            not isinstance(confirmation_token, str) or not confirmation_token
+        ):
+            raise ValueError("confirmation_token must be a non-empty string")
+        async with self._lock:
+            if self._closed or task_id in self._unavailable:
+                raise SessionStoreError("store unavailable")
+            current = await self.tasks.get_task(task_id)
+            if await self.tasks.has_resume_receipt(task_id, operation_id):
+                # A matching retry returns the current row without a second turn.
+                return await self._body(current)
+            if confirmation_token is not None:
+                grant = self._resume_tokens.binding_for(confirmation_token)
+                if grant is None or grant.task_id != task_id:
+                    raise StaleConfirmationError(
+                        "The confirmation expired, was already used, or belongs "
+                        "to another task."
+                    )
+            if await self.tasks.operation_receipt(task_id, operation_id) is not None:
+                raise RecoveryUnknownError(
+                    "Resume unavailable: this operation ID belongs to another transition."
+                )
+            recovery = RecoveryStore(self.store)
+            if await recovery.receipt(task_id, operation_id) is not None:
+                raise RecoveryUnknownError(
+                    "Resume unavailable: this operation ID belongs to another recovery operation."
+                )
+            if await recovery.active_intent(task_id) is not None:
+                raise RecoveryUnknownError()
+            if current.state in TERMINAL_PHASES:
+                raise ResumeRefusedError(
+                    f"Task {task_id} is finished ({current.state}) and cannot be resumed.",
+                    reason="terminal",
+                )
+            if current.state not in {"interrupted", "parked"}:
+                raise ResumeRefusedError(
+                    f"Task {task_id} is not waiting for recovery.",
+                    reason="invalid_state",
+                )
+            workspace_valid = await self._resume_workspace(task_id)
+            evidence = await collect_evidence(
+                self.tasks, recovery, current, verifier=self._process_verifier
+            )
+            decision = decide(evidence, workspace_valid=workspace_valid)
+            binding = ResumeBinding(
+                task_id=task_id,
+                execution_id=evidence.execution_id,
+                evidence_key=evidence.evidence_key,
+                generation=evidence.generation,
+                pending_operation_id=evidence.pending_operation_id,
+            )
+            if decision.kind == "confirm":
+                if confirmation_token is None:
+                    token = self._resume_tokens.issue(binding)
+                    raise ConfirmationRequiredError(binding, token=token)
+                if not self._resume_tokens.valid(confirmation_token, binding):
+                    raise StaleConfirmationError(
+                        "The recovery evidence or task identity changed; "
+                        "review it again."
+                    )
+            record = await self.tasks.resume_recovered(
+                task_id,
+                operation_id=operation_id,
+                expected_generation=evidence.generation,
+                expected_operation_id=evidence.pending_operation_id,
+                expected_execution_id=evidence.execution_id,
+                confirmed=decision.kind == "confirm",
+                first_start=decision.kind == "first_start",
+            )
+            if (
+                decision.kind == "confirm"
+                and confirmation_token is not None
+                and not self._resume_tokens.consume(confirmation_token, binding)
+            ):
+                raise StaleConfirmationError(
+                    "The confirmation was already used for another transition."
+                )
+            # An accepted transition retires every preview issued for it.
+            self._resume_tokens.invalidate(task_id)
+            self._restart_fenced.discard(task_id)
+            self._restart_first.discard(task_id)
+            self._invalid_workspace.discard(task_id)
+            self._pause_requested.discard(task_id)
+            self._register(record)
+            restored: int | str = (
+                record.level if record.level_source == "user" else "auto"
+            )
+            self.gate.set_task_level(task_id, restored, rank=record.user_rank)
+            if record.level >= 5:
+                self.gate.update_task(task_id, paused=True)
+                self._ready[task_id].clear()
+            else:
+                self.gate.update_task(task_id, paused=False)
+                self._eligible.add(task_id)
+                self._ready[task_id].set()
+            await self._schedule()
+            return await self._body(record)
+
+    async def _resume_workspace(self, task_id: str) -> bool:
+        try:
+            await self._workspace(task_id)
+        except WorkspaceError:
+            return False
+        return True
 
     def _select_park(self, task_id: str) -> None:
         point = self._points.get(task_id)

@@ -94,6 +94,16 @@ class RecoveryStore:
         async with self.store.component_transaction("recovery_receipt") as conn:
             return await self._receipt(conn, task_id, operation_id)
 
+    async def active_capture(self, task_id: str) -> str | None:
+        """The execution whose capture is current, or ``None`` when unknown."""
+        async with self.store.component_transaction("capture_active") as conn:
+            row = await _one(
+                conn,
+                "SELECT execution_id FROM recovery_capture WHERE task_id = ? AND active = 1",
+                (task_id,),
+            )
+            return None if row is None else str(row[0])
+
     async def active_intent(self, task_id: str) -> tuple[str, dict[str, Any]] | None:
         """Find the durable operation that must be reconciled before another."""
         async with self.store.component_transaction("recovery_active") as conn:

@@ -236,6 +236,19 @@ def _json_columns(values: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _resume_request(generation: int | None, previous: str | None, actor: str) -> str:
+    return json.dumps(
+        {
+            "kind": "resume_recovered",
+            "generation": generation,
+            "previous": previous,
+            "actor": actor,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 async def compare_park_identity(
     conn: Any,
     task_id: str,
@@ -535,10 +548,27 @@ class TaskStore:
         self, task_id: str, operation_id: str
     ) -> tuple[dict[str, Any], bool] | None:
         """Read a receipt after the writer settles; None means unknown, not rollback."""
-        async with self._store.component_transaction("task_pause_reconcile") as conn:
+        return await self.operation_receipt(task_id, operation_id)
+
+    async def operation_receipt(
+        self, task_id: str, operation_id: str
+    ) -> tuple[dict[str, Any], bool] | None:
+        """Read any ``sched.*`` receipt; None is unknown, never a rollback."""
+        async with self._store.component_transaction("task_operation_receipt") as conn:
             if await self._get(conn, task_id) is None:
                 raise TaskNotFoundError(f"No task has id {task_id}")
             return await read_operation_receipt(conn, task_id, operation_id)
+
+    async def has_resume_receipt(self, task_id: str, operation_id: str) -> bool:
+        """Whether this task already committed a Resume under this operation ID."""
+        async with self._store.component_transaction("task_resume_receipt") as conn:
+            row = await _first(
+                conn,
+                "SELECT 1 FROM recovery_operations WHERE task_id = ? "
+                "AND operation_id = ? AND kind = 'resume'",
+                (task_id, operation_id),
+            )
+            return row is not None
 
     async def _is_retry(
         self, conn: Any, current: TaskRecord, op: str, request: Mapping[str, Any]
@@ -1458,6 +1488,167 @@ class TaskStore:
                         ),
                         task_id,
                     ),
+                )
+            await self._log(
+                conn, "task.resume", task_id, {"level": level, "source": source}, ts=now
+            )
+            result = await self._get(conn, task_id)
+        assert result is not None
+        return result
+
+    async def resume_recovered(
+        self,
+        task_id: str,
+        *,
+        operation_id: str,
+        expected_generation: int | None,
+        expected_operation_id: str | None,
+        expected_execution_id: str | None,
+        confirmed: bool,
+        first_start: bool,
+        actor: str = "user",
+    ) -> TaskRecord:
+        """Queue one recovered task and record the Resume operation atomically.
+
+        *confirmed* records a user-accepted orphan risk in
+        ``sched.resume_confirmed``; it proves nothing about process death. A
+        repeated ``operation_id`` returns the stored row without a second
+        transition. A terminal or changed row refuses the resume.
+        """
+        if not isinstance(operation_id, str) or not operation_id.strip():
+            raise ValueError("operation_id must be a non-empty string")
+        if not isinstance(confirmed, bool) or not isinstance(first_start, bool):
+            raise ValueError("resume flags must be boolean")
+        now = self._clock()
+        async with self._store.component_event_transaction("task_resume_recovered") as (
+            conn,
+            events,
+        ):
+            current = await self._get(conn, task_id)
+            if current is None:
+                raise TaskNotFoundError(f"No task has id {task_id}")
+            receipt = await _first(
+                conn,
+                "SELECT kind, request FROM recovery_operations "
+                "WHERE task_id = ? AND operation_id = ?",
+                (task_id, operation_id),
+            )
+            if receipt is not None:
+                if receipt[0] != "resume":
+                    raise TaskConflictError(
+                        "operation ID belongs to another recovery operation"
+                    )
+                return current
+            if await read_operation_receipt(conn, task_id, operation_id) is not None:
+                raise TaskConflictError("operation ID was already used")
+            if current.state in _TERMINAL_STATES:
+                raise TaskStoreError(f"Task {task_id} is finished ({current.state})")
+            if current.state not in {"interrupted", "parked"}:
+                raise TaskStoreError("task is not waiting for recovery")
+            if await _first(
+                conn,
+                "SELECT 1 FROM recovery_operations WHERE task_id = ? "
+                "AND kind = 'recovery' AND phase = 'prepared'",
+                (task_id,),
+            ):
+                raise TaskConflictError("another recovery operation is unresolved")
+            provenance = await _first(
+                conn,
+                "SELECT first_start, execution_id FROM recovery_provenance "
+                "WHERE task_id = ?",
+                (task_id,),
+            )
+            first = bool(provenance) and provenance[0] == "never_started"
+            if first_start != first:
+                raise TaskConflictError("first-start evidence changed")
+            if not first and not current.card.strip():
+                raise TaskStoreError("recovery information is missing")
+            if provenance and provenance[1] != expected_execution_id:
+                raise TaskConflictError("recovery execution identity changed")
+            active_capture = await _first(
+                conn,
+                "SELECT execution_id FROM recovery_capture WHERE task_id = ? AND active = 1",
+                (task_id,),
+            )
+            if active_capture and active_capture[0] != expected_execution_id:
+                raise TaskConflictError("recovery capture identity is stale")
+            saved = await _first(
+                conn,
+                "SELECT level, source, reason, user_rank FROM park_priority "
+                "WHERE task_id = ? AND snapshot_active = 1",
+                (task_id,),
+            )
+            if saved:
+                level, source, reason, rank = saved
+            elif current.level == 5:
+                level, source, reason, rank = 2, "computed", "", None
+            else:
+                level, source, reason, rank = (
+                    current.level,
+                    current.level_source,
+                    current.reason,
+                    current.user_rank,
+                )
+            transition_id = uuid.uuid4().hex
+            await self._identity_transition(
+                conn,
+                events,
+                task_id,
+                "sched.resumed",
+                bump=True,
+                explicit=True,
+                create=True,
+                expected_generation=expected_generation,
+                expected_operation_id=expected_operation_id,
+                operation_id=transition_id,
+                state="queued",
+            )
+            identity = await _first(
+                conn,
+                "SELECT generation, operation_id FROM park_priority WHERE task_id = ?",
+                (task_id,),
+            )
+            assert identity is not None
+            generation = int(identity[0])
+            await self._clear_snapshot(conn, task_id)
+            if level == 0 and source == "user":
+                await self._demote_other_p0(conn, task_id, actor, now)
+            await self._write_level(conn, current, level, source, rank, reason, now)
+            if current.level != level:
+                await self._event(
+                    conn,
+                    task_id,
+                    from_level=current.level,
+                    to_level=level,
+                    actor=actor,
+                    reason="resume",
+                    quote="",
+                    pinned=_pinned(source),
+                    ts=now,
+                )
+            await conn.execute(
+                "UPDATE tasks SET state = 'queued', wait_reason = '', "
+                "hold_site = '', updated_at = ? WHERE task_id = ?",
+                (now, task_id),
+            )
+            request = _resume_request(expected_generation, expected_operation_id, actor)
+            await conn.execute(
+                "INSERT INTO recovery_operations VALUES "
+                "(?, ?, 'resume', ?, 'committed', ?, NULL, 'queued')",
+                (task_id, operation_id, request, generation),
+            )
+            if confirmed:
+                await self.store.append_component_event(
+                    conn,
+                    events,
+                    task_id,
+                    "sched.resume_confirmed",
+                    {
+                        "operation_id": operation_id,
+                        "execution_id": expected_execution_id,
+                        "generation": generation,
+                        "state": "queued",
+                    },
                 )
             await self._log(
                 conn, "task.resume", task_id, {"level": level, "source": source}, ts=now
