@@ -117,9 +117,9 @@ EOF
 PORT=18401   # a free port that is not the user's gateway port (default 8401)
 lsof -nP -iTCP:$PORT -sTCP:LISTEN >/dev/null && { echo "port $PORT taken" >&2; exit 1; }   # run as a script
 HOME=$T CLONE/.venv/bin/melo --serve --port $PORT > "$T/gateway.log" 2>&1 & GW=$!   # blocks until stopped
-for i in $(seq 60); do curl -sf -H "Authorization: Bearer $(< "$T/.cache/localmelo/gateway/auth/token")" http://127.0.0.1:$PORT/v1/health >/dev/null && break; kill -0 $GW 2>/dev/null || break; sleep 0.5; done
-curl -sf -H "Authorization: Bearer $(< "$T/.cache/localmelo/gateway/auth/token")" http://127.0.0.1:$PORT/v1/health >/dev/null || { echo "gateway did not start; see $T/gateway.log" >&2; kill $GW 2>/dev/null; exit 1; }
-curl -s --max-time 600 -H "Authorization: Bearer $(< "$T/.cache/localmelo/gateway/auth/token")" -X POST http://127.0.0.1:$PORT/v1/agent/run -H "Content-Type: application/json" \
+for i in $(seq 60); do { printf 'Authorization: Bearer '; cat "$T/.cache/localmelo/gateway/auth/token"; printf '\n'; } | curl -sf -H @- http://127.0.0.1:$PORT/v1/health >/dev/null && break; kill -0 $GW 2>/dev/null || break; sleep 0.5; done
+{ printf 'Authorization: Bearer '; cat "$T/.cache/localmelo/gateway/auth/token"; printf '\n'; } | curl -sf -H @- http://127.0.0.1:$PORT/v1/health >/dev/null || { echo "gateway did not start; see $T/gateway.log" >&2; kill $GW 2>/dev/null; exit 1; }
+{ printf 'Authorization: Bearer '; cat "$T/.cache/localmelo/gateway/auth/token"; printf '\n'; } | curl -s --max-time 600 -H @- -X POST http://127.0.0.1:$PORT/v1/agent/run -H "Content-Type: application/json" \
   -d '{"query": "What is the capital of France?"}'
 # {"result":"Paris is the capital of France.","session_id":"850f5874fd49"}
 kill -TERM $GW; wait $GW   # exit 143 once runs in flight end; SIGKILL after your own deadline

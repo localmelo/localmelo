@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import multiprocessing
 import os
 import subprocess
 import sys
@@ -308,6 +309,114 @@ def test_non_loopback_gateway_refused() -> None:
         GatewayServer(cfg)
 
 
+def _startup_token(path: str) -> bytes:
+    auth = GatewayAuth(Path(path))
+    try:
+        return auth.read_token()
+    finally:
+        auth.close()
+
+
+def _startup_or_rotate(args: tuple[str, bool]) -> None:
+    path, rotate = args
+    auth = GatewayAuth(Path(path), allow_corrupt=rotate)
+    try:
+        if rotate:
+            auth.rotate()
+        else:
+            auth.read_token()
+    finally:
+        auth.close()
+
+
+def test_concurrent_first_start_and_rotation(tmp_path: Path) -> None:
+    path = str(tmp_path / "gateway/auth")
+    with multiprocessing.get_context("spawn").Pool(4) as pool:
+        pool.map(_startup_or_rotate, [(path, i % 2 == 0) for i in range(24)])
+    auth = GatewayAuth(Path(path))
+    assert len(auth.read_token()) == 64
+    auth.close()
+
+
+def test_concurrent_first_start_and_empty_recovery(tmp_path: Path) -> None:
+    path = tmp_path / "gateway" / "auth"
+    for empty in (False, True):
+        if empty:
+            (path / "token").write_bytes(b"")
+        with multiprocessing.get_context("spawn").Pool(4) as pool:
+            tokens = pool.map(_startup_token, [str(path)] * 24)
+        assert len(set(tokens)) == 1
+        assert len(tokens[0]) == 64
+
+
+def test_rotation_invalidates_streams_even_if_directory_sync_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    auth = GatewayAuth(tmp_path / "auth")
+    old_token = auth.read_token()
+    event = auth.rotation
+    fsync = os.fsync
+
+    def fail_directory(fd: int) -> None:
+        if fd == auth._directory:
+            raise OSError("directory sync failed")
+        fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", fail_directory)
+    with pytest.raises(OSError, match="directory sync failed"):
+        auth.rotate()
+    assert event.is_set()
+    assert auth.read_token() != old_token
+    auth.close()
+
+
+def test_corrupt_token_requires_explicit_cli_rotation(tmp_path: Path) -> None:
+    path = tmp_path / ".cache/localmelo/gateway/auth"
+    auth = GatewayAuth(path)
+    auth.close()
+    (path / "token").write_bytes(b"corrupt-secret")
+    with pytest.raises(ValueError) as error:
+        GatewayAuth(path)
+    assert str(path / "token") in str(error.value)
+    assert "melo --gateway-rotate-token" in str(error.value)
+    assert "corrupt-secret" not in str(error.value)
+    result = subprocess.run(
+        [sys.executable, "-m", "localmelo", "--gateway-rotate-token"],
+        env={**os.environ, "HOME": str(tmp_path)},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "corrupt-secret" not in result.stdout + result.stderr
+    auth = GatewayAuth(path)
+    assert len(auth.read_token()) == 64
+    auth.close()
+
+
+def test_symlink_prefix_allowed_but_gateway_and_auth_refused(tmp_path: Path) -> None:
+    real = tmp_path / "real"
+    real.mkdir()
+    prefix = tmp_path / "prefix"
+    prefix.symlink_to(real, target_is_directory=True)
+    path = prefix / "gateway" / "auth"
+    auth = GatewayAuth(path)
+    auth.close()
+    assert (real / "gateway/auth/token").exists()
+    for boundary in ("gateway", "auth"):
+        root = tmp_path / boundary
+        root.mkdir()
+        target = tmp_path / (boundary + "-target")
+        target.mkdir()
+        gateway = root / "gateway"
+        if boundary == "gateway":
+            gateway.symlink_to(target, target_is_directory=True)
+        else:
+            gateway.mkdir()
+            (gateway / "auth").symlink_to(target, target_is_directory=True)
+        with pytest.raises(OSError, match="symlinks are not allowed"):
+            GatewayAuth(gateway / "auth")
+
+
 def test_auth_refuses_unsafe_directory_and_token(tmp_path: Path) -> None:
     path = tmp_path / "auth"
     path.mkdir(mode=0o755)
@@ -318,3 +427,14 @@ def test_auth_refuses_unsafe_directory_and_token(tmp_path: Path) -> None:
     (path / "token").symlink_to(tmp_path / "not-a-token")
     with pytest.raises(OSError):
         GatewayAuth(path)
+    with pytest.raises(OSError):
+        GatewayAuth(path, allow_corrupt=True)
+    (path / "token").unlink()
+    (path / "token").write_bytes(b"invalid")
+    os.chmod(path / "token", 0o644)
+    with pytest.raises(PermissionError):
+        GatewayAuth(path, allow_corrupt=True)
+    os.chmod(path / "token", 0o600)
+    os.link(path / "token", path / "another-link")
+    with pytest.raises(PermissionError):
+        GatewayAuth(path, allow_corrupt=True)

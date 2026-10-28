@@ -58,11 +58,12 @@ or computed P2 if retention pruned the pause log; an unpaused task returns
 
 ### GET /v1/health
 
-The examples read the gateway bearer token from its private file. A command-line
-header can be visible to local processes; keep the token out of logs and history.
+The examples pipe the gateway bearer token from its private file to curl, keeping
+it out of command-line arguments and shell history. Do not enable verbose curl
+output or log the header; same-user processes can still read the token file.
 
 ```bash
-curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" http://127.0.0.1:8401/v1/health
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/health
 ```
 
 ```json
@@ -83,7 +84,7 @@ The health check does not contact the model server.
 Runs one task in a session and returns its result.
 
 ```bash
-curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" -X POST http://127.0.0.1:8401/v1/agent/run \
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X POST http://127.0.0.1:8401/v1/agent/run \
   -H "Content-Type: application/json" \
   -d '{"query": "What is 6*7?", "session_id": "demo123"}'
 ```
@@ -119,7 +120,7 @@ field; see [Run results](run-results.md#where-results-appear).
 ### GET /v1/sessions
 
 ```bash
-curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" http://127.0.0.1:8401/v1/sessions
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- http://127.0.0.1:8401/v1/sessions
 ```
 
 ```json
@@ -137,7 +138,7 @@ curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" http:
 ### DELETE /v1/sessions/{session_id}
 
 ```bash
-curl -H "Authorization: Bearer $(< ~/.cache/localmelo/gateway/auth/token)" -X DELETE http://127.0.0.1:8401/v1/sessions/demo123
+{ printf 'Authorization: Bearer '; cat ~/.cache/localmelo/gateway/auth/token; printf '\n'; } | curl -H @- -X DELETE http://127.0.0.1:8401/v1/sessions/demo123
 ```
 
 The answer is HTTP 200 with `{"closed": "demo123"}`, or HTTP 404 with

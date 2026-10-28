@@ -1494,7 +1494,7 @@ def main() -> None:
             parser.error("gateway authentication requires a supported loopback host")
         if getattr(args, "gateway_login", False) and not sys.stdout.isatty():
             parser.exit(2, "melo: sign-in links are printed only to a terminal.\n")
-        auth = GatewayAuth()
+        auth = GatewayAuth(allow_corrupt=getattr(args, "gateway_rotate_token", False))
         try:
             if getattr(args, "gateway_login", False):
                 login_code = auth.issue_login(auth_port)
