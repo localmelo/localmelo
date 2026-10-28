@@ -12,6 +12,7 @@ from html.parser import HTMLParser
 from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlsplit
 
+import pytest
 from markdown_it import MarkdownIt
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -126,6 +127,65 @@ def safe_path(path: str) -> bool:
     )
 
 
+def check_fragment_mapping(
+    alias: str, mapping: str | dict[str, str], anchors: list[str], output: str
+) -> None:
+    """Check default same-ID routing or require explicit split destinations."""
+    prefix = "zh-CN/" if alias.startswith("docs/zh-CN/") else "en/"
+    if isinstance(mapping, str):
+        target = output if mapping == "same" else mapping
+        assert (
+            safe_path(target) and target.startswith(prefix) and target.endswith(".html")
+        ), alias
+        return
+    assert isinstance(mapping, dict), alias
+    required = set(anchors) | RETIRED_FRAGMENTS.get(alias, set())
+    missing = sorted(required - set(mapping))
+    assert (
+        not missing
+    ), f"{alias}: unmapped anchors {missing}; assign their destinations in docs/manifest.json"
+    extra = set(mapping) - set(anchors) - RETIRED_FRAGMENTS.get(alias, set())
+    assert not extra, f"{alias}: unexpected historical anchors {sorted(extra)}"
+    for fragment, destination in mapping.items():
+        target, sep, anchor = destination.partition("#")
+        assert sep and fragment and anchor == fragment, (alias, fragment, destination)
+        assert (
+            safe_path(target) and target.startswith(prefix) and target.endswith(".html")
+        ), alias
+
+
+def test_fragment_rules_accept_unsplit_new_anchors() -> None:
+    check_fragment_mapping(
+        "docs/en/updates.html", "same", ["old", "u-worker-history"], "en/updates.html"
+    )
+    check_fragment_mapping(
+        "docs/en/quickstart.html",
+        "en/start/quickstart.html",
+        ["old", "new"],
+        "en/quickstart.html",
+    )
+
+
+def test_fragment_rules_reject_unsafe_or_cross_language_targets() -> None:
+    for target in ("../escape.html", "zh-CN/updates.html", "en/updates.html#fragment"):
+        with pytest.raises(AssertionError):
+            check_fragment_mapping(
+                "docs/en/updates.html", target, ["anchor"], "en/updates.html"
+            )
+
+
+def test_fragment_rules_require_a_destination_for_new_split_anchors() -> None:
+    with pytest.raises(
+        AssertionError, match=r"docs/cli\.md.*worker-histories.*manifest"
+    ):
+        check_fragment_mapping(
+            "docs/cli.md",
+            {"old": "en/reference/cli.html#old"},
+            ["old", "worker-histories"],
+            "en/reference/cli.html",
+        )
+
+
 def test_manifest_schema_and_inventory() -> None:
     manifest = json.loads(MANIFEST.read_text())
     assert set(manifest) == {"version", "sections", "pages"}
@@ -174,20 +234,10 @@ def test_manifest_schema_and_inventory() -> None:
             assert safe_path(alias) and alias in tracked_docs()
             aliases.append(alias)
             expected, _ = inventory((ROOT / alias).read_text(), Path(alias).suffix)
-            assert set(page["fragments"][alias]) == set(
-                expected
-            ) | RETIRED_FRAGMENTS.get(alias, set()), alias
-            for fragment, destination in page["fragments"][alias].items():
-                target, sep, anchor = destination.partition("#")
-                assert sep and fragment and anchor == fragment, (
-                    alias,
-                    fragment,
-                    destination,
-                )
-                assert safe_path(target) and target.endswith(".html")
-                assert target.startswith(
-                    "zh-CN/" if alias.startswith("docs/zh-CN/") else "en/"
-                )
+            lang = "zh" if alias.startswith("docs/zh-CN/") else "en"
+            check_fragment_mapping(
+                alias, page["fragments"][alias], expected, page[f"{lang}_output"]
+            )
     assert len(ids) == len(set(ids))
     assert len(orders) == len(set(orders))
     assert len(outputs) == len(set(outputs))
@@ -229,8 +279,8 @@ def test_split_destinations_and_existing_language_pairs() -> None:
         "docs/zh-CN/STYLE.md",
     )
     assert (
-        pages["site-quickstart"]["fragments"]["docs/en/quickstart.html"]["json-output"]
-        == "en/start/quickstart.html#json-output"
+        pages["site-quickstart"]["fragments"]["docs/en/quickstart.html"]
+        == "en/start/quickstart.html"
     )
 
 
