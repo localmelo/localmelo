@@ -13,6 +13,7 @@ from localmelo.melo.contracts.approvals import (
     ApprovalDecision,
     denial_text,
 )
+from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
 from localmelo.melo.executor.builtins import builtin_names
 from localmelo.melo.executor.models import (
     ArtifactMeta,
@@ -53,6 +54,7 @@ class Executor:
         self.hippo = hippo
         self.checker = checker
         self._callables: dict[str, ToolCallable] = {}
+        self._process_free: set[str] = set()
         self._timeouts_ms: dict[str, float] = {}
         # The tools registered as requiring approval.
         self._marked_for_approval: set[str] = set()
@@ -82,6 +84,7 @@ class Executor:
         passes, so a call without *requires_approval* clears the mark.
         """
         self._callables[name] = fn
+        self._process_free.discard(name)
         if timeout_ms is not None:
             self._timeouts_ms[name] = timeout_ms
         else:
@@ -337,6 +340,16 @@ class Executor:
         deadline = asyncio.timeout(timeout_s)
         try:
             async with deadline:
+                capture = TOOL_ENTRY.get()
+                if (
+                    capture is not None
+                    and request.tool_name not in self._process_free
+                    and not _parameter_mismatch(fn, request.arguments)
+                ):
+                    await capture()
+                    task = asyncio.current_task()
+                    if task is not None and task.cancelling():
+                        raise asyncio.CancelledError()
                 output = await fn(**request.arguments)
         except TimeoutError as exc:
             duration = (time.perf_counter() - start) * 1000

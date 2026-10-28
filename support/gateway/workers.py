@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import builtins
+import contextvars
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -19,6 +20,8 @@ from localmelo.melo.contracts.providers import (
     BaseEmbeddingProvider,
     BaseLLMProvider,
 )
+from localmelo.melo.contracts.tool_capture import TOOL_ENTRY
+from localmelo.melo.executor.process_gate import PROCESS_RECORD
 from localmelo.melo.schema import Message, ToolDef
 from localmelo.support.config import Config
 from localmelo.support.gateway.chat_gate import (
@@ -30,6 +33,7 @@ from localmelo.support.gateway.chat_gate import (
 )
 from localmelo.support.gateway.park_card import build_park_card
 from localmelo.support.gateway.park_store import ParkStore
+from localmelo.support.gateway.process_identity import identity as process_identity
 from localmelo.support.gateway.recovery_store import RecoveryStore
 from localmelo.support.gateway.startup_recovery import StartupRecovery
 from localmelo.support.gateway.task_policy import (
@@ -60,6 +64,7 @@ from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 log = logging.getLogger(__name__)
 MAX_WORKERS = 4
+_CAPTURE_RETRY_SECONDS = 10.0
 
 
 class _WorkerLLM(GatedLLM):
@@ -992,6 +997,60 @@ class TaskWorkers:
             raise WorkspaceError("The task workspace has changed")
         return resolved
 
+    async def _capture_incomplete(self, task_id: str, execution_id: str) -> None:
+        """Do not admit arbitrary code without durable incomplete evidence."""
+        delay = 0.05
+        try:
+            async with asyncio.timeout(_CAPTURE_RETRY_SECONDS):
+                while True:
+                    try:
+                        async with self._lock:
+                            if self._closed or task_id in self._stopping:
+                                raise asyncio.CancelledError()
+                            generation, previous = await self.tasks.park_identity(
+                                task_id
+                            )
+                            await RecoveryStore(self.store).mark_capture_incomplete(
+                                task_id,
+                                execution_id=execution_id,
+                                expected_generation=generation,
+                                expected_operation_id=previous,
+                            )
+                            if self._closed or task_id in self._stopping:
+                                raise asyncio.CancelledError()
+                        return
+                    except Exception:
+                        await asyncio.sleep(delay)
+                        delay = min(delay * 2, 1.0)
+        except TimeoutError as exc:
+            raise RuntimeError(
+                "execution evidence could not be recorded; the call was not run; task store unavailable"
+            ) from exc
+
+    async def _capture_process(self, task_id: str, execution_id: str, pid: int) -> None:
+        try:
+            pgid, leader, boot, birth = process_identity(pid)
+            async with self._lock:
+                if self._closed or task_id in self._stopping:
+                    raise asyncio.CancelledError()
+                generation, previous = await self.tasks.park_identity(task_id)
+                await RecoveryStore(self.store).record_captured_process(
+                    task_id,
+                    execution_id=execution_id,
+                    pgid=pgid,
+                    leader_pid=leader,
+                    boot_id=boot,
+                    start_token=birth,
+                    expected_generation=generation,
+                    expected_operation_id=previous,
+                )
+                if self._closed or task_id in self._stopping:
+                    raise asyncio.CancelledError()
+        except Exception:
+            # A child may only pass its gate without a process record once the
+            # execution is durably incomplete, including on unsupported systems.
+            await self._capture_incomplete(task_id, execution_id)
+
     async def _run(self, task_id: str) -> None:
         agent = None
         runner = None
@@ -1003,6 +1062,8 @@ class TaskWorkers:
         launch_committed = execution_id is not None
         turn_started = False
         post_fence_failure = False
+        tool_token: contextvars.Token[Any] | None = None
+        process_token: contextvars.Token[Any] | None = None
         try:
             async with self._lock:
                 record = await self.tasks.get_task(task_id)
@@ -1041,6 +1102,7 @@ class TaskWorkers:
                             execution_id=execution_id,
                             expected_generation=generation,
                             expected_operation_id=previous,
+                            _capture=True,
                         )
                         if not launch.acquired:
                             raise TaskStoreError(
@@ -1067,6 +1129,18 @@ class TaskWorkers:
                     ):
                         deferred = True
                         return
+            if execution_id is None:
+                execution_id = uuid.uuid4().hex
+            capture_execution = execution_id
+
+            async def incomplete() -> None:
+                await self._capture_incomplete(task_id, capture_execution)
+
+            async def capture(pid: int) -> None:
+                await self._capture_process(task_id, capture_execution, pid)
+
+            tool_token = TOOL_ENTRY.set(incomplete)
+            process_token = PROCESS_RECORD.set(capture)
             client = self.gate.client(task_id)
             agent = await build_session_agent(
                 cfg=self.settings(),
@@ -1132,7 +1206,11 @@ class TaskWorkers:
                     else:
                         if not launch_committed or current.state != "running":
                             await self.tasks.change(
-                                task_id, state="running", actor="scheduler"
+                                task_id,
+                                state="running",
+                                actor="scheduler",
+                                _capture_execution=execution_id,
+                                _capture_existing=launch_committed,
                             )
                         self.gate.update_task(task_id, phase="running")
                         self.gate.turn_start(task_id)
@@ -1143,7 +1221,7 @@ class TaskWorkers:
                             approval=policy,
                             **(
                                 {"client_request_id": execution_id}
-                                if execution_id
+                                if execution_id and launch_committed
                                 else {}
                             ),
                         )
@@ -1180,6 +1258,10 @@ class TaskWorkers:
             post_fence_failure = launch_committed and not turn_started
             log.exception("Worker %s failed", task_id)
         finally:
+            if process_token is not None:
+                PROCESS_RECORD.reset(process_token)
+            if tool_token is not None:
+                TOOL_ENTRY.reset(tool_token)
             park = task_id in self._park_winners and not (
                 self._closed
                 or task_id in self._stopping

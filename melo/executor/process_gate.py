@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import json
 import os
 import sys
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
+
+PROCESS_RECORD: contextvars.ContextVar[Callable[[int], Awaitable[None]] | None] = (
+    contextvars.ContextVar("PROCESS_RECORD", default=None)
+)
 
 # This trusted bootstrap performs no task action before the parent releases it.
 _BOOTSTRAP = """import json,os,sys

@@ -109,6 +109,8 @@ def register_builtins(
             timeout_ms=timeout_ms,
             requires_approval=tier_requires_approval(tier),
         )
+        if tool_def.name in {"file_read", "file_write"}:
+            executor._process_free.add(tool_def.name)
 
 
 __all__ = [

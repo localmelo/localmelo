@@ -873,11 +873,22 @@ class TaskStore:
         expected_generation: int | None = None,
         expected_operation_id: str | None = None,
         operation_id: str | None = None,
+        _capture_execution: str | None = None,
+        _capture_existing: bool = False,
     ) -> TaskRecord:
         """Commit priority and state together, including P0 demotions and audit rows.
 
         A failure reason is stored in wait_reason for a failed task.
         """
+        if _capture_existing and _capture_execution is None:
+            raise ValueError("existing capture requires an execution")
+        if _capture_execution is not None and (
+            not isinstance(_capture_execution, str)
+            or not _capture_execution.strip()
+            or state != "running"
+            or actor != "scheduler"
+        ):
+            raise ValueError("capture execution requires a scheduler start")
         choice = priority.strip().lower() if isinstance(priority, str) else priority
         if (
             isinstance(choice, str)
@@ -977,10 +988,40 @@ class TaskStore:
                     "first start requires the recovery launch fence"
                 )
             if state == "running":
-                await conn.execute(
-                    "UPDATE recovery_capture SET active = 0, complete = 0 WHERE task_id = ? AND active = 1",
-                    (task_id,),
-                )
+                if _capture_execution is not None and (
+                    current.state != "queued"
+                    or current.level >= 5
+                    or await _first(
+                        conn,
+                        "SELECT 1 FROM recovery_operations WHERE task_id = ? AND kind = 'recovery' AND phase = 'prepared'",
+                        (task_id,),
+                    )
+                    or await _first(
+                        conn,
+                        "SELECT 1 FROM park_priority WHERE task_id = ? AND pause_pending = 1",
+                        (task_id,),
+                    )
+                ):
+                    raise TaskConflictError(
+                        "task is not eligible for an ordinary start"
+                    )
+                if _capture_existing:
+                    if not await _first(
+                        conn,
+                        "SELECT 1 FROM recovery_capture WHERE task_id = ? AND execution_id = ? AND active = 1",
+                        (task_id, _capture_execution),
+                    ):
+                        raise TaskConflictError("launch capture is no longer active")
+                else:
+                    await conn.execute(
+                        "UPDATE recovery_capture SET active = 0, complete = 0 WHERE task_id = ? AND active = 1",
+                        (task_id,),
+                    )
+                    if _capture_execution is not None:
+                        await conn.execute(
+                            "INSERT INTO recovery_capture VALUES (?, ?, 0, 0, 1)",
+                            (task_id, _capture_execution),
+                        )
             if state == "parked" and await _first(
                 conn,
                 "SELECT 1 FROM park_priority WHERE task_id = ? AND pause_pending = 1",

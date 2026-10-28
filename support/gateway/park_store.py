@@ -434,6 +434,26 @@ class ParkStore:
                 )
             except TaskConflictError as exc:
                 raise ParkStoreError(str(exc)) from exc
+            if target in {"held", "running"} and task_state == target:
+                # Carry the current launch receipt through its own hold and
+                # resume only. A superseded receipt must never be revived.
+                await conn.execute(
+                    "UPDATE recovery_operations SET generation = ?, pending_operation_id = ?, task_state = ? "
+                    "WHERE task_id = ? AND kind = 'start' AND phase = 'committed' "
+                    "AND generation IS ? AND pending_operation_id IS ? AND task_state = ? "
+                    "AND json_extract(request, '$.execution_id') IN "
+                    "(SELECT execution_id FROM recovery_capture WHERE task_id = ? AND active = 1)",
+                    (
+                        new_generation,
+                        pending_id,
+                        task_state,
+                        task_id,
+                        expected_generation,
+                        expected_operation_id,
+                        state,
+                        task_id,
+                    ),
+                )
             if target == "interrupted" and snapshot is None:
                 await conn.execute(
                     "UPDATE park_priority SET level = 2, source = 'computed', reason = '', "
