@@ -186,6 +186,51 @@ def test_fragment_rules_require_a_destination_for_new_split_anchors() -> None:
         )
 
 
+def test_historical_fragments_survive_page_moves() -> None:
+    baseline = json.loads((ROOT / "tests/docs/legacy_fragments.json").read_text())
+    pages = json.loads(MANIFEST.read_text())["pages"]
+    for source, mapping in baseline.items():
+        page = next(page for page in pages if source in page["aliases"])
+        path = ROOT / source
+        anchors, _ = inventory(path.read_text(), path.suffix)
+        if page["en_source"] == source:
+            assert set(mapping) - RETIRED_FRAGMENTS.get(source, set()) <= set(
+                anchors
+            ), source
+            continue
+        assert set(mapping) <= set(
+            anchors
+        ), f"{source}: missing historical stub anchors"
+        tokens = MD.parse(path.read_text())
+        heading_links = {}
+        heading_ids = iter(anchors)
+        for index, token in enumerate(tokens):
+            if token.type != "heading_open":
+                continue
+            anchor = next(heading_ids)
+            children = tokens[index + 1].children or []
+            links = [
+                child.attrGet("href") for child in children if child.type == "link_open"
+            ]
+            if links:
+                heading_links[anchor] = links[0]
+        for anchor, destination in mapping.items():
+            href = heading_links.get(anchor)
+            assert isinstance(href, str), f"{source}#{anchor}: no visible link"
+            parsed = urlsplit(href)
+            target, _, target_anchor = destination.partition("#")
+            assert (path.parent / unquote(parsed.path)).resolve() == (
+                ROOT / target
+            ).resolve(), (source, anchor, href)
+            assert unquote(parsed.fragment) == target_anchor, (source, anchor, href)
+            target_path = ROOT / target
+            assert target_path.is_file(), f"{source}#{anchor}: missing {target}"
+            target_ids, _ = inventory(target_path.read_text(), target_path.suffix)
+            assert (
+                target_anchor in target_ids
+            ), f"{source}#{anchor}: missing {destination}"
+
+
 def test_manifest_schema_and_inventory() -> None:
     manifest = json.loads(MANIFEST.read_text())
     assert set(manifest) == {"version", "sections", "pages"}
