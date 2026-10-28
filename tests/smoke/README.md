@@ -3,8 +3,9 @@
 This directory holds two kinds of smoke checks:
 
 1. **Pytest-discoverable smoke** — `test_*.py` files (chat round-trip, thinking
-   split, logging dispatch, normalized token metrics). Auto-skipped when the
-   local backend is unreachable.
+   split, logging dispatch, normalized token metrics). The real-backend chat
+   tests are opt-in and skip when the local backend is unreachable; the rest
+   are offline tests of the smoke tools.
 2. **CLI smoke / benchmark** — `core_loop_test.py` is a data-driven script that
    seeds memories, runs scenario queries against a real chat + embedding
    backend, persists into SQLite, and emits per-backend evidence JSON plus a
@@ -26,20 +27,26 @@ python -m pytest tests/smoke -q
 
 Collects:
 
-- `test_backend_smoke.py` — chat round-trip for ollama and mlc. When the
-  file is collected, it opens a TCP connection to each backend's
-  `health_url` (`127.0.0.1:11434` and `127.0.0.1:8400`, 0.5 s timeout). A
-  test sends a real chat request to the server that answers, and is skipped
-  for the one that does not.
+- `test_backend_smoke.py` — chat round-trip for ollama and mlc. These tests
+  are **skipped unless `LOCALMELO_SMOKE=1` is set**, and collecting the file
+  opens no socket. With the switch on, a test connects to its backend's
+  `health_url` (`127.0.0.1:11434` and `127.0.0.1:8400`, 0.5 s timeout) when
+  it runs, sends a real chat request to the server that answers, and is
+  skipped for the one that does not.
 - `test_thinking_split.py` — pure parsing tests, no network.
 - `test_smoke_normalized.py` — aggregation tests, no network.
 - `test_logging_llm_dispatch.py` — provider dispatch tests, no network.
 
-None of these touch online services, but a server listening on either port
-gets a chat request. For a run that contacts no server, add
-`--ignore=tests/smoke/test_backend_smoke.py`; `-m 'not smoke_backend'`
-skips the chat requests but still opens the two TCP connections.
-`core_loop_test.py` is not collected.
+A plain run touches no online service and sends no chat request. To run the
+real-backend tests with your own servers:
+
+```bash
+LOCALMELO_SMOKE=1 python -m pytest -m smoke_backend tests/smoke -q
+```
+
+`-m 'not smoke_backend'` deselects them. `--ignore=tests/smoke/test_backend_smoke.py`
+still works, but a plain run no longer needs it. `core_loop_test.py` is not
+collected.
 
 ## CLI smoke — `core_loop_test.py`
 

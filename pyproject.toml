@@ -103,5 +103,5 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 cache_dir = ".cache/pytest"
 markers = [
-    "smoke_backend: real-backend smoke tests; skipped automatically when the backend is not reachable",
+    "smoke_backend: real-backend smoke tests; opt-in with LOCALMELO_SMOKE=1, and skipped when the backend is not reachable",
 ]
