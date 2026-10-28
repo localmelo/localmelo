@@ -15,8 +15,10 @@ import aiosqlite
 
 from localmelo.melo.memory._sqlite import (
     THINKING_RETENTION_DAYS,
+    checkpoint_wal,
     create_private_file,
     prepare_connection,
+    secure_deletes,
 )
 from localmelo.melo.memory.history import History
 from localmelo.melo.schema import (
@@ -541,6 +543,51 @@ class SqliteHistory(History):
         async with conn.execute("SELECT COUNT(*) FROM steps") as cur:
             row = await cur.fetchone()
         return int(row[0]) if row else 0
+
+    async def forget(self, task_id: str) -> None:
+        """Delete a task's rows from ``tasks``, ``steps`` and ``llm_calls``.
+
+        The deletes run in one ``BEGIN IMMEDIATE`` transaction under the
+        write lock, so another writer waits and a failure or a cancellation
+        leaves no row half-deleted. An unknown *task_id* deletes nothing.
+        The transaction overwrites what it frees (``secure_delete``), and
+        the commit is followed by a checkpoint that truncates the WAL, so
+        the text is not left in the database or its ``-wal`` file. A
+        checkpoint that another connection makes impossible is skipped
+        with a WARNING.
+        """
+        await self._forget(task_id)
+
+    async def forget_all(self) -> None:
+        """Delete every row of ``tasks``, ``steps`` and ``llm_calls``.
+
+        As :meth:`forget`, in one transaction; the database file stays.
+        """
+        await self._forget(None)
+
+    async def _forget(self, task_id: str | None) -> None:
+        conn = await self._ensure_ready()
+        where = "" if task_id is None else " WHERE task_id = ?"
+        params: tuple[Any, ...] = () if task_id is None else (task_id,)
+        async with self._write_lock:
+            async with secure_deletes(conn):
+                try:
+                    await conn.execute("BEGIN IMMEDIATE")
+                    # steps references tasks, so it goes before the task rows.
+                    for table in ("steps", "llm_calls", "tasks"):
+                        await conn.execute(f"DELETE FROM {table}{where}", params)
+                    await conn.commit()
+                except BaseException:
+                    with contextlib.suppress(Exception):
+                        await conn.rollback()
+                    raise
+            if not await checkpoint_wal(conn):
+                logger.warning(
+                    "Forgot %s but could not truncate the WAL of %s: "
+                    "another connection holds it",
+                    "every task" if task_id is None else f"the rows of {task_id}",
+                    self._db_path,
+                )
 
     async def aclose(self) -> None:
         """Close the underlying aiosqlite connection."""
