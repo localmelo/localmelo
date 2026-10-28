@@ -1,4 +1,4 @@
-"""The scheduler's task store: component version 3 of the gateway's file.
+"""The scheduler's task store: component version 4 of the gateway's file.
 
 The eight tables of design 4.2 arrive as the ``scheduler`` component of the
 gateway's ``sessions.db``, never of the CLI's file. :meth:`TaskStore.open`
@@ -38,7 +38,7 @@ from localmelo.support.scheduler.model import TERMINAL_PHASES, Origin
 from localmelo.support.sessions.store import SessionStore, SessionStoreError
 
 COMPONENT: Final = "scheduler"
-SCHEDULER_VERSION: Final = 3
+SCHEDULER_VERSION: Final = 4
 
 TASK_ORIGINS: Final = frozenset(get_args(Origin))
 _TERMINAL_STATES: Final = TERMINAL_PHASES
@@ -121,6 +121,11 @@ _RECOVERY_SCHEMA: Final = (
   execution_id TEXT NOT NULL, pgid INTEGER NOT NULL, leader_pid INTEGER NOT NULL,
   boot_id TEXT NOT NULL, start_token TEXT NOT NULL,
   PRIMARY KEY (task_id, execution_id, pgid, leader_pid, boot_id, start_token))""",
+    """CREATE TABLE IF NOT EXISTS recovery_capture (
+  task_id TEXT NOT NULL REFERENCES tasks(task_id) ON DELETE CASCADE,
+  execution_id TEXT NOT NULL, complete INTEGER NOT NULL, trusted INTEGER NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1, PRIMARY KEY (task_id, execution_id))""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS recovery_one_capture ON recovery_capture(task_id) WHERE active = 1",
 )
 
 _TASK_COLUMNS: Final = (
@@ -343,7 +348,7 @@ class TaskStore:
                     "INSERT INTO schema_components (name, version) VALUES (?, ?)",
                     (COMPONENT, SCHEDULER_VERSION),
                 )
-            elif current in (1, 2):
+            elif current in (1, 2, 3):
                 if current == 1:
                     await conn.execute(_SNAPSHOT_SCHEMA)
                     await self._migrate_snapshots(conn)
@@ -970,6 +975,11 @@ class TaskStore:
             ):
                 raise TaskConflictError(
                     "first start requires the recovery launch fence"
+                )
+            if state == "running":
+                await conn.execute(
+                    "UPDATE recovery_capture SET active = 0, complete = 0 WHERE task_id = ? AND active = 1",
+                    (task_id,),
                 )
             if state == "parked" and await _first(
                 conn,
