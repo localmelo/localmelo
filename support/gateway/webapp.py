@@ -14,6 +14,7 @@ from localmelo.melo.contracts.providers import ProviderError
 from localmelo.support import config
 from localmelo.support.config import Config, SchedulerConfig
 from localmelo.support.gateway.chat_gate import call_log_dir
+from localmelo.support.gateway.guard import app_instance
 from localmelo.support.gateway.machine_monitor import read_pmset
 from localmelo.support.gateway.playground import LockHeldError, SmokePlayground
 
@@ -94,9 +95,19 @@ def mount(
 
     app.mount("/assets", StaticFiles(directory=_STATIC), name="workspace-assets")
 
+    # The header identifies this app-started instance; it is not authentication.
+    instance = app_instance()
+
     @app.get("/", response_class=HTMLResponse)
-    async def chat_ui() -> str:
-        return (_STATIC / "index.html").read_text(encoding="utf-8")
+    async def chat_ui() -> HTMLResponse:
+        headers = (
+            {"X-LocalMelo-Instance": instance, "Cache-Control": "no-store"}
+            if instance
+            else {}
+        )
+        return HTMLResponse(
+            (_STATIC / "index.html").read_text(encoding="utf-8"), headers=headers
+        )
 
     if not enable_playground:
         return

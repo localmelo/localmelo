@@ -58,6 +58,11 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   inbox, but the read end is close-on-exec before tools start. Python, shell
   and MCP subprocesses get no copy, so a tool cannot write the channel; use it
   for untrusted tasks ([#NN]).
+- An unsigned arm64 macOS development bundle wraps the local web console in a
+  native window and menu-bar host. It owns its gateway child, checks the
+  instance before sending any login code, binds the code to the launch instance
+  and checks page responses, re-signs in after a token rotation, and offers
+  "Sign In Again"; the check is not authentication ([#167]).
 - Direct workers can read an explicit append-only inbox at planning boundaries,
   with per-line acceptance events and redacted saved history. An inbox inside the
   workspace is refused as `setup_error` before any model call; a slow event
@@ -88,7 +93,6 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
   and reconciles execution-linked terminal results. Recovered tasks with
   uncertain history remain fenced until controlled recovery is wired; Stop is
   available. Ordinary task creation does not yet establish first-start proof. [#152]
-
 - Scheduler component v3 adds dormant recovery provenance, guarded durable
   intents and receipts, and process identity records. Interrupted recovery
   retains pending pause intent; explicit legacy adoption records orphan-risk
@@ -1054,3 +1058,4 @@ earlier milestones.
 [#164]: https://github.com/localmelo/localmelo/pull/164
 [#165]: https://github.com/localmelo/localmelo/pull/165
 [#166]: https://github.com/localmelo/localmelo/pull/166
+[#167]: https://github.com/localmelo/localmelo/pull/167
