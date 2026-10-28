@@ -171,6 +171,7 @@ class AgentOptions:
       modes.
     """
 
+    fixed_prefix: bool = False
     context_window: int | None = None
     output_reserve: int | None = None
     safety_margin: int | None = None
@@ -209,6 +210,8 @@ class AgentOptions:
     mode: ToolMode = "python"
 
     def __post_init__(self) -> None:
+        if not isinstance(self.fixed_prefix, bool):
+            raise ValueError("fixed_prefix must be a bool")
         budget = (self.context_window, self.output_reserve, self.safety_margin)
         if any(value is not None for value in budget):
             if not all(_is_positive_int(value) for value in budget):
