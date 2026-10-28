@@ -78,7 +78,7 @@
           <li>无头工作进程支持-4：worker 契约（#107 W2）；</li>
           <li>网关安全-1：访问令牌（<a href="https://github.com/localmelo/localmelo/issues/29">#29</a> P11-P12）；</li>
           <li>终端界面-2：附件、shell 命令和流式输出（U2c、U4）；</li>
-          <li>记忆事实-2：中文和否定事实；</li>
+          <li>记忆事实-2：识别否定含义的更新、跨会话链接与 worker 记忆（提取工作已开始）；</li>
           <li>无头工作进程支持-5：任务 API 的 workers 和 Claude Code（#107 W3-W4）；</li>
           <li>文档-1：在网站上提供有条理、可读、双语的文档（<a href="https://github.com/localmelo/localmelo/issues/117">#117</a>）；</li>
           <li>之后：更多调度器阶段、睡眠流水线（<a href="https://github.com/localmelo/localmelo/issues/14">#14</a>）和 Track 6 的其余部分（<a href="https://github.com/localmelo/localmelo/issues/29">#29</a>）。</li>
@@ -89,6 +89,12 @@
       <section class="section" id="updates">
         <h2>更新</h2>
         <p><a href="https://github.com/localmelo/localmelo/blob/main/CHANGELOG.md">更新日志（英文）</a>详细列出了 2026-10-22 以来的每一项变化。</p>
+
+        <article class="update-entry" id="u-facts2-extraction">
+          <h3>否定和中文笔记</h3>
+          <p class="update-date">尚未发布</p>
+          <p>启发式笔记可原样保留部分英文否定句及中文居住、取消陈述；否定句来源匹配和事件时间冲突的处理更保守。覆盖范围有限，写入策略尚未识别否定含义。</p>
+        </article>
 
         <article class="update-entry" id="u-2026-10-28-context-accounting">
           <h3>可选的上下文统计</h3>

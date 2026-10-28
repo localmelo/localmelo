@@ -672,7 +672,7 @@ _EN_NEGATIVE_ASSERTION = re.compile(
     re.IGNORECASE,
 )
 _UNCERTAIN_ASSERTION = re.compile(
-    r"\b(?:if|unless|whether|may|might|could|not only)\b|如果|假如|是否|不但|不仅|可能|也许",
+    r"\b(?:if|unless|whether|may|might|could|not only|not\s+cancel+ed)\b|如果|假如|是否|不但|不仅|可能|也许",
     re.IGNORECASE,
 )
 

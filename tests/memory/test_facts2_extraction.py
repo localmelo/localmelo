@@ -35,6 +35,7 @@ def test_explicit_assertions_keep_original_polarity(text: str) -> None:
         "The meeting may not happen on 4/9.",
         "If the meeting is cancelled on 4/9, call me.",
         "The room is not only large but also quiet at 9:00.",
+        "The meeting was not cancelled on 4/9.",
         "会议是否取消？",
         "如果会议取消，我们就去上海。",
         "小李不但聪明而且努力。",

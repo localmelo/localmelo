@@ -44,9 +44,12 @@ from its visible text: every bullet, numbered item or table row, and every
 sentence of a plain paragraph, that carries a strong key (see
 [Long-term memory](../reference/memory.md#long-term-memory)) becomes one item, in text order, up to
 12 per reply. Questions go to `open`; plans and options go to `plan` or
-are left out, and negated or cancelled statements are not promoted as
-positive facts. These checks are heuristic, not a semantic verifier. Lines
-whose only strong key is a CJK run are not extracted as factual lines. The
+are left out. A small set of explicit English negative and cancellation
+statements and Chinese residence/cancellation forms can be kept verbatim,
+without dropping the negation; other forms may be missed. The rules are
+heuristic, not a semantic verifier. The existing admission policy can still
+ignore short facts or treat similar assertions as duplicates; polarity-aware
+updates are not yet implemented. The
 rendered note keeps its 1,200-character budget, so it may show fewer than it
 stores; the 12 items are what long-term memory offers. An explicit `<note>`
 may also list up to 12 `found` items. A reply that only reports the agent's

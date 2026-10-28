@@ -58,8 +58,12 @@ and the rest of the same task's results. Only the task's last 200 records are
 kept, and another task's records are never used. A record matches when it
 shares a strong key or at least two distinctive non-stopwords of four or more
 characters. The uniquely best score wins; equal top scores cite nothing.
-Each matching typed key adds to the score, and conflicting dates, years when
-both are present, currencies or phone numbers reject a record. Amounts retain
+Each matching typed key adds to the score; conflicting dates, years when
+both are present, currencies, phone numbers or event times reject a record.
+For JSON records, time comparison uses body, text, notes, start and end, not
+message timestamps. A negative item must appear in full in the record (apart
+from final punctuation), or it is left unsourced; paraphrases can be missed.
+Other matching remains heuristic and is not verified evidence. Amounts retain
 their unit or currency. A strong key is a date, a time with a colon or am/pm,
 an amount with a currency or unit (or an amount field), a phone number, an
 identifier of three or more characters containing a digit, a number of three
