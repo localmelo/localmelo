@@ -235,8 +235,13 @@ async def test_settings_module_is_served_as_javascript(
 def test_quickstart_describes_available_workspace_controls() -> None:
     quickstart = Path(__file__).parents[2] / "docs" / "quickstart.md"
     text = quickstart.read_text(encoding="utf-8")
-    assert "Approval cards, connection settings and the session details drawer are" in text
-    assert "The approval cards and the settings dialog arrive in a later update" not in text
+    assert (
+        "Approval cards, connection settings and the session details drawer are" in text
+    )
+    assert (
+        "The approval cards and the settings dialog arrive in a later update"
+        not in text
+    )
 
 
 async def test_theme_init_is_served_as_javascript(client: httpx.AsyncClient) -> None:
