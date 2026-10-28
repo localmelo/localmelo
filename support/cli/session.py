@@ -34,7 +34,7 @@ from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import Approvals, Mode, TerminalApprover
 from localmelo.support.cli.output import Out
-from localmelo.support.cli.render import EXPAND_LINES, TurnRenderer
+from localmelo.support.cli.render import EXPAND_LINES, ToolOutput, TurnRenderer
 from localmelo.support.cli.text import expand_tabs, wrap_cells
 from localmelo.support.cli.theme import in_symbols
 from localmelo.support.sessions.display import (
@@ -464,6 +464,7 @@ class CliSession:
             self.out.print(_line("✗ No tool calls yet.", style="error"))
             return
         latest_turn = calls[-1].ref.split(".", 1)[0]
+        call: ToolOutput | None
         argument = arguments.strip()
         if not argument:
             call = calls[-1]
