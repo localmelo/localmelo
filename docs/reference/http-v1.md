@@ -47,14 +47,39 @@ cause `shutdown`.
 S3a.2 task workers use that same gate for model and embedding calls, with
 memory off and gateway tools (no `shell_exec`). Up to four workers can be
 resident; a paused running worker can still occupy a slot. Task rows survive
-restart, but startup marks surviving nonterminal tasks failed with the reason
-`gateway restarted; recovery arrives in S3b`. Full recovery, deadlines and worker
+restart; startup interrupts uncertain work and preserves proved-never-started
+queued tasks, with Stop available while ordinary creation remains unproved.
+Full recovery, deadlines and worker
 accounting are deferred. Workspace validation also runs before a worker starts
 or resumes; a no-longer-valid folder fails the task rather than running it.
 Pause waits for the next model call: running tools finish, and an answered
 pending approval waits until resume. Resume restores the priority before pause,
 or computed P2 if retention pruned the pause log; an unpaused task returns
 409 `not_paused`. Task PATCH rejects `first` (400); it is deferred to S6b.
+
+### Legacy playground
+
+The internal `/v1/playground/` routes are disabled by default (404), and their
+manager is not started. Opt in with `melo --serve --enable-playground`;
+authentication and Host/Origin checks still apply. Discovery and sessions use
+the saved local chat backend and model, not request overrides. These routes
+include:
+
+- `GET /v1/playground/sessions` for summaries;
+- `GET /v1/playground/session/{id}` for a transcript;
+- `POST /v1/playground/session/{id}/cancel` to cancel a chat;
+- `POST /v1/playground/session/{id}/level` with `{"level": 1..4}` to set a level;
+- `POST /v1/playground/presence` with `{"session_id": ...}` for a typing heartbeat.
+
+The separate `/v1/agent/` API requires authentication too, but its calls do not
+pass through the playground and console's shared scheduler gate.
+
+For development, this starts the authenticated gateway with the playground
+enabled, using its saved configuration and configured loopback address:
+
+```bash
+uv run python -m localmelo.support.gateway._test_webapp
+```
 
 ### GET /v1/health
 

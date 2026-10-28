@@ -75,6 +75,12 @@ from localmelo.melo.schema import (
     decode_base64,
     split_thinking,
 )
+from localmelo.support.sessions.attachments import (
+    TextAttachment,
+    compose_user_text,
+    decode_attachments,
+    encode_attachments,
+)
 from localmelo.support.sessions.display import home_label
 from localmelo.support.sessions.submissions import (
     WITHDRAWN_ERROR,
@@ -123,7 +129,7 @@ MAX_WITHDRAWN_PER_SCOPE: Final = 1_000
 # Events per append_events transaction (the runner's writer batches).
 WRITER_BATCH_MAX: Final = 200
 # The version of the tables below, in PRAGMA user_version.
-SCHEMA_VERSION: Final = 1
+SCHEMA_VERSION: Final = 2
 
 # The statuses a RunResult can have (docs/run-results.md, "Statuses").
 RUN_STATUSES: Final = frozenset(
@@ -228,6 +234,7 @@ _SCHEMA: Final = (
     run_id      TEXT NOT NULL DEFAULT '',
     user_text   TEXT NOT NULL,
     typed_text  TEXT NOT NULL DEFAULT '',
+    attachments TEXT,
     status      TEXT NOT NULL DEFAULT 'running',
     cause       TEXT NOT NULL DEFAULT '',
     answer      TEXT NOT NULL DEFAULT '',
@@ -352,6 +359,22 @@ class TurnInfo:
     finished_at: float | None
     client_request_id: str | None
     typed_text: str
+    attachments: tuple[TextAttachment, ...] | None = None
+
+
+def check_attachment_submission(
+    info: SubmissionInfo | None,
+    attachments: Sequence[TextAttachment],
+    typed_text: str | None,
+) -> None:
+    """Disambiguate equal composed messages with different structured snapshots."""
+    if info is None or info.turn is None or info.turn.attachments is None:
+        return
+    saved = info.turn
+    if saved.attachments != tuple(attachments) or (
+        attachments and saved.typed_text != typed_text
+    ):
+        raise SubmissionConflict(info)
 
 
 @dataclass(frozen=True)
@@ -666,7 +689,7 @@ _TURN_COLUMNS: Final = (
     "t.id, t.session_id, t.turn, t.run_id, t.user_text, t.status, t.cause, "
     "t.answer, t.result, t.holder, t.undone, t.started_at, t.finished_at, "
     "(SELECT a.client_request_id FROM submissions a WHERE a.session_id = t.session_id "
-    "AND a.turn = t.turn AND a.state = 'accepted'), t.typed_text"
+    "AND a.turn = t.turn AND a.state = 'accepted'), t.typed_text, t.attachments"
 )
 _SUBMISSION_COLUMNS: Final = (
     "u.client_request_id, u.scope, u.state, u.session_id, u.text_sha256, u.error, "
@@ -691,6 +714,7 @@ def _turn_info(row: Sequence[Any]) -> TurnInfo:
         finished_at=row[12],
         client_request_id=row[13],
         typed_text=row[14],
+        attachments=decode_attachments(row[15]),
     )
 
 
@@ -912,6 +936,12 @@ class SessionStore:
         if new_file:
             self._stop_if_closed()
             await self._create_schema(conn)
+        else:
+            async with self._transaction(conn, "migrate"):
+                version = await self._user_version(conn)
+                if version == 1:
+                    await conn.execute("ALTER TABLE turns ADD COLUMN attachments TEXT")
+                    await conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         # 7. Retention (T-2) and 8. recovery (T-3), before anything serves.
         self._stop_if_closed()
         await self._retain(conn)
@@ -1779,6 +1809,8 @@ class SessionStore:
         client_request_id: str | None = None,
         new_session: NewSession | None = None,
         create_scope: bool = False,
+        attachments: Sequence[TextAttachment] = (),
+        typed_text: str | None = None,
     ) -> TurnInfo:
         """Start a turn of *user_text* under *holder*, in one transaction (T-5).
 
@@ -1809,7 +1841,17 @@ class SessionStore:
             raise ValueError("holder must be a non-empty str")
         kind = None if new_session is None else _check_kind(new_session.kind)
         meta_text = None if new_session is None else _meta_text(new_session.meta)
-        typed = title if isinstance(title, str) and title.strip() else ""
+        attachment_data = encode_attachments(attachments)
+        if attachments and (
+            typed_text is None
+            or compose_user_text(typed_text, attachments) != user_text
+        ):
+            raise ValueError("attachment snapshots must match the composed user text")
+        typed = (
+            typed_text
+            if typed_text is not None
+            else (title if isinstance(title, str) and title.strip() else "")
+        )
         _encodable(typed, "title")
         async with self._lock:
             conn = await self._ready()
@@ -1825,6 +1867,7 @@ class SessionStore:
                         None if new_session is not None or create_scope else session_id
                     )
                     found = await self._submission(conn, lookup, client_request_id)
+                    check_attachment_submission(found, attachments, typed_text)
                     check_submission(found, user_text)
                 # 2. The session.
                 if new_session is not None:
@@ -1876,8 +1919,17 @@ class SessionStore:
                 turn_id = uuid.uuid4().hex
                 await conn.execute(
                     "INSERT INTO turns (session_id, turn, id, user_text, typed_text, "
-                    "holder, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (session_id, number, turn_id, user_text, typed, holder, now),
+                    "attachments, holder, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        session_id,
+                        number,
+                        turn_id,
+                        user_text,
+                        typed,
+                        attachment_data,
+                        holder,
+                        now,
+                    ),
                 )
                 # 6. The lease, and 7. the first title.
                 new_title = None

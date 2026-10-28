@@ -281,6 +281,20 @@ These options apply to `melo` without a task.
   `window` can replay the checkpoint's retained, redacted thinking. The
   current process's mode wins over the mode recorded on old turns. Neither
   path reconstructs the RAM-only note store. See [Resume](../guides/sessions.md#resume).
+- Text attachments in the interactive UI: `/attach PATH` stages one file
+  (quote paths with spaces), `/attachments` lists staged files, and `/detach N`
+  or `/detach all` removes them. Explicit selection from `@` file completion
+  stages a file; typed `@file` prose alone does not. Workspace-only regular
+  UTF-8 text, no symlinks, traversal, URLs, recognized secret files, binary or
+  images; sanitized names are at most 200 characters. Hardlinks can refer to
+  files outside the workspace; this is not a sandbox. Up to 8 files, 256 KiB
+  each and 512 KiB total in original bytes,
+  subject also to the composed prompt limit. Redaction is best effort; if
+  cleaning or redaction changes a snapshot or path, review and confirm it.
+  Snapshots persist unencrypted with the session and `/retry` uses the saved
+  snapshot, not the live file. Pairs resume has a 32,000-character user/answer
+  budget and may omit a turn; window resume can clip or omit it too. See
+  [Attach text files](../guides/terminal.md#attach-text-files).
 - `--workspace` is expanded and resolved here too, and a path that is not a
   folder gives the same one-line usage error as with a task; see
   [Usage errors](#usage-errors).
@@ -412,7 +426,8 @@ These are usage errors:
 **With `--brief`:** JSON is a versioned worker result: `v`, `status`, `run_id`,
 `exit_code`, `head_sha`, `git_dirty`, `tests`, `run` and `error`. HEAD and dirty
 state come from the workspace, and are null when unavailable. `run` is the
-run record without `config`; `tests` is `recorded` only for the last passing
+run record without `config`, or null for startup or transport errors; `tests` is
+`recorded` only for the last passing
 recognized test check of the final attempt, otherwise `not_recorded`. A
 recorded item contains the raw command or Python code, redacted and capped at
 2,000 characters with `command_truncated`, its nullable exit code and
@@ -423,15 +438,19 @@ is wrapped as `{ "v": 1, "type": "event", "event": ... }`, followed by a
 `{ "v": 1, "type": "result", "result": ... }` worker result when the run
 finishes normally. A broken or undrained output pipe is a failure; signals,
 process death or a broken pipe can leave no result. Drain stdout and check
-both the final record and the exit code. A valid brief can exit 1 with empty
-stdout and a startup error on stderr (for example, no backend, invalid config,
-or agent construction failure); no `startup_error` or `transport_error` result
-is emitted yet, and `run` is non-null when a result is emitted. Worker
-output uses pattern-based
+both the final record and the exit code. Agent construction failures after a
+valid brief, including config-file values the agent would refuse and an
+invalid TOML file, produce `startup_error` with `run: null` and exit 1. For
+event output failures the worker attempts a `transport_error` result with
+`run: null` and exits 1; a failed or blocked output may prevent that record
+from arriving. A broken pipe while the startup record is written still exits
+1. Usage errors remain resultless. Worker output uses pattern-based
 redaction and omits some recognizable sensitive-file reads, including simple
-shell and Python reads. Arbitrary commands, code and model output can still
-expose secrets: the stream is not a secret boundary. Review before sharing. `--inbox` is not yet
-available. `--save-session` can record the same run.
+shell and Python reads. A startup error's text is redacted too, and the
+user's home directory is shown as `~`. Arbitrary commands, code and model
+output can still expose secrets: the stream is not a secret boundary. Review
+before sharing. `--inbox` is not yet available. `--save-session` can record
+the same run.
 
 **In both formats:**
 
@@ -440,7 +459,7 @@ available. `--save-session` can record the same run.
   output, goes to stderr instead.
 - Warnings go to stderr, one line each.
 - A traceback appears only when the run ends as `crashed`, after Ctrl+C, or
-  when the config file is not valid TOML.
+  when the config file is not valid TOML and no `--brief` was given.
 
 ## Progress line
 

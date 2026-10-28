@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import logging
 import os
+import shlex
 import time
 from collections.abc import Callable, Coroutine
 from typing import Any, Final, Literal, cast
@@ -35,6 +36,15 @@ from localmelo.support.cli import commands
 from localmelo.support.cli.agents import AgentFactory
 from localmelo.support.cli.app import InteractiveApp, StatusBar
 from localmelo.support.cli.approvals import Approvals, Mode, TerminalApprover
+from localmelo.support.cli.attachments import (
+    Attachment,
+)
+from localmelo.support.cli.attachments import (
+    add as add_attachment,
+)
+from localmelo.support.cli.attachments import (
+    load as load_attachment,
+)
 from localmelo.support.cli.output import Out
 from localmelo.support.cli.render import EXPAND_LINES, ToolOutput, TurnRenderer
 from localmelo.support.cli.session_tools import SessionTools
@@ -42,6 +52,7 @@ from localmelo.support.cli.sessions import BUSY, DELETED, SessionNavigation
 from localmelo.support.cli.text import expand_tabs, wrap_cells
 from localmelo.support.cli.theme import ASCII, in_symbols
 from localmelo.support.progress_line import run_elapsed, wall_range
+from localmelo.support.sessions.attachments import TextAttachment
 from localmelo.support.sessions.display import (
     clean_output,
     format_duration,
@@ -192,6 +203,7 @@ class CliSession:
         self.runner: SessionRunner | None = None
         self.app: InteractiveApp | None = None
         self.queued: str | None = None
+        self._attachments: tuple[Attachment, ...] = ()
         self.activity: str | None = None
         self.title = ""
         self.models: list[str] = []
@@ -231,6 +243,31 @@ class CliSession:
             mode_style="class:yolo" if yolo else "class:muted",
         )
 
+    @property
+    def attachment_line(self) -> str:
+        if not self._attachments:
+            return ""
+        return "Attached: " + " · ".join(
+            item.path.replace("\n", " ").replace("\t", " ")
+            for item in self._attachments
+        )
+
+    def attach_path(self, path: str) -> str | None:
+        """Stage a path explicitly selected from completion, never parsed from prose."""
+        if self._state != "idle":
+            return "Wait for the current operation before attaching a file."
+        self._state = "switching"
+        self._pending_command = "attach"
+        self._work = self.spawn(
+            self._run_command(
+                "attach",
+                shlex.quote(path),
+                "/attach " + shlex.quote(path),
+                restore=False,
+            )
+        )
+        return None
+
     def _hint(self, text: str) -> None:
         if self.app is not None:
             self.app.hint(text)
@@ -254,6 +291,8 @@ class CliSession:
                     )
                 )
                 return ""
+            if self._attachments and command.name in ("new", "resume", "sessions"):
+                return "Detach staged files before switching sessions."
             allowed = command.during_turn is True or (
                 command.during_turn == "show" and not arguments
             )
@@ -265,7 +304,16 @@ class CliSession:
                 return (
                     "Wait for the session switch to finish before changing its title."
                 )
-            if command.name in ("sessions", "resume", "retry", "undo", "new"):
+            if command.name in (
+                "sessions",
+                "resume",
+                "retry",
+                "undo",
+                "new",
+                "attach",
+                "attachments",
+                "detach",
+            ):
                 self._state = "switching"
                 self._pending_command = command.name
                 self._work = self.spawn(
@@ -334,7 +382,15 @@ class CliSession:
             self.title = self.session_tools.pending_title or title_from_text(text)
         first_turn = self.runner is None or self.runner.session_id is None
         self.renderer.begin_turn(text, first_turn=first_turn)
-        self._work = self.spawn(self._turn(text))
+        staged, self._attachments = self._attachments, ()
+        for item in staged:
+            self.out.print(
+                self._text(
+                    f"  └ attached {item.path} ({len(item.content.encode('utf-8')):,} bytes)",
+                    "muted",
+                )
+            )
+        self._work = self.spawn(self._turn(text, attachments=staged))
 
     async def _ask(self, request: ApprovalRequest) -> ApprovalDecision:
         """Ask through the panel, recorded in the session's events during a turn."""
@@ -346,7 +402,13 @@ class CliSession:
         await self.navigation.synchronize(reload)
         await self.session_tools.apply_title()
 
-    async def _turn(self, text: str, *, typed_text: str | None = None) -> None:
+    async def _turn(
+        self,
+        text: str,
+        *,
+        typed_text: str | None = None,
+        attachments: tuple[Attachment, ...] = (),
+    ) -> None:
         started = self._clock()
         if self.runner is None:
             self.runner = SessionRunner(
@@ -366,10 +428,20 @@ class CliSession:
         result: RunResult | None = None
         error: BaseException | None = None
         try:
+            kwargs: dict[str, Any] = (
+                {
+                    "attachments": tuple(
+                        TextAttachment(item.path, item.content) for item in attachments
+                    )
+                }
+                if attachments
+                else {}
+            )
             result = await runner.run_turn(
                 text,
                 approval=self.approvals.policy(),
                 title=text if typed_text is None else typed_text,
+                **kwargs,
             )
         except UnknownSessionError:
             error = UnknownSessionError(DELETED)
@@ -389,6 +461,8 @@ class CliSession:
         self.renderer.end_turn(result, error, cause=cause)
         with contextlib.suppress(SessionStoreError):
             await self.navigation.refresh_refs()
+        if error is not None and attachments:
+            self._attachments = attachments + self._attachments
         self._state = "idle"
         self._work = None
         if self.app is not None:
@@ -465,7 +539,9 @@ class CliSession:
 
     # ── Commands ──
 
-    async def _run_command(self, name: str, arguments: str, text: str) -> None:
+    async def _run_command(
+        self, name: str, arguments: str, text: str, *, restore: bool = True
+    ) -> None:
         """Echo the command as a message is echoed, run it, then a blank line.
 
         ``/exit`` prints nothing.
@@ -483,7 +559,7 @@ class CliSession:
                 else BUSY if isinstance(exc, SessionBusyError) else str(exc)
             )
             self.out.print(self._text(f"✗ {message}", style="error"))
-            if self.app is not None:
+            if self.app is not None and restore:
                 self._give_back(text)
         finally:
             if self._work is asyncio.current_task():
@@ -495,6 +571,12 @@ class CliSession:
     async def _command(self, name: str, arguments: str) -> None:
         if name == "help":
             self.out.print(commands.help_text(arguments, self.renderer.symbols))
+        elif name == "attach":
+            await self._attach_file(arguments)
+        elif name == "attachments":
+            self._list_attachments(arguments)
+        elif name == "detach":
+            self._detach(arguments)
         elif name in ("exit", "quit"):
             if self.app is not None:
                 self.app.exit()
@@ -526,6 +608,69 @@ class CliSession:
             await self.retry()
         elif name == "mcp":
             self.mcp()
+
+    async def _attach_file(self, arguments: str) -> None:
+        try:
+            paths = shlex.split(arguments)
+        except ValueError as exc:
+            raise ValueError(
+                "Use /attach PATH (quote paths containing spaces)."
+            ) from exc
+        if len(paths) != 1:
+            raise ValueError("Use /attach PATH (quote paths containing spaces).")
+        workspace = self.agent.workspace_root or os.getcwd()
+        item = await asyncio.to_thread(load_attachment, workspace, paths[0])
+        updated = add_attachment(self._attachments, item)
+        if item.changed:
+            self.out.print(
+                self._text(
+                    "Attachment was redacted or cleaned; review the exact snapshot:",
+                    "warn",
+                )
+            )
+            self.out.print(Text(item.content))
+            answer = (
+                await self.app.ask("Attach this redacted snapshot? [y/N]")
+                if self.app is not None
+                else None
+            )
+            if (answer or "").strip().lower() not in ("y", "yes"):
+                raise ValueError("Attachment not added.")
+        self._attachments = updated
+        self.out.print(
+            self._text(
+                f"✓ Attached {item.path} ({len(item.content.encode('utf-8')):,} bytes)."
+            )
+        )
+        if self.app is not None:
+            self.app.invalidate()
+
+    def _list_attachments(self, arguments: str) -> None:
+        if arguments:
+            raise ValueError("Use /attachments without arguments.")
+        if not self._attachments:
+            self.out.print(self._text("No staged attachments.", "muted"))
+        for index, item in enumerate(self._attachments, 1):
+            self.out.print(
+                self._text(
+                    f"{index}. {item.path} ({len(item.content.encode('utf-8')):,} bytes)",
+                    "muted",
+                )
+            )
+
+    def _detach(self, arguments: str) -> None:
+        if arguments.strip() == "all":
+            self._attachments = ()
+        elif arguments.strip().isdigit() and 1 <= int(arguments.strip()) <= len(
+            self._attachments
+        ):
+            i = int(arguments.strip()) - 1
+            self._attachments = self._attachments[:i] + self._attachments[i + 1 :]
+        else:
+            raise ValueError("Use /detach N or /detach all.")
+        self.out.print(self._text("Attachment removed.", "muted"))
+        if self.app is not None:
+            self.app.invalidate()
 
     def toggle_verbose(self, arguments: str) -> None:
         """``/verbose [on|off]``: verbose rendering, or the other way."""
@@ -765,8 +910,15 @@ class CliSession:
         self.out.print(self._text(f"↻ Retrying turn {turn.turn}: {first}"))
         self._state = "running"
         self._stop_wanted = self._stop_landed = False
-        self.renderer.begin_turn(turn.user_text, first_turn=False)
-        self._work = self.spawn(self._turn(turn.user_text, typed_text=turn.typed_text))
+        staged = tuple(
+            Attachment(a.name, a.text, len(a.text.encode("utf-8")), len(a.text), False)
+            for a in (turn.attachments or ())
+        )
+        message = turn.typed_text if staged else turn.user_text
+        self.renderer.begin_turn(message, first_turn=False)
+        self._work = self.spawn(
+            self._turn(message, typed_text=turn.typed_text, attachments=staged)
+        )
 
     def mcp(self) -> None:
         """``/mcp``: the MCP servers, their tools, and where the file came from."""
