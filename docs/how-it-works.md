@@ -74,8 +74,8 @@ More about reflections:
 
 Each step offers the model a list of tools, and only those tools can run in
 that step. By default the list holds every built-in tool plus the few other
-tools that match the task or the conversation. See
-[How tools are offered](tools.md#how-tools-are-offered).
+tools that match the task or that the model has already called in this
+conversation. See [How tools are offered](tools.md#how-tools-are-offered).
 
 ## Memory in the loop
 
@@ -101,12 +101,13 @@ Three limits apply at different levels:
   more. A server that sends keep-alive bytes while it generates never times
   out. A request that times out is retried twice. See
   [Chat request timeout](configuration.md#chat-request-timeout).
-- **Tool time limits.** `shell_exec` 30 seconds, `file_read` and
-  `file_write` 60 seconds, MCP tools their server's `timeout`. `python_exec`
-  has no limit, because its code runs inside localmelo and cannot be
-  interrupted. In the Python API, an agent with a workspace root runs
-  `python_exec` in a child process with a limit; see
-  [Work in a directory](python-api.md#work-in-a-directory).
+- **Tool time limits.** `shell_exec` 30 seconds, `python_exec` 60 seconds,
+  `file_read` and `file_write` 60 seconds, MCP tools their server's
+  `timeout`. `shell_exec` and `python_exec` run in a child process with a
+  process group, which a timeout or a cancellation kills; the interactive
+  UI gives them 10 minutes. See
+  [Work in a directory](python-api.md#work-in-a-directory) for the Python
+  API's `tool_timeout_s`.
 - **Run time limit** (`--timeout`). It is the only limit on a whole run. When
   it expires, the run ends as `timeout`.
 

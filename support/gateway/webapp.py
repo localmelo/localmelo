@@ -13,7 +13,8 @@ from fastapi.staticfiles import StaticFiles
 from localmelo.melo.contracts.providers import ProviderError
 from localmelo.support.config import Config, SchedulerConfig
 from localmelo.support.gateway.chat_gate import DEFAULT_CALL_LOG_DIR
-from localmelo.support.gateway.playground import SmokePlayground
+from localmelo.support.gateway.machine_monitor import read_pmset
+from localmelo.support.gateway.playground import LockHeldError, SmokePlayground
 
 _STATIC = Path(__file__).with_name("static")
 
@@ -38,6 +39,11 @@ def _manager(app: FastAPI) -> SmokePlayground:
             r_f=scheduler.r_f,
             n_fg=scheduler.n_fg,
             call_log_dir=_call_log_dir(scheduler),
+            lock_path=scheduler.gpu_lock_file or None,
+            lock_self=scheduler.lock_self,
+            lock_gate=scheduler.lock_gate,
+            # The gateway always reads the battery; the lock is optional.
+            battery_runner=read_pmset,
         )
         app.state.smoke_playground = manager
     return manager
@@ -61,6 +67,10 @@ def mount(app: FastAPI, cfg: Config | None = None) -> None:
 
     _manager(app)
     app.mount("/assets", StaticFiles(directory=_STATIC), name="workspace-assets")
+
+    @app.on_event("startup")
+    async def _start_smoke_playground() -> None:
+        await _manager(app).start()
 
     @app.on_event("shutdown")
     async def _close_smoke_playground() -> None:
@@ -130,6 +140,8 @@ def mount(app: FastAPI, cfg: Config | None = None) -> None:
                 scenario_id=_body_text(body, "scenario_id", ""),
             )
             return JSONResponse(content=payload)
+        except LockHeldError as e:
+            return JSONResponse(status_code=409, content={"error": str(e)})
         except SessionBusyError as e:
             return JSONResponse(status_code=409, content={"error": str(e)})
         except ValueError as e:
@@ -161,7 +173,13 @@ def mount(app: FastAPI, cfg: Config | None = None) -> None:
 
     @app.get("/v1/playground/sessions")
     async def playground_sessions() -> JSONResponse:
-        return JSONResponse(content={"sessions": _manager(app).list_sessions()})
+        manager = _manager(app)
+        return JSONResponse(
+            content={
+                "sessions": manager.list_sessions(),
+                "machine": manager.machine_payload(),
+            }
+        )
 
     @app.get("/v1/playground/session/{session_id}")
     async def playground_get(session_id: str) -> JSONResponse:

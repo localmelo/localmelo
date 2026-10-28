@@ -30,6 +30,8 @@ VALID_CHAT_BACKENDS = (
     "nvidia",
 )
 VALID_EMBEDDING_BACKENDS = ("mlc", "ollama", "vllm", "sglang", "none")
+REASONING_MODES = ("legacy", "drop", "replay")
+REASONING_FIELDS = ("auto", "reasoning_content", "reasoning")
 
 
 @dataclass
@@ -43,6 +45,12 @@ class LocalBackendConfig:
     # Extra top-level fields merged into every chat request body, e.g.
     # {"chat_template_kwargs": {"enable_thinking": False}}.
     extra_body: dict[str, Any] = field(default_factory=dict)
+    # The request key the provider sends a reply's reasoning back under:
+    # "" (unset), "auto", "reasoning_content" or "reasoning"; for the
+    # [ollama] section, also "thinking".
+    reasoning_field: str = ""
+    # Whether the chat server requires a reply's reasoning in later requests.
+    requires_reasoning_replay: bool = False
 
 
 @dataclass
@@ -54,12 +62,24 @@ class CloudVendorConfig:
     base_url: str = ""  # optional override; each vendor has a built-in default
     # Extra top-level fields merged into every chat request body.
     extra_body: dict[str, Any] = field(default_factory=dict)
+    # See LocalBackendConfig: the reasoning field and whether the server
+    # requires replay.
+    reasoning_field: str = ""
+    requires_reasoning_replay: bool = False
 
 
 @dataclass
 class GatewayConfig:
     port: int = 8401
     host: str = "127.0.0.1"
+
+
+@dataclass
+class AgentConfig:
+    """The ``[agent]`` table: how a direct run or a session reasons."""
+
+    reasoning: str = "legacy"  # legacy | drop | replay
+    replay_turns: int | None = None  # None: every turn in scope
 
 
 @dataclass
@@ -78,6 +98,13 @@ class SchedulerConfig:
     n_fg: int = 1
     call_log: bool = True
     call_log_dir: str = ""
+    # The GPU lock and the battery (S2b). An empty path means no lock
+    # reader; the gateway's battery reader is always on. ``record`` only
+    # observes; ``wait`` holds every workspace call while a foreign lock is
+    # present.
+    gpu_lock_file: str = ""
+    lock_self: str = ""
+    lock_gate: str = "record"  # record | wait
 
 
 @dataclass
@@ -86,6 +113,9 @@ class Config:
         ""  # mlc | ollama | vllm | sglang | openai | gemini | anthropic | nvidia
     )
     embedding_backend: str = ""  # mlc | ollama | vllm | sglang | none
+
+    # A path to an MCP servers JSON file the CLI and the gateway both read.
+    mcp_config: str = ""
 
     # HTTP timeout of each chat request, in seconds, for every chat backend.
     # None keeps each chat provider's own default (120 s; 300 s for the
@@ -105,6 +135,7 @@ class Config:
     nvidia: CloudVendorConfig = field(default_factory=CloudVendorConfig)
 
     gateway: GatewayConfig = field(default_factory=GatewayConfig)
+    agent: AgentConfig = field(default_factory=AgentConfig)
     scheduler: SchedulerConfig = field(default_factory=SchedulerConfig)
 
     @property
@@ -126,6 +157,7 @@ class Config:
     def validate(self) -> list[str]:
         """Return a list of validation errors. Empty list means valid."""
         errors: list[str] = []
+        errors.extend(self._validate_agent())
         errors.extend(self._validate_scheduler())
 
         # -- chat_backend validation --
@@ -156,6 +188,7 @@ class Config:
         chat_errors = self._validate_chat_backend()
         errors.extend(chat_errors)
         errors.extend(self._validate_extra_body())
+        errors.extend(self._validate_reasoning_fields())
 
         # -- Delegate embedding backend validation (skip if "none") --
         if self.embedding_backend != "none":
@@ -198,6 +231,17 @@ class Config:
                 "[scheduler] call_log_dir must be a string, "
                 f"got {scheduler.call_log_dir!r}"
             )
+        if scheduler.lock_gate not in ("record", "wait"):
+            errors.append(
+                f"[scheduler] lock_gate={scheduler.lock_gate!r} is not one of "
+                "('record', 'wait')"
+            )
+        for name in ("gpu_lock_file", "lock_self"):
+            value = getattr(scheduler, name)
+            if not isinstance(value, str):
+                errors.append(f"[scheduler] {name} must be a string, got {value!r}")
+            elif "\x00" in value:
+                errors.append(f"[scheduler] {name} must not contain a NUL byte")
         return errors
 
     def _validate_request_timeout(self) -> list[str]:
@@ -218,6 +262,44 @@ class Config:
             return backend.validate(self)
         except KeyError:
             return [f"chat_backend {self.chat_backend!r}: no registered adapter found."]
+
+    def _validate_agent(self) -> list[str]:
+        """``[agent]`` holds a known mode and a positive ``replay_turns``."""
+        errors: list[str] = []
+        if self.agent.reasoning not in REASONING_MODES:
+            errors.append(
+                f"[agent] reasoning {self.agent.reasoning!r} is not recognised. "
+                f"Must be one of {REASONING_MODES}."
+            )
+        turns: object = self.agent.replay_turns
+        if turns is not None and (
+            isinstance(turns, bool) or not isinstance(turns, int) or turns < 1
+        ):
+            errors.append(f"[agent] replay_turns must be an int >= 1, got {turns!r}")
+        return errors
+
+    def _validate_reasoning_fields(self) -> list[str]:
+        """Each backend's reasoning keys are known and its flags are bools."""
+        errors: list[str] = []
+        for section_name in _LOCAL_SECTIONS + _CLOUD_SECTIONS:
+            section = getattr(self, section_name)
+            value = section.reasoning_field
+            allowed = (
+                ("", "thinking", "auto")
+                if section_name == "ollama"
+                else ("",) + REASONING_FIELDS
+            )
+            if not isinstance(value, str) or value not in allowed:
+                errors.append(
+                    f"[{section_name}] reasoning_field {value!r} is not recognised. "
+                    f"Must be one of {allowed}."
+                )
+            if not isinstance(section.requires_reasoning_replay, bool):
+                errors.append(
+                    f"[{section_name}] requires_reasoning_replay must be a bool, "
+                    f"got {section.requires_reasoning_replay!r}"
+                )
+        return errors
 
     def _validate_extra_body(self) -> list[str]:
         from localmelo.support.providers.llm._protocol import extra_body_errors
@@ -340,6 +422,10 @@ def load() -> Config:
             if hasattr(cfg.gateway, k):
                 setattr(cfg.gateway, k, v)
 
+    if isinstance(data.get("agent"), dict):
+        for k, v in data["agent"].items():
+            if hasattr(cfg.agent, k):
+                setattr(cfg.agent, k, v)
     # A [scheduler] that is not a table is ignored, like an unknown key; a
     # malformed value inside a real table is left for Config.validate.
     if isinstance(data.get("scheduler"), dict):
@@ -349,6 +435,7 @@ def load() -> Config:
 
     # A bad value is left for Config.validate to report.
     cfg.request_timeout_s = data.get("request_timeout_s")
+    cfg.mcp_config = str(data.get("mcp_config") or "")
 
     return cfg
 
@@ -452,6 +539,11 @@ def _migrate_legacy(data: dict) -> Config:
             if hasattr(cfg.gateway, k):
                 setattr(cfg.gateway, k, v)
 
+    if isinstance(data.get("agent"), dict):
+        for k, v in data["agent"].items():
+            if hasattr(cfg.agent, k):
+                setattr(cfg.agent, k, v)
+
     cfg.request_timeout_s = data.get("request_timeout_s")
 
     return cfg
@@ -505,6 +597,8 @@ def save(cfg: Config) -> None:
     # is written, so a config without one is saved as it was before.
     if cfg.request_timeout_s is not None:
         lines.append(f"request_timeout_s = {_toml_value(cfg.request_timeout_s)}")
+    if cfg.mcp_config:
+        lines.append(f"mcp_config = {_toml_string(cfg.mcp_config)}")
     lines.append("")
 
     # Local backend sections
@@ -517,6 +611,10 @@ def save(cfg: Config) -> None:
         lines.append(f"embedding_model = {_toml_string(sec.embedding_model)}")
         if sec.extra_body:
             lines.append(f"extra_body = {_toml_value(sec.extra_body)}")
+        if sec.reasoning_field:
+            lines.append(f"reasoning_field = {_toml_string(sec.reasoning_field)}")
+        if sec.requires_reasoning_replay:
+            lines.append("requires_reasoning_replay = true")
         lines.append("")
 
     # Cloud vendor sections
@@ -528,12 +626,23 @@ def save(cfg: Config) -> None:
         lines.append(f"base_url = {_toml_string(sec.base_url)}")
         if sec.extra_body:
             lines.append(f"extra_body = {_toml_value(sec.extra_body)}")
+        if sec.reasoning_field:
+            lines.append(f"reasoning_field = {_toml_string(sec.reasoning_field)}")
+        if sec.requires_reasoning_replay:
+            lines.append("requires_reasoning_replay = true")
         lines.append("")
 
     lines.append("[gateway]")
     lines.append(f"port = {cfg.gateway.port}")
     lines.append(f"host = {_toml_string(cfg.gateway.host)}")
     lines.append("")
+
+    if cfg.agent.reasoning != "legacy" or cfg.agent.replay_turns is not None:
+        lines.append("[agent]")
+        lines.append(f"reasoning = {_toml_string(cfg.agent.reasoning)}")
+        if cfg.agent.replay_turns is not None:
+            lines.append(f"replay_turns = {cfg.agent.replay_turns}")
+        lines.append("")
 
     # Only a settings section that differs from the defaults is written, so
     # an existing config is saved exactly as before and a reconfigure keeps
@@ -547,6 +656,9 @@ def save(cfg: Config) -> None:
         lines.append(f"n_fg = {scheduler.n_fg}")
         lines.append(f"call_log = {'true' if scheduler.call_log else 'false'}")
         lines.append(f"call_log_dir = {_toml_string(scheduler.call_log_dir)}")
+        lines.append(f"gpu_lock_file = {_toml_string(scheduler.gpu_lock_file)}")
+        lines.append(f"lock_self = {_toml_string(scheduler.lock_self)}")
+        lines.append(f"lock_gate = {_toml_string(scheduler.lock_gate)}")
         lines.append("")
 
     # TOML files are UTF-8. Encode before opening the file, so text that

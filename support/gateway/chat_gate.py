@@ -39,6 +39,7 @@ from localmelo.melo.contracts.providers import (
 )
 from localmelo.melo.memory._sqlite import thinking_retention_days
 from localmelo.melo.schema import Message, ToolDef
+from localmelo.support.gateway.machine_monitor import canonical_machine_line
 from localmelo.support.scheduler import (
     Call,
     CallEnded,
@@ -47,6 +48,7 @@ from localmelo.support.scheduler import (
     Decision,
     Dispatch,
     Machine,
+    MachineChanged,
     Params,
     State,
     Task,
@@ -60,6 +62,7 @@ from localmelo.support.scheduler import (
     params_for_arm,
 )
 from localmelo.support.scheduler.costs import Rates, charge_s
+from localmelo.support.scheduler.machine_gates import battery_band
 from localmelo.support.scheduler.model import (
     CallKind,
     Event,
@@ -175,6 +178,9 @@ class CallLog:
     ) -> None:
         self._fd: int | None = None
         self._path: Path | None = None
+        self._machine_fd: int | None = None
+        self._machine_path: Path | None = None
+        self._machine_warned = False
         self._warned = False
         if directory is None:
             return
@@ -199,12 +205,34 @@ class CallLog:
             self._path = path
         except OSError as exc:
             logger.warning("Call log disabled: cannot create %s: %s", directory, exc)
-            self._fd = None
+            self._close_fd()
+            self._path = None
+            return
+        # The machine log sits beside the calls it affected, so one retention
+        # sweep covers both (decision D8). Its schema is its own; a failure
+        # here disables only this file, never calls.jsonl (R14).
+        try:
+            machine = run / "machine.jsonl"
+            self._machine_fd = os.open(
+                machine, os.O_CREAT | os.O_APPEND | os.O_WRONLY, 0o600
+            )
+            with contextlib.suppress(OSError):
+                os.chmod(machine, 0o600)
+            self._machine_path = machine
+        except OSError as exc:
+            logger.warning("Machine log disabled: cannot create %s: %s", directory, exc)
+            self._close_machine_fd()
+            self._machine_path = None
 
     @property
     def path(self) -> Path | None:
         """The file this log writes, or ``None`` when it is disabled."""
         return self._path
+
+    @property
+    def machine_path(self) -> Path | None:
+        """This run's ``machine.jsonl``, or ``None`` when it is disabled."""
+        return self._machine_path
 
     @staticmethod
     def _run_dir(runs: Path, name: str) -> Path:
@@ -274,9 +302,45 @@ class CallLog:
                 os.close(self._fd)
             self._fd = None
 
+    def write_machine(self, values: dict[str, Any]) -> None:
+        """Append one canonical machine line; a failure disables only this file.
+
+        The line carries its own schema, never the call trace's (R14); a
+        failure here must not turn ``calls.jsonl`` off.
+        """
+        offset: int | None = None
+        try:
+            line = canonical_machine_line(values)
+            payload = line.encode("utf-8") + b"\n"
+            if self._machine_fd is None:
+                return
+            offset = os.lseek(self._machine_fd, 0, os.SEEK_END)
+            view = memoryview(payload)
+            while view:
+                written = os.write(self._machine_fd, view)
+                if written <= 0:
+                    raise OSError("short write to the machine log")
+                view = view[written:]
+        except (OSError, TypeError, ValueError) as exc:
+            if offset is not None and self._machine_fd is not None:
+                with contextlib.suppress(OSError):
+                    os.ftruncate(self._machine_fd, offset)
+            if not self._machine_warned:
+                logger.warning("Machine log write failed, disabling it: %s", exc)
+                self._machine_warned = True
+            self._close_machine_fd()
+            self._machine_path = None
+
+    def _close_machine_fd(self) -> None:
+        if self._machine_fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(self._machine_fd)
+            self._machine_fd = None
+
     def close(self) -> None:
-        """Close the file; a second close is a no-op."""
+        """Close both files; a second close is a no-op."""
         self._close_fd()
+        self._close_machine_fd()
 
 
 # ── One call, as the gate tracks it ──
@@ -308,6 +372,7 @@ class CallMeta:
     # embedding while that call is not a lane call (decision 1b).
     lane: bool = False
     admitted_mono_us: int | None = None
+    prompt_tokens: int | None = None
 
 
 @dataclass
@@ -317,6 +382,9 @@ class GateCall:
     meta: CallMeta
     future: asyncio.Future[None] | None = None
     done: bool = False
+    # The pre-gate parked this call: the policy has not seen it yet (wait mode
+    # under a foreign lock, section 6.2).
+    lock_waiting: bool = False
 
 
 @dataclass(frozen=True)
@@ -350,12 +418,18 @@ class ChatGate:
         clock: Callable[[], Clock] | None = None,
         retention_days: float | None = None,
         decide_fn: Callable[[State, Clock, Params], Decision] | None = None,
+        lock_gate: str = "record",
     ) -> None:
         if policy not in ("off", "fcfs", "class"):
             raise ValueError(
                 f"policy {policy!r} is not one of ('off', 'fcfs', 'class')"
             )
+        if lock_gate not in ("record", "wait"):
+            raise ValueError(
+                f"lock_gate {lock_gate!r} is not one of ('record', 'wait')"
+            )
         self.policy = policy
+        self.lock_gate = lock_gate
         self.n_srv = n_srv
         self.r_f = r_f
         self.n_fg = n_fg
@@ -370,6 +444,7 @@ class ChatGate:
                 inheritance=False,
                 idle_gate=False,
                 battery_gate_enforce=False,
+                reservation_policy="respect",
                 p0_meaning="conversation",
             )
         self._clock = clock if clock is not None else _default_clock
@@ -392,6 +467,12 @@ class ChatGate:
 
         self._state = State(machine=Machine())
         self._calls: dict[str, GateCall] = {}
+        # The page's view of the machine, the policy's view, and the observed
+        # battery band with S1's hysteresis (R5).
+        self.machine = Machine()
+        self._policy_machine = Machine()
+        self._observed_band = 4
+        self._machine_payload: dict[str, Any] | None = None
         self._levels: dict[str, tuple[int, str]] = {}
         self._counts: dict[str, int] = {}
         self._first_submit: dict[str, int] = {}
@@ -425,6 +506,88 @@ class ChatGate:
     def call_log_path(self) -> Path | None:
         """This run's call log, or ``None`` when the file is disabled."""
         return self._log.path
+
+    @property
+    def machine_log_path(self) -> Path | None:
+        """This run's machine log, or ``None`` when the file is disabled."""
+        return self._log.machine_path
+
+    @property
+    def battery_band(self) -> int:
+        """The observed band, from S1's hysteresis, even in record mode."""
+        return self._observed_band
+
+    @property
+    def enforces_holds(self) -> bool:
+        """Whether a run must use the hold-aware wait (R12)."""
+        return self.policy != "off" or self.lock_gate == "wait"
+
+    def write_machine(self, values: dict[str, Any]) -> None:
+        """Write one machine line through this run's log (R14)."""
+        self._log.write_machine(values)
+
+    def set_machine(
+        self,
+        machine: Machine,
+        *,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        """Record the observed machine; only ``wait`` feeds the policy (R9/R10).
+
+        In ``record`` the policy keeps ``Machine()`` and no transition runs.
+        In ``wait`` the policy sees a changed lock, AC state or battery band
+        through one ``MachineChanged``; a percentage change inside a band
+        updates only the page. Never awaits.
+        """
+        self.machine = machine
+        self._observed_band = battery_band(machine, self._observed_band)
+        self._machine_payload = (
+            dict(payload) if payload is not None else self._payload_for(machine)
+        )
+        if self.lock_gate != "wait" or self._closed:
+            return
+        relevant = (
+            machine.lock != self._policy_machine.lock
+            or machine.on_ac != self._policy_machine.on_ac
+            or self._observed_band != self._state.battery_band
+        )
+        if relevant:
+            self._policy_machine = machine
+            if self.policy == "off":
+                # No decide() under off: update the state directly so the
+                # next release and the page agree (R5).
+                self._state = replace(
+                    self._state,
+                    machine=machine,
+                    battery_band=self._observed_band,
+                )
+                self._update_holds(None, self._clock())
+            else:
+                self._transition((MachineChanged(machine),))
+        if machine.lock != "foreign":
+            self._release_lock_waiters(self._clock())
+
+    def machine_payload(self) -> dict[str, Any]:
+        """The page/API snapshot of the observed machine (R15)."""
+        if self._machine_payload is not None:
+            return dict(self._machine_payload)
+        return self._payload_for(self.machine)
+
+    def _payload_for(self, machine: Machine) -> dict[str, Any]:
+        return {
+            "lock": machine.lock,
+            "holder": "",
+            "purpose": "",
+            "run": "",
+            "eta": "",
+            "stale": False,
+            "readable": True,
+            "on_ac": machine.on_ac,
+            "battery_pct": machine.battery_pct,
+            "battery_state": "",
+            "band": self._observed_band,
+            "gate": self.lock_gate,
+        }
 
     @property
     def hold_wake_s(self) -> float:
@@ -490,7 +653,6 @@ class ChatGate:
         self._counts[session_id] = index + 1
         first = self._first_submit.setdefault(session_id, now.mono_us)
         level = self.level(session_id)
-        source = self.level_source(session_id)
         planning = call_kind in _CHAT_KINDS
         # Only a planning call can be a lane call: an embedding or a
         # retrieval is never held (R14), and S1's lane path would hold it.
@@ -513,9 +675,21 @@ class ChatGate:
             inflight_at_submit=self._inflight(),
             prev_end_mono_us=self._last_end.get(session_id),
             lane=lane,
+            prompt_tokens=prompt_tokens,
         )
         call = GateCall(meta)
         self._calls[meta.call_id] = call
+        if (
+            self.lock_gate == "wait"
+            and self.machine.lock == "foreign"
+            and not (self._closed)
+        ):
+            # Lock first, call second: park it before the policy sees it, so
+            # not even an embedding goes out under a foreign lock (D3).
+            call.lock_waiting = True
+            call.future = asyncio.get_running_loop().create_future()
+            self._update_holds(None, now)
+            return call
         if self.policy == "off" or self._closed:
             # Observation only (or already shut down): the call is never
             # pending, so admit_s is submit_s and nothing can hang on it.
@@ -523,45 +697,69 @@ class ChatGate:
             return call
 
         call.future = asyncio.get_running_loop().create_future()
+        self._transition(self._submitted_events(meta, now, prompt_tokens))
+        return call
+
+    def _submitted_events(
+        self,
+        meta: CallMeta,
+        now: Clock,
+        prompt_tokens: int | None = None,
+        opened: set[str] | None = None,
+    ) -> list[Event]:
+        """The events a submit would build: task open, then the call.
+
+        *opened* names the sessions a release batch already gave a task event
+        to; each session gets at most one in a batch, or the duplicate
+        ``TaskAdded`` would make ``advance`` reject the whole release.
+        """
         events: list[Event] = []
+        planning = meta.kind in _CHAT_KINDS
         if planning:
             # Only a chat call opens (or reopens) the chat's task; an
             # embedding or a retrieval is taskless in S1 (section 4.2).
-            current = self._task(session_id)
+            already = opened is not None and meta.session_id in opened
+            current = self._task(meta.session_id)
             if current is None:
-                events.append(
-                    TaskAdded(
-                        Task(
-                            task_id=session_id,
-                            kind="chat",
-                            origin="user",
-                            level=level,
-                            level_source=cast(LevelSource, source),
-                            phase="running",
-                            created_mono_us=now.mono_us,
-                            created_wall_us=now.wall_us,
+                if not already:
+                    events.append(
+                        TaskAdded(
+                            Task(
+                                task_id=meta.session_id,
+                                kind="chat",
+                                origin="user",
+                                level=self.level(meta.session_id),
+                                level_source=cast(
+                                    LevelSource, self.level_source(meta.session_id)
+                                ),
+                                phase="running",
+                                created_mono_us=now.mono_us,
+                                created_wall_us=now.wall_us,
+                            )
                         )
                     )
-                )
-            elif is_terminal(current.phase):
-                events.append(TaskUpdated(session_id, (("phase", "running"),)))
+                    if opened is not None:
+                        opened.add(meta.session_id)
+            elif is_terminal(current.phase) and not already:
+                events.append(TaskUpdated(meta.session_id, (("phase", "running"),)))
+                if opened is not None:
+                    opened.add(meta.session_id)
         events.append(
             CallSubmitted(
                 Call(
                     call_id=meta.call_id,
                     # R11: a lane call is taskless; only a background plan or
                     # reflect call belongs to the chat's task.
-                    task_id=(session_id if planning and not lane else None),
-                    session_kind=cast(SessionKind, "front" if lane else "chat"),
-                    kind=call_kind,
+                    task_id=(meta.session_id if planning and not meta.lane else None),
+                    session_kind=cast(SessionKind, "front" if meta.lane else "chat"),
+                    kind=cast(CallKind, meta.kind),
                     attempt=meta.attempt,
-                    submit_mono_us=now.mono_us,
+                    submit_mono_us=meta.submit_mono_us,
                     prompt_tokens=prompt_tokens,
                 )
             )
         )
-        self._transition(events)
-        return call
+        return events
 
     async def acquire(self, call: GateCall) -> None:
         """Wait until the policy admits *call*; under ``off`` it is a no-op."""
@@ -585,6 +783,8 @@ class ChatGate:
             return
         call.done = True
         meta = call.meta
+        lock_waiting = call.lock_waiting
+        call.lock_waiting = False
         self._calls.pop(meta.call_id, None)
         now = self._clock()
         prompt, completion, cached = _usage_tokens(usage)
@@ -595,7 +795,7 @@ class ChatGate:
         except Exception:  # an odd usage value must not leak the call's slot
             logger.warning("Call charge failed; logging it as unknown", exc_info=True)
             charge, source = 0.0, "unknown"
-        if self.policy != "off":
+        if self.policy != "off" and not lock_waiting:
             events: list[Event] = [
                 CallEnded(
                     call_id=meta.call_id,
@@ -626,6 +826,18 @@ class ChatGate:
             )
         except Exception:  # the log may never fail a chat (R19)
             logger.warning("Call log line could not be written", exc_info=True)
+        if (
+            self.lock_gate == "wait"
+            and self.machine.lock != "foreign"
+            and not self._closed
+        ):
+            # A finished planning call may let the next parked call of the
+            # same chat enter the policy.
+            self._release_lock_waiters(now)
+        if lock_waiting or (self.lock_gate == "wait" and self.policy == "off"):
+            # The policy never saw this call, so no transition booked its
+            # hold end; do it here in every mode (R10).
+            self._update_holds(None, now)
 
     # ── Events ──
 
@@ -666,7 +878,7 @@ class ChatGate:
 
     def turn_start(self, session_id: str) -> int:
         """Reset the turn's hold clock; return its start instant in µs."""
-        if self.policy == "off":
+        if not self.enforces_holds:
             self._turn_start[session_id] = 0
             self._held_total_us.pop(session_id, None)
             self._hold_start.pop(session_id, None)
@@ -748,6 +960,8 @@ class ChatGate:
             call.done = True
             if call.future is not None and not call.future.done():
                 call.future.cancel()
+        # Book every hold that was still open before the bookkeeping goes.
+        self._update_holds(None, now)
         self._calls.clear()
         self._hold_start.clear()
         self._held_reason.clear()
@@ -832,33 +1046,93 @@ class ChatGate:
         self._update_holds(decided, now)
 
     def _held_for(
-        self, session_id: str, waiting: list[CallMeta], decided: Decision | None
+        self,
+        session_id: str,
+        waiting: list[CallMeta],
+        decided: Decision | None,
+        *,
+        parked: bool = False,
     ) -> str:
         """The reason code of the chat's pending call (R16)."""
+        if parked:
+            # A call parked by the lock gate, still waiting for its turn
+            # after the lock cleared, reads as the same Reservation hold.
+            return "Reservation"
+        if self.lock_gate == "wait" and self.machine.lock == "foreign":
+            return "Reservation"
         if any(meta.lane for meta in waiting):
             return "Resources" if self._inflight() >= self.n_srv else "Priority"
         if decided is not None:
             return self._reason_by_task.get(session_id, "Priority")
         return "Priority"
 
+    def _release_lock_waiters(self, now: Clock) -> None:
+        """Admit the calls parked by the pre-gate, in submit order (section 6.2)."""
+        waiting = sorted(
+            (c for c in self._calls.values() if c.lock_waiting and not c.done),
+            key=lambda c: (c.meta.submit_mono_us, c.meta.call_id),
+        )
+        if not waiting:
+            return
+        if self.policy == "off" or self._closed or self._params is None:
+            for call in waiting:
+                call.lock_waiting = False
+                if call.meta.admitted_mono_us is None:
+                    call.meta.admitted_mono_us = now.mono_us
+                if call.future is not None and not call.future.done():
+                    call.future.set_result(None)
+            self._update_holds(None, now)
+            return
+        # S1 keeps at most one holdable planning call per task. A chat makes
+        # its plan and reflect calls one after the other, so a release batch
+        # submits the first planning call of each chat and leaves the next
+        # one parked until that call finishes (otherwise advance() would
+        # raise on a duplicate TaskAdded, or the policy would alarm on an
+        # extra pending call and never admit it).
+        planning_sessions = {
+            c.meta.session_id
+            for c in self._calls.values()
+            if not c.done and not c.lock_waiting and c.meta.kind in _CHAT_KINDS
+        }
+        ready: list[GateCall] = []
+        for call in waiting:
+            if call.meta.kind in _CHAT_KINDS:
+                if call.meta.session_id in planning_sessions:
+                    continue
+                planning_sessions.add(call.meta.session_id)
+            call.lock_waiting = False
+            ready.append(call)
+        if not ready:
+            self._update_holds(None, now)
+            return
+        events: list[Event] = []
+        opened: set[str] = set()
+        for call in ready:
+            events.extend(
+                self._submitted_events(call.meta, now, call.meta.prompt_tokens, opened)
+            )
+        self._transition(events)
+
     def _update_holds(self, decided: Decision | None, now: Clock) -> None:
         """Book hold starts and ends; set ``wait_event`` on each change."""
-        by_session: dict[str, list[CallMeta]] = {}
+        by_session: dict[str, list[GateCall]] = {}
         for call in self._calls.values():
             if not call.done:
-                by_session.setdefault(call.meta.session_id, []).append(call.meta)
+                by_session.setdefault(call.meta.session_id, []).append(call)
         for session_id in set(by_session) | set(self._hold_start):
-            waiting = [
-                meta
-                for meta in by_session.get(session_id, [])
-                if meta.admitted_mono_us is None
+            waiting_calls = [
+                call
+                for call in by_session.get(session_id, [])
+                if call.meta.admitted_mono_us is None
             ]
+            waiting = [call.meta for call in waiting_calls]
+            parked = any(call.lock_waiting for call in waiting_calls)
             if waiting:
                 if session_id not in self._hold_start:
                     self._hold_start[session_id] = now.mono_us
                     self._wait_event.set()
                 self._held_reason[session_id] = self._held_for(
-                    session_id, waiting, decided
+                    session_id, waiting, decided, parked=parked
                 )
             elif session_id in self._hold_start:
                 self._held_total_us[session_id] = self._held_total_us.get(

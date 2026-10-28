@@ -235,29 +235,44 @@ and polls for changes from other browser clients every 2.5 seconds while visible
 
 A chat's header has a level chip (P1 to P4, P2 by default) that sets how the
 scheduler orders the chat's calls in front of other chats; it is kept in
-memory and is not saved. While a call waits (for a slot or for the
-background cap), the header's status pill and the status label say
+memory and is not saved. Next to the title and the level chip, a machine line
+shows a foreign GPU lock (`GPU lock: <holder> · <purpose>`, with
+`(recorded)` or `(chats wait)`), `GPU lock: yours`, `GPU lock unreadable`,
+`· ETA passed`, and the battery (`Battery 55% · discharging`). AC power with
+no lock shows nothing. While a call waits (for a slot, the background cap or
+a foreign lock), the header's status pill and the status label say
 `Waiting: <reason>`, the sidebar says `● Waiting` and the chat's bubble says
-the same; the reason is the scheduler's own code (`Resources`, `Priority`, …).
+the same; the reason is the scheduler's own code (`Resources`, `Priority`,
+`Reservation`, …). A lock hold uses `Reservation` and, in `wait` mode, does
+not count against the 600-second active-time bound.
 
 Stop cancels the run. A model request in flight is abandoned, although the
-model server may finish computing it, and a running `shell_exec` command is
-killed with its process group. `python_exec` code runs inside the gateway
-process and cannot be interrupted: until it returns, Stop has no effect and
-the gateway answers no other request. See [Tools and MCP](tools.md) for the
-tools' limits. The task is saved with the status `cancelled`, and the chat
-takes the next message once that save is done. A Stop that comes after the
-answer, while the task is being saved, leaves the answer in the chat. Each
-message sees the earlier answers of its chat, as in a [session](#sessions).
+model server may finish computing it, and a running `shell_exec` command or
+`python_exec` child is killed with its process group. `python_exec` code runs
+in a child process, so the gateway keeps answering other requests while it
+runs. See [Tools and MCP](tools.md) for the tools' limits. The task is saved
+with the status `cancelled`, and the chat takes the next message once that
+save is done. A Stop that comes after the answer, while the task is being
+saved, leaves the answer in the chat. Each message sees the earlier answers
+of its chat, as in a [session](#sessions).
 
 The web workspace works apart from the HTTP API above:
 
 - It does not use the config file's backend settings. It talks to the URL you
   enter, so `extra_body` and `request_timeout_s` do not apply. It does read
-  the `[scheduler]` table: `policy` (default `off`), `n_srv`, `r_f`, `n_fg`
-  and the call log; see [Scheduler](scheduler.md#the-gate-on-chats-s2). Chat
-  requests wait up to 300 seconds, and a task is stopped after 600 seconds of
-  active time: a call the scheduler holds does not count against that bound.
+  the `[scheduler]` table: `policy` (default `off`), `n_srv`, `r_f`, `n_fg`,
+  the call log, and the lock and battery keys (`gpu_lock_file`, `lock_self`,
+  `lock_gate`); see [Scheduler](scheduler.md#the-gate-on-chats-s2) and
+  [The GPU lock and the battery](scheduler.md#the-gpu-lock-and-the-battery-s2b).
+  Chat requests wait up to 300 seconds, and a task is stopped after 600
+  seconds of active time: a call the scheduler holds, including a foreign-lock
+  hold, does not count against that bound.
+- In `lock_gate = "record"` (the default) a foreign lock is shown and logged
+  but nothing waits. In `wait`, every call a chat makes waits while a foreign
+  lock is present, embeddings included, and a create that would seed memories
+  answers HTTP 409 `{"error": "GPU lock held by <holder>; …"}` without sending
+  an embedding or keeping a half-built chat. A create without seeding makes no
+  model call and proceeds.
 - Each chat's agent uses the default run options (all four built-in tools
   and no MCP tools), except that it keeps its answers. A chat can therefore
   run shell commands and Python code, and read and write files.
@@ -276,9 +291,13 @@ The workspace routes include `GET /v1/playground/sessions` for summaries,
 chat's level, and `POST /v1/playground/presence` with `{"session_id": …}` for
 the page's typing heartbeat (the focused chat is the scheduler's lane). A
 session summary and transcript also carry `level` and `held`, the scheduler's
-reason while one of the chat's calls waits (`""` otherwise). Running or
-deleting a busy chat returns HTTP 409. The ordinary `/v1/agent/` API remains
-separate.
+reason while one of the chat's calls waits (`""` otherwise). The
+`GET /v1/playground/sessions` response adds a top-level `machine` object
+(`lock`, `holder`, `purpose`, `run`, `eta`, `stale`, `readable`, `on_ac`,
+`battery_pct`, `battery_state`, `band`, `gate`), or `null` when the playground
+has no monitor; the per-session keys do not change. Running or deleting a busy
+chat returns HTTP 409. The ordinary `/v1/agent/` API remains separate and
+ungated.
 
 To start only the workspace without the configuration wizard:
 

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections.abc import Collection
 from typing import Any
 
@@ -233,27 +232,21 @@ class Hippo:
             for text, _score, _meta in long_results
         ]
 
-    # ── Tool hint extraction (pure text scan, no execution) ──
+    # ── Tool hint extraction (the model's tool calls only) ──
 
     def extract_tool_hints(self, messages: list[Message]) -> list[str]:
-        """Extract tool-name hints from messages.
+        """Return the names of the tools called in *messages*, in order.
 
-        Collects the names of structured tool calls, then scans contents
-        for registered tool names and ``[called X]`` patterns. This is a
-        read-only scan — no tools are resolved or executed.
+        Only structured tool calls count. A message that merely names a
+        tool — user text, a tool result, a memory or a reflection — adds
+        nothing, so a run's own text cannot expose a tool to the model.
+        This is a read-only scan — no tools are resolved or executed.
         """
         tool_hints: list[str] = []
-        all_tool_names = {t.name for t in self.tools.list_all()}
         for msg in messages:
             for tc in msg.tool_calls:
                 if tc.tool_name and tc.tool_name not in tool_hints:
                     tool_hints.append(tc.tool_name)
-            for name in all_tool_names:
-                if name in msg.content and name not in tool_hints:
-                    tool_hints.append(name)
-            for match in re.findall(r"\[called (\w+)\]", msg.content):
-                if match not in tool_hints:
-                    tool_hints.append(match)
         return tool_hints
 
     # ── Level 2: Tool Resolution (BM25 over registry) ──

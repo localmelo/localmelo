@@ -91,6 +91,12 @@ class GatewayServer:
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI) -> AsyncIterator[None]:  # type: ignore[type-arg]
         self._started_at = time.time()
+        # The web workspace's machine monitor starts before the gateway
+        # reports ready, so a lock present at startup is observed at once.
+        playground = getattr(app.state, "smoke_playground", None)
+        starter = getattr(playground, "start", None)
+        if starter is not None:
+            await starter()
         if self.console is not None:
             await self.console.start()
         logger.info("gateway ready on %s:%d", self.host, self.port)

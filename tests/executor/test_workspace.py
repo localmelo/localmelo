@@ -8,7 +8,9 @@ anything but a regular file, and cap what they read. Its ``shell_exec`` and
 ``python_exec`` run in the root, in a process group of their own, within
 ``tool_timeout_s``; the shell starts the text of a non-zero exit with
 ``[exit code <n>]``, and both record their child's exit status in
-``TOOL_EXIT_CODE``. Without a root, the built-ins are Phase 1a's functions.
+``TOOL_EXIT_CODE``. Without a root, the file tools and ``shell_exec`` are
+Phase 1a's functions, and ``python_exec`` runs the same child Python, in
+this process's directory.
 An agent with a root names it in the system prompt of its planning requests.
 """
 
@@ -17,11 +19,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import inspect
+import json
 import os
 import signal
 import sys
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -76,11 +79,13 @@ def _executor(
     *,
     rooted_tools: bool = True,
     tool_timeout_s: float | None = None,
+    tool_env: Mapping[str, str] | None = None,
 ) -> Executor:
     """An executor with every built-in, fenced by *root*.
 
     With *rooted_tools*, the built-ins are the ones ``register_builtins``
-    gives for *root*; otherwise Phase 1a's.
+    gives for *root*; otherwise Phase 1a's. *tool_env* adds variables to
+    the environment of the ``shell_exec`` and ``python_exec`` children.
     """
     hippo = Hippo()
     workspace_root = None if root is None else str(root)
@@ -90,6 +95,7 @@ def _executor(
         hippo,
         workspace_root=workspace_root if rooted_tools else None,
         tool_timeout_s=tool_timeout_s,
+        tool_env=tool_env,
     )
     return executor
 
@@ -600,12 +606,190 @@ def test_tool_timeout_s_needs_a_workspace_root() -> None:
     assert executor._callables == {}
 
 
-async def test_without_a_root_python_exec_runs_in_process() -> None:
+# ── python_exec without a root ──────────────────────────────────────────────
+
+
+async def test_without_a_root_python_exec_runs_in_a_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
     executor = _executor(None)
 
-    outcome = await _run(executor, "python_exec", code="import os; print(os.getpid())")
+    outcome, codes = await _run_recording(
+        executor,
+        "python_exec",
+        code="import os\nprint(os.getpid())\nprint(os.getcwd())\nos.chdir('/')",
+    )
 
-    assert outcome.output == str(os.getpid())
+    pid, cwd = outcome.output.splitlines()
+    assert outcome.status == ExecutionStatus.SUCCESS
+    assert int(pid) != os.getpid()
+    assert cwd == str(Path(os.path.realpath(tmp_path)))
+    assert codes == [0]
+    assert os.getcwd() == str(Path(os.path.realpath(tmp_path)))
+
+
+async def test_without_a_root_python_exec_never_reads_this_process_stdin() -> None:
+    executor = _executor(None)
+    read = "import sys\nprint(repr(sys.stdin.read()))"
+
+    with _stdin_holding(b"hello\n"):
+        outcome = await asyncio.wait_for(_run(executor, "python_exec", code=read), 10.0)
+
+    assert outcome.output == "''"
+
+
+async def test_without_a_root_a_python_input_gets_eof() -> None:
+    executor = _executor(None)
+
+    outcome = await asyncio.wait_for(
+        _run(executor, "python_exec", code="input()"), 10.0
+    )
+
+    assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
+    assert "EOFError" in outcome.error
+
+
+@pytest.mark.parametrize("rooted", [False, True], ids=["no_root", "root"])
+async def test_the_code_goes_to_the_child_on_a_pipe_not_in_argv(
+    root: Path, monkeypatch: pytest.MonkeyPatch, rooted: bool
+) -> None:
+    calls: list[tuple[Any, ...]] = []
+    real = asyncio.create_subprocess_exec
+
+    async def spy(*args: Any, **kwargs: Any) -> Any:
+        calls.append(args)
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", spy)
+    executor = _executor(root if rooted else None)
+    marker = "LOCALMELO_CODE_MARKER_7f3a"
+
+    outcome = await _run(executor, "python_exec", code=f"print({marker!r})")
+
+    assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, marker)
+    (argv,) = calls
+    # The executable, ``-c`` and the fixed wrapper: never the code.
+    assert len(argv) == 3
+    assert argv[1] == "-c"
+    assert argv[2] == builtin_tools._python_wrapper()
+    assert marker not in "".join(argv)
+
+
+@pytest.mark.parametrize("rooted", [False, True], ids=["no_root", "root"])
+async def test_a_two_megabyte_python_code_runs(root: Path, rooted: bool) -> None:
+    # Past this Mac's ARG_MAX (1,048,576 bytes of argv and environment); in
+    # argv this would fail with E2BIG before the code ran.
+    code = "print('ok')\n#" + "y" * 2_000_000 + "\n"
+    executor = _executor(root if rooted else None)
+
+    outcome = await asyncio.wait_for(_run(executor, "python_exec", code=code), 60.0)
+
+    assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, "ok")
+
+
+async def test_without_a_root_a_hang_ends_at_the_executors_limit(
+    pid_file: Path,
+) -> None:
+    executor = _executor(None)
+
+    outcome = await executor.execute_structured(
+        ExecutionRequest(
+            tool_name="python_exec",
+            arguments={"code": _hang(pid_file)},
+            timeout_ms=500,
+        )
+    )
+
+    assert outcome.status == ExecutionStatus.TIMEOUT
+    assert outcome.error_category == ErrorCategory.TIMEOUT
+    assert await _group_gone(await _pid(pid_file))
+
+
+async def test_without_a_root_no_process_of_the_python_group_survives_a_cancel(
+    pid_file: Path,
+) -> None:
+    executor = _executor(None)
+    running = asyncio.create_task(
+        executor.execute_structured(
+            ExecutionRequest(
+                tool_name="python_exec", arguments={"code": _hang(pid_file)}
+            )
+        )
+    )
+    python = await _pid(pid_file)
+
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    assert python != os.getpid()
+    assert await _group_gone(python)
+
+
+async def test_without_a_root_the_success_text_is_the_same() -> None:
+    executor = _executor(None)
+
+    outcome = await _run(executor, "python_exec", code="print(1 + 1)")
+
+    assert (outcome.status, outcome.output) == (ExecutionStatus.SUCCESS, "2")
+
+
+async def test_without_a_root_a_python_error_reads_as_the_rooted_one() -> None:
+    executor = _executor(None)
+
+    outcome = await _run(
+        executor, "python_exec", code="print('y' * 10_000)\nraise ValueError('boom')"
+    )
+
+    assert outcome.error.startswith("Python exited with code 1:\n")
+    tail = outcome.error.removeprefix("Python exited with code 1:\n")
+    assert len(tail) == 4_000
+    assert tail.endswith("ValueError: boom")
+
+
+async def test_without_a_root_a_keyboard_interrupt_keeps_its_exit_status() -> None:
+    executor = _executor(None)
+
+    outcome = await _run(executor, "python_exec", code="raise KeyboardInterrupt")
+
+    # As python -c's own status, which the rooted child kept before this path.
+    assert outcome.error.startswith("Python exited with code 130:\n")
+    assert outcome.error.endswith("KeyboardInterrupt")
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX resource limits")
+async def test_a_python_child_gets_the_posix_resource_limits() -> None:
+    executor = _executor(None)
+
+    outcome = await _run(
+        executor,
+        "python_exec",
+        code=(
+            "import resource\n"
+            "print(resource.getrlimit(resource.RLIMIT_CPU))\n"
+            "print(resource.getrlimit(resource.RLIMIT_NOFILE))"
+        ),
+    )
+
+    cpu = builtin_tools.PYTHON_CPU_LIMIT_S
+    files = builtin_tools.PYTHON_NOFILE_LIMIT
+    assert outcome.output.splitlines() == [f"({cpu}, {cpu})", f"({files}, {files})"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX resource limits")
+async def test_a_python_child_that_uses_too_much_cpu_is_killed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(builtin_tools, "PYTHON_CPU_LIMIT_S", 1)
+    executor = _executor(None)
+
+    outcome = await asyncio.wait_for(
+        _run(executor, "python_exec", code="while True: pass"), 20.0
+    )
+
+    assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
+    assert outcome.error == f"Python exited with code {-signal.SIGXCPU}"
 
 
 # ── shell_exec with a root ──────────────────────────────────────────────────
@@ -902,6 +1086,134 @@ async def test_python_without_an_interpreter(
 
     assert outcome.error_category == ErrorCategory.RUNTIME_ERROR
     assert outcome.error == "No Python interpreter is available for python_exec"
+
+
+# ── The environment of a tool's child process ──────────────────────────────
+
+SECRET = "LOCALMELO_TEST_SECRET"
+
+# Variables a tool's child must not inherit: a secret of the agent's own,
+# an API key, the proxy settings and PYTHONPATH.
+PRIVATE_VARS = (SECRET, "OPENAI_API_KEY", "HTTPS_PROXY", "PYTHONPATH")
+
+
+@pytest.fixture
+def private_vars(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set the variables of :data:`PRIVATE_VARS`, and a locale that passes."""
+    monkeypatch.setenv(SECRET, "hunter2")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.test:3128")
+    monkeypatch.setenv("PYTHONPATH", "/tmp/path")
+    monkeypatch.setenv("LC_TIME", "de_DE.UTF-8")
+
+
+class TestChildEnvironment:
+    @pytest.mark.parametrize("rooted", [True, False], ids=["rooted", "unrooted"])
+    async def test_the_shell_child_gets_the_allowlist_only(
+        self, root: Path, private_vars: None, rooted: bool
+    ) -> None:
+        executor = _executor(root if rooted else None, rooted_tools=rooted)
+
+        outcome = await _run(executor, "shell_exec", command="env")
+
+        assert outcome.status == ExecutionStatus.SUCCESS
+        seen = dict(
+            line.split("=", 1) for line in outcome.output.splitlines() if "=" in line
+        )
+        for name in PRIVATE_VARS:
+            assert name not in seen
+        assert seen["PATH"] == os.environ["PATH"]
+        assert seen["HOME"] == os.environ["HOME"]
+        # Every LC_* variable passes.
+        assert seen["LC_TIME"] == "de_DE.UTF-8"
+
+    @pytest.mark.parametrize("rooted", [True, False], ids=["rooted", "unrooted"])
+    async def test_the_python_child_gets_the_allowlist_only(
+        self, root: Path, private_vars: None, rooted: bool
+    ) -> None:
+        executor = _executor(root if rooted else None, rooted_tools=rooted)
+
+        outcome = await _run(
+            executor,
+            "python_exec",
+            code="import json, os; print(json.dumps(dict(os.environ)))",
+        )
+
+        assert outcome.status == ExecutionStatus.SUCCESS
+        seen = json.loads(outcome.output)
+        for name in PRIVATE_VARS:
+            assert name not in seen
+        assert seen["PATH"] == os.environ["PATH"]
+        assert seen["LC_TIME"] == "de_DE.UTF-8"
+
+    async def test_the_extras_reach_both_children(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("TMPDIR", "/inherited")
+        executor = _executor(root, tool_env={"MY_VALUE": "42", "TMPDIR": "/mine"})
+
+        shell = await _run(
+            executor, "shell_exec", command='printf "%s %s" "$MY_VALUE" "$TMPDIR"'
+        )
+        python = await _run(
+            executor,
+            "python_exec",
+            code=(
+                "import os\n" "print(os.environ['MY_VALUE'], os.environ['TMPDIR'])\n"
+            ),
+        )
+
+        expected = (ExecutionStatus.SUCCESS, "42 /mine")
+        assert (shell.status, shell.output) == expected
+        assert (python.status, python.output) == expected
+
+
+class _ShellCaller(BaseLLMProvider):
+    """Calls ``shell_exec`` once with *command*, then ends the run."""
+
+    def __init__(self, command: str) -> None:
+        self.replies = [
+            Message(
+                role="assistant",
+                tool_calls=[ToolCall("shell_exec", arguments={"command": command})],
+            ),
+            Message(role="assistant", content="done"),
+        ]
+        self.calls: list[list[Message]] = []
+
+    async def chat(
+        self, messages: list[Message], tools: list[ToolDef] | None = None
+    ) -> Message:
+        self.calls.append(list(messages))
+        return self.replies.pop(0)
+
+    async def close(self) -> None:
+        pass
+
+
+async def test_the_agent_options_give_the_children_their_extras(
+    root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("LOCALMELO_PERSIST_MEMORY", raising=False)
+    monkeypatch.delenv("LOCALMELO_MEMORY_DIR", raising=False)
+    monkeypatch.setenv(SECRET, "hunter2")
+    llm = _ShellCaller('printf "%s|%s" "$MY_VALUE" "$LOCALMELO_TEST_SECRET"')
+    agent = Agent(
+        llm=llm,
+        options=AgentOptions(
+            builtins=frozenset({"shell_exec"}),
+            attempt_policy="none",
+            max_steps=2,
+            workspace_root=str(root),
+            tool_env={"MY_VALUE": "42"},
+        ),
+    )
+
+    result = await agent.run_task("print the value")
+
+    assert (result.status, result.result) == ("completed", "done")
+    # The extra reached the child; the secret of melo's own environment did not.
+    assert [m.content for m in llm.calls[1] if m.role == "tool"] == ["42|"]
 
 
 # ── What the model is told ──────────────────────────────────────────────────

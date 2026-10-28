@@ -76,6 +76,7 @@ class OllamaBackend(BaseBackend):
             base_url=url,
             model=cfg.ollama.chat_model,
             extra_body=cfg.ollama.extra_body,
+            requires_reasoning_replay=cfg.ollama.requires_reasoning_replay,
             **options,
         )
 

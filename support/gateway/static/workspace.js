@@ -16,6 +16,7 @@ const S = {
   detailVersions: new Map(),
   levelsOpen: false,
   lastPresenceAt: 0,
+  machine: null,
 };
 const dialog = $("settings-dialog");
 const input = $("input");
@@ -179,10 +180,61 @@ function presence(force = false) {
     /* A browser may refuse fetch, or a test may not allow it. */
   }
 }
+function machineLine(machine) {
+  if (!machine) return {text: "", label: ""};
+  const parts = [];
+  let label = "";
+  if (machine.readable === false) {
+    parts.push("GPU lock unreadable");
+    label = "GPU lock unreadable";
+  } else if (machine.lock === "foreign") {
+    const holder = machine.holder || "another session";
+    const purpose = machine.purpose || "";
+    const mode = machine.gate === "wait" ? "(chats wait)" : "(recorded)";
+    const stale = machine.stale ? " · ETA passed" : "";
+    const prefix = `GPU lock: ${holder}`;
+    const suffix = ` ${mode}${stale}`;
+    // Keep the mode (and holder) visible in the header: spend the line's
+    // character budget on the purpose only after the suffix has room.
+    const room = Math.max(0, 78 - prefix.length - suffix.length);
+    const short =
+      purpose && room > 5
+        ? purpose.length > room - 3
+          ? purpose.slice(0, room - 4) + "…"
+          : purpose
+        : "";
+    parts.push(`${prefix}${short ? ` · ${short}` : ""}${suffix}`);
+    label = `${prefix}${purpose ? ` · ${purpose}` : ""}${suffix}`;
+  } else if (machine.lock === "self") {
+    const stale = machine.stale ? " · ETA passed" : "";
+    parts.push(`GPU lock: yours${stale}`);
+    label = parts[parts.length - 1];
+  }
+  if (machine.on_ac === false && typeof machine.battery_pct === "number") {
+    const state = machine.battery_state ? ` · ${machine.battery_state}` : "";
+    const battery = `Battery ${Math.round(machine.battery_pct)}%${state}`;
+    parts.push(battery);
+    label = label ? `${label} · ${battery}` : battery;
+  }
+  return {text: parts.join(" · "), label: label || parts.join(" · ")};
+}
+let machineSnapshot = "";
 function syncUI() {
   const s = active();
   const busy = !!s && (s.is_busy || S.pending.has(s.session_id));
   const held = busy && s?.held ? s.held : "";
+  const machine = machineLine(S.machine);
+  const chip = $("machine-state");
+  const snapshot = `${machine.text}\n${machine.label}`;
+  if (snapshot !== machineSnapshot) {
+    machineSnapshot = snapshot;
+    // Unhide before the text write, so a screen reader announces the first
+    // lock instead of a mutation inside a hidden live region.
+    chip.hidden = !machine.text;
+    chip.textContent = machine.text;
+    chip.setAttribute("aria-label", machine.label || "Machine status");
+    chip.title = machine.label;
+  }
   $("header-title").textContent = s ? title(s) : "New chat";
   $("header-model").textContent = s ? s.chat_model : "Connect your model to get started";
   $("connection-label").textContent = !S.online
@@ -535,6 +587,7 @@ async function createSession() {
   } catch (error) {
     $("create-error").textContent = error.message;
     $("create-error").hidden = false;
+    notify(error.message, true);
   } finally {
     S.working = false;
     $("create-btn").innerHTML = 'Create chat <span aria-hidden="true">→</span>';
@@ -607,6 +660,7 @@ async function poll() {
   try {
     const data = await api("/sessions");
     S.online = true;
+    S.machine = data.machine || null;
     const old = new Map(S.sessions.map((s) => [s.session_id, s]));
     S.sessions = data.sessions.map((s) => ({ ...old.get(s.session_id), ...s }));
     renderSessions();
@@ -661,6 +715,7 @@ async function init() {
   }
   if (results[1].status === "fulfilled") {
     S.sessions = results[1].value.sessions;
+    S.machine = results[1].value.machine || null;
     const saved = stored(KEY + "-view").id;
     const id = S.sessions.some((s) => s.session_id === saved) ? saved : S.sessions[0]?.session_id;
     if (id) await selectSession(id);

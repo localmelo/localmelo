@@ -89,6 +89,45 @@
           lists each change since 2026-10-22 in detail.
         </p>
 
+        <article class="update-entry" id="u-2026-10-27-gpu-lock">
+          <h3>The gateway reads the GPU lock and the battery</h3>
+          <p class="update-date">
+            <time datetime="2026-10-28">2026-10-28</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/76">#76</a>
+          </p>
+          <ul>
+            <li>The web workspace's header shows a foreign GPU lock (holder and purpose, with <code>(recorded)</code> or <code>(chats wait)</code>), your own lock, an unreadable lock, <code>· ETA passed</code>, and the battery percent and state on battery power. The same change is logged to <code>machine.jsonl</code> beside <code>calls.jsonl</code>.</li>
+            <li><code>[scheduler] lock_gate</code> defaults to <code>record</code>: the lock and battery are shown and logged and no request changes. <code>wait</code> holds every workspace call, embeddings included, while a foreign lock is present; the chat says <code>Waiting: Reservation</code>.</li>
+            <li><code>lock_self</code> matches the holder exactly (or <code>holder:run</code>). An unreadable or stale lock is foreign and never auto-cleared, and localmelo never writes, renames or removes a lock. Direct runs, the CLI and <code>/v1/agent/run</code> are unchanged.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-approval-diffs">
+          <h3>Diffs in approvals, and the recovery commands</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/75">#75</a>
+          </p>
+          <ul>
+            <li>A <code>file_write</code> over an existing text file now shows what changes before you approve it: a unified diff with <code>+a -b lines</code> in the header, removed lines in red and added lines in green; a new file shows its content and line count, and a file too large, not text or not a regular file says why.</li>
+            <li>The terminal UI gains <code>/approvals</code> (the mode and the session's grants, and switching <code>ask</code>, <code>auto</code> or <code>deny</code>), <code>/status</code> (the model and server, the session, the tools, memory, limits and files), <code>/retry</code> (runs the newest turn again) and <code>/mcp</code> (the servers, their tools and why MCP is off). The hints name them where they apply.</li>
+            <li>It loads an MCP servers file from <code>--mcp-config</code>, or the config file's new top-level <code>mcp_config</code> key; a server that fails to start turns MCP off for that session instead of ending the UI. Direct mode never reads the key.</li>
+          </ul>
+        </article>
+
+        <article class="update-entry" id="u-2026-10-27-embedding-setup">
+          <h3>Setting up an embedding model for long-term memory</h3>
+          <p class="update-date">
+            <time datetime="2026-10-27">2026-10-27</time> ·
+            <a href="https://github.com/localmelo/localmelo/pull/74">#74</a>
+          </p>
+          <ul>
+            <li>The first run offers an embedding model the chat server already lists (<code>Use nomic-embed-text for long-term memory? [Y/n]:</code>), and the setup wizard appends the server's embedding models as options after the backends, defaulting to the recommended one.</li>
+            <li>The banner names the configured embedding backend and model (<code>long-term memory · vLLM · Qwen3-Embedding-0.6B</code>), or says <code>melo --reconfigure adds one</code> when there is none; a stored vector from another model is skipped instead of failing the recall.</li>
+            <li>A new <a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">guide</a> covers Ollama, oMLX, vLLM, SGLang and MLC.</li>
+          </ul>
+        </article>
+
         <article class="update-entry" id="u-2026-10-27-held-labels">
           <h3>A held chat reads Waiting everywhere</h3>
           <p class="update-date">

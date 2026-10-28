@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 
 from localmelo.melo.checker.tiers import tier_of, tier_requires_approval
 from localmelo.melo.executor.builtins import (
@@ -11,6 +11,7 @@ from localmelo.melo.executor.builtins import (
     MAX_FILE_READ_BYTES,
     TOOL_EXIT_CODE,
     builtin_names,
+    builtins_with_env,
     rooted_builtins,
 )
 from localmelo.melo.executor.executor import ApprovalGate, Executor
@@ -33,6 +34,7 @@ def register_builtins(
     *,
     workspace_root: str | None = None,
     tool_timeout_s: float | None = None,
+    tool_env: Mapping[str, str] | None = None,
 ) -> None:
     """Register built-in tools with the executor and hippo.
 
@@ -46,7 +48,9 @@ def register_builtins(
     any, before it runs.
 
     Without *workspace_root*, the functions of :data:`BUILTINS` themselves
-    are registered, and a *tool_timeout_s* raises ``ValueError``. With a
+    are registered, and a *tool_timeout_s* raises ``ValueError``. Its
+    ``python_exec`` is a child process too, in this process's directory,
+    within the executor's default timeout. With a
     root, the tools that :func:`rooted_builtins` gives for it take their
     place, with the timeouts it gives them: ``file_read`` and ``file_write``
     refuse a symlink that takes the checked file's place and anything but a
@@ -57,6 +61,14 @@ def register_builtins(
     executor fences the file tools' paths with its own root, so an executor
     built with the same ``workspace_root`` goes with them. ``shell_exec``
     and ``python_exec`` can still reach any path: approval is their control.
+
+    *tool_env* adds variables to the environment of the ``shell_exec`` and
+    ``python_exec`` children, with or without a root. The child does not
+    inherit this process's environment: it gets
+    :func:`~localmelo.melo.executor.env.child_env` (``PATH``, ``HOME``, the
+    user, the shell, the terminal, ``LANG``, every ``LC_*`` and
+    ``TMPDIR``) with *tool_env* on top, so a secret in the agent's
+    environment reaches no tool unless *tool_env* names it.
     """
     selected = None if names is None else set(names)
     if selected is not None:
@@ -70,13 +82,19 @@ def register_builtins(
     if tool_timeout_s is not None and not workspace_root:
         raise ValueError("tool_timeout_s needs a workspace_root")
     rooted = (
-        rooted_builtins(workspace_root, tool_timeout_s=tool_timeout_s)
+        rooted_builtins(
+            workspace_root, tool_timeout_s=tool_timeout_s, tool_env=tool_env
+        )
         if workspace_root
         else {}
     )
+    with_env = builtins_with_env(tool_env) if tool_env else {}
     for tool_def, phase1a_fn in BUILTINS:
         if selected is None or tool_def.name in selected:
-            fn, timeout_ms = rooted.get(tool_def.name, (phase1a_fn, None))
+            if tool_def.name in rooted:
+                fn, timeout_ms = rooted[tool_def.name]
+            else:
+                fn, timeout_ms = with_env.get(tool_def.name, phase1a_fn), None
             tier = tier_of(tool_def)
             hippo.register_tool(tool_def)  # type: ignore[attr-defined]
             executor.register(

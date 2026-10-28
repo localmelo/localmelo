@@ -71,9 +71,10 @@ agent = Agent(llm=llm, options=AgentOptions(builtins=["file_read"], timeout_s=60
 | `builtins` | `None` | The built-in tools to register: `None` for all, an empty collection for none, or a collection of names. |
 | `memory` | `True` | `False` turns long-term memory off. |
 | `memory_dir` | `None` | A directory for SQLite memory, with `~` expanded. `None` follows the environment variables; see [Memory](memory.md#keep-memory-between-runs). |
-| `timeout_s` | `None` | A time limit for each run, in seconds. `None` means no limit. Without a `workspace_root`, `python_exec` code cannot be interrupted, so a run ends only when that code returns. |
+| `timeout_s` | `None` | A time limit for each run, in seconds. `None` means no limit. It also interrupts a `python_exec` call, whose child process it kills. |
 | `workspace_root` | `None` | The directory the built-in tools work in, and the only one the file tools reach; see [Work in a directory](#work-in-a-directory). |
 | `tool_timeout_s` | `None` | The time limit of `shell_exec` and `python_exec`, in seconds. Needs a `workspace_root`. `None` keeps 30 seconds for a shell command and 60 seconds for Python. |
+| `tool_env` | `None` | Extra variables for the `shell_exec` and `python_exec` children, on top of the minimal environment; see [Work in a directory](#work-in-a-directory). |
 | `record_answers` | `False` | `True` keeps each run's answer in working memory for the next run; see [Keep answers between runs](#keep-answers-between-runs). |
 
 `AgentOptions` cannot be changed after it is created. A value that is not
@@ -85,7 +86,7 @@ ValueError: max_steps must be an int >= 1, got 0
 
 The [command-line options](cli.md#direct-mode) set the same fields, except
 `steps_per_attempt` and `max_attempts`. Direct mode never sets
-`workspace_root`, `tool_timeout_s` or `record_answers`.
+`workspace_root`, `tool_timeout_s`, `tool_env` or `record_answers`.
 
 ## Results
 
@@ -194,8 +195,8 @@ After an interactive cancellation:
   run on the agent sees this.
 - Reflections are cleared without being promoted to long-term memory, so no
   network request follows the cancellation.
-- A `shell_exec` command, or a `python_exec` child process with a workspace
-  root, is killed with every process it started.
+- A `shell_exec` command, or a `python_exec` child process, is killed with
+  every process it started.
 - This clean-up runs in a task of its own, which a second cancellation does
   not stop. Writing history and the task record may take up to 10 seconds.
   `run.finished` still comes, and `agent.close()` waits for the clean-up.
@@ -398,12 +399,21 @@ Both lines print the real path of `~/melo-work`, such as
   characters, is cut to 50,000 characters, which end with
   `... [truncated: the file has <size> bytes]`. `file_write` reports the
   resolved path.
-- **`shell_exec` and `python_exec`** start in the root, each in a child
-  process with a process group of its own, which a timeout or a
-  cancellation kills as a whole. A shell command's standard input is
-  `/dev/null`, with or without a root. Python code runs in a child Python,
-  so a time limit can stop it, and `sys.exit()` or `os.chdir()` stays in
-  the child.
+- **`shell_exec` and `python_exec`** always run in a child process with a
+  process group of its own, which a timeout or a cancellation kills as a
+  whole; the root is the directory they start in. A shell command's standard
+  input is `/dev/null`; `python_exec` receives its code on a pipe (never in
+  argv) and then points fd 0 at `/dev/null`, so `input()` gets EOF and
+  neither reads the terminal. Python code runs in a child Python, so a time
+  limit can stop it, and `sys.exit()` or `os.chdir()` stays in the child.
+  The child also gets a CPU-time limit of one hour and an open-file limit of
+  1,024 (`RLIMIT_CPU` and `RLIMIT_NOFILE` on POSIX), which only stop code
+  that outlives the call; no address-space limit is set, because macOS
+  refuses one. Its environment is not melo's: it gets `PATH`, `HOME`,
+  `USER`, `LOGNAME`, `SHELL`, `TERM`, `LANG`, every `LC_*` variable and
+  `TMPDIR`, plus `tool_env`, so an API key in melo's environment reaches no
+  tool; `VIRTUAL_ENV`, `PYTHONPATH`, `SSH_AUTH_SOCK` and the proxy
+  variables pass only through `tool_env`.
 - **They can still reach any path.** Only the file tools are limited to the
   root. Use an [approval policy](#approve-tool-calls) to control
   `shell_exec` and `python_exec`.
@@ -417,8 +427,9 @@ Both lines print the real path of `~/melo-work`, such as
   `python_exec`, for builds and test suites that take longer than the
   defaults of 30 seconds for a shell command and 60 seconds for Python. A
   shell command that runs too long fails with
-  `Command timed out after <n> s`. `tool_timeout_s` without a
-  `workspace_root` raises `ValueError`.
+  `Command timed out after <n> s`; a Python call that runs too long ends as
+  a timeout with `Execution timed out after <n>s`. `tool_timeout_s` without
+  a `workspace_root` raises `ValueError`.
 - **The model is told.** Each planning request says:
   `Working directory: <root>. Relative paths and shell and Python commands run there; file_read and file_write refuse paths outside it.`
 - `RunResult.config` does not include the root: `agent.workspace_root` and

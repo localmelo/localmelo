@@ -33,7 +33,12 @@ from localmelo.melo.agent._chat import (
     lacks_task_query,
 )
 from localmelo.melo.agent._events import _Emitter, check_sink
-from localmelo.melo.agent.options import AgentOptions, ReflectionGate
+from localmelo.melo.agent.options import (
+    REPLAY_TURN_CAP,
+    AgentOptions,
+    ReflectionGate,
+    reasoning_refusal,
+)
 from localmelo.melo.checker import Checker
 from localmelo.melo.checker.payloads import (
     ExecutorResultPayload,
@@ -260,6 +265,105 @@ def _as_planned(window: list[Message], query: str) -> list[Message]:
     if lacks_task_query(window, query):
         return [Message(role="user", content=query), *window]
     return window
+
+
+def _split_inline_reasoning(response: Message) -> Message:
+    """Move a ``<think>`` block out of *response*'s content into thinking.
+
+    The explicit modes call this on every planning and reflection reply.
+    It uses :func:`~localmelo.melo.schema.split_thinking`: a block becomes
+    the thinking unless the provider already set one, in which case the
+    provider's value wins and the block is only removed from content.
+    A reply without a block is returned unchanged.
+    """
+    block, content = split_thinking(response.content)
+    if not block:
+        return response
+    if response.thinking:
+        return dataclasses.replace(response, content=content)
+    return dataclasses.replace(response, content=content, thinking=block)
+
+
+def _replay_plan(
+    window: list[Message],
+    options: AgentOptions,
+    *,
+    task_query: Message | None = None,
+    requires_replay: bool = False,
+) -> tuple[list[Message], list[int]]:
+    """The window as an explicit-mode request carries it, and its cap skips.
+
+    The first list is the one :func:`_as_sent` returns. The second holds the
+    indexes in *window* of the assistant turns whose thinking was left out
+    because it exceeds :data:`REPLAY_TURN_CAP` (empty on a replay-required
+    provider, and in ``legacy``/``drop``). On a replay-required provider the
+    whole window is replayed: the task scope and ``replay_turns`` do not
+    apply, since a turn the server needs is not one the caller can leave out.
+    """
+    if options.reasoning == "legacy":
+        return window, []
+    start = 0
+    if (
+        not requires_replay
+        and options.replay_scope != "window"
+        and task_query is not None
+    ):
+        for index, msg in enumerate(window):
+            if msg is task_query:
+                start = index
+                break
+    in_scope = [
+        index
+        for index, msg in enumerate(window)
+        if index >= start and msg.role == "assistant" and msg.thinking
+    ]
+    keep = (
+        set(in_scope)
+        if requires_replay or options.replay_turns is None
+        else set(in_scope[-options.replay_turns :])
+    )
+    sent: list[Message] = []
+    skipped: list[int] = []
+    for index, msg in enumerate(window):
+        if msg.role != "assistant" or not msg.thinking:
+            sent.append(msg)
+            continue
+        if options.reasoning != "replay" or index not in keep:
+            sent.append(dataclasses.replace(msg, thinking=""))
+            continue
+        if not requires_replay and len(msg.thinking) > REPLAY_TURN_CAP:
+            sent.append(dataclasses.replace(msg, thinking=""))
+            skipped.append(index)
+            continue
+        sent.append(msg)
+    return sent, skipped
+
+
+def _as_sent(
+    window: list[Message],
+    options: AgentOptions,
+    *,
+    task_query: Message | None = None,
+    requires_replay: bool = False,
+) -> list[Message]:
+    """The window as a request carries it, for send and for size checks.
+
+    In ``legacy`` it is *window* itself, unchanged. Otherwise it is a new
+    list in which an assistant message keeps its thinking only in
+    ``replay``, in scope (the current task from *task_query* on, or the
+    whole window), among the newest ``replay_turns`` such turns, and within
+    :data:`REPLAY_TURN_CAP` (the cap does not apply to a provider that
+    requires replay). A provider that requires replay gets every assistant
+    turn in the window: the task scope and ``replay_turns`` are ignored
+    there. A message that fails one of these is a copy with an empty
+    thinking; one that passes is the original object.
+    """
+    return _replay_plan(
+        window,
+        options,
+        task_query=task_query,
+        requires_replay=requires_replay,
+    )[0]
 
 
 def _serialize_reflections(entries: list[ReflectionEntry]) -> list[Message]:
@@ -733,10 +837,22 @@ class _RunState:
     # answer of a reflection's "done" that gives none, and the result of a
     # final boundary whose reflection is unreadable (reflection_gate="flags").
     last_text: str = ""
+    # The thinking of the planning reply that set last_text, and of the last
+    # reflection reply read; _record_answer replays the one behind the result.
+    last_text_thinking: str = ""
+    reflection_thinking: str = ""
+    # The thinking of the reply that gave the result, once the run ends.
+    answer_thinking: str = ""
     # Planning replies in a row with neither a tool call nor text.
     empty_replies: int = 0
     # The run's task id ("" for a call without a task record).
     task_id: str = ""
+    # The query Message this run appended to the window, for replay scope.
+    task_query_msg: Message | None = None
+    # Replay counters (see memory_stats on RunResult).
+    replayed_chars: int = 0
+    replay_skipped: int = 0
+    replay_stripped: int = 0
     # Reports the run's events to the caller's sink; silent without one.
     events: _Emitter = dataclasses.field(default_factory=_Emitter)
     # The approval policy the caller passed to run_task, or None.
@@ -1046,6 +1162,26 @@ class Agent:
             raise TypeError("Agent requires either config= or llm= to be provided")
 
         self.options = options if options is not None else AgentOptions()
+        if (
+            config is not None
+            and llm is None
+            and self.options.reasoning != "replay"
+            and config.chat_backend != "ollama"
+        ):
+            # The section's key is only for replay: legacy and drop send no
+            # reasoning, and the gateway, a configured UI session and a
+            # Python caller all build their provider here. Ollama keeps its
+            # fixed "thinking" field, whose native wire legacy already uses.
+            self._llm.reasoning_field = None
+        # The API user's error; the CLI refuses the same pairs before it
+        # builds an Agent, so direct mode never reaches this traceback.
+        refusal = reasoning_refusal(
+            self.options.reasoning,
+            getattr(self._llm, "reasoning_field", None),
+            bool(getattr(self._llm, "requires_reasoning_replay", False)),
+        )
+        if refusal is not None:
+            raise ValueError(refusal)
         # Resolved first, so that a bad root raises before anything, such as
         # the memory directory, is created.
         workspace_root = _resolve_workspace_root(self.options.workspace_root)
@@ -1142,6 +1278,7 @@ class Agent:
             names=self.options.builtins,
             workspace_root=workspace_root,
             tool_timeout_s=self.options.tool_timeout_s,
+            tool_env=self.options.tool_env,
         )
         # The names of the built-ins registered above (see list_tools).
         self._builtin_names = (
@@ -1154,6 +1291,16 @@ class Agent:
     def workspace_root(self) -> str | None:
         """The real path of the agent's workspace root, or ``None``."""
         return self.executor.workspace_root
+
+    @property
+    def _counts_thinking(self) -> bool:
+        """Whether prompt checks count the reasoning a request carries."""
+        return self.options.reasoning == "replay"
+
+    @property
+    def _requires_replay(self) -> bool:
+        """Whether the provider refuses a request that omits its reasoning."""
+        return bool(getattr(self._llm, "requires_reasoning_replay", False))
 
     async def start(self) -> None:
         """Start the tool providers and register their tools now.
@@ -1473,61 +1620,132 @@ class Agent:
     # short status string when the loop should break, or None to
     # continue to the next stage.
 
-    async def _fit_prompt_cap(self, others: list[Message], query: str) -> None:
-        """Drop the oldest working memory that the planning prompt has no room for.
+    async def _fit_prompt_cap(
+        self,
+        others: list[Message],
+        query: str,
+        *,
+        task_query: Message | None = None,
+        run: _RunState | None = None,
+    ) -> None:
+        """Drop or strip the oldest working memory the planning prompt cannot hold.
 
         ``Checker.pre_plan`` refuses a step whose prompt, the working-memory
         window plus *others* (long-term recall and the reflection), is
-        over its cap. Units of the window (see :func:`group_turns`) are
-        dropped oldest first and whole, so a tool call keeps its results,
-        until the prompt fits; the newest unit always stays. The window is
-        measured as the planning request carries it: once the unit that
-        holds the task *query* is dropped, the request puts the query back
-        in front (see :func:`_as_planned`), so dropping that unit saves
-        nothing. When even the newest unit alone, with the query, does not
-        fit, nothing is dropped and pre_plan refuses the step as before.
+        over its cap. The window is measured as the planning request
+        carries it: once the unit that holds the task *query* is dropped,
+        the request puts the query back in front (see :func:`_as_planned`),
+        so dropping that unit saves nothing.
 
-        Each turn fits half the cap (see :meth:`_checked_tool_turn`), but
-        several large turns, of one run or of earlier runs on this agent,
-        can pass it together. Without this, the task would fail with
-        "Prompt too large", and so would each later run on this agent,
-        until eviction by message count caught up.
+        In ``replay`` on a provider that does not require replay, the
+        oldest units' thinking is cleared first (see
+        :meth:`WorkingMemory.strip_thinking`), and the count that fits is
+        committed. Only when no such strip fits does the whole-unit loop
+        run. On a replay-required provider that loop runs directly, with
+        thinking counted: a unit is dropped whole and no reasoning is ever
+        cut or skipped. ``legacy`` and ``drop`` run the loop as before.
+        The newest unit always stays.
         """
         units = group_turns(self.hippo.working.get_window())
-        for first in range(len(units)):
-            kept = [msg for unit in units[first:] for msg in unit]
-            if (await self.checker.pre_plan(others + _as_planned(kept, query))).allowed:
-                break
-        else:
-            return  # not even the newest unit fits: keep the window
-        if first:
-            dropped = self.hippo.working.drop_oldest_units(first)
-            logger.info(
-                "Dropped the %d oldest working-memory messages so that the "
-                "planning prompt fits",
-                dropped,
+
+        async def fits(kept: list[Message]) -> bool:
+            sent = _as_sent(
+                kept,
+                self.options,
+                task_query=task_query,
+                requires_replay=self._requires_replay,
             )
+            check = await self.checker.pre_plan(
+                others + _as_planned(sent, query),
+                count_thinking=self._counts_thinking,
+            )
+            return check.allowed
+
+        if not await fits(self.hippo.working.get_window()):
+            if self.options.reasoning == "replay" and not self._requires_replay:
+                carried = {
+                    id(msg)
+                    for msg in _as_sent(
+                        self.hippo.working.get_window(),
+                        self.options,
+                        task_query=task_query,
+                        requires_replay=self._requires_replay,
+                    )
+                    if msg.role == "assistant" and msg.thinking
+                }
+                for first in range(1, len(units)):
+                    kept = [
+                        (
+                            dataclasses.replace(msg, thinking="")
+                            if index < first
+                            and msg.role == "assistant"
+                            and msg.thinking
+                            and id(msg) in carried
+                            else msg
+                        )
+                        for index, unit in enumerate(units)
+                        for msg in unit
+                    ]
+                    if not await fits(kept):
+                        continue
+                    changed = self.hippo.working.strip_thinking(first, only=carried)
+                    if run is not None:
+                        run.replay_stripped += changed
+                    logger.info(
+                        "Cleared the thinking of %d working-memory message(s) "
+                        "so that the planning prompt fits",
+                        changed,
+                    )
+                    return
+            for first in range(len(units)):
+                kept = [msg for unit in units[first:] for msg in unit]
+                if await fits(kept):
+                    break
+            else:
+                return  # not even the newest unit fits: keep the window
+            if first:
+                dropped = self.hippo.working.drop_oldest_units(first)
+                logger.info(
+                    "Dropped the %d oldest working-memory messages so that the "
+                    "planning prompt fits",
+                    dropped,
+                )
 
     async def _do_retrieval(
-        self, query: str
+        self,
+        query: str,
+        *,
+        task_query: Message | None = None,
+        run: _RunState | None = None,
     ) -> tuple[list[Message], list[Message], list[ToolDef], str | None]:
         """Stage 1+2: retrieve context, resolve tools, run boundary checks.
 
         With ``tool_exposure="retrieve"`` the tools are every registered
-        built-in, sorted by name, then the other tools that hint
-        extraction and BM25 resolve among themselves, also sorted by name;
+        built-in, sorted by name, then the other tools that the model's
+        tool calls and BM25 resolve among themselves, also sorted by name;
         with ``"all"`` they are every registered tool, sorted by name.
 
-        Before anything reads the working-memory window, its oldest units
-        are dropped when the planning prompt would not fit
-        ``Checker.pre_plan``'s cap otherwise (see :meth:`_fit_prompt_cap`).
+        In ``drop`` and ``replay`` no long-term recall is read, so the
+        system prompt has no ``[RECALL]`` section; the long-term writes are
+        unchanged. Before anything reads the working-memory window, its
+        oldest units are dropped or stripped when the planning prompt would
+        not fit ``Checker.pre_plan``'s cap otherwise (see
+        :meth:`_fit_prompt_cap`).
 
         Returns (long_context, short_window, tools, fail_reason).
         *fail_reason* is non-None when a check fails and the loop must break.
         """
-        long_context = await self.hippo.retrieve_context(query)
+        if self.options.reasoning == "legacy":
+            long_context = await self.hippo.retrieve_context(query)
+        else:
+            long_context = []
         reflection_msgs = _serialize_reflections(self.hippo.working.get_reflections())
-        await self._fit_prompt_cap(long_context + reflection_msgs, query)
+        await self._fit_prompt_cap(
+            long_context + reflection_msgs,
+            query,
+            task_query=task_query,
+            run=run,
+        )
         short_window = self.hippo.working.get_window()
 
         tool_hints: list[str] = []
@@ -1541,7 +1759,8 @@ class Agent:
             # sorted by name too: the list stays byte-identical for as long
             # as the chosen set does not change, whatever the hint order.
             builtins = builtin_names()
-            # Include reflection context in tool hint extraction
+            # Hints are the model's tool calls, which live in the window; the
+            # long-term and reflection messages carry none.
             hint_sources = long_context + short_window + reflection_msgs
             tool_hints = [
                 name
@@ -1573,8 +1792,16 @@ class Agent:
             )
 
         # As the planning request will carry it: with the query put back.
-        all_msgs = long_context + _as_planned(short_window, query) + reflection_msgs
-        check = await self.checker.pre_plan(all_msgs)
+        sent = _as_sent(
+            short_window,
+            self.options,
+            task_query=task_query,
+            requires_replay=self._requires_replay,
+        )
+        all_msgs = long_context + _as_planned(sent, query) + reflection_msgs
+        check = await self.checker.pre_plan(
+            all_msgs, count_thinking=self._counts_thinking
+        )
         if not check.allowed:
             return (
                 long_context,
@@ -1592,18 +1819,44 @@ class Agent:
         tools: list[ToolDef],
         query: str,
         reflections: list[ReflectionEntry] | None = None,
+        *,
+        task_query: Message | None = None,
+        run: _RunState | None = None,
     ) -> tuple[Message, str | None]:
         """Stage 3: LLM planning step with post-plan check.
 
+        The request carries :func:`_as_sent`'s window. In ``replay`` the
+        characters of thinking it carries are counted, and a turn skipped
+        for the per-turn cap is counted too; in ``drop`` both are zero; in
+        ``legacy`` neither counter is used. An explicit-mode reply's inline
+        ``<think>`` block is moved into thinking before the run reads it,
+        so the result and tool-hint scan see the clean answer.
+
         Returns (response, fail_reason).
         """
+        sent, skipped = _replay_plan(
+            short_window,
+            self.options,
+            task_query=task_query,
+            requires_replay=self._requires_replay,
+        )
+        if run is not None:
+            run.replayed_chars += sum(
+                len(msg.thinking) for msg in sent if msg.role == "assistant"
+            )
+            run.replay_skipped += len(skipped)
         response = await self.chat.plan_step(
             context=long_context,
-            short=short_window,
+            short=sent,
             tools=tools,
             query=query,
             reflections=reflections,
         )
+        if self.options.reasoning != "legacy":
+            before = response.thinking
+            response = _split_inline_reasoning(response)
+            if not before and response.thinking:
+                self.chat.stats.reasoning_chars += len(response.thinking)
 
         check = await self.checker.post_plan(response)
         if not check.allowed:
@@ -1906,7 +2159,9 @@ class Agent:
 
         turn_chars = len(full_text) + sum(len(text) for text in texts)
         if turn_chars > MAX_MEMORY_TEXT_LEN or not text_allowed:
-            content, thinking = "", ""
+            content = ""
+            if self.options.reasoning == "legacy":
+                thinking = ""
         assistant_msg = Message(
             role="assistant", content=content, tool_calls=calls, thinking=thinking
         )
@@ -1990,6 +2245,59 @@ class Agent:
 
     # ── Reflection ──
 
+    async def _fit_reflection_messages(
+        self,
+        messages: list[Message],
+        run: _RunState | None,
+        *,
+        skipped: list[int] | None = None,
+        sent: list[Message] | None = None,
+    ) -> list[Message] | None:
+        """*messages* with the oldest reflection tail units dropped to fit.
+
+        Keeps the system message and the final user request. ``None`` when
+        even the newest tail unit alone, with them, is over the prompt cap:
+        the reflection is then refused before it is sent. In ``replay``
+        the thinking the kept turns carry is counted in the run's
+        ``replayed_chars``.
+        """
+        if len(messages) <= 2:
+            check = await self.checker.pre_plan(
+                messages, count_thinking=self._counts_thinking
+            )
+            if not check.allowed:
+                return None
+            self._note_reflection_sent(messages, run, skipped, sent)
+            return messages
+        units = group_turns(messages[1:-1])
+        for first in range(len(units)):
+            kept = [msg for unit in units[first:] for msg in unit]
+            candidate = [messages[0], *kept, messages[-1]]
+            check = await self.checker.pre_plan(
+                candidate, count_thinking=self._counts_thinking
+            )
+            if check.allowed:
+                self._note_reflection_sent(candidate, run, skipped, sent)
+                return candidate
+        return None
+
+    @staticmethod
+    def _note_reflection_sent(
+        candidate: list[Message],
+        run: _RunState | None,
+        skipped: list[int] | None,
+        sent: list[Message] | None,
+    ) -> None:
+        """Count what a reflection request that *candidate* sends carries."""
+        if run is None:
+            return
+        run.replayed_chars += sum(
+            len(msg.thinking) for msg in candidate if msg.role == "assistant"
+        )
+        if skipped and sent is not None:
+            kept = {id(msg) for msg in candidate}
+            run.replay_skipped += sum(1 for index in skipped if id(sent[index]) in kept)
+
     async def _do_reflect(
         self,
         task: TaskRecord,
@@ -1998,6 +2306,7 @@ class Agent:
         *,
         final: bool = False,
         replies: list[Message] | None = None,
+        run: _RunState | None = None,
     ) -> tuple[ReflectionEntry, ReflectionDecision] | None:
         """Structured reflection at attempt boundary.
 
@@ -2034,18 +2343,51 @@ class Agent:
           agent stops chasing instead of carrying an ever-growing
           scratchpad. A ``done`` decision is left as it is: it ends the
           run, so no attempt would carry the reflection.
+
+        A reflection request that ``fit`` refuses (the explicit modes,
+        when even its newest tail unit is over the prompt cap) is a reply
+        that cannot be read: with ``"flags"`` this returns ``None``, and
+        with ``"utility"`` it reads ``stop`` as a reply without a JSON
+        object does.
         """
         flags = self.options.reflection_gate == "flags"
         short_window = self.hippo.working.get_window()
+        task_query = run.task_query_msg if run is not None else None
+        sent, skipped = _replay_plan(
+            short_window,
+            self.options,
+            task_query=task_query,
+            requires_replay=self._requires_replay,
+        )
+        fit = None
+        if self.options.reasoning != "legacy":
+
+            async def fit(messages: list[Message]) -> list[Message] | None:
+                return await self._fit_reflection_messages(
+                    messages, run, skipped=skipped, sent=sent
+                )
+
         prior_reflections = self.hippo.working.get_reflections()
         response = await self.chat.reflect(
-            short=short_window,
+            short=sent,
             query=task.query,
             attempt_id=attempt_id,
             failure_type=failure_type,
             prior_reflections=prior_reflections or None,
             final=final,
+            fit=fit,
         )
+        if response is None:
+            # The fit refused the request before it was sent; read it as an
+            # unreadable reply (see the docstring and _parse_reflection).
+            return (
+                None if flags else self._parse_reflection("", attempt_id, failure_type)
+            )
+        if self.options.reasoning != "legacy":
+            before = response.thinking
+            response = _split_inline_reasoning(response)
+            if not before and response.thinking:
+                self.chat.stats.reasoning_chars += len(response.thinking)
         if replies is not None:
             replies.append(response)
         if flags:
@@ -2057,16 +2399,30 @@ class Agent:
             # models continue them although the request offers no tools.
             # Ask once more, with those turns written out as text.
             response = await self.chat.reflect(
-                short=short_window,
+                short=sent,
                 query=task.query,
                 attempt_id=attempt_id,
                 failure_type=failure_type,
                 prior_reflections=prior_reflections or None,
                 final=final,
                 retry=True,
+                fit=fit,
             )
+            if response is None:
+                return (
+                    None
+                    if flags
+                    else self._parse_reflection("", attempt_id, failure_type)
+                )
+            if self.options.reasoning != "legacy":
+                before = response.thinking
+                response = _split_inline_reasoning(response)
+                if not before and response.thinking:
+                    self.chat.stats.reasoning_chars += len(response.thinking)
             if replies is not None:
                 replies.append(response)
+        if run is not None:
+            run.reflection_thinking = response.thinking
         if flags:
             data = _find_reflection(response.content)
             if data is None:
@@ -2220,7 +2576,9 @@ class Agent:
 
         for step in range(budget):
             # Retrieval + tool resolution + boundary checks
-            long_context, short_window, tools, fail = await self._do_retrieval(query)
+            long_context, short_window, tools, fail = await self._do_retrieval(
+                query, task_query=run.task_query_msg, run=run
+            )
             if fail is not None:
                 run.end("failed", error=fail)
                 return step + 1, ""
@@ -2236,6 +2594,8 @@ class Agent:
                 tools,
                 query,
                 reflections=reflections,
+                task_query=run.task_query_msg,
+                run=run,
             )
             # Also a reply the post-plan check refuses.
             run.events.assistant_message(response)
@@ -2244,10 +2604,12 @@ class Agent:
                 return step + 1, ""
             if response.content.strip():
                 run.last_text = response.content
+                run.last_text_thinking = response.thinking
 
             if not response.tool_calls:
                 if response.content.strip():
                     # No tool call → direct answer
+                    run.answer_thinking = response.thinking
                     run.end("completed", result=response.content)
                     return step + 1, ""
                 # An empty reply is no answer: ask for one and plan again.
@@ -2258,8 +2620,11 @@ class Agent:
                 # The label stands in for the reply, so the nudge does not
                 # follow another user message; as one unit, the two are
                 # only ever dropped together.
+                label = Message(role="assistant", content=EMPTY_REPLY_LABEL)
+                if self.options.reasoning != "legacy":
+                    label = dataclasses.replace(label, thinking=response.thinking)
                 self.hippo.working.append_turn(
-                    Message(role="assistant", content=EMPTY_REPLY_LABEL),
+                    label,
                     [Message(role="user", content=EMPTY_REPLY_NUDGE)],
                 )
                 run.events.empty_reply(run.empty_replies)
@@ -2347,14 +2712,10 @@ class Agent:
           ``setup_error`` too, before its first step;
         - ``timeout``: the run was still going after ``timeout_s``
           seconds. It is cancelled wherever it was: a request in flight
-          is abandoned (and counts in ``llm_errors``), a shell command is
-          killed with every process it started, and tool providers still
-          being set up are closed (so later runs end as ``setup_error``).
-          ``python_exec`` code without a ``workspace_root`` is the
-          exception: it runs on the event loop, so neither ``timeout_s``
-          nor the executor's timeout can interrupt it, and the run ends
-          only once that code returns. With a root it runs in a child
-          process, which is killed with every process it started.
+          is abandoned (and counts in ``llm_errors``), a shell command or
+          a ``python_exec`` child is killed with every process it
+          started, and tool providers still being set up are closed (so
+          later runs end as ``setup_error``).
           Closing the providers is not cut short, also when the deadline
           expires while a failed setup is closing them, so the run
           returns once they are closed, which can be after ``timeout_s``;
@@ -2558,7 +2919,9 @@ class Agent:
                         await self._ensure_tools()
                     except Exception as exc:
                         raise _ToolSetupError(str(exc) or _exception_text(exc)) from exc
-                    self.hippo.working.append(Message(role="user", content=query))
+                    query_msg = Message(role="user", content=query)
+                    self.hippo.working.append(query_msg)
+                    run.task_query_msg = query_msg
                     run.query_in_memory = True
                     if self.options.attempt_policy == "none":
                         await self._run_single_attempt(task, query, run)
@@ -2767,9 +3130,11 @@ class Agent:
         :func:`~localmelo.melo.schema.clip_session_text`). A text that the
         memory-write check refuses is replaced by
         :data:`~localmelo.melo.schema.ANSWER_NOT_KEPT_LABEL` with the
-        check's reason. The result itself is not changed. A failure is
-        logged, not raised, so it cannot replace the run's outcome or skip
-        the save.
+        check's reason. The result itself is not changed. On a provider that
+        requires reasoning replay, ``replay`` also keeps the thinking of the
+        reply that gave the answer, so the next request can send it back. A
+        failure is logged, not raised, so it cannot replace the run's
+        outcome or skip the save.
         """
         if not self.options.record_answers or not run.query_in_memory:
             return
@@ -2781,7 +3146,14 @@ class Agent:
             )
             if not check.allowed:
                 text = ANSWER_NOT_KEPT_LABEL.format(reason=check.reason)
-            self.hippo.working.append(Message(role="assistant", content=text))
+            thinking = (
+                run.answer_thinking
+                if self.options.reasoning == "replay" and self._requires_replay
+                else ""
+            )
+            self.hippo.working.append(
+                Message(role="assistant", content=text, thinking=thinking)
+            )
         except Exception:
             logger.exception(
                 "Could not keep the answer of task %s in working memory", run.task_id
@@ -2899,7 +3271,9 @@ class Agent:
         """
         run.end("cancelled", error=self._cancel_reason(exc))
         if not run.query_in_memory:
-            self.hippo.working.append(Message(role="user", content=query))
+            query_msg = Message(role="user", content=query)
+            self.hippo.working.append(query_msg)
+            run.task_query_msg = query_msg
             run.query_in_memory = True
         if run.inflight is None:
             return
@@ -3164,6 +3538,17 @@ class Agent:
     def _run_result(
         self, task: TaskRecord, run: _RunState, stats: RequestStats, duration_s: float
     ) -> RunResult:
+        opts = self.options
+        usage = dict(stats.usage)
+        memory_stats: dict[str, Any] | None = None
+        if opts.reasoning != "legacy":
+            usage["reasoning_chars"] = stats.reasoning_chars
+            usage.update(stats.details)
+            memory_stats = {
+                "replayed_chars": run.replayed_chars,
+                "replay_skipped": run.replay_skipped,
+                "replay_stripped": run.replay_stripped,
+            }
         return RunResult(
             task_id=task.task_id,
             status=run.status,
@@ -3176,16 +3561,17 @@ class Agent:
             n_aux=stats.n_aux,
             n_tool=run.n_tool,
             llm_errors=stats.llm_errors,
-            usage=dict(stats.usage),
+            usage=usage,
             duration_s=duration_s,
             config=self._run_config(),
+            memory_stats=memory_stats,
         )
 
     def _run_config(self) -> dict[str, Any]:
         """The effective configuration that ``RunResult.config`` reports."""
         opts = self.options
         builtins = builtin_names() if opts.builtins is None else opts.builtins
-        return {
+        config: dict[str, Any] = {
             "max_steps": opts.max_steps,
             "attempt_policy": opts.attempt_policy,
             "steps_per_attempt": opts.steps_per_attempt,
@@ -3198,6 +3584,10 @@ class Agent:
             "timeout_s": opts.timeout_s,
             "tools": sorted(tool.name for tool in self.hippo.list_tools()),
         }
+        if opts.reasoning != "legacy":
+            config["reasoning"] = opts.reasoning
+            config["replay_turns"] = opts.replay_turns
+        return config
 
     async def _run_reflective_attempts(
         self, task: TaskRecord, query: str, run: _RunState
@@ -3277,6 +3667,7 @@ class Agent:
                 failure_type,
                 final=bool(out_of),
                 replies=run.events.replies,
+                run=run,
             )
             if reflection is None:  # only with reflection_gate="flags"
                 run.events.reflection(None, continue_run=not out_of)
@@ -3287,6 +3678,7 @@ class Agent:
                         run.attempts,
                         out_of,
                     )
+                    run.answer_thinking = run.last_text_thinking
                     run.end("budget_exhausted", result=run.last_text, error=out_of)
                     return
                 logger.info(
@@ -3302,16 +3694,23 @@ class Agent:
             best_effort = decision.best_effort_result
             if decision.recommended_action == "done":
                 run.events.reflection(reflection, continue_run=False)
-                answer = best_effort if best_effort.strip() else run.last_text
+                if best_effort.strip():
+                    answer = best_effort
+                    run.answer_thinking = run.reflection_thinking
+                else:
+                    answer = run.last_text
+                    run.answer_thinking = run.last_text_thinking
                 run.end("completed", result=answer)
                 return
             if out_of:
                 run.events.reflection(reflection, continue_run=False)
+                run.answer_thinking = run.reflection_thinking
                 run.end("budget_exhausted", result=best_effort, error=out_of)
                 return
             if not _should_continue(decision, opts.reflection_gate):
                 run.events.reflection(reflection, continue_run=False)
                 stopped = f"Stopped after attempt {run.attempts}"
+                run.answer_thinking = run.reflection_thinking
                 run.end(
                     "gate_stopped",
                     result=best_effort,

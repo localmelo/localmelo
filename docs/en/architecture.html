@@ -196,7 +196,9 @@
           embedding model, one long-term memory, in
           <code>~/.cache/localmelo/playground/</code>. Chats last while the
           gateway runs, but creating a chat closes those idle for 2 hours
-          and, at 12 chats, replaces the oldest idle one.
+          and, at 12 chats, replaces the oldest idle one. A chat's model calls
+          pass through the scheduler's policy, and the header shows the GPU
+          lock and the battery the gateway reads.
         </p>
         <p>
           The gateway has no authentication. When it listens on
@@ -225,8 +227,9 @@
           start of the first run, <code>support/mcp</code> starts each server,
           lists its tools and registers them, as
           <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>, with the tool registry
-          and the executor. MCP tools work in direct mode and the Python API,
-          not in gateway sessions or the interactive UI. A server's <code>require_approval</code>
+          and the executor. MCP tools work in direct mode, the Python API and
+          the interactive UI (<code>--mcp-config</code>, else the config's
+          <code>mcp_config</code> key); the gateway does not load them yet. A server's <code>require_approval</code>
           makes calls of its tools, or of the tools it names, ask the run's
           approval policy first; a run without a policy, such as a direct run,
           runs them without asking.
@@ -316,10 +319,11 @@
           MCP tool its server's <code>timeout</code>. In the interactive UI,
           <code>shell_exec</code> and <code>python_exec</code> get 10 minutes.
           A shell command's standard input is <code>/dev/null</code>, so it
-          never reads the terminal. Without a workspace root,
-          <code>python_exec</code> code runs inside localmelo and cannot be
-          interrupted. A refusal, a denial, a time-out or an error comes back
-          as the tool's error.
+          never reads the terminal. <code>python_exec</code> code always runs
+          in a child process, which a time limit or a cancellation kills: in
+          the current directory without a workspace root, in the root with
+          one. A refusal, a denial, a time-out or an error comes back as the
+          tool's error.
         </p>
         <p>
           The four built-in tools are <code>shell_exec</code>,
@@ -403,7 +407,10 @@
           terminal, <code>melo</code> finds a model server with
           <code>GET /v1/models</code>, asks for its URL and model and saves
           them, as the <code>ollama</code> backend for an Ollama server and as
-          <code>vllm</code> for any other OpenAI-compatible server. The setup
+          <code>vllm</code> for any other OpenAI-compatible server. When the
+          server lists an embedding model, it offers one for long-term
+          memory; the <a href="https://github.com/localmelo/localmelo/blob/main/docs/embedding.md">embedding guide</a>
+          covers Ollama, oMLX, vLLM, SGLang and MLC. The setup
           wizard (<code>melo --reconfigure</code>) asks for
           every backend, sends a test request to each server, saves the file,
           then opens the interactive UI, or with <code>--serve</code>
@@ -451,8 +458,10 @@
           <code>support/melo_serving/</code> hold code that the agent does not
           use yet. <code>melo/memory/retrieval/</code> and
           <code>melo/memory/notes.py</code> serve only
-          <code>melo-retrieve</code>, and <code>support/scheduler/</code>, the
-          scheduling policy core and its simulator, only its tests.
+          <code>melo-retrieve</code>; <code>support/scheduler/</code> is the
+          scheduling policy core and its simulator, which the gateway's chat
+          gate uses, and <code>support/gateway/machine_monitor.py</code> reads
+          the GPU lock and the battery.
         </p>
       </section>
 
@@ -493,16 +502,16 @@
         <h2>What exists today</h2>
         <ul>
           <li>Direct mode with run options, nine run statuses, text or JSON output, and fixed exit codes.</li>
-          <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>; and the plain conversation loop (<code>melo ""</code>).</li>
-          <li>Four built-in tools, and tools from local MCP servers in direct mode and the Python API.</li>
+          <li>The interactive UI in the terminal (bare <code>melo</code>, <code>support/cli/</code>): live tool blocks and a spinner, approvals with the diff a file write will make, <code>/</code> commands with completion, <code>/model</code> and <code>/backend</code>, <code>/approvals</code>, <code>/status</code>, <code>/mcp</code> and <code>/retry</code>, and an MCP servers file (<code>--mcp-config</code> or the config's <code>mcp_config</code>); and the plain conversation loop (<code>melo ""</code>).</li>
+          <li>Four built-in tools, and tools from local MCP servers in direct mode, the Python API and the interactive UI.</li>
           <li>The Python API (experimental): run events, stopping a run, approval policies for tool calls, a workspace root for the file tools, and conversations that carry over between runs.</li>
           <li>Sessions (experimental): conversations kept in SQLite whose turns each end exactly once, survive a restart and resume on a fresh agent (<code>support/sessions/</code>); a runner can ask its turns for progress events. The interactive UI keeps its turns in them; the gateway does not use them yet.</li>
-          <li>The gateway: the HTTP API, sessions that close on request only when idle, the web workspace, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
+          <li>The gateway: the HTTP API, sessions that close on request only when idle, the web workspace, whose chats pass through the scheduler's policy (<code>off</code> by default) and whose header shows the GPU lock and the battery, checks that, on a loopback host, refuse requests from other sites, and a macOS background service.</li>
           <li>Backends for Ollama, MLC LLM, vLLM, SGLang and four cloud APIs.</li>
           <li>Working memory, history and long-term memory, saved to SQLite when persistence is on; the saved history also keeps every model call with its reasoning, for 30 days by default, and the Python API can forget a task's memory or all of it.</li>
           <li><code>melo-retrieve</code>, which compares the <code>bm25</code>, <code>llm</code> and <code>embedding</code> memory retrievers offline. Runs do not use the retrievers yet.</li>
           <li>Procedural memory: each run records its steps, and a completed run updates the step template of its task, in <code>procedures.db</code> with persistence on. Python callers get <code>run.progress</code> events with <code>progress=True</code>, without a percent bar for now. On a terminal, <code>melo &quot;&lt;task&gt;&quot;</code> draws them as a progress line on stderr (<code>support/progress_line.py</code>). <code>melo-procedures</code> replays the progress rules offline.</li>
-          <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>). Runs and the gateway do not use it yet.</li>
+          <li>The scheduler's policy core and a simulator that tests it offline (<code>support/scheduler/</code>), and the gateway's chat gate, GPU-lock reader and battery reader (<code>support/gateway/chat_gate.py</code>, <code>machine_monitor.py</code>). Direct runs, <code>melo ""</code> and the HTTP API do not go through it.</li>
         </ul>
         <p>What comes next is on the <a href="./updates.html#roadmap">roadmap</a>.</p>
       </section>

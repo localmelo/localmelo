@@ -159,6 +159,10 @@ tables of the chosen backends.
 | `embedding_url` | local backend | not set | The embedding server's URL. |
 | `embedding_model` | local backend | not set | The embedding model to use. |
 | `extra_body` | local or cloud backend | not set | Extra fields for every chat request; see [Extra request fields](#extra-request-fields-extra_body). |
+| `reasoning_field` | local or cloud backend | not set | The request key reasoning is sent back under: `auto`, `reasoning_content` or `reasoning`; `[ollama]` also takes `thinking`. See [Reasoning](#reasoning). |
+| `requires_reasoning_replay` | local or cloud backend | `false` | `true` when the server rejects a request that omits a reply's reasoning. See [Reasoning](#reasoning). |
+| `reasoning` | `[agent]` | `"legacy"` | `legacy`, `drop` or `replay`; the default is direct mode's `--reasoning`. See [Reasoning](#reasoning). |
+| `replay_turns` | `[agent]` | not set | With `replay`, the newest N assistant turns whose reasoning is sent; omit for every turn in scope. |
 | `api_key_env` | cloud backend | not set | The name of the environment variable that holds the API key. |
 | `base_url` | cloud backend | the vendor's URL | The API's URL. |
 | `host` | `[gateway]` | `"127.0.0.1"` | The address the gateway listens on: keep `127.0.0.1`, or use `localhost` or `::1`. On a host that is not `localhost` or a loopback IP address, such as `0.0.0.0`, the gateway does not check the `Host` and `Origin` of requests; see [Keep the gateway private](gateway.md#keep-the-gateway-private). |
@@ -169,6 +173,9 @@ tables of the chosen backends.
 | `n_fg` | `[scheduler]` | `1` | Background calls allowed in flight while a chat is focused. |
 | `call_log` | `[scheduler]` | `true` | Write one JSONL call log per gateway run. |
 | `call_log_dir` | `[scheduler]` | `""` | The log's parent directory; the default is `~/.cache/localmelo/scheduler`. |
+| `gpu_lock_file` | `[scheduler]` | `""` | The shared GPU lock to read; empty means no lock reader. The battery reader is always on in the gateway. |
+| `lock_self` | `[scheduler]` | `""` | This bench's own holder: the exact `holder:` value, or `holder:run` when the lock carries a `run:` line. Matching is exact and case-sensitive. |
+| `lock_gate` | `[scheduler]` | `"record"` | `record` never changes a request; `wait` holds every workspace call, embeddings included, while a foreign lock is present. See [Scheduler](scheduler.md#the-gpu-lock-and-the-battery-s2b). |
 
 A `[scheduler]` table that is all defaults is not written, and unknown
 scheduler keys are dropped, so a config file without such a table keeps its
@@ -181,6 +188,51 @@ Top-level keys must come before the first `[table]` line. How URLs are used:
 - `ollama`: chat uses Ollama's own `/api/chat`, so `chat_url` is used without
   `/v1` (a trailing `/v1` is removed). `embedding_url` gets `/v1` added.
 - Cloud backends: `base_url` is used as given.
+
+### Reasoning
+
+`legacy` is the default: an OpenAI-compatible backend sends no reasoning,
+and Ollama native sends its own `thinking` field and inline copy as before.
+`drop` never sends reasoning; `replay` sends it on the assistant turns in
+scope, under one key, at most 40,000 characters per turn (a longer turn's
+reasoning is skipped and counted). Both explicit modes also stop reading
+`[RECALL]` and remove an inline `<think>` block from the answer.
+
+```toml
+[agent]
+reasoning = "replay"      # legacy, drop, replay
+replay_turns = 3          # optional; omit for every turn
+```
+
+A direct-mode flag wins over `[agent]`, and a `--base-url` run uses only the
+flags (it does not read this file). The interactive UI and the gateway do
+not read `[agent]` in this release.
+
+Each backend section can name the request key and say that the server
+requires replay:
+
+```toml
+[vllm]
+chat_url = "http://127.0.0.1:8000/v1"
+chat_model = "MODEL"
+reasoning_field = "auto"              # or reasoning_content, reasoning
+requires_reasoning_replay = false     # true for a server that rejects a
+                                      # request without the reasoning
+```
+
+`auto` follows the key the last reply's reasoning came from, so a backend
+that emits either `reasoning_content` or `reasoning` works as it is; it
+sends no key before the first reply. The field is used only by `replay`:
+`legacy` and `drop` ignore it, also when the gateway, a configured
+interactive session or a Python caller builds its provider from this file
+(direct mode with `--base-url` does not read the file). `replay` uses the
+current task's assistant turns by default; earlier turns of a `melo ""`
+loop or a session are not replayed. The `[ollama]` backend fixes its field
+to `thinking` (it may still write `"thinking"` or `"auto"`). With
+`requires_reasoning_replay = true`, `--reasoning drop` is refused, every
+assistant turn in the window is replayed (the task scope and
+`replay_turns` do not apply), and the agent evicts whole working-memory
+units instead of cutting reasoning.
 
 ## Backends
 
@@ -375,6 +427,12 @@ enable_thinking = false
   `extra_body = { think = false }` turns that off.
 - `--base-url` does not read the config file, so `extra_body` does not apply
   there.
+
+## MCP servers
+
+`mcp_config = "~/mcp.json"` at the top of `config.toml` names the MCP servers JSON file the
+interactive UI loads (the gateway will read the same key); `--mcp-config FILE` overrides it for
+one run. Direct mode never reads it.
 
 ## Chat request timeout
 

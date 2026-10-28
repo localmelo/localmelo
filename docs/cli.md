@@ -160,6 +160,10 @@ type more letters to narrow them, Tab or Enter to take one.
 | `/thinking [on\|off]` | The thinking excerpt on (the default) or off, leaving only `Thought for 1.2s`; without an argument, flips it. |
 | `/expand [turn.call]` | A tool call's whole output or error: the latest call, call N of the latest turn, or turn T's call C (≤ 200 lines, then the rest's count). |
 | `/progress` | The latest progress facts of this turn: level, step, attempt, phase and cycle, tests, the past runs, every named step and the memory it rests on. |
+| `/approvals [ask\|auto\|deny\|forget [tool]]` | The approval mode and this session's grants; switch it, or forget one tool's grant (all with `forget`). Under `--yolo`, says how to turn prompts on. |
+| `/status` | The model, server and its reachability, the workspace and its fence, the session, approvals, tools, memory, limits, files and version. |
+| `/mcp` | The MCP servers, their tools and command lines, and the file they came from (`--mcp-config` or `mcp_config`); why MCP is off after a failure; how to name a file when there is none. |
+| `/retry` | Undo the newest turn and run it again. |
 | `/model [name\|number]` | Alone: the current model, and the models the server lists. With a listed id, or a number from that list (melo lists the models first if it has not yet): switch to it from the next message, and save it as the default. |
 | `/backend [url]` | Switch to another model server: asks for its URL (Enter keeps the current one) and a model from its list, checks the server with `GET /models`, switches and saves both as the default (as `ollama` when the server answers like Ollama, else `vllm`). |
 | `/exit` (also `/quit`) | Quit; a running turn is stopped first. |
@@ -201,6 +205,9 @@ type more letters to narrow them, Tab or Enter to take one.
 
 ### A turn's output
 
+- **Approvals show what changes.** A `file_write` over an existing file shows a diff (removed
+  lines in red, added in green, with the counts), and a write too large or not text says why;
+  `/approvals` switches between `ask`, `auto` and `deny`, and the session's grants.
 - **The live area.** The first row names what melo does (`Starting`,
   `Thinking`, `Running`, `Waiting for your approval`, `Retrying in 4s`,
   `Reflecting`, `Wrapping up`, `Stopping`), then the run's facts: the step
@@ -239,9 +246,10 @@ type more letters to narrow them, Tab or Enter to take one.
 
 ### Approvals
 
-`shell_exec`, `python_exec` and `file_write` run only once you answer. (The
-interactive UI does not load MCP servers yet; in a Python run, an approval
-policy asks about an MCP tool by the same tiers.) The panel takes the place
+`shell_exec`, `python_exec` and `file_write` run only once you answer, and
+so do MCP tools marked for approval. (The interactive UI loads the MCP
+servers of `--mcp-config`, else of the top-level `mcp_config` key; a server
+that fails to start turns MCP off for the session and `/mcp` says why.) The panel takes the place
 of the input box, and your draft stays:
 
 ```text
@@ -438,6 +446,9 @@ These options apply to a task run without `--serve`.
 | `--embedding-model NAME` | `default` | The model to request from the `--embedding-base-url` server. |
 | `--progress auto\|off` | `auto` | Draw a [progress line](#progress-line) on stderr while the task runs: `auto` when stderr is a terminal and the output is text, `off` never. |
 | `--routine NAME` | not set | Learn and recall this task's steps as the routine `NAME`, in any folder and whatever the task's wording. |
+| `--reasoning legacy\|drop\|replay` | `legacy` | How a reply's reasoning is sent back. `legacy` keeps the provider's own behavior (an OpenAI-compatible server gets none, Ollama native gets its own field); `drop` never sends it; `replay` sends it on the assistant turns in scope, under one key. |
+| `--reasoning-field auto\|reasoning_content\|reasoning` | not set | The request key `--reasoning replay` uses. `auto` follows the key the last reply's reasoning came from; the others fix it. Needed with `--base-url`, or set `reasoning_field` in the chat backend's config section. |
+| `--replay-turns N` | every turn in scope | With `replay`, keep the newest `N` assistant turns' reasoning; older ones are sent without it. It is inert in `legacy` and `drop`. |
 
 - `--max-steps`: at least 1. With `reflect`, a run has attempts of up to 10
   steps, at most 5 attempts, and at most `--max-steps` steps in total. See
@@ -469,6 +480,28 @@ These options apply to a task run without `--serve`.
   routine, so `--routine daily-mail` joins differently worded requests run
   from any folder. A blank name is a usage error. See
   [Procedural memory](procedures.md#how-it-works).
+- `--reasoning`: `legacy` is the default and leaves the wire unchanged.
+  `drop` and `replay` do not read `[RECALL]` and remove an inline `<think>`
+  block from an explicit-mode reply's text, so the result is the clean
+  answer. `replay` sends the reasoning on assistant turns in scope, at most
+  `40,000` characters per turn (a longer turn's reasoning is skipped and
+  counted); a backend whose `requires_reasoning_replay` is true never has
+  its reasoning cut, and `drop` is refused there. `legacy` is never
+  refused, even on such a backend, where it can still draw an HTTP 400.
+  `--replay-turns` counts assistant turns that carry reasoning; tool results
+  do not consume a turn. The default task scope is the current task's
+  turns only: earlier turns of a `melo ""` loop or of a session are not
+  replayed. On a backend whose `requires_reasoning_replay` is true, every
+  assistant turn in the window is replayed, and neither the task scope nor
+  `--replay-turns` applies. `--base-url` runs use these flags and do not
+  read the config file.
+- `--reasoning-field`: `auto` resolves to the key the last reply's
+  reasoning came from, and sends no key before the first such reply. The
+  flag, and a backend's `reasoning_field`, are used only in `replay`; in
+  `legacy` and `drop` the wire is as if no field were set. The `ollama`
+  backend fixes its field to `thinking`, so the flag is a usage error
+  there. The interactive UI refuses the flag until it applies it (R2b);
+  direct mode is the only place it works now.
 
 ### Interactive UI
 
@@ -480,11 +513,13 @@ These options apply to `melo` without a task.
 | `--yolo` | off | Run every tool without asking for approval. |
 
 - The UI also takes `--max-steps`, `--attempt-policy`, `--reflection-gate`,
-  `--builtins`, `--memory`, `--memory-dir`, `--request-timeout` and the
-  `--embedding-*` options, for every turn of the session. `--tool-exposure`
-  (the UI offers every tool), `--timeout`, `--output-format`, `--progress`
-  and `--routine` are usage errors there, and so, for now, are
-  `--mcp-config` and `--mcp-only`.
+  `--builtins`, `--memory`, `--memory-dir`, `--request-timeout`,
+  `--reasoning`, `--replay-turns` and the `--embedding-*` options, for
+  every turn of the session. The UI does not yet apply `[agent]`; use
+  direct mode for that. `--tool-exposure`
+  (the UI offers every tool), `--timeout`, `--output-format`, `--progress`,
+  `--routine` and `--reasoning-field` are usage errors there;
+  `--mcp-config` and `--mcp-only` are accepted.
 - `--workspace` that is not a folder exits with code 2:
   `melo: --workspace: not a directory: DIR`.
 
@@ -536,8 +571,6 @@ These are usage errors:
   `only for direct mode (a query without --serve): --max-steps`; without a
   task, only those the interactive UI cannot use (`--tool-exposure`,
   `--timeout`, `--output-format`, `--progress`, `--routine`);
-- `--mcp-config` or `--mcp-only` without a task, reported as
-  `--mcp-config and --mcp-only are not in the interactive UI yet; give them with a task (melo -- "<task>")`;
 - `--workspace` or `--yolo` with a task, `--serve` or `--daemon`, reported as
   `only for the interactive UI (melo without a query, --serve or --daemon): --yolo`;
 - `--base-url` or `--chat-model` with `--serve` or `--daemon`, reported as
@@ -547,6 +580,20 @@ These are usage errors:
   `--host and --port are for --serve and --daemon; bare melo opens the interactive UI`;
 - `--reconfigure` with `--base-url` and no task, reported as
   `--reconfigure sets up the config file, which --base-url does not use; give one of them`;
+- `--reasoning replay` with `--base-url` and no `--reasoning-field`, reported
+  as
+  `argument --reasoning: replay needs a reasoning field: give --reasoning-field (auto, reasoning_content or reasoning) with --base-url, or set reasoning_field in the backend's config`;
+- `--reasoning replay` on a configured backend whose `reasoning_field` is
+  unset, reported as
+  `argument --reasoning: replay needs a reasoning field: set reasoning_field in the chat backend's config section`;
+- `--reasoning drop` on a backend with `requires_reasoning_replay = true`,
+  reported as
+  `argument --reasoning: this backend requires reasoning replay, so drop is not possible: use replay`;
+- `--reasoning-field` with the `ollama` backend, reported as
+  `argument --reasoning-field: the ollama backend always reads and sends the thinking field`;
+- `--reasoning-field` with bare `melo`, whose interactive UI does not apply it
+  yet, reported as
+  `--reasoning-field is not in the interactive UI yet; give it with a task (melo -- "<task>")`;
 - an MCP config file that cannot be read or is not valid;
 - an invalid `LOCALMELO_THINKING_RETENTION_DAYS`, also with `--serve` or
   `melo ""`, which prints its one `melo: error:` line without the usage
@@ -575,6 +622,11 @@ These are usage errors:
 - `localmelo_version` is the output of `git describe --tags --always --dirty`
   when localmelo runs from a git checkout (for example `603f40d`), otherwise
   the installed package version (for example `0.1.0`), or `unknown`.
+- Outside `--reasoning legacy`, the record also has `config.reasoning`,
+  `config.replay_turns`, `usage.reasoning_chars` (and `usage.reasoning_tokens`
+  or `usage.cached_tokens` when the server reports them) and
+  `memory_stats`; see [Run results](run-results.md#fields). A `legacy`
+  record has none of them.
 
 **In both formats:**
 
@@ -683,7 +735,8 @@ ended with.
 
 SIGTERM and SIGHUP end a direct run cleanly, within 8 seconds:
 
-1. A running `shell_exec` command is killed together with its process group.
+1. A running `shell_exec` command or `python_exec` child is killed together
+   with its process group.
 2. MCP servers are closed. A server still running 6 seconds after the signal
    is killed.
 3. The task record is saved with status `crashed` and the error
@@ -692,10 +745,8 @@ SIGTERM and SIGHUP end a direct run cleanly, within 8 seconds:
 4. `melo` exits by the signal (a shell shows 143 or 129) and prints nothing on
    stdout: no result, status line or JSON line.
 
-There are two exceptions:
+One exception:
 
-- `python_exec` code runs inside `melo`, so the signal takes effect only when
-  that code returns.
 - A signal that was ignored when `melo` started stays ignored. For example,
   `nohup` ignores SIGHUP.
 

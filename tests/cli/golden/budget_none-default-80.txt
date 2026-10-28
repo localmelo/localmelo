@@ -21,5 +21,6 @@
   └ 9
 ⚠ The attempt used its step budget.
 ⚠ melo: run ended with status budget_exhausted: Max steps reached
+  /retry tries again.
 ✻ Worked for 0.4s · 9 tool calls · ↓ 72 tokens
 
