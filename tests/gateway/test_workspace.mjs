@@ -379,6 +379,21 @@ test('the status label shows waiting with the reason', () => {
   assert.equal(h.element('run-status').textContent, 'Running on your backend');
 });
 
+test('the header pill and the bubble show a hold, then Working when it ends', () => {
+  const h = harness(async () => ({}), {renderMessages: true});
+  h.state.sessions = [session('a', {is_busy: true, held: 'Resources', messages: [{role: 'user', content: 'Hi'}]})];
+  h.state.activeId = 'a';
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('connection-label').textContent, 'Waiting: Resources');
+  let rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Waiting: Resources…');
+  h.state.sessions[0].held = '';
+  h.run('renderMessages(); syncUI()');
+  assert.equal(h.element('connection-label').textContent, 'Working');
+  rows = h.element('messages').children;
+  assert.equal(rows[rows.length - 1].children[1].textContent, 'Working on your request…');
+});
+
 test('presence is throttled to one request per 2.5 seconds', async () => {
   const posts = [];
   const h = harness(async () => ({}));

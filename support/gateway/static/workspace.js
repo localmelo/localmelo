@@ -182,13 +182,16 @@ function presence(force = false) {
 function syncUI() {
   const s = active();
   const busy = !!s && (s.is_busy || S.pending.has(s.session_id));
+  const held = busy && s?.held ? s.held : "";
   $("header-title").textContent = s ? title(s) : "New chat";
   $("header-model").textContent = s ? s.chat_model : "Connect your model to get started";
   $("connection-label").textContent = !S.online
     ? "Gateway offline"
     : s
       ? busy
-        ? "Working"
+        ? held
+          ? `Waiting: ${held}`
+          : "Working"
         : "Ready"
       : "Set up model";
   $("connection-dot").classList.toggle("offline", !s || !S.online);
@@ -199,7 +202,6 @@ function syncUI() {
   $("stop-btn").querySelector("span").textContent =
     s && S.cancelling.has(s.session_id) ? "Stopping…" : "Stop";
   $("send-btn").disabled = S.working || busy || !S.online || !input.value.trim();
-  const held = busy && s?.held ? s.held : "";
   $("run-status").textContent = busy
     ? held
       ? `Waiting: ${held}`

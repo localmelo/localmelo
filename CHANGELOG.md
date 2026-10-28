@@ -272,6 +272,10 @@ localmelo has no release yet. The v0.1.0 milestone is due 2026-12-20.
 
 ### Fixed
 
+- A held chat's header still said `● Working` while the sidebar, status
+  label and message area said it was waiting. The header's status pill now
+  says `Waiting: <reason>` too and returns to Working when the hold ends
+  ([#NN]).
 - The scheduler simulator's importer reads a chat call's kind from the
   `X-Localmelo-Call-Kind` header that localmelo sends, in the headers side
   file a proxy record names with `bodies.headers`. Retrieval and
